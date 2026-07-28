@@ -37,6 +37,15 @@ def _matches_detect_patterns(changed_file: str, patterns: list[str]) -> bool:
     return any(_glob_match(changed_file, pattern) for pattern in expand_detect_patterns(patterns))
 
 
+def filter_changed_files_for_manifest(
+    manifest: AnalyzerManifest,
+    changed_files: list[str],
+) -> list[str]:
+    """Keep only changed paths that match the manifest's ``detect.files`` globs."""
+    patterns = manifest.detect.files
+    return [path for path in changed_files if _matches_detect_patterns(path, patterns)]
+
+
 def _detect_matches(manifest: AnalyzerManifest, changed_files: list[str]) -> bool:
     if not changed_files:
         return False
@@ -124,6 +133,7 @@ def warn_unknown_analyzer_overrides(settings: dict[str, Any]) -> None:
 
 __all__ = [
     "detect_enabled",
+    "filter_changed_files_for_manifest",
     "known_analyzer_ids",
     "load_catalog",
     "warn_unknown_analyzer_overrides",

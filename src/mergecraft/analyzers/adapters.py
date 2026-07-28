@@ -13,7 +13,7 @@ from mergecraft.analyzers.parse import parse_output_file
 from mergecraft.analyzers.parsers import parse_output
 from mergecraft.analyzers.parsers._common import resolve_repo_relative_path
 from mergecraft.analyzers.provision import ProvisionError, resolve_with_lock
-from mergecraft.analyzers.registry import load_catalog
+from mergecraft.analyzers.registry import filter_changed_files_for_manifest, load_catalog
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv, resolve_analyzer
 from mergecraft.analyzers.run import run_plan
 from mergecraft.analyzers.trust import build_analyzer_env, evaluate_manifest_for_tier
@@ -62,7 +62,8 @@ def _finalize_plan(
     changed_files: list[str],
     tier: TrustTier,
 ) -> AnalyzerPlan:
-    argv = expand_analyzer_argv(plan.argv, repo_root=repo_root, changed_files=changed_files)
+    scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
+    argv = expand_analyzer_argv(plan.argv, repo_root=repo_root, changed_files=scoped_files)
     env = build_analyzer_env(tier=tier, event=None, repo_env=None)
     return replace(plan, argv=argv, cwd=repo_root, env=env)
 
@@ -122,11 +123,16 @@ def run_adapter(
         logger.info("adapter {} unavailable in mode {}", tool_id, plan.mode)
         return []
 
+    scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
+    if not scoped_files:
+        logger.info("adapter {} skipped: no changed files match detect globs", tool_id)
+        return []
+
     plan = _finalize_plan(
         plan,
         manifest=manifest,
         repo_root=repo_root,
-        changed_files=changed_files,
+        changed_files=scoped_files,
         tier=tier,
     )
     outcome = run_plan(plan)
