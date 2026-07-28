@@ -1,6 +1,6 @@
 {
   "verdict": "pass",
-  "sha": "de10ddb",
+  "sha": "b7e5482",
   "date": "2026-07-28",
   "findings": [],
   "checks": {
@@ -52,7 +52,10 @@
       ]
     }
   },
-  "fix_commits": ["de10ddb fix(analyzers): scope {files} expansion to manifest detect globs"],
+  "fix_commits": [
+    "de10ddb fix(analyzers): scope {files} expansion to manifest detect globs",
+    "b7e5482 fix(analyzers): serialize analyzers.lock writes under flock"
+  ],
   "pr1_ci": "re-run pending after de10ddb push (prior failure: zizmor flake on Linux gw1 @ 30375702257)",
   "final_unblocked": true
 }

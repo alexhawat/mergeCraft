@@ -11,13 +11,14 @@ from typing import TYPE_CHECKING, Any, Literal
 import yaml
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 LockMode = Literal["repo-native", "ci-result", "managed", "container"]
 
 
 @contextlib.contextmanager
-def _lockfile_transaction(path: Path):
+def _lockfile_transaction(path: Path) -> Iterator[None]:
     """Serialize lockfile read/modify/write across parallel analyzer runs."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", encoding="utf-8") as handle:
