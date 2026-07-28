@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mergecraft.review_taxonomy import (
     BODY_ONLY_EFFORT,
     BODY_ONLY_SEVERITY,
@@ -63,3 +65,20 @@ def test_stamp_handles_empty_body() -> None:
     stamped = stamp_finding_fingerprint(path="src/app.py", body="")
     assert stamped.startswith(FINDING_MARKER_PREFIX)
     assert "\n" not in stamped
+
+
+@pytest.mark.xfail(reason="green after W2: FINDING_CONFIDENCES axis", strict=False)
+def test_finding_confidences_axis_exists_and_is_pinned() -> None:
+    from mergecraft.review_taxonomy import FINDING_CONFIDENCES
+
+    assert FINDING_CONFIDENCES == ("certain", "likely", "possible")
+    assert len(set(FINDING_CONFIDENCES)) == 3
+
+
+@pytest.mark.xfail(reason="green after W7: Review prompt names confidence values", strict=False)
+def test_review_prompt_names_every_confidence_value() -> None:
+    from mergecraft.modes import PR_SUMMARY_FORMAT
+    from mergecraft.review_taxonomy import FINDING_CONFIDENCES
+
+    for value in FINDING_CONFIDENCES:
+        assert value in PR_SUMMARY_FORMAT, value
