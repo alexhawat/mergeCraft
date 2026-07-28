@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
+import os
 import shutil
 import stat
+import sys
 import tarfile
 import tempfile
 import zipfile
@@ -116,6 +120,29 @@ def _extract_executable(archive: Path, dest_dir: Path, binary_name: str) -> Path
     return candidates[0]
 
 
+@contextlib.contextmanager
+def _cache_provision_lock(cache_root: Path):
+    """Serialize cache writes so parallel workers cannot clobber a running binary."""
+    cache_root.mkdir(parents=True, exist_ok=True)
+    lock_path = cache_root / ".provision.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        if sys.platform != "win32":
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if sys.platform != "win32":
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _install_cached_binary(*, staged: Path, cached: Path) -> None:
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    staging = cached.with_name(f".{cached.name}.staging")
+    staging.write_bytes(staged.read_bytes())
+    staging.chmod(staging.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    os.replace(staging, cached)
+
+
 def fetch_unpinned(*, url: str, cache_dir: Path) -> None:
     """Unpinned downloads are forbidden (D10)."""
     _ = url, cache_dir
@@ -153,29 +180,37 @@ def provision_managed_binary(
             source="cache",
         )
 
-    logger.info("provisioning {} {} from pinned url", manifest.id, platform)
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        artifact_name = entry.url.rsplit("/", 1)[-1]
-        download_path = tmp_path / artifact_name
-        try:
-            _download_pinned_url(entry.url, download_path)
-        except OSError as exc:
-            msg = f"download failed for {manifest.id}: {exc}"
-            raise ProvisionError(msg) from exc
+    with _cache_provision_lock(cache_root):
+        if cached.is_file():
+            binary_sha = _sha256_file(cached)
+            return ProvisionResult(
+                resolved_path=cached,
+                sha256=binary_sha,
+                version=manifest.version,
+                source="cache",
+            )
 
-        _verify_sha256(download_path, artifact_pin)
+        logger.info("provisioning {} {} from pinned url", manifest.id, platform)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            artifact_name = entry.url.rsplit("/", 1)[-1]
+            download_path = tmp_path / artifact_name
+            try:
+                _download_pinned_url(entry.url, download_path)
+            except OSError as exc:
+                msg = f"download failed for {manifest.id}: {exc}"
+                raise ProvisionError(msg) from exc
 
-        if _looks_like_archive(artifact_name):
-            extract_dir = tmp_path / "extract"
-            extract_dir.mkdir()
-            staged = _extract_executable(download_path, extract_dir, binary_name)
-        else:
-            staged = download_path
+            _verify_sha256(download_path, artifact_pin)
 
-        cache_root.mkdir(parents=True, exist_ok=True)
-        cached.write_bytes(staged.read_bytes())
-        cached.chmod(cached.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            if _looks_like_archive(artifact_name):
+                extract_dir = tmp_path / "extract"
+                extract_dir.mkdir()
+                staged = _extract_executable(download_path, extract_dir, binary_name)
+            else:
+                staged = download_path
+
+            _install_cached_binary(staged=staged, cached=cached)
 
     binary_sha = _sha256_file(cached)
     return ProvisionResult(
