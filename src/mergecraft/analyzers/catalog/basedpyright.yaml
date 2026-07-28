@@ -1,27 +1,25 @@
-id: ruff
+id: basedpyright
 category: lint
 languages: ["python"]
 detect:
   files:
     - "*.py"
 command:
-  - ruff
-  - check
-  - --output-format
-  - json
-  - --ignore-noqa
+  - basedpyright
+  - --outputjson
   - "{files}"
 scope: diff
-parser: ruff_json
-supports_fix: true
+parser: pyright_json
+supports_fix: false
 default_enabled: auto
-version: "0.15.12"
+version: "1.39.9"
 runtime: repo-native
-timeout_s: 120
+timeout_s: 300
 trust: trusted
 severity_map:
   error: Major
   warning: Minor
+  information: Trivial
 provenance: {}
 network_allowlist: []
-exclusive_group: python-lint
+exclusive_group: python-typecheck

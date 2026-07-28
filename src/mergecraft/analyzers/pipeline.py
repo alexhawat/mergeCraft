@@ -232,4 +232,23 @@ def run_analyzer_pipeline(
     )
 
 
-__all__ = ["run_analyzer_pipeline"]
+def analyzer_run_metadata(*, tool_id: str, result: object) -> dict[str, str]:
+    """Return review metadata naming the tool version and config that ran (D5/C1.5)."""
+    from mergecraft.analyzers.adapters import AdapterRunResult
+
+    if not isinstance(result, AdapterRunResult):
+        return {}
+    version_note = result.version_note or ""
+    config_note = result.config_note or ""
+    payload: dict[str, str] = {}
+    if version_note:
+        payload["version_note"] = version_note
+        payload["version"] = version_note
+    if config_note:
+        payload["config"] = config_note
+    if tool_id:
+        payload["tool"] = tool_id
+    return payload
+
+
+__all__ = ["analyzer_run_metadata", "run_analyzer_pipeline"]

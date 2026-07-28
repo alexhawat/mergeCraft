@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import shlex
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
+
+from mergecraft.analyzers.detect import _eslint_command_prefix, resolve_repo_tool
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
@@ -16,6 +17,8 @@ _CATALOG_PREFIX = "@catalog:"
 FILES_TOKEN = "{files}"
 
 ExecutionMode = Literal["repo-native", "ci-result", "managed", "container", "skip"]
+
+_TYPE_CHECKER_IDS = frozenset({"mypy", "pyright", "basedpyright"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +32,7 @@ class AnalyzerPlan:
     env: dict[str, str] = field(default_factory=dict)
     timeout_s: int = 300
     version_note: str | None = None
+    config_note: str | None = None
     reason: str | None = None
 
 
@@ -36,31 +40,33 @@ def _repo_tool_binary(manifest: AnalyzerManifest) -> str:
     return manifest.command[0]
 
 
+def _format_version_note(
+    manifest: AnalyzerManifest,
+    *,
+    repo_tool_version: str | None,
+    config_note: str | None,
+) -> str | None:
+    if not repo_tool_version:
+        return None
+    parts = [f"ran repo-native {manifest.id} ({repo_tool_version})"]
+    if config_note:
+        parts.append(f"config: {config_note}")
+    return "; ".join(parts)
+
+
 def detect_repo_tool(
     manifest: AnalyzerManifest, repo_root: Path
 ) -> tuple[bool, str | None, str | None]:
     """Reuse prep-style PATH detection for repo-native execution (D4)."""
-    _ = repo_root
-    binary = _repo_tool_binary(manifest)
-    path = shutil.which(binary)
-    if path is None:
+    resolution, skip_reason = resolve_repo_tool(
+        manifest.id,
+        repo_root=repo_root,
+        command_binary=_repo_tool_binary(manifest),
+    )
+    if resolution is None:
         return False, None, None
-    version: str | None = None
-    try:
-        import subprocess
-
-        completed = subprocess.run(
-            [path, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if completed.stdout.strip():
-            version = completed.stdout.strip().splitlines()[0]
-    except OSError:
-        version = None
-    return True, path, version
+    _ = skip_reason
+    return True, resolution.path, resolution.version
 
 
 def resolve_analyzer(
@@ -76,19 +82,48 @@ def resolve_analyzer(
     managed_version: str | None = None,
 ) -> AnalyzerPlan:
     """Resolve D4's preference chain for one manifest."""
+    config_note: str | None = None
     if repo_has_tool is None:
-        has_tool, detected_path, detected_version = detect_repo_tool(manifest, repo_root)
-        repo_has_tool = has_tool
-        repo_tool_path = repo_tool_path or detected_path
-        repo_tool_version = repo_tool_version or detected_version
+        resolution, skip_reason = resolve_repo_tool(
+            manifest.id,
+            repo_root=repo_root,
+            command_binary=_repo_tool_binary(manifest),
+        )
+        if resolution is None:
+            if manifest.id in _TYPE_CHECKER_IDS:
+                return AnalyzerPlan(
+                    manifest_id=manifest.id,
+                    mode="skip",
+                    reason=skip_reason,
+                )
+            if skip_reason and skip_reason.startswith("skipped"):
+                return AnalyzerPlan(
+                    manifest_id=manifest.id,
+                    mode="skip",
+                    reason=skip_reason,
+                )
+            repo_has_tool = False
+        else:
+            repo_has_tool = True
+            repo_tool_path = repo_tool_path or resolution.path
+            repo_tool_version = repo_tool_version or resolution.version
+            config_note = resolution.config_note
 
     if repo_has_tool:
         argv = tuple(manifest.command)
-        if repo_tool_path and argv and argv[0] == _repo_tool_binary(manifest):
+        if manifest.id == "eslint":
+            prefix = _eslint_command_prefix(repo_root)
+            if len(prefix) == 2:
+                argv = (*prefix, *manifest.command[1:])
+            elif len(prefix) == 1:
+                argv = (prefix[0], *manifest.command[1:])
+        elif repo_tool_path and argv and argv[0] == _repo_tool_binary(manifest):
             argv = (repo_tool_path, *argv[1:])
-        version_note = None
-        if repo_tool_version:
-            version_note = f"ran repo-native {manifest.id} ({repo_tool_version})"
+        version_note = _format_version_note(
+            manifest,
+            repo_tool_version=repo_tool_version,
+            config_note=config_note,
+        )
         return AnalyzerPlan(
             manifest_id=manifest.id,
             mode="repo-native",
@@ -96,6 +131,17 @@ def resolve_analyzer(
             cwd=repo_root,
             timeout_s=manifest.timeout_s,
             version_note=version_note,
+            config_note=config_note,
+        )
+
+    if manifest.id in _TYPE_CHECKER_IDS:
+        return AnalyzerPlan(
+            manifest_id=manifest.id,
+            mode="skip",
+            reason=(
+                f"skipped {manifest.id}: type checker not installed in the repo environment "
+                "(repo-native only — managed substitute forbidden, C3/D5)"
+            ),
         )
 
     if ci_artifact_available:

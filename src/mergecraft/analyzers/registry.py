@@ -8,6 +8,14 @@ from typing import Any
 
 from loguru import logger
 
+from mergecraft.analyzers.detect import (
+    detect_js_linter_intent,
+    has_basedpyright_config,
+    has_mypy_config,
+    has_pyright_config,
+    has_ruff_config,
+    manifest_config_present,
+)
 from mergecraft.analyzers.manifest import (
     AnalyzerManifest,
     expand_detect_patterns,
@@ -15,6 +23,10 @@ from mergecraft.analyzers.manifest import (
 )
 
 _CATALOG_DIR = Path(__file__).resolve().parent / "catalog"
+
+_PYTHON_LINT_PREFERENCE = ("ruff", "pylint")
+_PYTHON_TYPECHECK_PREFERENCE = ("mypy", "basedpyright", "pyright")
+_JS_LINTERS = ("eslint", "biome", "oxlint")
 
 
 @lru_cache(maxsize=1)
@@ -71,6 +83,59 @@ def _settings_enabled(
     return None
 
 
+def _auto_manifest_enabled(manifest: AnalyzerManifest, repo_root: Path) -> bool:
+    if manifest.id == "ruff":
+        return has_ruff_config(repo_root)
+    if manifest.id == "mypy":
+        return has_mypy_config(repo_root)
+    if manifest.id == "pyright":
+        return has_pyright_config(repo_root)
+    if manifest.id == "basedpyright":
+        return has_basedpyright_config(repo_root)
+    if manifest.id in _JS_LINTERS:
+        intent = detect_js_linter_intent(repo_root)
+        return intent == manifest.id
+    return manifest_config_present(manifest.id, repo_root)
+
+
+def _exclusive_group_winner(
+    group: str,
+    candidates: list[AnalyzerManifest],
+    *,
+    repo_root: Path,
+    settings: dict[str, Any],
+) -> AnalyzerManifest:
+    overrides = (settings.get("analyzers") or {}).get("overrides") or {}
+    explicit = [
+        manifest_id
+        for manifest_id, override in overrides.items()
+        if isinstance(override, dict) and override.get("enabled") is True
+    ]
+    explicit_in_group = [m for m in candidates if m.id in explicit]
+    if len(explicit_in_group) == 1:
+        return explicit_in_group[0]
+    if len(explicit_in_group) > 1:
+        return sorted(explicit_in_group, key=lambda m: m.id)[0]
+
+    if group == "python-lint":
+        for preferred in _PYTHON_LINT_PREFERENCE:
+            for manifest in candidates:
+                if manifest.id == preferred:
+                    return manifest
+    if group == "python-typecheck":
+        for preferred in _PYTHON_TYPECHECK_PREFERENCE:
+            for manifest in candidates:
+                if manifest.id == preferred:
+                    return manifest
+    if group == "js-lint":
+        intent = detect_js_linter_intent(repo_root)
+        if intent is not None:
+            for manifest in candidates:
+                if manifest.id == intent:
+                    return manifest
+    return sorted(candidates, key=lambda m: m.id)[0]
+
+
 def detect_enabled(
     *,
     repo_root: Path,
@@ -78,7 +143,7 @@ def detect_enabled(
     settings_overrides: dict[str, Any] | None = None,
 ) -> list[AnalyzerManifest]:
     """Return analyzers enabled for this diff, honoring detection and config overrides."""
-    _ = repo_root  # reserved for repo-native detection in later waves
+    repo_root = repo_root.resolve()
     settings = settings_overrides or {}
     candidates: list[AnalyzerManifest] = []
 
@@ -86,33 +151,41 @@ def detect_enabled(
         enabled = _settings_enabled(manifest, settings)
         if enabled is False:
             continue
-        if enabled is None and not _detect_matches(manifest, changed_files):
-            continue
+        if enabled is None:
+            if not _detect_matches(manifest, changed_files):
+                continue
+            if manifest.default_enabled == "auto" and not _auto_manifest_enabled(
+                manifest, repo_root
+            ):
+                continue
         candidates.append(manifest)
 
+    grouped: dict[str, list[AnalyzerManifest]] = {}
     selected: list[AnalyzerManifest] = []
-    groups: dict[str, AnalyzerManifest] = {}
     for manifest in candidates:
         group = manifest.exclusive_group
         if not group:
             selected.append(manifest)
             continue
-        if group not in groups:
-            groups[group] = manifest
-            selected.append(manifest)
+        grouped.setdefault(group, []).append(manifest)
+
+    overrides = (settings.get("analyzers") or {}).get("overrides") or {}
+    explicit = {
+        manifest_id
+        for manifest_id, override in overrides.items()
+        if isinstance(override, dict) and override.get("enabled") is True
+    }
+
+    for group, members in grouped.items():
+        explicit_members = [m for m in members if m.id in explicit]
+        if len(explicit_members) > 1:
+            selected.extend(sorted(explicit_members, key=lambda m: m.id))
             continue
-        overrides = (settings.get("analyzers") or {}).get("overrides") or {}
-        explicit = [
-            manifest_id
-            for manifest_id, override in overrides.items()
-            if isinstance(override, dict) and override.get("enabled") is True
-        ]
-        if manifest.id in explicit and groups[group].id in explicit:
-            selected.append(manifest)
-        elif manifest.id in explicit:
-            selected = [m for m in selected if m.exclusive_group != group]
-            groups[group] = manifest
-            selected.append(manifest)
+        if len(explicit_members) == 1:
+            selected.append(explicit_members[0])
+            continue
+        winner = _exclusive_group_winner(group, members, repo_root=repo_root, settings=settings)
+        selected.append(winner)
 
     return selected
 

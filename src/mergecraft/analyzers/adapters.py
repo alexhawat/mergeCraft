@@ -34,6 +34,8 @@ class AdapterRunResult:
     findings: list[Finding]
     skipped: bool = False
     skip_reason: str | None = None
+    version_note: str | None = None
+    config_note: str | None = None
 
 
 def _provision_platform_key() -> str:
@@ -110,6 +112,75 @@ def _provision_managed_argv(
     return replace(plan, argv=tuple(argv))
 
 
+def _format_finding(
+    *,
+    manifest: AnalyzerManifest,
+    path: str,
+    line: int,
+    message: str,
+) -> Finding:
+    from mergecraft.analyzers.finding import make_finding
+    from mergecraft.analyzers.parsers._common import map_confidence, taxonomy_category
+
+    return make_finding(
+        tool=manifest.id,
+        rule_id="format",
+        category=taxonomy_category(manifest),
+        severity=manifest.severity_map.get("warning", "Minor"),
+        confidence=map_confidence(None),
+        message=message,
+        path=path,
+        start_line=line,
+        end_line=line,
+        source="analyzer",
+    )
+
+
+def _run_ruff_format_check(
+    plan: AnalyzerPlan,
+    *,
+    manifest: AnalyzerManifest,
+    repo_root: Path,
+    scoped_files: list[str],
+    tier: TrustTier,
+    sandbox_context: SandboxContext | None,
+) -> list[Finding]:
+    if not plan.argv:
+        return []
+    binary = plan.argv[0]
+    format_argv = expand_analyzer_argv(
+        (binary, "format", "--check", "{files}"),
+        repo_root=repo_root,
+        changed_files=scoped_files,
+    )
+    format_plan = replace(
+        plan,
+        manifest_id=f"{manifest.id}-format",
+        argv=format_argv,
+    )
+    format_plan = _finalize_plan(
+        format_plan,
+        manifest=manifest,
+        repo_root=repo_root,
+        changed_files=scoped_files,
+        tier=tier,
+    )
+    outcome = run_plan(format_plan, sandbox_context=sandbox_context)
+    if outcome.ran and outcome.exit_code == 0:
+        return []
+    if not scoped_files:
+        return []
+    rel = scoped_files[0]
+    return [
+        _format_finding(
+            manifest=manifest,
+            path=rel,
+            line=1,
+            message="File would be reformatted by ruff format",
+        )
+    ]
+
+
 def run_adapter(
     *,
     tool_id: str,
@@ -174,14 +245,37 @@ def run_adapter(
 
     from pathlib import Path
 
-    findings = parse_output_file(
-        Path(outcome.output_path),
-        manifest=manifest,
-        repo_root=repo_root,
+    try:
+        findings = parse_output_file(
+            Path(outcome.output_path),
+            manifest=manifest,
+            repo_root=repo_root,
+        )
+        if not findings and outcome.output.strip():
+            findings = parse_output(outcome.output, manifest=manifest, repo_root=repo_root)
+    except (ValueError, KeyError) as exc:
+        reason = f"skipped {tool_id}: failed to parse analyzer output ({exc})"
+        logger.info("{}", reason)
+        return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
+
+    if tool_id == "ruff":
+        findings = [
+            *findings,
+            *_run_ruff_format_check(
+                plan,
+                manifest=manifest,
+                repo_root=repo_root,
+                scoped_files=scoped_files,
+                tier=tier,
+                sandbox_context=sandbox_context,
+            ),
+        ]
+
+    return AdapterRunResult(
+        findings=_normalize_paths(findings, repo_root=repo_root),
+        version_note=plan.version_note,
+        config_note=plan.config_note,
     )
-    if not findings and outcome.output.strip():
-        findings = parse_output(outcome.output, manifest=manifest, repo_root=repo_root)
-    return AdapterRunResult(findings=_normalize_paths(findings, repo_root=repo_root))
 
 
 __all__ = ["AdapterRunResult", "run_adapter"]
