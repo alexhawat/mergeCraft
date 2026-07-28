@@ -1,0 +1,48 @@
+{
+  "wave": "Final",
+  "date": "2026-07-28",
+  "sha": "ddc964d",
+  "worktree": "/Users/alex/Documents/code/sevn.bot/mergecraft-analyzer-platform",
+  "branch": "wave/analyzer-platform",
+  "checks": {
+    "F.1": "worktree/branch assertion OK @ 99b6a58",
+    "F.2": "0 xfails in tests/; xfail_strict clean",
+    "F.3": "make ci green — 285 passed; lockcheck lint typecheck pyright build test security; ~38s wall-clock",
+    "F.4": {
+      "docker_analyzers_gb": "1.27GB",
+      "docker_slim_gb": "1.22GB",
+      "delta_mb": 50,
+      "fresh_uv_sync_help": "OK"
+    },
+    "F.5": {
+      "delta_vs_ws6a": "Added src/mergecraft/analyzers/scope.py S6 dual-read marker regex (W5 withdrawn suppression). mergecraft.yml upstream comment absent (no such workflow in repo)."
+    }
+  },
+  "shipped": [
+    "Analyzer platform spine W2–W5",
+    "Four proof adapters (actionlint, zizmor, shellcheck, hadolint)",
+    "Review integration + verification agent (W7)",
+    "REVIEW-CHECKS.md §2 rewrite",
+    "285 tests / 0 xfails"
+  ],
+  "deferred": [
+    "Real fork-PR sandbox proof",
+    "Full LLM diff-review (no CLAUDE_CODE_OAUTH_TOKEN)",
+    "Catalog plan adapters B–E",
+    "CI-intelligence plan",
+    "PyPI publish",
+    "pullfrog-py archival (operator S8)"
+  ],
+  "w02_baseline_delta": {
+    "d14_cap": 8,
+    "w02_median_agent_inline": 16,
+    "fixture_pipeline_findings": 13,
+    "fixture_pipeline_inline": 8,
+    "w6_adapter_wall_clock_s": 0.26,
+    "make_ci_ws": "~38s / 179 tests",
+    "make_ci_final": "~38s / 285 tests"
+  },
+  "follow_on_readiness": "Fixture repo + parser set ready for catalog plan; CI plan inherits trust/sandbox seams.",
+  "pr1": "OPEN @ 99b6a58; CI green run 30376897930",
+  "next_gate": "Thermos (D23, blocking)"
+}
