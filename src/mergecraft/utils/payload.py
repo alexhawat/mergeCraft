@@ -112,8 +112,9 @@ class ActionInputs(BaseModel):
     status_checks: StatusChecksInput | None = None
     cwd: str | None = None
     output_schema: str | None = None
+    analyzers: str | None = None
 
-    @field_validator("push", "shell", "status_checks", mode="before")
+    @field_validator("push", "shell", "status_checks", "analyzers", mode="before")
     @classmethod
     def _empty_to_none(cls, value: object) -> object:
         if value == "" or value is None:
@@ -174,6 +175,11 @@ def _read_github_event() -> dict[str, Any] | None:
         logger.warning("failed to read GITHUB_EVENT_PATH {}: {}", path, exc)
         return None
     return data if isinstance(data, dict) else None
+
+
+def read_github_event() -> dict[str, Any] | None:
+    """Public alias for native GitHub Actions event payload."""
+    return _read_github_event()
 
 
 def _head_ref(pr: dict[str, Any]) -> str | None:
@@ -472,6 +478,7 @@ __all__ = [
     "is_mergecraft",
     "normalize_timeout_input",
     "parse_timeout",
+    "read_github_event",
     "resolve_cwd",
     "resolve_native_event",
     "resolve_non_prompt_inputs",

@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.analyzers.support import import_module
-
-pytestmark = pytest.mark.xfail(reason="green after W3: sandbox isolation", strict=False)
 
 
 def test_capability_probe_records_unavailable_primitives_by_name() -> None:

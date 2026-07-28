@@ -1,16 +1,16 @@
-id: actionlint
+id: zizmor
 category: ci
 languages: []
 detect:
   files:
     - ".github/workflows/*.{yml,yaml}"
     - ".github/actions/**/action.yml"
-command: ["actionlint", "-format", "sarif", "{files}"]
+command: ["zizmor", "sarif", "{files}"]
 scope: diff
 parser: sarif
 supports_fix: false
 default_enabled: auto
-version: "1.7.12"
+version: "1.28.0"
 runtime: managed
 timeout_s: 120
 trust: untrusted
@@ -20,7 +20,7 @@ severity_map:
   note: Trivial
 provenance:
   linux-amd64:
-    url: https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
-    sha256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+    url: https://github.com/zizmorcore/zizmor/releases/download/v1.28.0/zizmor-x86_64-unknown-linux-gnu.tar.gz
+    sha256: "e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c09"
 network_allowlist: []
 exclusive_group: github-workflow

@@ -27,6 +27,10 @@ inputs:
   status_checks:
     description: "Post mergecraft and mergecraft-approval commit-status checks: disabled (default) or enabled."
     required: false
+  analyzers:
+    description: "Analyzer execution tier: off (disabled), auto (detect + provision), or full (baked image tools). Default: auto"
+    required: false
+    default: auto
   output_schema:
     description: "JSON Schema (draft-07) for structured output validation."
     required: false
@@ -55,6 +59,7 @@ runs:
     INPUT_PUSH: ${{ inputs.push }}
     INPUT_SHELL: ${{ inputs.shell }}
     INPUT_STATUS_CHECKS: ${{ inputs.status_checks }}
+    INPUT_ANALYZERS: ${{ inputs.analyzers }}
     INPUT_OUTPUT_SCHEMA: ${{ inputs.output_schema }}
     INPUT_TOKEN: ${{ inputs.token }}
 

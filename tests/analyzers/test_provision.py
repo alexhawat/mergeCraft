@@ -8,8 +8,6 @@ import pytest
 
 from tests.analyzers.support import import_module
 
-pytestmark = pytest.mark.xfail(reason="green after W3: provision and lockfile", strict=False)
-
 
 def test_checksum_mismatch_fails_before_execute(tmp_path: Path) -> None:
     provision = import_module("mergecraft.analyzers.provision")

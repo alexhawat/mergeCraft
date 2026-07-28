@@ -177,6 +177,9 @@ async def _run_agent_review(
             ],
             # Local run, operator's own tree and own config — no PR author in the loop.
             static_checks_enabled=True,
+            analyzers_mode="auto",
+            trust_tier="trusted",
+            analyzers_settings_enabled=settings.analyzers.enabled,
         )
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context)

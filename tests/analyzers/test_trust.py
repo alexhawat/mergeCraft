@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from mergecraft.mcp.context import (
     PayloadEvent,
     RepoIdentity,
@@ -16,8 +14,6 @@ from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
 from tests.analyzers.support import import_module
-
-pytestmark = pytest.mark.xfail(reason="green after W3: trust tiers", strict=False)
 
 
 def test_same_repo_pull_request_is_trusted(same_repo_event: dict[str, object]) -> None:
@@ -32,9 +28,7 @@ def test_fork_pull_request_is_untrusted(fork_pr_event: dict[str, object]) -> Non
     assert tier == "untrusted"
 
 
-def test_untrusted_run_strips_secret_env(
-    monkeypatch: pytest.MonkeyPatch, fork_pr_event: dict[str, object]
-) -> None:
+def test_untrusted_run_strips_secret_env(monkeypatch, fork_pr_event: dict[str, object]) -> None:
     trust = import_module("mergecraft.analyzers.trust")
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_secret")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk_secret")
@@ -76,6 +70,8 @@ def test_shell_disabled_disables_analyzer_surface(tmp_path: Path) -> None:
         mcp_server_url="",
         tmpdir=str(tmp_path),
         static_checks_enabled=False,
+        analyzers_mode="auto",
+        analyzers_settings_enabled=True,
     )
     assert trust.analyzers_enabled(ctx) is False
 

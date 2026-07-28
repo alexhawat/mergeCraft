@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: MIT
+# Full analyzer toolchain image (W6 managed binaries baked at pinned checksums).
+FROM python:3.14-slim-bookworm
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/mergecraft/.venv/bin:/usr/local/analyzers:${PATH}" \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    MERGECRAFT_ANALYZERS=full
+
+ENV IS_SANDBOX=1
+
+# Pinned artifact checksums (W0.6 / W3.6).
+ARG ACTIONLINT_VERSION=1.7.12
+ARG ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+ARG SHELLCHECK_VERSION=0.10.0
+ARG SHELLCHECK_SHA256=6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
+ARG HADOLINT_VERSION=2.12.0
+ARG HADOLINT_SHA256=56de6d5e5ec427e17b74fa48d51271c7fc0d61244bf5c90e828aab8362d55010
+ARG ZIZMOR_VERSION=1.28.0
+ARG ZIZMOR_SHA256=e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c09
+
+RUN apt-get update -qq \
+    && apt-get install -qq -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        gnupg \
+        jq \
+        openssh-client \
+        sudo \
+        unzip \
+        xz-utils \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update -qq \
+    && apt-get install -qq -y --no-install-recommends gh nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force
+
+RUN mkdir -p /usr/local/analyzers /tmp/analyzer-dl \
+    && curl -fsSL -o /tmp/analyzer-dl/actionlint.tar.gz \
+        "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+    && echo "${ACTIONLINT_SHA256}  /tmp/analyzer-dl/actionlint.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/analyzer-dl/actionlint.tar.gz -C /usr/local/analyzers actionlint \
+    && curl -fsSL -o /tmp/analyzer-dl/shellcheck.tar.xz \
+        "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+    && echo "${SHELLCHECK_SHA256}  /tmp/analyzer-dl/shellcheck.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/analyzer-dl/shellcheck.tar.xz -C /usr/local/analyzers --strip-components=1 shellcheck-v${SHELLCHECK_VERSION}/shellcheck \
+    && curl -fsSL -o /tmp/analyzer-dl/hadolint \
+        "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
+    && echo "${HADOLINT_SHA256}  /tmp/analyzer-dl/hadolint" | sha256sum -c - \
+    && install -m 0755 /tmp/analyzer-dl/hadolint /usr/local/analyzers/hadolint \
+    && curl -fsSL -o /tmp/analyzer-dl/zizmor.tar.gz \
+        "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz" \
+    && echo "${ZIZMOR_SHA256}  /tmp/analyzer-dl/zizmor.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/analyzer-dl/zizmor.tar.gz -C /usr/local/analyzers zizmor \
+    && chmod +x /usr/local/analyzers/* \
+    && rm -rf /tmp/analyzer-dl
+
+WORKDIR /opt/mergecraft
+
+COPY pyproject.toml uv.lock README.md ./
+COPY src/mergecraft ./src/mergecraft
+
+RUN uv sync --frozen --no-dev \
+    && useradd -m -u 10001 -s /bin/bash mergecraft \
+    && chown -R mergecraft:mergecraft /opt/mergecraft
+
+COPY docker-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["--help"]

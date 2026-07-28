@@ -57,7 +57,7 @@ def test_provenance_requires_sha256_per_declared_platform() -> None:
     raw = (MANIFEST_FIXTURES / "valid-actionlint.yaml").read_text(encoding="utf-8")
     manifest = manifest_mod.load_manifest_yaml(
         raw.replace(
-            'sha256: "0000000000000000000000000000000000000000000000000000000000000000"',
+            'sha256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"',
             'sha256: ""',
         )
     )
