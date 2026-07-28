@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -11,6 +14,20 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 LockMode = Literal["repo-native", "ci-result", "managed", "container"]
+
+
+@contextlib.contextmanager
+def _lockfile_transaction(path: Path):
+    """Serialize lockfile read/modify/write across parallel analyzer runs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+", encoding="utf-8") as handle:
+        if sys.platform != "win32":
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if sys.platform != "win32":
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,27 +76,27 @@ def write_lock(
     normalized = [
         entry if isinstance(entry, LockEntry) else _coerce_entry(entry) for entry in entries
     ]
-    if merge and path.is_file():
-        by_id = {entry.tool_id: entry for entry in read_lock(path)}
-        for entry in normalized:
-            by_id[entry.tool_id] = entry
-        normalized = list(by_id.values())
+    with _lockfile_transaction(path):
+        if merge and path.is_file():
+            by_id = {entry.tool_id: entry for entry in read_lock(path)}
+            for entry in normalized:
+                by_id[entry.tool_id] = entry
+            normalized = list(by_id.values())
 
-    payload = {
-        "version": 1,
-        "tools": [
-            {
-                "tool_id": entry.tool_id,
-                "version": entry.version,
-                "mode": entry.mode,
-                "source": entry.source,
-                "sha256": entry.sha256,
-            }
-            for entry in normalized
-        ],
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+        payload = {
+            "version": 1,
+            "tools": [
+                {
+                    "tool_id": entry.tool_id,
+                    "version": entry.version,
+                    "mode": entry.mode,
+                    "source": entry.source,
+                    "sha256": entry.sha256,
+                }
+                for entry in normalized
+            ],
+        }
+        path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def lock_digest(path: Path) -> str:

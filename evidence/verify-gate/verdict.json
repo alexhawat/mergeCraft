@@ -1,0 +1,58 @@
+{
+  "verdict": "pass",
+  "sha": "de10ddb",
+  "date": "2026-07-28",
+  "findings": [],
+  "checks": {
+    "V.1": {
+      "status": "pass",
+      "evidence": [
+        "evidence/verify-gate/analyzer-pipeline-trusted-postfix.json — 4/4 W6 planted hits, inline cap 8",
+        "evidence/verify-gate/diff-review-dry-run-prompt.txt — offline diff-review dry-run wires run_analyzers + mergecraft-verifier",
+        "evidence/verify-gate/pr1-analyzer-pipeline.json — PR #1 diff: 11 findings, budget ok (full LLM review skipped: no token)"
+      ]
+    },
+    "V.2": {
+      "status": "pass",
+      "evidence": [
+        "tests/analyzers/test_trust.py — fork event → untrusted; secret strip; trusted-only skip (W3.8 simulated; real fork PR deferred per plan)",
+        "evidence/verify-gate/untrusted-tier-python-only.json — pylint skipped with named reason on untrusted tier"
+      ]
+    },
+    "V.3": {
+      "status": "pass",
+      "evidence": [
+        "tests/analyzers/test_redaction.py — 19 passed; canary absent from redact/fingerprint/cache paths",
+        "grep evidence/verify-gate — no canary hits"
+      ]
+    },
+    "V.4": {
+      "status": "pass",
+      "evidence": [
+        "make ci green locally @ de10ddb (285 pass)",
+        "mergecraft --help OK",
+        "ghcr.io/alexhawat/mergecraft lowercase in ci-cd.yml + docker.yml",
+        "sevn make review: skipped (no CLAUDE_CODE_OAUTH_TOKEN); mergecraft-ref-check green per WS.7"
+      ]
+    },
+    "V.5": {
+      "status": "pass",
+      "evidence": [
+        "run_analyzers registered in mcp/server.py:108 when analyzers_enabled",
+        "Catalog parsers reachable via manifest parser ids; severity_map validated at manifest load",
+        "Verifier: mergecraft-verifier in agents/claude.py:65-72 + Review prompt (tests/test_modes.py); should_verify() severity gate — dispatch is orchestrator Agent() per D11 (no silent getattr seams on review path)"
+      ]
+    },
+    "V.6": {
+      "status": "pass",
+      "evidence": [
+        "tests/analyzers/test_adapters_github.py — behavioral planted-finding assertions per W6 tool",
+        "tests/mcp/test_analyzers.py — ran:false contract + per-analyzer status",
+        "tests/agents/test_verifier.py — deny-list, should_verify, withdrawn write (not structural-only)"
+      ]
+    }
+  },
+  "fix_commits": ["de10ddb fix(analyzers): scope {files} expansion to manifest detect globs"],
+  "pr1_ci": "re-run pending after de10ddb push (prior failure: zizmor flake on Linux gw1 @ 30375702257)",
+  "final_unblocked": true
+}
