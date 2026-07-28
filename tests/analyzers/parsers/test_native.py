@@ -7,8 +7,6 @@ from pathlib import Path
 import pytest
 from tests.analyzers.support import FIXTURES_DIR, import_module
 
-pytestmark = pytest.mark.xfail(reason="green after W4: native parsers", strict=False)
-
 
 @pytest.mark.parametrize(
     ("parser_id", "fixture"),
@@ -38,6 +36,7 @@ runtime: managed
 timeout_s: 60
 trust: untrusted
 severity_map:
+  error: Major
   warning: Minor
 provenance: {{}}
 network_allowlist: []
@@ -79,6 +78,7 @@ runtime: repo-native
 timeout_s: 120
 trust: trusted
 severity_map:
+  error: Major
   warning: Minor
 provenance: {}
 network_allowlist: []

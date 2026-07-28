@@ -23,6 +23,7 @@ _BRACE_RE = re.compile(r"\{([^{}]+)\}")
 _PARSER_NATIVE_SEVERITIES: dict[str, frozenset[str]] = {
     "sarif": frozenset({"error", "warning", "note"}),
     "ruff_json": frozenset({"error", "warning"}),
+    "shellcheck_json": frozenset({"error", "warning", "info", "style"}),
     "eslint_json": frozenset({"error", "warning"}),
     "osv_json": frozenset({"critical", "high", "medium", "low"}),
     "trivy_json": frozenset({"critical", "high", "medium", "low", "unknown"}),

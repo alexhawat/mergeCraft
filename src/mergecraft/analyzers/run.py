@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
+from mergecraft.analyzers.redact import redact_analyzer_output
+
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from mergecraft.analyzers.resolve import AnalyzerPlan
 
 CHECK_TIMEOUT_S = 300
@@ -26,6 +30,7 @@ class AnalyzerOutcome:
     status: CheckStatus
     output: str
     exit_code: int | None = None
+    output_path: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -36,9 +41,33 @@ class AnalyzerOutcome:
         return self.status != "unavailable"
 
 
-def _truncate(text: str) -> str:
+def _run_tmpdir(plan: AnalyzerPlan) -> Path:
+    from pathlib import Path
+
+    base = plan.cwd or Path.cwd()
+    tmpdir = base / ".mergecraft" / "analyzer-runs"
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    return tmpdir
+
+
+def _persist_output(raw: str, *, plan: AnalyzerPlan) -> str | None:
+    if not raw:
+        return None
+    from mergecraft.analyzers.parse import persist_analyzer_output
+
+    path = persist_analyzer_output(raw, tmpdir=_run_tmpdir(plan), tool_id=plan.manifest_id)
+    return str(path)
+
+
+def _truncate(text: str, *, output_path: str | None = None) -> str:
     if len(text) <= MAX_OUTPUT_CHARS:
         return text
+    if output_path:
+        elided = len(text) - MAX_OUTPUT_CHARS
+        return (
+            f"... [{elided} chars truncated; full output saved to {output_path}] ...\n"
+            f"{text[-MAX_OUTPUT_CHARS:]}"
+        )
     return text[:MAX_OUTPUT_CHARS] + f"\n… truncated at {MAX_OUTPUT_CHARS} chars"
 
 
@@ -99,12 +128,15 @@ def run_plan(plan: AnalyzerPlan) -> AnalyzerOutcome:
     combined = ((completed.stdout or "") + (completed.stderr or "")).strip()
     if plan.version_note:
         combined = f"{plan.version_note}\n{combined}".strip()
+    redacted = redact_analyzer_output(combined, tool_id=plan.manifest_id)
+    output_path = _persist_output(combined, plan=plan)
     return AnalyzerOutcome(
         name=plan.manifest_id,
         command=command,
         status="passed" if completed.returncode == 0 else "failed",
-        output=_truncate(combined),
+        output=_truncate(redacted, output_path=output_path),
         exit_code=completed.returncode,
+        output_path=output_path,
     )
 
 

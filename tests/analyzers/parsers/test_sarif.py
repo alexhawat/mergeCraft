@@ -7,8 +7,6 @@ from pathlib import Path
 import pytest
 from tests.analyzers.support import FIXTURES_DIR, import_module
 
-pytestmark = pytest.mark.xfail(reason="green after W4: SARIF ingest/export", strict=False)
-
 
 @pytest.mark.parametrize(
     "fixture_name",

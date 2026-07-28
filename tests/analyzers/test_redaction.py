@@ -6,8 +6,6 @@ import pytest
 
 from tests.analyzers.support import CANARY_SECRET, W6_ANALYZER_IDS, import_module
 
-pytestmark = pytest.mark.xfail(reason="green after W4: redaction boundary", strict=False)
-
 
 @pytest.mark.parametrize("analyzer_id", W6_ANALYZER_IDS)
 def test_canary_never_in_redacted_output(analyzer_id: str) -> None:

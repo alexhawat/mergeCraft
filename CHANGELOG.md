@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- SARIF 2.1.0 ingest and export, native parsers (ruff, eslint, osv, trivy, trufflehog,
+  shellcheck), D8 redaction boundary, and file-based output parsing for large analyzer runs.
 - Analyzer provisioning and sandbox: pinned managed-binary fetch with SHA256 verification,
   ``.mergecraft/analyzers.lock`` reproducibility, trust tiers wired into ``ToolContext``,
   sandbox capability probing with skip-not-degrade on missing isolation, ``Dockerfile.analyzers``
