@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import stat
 import tarfile
 import tempfile
-import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
+import httpx
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -48,6 +50,31 @@ def _verify_sha256(path: Path, expected: str) -> None:
         raise ProvisionError(msg)
 
 
+def _safe_archive_member_path(dest_dir: Path, member_name: str) -> Path:
+    dest_root = dest_dir.resolve()
+    target = (dest_root / member_name).resolve()
+    if target != dest_root and dest_root not in target.parents:
+        msg = f"unsafe archive member path: {member_name!r}"
+        raise ProvisionError(msg)
+    return target
+
+
+def _download_pinned_url(url: str, dest: Path) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        msg = f"refusing unpinned or non-https download url: {url!r}"
+        raise ProvisionError(msg)
+    try:
+        with httpx.stream("GET", url, follow_redirects=True, timeout=120.0) as response:
+            response.raise_for_status()
+            with dest.open("wb") as handle:
+                for chunk in response.iter_bytes():
+                    handle.write(chunk)
+    except httpx.HTTPError as exc:
+        msg = f"download failed for {url!r}: {exc}"
+        raise ProvisionError(msg) from exc
+
+
 def _cache_path(cache_dir: Path, manifest_id: str, platform: str, artifact_sha256: str) -> Path:
     return cache_dir / manifest_id / platform / artifact_sha256
 
@@ -67,7 +94,14 @@ def _extract_executable(archive: Path, dest_dir: Path, binary_name: str) -> Path
             tar.extractall(dest_dir, filter="data")
     elif name_lower.endswith(".zip"):
         with zipfile.ZipFile(archive) as zf:
-            zf.extractall(dest_dir)
+            for info in zf.infolist():
+                target = _safe_archive_member_path(dest_dir, info.filename)
+                if info.is_dir() or info.filename.endswith("/"):
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, target.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
     else:
         target = dest_dir / binary_name
         target.write_bytes(archive.read_bytes())
@@ -125,7 +159,7 @@ def provision_managed_binary(
         artifact_name = entry.url.rsplit("/", 1)[-1]
         download_path = tmp_path / artifact_name
         try:
-            urllib.request.urlretrieve(entry.url, download_path)
+            _download_pinned_url(entry.url, download_path)
         except OSError as exc:
             msg = f"download failed for {manifest.id}: {exc}"
             raise ProvisionError(msg) from exc

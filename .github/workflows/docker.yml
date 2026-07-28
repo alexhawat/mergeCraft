@@ -78,4 +78,4 @@ jobs:
         if: github.event_name != 'push'
         run: |
           docker run --rm mergecraft-analyzers:ci --help
-          docker run --rm mergecraft-analyzers:ci which actionlint zizmor shellcheck hadolint
+          docker run --rm --entrypoint /bin/sh mergecraft-analyzers:ci -c "which actionlint zizmor shellcheck hadolint"
