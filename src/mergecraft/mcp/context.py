@@ -1,0 +1,87 @@
+"""ToolContext dataclass shared by MCP tools and the HTTP server."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from mergecraft.mcp.tool_state import ToolState
+    from mergecraft.modes import Mode
+    from mergecraft.review_checks import StaticCheckConfig
+    from mergecraft.types import AgentId, XrepoConfig
+    from mergecraft.utils.github import GitHubClient
+
+AccountPlan = Literal["free", "pro", "team", "enterprise", "unknown"]
+
+
+@dataclass(slots=True)
+class RepoIdentity:
+    owner: str
+    name: str
+
+
+@dataclass(slots=True)
+class PayloadEvent:
+    trigger: str = "unknown"
+    issue_number: int | None = None
+    is_pr: bool = False
+    branch: str | None = None
+    title: str | None = None
+    body: str | None = None
+
+
+@dataclass(slots=True)
+class ResolvedPayload:
+    """Minimal runtime payload; expanded as action wiring lands."""
+
+    event: PayloadEvent = field(default_factory=PayloadEvent)
+    shell: Literal["disabled", "restricted", "enabled"] = "restricted"
+    push: Literal["disabled", "restricted", "enabled"] = "restricted"
+    triggerer: str | None = None
+    model: str | None = None
+    cwd: str | None = None
+    generate_summary: bool = False
+    status_checks: bool = False
+    timeout: str | None = None
+    prompt: str = ""
+    xrepo: Any = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ToolContext:
+    agent_id: AgentId
+    repo: RepoIdentity
+    payload: ResolvedPayload
+    github: GitHubClient
+    github_installation_token: str
+    git_token: str
+    api_token: str
+    modes: list[Mode]
+    tool_state: ToolState
+    mcp_server_url: str
+    tmpdir: str
+    refresh_git_token: Callable[[str], Awaitable[str]] | None = None
+    read_token: str | None = None
+    xrepo: XrepoConfig | None = None
+    post_checkout_script: str | None = None
+    prepush_script: str | None = None
+    pr_approve_enabled: bool = False
+    auto_merge_enabled: bool = False
+    signed_commits: bool = False
+    mode_instructions: dict[str, str] = field(default_factory=dict)
+    static_checks: list[StaticCheckConfig] = field(default_factory=list)
+    # Whether `run_static_checks` is offered at all. Gates run repo-declared
+    # commands, so on a pull request they are commands the PR author controls —
+    # that is exactly what `shell: disabled` exists to forbid. The offline
+    # `diff-review` path sets this True regardless, because there the config and
+    # the working tree both belong to the operator who started the run.
+    static_checks_enabled: bool = False
+    run_id: int | None = None
+    job_id: str | None = None
+    oss: bool = False
+    plan: AccountPlan = "unknown"
+    resolved_model: str | None = None

@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: MIT
+# PR/push verify gate (adapted from sevn@pre-0.0.1; no mergecraft.yml).
+name: CI
+
+on:
+  pull_request:
+    branches: [main, pre-0.0.1]
+  push:
+    branches: [main, pre-0.0.1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  toolchain:
+    name: Verify (toolchain)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: Lockfile check
+        run: make lockcheck
+
+  test:
+    name: Verify (tests ${{ matrix.group }}/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: Unit tests (shard ${{ matrix.group }} of 2)
+        env:
+          MERGECRAFT_TEST_SPLITS: "2"
+          MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
+        run: make test
+
+  static:
+    name: Verify (static + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: Static, typecheck, build tier
+        run: make ci-static
+
+  security:
+    name: Verify (security audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: bandit + pip-audit (OSV.dev)
+        run: make security

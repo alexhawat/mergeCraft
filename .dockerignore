@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+.git
+.github
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+*.pyc
+.coverage
+htmlcov
+dist
+build
+.cache
+tests
+docs
+*.md
+!README.md
+.pre-commit-config.yaml
+.editorconfig

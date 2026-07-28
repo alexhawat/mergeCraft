@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: MIT
+name: Docker
+
+on:
+  pull_request:
+    branches: [main, pre-0.0.1]
+    paths:
+      - Dockerfile
+      - docker-entrypoint.sh
+      - pyproject.toml
+      - uv.lock
+      - src/**
+      - .github/workflows/docker.yml
+  push:
+    branches: [main, pre-0.0.1]
+    paths:
+      - Dockerfile
+      - docker-entrypoint.sh
+      - pyproject.toml
+      - uv.lock
+      - src/**
+      - .github/workflows/docker.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build image smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: mergeCraft:ci
+          cache-from: type=gha,scope=mergeCraft
+          cache-to: type=gha,mode=max,scope=mergeCraft
+      - name: Entrypoint smoke
+        run: docker run --rm mergeCraft:ci --help

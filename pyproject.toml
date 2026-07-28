@@ -1,0 +1,195 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "merge-craft"
+version = "0.0.1"
+description = "Standalone BYOK GitHub Action for AI-powered PR review (mergeCraft)"
+readme = "README.md"
+requires-python = ">=3.14"
+license = { text = "MIT" }
+authors = [{ name = "Alex Hawat" }]
+keywords = ["github-actions", "ai-coding-agent", "code-review"]
+dependencies = [
+    "loguru==0.7.3",
+    "httpx==0.28.1",
+    "rich==15.0.0",
+    "typer==0.25.1",
+    "pyyaml==6.0.3",
+    "pydantic==2.13.3",
+    "pydantic-settings==2.14.2",
+    "fastapi==0.139.2",
+    "uvicorn[standard]==0.51.0",
+    "starlette==1.3.1",
+    "jsonschema==4.26.0",
+    "semver==3.0.4",
+    "python-dotenv==1.2.2",
+    "anyio==4.11.0",
+    "tenacity==9.1.2",
+    "markdownify==1.2.2",
+    "pyjwt[crypto]>=2.13.0",
+    "aiofiles==25.1.0",
+]
+
+[project.scripts]
+mergecraft = "mergecraft.cli.app:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.0.3",
+    "pytest-asyncio==1.3.0",
+    "pytest-xdist==3.8.0",
+    "ruff==0.15.22",
+    "mypy==1.20.2",
+    "pre-commit==4.6.0",
+    "bandit[toml]==1.9.4",
+    "pip-audit==2.10.1",
+    "types-PyYAML==6.0.12.20260510",
+    "types-jsonschema==4.25.1.20250822",
+    "pyright==1.1.409",
+    "pytest-cov==6.0.0",
+    "pytest-randomly==3.16.0",
+    "pytest-split==0.11.0",
+    "types-aiofiles==25.1.0.20251011",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mergecraft"]
+artifacts = [
+    "src/mergecraft/skills/**/*.md",
+]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/mergecraft", "tests", "README.md", "pyproject.toml"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "RUF",
+    "ASYNC",
+    "PT",
+    "TCH",
+    "PIE",
+    "T20",
+    "RET",
+    "BLE",
+    "RSE",
+    "SLF",
+    "DTZ",
+    "FLY",
+    "PTH",
+    "C4",
+    "PERF",
+    "FURB",
+    "TRY",
+    "EM",
+    "ARG",
+    "N",
+    "PL",
+    "FBT",
+    "ERA",
+    "ISC",
+    "ICN",
+    "C901",
+]
+ignore = [
+    "E501",
+    "B008",
+    # Advisory-only — not blocking lint
+    "SLF",
+    "BLE",
+    "PTH",
+    "C4",
+    "PERF",
+    "FURB",
+    "TRY",
+    "EM",
+    "ARG",
+    "N",
+    "PL",
+    "FBT",
+    "ERA",
+    "ISC",
+    "ICN",
+    "C901",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["T20", "RUF001", "TC001", "TC003"]
+"scripts/**" = ["T20"]
+# Catalog prompts intentionally retain upstream emoji / typography.
+"src/mergecraft/modes.py" = ["RUF001", "TC003"]
+# MCP tool handlers and agent CLI harnesses use sync subprocess/Path I/O by design.
+"src/mergecraft/mcp/**" = ["ASYNC221", "ASYNC230", "ASYNC240", "SIM105", "SIM102", "RUF001"]
+"src/mergecraft/agents/**" = ["ASYNC221", "ASYNC230", "ASYNC240", "SIM105", "SIM102", "FLY002", "RUF001"]
+"src/mergecraft/cli/**" = ["T20", "ASYNC221", "ASYNC230", "ASYNC240"]
+"src/mergecraft/yes/**" = ["UP047"]
+"src/mergecraft/utils/learnings.py" = ["ASYNC240"]
+"src/mergecraft/utils/skills.py" = ["ASYNC240"]
+"src/mergecraft/utils/git_setup.py" = ["ASYNC221", "ASYNC240"]
+"src/mergecraft/utils/offline_diff.py" = ["ASYNC221", "ASYNC240", "TC003"]
+"src/mergecraft/offline_review.py" = ["ASYNC221", "ASYNC230", "ASYNC240"]
+"src/mergecraft/action/**" = ["T20", "ASYNC240"]
+"src/mergecraft/prep/**" = ["ASYNC221", "ASYNC240", "TC003"]
+"get-installation-token/**" = ["T20", "ASYNC230", "SIM112"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+ignore_missing_imports = true
+mypy_path = ["src"]
+packages = ["mergecraft"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["mergecraft.mcp.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = ["mergecraft.yes.*", "mergecraft.yes"]
+disallow_untyped_decorators = false
+warn_return_any = false
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+xfail_strict = true
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: opt-in tests that need network or credentials",
+]
+
+[tool.coverage.run]
+source = ["mergecraft"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 0
+
+[tool.bandit]
+exclude_dirs = ["tests", "scripts"]
+# B101: assert in tests/guards; B108: GHA uses /tmp by design;
+# B604: false positive on kwargs named ``shell`` (permission field, not subprocess).
+skips = ["B101", "B108", "B604"]
