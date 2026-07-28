@@ -21,6 +21,8 @@ import httpx
 from loguru import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
 
@@ -121,7 +123,7 @@ def _extract_executable(archive: Path, dest_dir: Path, binary_name: str) -> Path
 
 
 @contextlib.contextmanager
-def _cache_provision_lock(cache_root: Path):
+def _cache_provision_lock(cache_root: Path) -> Iterator[None]:
     """Serialize cache writes so parallel workers cannot clobber a running binary."""
     cache_root.mkdir(parents=True, exist_ok=True)
     lock_path = cache_root / ".provision.lock"

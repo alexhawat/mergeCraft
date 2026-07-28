@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Review integration for analyzers: `run_analyzers` and `analyzer_findings` MCP tools,
+  read-only `mergecraft-verifier` subagent for Critical/Major hits (D11), mechanical
+  findings section and pre-merge Analyzers row, offline `diff-review` wiring, and
+  `REVIEW-CHECKS.md` §2 rewrite (W7).
 - GitHub-native analyzer adapters: actionlint, zizmor, ShellCheck, and Hadolint manifests
   with bundled actionlint SARIF template, ``adapters.run_adapter`` end-to-end runner, and
   fixture-repo planted-finding coverage (W6).

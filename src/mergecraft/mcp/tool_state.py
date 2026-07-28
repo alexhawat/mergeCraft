@@ -98,6 +98,26 @@ class DependencyInstallationState:
 
 
 @dataclass(slots=True)
+class AnalyzerStatusRow:
+    id: str
+    status: str
+    reason: str | None = None
+    finding_count: int = 0
+
+
+@dataclass(slots=True)
+class AnalyzerRunState:
+    ran: bool = False
+    reason: str | None = None
+    analyzers: list[AnalyzerStatusRow] = field(default_factory=list)
+    findings: list[dict[str, Any]] = field(default_factory=list)
+    inline: list[dict[str, Any]] = field(default_factory=list)
+    mechanical_section: str | None = None
+    pre_merge_summary: str | None = None
+    lockfile_digest: str | None = None
+
+
+@dataclass(slots=True)
 class ToolState:
     repos: dict[str, RepoToolState]
     primary_repo_key: str
@@ -136,6 +156,7 @@ class ToolState:
     todo_tracker: Any = None
     agent_diagnostic: Any = None
     browser_daemon: Any = None
+    analyzer_run: AnalyzerRunState | None = None
 
 
 def repo_key(owner: str, name: str) -> str:

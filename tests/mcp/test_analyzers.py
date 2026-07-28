@@ -19,8 +19,6 @@ from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
 
-pytestmark = pytest.mark.xfail(reason="green after W7: run_analyzers tool", strict=False)
-
 
 def _ctx(
     tmp_path: Path,
@@ -35,7 +33,6 @@ def _ctx(
         payload=ResolvedPayload(
             event=PayloadEvent(trigger="pull_request"),
             shell=shell,  # type: ignore[arg-type]
-            extra={"analyzer_trust_tier": tier},
         ),
         github=GitHubClient(token=""),
         github_installation_token="",
@@ -45,7 +42,8 @@ def _ctx(
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         mcp_server_url="",
         tmpdir=str(tmp_path),
-        static_checks_enabled=analyzers_enabled,
+        analyzers_settings_enabled=analyzers_enabled,
+        trust_tier=tier,  # type: ignore[arg-type]
     )
 
 

@@ -8,6 +8,7 @@ from mergecraft.review_taxonomy import (
     BODY_ONLY_EFFORT,
     BODY_ONLY_SEVERITY,
     FINDING_CATEGORIES,
+    FINDING_CONFIDENCES,
     FINDING_EFFORTS,
     FINDING_MARKER_PREFIX,
     FINDING_SEVERITIES,
@@ -74,10 +75,8 @@ def test_finding_confidences_axis_exists_and_is_pinned() -> None:
     assert len(set(FINDING_CONFIDENCES)) == 3
 
 
-@pytest.mark.xfail(reason="green after W7: Review prompt names confidence values", strict=False)
-def test_review_prompt_names_every_confidence_value() -> None:
+@pytest.mark.parametrize("value", FINDING_CONFIDENCES)
+def test_review_prompt_names_every_confidence_value(value: str) -> None:
     from mergecraft.modes import PR_SUMMARY_FORMAT
-    from mergecraft.review_taxonomy import FINDING_CONFIDENCES
 
-    for value in FINDING_CONFIDENCES:
-        assert value in PR_SUMMARY_FORMAT, value
+    assert value in PR_SUMMARY_FORMAT, value

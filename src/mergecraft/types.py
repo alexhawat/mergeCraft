@@ -14,6 +14,7 @@ MERGECRAFT_MCP_NAME = "mergecraft"
 # Back-compat alias matching the TS export name style in prompts/docs.
 # Subagent name used in mode prompts (agents/reviewer.ts).
 REVIEWER_AGENT_NAME = "mergecraft-reviewer"
+VERIFIER_AGENT_NAME = "mergecraft-verifier"
 
 
 def format_mcp_tool_ref(agent_id: AgentId, tool_name: str) -> str:

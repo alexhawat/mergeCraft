@@ -19,6 +19,7 @@ from mergecraft.agents.shared import (
     agent,
     log_token_table,
 )
+from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.types import MERGECRAFT_MCP_NAME
 
 CLAUDE_EXEC_TOOLS = ("Bash", "Monitor", "REPL", "Workflow")
@@ -60,7 +61,15 @@ def build_agents_json() -> str:
             ),
             "prompt": REVIEWER_SYSTEM_PROMPT,
             "model": "claude-sonnet-5",
-        }
+        },
+        VERIFIER_AGENT_NAME: {
+            "description": (
+                "Read-only verification subagent for Critical/Major analyzer findings. "
+                "Confirms, downgrades, or drops before publication."
+            ),
+            "prompt": VERIFIER_SYSTEM_PROMPT,
+            "model": "claude-sonnet-5",
+        },
     }
     return json.dumps(agents)
 

@@ -1,19 +1,19 @@
 # What mergecraft checks for
 
-> **Doc status (W6):** This file is **stale-with-reason** until Wave W7 rewrites §2 for the analyzer platform (actionlint, zizmor, ShellCheck, Hadolint adapters ship as manifests; review integration lands in W7).
+> **Doc status (W7):** §2 describes the analyzer platform shipped in Wave W7 (actionlint, zizmor, ShellCheck, Hadolint). Catalog expansion is tracked separately.
 
 Every check mergecraft applies when it reviews a pull request, grouped by what it is looking at.
 
 A quick orientation before the lists:
 
 - Most of these are **judgment checks** carried out by the reviewing agent, not scripted rules. There is no rule engine — the behavior lives in the `Review` and `IncrementalReview` mode prompts in [`src/mergecraft/modes.py`](src/mergecraft/modes.py).
-- Exactly one check group is **mechanical**: [Mechanical gates](#2-mechanical-gates) shells out to your repo's own linter.
+- **Mechanical evidence** comes from two layers: your repo's own gates (`staticChecks` / Makefile targets via `run_static_checks`) and mergeCraft's **catalog analyzers** (`run_analyzers`). Only **`failed`** gate status and **verified** analyzer findings become review signal — everything else is reported as skipped.
 - Groups 1–3 are the ones that produce findings. Groups 4–8 govern how findings are graded, placed, filtered, and formatted — they are why the review stays short.
 
 ## Contents
 
 1. [Code correctness and risk](#1-code-correctness-and-risk) — the review lenses
-2. [Mechanical gates](#2-mechanical-gates)
+2. [Analyzers](#2-analyzers) — catalog tools + repo gates
 3. [Pull request hygiene](#3-pull-request-hygiene) — the pre-merge checks table
 4. [Diff coverage](#4-diff-coverage)
 5. [Finding grading](#5-finding-grading)
@@ -55,30 +55,46 @@ The reviewer reads the whole diff itself, then picks the **lenses** the PR actua
 - Scope questions only a human can answer (is the legacy path going away, or is this a long-term dual track?).
 - Architectural risks the diff opens up that are not a single-line bug.
 
-## 2. Mechanical gates
+## 2. Analyzers
 
-The one group that runs commands instead of reading code. Always **your repo's own** gate:
+Deterministic evidence from catalog tools and your repo's own gates. The reviewer calls `run_analyzers` (catalog) and `run_static_checks` (repo gates) early in Review / IncrementalReview — results feed the **Analyzers** and **Mechanical gates** pre-merge rows and may become inline findings.
 
-- **Declared gates** — whatever you list under `staticChecks` in `.mergecraft/config.yaml`. A `{files}` token expands to the diff's changed paths, and `suffixes` skips the gate when no matching file changed.
-- **Discovered gates** — with nothing declared, mergecraft looks for `lint`, `format-check`, `typecheck`, and `ci-static` targets in your `Makefile` and runs the ones that exist. Skipped entirely when `make` isn't installed, since every command it would produce is unrunnable.
-- **Nothing found** → reported as skipped. mergecraft will **not** substitute a linter or interpreter of its own, because a gate run under the wrong toolchain version invents findings. (`except A, B:` is a syntax error on Python 3.13 and perfectly legal on 3.14.)
+### Repo mechanical gates (`run_static_checks`)
 
-A failing gate becomes a finding that quotes the exact command and its output, so "consider sorting this" becomes "`make lint` fails on this file". Gate results also tell the reviewer which conventions your repo actually enforces, so it stops inventing ones you don't.
+Your repo's own gate — unchanged from prior mergeCraft behavior:
 
-Each gate comes back as one of four statuses, and only **`failed`** is ever a finding:
+- **Declared gates** — `staticChecks` in `.mergecraft/config.yaml`. `{files}` expands to changed paths; `suffixes` skips when no matching file changed.
+- **Discovered gates** — with nothing declared, mergecraft looks for `lint`, `format-check`, `typecheck`, and `ci-static` Makefile targets. Skipped when `make` is not installed.
+- **Nothing found** → skipped. mergecraft will **not** substitute a linter of its own (`except A, B:` is legal on Python 3.14 and a syntax error on 3.13 — version mismatch manufactures false positives).
+
+Each gate returns one of four statuses; only **`failed`** is a finding:
 
 | Status | Meaning |
 |---|---|
 | `passed` | ran, exit 0 |
 | `failed` | ran, non-zero exit — a finding |
 | `timed_out` | exceeded the per-gate timeout |
-| `unavailable` | the executable isn't installed here, so it judged nothing |
+| `unavailable` | executable not installed — judged nothing |
 
-**When gates run at all.** A gate executes commands your config names, so on a pull request it executes commands the PR author controls. That is what `shell: disabled` exists to forbid, so under that setting the tool is not offered and the pre-merge row is skipped. The offline `mergecraft diff-review` path always has it, because there the config and the working tree both belong to whoever started the run.
+### Catalog analyzers (`run_analyzers`)
 
-One consequence worth knowing: the containerized GitHub Action image ships neither `make` nor your project's toolchain, so `make`-based gates report `unavailable` there and do their real work on the local review path.
+Shipped in this release: **actionlint**, **zizmor**, **ShellCheck**, **Hadolint** — each is a YAML manifest, not bespoke Python. Enablement follows path detection and `.mergecraft/config.yaml` `analyzers:` overrides.
 
-Implementation: [`src/mergecraft/review_checks.py`](src/mergecraft/review_checks.py), exposed to the agent as the `run_static_checks` tool.
+**Execution preference (D4):** `repo-native` → existing CI result → managed pinned binary → container → **skip with a named reason**. Skipped is skipped — never a finding, never a failed pre-merge row.
+
+**Trust tiers (D7):** `trusted` (same-repo PR, `workflow_dispatch`, offline `diff-review`) vs `untrusted` (fork PR / `pull_request_target` — no secrets, network deny-by-default, no PR-authored command construction; trusted-only manifests skip with reasons). `shell: disabled` withholds both gate and analyzer tools on PR events; offline `diff-review` runs analyzers at trusted tier without shell.
+
+**Scoping (D6):** analyzers run on **head** by default; findings outside the diff hunks are dropped unless the path is an explicit exception (new file, dependency manifest, lockfile, workflow, migration). `introduced_by_pr: unknown` when no base run happened — never implied `true`.
+
+**Clustering (D12):** one defect from multiple tools publishes **one** finding with corroborating evidence and raised `confidence`.
+
+**Verification (D11):** Critical/Major analyzer hits are **hypotheses** until the read-only `mergecraft-verifier` subagent confirms, downgrades, or drops them. Drops write a reason under `## Withdrawn review findings (known non-issues)`.
+
+**Noise budget (D14):** inline analyzer slots cap at **8** (W0.2 measurement); overflow lands in `### 🔧 Mechanical findings`. Agent findings win ties; Trivial/Low value never inline.
+
+**Lockfile (D24):** `.mergecraft/analyzers.lock` records resolved tool id, version, source, and SHA256; the pre-merge **Analyzers** row echoes the digest.
+
+Implementation: [`src/mergecraft/mcp/analyzers.py`](src/mergecraft/mcp/analyzers.py), [`src/mergecraft/agents/verifier.py`](src/mergecraft/agents/verifier.py), [`src/mergecraft/review_checks.py`](src/mergecraft/review_checks.py) (repo gates).
 
 ## 3. Pull request hygiene
 
@@ -88,7 +104,8 @@ Assertions about the pull request itself rather than its code. These always appe
 - **Description** — does it explain what changed and why, and does every claim in it hold against the diff?
 - **Linked issues** — for each issue the PR closes, is every stated requirement actually covered?
 - **Scope** — does the diff do things neither the description nor a linked issue asked for? Out-of-scope paths get named.
-- **Mechanical gates** — the result from the group above.
+- **Mechanical gates** — the result from `run_static_checks` (repo gates).
+- **Analyzers** — the result from `run_analyzers` (catalog tools): how many ran, how many skipped (with reasons), lockfile digest.
 
 A flagged row here is fixed by editing the PR's title, body, or issue links — not its code — so these never also become inline comments. The one exception is a failing mechanical gate, which is a real code finding and is raised inline too.
 

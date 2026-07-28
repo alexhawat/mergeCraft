@@ -108,11 +108,14 @@ def resolve_analyzers_mode(raw: str | None) -> AnalyzersMode:
 
 def analyzers_enabled(ctx: ToolContext) -> bool:
     """Whether the analyzer MCP surface may register for this run."""
-    if ctx.payload.shell == "disabled":
-        return False
     if ctx.analyzers_mode == "off":
         return False
-    return ctx.analyzers_settings_enabled
+    if not ctx.analyzers_settings_enabled:
+        return False
+    if ctx.payload.shell == "disabled":
+        # Offline diff-review: operator-owned tree — analyzers still run (W7.8).
+        return ctx.payload.event.trigger == "unknown"
+    return True
 
 
 def compute_analyzers_enabled(

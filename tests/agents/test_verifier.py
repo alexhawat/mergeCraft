@@ -22,8 +22,6 @@ from mergecraft.utils.github import GitHubClient
 if TYPE_CHECKING:
     from pathlib import Path
 
-pytestmark = pytest.mark.xfail(reason="green after W7: verification agent", strict=False)
-
 
 def _ctx(tmp_path: Path) -> ToolContext:
     return ToolContext(
