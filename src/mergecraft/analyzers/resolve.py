@@ -150,7 +150,12 @@ def expand_analyzer_argv(
         if arg == FILES_TOKEN:
             for rel in changed_files:
                 path = Path(rel)
-                expanded.append(str(path if path.is_absolute() else repo_root / rel))
+                candidate = path if path.is_absolute() else repo_root / rel
+                try:
+                    candidate.resolve().relative_to(repo_root)
+                except ValueError:
+                    continue
+                expanded.append(str(candidate))
             continue
         if arg.startswith(_CATALOG_PREFIX):
             template_path = _CATALOG_DIR / arg.removeprefix(_CATALOG_PREFIX)

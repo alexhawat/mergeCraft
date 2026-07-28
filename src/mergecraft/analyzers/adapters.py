@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import platform
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
@@ -12,19 +12,28 @@ from loguru import logger
 from mergecraft.analyzers.parse import parse_output_file
 from mergecraft.analyzers.parsers import parse_output
 from mergecraft.analyzers.parsers._common import resolve_repo_relative_path
-from mergecraft.analyzers.provision import ProvisionError, resolve_with_lock
+from mergecraft.analyzers.provision import ProvisionError, resolve_baked_binary, resolve_with_lock
 from mergecraft.analyzers.registry import filter_changed_files_for_manifest, load_catalog
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv, resolve_analyzer
 from mergecraft.analyzers.run import run_plan
-from mergecraft.analyzers.trust import build_analyzer_env, evaluate_manifest_for_tier
+from mergecraft.analyzers.sandbox import plan_sandbox
+from mergecraft.analyzers.trust import build_analyzer_env
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import AnalyzerManifest
+    from mergecraft.analyzers.sandbox import SandboxContext
 
 TrustTier = Literal["trusted", "untrusted"]
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterRunResult:
+    findings: list[Finding]
+    skipped: bool = False
+    skip_reason: str | None = None
 
 
 def _provision_platform_key() -> str:
@@ -74,6 +83,13 @@ def _provision_managed_argv(
     manifest: AnalyzerManifest,
     repo_root: Path,
 ) -> AnalyzerPlan | None:
+    baked = resolve_baked_binary(manifest)
+    if baked is not None:
+        argv = list(plan.argv)
+        if argv and argv[0] == manifest.command[0]:
+            argv[0] = str(baked)
+        return replace(plan, argv=tuple(argv))
+
     platform_key = _provision_platform_key()
     cache_dir = repo_root / ".mergecraft" / "analyzer-cache"
     lock_path = repo_root / ".mergecraft" / "analyzers.lock"
@@ -100,34 +116,50 @@ def run_adapter(
     repo_root: Path,
     changed_files: list[str],
     tier: TrustTier = "trusted",
-) -> list[Finding]:
+) -> AdapterRunResult:
     """Run one catalog analyzer and return normalized findings."""
     repo_root = repo_root.resolve()
     manifest = _manifest_by_id(tool_id)
-    decision = evaluate_manifest_for_tier(manifest=manifest, tier=tier)
-    if decision.skipped:
-        return []
 
     plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
     if plan.mode == "skip":
         logger.info("{}", plan.reason)
-        return []
+        return AdapterRunResult(findings=[], skipped=True, skip_reason=plan.reason)
 
     if plan.mode == "managed":
         provisioned = _provision_managed_argv(plan, manifest=manifest, repo_root=repo_root)
         if provisioned is None:
-            return []
+            reason = f"skipped {tool_id}: managed binary provisioning failed"
+            return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
         plan = provisioned
 
     if plan.mode in {"ci-result", "container"} or not plan.argv:
-        logger.info("adapter {} unavailable in mode {}", tool_id, plan.mode)
-        return []
+        reason = f"skipped {tool_id}: mode {plan.mode} unavailable in this environment"
+        logger.info("{}", reason)
+        return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
     if not scoped_files:
-        logger.info("adapter {} skipped: no changed files match detect globs", tool_id)
-        return []
+        reason = f"skipped {tool_id}: no changed files match detect globs"
+        logger.info("{}", reason)
+        return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
+    scratch_dir = repo_root / ".mergecraft" / "analyzer-scratch" / tool_id
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    sandbox_decision = plan_sandbox(
+        manifest=manifest,
+        tier=tier,
+        repo_root=repo_root,
+        scratch_dir=scratch_dir,
+    )
+    if not sandbox_decision.can_run:
+        return AdapterRunResult(
+            findings=[],
+            skipped=True,
+            skip_reason=sandbox_decision.skip_reason,
+        )
+
+    sandbox_context: SandboxContext | None = sandbox_decision.context
     plan = _finalize_plan(
         plan,
         manifest=manifest,
@@ -135,9 +167,10 @@ def run_adapter(
         changed_files=scoped_files,
         tier=tier,
     )
-    outcome = run_plan(plan)
+    outcome = run_plan(plan, sandbox_context=sandbox_context)
     if not outcome.ran or outcome.output_path is None:
-        return []
+        reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
+        return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     from pathlib import Path
 
@@ -148,7 +181,7 @@ def run_adapter(
     )
     if not findings and outcome.output.strip():
         findings = parse_output(outcome.output, manifest=manifest, repo_root=repo_root)
-    return _normalize_paths(findings, repo_root=repo_root)
+    return AdapterRunResult(findings=_normalize_paths(findings, repo_root=repo_root))
 
 
-__all__ = ["run_adapter"]
+__all__ = ["AdapterRunResult", "run_adapter"]

@@ -31,7 +31,7 @@ def test_adapter_catches_planted_finding(tool_id: str, adapter_fixture_repo: Pat
         repo_root=adapter_fixture_repo,
         changed_files=[path],
         tier="trusted",
-    )
+    ).findings
     matches = [f for f in findings if f.path == path and f.start_line == line]
     assert matches, f"{tool_id} must catch planted finding at {path}:{line}"
 
@@ -46,7 +46,7 @@ def test_adapter_invents_no_unplanted_findings_on_untouched_files(
         repo_root=adapter_fixture_repo,
         changed_files=[PLANTED[tool_id][0]],
         tier="trusted",
-    )
+    ).findings
     reported_paths = {f.path for f in findings}
     for untouched in UNTOUCHED_PATHS:
         assert untouched not in reported_paths

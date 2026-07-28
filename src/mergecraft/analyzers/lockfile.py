@@ -18,14 +18,14 @@ LockMode = Literal["repo-native", "ci-result", "managed", "container"]
 
 
 @contextlib.contextmanager
-def _lockfile_transaction(path: Path) -> Iterator[None]:
+def _lockfile_transaction(path: Path) -> Iterator[Any]:
     """Serialize lockfile read/modify/write across parallel analyzer runs."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", encoding="utf-8") as handle:
         if sys.platform != "win32":
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
-            yield
+            yield handle
         finally:
             if sys.platform != "win32":
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
@@ -67,6 +67,24 @@ def read_lock(path: Path) -> list[LockEntry]:
     return entries
 
 
+def _read_lock_handle(handle: Any) -> list[LockEntry]:
+    handle.seek(0)
+    raw = handle.read()
+    if not raw.strip():
+        return []
+    data = yaml.safe_load(raw)
+    if not isinstance(data, dict):
+        return []
+    tools = data.get("tools")
+    if not isinstance(tools, list):
+        return []
+    entries: list[LockEntry] = []
+    for item in tools:
+        if isinstance(item, dict):
+            entries.append(_coerce_entry(item))
+    return entries
+
+
 def write_lock(
     path: Path,
     entries: list[LockEntry | dict[str, Any]],
@@ -77,9 +95,9 @@ def write_lock(
     normalized = [
         entry if isinstance(entry, LockEntry) else _coerce_entry(entry) for entry in entries
     ]
-    with _lockfile_transaction(path):
-        if merge and path.is_file():
-            by_id = {entry.tool_id: entry for entry in read_lock(path)}
+    with _lockfile_transaction(path) as handle:
+        if merge:
+            by_id = {entry.tool_id: entry for entry in _read_lock_handle(handle)}
             for entry in normalized:
                 by_id[entry.tool_id] = entry
             normalized = list(by_id.values())
@@ -97,7 +115,9 @@ def write_lock(
                 for entry in normalized
             ],
         }
-        path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+        handle.seek(0)
+        handle.truncate()
+        handle.write(yaml.safe_dump(payload, sort_keys=False))
 
 
 def lock_digest(path: Path) -> str:

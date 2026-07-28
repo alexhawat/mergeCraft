@@ -16,6 +16,11 @@ from mergecraft.utils.github import GitHubClient
 from tests.analyzers.support import import_module
 
 
+def test_missing_github_event_defaults_untrusted() -> None:
+    trust = import_module("mergecraft.analyzers.trust")
+    assert trust.derive_trust_tier(event=None, shell="restricted") == "untrusted"
+
+
 def test_same_repo_pull_request_is_trusted(same_repo_event: dict[str, object]) -> None:
     trust = import_module("mergecraft.analyzers.trust")
     tier = trust.derive_trust_tier(event=same_repo_event, shell="restricted")

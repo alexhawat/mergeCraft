@@ -268,10 +268,29 @@ def resolve_with_lock(
     return result
 
 
+BAKED_ANALYZER_ROOT = Path("/usr/local/analyzers")
+
+
+def resolve_baked_binary(manifest: AnalyzerManifest) -> Path | None:
+    """Return a pre-baked binary path when running in the analyzers image (D10)."""
+    if os.environ.get("MERGECRAFT_ANALYZERS", "").strip().lower() != "full":
+        return None
+    binary = manifest.command[0]
+    candidate = BAKED_ANALYZER_ROOT / binary
+    if candidate.is_file():
+        return candidate
+    discovered = shutil.which(binary)
+    if discovered:
+        return Path(discovered)
+    return None
+
+
 __all__ = [
+    "BAKED_ANALYZER_ROOT",
     "ProvisionError",
     "ProvisionResult",
     "fetch_unpinned",
     "provision_managed_binary",
+    "resolve_baked_binary",
     "resolve_with_lock",
 ]

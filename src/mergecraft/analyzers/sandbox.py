@@ -200,8 +200,10 @@ def build_sandbox_context(
     limits: SandboxLimits,
     network_allowlist: list[str],
     read_only_source: bool,
+    caps: SandboxCapabilities | None = None,
 ) -> SandboxContext:
-    caps = probe_capabilities()
+    probed = caps if caps is not None else probe_capabilities()
+    _ = probed
     return SandboxContext(
         repo_root=repo_root,
         scratch_dir=scratch_dir,
@@ -212,7 +214,7 @@ def build_sandbox_context(
         source_mount_read_only=read_only_source,
         network_allowlist=list(network_allowlist),
         network_default="deny",
-        unavailable_capabilities=tuple(caps.unavailable_reasons),
+        unavailable_capabilities=tuple(probed.unavailable_reasons),
     )
 
 
@@ -243,6 +245,7 @@ def plan_sandbox(
         limits=limits,
         network_allowlist=manifest.network_allowlist,
         read_only_source=tier == "untrusted",
+        caps=caps,
     )
     return SandboxPlan(can_run=True, context=context)
 

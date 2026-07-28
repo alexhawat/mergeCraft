@@ -66,6 +66,9 @@ def redact_secrets(text: str) -> str:
 def redact_analyzer_output(raw: str, *, tool_id: str) -> str:
     """Redact analyzer stdout/stderr before any downstream consumer."""
     _ = tool_id
+    stripped = raw.lstrip()
+    if stripped.startswith(("{", "[")):
+        return _pattern_redact(raw)
     return redact_secrets(raw)
 
 

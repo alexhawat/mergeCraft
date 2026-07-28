@@ -38,7 +38,7 @@ def derive_trust_tier(
     if offline:
         return "trusted"
     if not event:
-        return "trusted"
+        return "untrusted"
 
     event_name = _event_name()
     if event_name == "workflow_dispatch":
@@ -118,26 +118,12 @@ def analyzers_enabled(ctx: ToolContext) -> bool:
     return True
 
 
-def compute_analyzers_enabled(
-    *,
-    shell: str,
-    analyzers_mode: AnalyzersMode,
-    settings_enabled: bool,
-) -> bool:
-    if shell == "disabled":
-        return False
-    if analyzers_mode == "off":
-        return False
-    return settings_enabled
-
-
 __all__ = [
     "AnalyzersMode",
     "ManifestTierDecision",
     "allow_repo_command_overrides",
     "analyzers_enabled",
     "build_analyzer_env",
-    "compute_analyzers_enabled",
     "derive_trust_tier",
     "evaluate_manifest_for_tier",
     "resolve_analyzers_mode",

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Wire D7 sandbox planning into adapter execution; fail-closed trust tier when the GitHub
+  event is missing; redact analyzer artifacts before persist; apply repo ``inlineBudget``;
+  extract canonical ``analyzers/pipeline.py``; use baked binaries when ``MERGECRAFT_ANALYZERS=full``.
+
 ### Added
 
 - Review integration for analyzers: `run_analyzers` and `analyzer_findings` MCP tools,
