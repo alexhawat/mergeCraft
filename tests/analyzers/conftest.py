@@ -27,3 +27,13 @@ def same_repo_event() -> dict[str, Any]:
 @pytest.fixture
 def fork_pr_event() -> dict[str, Any]:
     return FORK_PULL_REQUEST_EVENT.copy()
+
+
+@pytest.fixture
+def adapter_fixture_repo(fixture_repo: Path, tmp_path: Path) -> Path:
+    """Isolated copy of the W0.8 fixture so parallel workers do not share analyzer cache."""
+    import shutil
+
+    dest = tmp_path / "fixture-repo"
+    shutil.copytree(fixture_repo, dest)
+    return dest

@@ -23,12 +23,12 @@ UNTOUCHED_PATHS = (
 
 
 @pytest.mark.parametrize("tool_id", list(PLANTED))
-def test_adapter_catches_planted_finding(tool_id: str, fixture_repo: Path) -> None:
+def test_adapter_catches_planted_finding(tool_id: str, adapter_fixture_repo: Path) -> None:
     adapters = import_module("mergecraft.analyzers.adapters")
     path, line = PLANTED[tool_id]
     findings = adapters.run_adapter(
         tool_id=tool_id,
-        repo_root=fixture_repo,
+        repo_root=adapter_fixture_repo,
         changed_files=[path],
         tier="trusted",
     )
@@ -38,12 +38,12 @@ def test_adapter_catches_planted_finding(tool_id: str, fixture_repo: Path) -> No
 
 @pytest.mark.parametrize("tool_id", list(PLANTED))
 def test_adapter_invents_no_unplanted_findings_on_untouched_files(
-    tool_id: str, fixture_repo: Path
+    tool_id: str, adapter_fixture_repo: Path
 ) -> None:
     adapters = import_module("mergecraft.analyzers.adapters")
     findings = adapters.run_adapter(
         tool_id=tool_id,
-        repo_root=fixture_repo,
+        repo_root=adapter_fixture_repo,
         changed_files=[PLANTED[tool_id][0]],
         tier="trusted",
     )
