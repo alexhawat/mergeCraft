@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 _CATALOG_DIR = Path(__file__).resolve().parent / "catalog"
 _CATALOG_PREFIX = "@catalog:"
 FILES_TOKEN = "{files}"
+TRUFFLEHOG_CONFIG_TOKEN = "{trufflehog_config}"
 
 ExecutionMode = Literal["repo-native", "ci-result", "managed", "container", "skip"]
 
@@ -96,7 +97,11 @@ def resolve_analyzer(
                     mode="skip",
                     reason=skip_reason,
                 )
-            if skip_reason and skip_reason.startswith("skipped"):
+            if (
+                manifest.runtime == "repo-native"
+                and skip_reason
+                and skip_reason.startswith("skipped")
+            ):
                 return AnalyzerPlan(
                     manifest_id=manifest.id,
                     mode="skip",
@@ -203,6 +208,9 @@ def expand_analyzer_argv(
                     continue
                 expanded.append(str(candidate))
             continue
+        if arg == TRUFFLEHOG_CONFIG_TOKEN:
+            expanded.append(str(_CATALOG_DIR / "trufflehog-detectors.txt"))
+            continue
         if arg.startswith(_CATALOG_PREFIX):
             template_path = _CATALOG_DIR / arg.removeprefix(_CATALOG_PREFIX)
             expanded.append(template_path.read_text(encoding="utf-8"))
@@ -236,6 +244,7 @@ def static_check_plan(
 
 __all__ = [
     "FILES_TOKEN",
+    "TRUFFLEHOG_CONFIG_TOKEN",
     "AnalyzerPlan",
     "ExecutionMode",
     "detect_repo_tool",

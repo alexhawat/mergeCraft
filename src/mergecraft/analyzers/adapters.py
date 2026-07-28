@@ -72,11 +72,45 @@ def _finalize_plan(
     repo_root: Path,
     changed_files: list[str],
     tier: TrustTier,
+    event: dict[str, object] | None = None,
 ) -> AnalyzerPlan:
     scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
-    argv = expand_analyzer_argv(plan.argv, repo_root=repo_root, changed_files=scoped_files)
-    env = build_analyzer_env(tier=tier, event=None, repo_env=None)
-    return replace(plan, argv=argv, cwd=repo_root, env=env)
+    argv = list(expand_analyzer_argv(plan.argv, repo_root=repo_root, changed_files=scoped_files))
+    if manifest.id == "trufflehog":
+        argv = _trufflehog_argv(argv, repo_root=repo_root, tier=tier, event=event)
+    env = build_analyzer_env(tier=tier, event=event, repo_env=None)
+    return replace(plan, argv=tuple(argv), cwd=repo_root, env=env)
+
+
+def _trufflehog_argv(
+    argv: list[str],
+    *,
+    repo_root: Path,
+    tier: TrustTier,
+    event: dict[str, object] | None,
+) -> list[str]:
+    from mergecraft.analyzers.config import trufflehog_verify_enabled
+
+    filtered = [arg for arg in argv if arg not in {"--no-verification", "--verification"}]
+    if trufflehog_verify_enabled(repo_root=repo_root, tier=tier, event=event):
+        if "--verification" not in filtered:
+            filtered.append("--verification")
+    elif "--no-verification" not in filtered:
+        filtered.append("--no-verification")
+    return filtered
+
+
+def _finalize_trufflehog_findings(findings: list[Finding], *, repo_root: Path) -> list[Finding]:
+    from mergecraft.analyzers.parsers.trufflehog_jsonl import _ROTATION_FIRST_REMEDIATION
+
+    normalized: list[Finding] = []
+    for finding in findings:
+        remediation = finding.remediation or _ROTATION_FIRST_REMEDIATION
+        if "rotate" not in remediation.casefold():
+            remediation = _ROTATION_FIRST_REMEDIATION
+        normalized.append(finding.model_copy(update={"remediation": remediation}))
+    _ = repo_root
+    return normalized
 
 
 def _provision_managed_argv(
@@ -270,6 +304,9 @@ def run_adapter(
                 sandbox_context=sandbox_context,
             ),
         ]
+
+    if tool_id == "trufflehog":
+        findings = _finalize_trufflehog_findings(findings, repo_root=repo_root)
 
     return AdapterRunResult(
         findings=_normalize_paths(findings, repo_root=repo_root),

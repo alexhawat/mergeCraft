@@ -1,0 +1,34 @@
+id: trufflehog
+category: secrets
+languages: []
+detect:
+  files:
+    - "**/*"
+command:
+  - trufflehog
+  - filesystem
+  - -j
+  - --no-verification
+  - --config
+  - "{trufflehog_config}"
+  - "{files}"
+scope: diff
+parser: trufflehog_jsonl
+supports_fix: false
+default_enabled: auto
+version: "3.96.0"
+runtime: managed
+timeout_s: 180
+trust: untrusted
+severity_map:
+  verified: Major
+  unverified: Major
+provenance:
+  linux-amd64:
+    url: https://github.com/trufflesecurity/trufflehog/releases/download/v3.96.0/trufflehog_3.96.0_linux_amd64.tar.gz
+    sha256: "6eb1f98fb890bf9361d8833c061e122dcb4f14fb7b71c65e603b7c096153c724"
+  darwin-arm64:
+    url: https://github.com/trufflesecurity/trufflehog/releases/download/v3.96.0/trufflehog_3.96.0_darwin_arm64.tar.gz
+    sha256: "87478306b95ca2420cfb844b7582383ac60b922e262350a0088e797f328d2e62"
+network_allowlist: []
+exclusive_group: null

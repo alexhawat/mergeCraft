@@ -18,6 +18,11 @@ if TYPE_CHECKING:
 
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
+_ROTATION_FIRST_REMEDIATION = (
+    "Rotate the exposed credential immediately, then remove it from repository "
+    "history (for example with git filter-repo or BFG)."
+)
+
 
 def _line_from_metadata(metadata: dict[str, Any]) -> int:
     data = metadata.get("Data") or metadata
@@ -28,19 +33,34 @@ def _line_from_metadata(metadata: dict[str, Any]) -> int:
     return 1
 
 
-def _path_from_metadata(metadata: dict[str, Any]) -> str:
+def _path_from_metadata(metadata: dict[str, Any], *, repo_root: Path | None) -> str:
     data = metadata.get("Data") or metadata
     if isinstance(data, dict):
         filesystem = data.get("Filesystem") or {}
         if isinstance(filesystem, dict) and filesystem.get("file"):
-            return str(filesystem["file"])
+            raw_path = str(filesystem["file"])
+            if repo_root is not None:
+                from mergecraft.analyzers.parsers._common import resolve_repo_relative_path
+
+                return resolve_repo_relative_path(raw_path, repo_root=repo_root)
+            return raw_path
     return "unknown"
+
+
+def _detector_name(item: dict[str, Any]) -> str:
+    if item.get("DetectorName"):
+        return str(item["DetectorName"])
+    if item.get("DetectorType") is not None:
+        return str(item["DetectorType"])
+    extra = item.get("ExtraData") or {}
+    if isinstance(extra, dict) and extra.get("name"):
+        return str(extra["name"])
+    return "secret"
 
 
 def parse_trufflehog_jsonl(
     raw: str, *, manifest: AnalyzerManifest, repo_root: Path
 ) -> list[Finding]:
-    _ = repo_root
     category = taxonomy_category(manifest)
     findings: list[Finding] = []
     for line in raw.splitlines():
@@ -50,14 +70,16 @@ def parse_trufflehog_jsonl(
         item = json.loads(stripped)
         if not isinstance(item, dict):
             continue
+        if item.get("level") and item.get("msg"):
+            continue
         metadata = item.get("SourceMetadata") or {}
         if not isinstance(metadata, dict):
             metadata = {}
-        path = _path_from_metadata(metadata)
+        path = _path_from_metadata(metadata, repo_root=repo_root)
         start_line = _line_from_metadata(metadata)
         verified = bool(item.get("Verified"))
         native_level = "verified" if verified else "unverified"
-        detector = str(item.get("DetectorType") or "secret")
+        detector = _detector_name(item)
         findings.append(
             make_finding(
                 tool=manifest.id,
@@ -65,12 +87,13 @@ def parse_trufflehog_jsonl(
                 category=category,
                 severity=map_native_severity(manifest, native_level),
                 confidence=map_confidence("likely" if verified else "possible"),
-                message=f"{detector} secret detected",
+                message=f"{detector} secret detected at {path}:{start_line}",
                 path=path,
                 start_line=start_line,
                 end_line=start_line,
                 source="analyzer",
                 evidence=[f"detector={detector}"],
+                remediation=_ROTATION_FIRST_REMEDIATION,
             )
         )
     return findings

@@ -35,4 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Pyright, BasedPyright, ESLint, Biome, and Oxlint — config-driven ``exclusive_group``
   selection, type-checker skip (never managed substitute), and ``analyzer_run_metadata``
   version reporting (D5/C3).
+- **Catalog C2:** managed OSV-Scanner and Trivy adapters with base-vs-head CVE delta
+  (``supply_chain.run_differential_scan``), TruffleHog secret scanning with rotation-first
+  remediation and verify-off-by-default policy (``config.trufflehog_verify_enabled``),
+  and ``dependency-vuln`` exclusive-group dedup hooks (D12).
 - Initial mergeCraft snapshot from pullfrog-py (history-free rebrand).
