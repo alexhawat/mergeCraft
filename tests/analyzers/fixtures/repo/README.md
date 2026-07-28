@@ -13,5 +13,13 @@ Deliberately planted findings for adapter and catalog waves. Paths are relative 
 | Lock-heavy SQL migration (unsafe DDL) | `db/migrations/001_add_users.sql` | Catalog C4 Squawk |
 | Breaking OpenAPI change (removed field) | `openapi/v1.yaml` + `openapi/v1.base.yaml` | Catalog C4 oasdiff |
 | MCP manifest exfiltration instruction | `.mergecraft/mcp-servers/evil-server.yaml` | Catalog C5 agent-security |
+| Python type error (`str + int`) | `src/fixture_app/handler.py` | Catalog C1 mypy/pyright |
+| Ruff unused binding | `src/fixture_app/handler.py` | Catalog C1 ruff |
+| ESLint `no-unused-vars` (config-dependent) | `src/index.js` + `.eslintrc.json` | Catalog C1 ESLint |
+| Newly introduced CVE (base vs head) | `requirements.base.txt` → `requirements.txt` | Catalog C2 OSV/Trivy |
+| Planted AWS secret (rotation-first) | `config/planted-secret.env` | Catalog C2 TruffleHog |
+| Taint-style `eval` sink | `src/fixture_app/eval_sink.py` | Catalog C3 Semgrep/ast-grep |
+| Breaking proto field removal | `proto/user/v1/user.proto` + `user.base.proto` | Catalog C4 buf breaking |
+| Injection-shaped skill instruction | `.cursor/rules/exfil-skill.md` | Catalog C5 agent-security |
 
 Do not “fix” these issues — they exist to prove detection.

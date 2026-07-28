@@ -89,3 +89,56 @@ All cross-wave markers use `strict=False` (repo `xfail_strict = true`).
 
 - Lazy `importlib.import_module` in analyzer tests keeps collection clean before W2 creates `src/mergecraft/analyzers/`.
 - Parser and adapter tests use recorded fixtures under `tests/analyzers/fixtures/`; no subprocess shell-out in parser tests.
+
+---
+
+## Catalog expansion (C0 RED — parent plan `mergecraft-analyzer-catalog-wave-plan.md`)
+
+Worktree: `mergecraft-analyzer-catalog` @ `wave/analyzer-catalog`
+
+### xfail schedule (catalog)
+
+| Wave | Test files | Marker reason prefix |
+|------|------------|----------------------|
+| **C1** | `tests/analyzers/test_adapters_language.py` | `green after C1:` |
+| **C2** | `tests/analyzers/test_adapters_supply_chain.py` | `green after C2:` |
+| **C3** | `tests/analyzers/test_adapters_pattern.py` | `green after C3:` |
+| **C4** | `tests/analyzers/test_adapters_contract.py` | `green after C4:` |
+| **C5** | `tests/analyzers/test_agentsec.py` | `green after C5:` |
+| **C6** | `tests/analyzers/test_catalog_docs.py`; un-xfail remaining adapter tests | `green after C6:` |
+
+All cross-wave markers use `strict=False`. `tests/analyzers/test_redaction.py` parametrisation extends to every catalog id via `REDACTION_ANALYZER_IDS` in `tests/analyzers/support.py` (C0.8) — redaction helpers are W4-green; new ids are structurally covered before their adapters ship.
+
+### Planted finding → wave map (catalog fixtures)
+
+| Planted finding | Path | Wave | Test |
+|-----------------|------|------|------|
+| Python type error (`str + int`) | `src/fixture_app/handler.py` | C1 mypy/pyright/basedpyright | `test_adapters_language.py` |
+| Ruff unused binding | `src/fixture_app/handler.py` | C1 ruff | `test_adapters_language.py` |
+| ESLint `no-unused-vars` | `src/index.js` | C1 eslint | `test_adapters_language.py` |
+| Newly introduced CVE | `requirements.base.txt` → `requirements.txt` | C2 osv-scanner/trivy | `test_adapters_supply_chain.py` |
+| Planted AWS secret | `config/planted-secret.env` | C2 trufflehog | `test_adapters_supply_chain.py` |
+| Taint-style `eval` sink | `src/fixture_app/eval_sink.py` | C3 semgrep/ast-grep | `test_adapters_pattern.py` |
+| Breaking OpenAPI field removal | `openapi/v1.yaml` + `v1.base.yaml` | C4 oasdiff | `test_adapters_contract.py` |
+| Lock-heavy SQL migration | `db/migrations/001_add_users.sql` | C4 squawk | `test_adapters_contract.py` |
+| Breaking proto field removal | `proto/user/v1/user.proto` + `user.base.proto` | C4 buf | `test_adapters_contract.py` |
+| MCP exfil manifest | `.mergecraft/mcp-servers/evil-server.yaml` | C5 agentsec | `test_agentsec.py` |
+| Injection-shaped skill | `.cursor/rules/exfil-skill.md` | C5 agentsec | `test_agentsec.py` |
+| Canary fake secret | `.env.example` | W4/W6+ D8 | `test_redaction.py` (all ids) |
+
+### Catalog contract matrix
+
+| Decision | Primary tests |
+|----------|---------------|
+| **C1** one backend per category | `test_adapters_pattern.py` (exclusive_group), registry |
+| **C2** credential verification off/untrusted | `test_adapters_supply_chain.py::test_trufflehog_verification_off_on_fork` |
+| **C3** repo-native type checkers | `test_adapters_language.py::test_type_checker_never_uses_managed_substitute` |
+| **C4** container-only heavy tools | C6 manifests (declared-not-runnable) |
+| **C5** manifest fixture/doc/severity gate | `test_catalog_docs.py` |
+| **C6** bespoke Python is platform defect | verifier gate V.6 |
+| **C7** agent-security rules are YAML | `test_agentsec.py::test_rules_load_from_yaml_not_code` |
+| **D5** version in review | `test_adapters_language.py::test_review_names_tool_version` |
+| **D6** skip with reason, no base guess | `test_adapters_contract.py` |
+| **D8** redaction all catalog ids | `test_redaction.py` (`REDACTION_ANALYZER_IDS`) |
+| **D11** taint → verification | `test_adapters_pattern.py::test_taint_finding_requires_verification_before_review` |
+| **D13** exclusive_group | `test_adapters_pattern.py::test_exactly_one_pattern_backend_runs` |

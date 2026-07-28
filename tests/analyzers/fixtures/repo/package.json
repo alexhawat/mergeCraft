@@ -1,0 +1,10 @@
+{
+  "name": "analyzer-fixture-repo",
+  "private": true,
+  "scripts": {
+    "lint": "eslint src/"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
+  }
+}

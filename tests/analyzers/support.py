@@ -22,6 +22,78 @@ INLINE_BUDGET = 8
 # W6 adapter ids — redaction parametrisation is structurally valid before W6 (W1.12).
 W6_ANALYZER_IDS: tuple[str, ...] = ("actionlint", "zizmor", "shellcheck", "hadolint")
 
+# Catalog expansion (C1-C6) - every id must stay on the redaction parametrisation (C0.8).
+CATALOG_ANALYZER_IDS: tuple[str, ...] = (
+    # C1 repo-native language gates
+    "ruff",
+    "mypy",
+    "pyright",
+    "basedpyright",
+    "eslint",
+    "biome",
+    "oxlint",
+    # C2 supply chain
+    "osv-scanner",
+    "trivy",
+    "trufflehog",
+    # C3 pattern scanners
+    "semgrep",
+    "ast-grep",
+    # C4 differential contracts
+    "oasdiff",
+    "squawk",
+    "buf",
+    # C5 agent security
+    "agentsec",
+    # C6 P1 representative sample (long tail shares the same redaction boundary)
+    "golangci-lint",
+    "sqlfluff",
+    "checkov",
+)
+
+# All analyzer ids covered by redaction tests (W6 + catalog).
+REDACTION_ANALYZER_IDS: tuple[str, ...] = W6_ANALYZER_IDS + CATALOG_ANALYZER_IDS
+
+# Planted secret for TruffleHog supply-chain tests — must never appear in outputs (D8).
+PLANTED_AWS_SECRET = "AKIA_PLANTED_FIXTURE_DO_NOT_ROTATE_IN_TESTS"
+
+# C1 language-gate tool ids and their planted paths.
+C1_LANGUAGE_TOOLS: dict[str, tuple[str, int]] = {
+    "ruff": ("src/fixture_app/handler.py", 11),
+    "mypy": ("src/fixture_app/handler.py", 8),
+    "pyright": ("src/fixture_app/handler.py", 8),
+    "basedpyright": ("src/fixture_app/handler.py", 8),
+    "eslint": ("src/index.js", 2),
+}
+
+C1_TYPE_CHECKERS: frozenset[str] = frozenset({"mypy", "pyright", "basedpyright"})
+
+# C2 supply-chain planted targets.
+C2_SUPPLY_CHAIN_TOOLS: dict[str, str] = {
+    "osv-scanner": "requirements.txt",
+    "trivy": "requirements.txt",
+    "trufflehog": "config/planted-secret.env",
+}
+
+# C3 pattern scanner targets.
+C3_PATTERN_TOOLS: dict[str, tuple[str, int]] = {
+    "semgrep": ("src/fixture_app/eval_sink.py", 10),
+    "ast-grep": ("src/fixture_app/eval_sink.py", 10),
+}
+
+# C4 contract tools and planted paths.
+C4_CONTRACT_TOOLS: dict[str, str] = {
+    "oasdiff": "openapi/v1.yaml",
+    "squawk": "db/migrations/001_add_users.sql",
+    "buf": "proto/user/v1/user.proto",
+}
+
+# C5 agent-security planted targets.
+C5_AGENTSEC_TARGETS: dict[str, str] = {
+    "mcp-exfil": ".mergecraft/mcp-servers/evil-server.yaml",
+    "skill-injection": ".cursor/rules/exfil-skill.md",
+}
+
 # W0.4 probe run 30368443226: same-repo ``pull_request`` (fork=false).
 SAME_REPO_PULL_REQUEST_EVENT: dict[str, Any] = {
     "action": "opened",
