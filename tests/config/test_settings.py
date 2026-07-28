@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from mergecraft.config import (
     ModeDefinition,
     default_settings,
@@ -15,6 +13,8 @@ from mergecraft.config import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 
 def test_default_settings_match_upstream() -> None:
@@ -148,7 +148,6 @@ def test_snake_and_camel_aliases(tmp_path: Path) -> None:
     assert settings.auto_merge_enabled is True
 
 
-@pytest.mark.xfail(reason="green after W2: analyzers config block", strict=False)
 def test_analyzers_block_parses_and_merges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     cfg_dir = tmp_path / ".mergecraft"
@@ -171,7 +170,6 @@ analyzers:
     assert settings.analyzers.overrides["actionlint"].enabled is True
 
 
-@pytest.mark.xfail(reason="green after W2: unknown analyzer id warning", strict=False)
 def test_unknown_analyzer_id_emits_warning_not_silent_drop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -190,7 +188,7 @@ analyzers:
         encoding="utf-8",
     )
     messages: list[str] = []
-    sink_id = logger.add(lambda record: messages.append(record["message"]), level="WARNING")
+    sink_id = logger.add(lambda record: messages.append(record.record["message"]), level="WARNING")
     try:
         load_repo_settings(root=tmp_path, load_learnings_files=False)
     finally:

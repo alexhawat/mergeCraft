@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.analyzers.support import import_module
-
-pytestmark = pytest.mark.xfail(reason="green after W2: registry detection", strict=False)
 
 
 def test_detect_files_globs_enable_analyzer(fixture_repo: Path) -> None:

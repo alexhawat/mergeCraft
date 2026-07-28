@@ -11,8 +11,6 @@ from mergecraft.review_taxonomy import (
 )
 from tests.analyzers.support import import_module
 
-pytestmark = pytest.mark.xfail(reason="green after W2: Finding schema", strict=False)
-
 
 def test_finding_requires_taxonomy_category_and_severity() -> None:
     finding_mod = import_module("mergecraft.analyzers.finding")

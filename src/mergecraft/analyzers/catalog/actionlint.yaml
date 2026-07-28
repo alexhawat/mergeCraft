@@ -1,0 +1,26 @@
+id: actionlint
+category: ci
+languages: []
+detect:
+  files:
+    - ".github/workflows/*.{yml,yaml}"
+    - ".github/actions/**/action.yml"
+command: ["actionlint", "-format", "sarif", "{files}"]
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: auto
+version: "1.7.12"
+runtime: managed
+timeout_s: 120
+trust: untrusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+network_allowlist: []
+exclusive_group: github-workflow

@@ -53,6 +53,34 @@ class StaticCheckDefinition(BaseModel):
     suffixes: list[str] = Field(default_factory=list)
 
 
+class AnalyzerOverride(BaseModel):
+    """Per-analyzer config override."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    enabled: bool | None = None
+
+
+class AnalyzerPatternSettings(BaseModel):
+    """Pattern backend selection for analyzer detection."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    backend: str | None = None
+
+
+class AnalyzersSettings(BaseModel):
+    """Catalog analyzer configuration block."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    enabled: bool = True
+    inline_budget: int = Field(default=8, alias="inlineBudget")
+    base_comparison: str = Field(default="diff", alias="baseComparison")
+    overrides: dict[str, AnalyzerOverride] = Field(default_factory=dict)
+    pattern: AnalyzerPatternSettings = Field(default_factory=AnalyzerPatternSettings)
+
+
 class RepoSettings(BaseModel):
     """Per-repo runtime settings — local equivalent of upstream ``RepoSettings``."""
 
@@ -71,6 +99,7 @@ class RepoSettings(BaseModel):
     signed_commits: bool = Field(default=False, alias="signedCommits")
     mode_instructions: dict[str, str] = Field(default_factory=dict, alias="modeInstructions")
     static_checks: list[StaticCheckDefinition] = Field(default_factory=list, alias="staticChecks")
+    analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
     learnings: str | None = None
     learnings_headings: list[LearningsHeading] = Field(
         default_factory=list, alias="learningsHeadings"
@@ -139,6 +168,7 @@ def default_settings() -> RepoSettings:
             "signed_commits": False,
             "mode_instructions": {},
             "static_checks": [],
+            "analyzers": {},
             "learnings": None,
             "learnings_headings": [],
             "env_allowlist": None,
@@ -239,6 +269,10 @@ def _merge_settings(raw: dict[str, Any] | None) -> RepoSettings:
     base = default_settings()
     if not raw:
         return base
+    if analyzers := raw.get("analyzers"):
+        from mergecraft.analyzers.registry import warn_unknown_analyzer_overrides
+
+        warn_unknown_analyzer_overrides({"analyzers": analyzers})
     overlay = RepoSettings.model_validate(raw)
     unset = overlay.model_dump(exclude_unset=True)
     if not unset:

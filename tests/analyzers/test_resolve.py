@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from tests.analyzers.support import import_module
 
-pytestmark = pytest.mark.xfail(reason="green after W2: resolve execution modes", strict=False)
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_preference_order_repo_native_before_managed(fixture_repo: Path) -> None:

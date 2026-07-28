@@ -67,7 +67,6 @@ def test_stamp_handles_empty_body() -> None:
     assert "\n" not in stamped
 
 
-@pytest.mark.xfail(reason="green after W2: FINDING_CONFIDENCES axis", strict=False)
 def test_finding_confidences_axis_exists_and_is_pinned() -> None:
     from mergecraft.review_taxonomy import FINDING_CONFIDENCES
 

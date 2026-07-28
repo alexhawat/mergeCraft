@@ -8,8 +8,6 @@ import pytest
 
 from tests.analyzers.support import MANIFEST_FIXTURES, import_module
 
-pytestmark = pytest.mark.xfail(reason="green after W2: manifest schema", strict=False)
-
 
 def test_valid_manifest_round_trips_yaml() -> None:
     manifest_mod = import_module("mergecraft.analyzers.manifest")
@@ -57,7 +55,12 @@ def test_unmapped_analyzer_severity_is_validation_error_not_default() -> None:
 def test_provenance_requires_sha256_per_declared_platform() -> None:
     manifest_mod = import_module("mergecraft.analyzers.manifest")
     raw = (MANIFEST_FIXTURES / "valid-actionlint.yaml").read_text(encoding="utf-8")
-    manifest = manifest_mod.load_manifest_yaml(raw.replace("sha256:", 'sha256: ""'))
+    manifest = manifest_mod.load_manifest_yaml(
+        raw.replace(
+            'sha256: "0000000000000000000000000000000000000000000000000000000000000000"',
+            'sha256: ""',
+        )
+    )
     with pytest.raises(manifest_mod.ManifestValidationError, match=r"sha256|provenance"):
         manifest_mod.validate_manifest(manifest)
 
