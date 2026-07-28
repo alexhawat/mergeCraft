@@ -1,0 +1,9 @@
+[
+  {
+    "filename": "src/example.py",
+    "location": { "row": 1, "column": 1 },
+    "message": "Module imported but unused",
+    "code": "F401",
+    "severity": "warning"
+  }
+]

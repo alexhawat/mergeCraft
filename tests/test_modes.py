@@ -13,6 +13,7 @@ from mergecraft.review_taxonomy import (
     BODY_ONLY_EFFORT,
     BODY_ONLY_SEVERITY,
     FINDING_CATEGORIES,
+    FINDING_CONFIDENCES,
     FINDING_EFFORTS,
     FINDING_SEVERITIES,
     VERIFY_FIRST_PREAMBLE,
@@ -100,8 +101,32 @@ def test_fix_all_block_carries_verify_first_preamble_verbatim() -> None:
 
 def test_pre_merge_checks_table_present() -> None:
     assert "### 🚥 Pre-merge checks" in PR_SUMMARY_FORMAT
-    for row in ("| Title |", "| Description |", "| Linked issues |", "| Scope |"):
+    for row in (
+        "| Title |",
+        "| Description |",
+        "| Linked issues |",
+        "| Scope |",
+        "| Analyzers |",
+    ):
         assert row in PR_SUMMARY_FORMAT, row
+
+
+def test_pr_summary_format_names_every_confidence_value() -> None:
+    for value in FINDING_CONFIDENCES:
+        assert value in PR_SUMMARY_FORMAT, value
+
+
+def test_pr_summary_format_includes_mechanical_findings_section() -> None:
+    assert "### 🔧 Mechanical findings" in PR_SUMMARY_FORMAT
+
+
+def test_review_modes_reference_analyzer_tools() -> None:
+    for agent, prefix in (("claude", "mcp__mergecraft__"), ("opencode", "mergecraft_")):
+        for name in ("Review", "IncrementalReview"):
+            prompt = next(m for m in compute_modes(agent) if m.name == name).prompt or ""
+            assert f"{prefix}run_analyzers" in prompt, (agent, name)
+            assert "analyzer_findings" in prompt, (agent, name)
+            assert "mergecraft-verifier" in prompt, (agent, name)
 
 
 def test_trivial_findings_routed_to_nitpicks() -> None:

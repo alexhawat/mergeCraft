@@ -13,6 +13,12 @@ from loguru import logger
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult, AgentRunContext
+from mergecraft.analyzers.redact import install_loguru_redaction_filter
+from mergecraft.analyzers.trust import (
+    allow_repo_command_overrides,
+    derive_trust_tier,
+    resolve_analyzers_mode,
+)
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
@@ -31,6 +37,7 @@ from mergecraft.utils.learnings import (
 from mergecraft.utils.normalize_env import normalize_env
 from mergecraft.utils.payload import (
     TIMEOUT_DISABLED,
+    read_github_event,
     resolve_output_schema,
     resolve_payload,
     resolve_prompt_input,
@@ -85,6 +92,7 @@ def _custom_modes(defs: list[ModeDefinition]) -> list[Mode]:
 
 
 async def main() -> MainResult:
+    install_loguru_redaction_filter()
     """Run the mergecraft action flow using local ``.mergecraft/config.yaml``."""
     normalize_env()
     stop_mcp = None
@@ -178,6 +186,12 @@ async def main() -> MainResult:
         output_schema = resolve_output_schema()
 
         ctx_payload = _payload_to_ctx(payload)
+        analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
+        github_event = read_github_event()
+        trust_tier = derive_trust_tier(
+            event=github_event,
+            shell=str(ctx_payload.shell),
+        )
         tool_context = ToolContext(
             agent_id=agent_id,
             repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
@@ -207,7 +221,12 @@ async def main() -> MainResult:
                 )
                 for check in settings.static_checks
             ],
-            static_checks_enabled=ctx_payload.shell != "disabled",
+            static_checks_enabled=(
+                ctx_payload.shell != "disabled" and allow_repo_command_overrides(trust_tier)
+            ),
+            analyzers_mode=analyzers_mode,
+            trust_tier=trust_tier,
+            analyzers_settings_enabled=settings.analyzers.enabled,
             run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
             job_id=os.environ.get("GITHUB_JOB"),
             oss=run_context.oss,

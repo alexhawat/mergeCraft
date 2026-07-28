@@ -23,6 +23,7 @@ from mergecraft.agents.shared import (
     agent,
     log_token_table,
 )
+from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.types import MERGECRAFT_MCP_NAME
 
 
@@ -49,7 +50,14 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
                 "description": ("Read-only review subagent for lens-based code review."),
                 "prompt": REVIEWER_SYSTEM_PROMPT,
                 "mode": "subagent",
-            }
+            },
+            VERIFIER_AGENT_NAME: {
+                "description": (
+                    "Read-only verification subagent for Critical/Major analyzer findings."
+                ),
+                "prompt": VERIFIER_SYSTEM_PROMPT,
+                "mode": "subagent",
+            },
         },
     }
     if model:

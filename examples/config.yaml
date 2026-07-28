@@ -20,3 +20,11 @@ autoMergeEnabled: false
 #   - name: types
 #     command: uv run mypy {files}   # {files} = the diff's changed paths
 #     suffixes: [".py"]              # gate is skipped when no such file changed
+# Deterministic analyzer catalog (see REVIEW-CHECKS.md). Omit for auto-detect.
+# analyzers:
+#   enabled: true
+#   inlineBudget: 8
+#   baseComparison: offline
+#   overrides:
+#     actionlint:
+#       enabled: true

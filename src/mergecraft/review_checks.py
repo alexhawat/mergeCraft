@@ -18,15 +18,20 @@ from __future__ import annotations
 
 import shlex
 import shutil
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
 
 from loguru import logger
 
-CHECK_TIMEOUT_S = 300
-MAX_OUTPUT_CHARS = 8_000
+from mergecraft.analyzers.resolve import AnalyzerPlan, static_check_plan
+from mergecraft.analyzers.run import (
+    CHECK_TIMEOUT_S,
+    MAX_OUTPUT_CHARS,
+    AnalyzerOutcome,
+    CheckStatus,
+    run_plans,
+)
+
 FILES_TOKEN = "{files}"
 
 # Makefile targets treated as mechanical gates, in the order they are offered.
@@ -50,31 +55,7 @@ class StaticCheck:
         return shlex.join(self.argv)
 
 
-# "unavailable" is deliberately distinct from "failed": a gate whose executable
-# is not installed says nothing about the diff, and reporting it as a failure
-# invents a finding. The containerized Action image ships no `make`, so every
-# discovered Makefile target lands here.
-CheckStatus = Literal["passed", "failed", "timed_out", "unavailable"]
-
-
-@dataclass(frozen=True, slots=True)
-class StaticCheckOutcome:
-    """Result of running one gate, with output capped for prompt embedding."""
-
-    name: str
-    command: str
-    status: CheckStatus
-    output: str
-    exit_code: int | None = None
-
-    @property
-    def passed(self) -> bool:
-        return self.status == "passed"
-
-    @property
-    def ran(self) -> bool:
-        """Whether the gate actually executed and judged the diff."""
-        return self.status != "unavailable"
+StaticCheckOutcome = AnalyzerOutcome
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,12 +65,6 @@ class StaticCheckConfig:
     name: str
     command: str
     suffixes: tuple[str, ...] = field(default=())
-
-
-def _truncate(text: str) -> str:
-    if len(text) <= MAX_OUTPUT_CHARS:
-        return text
-    return text[:MAX_OUTPUT_CHARS] + f"\n… truncated at {MAX_OUTPUT_CHARS} chars"
 
 
 def discover_makefile_targets(root: Path) -> tuple[str, ...]:
@@ -129,13 +104,15 @@ def plan_checks(
             )
             if cfg.suffixes and not matching:
                 continue
-            argv = shlex.split(cfg.command)
-            if FILES_TOKEN in argv:
-                if not matching:
-                    continue
-                index = argv.index(FILES_TOKEN)
-                argv = [*argv[:index], *matching, *argv[index + 1 :]]
-            planned.append(StaticCheck(name=cfg.name, argv=tuple(argv)))
+            if FILES_TOKEN in shlex.split(cfg.command) and not matching:
+                continue
+            plan = static_check_plan(
+                name=cfg.name,
+                command=cfg.command,
+                root=root,
+                changed_files=matching,
+            )
+            planned.append(StaticCheck(name=plan.manifest_id, argv=plan.argv))
         return planned
 
     if shutil.which("make") is None:
@@ -149,50 +126,11 @@ def plan_checks(
 
 def run_checks(checks: list[StaticCheck], *, root: Path) -> list[StaticCheckOutcome]:
     """Run each gate, capturing combined output. Never raises."""
-    outcomes: list[StaticCheckOutcome] = []
-    for check in checks:
-        try:
-            completed = subprocess.run(
-                check.argv,
-                cwd=root,
-                capture_output=True,
-                text=True,
-                timeout=CHECK_TIMEOUT_S,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            logger.warning("static check {} timed out after {}s", check.name, CHECK_TIMEOUT_S)
-            outcomes.append(
-                StaticCheckOutcome(
-                    name=check.name,
-                    command=check.command,
-                    status="timed_out",
-                    output=f"timed out after {CHECK_TIMEOUT_S}s",
-                )
-            )
-            continue
-        except OSError as exc:
-            logger.info("static check {} is unavailable: {}", check.name, exc)
-            outcomes.append(
-                StaticCheckOutcome(
-                    name=check.name,
-                    command=check.command,
-                    status="unavailable",
-                    output=f"not installed in this environment: {exc}",
-                )
-            )
-            continue
-        combined = ((completed.stdout or "") + (completed.stderr or "")).strip()
-        outcomes.append(
-            StaticCheckOutcome(
-                name=check.name,
-                command=check.command,
-                status="passed" if completed.returncode == 0 else "failed",
-                output=_truncate(combined),
-                exit_code=completed.returncode,
-            )
-        )
-    return outcomes
+    plans = [
+        AnalyzerPlan(manifest_id=check.name, mode="repo-native", argv=check.argv, cwd=root)
+        for check in checks
+    ]
+    return run_plans(plans)
 
 
 __all__ = [

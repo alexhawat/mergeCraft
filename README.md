@@ -67,9 +67,17 @@ signedCommits: false
 staticChecks:                 # mechanical gates the reviewer runs; optional
   - name: lint
     command: make lint
+# analyzers:                    # deterministic catalog tools (see REVIEW-CHECKS.md)
+#   enabled: true               # omit for auto-detect from changed paths
+#   inlineBudget: 8
+#   overrides:
+#     actionlint:
+#       enabled: true
 ```
 
 With no `staticChecks`, mergecraft discovers `lint` / `format-check` / `typecheck` / `ci-static` targets in your `Makefile` instead.
+
+**Analyzers** (actionlint, zizmor, ShellCheck, Hadolint in this release) run deterministically from YAML manifests when paths match — the reviewer calls `run_analyzers` early and places verified hits inline or in `### 🔧 Mechanical findings`. You can override enablement in `analyzers:`; editing the catalog remains possible but is not the headline workflow (D19).
 
 Learnings live in `.mergecraft/learnings.md` and are seeded/persisted across runs.
 

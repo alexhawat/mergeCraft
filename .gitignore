@@ -34,3 +34,6 @@ coverage.xml
 
 # Local operator
 .ignorelocal/
+
+# Analyzer adapter test artifacts
+tests/analyzers/fixtures/repo/.mergecraft/

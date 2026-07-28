@@ -1,0 +1,37 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "actionlint",
+          "rules": [
+            {
+              "id": "syntax-check",
+              "defaultConfiguration": { "level": "error" }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "syntax-check",
+          "level": "error",
+          "message": { "text": "unexpected key \"name\" for workflow name" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".github/workflows/broken.yml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": { "startLine": 2, "endLine": 2 }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

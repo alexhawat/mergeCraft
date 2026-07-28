@@ -13,7 +13,28 @@ from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo
 from mergecraft.review_taxonomy import stamp_finding_fingerprint
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
+
+
+def format_analyzer_inline_body(
+    finding: Finding,
+    *,
+    effort: str = "Quick win",
+    verification_note: str | None = None,
+) -> str:
+    """Format an analyzer-sourced inline comment with tool citation and confidence (W7.6)."""
+    tag = f"_{finding.category}_ | _{finding.severity}_ | _{effort}_ | _{finding.confidence}_"
+    citation = f"`{finding.tool}` `{finding.rule_id}`"
+    lines = [tag, "", f"{finding.message}", "", f"Source: {citation}."]
+    if verification_note:
+        lines.extend(["", verification_note.strip()])
+    return "\n".join(lines)
+
+
+def enrich_analyzer_comment_body(body: str) -> str:
+    """Return review comment bodies unchanged (formatting is upstream)."""
+    return body
 
 
 def create_pull_request_review_tool(ctx: ToolContext):

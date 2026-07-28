@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mergecraft.review_taxonomy import (
     BODY_ONLY_EFFORT,
     BODY_ONLY_SEVERITY,
     FINDING_CATEGORIES,
+    FINDING_CONFIDENCES,
     FINDING_EFFORTS,
     FINDING_MARKER_PREFIX,
     FINDING_SEVERITIES,
@@ -63,3 +66,17 @@ def test_stamp_handles_empty_body() -> None:
     stamped = stamp_finding_fingerprint(path="src/app.py", body="")
     assert stamped.startswith(FINDING_MARKER_PREFIX)
     assert "\n" not in stamped
+
+
+def test_finding_confidences_axis_exists_and_is_pinned() -> None:
+    from mergecraft.review_taxonomy import FINDING_CONFIDENCES
+
+    assert FINDING_CONFIDENCES == ("certain", "likely", "possible")
+    assert len(set(FINDING_CONFIDENCES)) == 3
+
+
+@pytest.mark.parametrize("value", FINDING_CONFIDENCES)
+def test_review_prompt_names_every_confidence_value(value: str) -> None:
+    from mergecraft.modes import PR_SUMMARY_FORMAT
+
+    assert value in PR_SUMMARY_FORMAT, value

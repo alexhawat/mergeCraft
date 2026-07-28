@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Final
+from typing import Final, Literal
 
 # ── triage axes ───────────────────────────────────────────────────────────────
 
@@ -26,6 +26,10 @@ FINDING_CATEGORIES: Final[tuple[str, ...]] = (
 FINDING_SEVERITIES: Final[tuple[str, ...]] = ("Critical", "Major", "Minor", "Trivial")
 
 FINDING_EFFORTS: Final[tuple[str, ...]] = ("Quick win", "Heavy lift", "Low value")
+
+FINDING_CONFIDENCES: Final[tuple[str, ...]] = ("certain", "likely", "possible")
+
+FindingSource = Literal["analyzer", "agent", "ci"]
 
 # A finding at one of these grades never occupies an inline anchor — it belongs
 # in the body's Nitpicks section instead.
@@ -77,11 +81,13 @@ __all__ = [
     "BODY_ONLY_EFFORT",
     "BODY_ONLY_SEVERITY",
     "FINDING_CATEGORIES",
+    "FINDING_CONFIDENCES",
     "FINDING_EFFORTS",
     "FINDING_MARKER_PREFIX",
     "FINDING_SEVERITIES",
     "VERIFY_FIRST_PREAMBLE",
     "WITHDRAWN_FINDINGS_HEADING",
+    "FindingSource",
     "finding_fingerprint",
     "stamp_finding_fingerprint",
 ]

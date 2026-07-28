@@ -41,7 +41,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
+      - name: Build and push slim
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -50,8 +50,19 @@ jobs:
           tags: |
             ghcr.io/alexhawat/mergecraft:latest
             ghcr.io/alexhawat/mergecraft:${{ github.sha }}
-          cache-from: type=gha,scope=mergeCraft
-          cache-to: type=gha,mode=max,scope=mergeCraft
+          cache-from: type=gha,scope=mergeCraft-slim
+          cache-to: type=gha,mode=max,scope=mergeCraft-slim
+      - name: Build and push analyzers
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile.analyzers
+          push: true
+          tags: |
+            ghcr.io/alexhawat/mergecraft:analyzers
+            ghcr.io/alexhawat/mergecraft:analyzers-${{ github.sha }}
+          cache-from: type=gha,scope=mergeCraft-analyzers
+          cache-to: type=gha,mode=max,scope=mergeCraft-analyzers
 
   release:
     name: GitHub Release

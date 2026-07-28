@@ -80,6 +80,9 @@ class ToolContext:
     # `diff-review` path sets this True regardless, because there the config and
     # the working tree both belong to the operator who started the run.
     static_checks_enabled: bool = False
+    analyzers_mode: Literal["off", "auto", "full"] = "auto"
+    trust_tier: Literal["trusted", "untrusted"] = "trusted"
+    analyzers_settings_enabled: bool = True
     run_id: int | None = None
     job_id: str | None = None
     oss: bool = False

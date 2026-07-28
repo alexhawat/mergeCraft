@@ -1,0 +1,23 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": { "driver": { "name": "zizmor", "rules": [] } },
+      "results": [
+        {
+          "ruleId": "unpinned-uses-ref",
+          "level": "warning",
+          "message": { "text": "action some-org/unverified-action@main is unpinned" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": ".github/workflows/unpinned-action.yml" },
+                "region": { "startLine": 11, "endLine": 11 }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

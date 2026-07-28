@@ -15,6 +15,8 @@ from fastapi import FastAPI, Request, Response
 from loguru import logger
 from starlette.responses import JSONResponse
 
+from mergecraft.analyzers.trust import analyzers_enabled
+from mergecraft.mcp.analyzers import analyzer_findings_tool, run_analyzers_tool
 from mergecraft.mcp.check_suite import get_check_suite_logs_tool
 from mergecraft.mcp.checkout import checkout_pr_tool
 from mergecraft.mcp.comment import (
@@ -102,6 +104,8 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
     ]
     if ctx.static_checks_enabled:
         tools.append(run_static_checks_tool(ctx))
+    if analyzers_enabled(ctx):
+        tools.extend([run_analyzers_tool(ctx), analyzer_findings_tool(ctx)])
     if ctx.xrepo is not None:
         tools.extend([list_repos_tool(ctx), checkout_repo_tool(ctx)])
     is_standalone = ctx.payload.event.trigger == "unknown"

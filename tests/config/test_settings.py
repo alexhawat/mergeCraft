@@ -146,3 +146,51 @@ def test_snake_and_camel_aliases(tmp_path: Path) -> None:
     assert settings.setup_script == "echo hi"
     assert settings.pr_approve_enabled is True
     assert settings.auto_merge_enabled is True
+
+
+def test_analyzers_block_parses_and_merges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    cfg_dir = tmp_path / ".mergecraft"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(
+        """
+analyzers:
+  enabled: true
+  inlineBudget: 8
+  baseComparison: offline
+  overrides:
+    actionlint:
+      enabled: true
+""",
+        encoding="utf-8",
+    )
+    settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
+    assert settings.analyzers.enabled is True
+    assert settings.analyzers.inline_budget == 8
+    assert settings.analyzers.overrides["actionlint"].enabled is True
+
+
+def test_unknown_analyzer_id_emits_warning_not_silent_drop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from loguru import logger
+
+    monkeypatch.chdir(tmp_path)
+    cfg_dir = tmp_path / ".mergecraft"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(
+        """
+analyzers:
+  overrides:
+    not-a-real-analyzer:
+      enabled: true
+""",
+        encoding="utf-8",
+    )
+    messages: list[str] = []
+    sink_id = logger.add(lambda record: messages.append(record.record["message"]), level="WARNING")
+    try:
+        load_repo_settings(root=tmp_path, load_learnings_files=False)
+    finally:
+        logger.remove(sink_id)
+    assert any("not-a-real-analyzer" in message for message in messages)

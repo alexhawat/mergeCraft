@@ -56,6 +56,9 @@ def build_offline_review_prompt(
         f"`{diff_path}` end-to-end (start with any TOC / file headers). "
         "Do not re-derive the diff via `git diff` unless that file is empty/unreadable.\n"
         "3. Investigate the working tree with read-only tools only as needed.\n"
+        "   When `run_analyzers` is available, call it with the diff's changed paths and "
+        f"`diff_path: {diff_path}` before drafting findings; use `analyzer_findings` for "
+        "placement and dispatch `mergecraft-verifier` for Critical/Major analyzer hits.\n"
         "4. Produce a complete review body using the Review mode format "
         "(preamble + cross-cutting sections + optional nitpicks). "
         "Put the full markdown review in your final response and, if available, "
@@ -177,6 +180,9 @@ async def _run_agent_review(
             ],
             # Local run, operator's own tree and own config — no PR author in the loop.
             static_checks_enabled=True,
+            analyzers_mode="auto",
+            trust_tier="trusted",
+            analyzers_settings_enabled=settings.analyzers.enabled,
         )
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context)
