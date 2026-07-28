@@ -125,11 +125,18 @@ def run_plan(plan: AnalyzerPlan) -> AnalyzerOutcome:
             output=f"not installed in this environment: {exc}",
         )
 
-    combined = ((completed.stdout or "") + (completed.stderr or "")).strip()
+    raw_stdout = (completed.stdout or "").strip()
+    raw_stderr = (completed.stderr or "").strip()
+    raw_for_parser = raw_stdout or raw_stderr
+    combined = raw_for_parser
+    if raw_stderr and raw_stdout:
+        combined = f"{raw_stdout}\n{raw_stderr}".strip()
+    elif raw_stderr:
+        combined = raw_stderr
     if plan.version_note:
         combined = f"{plan.version_note}\n{combined}".strip()
     redacted = redact_analyzer_output(combined, tool_id=plan.manifest_id)
-    output_path = _persist_output(combined, plan=plan)
+    output_path = _persist_output(raw_for_parser, plan=plan)
     return AnalyzerOutcome(
         name=plan.manifest_id,
         command=command,

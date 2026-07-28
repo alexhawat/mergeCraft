@@ -83,10 +83,19 @@ def resolve_repo_relative_path(
                 return Path(path).name
         return path.lstrip("/")
 
+    path_obj = Path(cleaned)
+    if repo_root is not None and path_obj.is_absolute():
+        try:
+            return path_obj.resolve().relative_to(repo_root.resolve()).as_posix()
+        except ValueError:
+            pass
+
     if uri_base_id in {"%SRCROOT%", "SRCROOT"} and repo_root is not None:
         return (repo_root / cleaned).resolve().relative_to(repo_root.resolve()).as_posix()
 
-    return cleaned.lstrip("./")
+    if cleaned.startswith("./"):
+        return cleaned[2:]
+    return cleaned
 
 
 def coerce_line(value: object, *, default: int = 1) -> int:

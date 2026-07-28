@@ -5,7 +5,7 @@ detect:
   files:
     - ".github/workflows/*.{yml,yaml}"
     - ".github/actions/**/action.yml"
-command: ["zizmor", "sarif", "{files}"]
+command: ["zizmor", "--format", "sarif", "{files}"]
 scope: diff
 parser: sarif
 supports_fix: false
@@ -23,4 +23,4 @@ provenance:
     url: https://github.com/zizmorcore/zizmor/releases/download/v1.28.0/zizmor-x86_64-unknown-linux-gnu.tar.gz
     sha256: "e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c09"
 network_allowlist: []
-exclusive_group: github-workflow
+exclusive_group: null

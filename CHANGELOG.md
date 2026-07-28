@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Diff scoping, cross-tool clustering, inline noise budget (cap 8), withdrawn-finding
+- GitHub-native analyzer adapters: actionlint, zizmor, ShellCheck, and Hadolint manifests
+  with bundled actionlint SARIF template, ``adapters.run_adapter`` end-to-end runner, and
+  fixture-repo planted-finding coverage (W6).
   suppression, and ``introduced_by_pr`` annotation for analyzer findings.
 - SARIF 2.1.0 ingest and export, native parsers (ruff, eslint, osv, trivy, trufflehog,
   shellcheck), D8 redaction boundary, and file-based output parsing for large analyzer runs.

@@ -10,6 +10,7 @@ from mergecraft.analyzers.parsers._common import (
     coerce_line,
     map_confidence,
     map_native_severity,
+    resolve_repo_relative_path,
     taxonomy_category,
 )
 
@@ -33,7 +34,7 @@ def parse_shellcheck_json(
     for item in payload:
         if not isinstance(item, dict):
             continue
-        path = str(item.get("file") or "")
+        path = resolve_repo_relative_path(str(item.get("file") or ""), repo_root=repo_root)
         start_line = coerce_line(item.get("line", 1))
         end_line = coerce_line(item.get("endLine", start_line), default=start_line)
         native_level = str(item.get("level") or "warning")

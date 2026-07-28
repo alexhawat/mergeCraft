@@ -5,12 +5,15 @@ from __future__ import annotations
 import shlex
 import shutil
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from mergecraft.analyzers.manifest import AnalyzerManifest
+
+_CATALOG_DIR = Path(__file__).resolve().parent / "catalog"
+_CATALOG_PREFIX = "@catalog:"
+FILES_TOKEN = "{files}"
 
 ExecutionMode = Literal["repo-native", "ci-result", "managed", "container", "skip"]
 
@@ -134,6 +137,29 @@ def resolve_analyzer(
     )
 
 
+def expand_analyzer_argv(
+    argv: tuple[str, ...] | list[str],
+    *,
+    repo_root: Path,
+    changed_files: list[str],
+) -> tuple[str, ...]:
+    """Expand ``{files}`` and ``@catalog:`` tokens in a manifest command."""
+    repo_root = repo_root.resolve()
+    expanded: list[str] = []
+    for arg in argv:
+        if arg == FILES_TOKEN:
+            for rel in changed_files:
+                path = Path(rel)
+                expanded.append(str(path if path.is_absolute() else repo_root / rel))
+            continue
+        if arg.startswith(_CATALOG_PREFIX):
+            template_path = _CATALOG_DIR / arg.removeprefix(_CATALOG_PREFIX)
+            expanded.append(template_path.read_text(encoding="utf-8"))
+            continue
+        expanded.append(arg)
+    return tuple(expanded)
+
+
 def static_check_plan(
     *,
     name: str,
@@ -158,9 +184,11 @@ def static_check_plan(
 
 
 __all__ = [
+    "FILES_TOKEN",
     "AnalyzerPlan",
     "ExecutionMode",
     "detect_repo_tool",
+    "expand_analyzer_argv",
     "resolve_analyzer",
     "static_check_plan",
 ]

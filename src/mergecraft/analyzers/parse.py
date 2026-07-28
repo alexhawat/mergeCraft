@@ -6,13 +6,36 @@ import uuid
 from typing import TYPE_CHECKING
 
 from mergecraft.analyzers.parsers import parse_output
-from mergecraft.analyzers.redact import redact_analyzer_output
+from mergecraft.analyzers.redact import redact_for_fingerprint, redact_secrets
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import AnalyzerManifest
+
+
+def _redact_findings(findings: list[Finding], *, tool_id: str) -> list[Finding]:
+    redacted: list[Finding] = []
+    for finding in findings:
+        message = redact_secrets(finding.message)
+        evidence = [redact_secrets(item) for item in finding.evidence]
+        body = redact_for_fingerprint(finding.message, tool_id=tool_id)
+        fingerprint = finding.fingerprint
+        if body != finding.message:
+            from mergecraft.review_taxonomy import finding_fingerprint
+
+            fingerprint = finding_fingerprint(path=finding.path, body=body)
+        redacted.append(
+            finding.model_copy(
+                update={
+                    "message": message,
+                    "evidence": evidence,
+                    "fingerprint": fingerprint,
+                }
+            )
+        )
+    return redacted
 
 
 def persist_analyzer_output(raw: str, *, tmpdir: Path, tool_id: str) -> Path:
@@ -36,8 +59,8 @@ def parse_output_file(
 ) -> list[Finding]:
     """Parse normalized findings from a persisted analyzer output file."""
     raw = read_output_file(path)
-    redacted = redact_analyzer_output(raw, tool_id=manifest.id)
-    return parse_output(redacted, manifest=manifest, repo_root=repo_root)
+    findings = parse_output(raw, manifest=manifest, repo_root=repo_root)
+    return _redact_findings(findings, tool_id=manifest.id)
 
 
 __all__ = ["parse_output_file", "persist_analyzer_output", "read_output_file"]

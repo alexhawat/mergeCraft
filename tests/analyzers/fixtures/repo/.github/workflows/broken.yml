@@ -1,9 +1,7 @@
-# Planted: invalid workflow syntax for actionlint (W6)
-name: Broken workflow
-on: [push]
+on:
+  branch: main
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo ${{ github.event.pull_request.title }}  # context may be invalid on push

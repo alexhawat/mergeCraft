@@ -1,5 +1,7 @@
 # What mergecraft checks for
 
+> **Doc status (W6):** This file is **stale-with-reason** until Wave W7 rewrites §2 for the analyzer platform (actionlint, zizmor, ShellCheck, Hadolint adapters ship as manifests; review integration lands in W7).
+
 Every check mergecraft applies when it reviews a pull request, grouped by what it is looking at.
 
 A quick orientation before the lists:

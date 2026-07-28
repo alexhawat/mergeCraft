@@ -8,8 +8,6 @@ import pytest
 
 from tests.analyzers.support import import_module
 
-pytestmark = pytest.mark.xfail(reason="green after W6: GitHub-native adapters", strict=False)
-
 PLANTED: dict[str, tuple[str, int]] = {
     "actionlint": (".github/workflows/broken.yml", 2),
     "zizmor": (".github/workflows/unpinned-action.yml", 11),
