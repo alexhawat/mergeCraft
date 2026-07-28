@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.analyzers.support import import_module
-
-pytestmark = pytest.mark.xfail(reason="green after W5: diff scoping", strict=False)
 
 
 def _sample_finding(path: str, line: int) -> object:
@@ -81,4 +77,4 @@ def test_introduced_by_pr_true_only_with_base_confirmation() -> None:
     scoped = scope.annotate_introduced_by_pr(
         [finding], base_run_performed=True, is_new_in_base=True
     )
-    assert scoped[0].introduced_by_pr is True
+    assert scoped[0].introduced_by_pr == "true"

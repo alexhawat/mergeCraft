@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.review_taxonomy import finding_fingerprint
 from tests.analyzers.support import import_module
-
-pytestmark = pytest.mark.xfail(reason="green after W5: cross-tool clustering", strict=False)
 
 
 def _finding(tool: str, path: str, line: int, message: str) -> object:

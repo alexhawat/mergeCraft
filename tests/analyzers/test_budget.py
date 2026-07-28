@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.review_taxonomy import BODY_ONLY_EFFORT, BODY_ONLY_SEVERITY
 from tests.analyzers.support import INLINE_BUDGET, import_module
-
-pytestmark = pytest.mark.xfail(reason="green after W5/W7: noise budget", strict=False)
 
 
 def _finding(
@@ -35,7 +31,7 @@ def test_inline_budget_matches_w0_measurement() -> None:
 
 def test_overflow_lands_in_mechanical_section() -> None:
     budget = import_module("mergecraft.analyzers.budget")
-    findings = [_finding("Major", path=f"src/f{i}.py", line=i) for i in range(INLINE_BUDGET + 3)]
+    findings = [_finding("Major", path=f"src/f{i}.py", line=i) for i in range(1, INLINE_BUDGET + 4)]
     placement = budget.place_findings(findings, inline_budget=INLINE_BUDGET)
     assert len(placement.inline) <= INLINE_BUDGET
     assert placement.mechanical_section is not None
@@ -64,7 +60,7 @@ def test_agent_findings_win_ties_over_analyzer() -> None:
     budget = import_module("mergecraft.analyzers.budget")
     agent = _finding("Major", source="agent", path="src/tie.py", line=10)
     analyzer = _finding("Major", source="analyzer", path="src/tie.py", line=10)
-    at_cap = [_finding("Major", path=f"src/other{i}.py", line=i) for i in range(INLINE_BUDGET - 1)]
+    at_cap = [_finding("Major", path=f"src/other{i}.py", line=i) for i in range(1, INLINE_BUDGET)]
     placement = budget.place_findings([*at_cap, agent, analyzer], inline_budget=INLINE_BUDGET)
     inline_sources = {f.source for f in placement.inline if f.path == "src/tie.py"}
     assert "agent" in inline_sources
