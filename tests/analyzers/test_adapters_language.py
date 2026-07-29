@@ -1,4 +1,4 @@
-"""C1 repo-native language gates — RED until catalog C1 lands."""
+"""C1 repo-native language gates."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from tests.analyzers.support import (
     C1_TYPE_CHECKERS,
     import_module,
 )
-
-pytestmark = pytest.mark.xfail(reason="green after C1: repo-native language adapters", strict=False)
 
 
 def _catalog_ids() -> set[str]:

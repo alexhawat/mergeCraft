@@ -9,5 +9,5 @@ def greet(name: str) -> str:
 
 
 def unused_helper() -> None:
-    # Planted: ruff F841 when enabled
+    # Planted: ruff F841 when enabled (--ignore-noqa in catalog adapter)
     stale = "never read"  # noqa: F841

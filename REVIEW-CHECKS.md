@@ -1,6 +1,8 @@
 # What mergecraft checks for
 
-> **Doc status (W7):** §2 describes the analyzer platform shipped in Wave W7 (actionlint, zizmor, ShellCheck, Hadolint). Catalog expansion is tracked separately.
+> **Doc status (W7 + catalog C6):** §2 describes the analyzer platform and the expanded
+> P0–P3 catalog. Long-tail tools default to **disabled** unless repo config or detection
+> enables them.
 
 Every check mergecraft applies when it reviews a pull request, grouped by what it is looking at.
 
@@ -78,7 +80,16 @@ Each gate returns one of four statuses; only **`failed`** is a finding:
 
 ### Catalog analyzers (`run_analyzers`)
 
-Shipped in this release: **actionlint**, **zizmor**, **ShellCheck**, **Hadolint** — each is a YAML manifest, not bespoke Python. Enablement follows path detection and `.mergecraft/config.yaml` `analyzers:` overrides.
+Shipped catalog spans **P0 workflow/Docker gates** (actionlint, zizmor, ShellCheck, Hadolint),
+**repo-native language gates** (Ruff, type checkers, ESLint/Biome/Oxlint), **supply chain**
+(OSV-Scanner, Trivy, TruffleHog), **pattern scanners** (Semgrep/OpenGrep, ast-grep),
+**differential contracts** (oasdiff, Squawk, buf breaking), **agent security** (native YAML
+rules on MCP/skill manifests), and **P1–P3 long-tail manifests** (Go, Rust, IaC, SQL, PHP,
+Ruby, …) — each is YAML plus an existing parser, not bespoke adapter code.
+
+Reference: [`docs/ANALYZERS.md`](docs/ANALYZERS.md) (generated from manifests; CI-enforced).
+Contributor path: [`docs/CONTRIBUTING-ANALYZERS.md`](docs/CONTRIBUTING-ANALYZERS.md).
+Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif|lock`.
 
 **Execution preference (D4):** `repo-native` → existing CI result → managed pinned binary → container → **skip with a named reason**. Skipped is skipped — never a finding, never a failed pre-merge row.
 

@@ -1,0 +1,28 @@
+id: clippy
+category: lint
+languages:
+- rust
+detect:
+  files:
+  - '*.rs'
+  - Cargo.toml
+command:
+- cargo
+- clippy
+- --message-format=json
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 1.83.0
+runtime: repo-native
+timeout_s: 300
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: rust-lint

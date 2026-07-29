@@ -6,7 +6,7 @@ import typer
 from rich.console import Console
 
 from mergecraft import __version__
-from mergecraft.cli import auth_cmd, diff_review_cmd, gha_cmd, init_cmd, watch_cmd
+from mergecraft.cli import analyzers_cmd, auth_cmd, diff_review_cmd, gha_cmd, init_cmd, watch_cmd
 
 app = typer.Typer(
     name="mergecraft",
@@ -18,6 +18,7 @@ app = typer.Typer(
 console = Console(stderr=True)
 
 app.add_typer(auth_cmd.app, name="auth")
+app.add_typer(analyzers_cmd.app, name="analyzers")
 app.command("init")(init_cmd.run)
 app.command("watch")(watch_cmd.run)
 app.command("diff-review")(diff_review_cmd.run)

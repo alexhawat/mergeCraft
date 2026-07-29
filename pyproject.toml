@@ -68,6 +68,7 @@ include = ["src/mergecraft", "tests", "README.md", "pyproject.toml"]
 target-version = "py314"
 line-length = 100
 src = ["src", "tests", "scripts"]
+extend-exclude = ["tests/analyzers/fixtures/repo"]
 
 [tool.ruff.lint]
 select = [

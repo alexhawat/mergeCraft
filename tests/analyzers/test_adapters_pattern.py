@@ -1,4 +1,4 @@
-"""C3 pattern scanners — RED until catalog C3 lands."""
+"""C3 pattern scanners."""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ from pathlib import Path
 import pytest
 
 from tests.analyzers.support import C3_PATTERN_TOOLS, import_module
-
-pytestmark = pytest.mark.xfail(reason="green after C3: pattern scanner backends", strict=False)
 
 PATTERN_EXCLUSIVE_GROUP = "pattern-scanner"
 

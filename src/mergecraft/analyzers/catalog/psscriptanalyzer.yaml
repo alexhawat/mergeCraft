@@ -1,0 +1,31 @@
+id: psscriptanalyzer
+category: lint
+languages:
+- powershell
+detect:
+  files:
+  - '*.ps1'
+  - '*.psm1'
+command:
+- Invoke-ScriptAnalyzer
+- -Path
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 1.23.0
+runtime: managed
+timeout_s: 120
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://www.powershellgallery.com/packages/PSScriptAnalyzer
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+network_allowlist: []
+exclusive_group: null
+declared_unavailable: requires non-Linux runner — Windows/macOS only (C6 out of scope)

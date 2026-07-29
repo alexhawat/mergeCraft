@@ -1,14 +1,10 @@
-"""C5 agent-manifest security scanner — RED until catalog C5 lands."""
+"""C5 agent-manifest security scanner."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.analyzers.support import C5_AGENTSEC_TARGETS, import_module
-
-pytestmark = pytest.mark.xfail(reason="green after C5: agent-security native rules", strict=False)
 
 
 def _run_agentsec(repo_root: Path, changed_files: list[str]):

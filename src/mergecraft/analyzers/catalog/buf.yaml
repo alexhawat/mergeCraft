@@ -9,7 +9,7 @@ command:
   - buf
   - breaking
 scope: diff
-parser: sarif
+parser: buf_native
 supports_fix: false
 default_enabled: auto
 version: "1.50.0"

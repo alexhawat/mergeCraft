@@ -1,0 +1,28 @@
+id: flake8
+category: lint
+languages:
+- python
+detect:
+  files:
+  - '*.py'
+  - .flake8
+  - setup.cfg
+  - pyproject.toml
+command:
+- flake8
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 7.1.1
+runtime: repo-native
+timeout_s: 120
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: python-lint

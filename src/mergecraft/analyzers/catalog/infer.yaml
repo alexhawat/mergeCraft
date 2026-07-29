@@ -1,0 +1,36 @@
+id: infer
+category: security
+languages:
+- java
+- c
+- cpp
+detect:
+  files:
+  - compile_commands.json
+  - pom.xml
+  - build.gradle
+command:
+- infer
+- run
+- --
+- make
+scope: repo
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 1.1.0
+runtime: container
+timeout_s: 900
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://github.com/facebook/infer/releases/tag/v1.1.0
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+network_allowlist: []
+exclusive_group: null
+declared_unavailable: requires compilation database and build — container-only heavyweight
+  (C4)

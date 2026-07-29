@@ -1,0 +1,33 @@
+id: pmd
+category: lint
+languages:
+- java
+detect:
+  files:
+  - '*.java'
+  - pmd.ruleset.xml
+command:
+- pmd
+- check
+- -f
+- sarif
+- -d
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 7.9.0
+runtime: managed
+timeout_s: 300
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.9.0/pmd-dist-7.9.0-bin.zip
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+network_allowlist: []
+exclusive_group: null

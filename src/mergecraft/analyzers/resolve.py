@@ -83,6 +83,13 @@ def resolve_analyzer(
     managed_version: str | None = None,
 ) -> AnalyzerPlan:
     """Resolve D4's preference chain for one manifest."""
+    if manifest.declared_unavailable:
+        return AnalyzerPlan(
+            manifest_id=manifest.id,
+            mode="skip",
+            reason=f"skipped {manifest.id}: {manifest.declared_unavailable}",
+        )
+
     if manifest.id == "agentsec":
         return AnalyzerPlan(
             manifest_id=manifest.id,

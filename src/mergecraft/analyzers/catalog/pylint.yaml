@@ -1,15 +1,18 @@
 id: pylint
 category: lint
-languages: ["python"]
+languages:
+- python
 detect:
   files:
-    - "*.py"
-command: ["pylint", "{files}"]
+  - '*.py'
+command:
+- pylint
+- '{files}'
 scope: diff
 parser: sarif
 supports_fix: false
-default_enabled: auto
-version: "3.3.0"
+default_enabled: false
+version: 3.3.0
 runtime: managed
 timeout_s: 120
 trust: trusted
@@ -20,6 +23,6 @@ severity_map:
 provenance:
   linux-amd64:
     url: https://pypi.org/project/pylint/3.3.0/
-    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
 network_allowlist: []
 exclusive_group: python-lint

@@ -1,0 +1,31 @@
+id: languagetool
+category: lint
+languages:
+- text
+detect:
+  files:
+  - '*.md'
+  - '*.txt'
+command:
+- languagetool
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: '6.5'
+runtime: container
+timeout_s: 300
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://hub.docker.com/r/erigones/languagetool
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+network_allowlist: []
+exclusive_group: null
+declared_unavailable: manifest-only — LanguageTool runtime not bundled on Linux runners
+  (C6 out of scope)

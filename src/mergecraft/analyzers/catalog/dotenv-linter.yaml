@@ -1,0 +1,28 @@
+id: dotenv-linter
+category: lint
+languages: []
+detect:
+  files:
+  - .env*
+  - '*.env'
+command:
+- dotenv-linter
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 3.3.0
+runtime: managed
+timeout_s: 60
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://github.com/dotenv-linter/dotenv-linter/releases/download/v3.3.0/dotenv-linter-v3.3.0-x86_64-unknown-linux-gnu.tar.gz
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+network_allowlist: []
+exclusive_group: null

@@ -1,4 +1,4 @@
-"""C4 differential contract adapters — RED until catalog C4 lands."""
+"""C4 differential contract adapters."""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ from pathlib import Path
 import pytest
 
 from tests.analyzers.support import C4_CONTRACT_TOOLS, import_module
-
-pytestmark = pytest.mark.xfail(reason="green after C4: oasdiff, squawk, buf adapters", strict=False)
 
 
 def _catalog_ids() -> set[str]:

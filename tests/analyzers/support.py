@@ -22,9 +22,8 @@ INLINE_BUDGET = 8
 # W6 adapter ids — redaction parametrisation is structurally valid before W6 (W1.12).
 W6_ANALYZER_IDS: tuple[str, ...] = ("actionlint", "zizmor", "shellcheck", "hadolint")
 
-# Catalog expansion (C1-C6) - every id must stay on the redaction parametrisation (C0.8).
+# Catalog expansion (C1-C6) - representative ids checked by test_catalog_docs (C0.7).
 CATALOG_ANALYZER_IDS: tuple[str, ...] = (
-    # C1 repo-native language gates
     "ruff",
     "mypy",
     "pyright",
@@ -32,34 +31,90 @@ CATALOG_ANALYZER_IDS: tuple[str, ...] = (
     "eslint",
     "biome",
     "oxlint",
-    # C2 supply chain
     "osv-scanner",
     "trivy",
     "trufflehog",
-    # C3 pattern scanners
     "semgrep",
     "ast-grep",
-    # C4 differential contracts
     "oasdiff",
     "squawk",
     "buf",
-    # C5 agent security
     "agentsec",
-    # C6 P1 representative sample (long tail shares the same redaction boundary)
     "golangci-lint",
     "sqlfluff",
     "checkov",
 )
 
-# All analyzer ids covered by redaction tests (W6 + catalog).
-REDACTION_ANALYZER_IDS: tuple[str, ...] = W6_ANALYZER_IDS + CATALOG_ANALYZER_IDS
+# Every shipped catalog id — redaction parametrisation (C0.8 / C6).
+_ALL_CATALOG_IDS: tuple[str, ...] = (
+    "actionlint",
+    "agentsec",
+    "ast-grep",
+    "basedpyright",
+    "biome",
+    "blinter",
+    "brakeman",
+    "buf",
+    "checkmake",
+    "checkov",
+    "circleci",
+    "clang-tidy",
+    "clippy",
+    "cppcheck",
+    "detekt",
+    "dotenv-linter",
+    "ember-template-lint",
+    "eslint",
+    "flake8",
+    "fortitude",
+    "golangci-lint",
+    "hadolint",
+    "htmlhint",
+    "infer",
+    "languagetool",
+    "luacheck",
+    "markdownlint",
+    "mypy",
+    "oasdiff",
+    "opengrep",
+    "osv-scanner",
+    "oxlint",
+    "phpcs",
+    "phpmd",
+    "phpstan",
+    "pmd",
+    "presidio",
+    "prisma-lint",
+    "psscriptanalyzer",
+    "pylint",
+    "pyright",
+    "regal",
+    "rubocop",
+    "ruff",
+    "semgrep",
+    "shellcheck",
+    "shopify-theme-check",
+    "smarty-lint",
+    "sqlfluff",
+    "squawk",
+    "stylelint",
+    "swiftlint",
+    "tflint",
+    "trivy",
+    "trufflehog",
+    "yamllint",
+    "zizmor",
+)
+
+# All analyzer ids covered by redaction tests (full shipped catalog, C0.8 / C6).
+REDACTION_ANALYZER_IDS: tuple[str, ...] = _ALL_CATALOG_IDS
 
 # Planted secret for TruffleHog supply-chain tests — must never appear in outputs (D8).
 PLANTED_AWS_SECRET = "AKIA_PLANTED_FIXTURE_DO_NOT_ROTATE_IN_TESTS"
 
 # C1 language-gate tool ids and their planted paths.
 C1_LANGUAGE_TOOLS: dict[str, tuple[str, int]] = {
-    "ruff": ("src/fixture_app/handler.py", 11),
+    "ruff": ("src/fixture_app/handler.py", 13),
     "mypy": ("src/fixture_app/handler.py", 8),
     "pyright": ("src/fixture_app/handler.py", 8),
     "basedpyright": ("src/fixture_app/handler.py", 8),

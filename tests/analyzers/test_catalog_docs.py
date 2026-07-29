@@ -1,4 +1,4 @@
-"""C6 catalog documentation enforcement — RED until catalog C6 lands."""
+"""C6 catalog documentation enforcement."""
 
 from __future__ import annotations
 
@@ -7,11 +7,6 @@ from pathlib import Path
 import pytest
 
 from tests.analyzers.support import CATALOG_ANALYZER_IDS, import_module
-
-pytestmark = pytest.mark.xfail(
-    reason="green after C6: ANALYZERS.md and catalog CI gate",
-    strict=False,
-)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -63,8 +58,10 @@ def test_manifest_missing_fixture_fails_ci_gate(tmp_path: Path) -> None:
     bad_manifest.write_text(
         "id: orphan-tool\ncategory: lint\nlanguages: [python]\n"
         "detect:\n  files: ['*.py']\ncommand: ['true']\n"
-        "scope: diff\nparser: ruff_json\ndefault_enabled: false\n"
-        "runtime: repo-native\nseverity_map:\n  error: Major\n",
+        "scope: diff\nparser: ruff_json\nsupports_fix: false\n"
+        "default_enabled: false\nversion: '0.0.0'\nruntime: repo-native\n"
+        "timeout_s: 60\ntrust: trusted\nseverity_map:\n  error: Major\n"
+        "  warning: Minor\nprovenance: {}\nnetwork_allowlist: []\n",
         encoding="utf-8",
     )
     with pytest.raises(docs.CatalogIntegrityError, match="fixture"):

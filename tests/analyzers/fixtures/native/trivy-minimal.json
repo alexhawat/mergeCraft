@@ -1,0 +1,14 @@
+{
+  "Results": [
+    {
+      "Target": "requirements.txt",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-0001",
+          "Severity": "HIGH",
+          "Title": "minimal"
+        }
+      ]
+    }
+  ]
+}

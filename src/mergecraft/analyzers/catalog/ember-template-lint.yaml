@@ -1,0 +1,26 @@
+id: ember-template-lint
+category: lint
+languages:
+- ember
+detect:
+  files:
+  - '*.hbs'
+  - .template-lintrc.js
+command:
+- ember-template-lint
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 6.0.0
+runtime: repo-native
+timeout_s: 120
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: null

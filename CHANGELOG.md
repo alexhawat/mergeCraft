@@ -48,4 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Catalog C5:** native agent-manifest security scanner for MCP and skill/instruction
   manifests — YAML policy rules, optional SkillSpector corroboration, and
   ``mergecraft.analyzers.agentsec`` manifest reader (C7 exception to manifest-only catalog).
+- **Catalog C6:** P1–P3 long-tail manifests (35 tools), generated ``docs/ANALYZERS.md`` with
+  CI ``catalog-check`` gate, ``docs/CONTRIBUTING-ANALYZERS.md``, and ``mergecraft analyzers``
+  CLI (list/detect/run/explain/export/lock).
 - Initial mergeCraft snapshot from pullfrog-py (history-free rebrand).

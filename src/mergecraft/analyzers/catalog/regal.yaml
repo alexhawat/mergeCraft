@@ -1,0 +1,31 @@
+id: regal
+category: lint
+languages:
+- rego
+detect:
+  files:
+  - '*.rego'
+command:
+- regal
+- lint
+- --format
+- sarif
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 0.27.0
+runtime: managed
+timeout_s: 120
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://github.com/StyraInc/regal/releases/download/v0.27.0/regal_Linux_x86_64.tar.gz
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+network_allowlist: []
+exclusive_group: null

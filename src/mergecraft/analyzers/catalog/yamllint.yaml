@@ -1,0 +1,32 @@
+id: yamllint
+category: lint
+languages:
+- yaml
+detect:
+  files:
+  - '*.yaml'
+  - '*.yml'
+  - .yamllint
+command:
+- yamllint
+- -f
+- sarif
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 1.35.1
+runtime: managed
+timeout_s: 120
+trust: untrusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://pypi.org/project/yamllint/1.35.1/
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+network_allowlist: []
+exclusive_group: null

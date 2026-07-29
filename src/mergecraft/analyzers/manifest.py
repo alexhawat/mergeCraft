@@ -32,6 +32,8 @@ _PARSER_NATIVE_SEVERITIES: dict[str, frozenset[str]] = {
     "squawk_json": frozenset({"error", "warning"}),
     "trivy_json": frozenset({"critical", "high", "medium", "low", "unknown"}),
     "trufflehog_jsonl": frozenset({"verified", "unverified"}),
+    "agentsec_native": frozenset({"critical", "major", "minor"}),
+    "buf_native": frozenset({"breaking", "lint"}),
 }
 
 
@@ -74,6 +76,7 @@ class AnalyzerManifest(BaseModel):
     provenance: dict[str, ProvenanceEntry]
     network_allowlist: list[str]
     exclusive_group: str | None = None
+    declared_unavailable: str | None = None
 
     @field_validator("severity_map")
     @classmethod

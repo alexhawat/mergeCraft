@@ -1,4 +1,4 @@
-"""C2 supply-chain adapters — RED until catalog C2 lands."""
+"""C2 supply-chain adapters."""
 
 from __future__ import annotations
 
@@ -11,11 +11,6 @@ from tests.analyzers.support import (
     FORK_PULL_REQUEST_EVENT,
     PLANTED_AWS_SECRET,
     import_module,
-)
-
-pytestmark = pytest.mark.xfail(
-    reason="green after C2: OSV, Trivy, TruffleHog adapters",
-    strict=False,
 )
 
 
