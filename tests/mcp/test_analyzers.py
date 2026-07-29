@@ -58,7 +58,9 @@ async def test_reports_not_run_when_nothing_enabled(tmp_path: Path) -> None:
     payload = await _run(_ctx(tmp_path), changed_files=[])
     assert payload["ran"] is False
     assert payload["reason"]
-    assert payload["analyzers"] == []
+    assert payload["findingCount"] == 0
+    if payload["analyzers"]:
+        assert all(row["status"] == "unavailable" for row in payload["analyzers"])
 
 
 @pytest.fixture

@@ -82,7 +82,7 @@ build: ## Build wheel/sdist
 ci-static: lockcheck lint typecheck pyright catalog-check build ## Static/build tier
 	@echo "ci-static OK"
 
-ci: ci-static test security ## Full gate
+ci: ci-static security test ## Full gate
 	@echo "ci OK"
 
 docker-build: ## Build action Docker image

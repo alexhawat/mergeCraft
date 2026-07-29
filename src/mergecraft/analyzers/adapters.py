@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import sys
 from dataclasses import dataclass, replace
@@ -78,6 +79,8 @@ def _finalize_plan(
     if manifest.id == "trufflehog":
         argv = _trufflehog_argv(argv, repo_root=repo_root, tier=tier, event=event)
     env = build_analyzer_env(tier=tier, event=event, repo_env=None)
+    if plan.env:
+        env = {**env, **plan.env}
     return replace(plan, argv=tuple(argv), cwd=repo_root, env=env)
 
 
@@ -135,7 +138,14 @@ def _provision_managed_argv(
         argv = list(plan.argv)
         if argv and argv[0] == manifest.command[0]:
             argv[0] = str(script)
-        return replace(plan, argv=tuple(argv))
+        bin_dir = str(script.parent)
+        install_root = str(script.parent.parent)
+        env = dict(plan.env or {})
+        system_path = os.environ.get("PATH", "")
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH') or system_path}"
+        prefix = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = f"{install_root}{os.pathsep}{prefix}" if prefix else install_root
+        return replace(plan, argv=tuple(argv), env=env)
 
     baked = resolve_baked_binary(manifest)
     if baked is not None:

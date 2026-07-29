@@ -224,9 +224,11 @@ def _tool_version(path: str, binary: str) -> str | None:
     except OSError:
         return None
     output = (completed.stdout or completed.stderr or "").strip()
-    if not output:
+    if not output or completed.returncode != 0:
         return None
     first = output.splitlines()[0].strip()
+    if first.casefold().startswith("traceback"):
+        return None
     for token in first.split():
         if re.search(r"\d+\.\d+", token):
             return first
@@ -246,7 +248,10 @@ def find_repo_binary(repo_root: Path, binary: str) -> RepoToolResolution | None:
 
     path = shutil.which(binary)
     if path is not None:
-        return RepoToolResolution(path=path, version=_tool_version(path, binary))
+        version = _tool_version(path, binary)
+        if version is None:
+            return None
+        return RepoToolResolution(path=path, version=version)
     return None
 
 

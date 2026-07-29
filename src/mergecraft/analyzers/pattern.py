@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -315,6 +316,26 @@ def prepare_pattern_plan(
     )
 
 
+def _resolve_pip_python(*, package: str) -> str:
+    """Pick a Python interpreter that can install ``package`` via ``uv pip --target``."""
+    host = sys.executable
+    if package != "semgrep" or sys.version_info < (3, 14):
+        return host
+    # semgrep has no 3.14 wheels yet; deps install but the package itself is omitted.
+    for candidate in ("python3.12", "python3.13"):
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    return host
+
+
+def _pip_target_valid(install_root: Path, *, package: str, script: str) -> bool:
+    script_path = install_root / "bin" / script
+    if not script_path.is_file():
+        return False
+    return (install_root / package.replace("-", "_")).is_dir() or (install_root / package).is_dir()
+
+
 def provision_pip_script(
     *,
     package: str,
@@ -325,11 +346,24 @@ def provision_pip_script(
     """Install a pinned PyPI package into cache and return its console script (semgrep)."""
     install_root = cache_dir / "pip" / package / version
     script_path = install_root / "bin" / script
-    if script_path.is_file():
+    if script_path.is_file() and _pip_target_valid(
+        install_root,
+        package=package,
+        script=script,
+    ):
         return script_path
+    if install_root.is_dir():
+        shutil.rmtree(install_root)
 
     install_root.mkdir(parents=True, exist_ok=True)
-    logger.info("provisioning {} {} via pip into {}", package, version, install_root)
+    pip_python = _resolve_pip_python(package=package)
+    logger.info(
+        "provisioning {} {} via pip into {} (python={})",
+        package,
+        version,
+        install_root,
+        pip_python,
+    )
     completed = subprocess.run(
         [
             "uv",
@@ -337,7 +371,7 @@ def provision_pip_script(
             "install",
             f"{package}=={version}",
             "--python",
-            sys.executable,
+            pip_python,
             "--target",
             str(install_root),
         ],
@@ -350,8 +384,12 @@ def provision_pip_script(
         tail = detail[-1] if detail else f"exit {completed.returncode}"
         msg = f"pip install failed for {package}=={version}: {tail}"
         raise OSError(msg)
-    if not script_path.is_file():
-        msg = f"{script!r} missing after pip install of {package}=={version}"
+    if not script_path.is_file() or not _pip_target_valid(
+        install_root,
+        package=package,
+        script=script,
+    ):
+        msg = f"{package} package missing after pip install of {package}=={version}"
         raise OSError(msg)
     script_path.chmod(script_path.stat().st_mode | os.X_OK)
     return script_path
