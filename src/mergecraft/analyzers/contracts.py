@@ -521,8 +521,39 @@ def requires_base_run(tool_id: str) -> bool:
     return tool_id in DIFFERENTIAL_CONTRACT_TOOLS
 
 
+def resolve_analyzer_base_ref(
+    repo_root: Path,
+    *,
+    base_ref: str | None,
+    offline: bool = False,
+    changed_files: list[str] | None = None,
+) -> str | None:
+    """Resolve the base revision for differential contract adapters (D6).
+
+    Prefers an explicit ``base_ref``, then fixture ``*.base.*`` companions used
+    by ``tests/analyzers/fixtures/repo``, then a git-detectable merge base for
+    offline diff-review and PR checkouts.
+    """
+    _ = offline
+    if base_ref:
+        return base_ref
+    for head_rel in changed_files or []:
+        if (repo_root / _fixture_base_rel(head_rel)).is_file():
+            return _FIXTURE_BASE_REF
+    try:
+        from mergecraft.utils.offline_diff import detect_default_base
+
+        detected = detect_default_base(repo_root)
+    except RuntimeError:
+        return None
+    if _git_ref_available(repo_root, detected):
+        return detected
+    return None
+
+
 __all__ = [
     "DIFFERENTIAL_CONTRACT_TOOLS",
     "requires_base_run",
+    "resolve_analyzer_base_ref",
     "run_differential_adapter",
 ]

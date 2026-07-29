@@ -84,6 +84,7 @@ def run_analyzer_pipeline(
     diff_text: str = "",
     inline_budget: int | None = None,
     offline: bool = False,
+    base_ref: str | None = None,
 ) -> AnalyzerRunState:
     """Run enabled analyzers end-to-end and return scoped, budgeted findings."""
     settings = _analyzers_settings(repo_root)
@@ -132,6 +133,8 @@ def run_analyzer_pipeline(
                 repo_root=repo_root,
                 changed_files=changed_files,
                 tier=tier,
+                base_ref=base_ref,
+                offline=offline,
             )
         except (KeyError, OSError, ValueError) as exc:
             logger.info("analyzer {} unavailable: {}", manifest.id, exc)

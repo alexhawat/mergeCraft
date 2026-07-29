@@ -239,10 +239,33 @@ def run_adapter(
     repo_root: Path,
     changed_files: list[str],
     tier: TrustTier = "trusted",
+    base_ref: str | None = None,
+    offline: bool = False,
 ) -> AdapterRunResult:
     """Run one catalog analyzer and return normalized findings."""
     repo_root = repo_root.resolve()
     manifest = _manifest_by_id(tool_id)
+
+    from mergecraft.analyzers.contracts import (
+        DIFFERENTIAL_CONTRACT_TOOLS,
+        resolve_analyzer_base_ref,
+        run_differential_adapter,
+    )
+
+    if tool_id in DIFFERENTIAL_CONTRACT_TOOLS:
+        resolved_base = resolve_analyzer_base_ref(
+            repo_root,
+            base_ref=base_ref,
+            offline=offline,
+            changed_files=changed_files,
+        )
+        return run_differential_adapter(
+            tool_id=tool_id,
+            repo_root=repo_root,
+            changed_files=changed_files,
+            base_ref=resolved_base,
+            tier=tier,
+        )
 
     if tool_id == "agentsec":
         from mergecraft.analyzers.agentsec import scan_manifests

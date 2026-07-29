@@ -41,6 +41,10 @@ def run_analyzers_tool(ctx: ToolContext):
         offline = ctx.payload.event.trigger == "unknown"
         from mergecraft.analyzers.pipeline import run_analyzer_pipeline
 
+        base_ref = params.get("base_ref")
+        if base_ref is not None:
+            base_ref = str(base_ref).strip() or None
+
         run_state = run_analyzer_pipeline(
             repo_root=repo_root,
             changed_files=changed,
@@ -48,6 +52,7 @@ def run_analyzers_tool(ctx: ToolContext):
             diff_text=diff_text,
             inline_budget=settings.inline_budget,
             offline=offline,
+            base_ref=base_ref,
         )
         _store_run_state(ctx, run_state)
 
@@ -104,6 +109,14 @@ def run_analyzers_tool(ctx: ToolContext):
                 "diff_path": {
                     "type": "string",
                     "description": "Optional on-disk unified diff for scoping findings to hunks.",
+                },
+                "base_ref": {
+                    "type": "string",
+                    "description": (
+                        "Optional git base ref for differential contract analyzers "
+                        "(oasdiff, squawk, buf). Defaults to fixture-base companions or "
+                        "the repo merge base when available."
+                    ),
                 },
             },
             "additionalProperties": False,
