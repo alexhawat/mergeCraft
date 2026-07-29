@@ -4,24 +4,64 @@ Standalone **BYOK** GitHub Action for AI-powered PR review — inspired by prior
 work including [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 
 No proprietary SaaS account is required. Settings, learnings, and secrets
-come from your repo and GitHub Actions secrets.
+come from your repo and GitHub Actions secrets — **you bring your own
+Claude subscription, API key, or other provider credential.**
 
 ## Requirements
 
 - Python **3.14+**
 - [uv](https://docs.astral.sh/uv/)
-- Provider API keys (Anthropic, OpenAI/Codex, Gemini, OpenRouter, …) as needed
+- [GitHub CLI (`gh`)](https://cli.github.com), authenticated (`gh auth login`) — used by `mergecraft auth` and `mergecraft init`
+- A credential for at least one provider — see [Authentication](#authentication) below
 
-## Quick start
+## Get started in 3 steps
 
-```bash
-# Install locally
-uv sync --extra dev
-uv run mergecraft --help
+1. **Install and scaffold** in the repo you want reviewed (not yet published to
+   PyPI, so install straight from git):
 
-# Scaffold config + example workflow into a consumer repo
-uv run mergecraft init
-```
+   ```bash
+   uv tool install "git+https://github.com/alexhawat/mergeCraft@pre-0.0.1"
+   mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
+   ```
+
+   Working on mergeCraft itself instead? Clone it and run
+   `uv sync --extra dev && uv run mergecraft --help`.
+
+2. **Authenticate** — pick one:
+
+   ```bash
+   mergecraft auth claude   # use your Claude Pro/Max subscription (no per-token API billing)
+   # or
+   mergecraft auth codex    # use your ChatGPT subscription (ChatGPT Plus/Pro/Team/Enterprise)
+   ```
+
+   Either command saves the credential as a GitHub Actions secret in the current repo via `gh secret set`. No API key required.
+
+3. **Commit and push** the scaffolded workflow, then trigger it by opening a PR, commenting `@mergecraft ...`, or running it manually from the Actions tab.
+
+That's it — no server, dashboard, or account to sign up for.
+
+## Authentication
+
+mergeCraft is BYOK: it never talks to a proprietary backend, only directly to
+the provider you configure. You can authenticate either with a **subscription**
+(no metered API billing) or a traditional **API key**.
+
+| Provider | Subscription (recommended) | API key |
+|----------|-----------------------------|---------|
+| Anthropic Claude | `mergecraft auth claude` → saves `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Claude Pro/Max) | `ANTHROPIC_API_KEY` secret |
+| OpenAI Codex | `mergecraft auth codex` → saves `CODEX_AUTH_JSON` from `codex login --device-auth` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` secret |
+
+Using a subscription means the GitHub Action authenticates as *you* through the
+official `claude` / `codex` CLIs — the same credential your local coding agent
+already uses — instead of paying per-token via a separate API key. Run the
+relevant `mergecraft auth ...` command from the repo you want reviewed; it
+detects the `origin` remote and stores the secret with `gh secret set`
+automatically (or prints the manual `Settings → Secrets` steps if `gh` isn't
+authenticated).
+
+Only set the env var(s) for the provider(s) you actually use — see the
+workflow example below, where the unused lines are commented out.
 
 ### Consumer workflow
 
@@ -50,8 +90,12 @@ jobs:
         with:
           prompt: ${{ inputs.prompt }}
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Claude — pick one:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}  # subscription (mergecraft auth claude)
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}           # or API key
+          # Codex / OpenAI — pick one:
+          # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}               # subscription (mergecraft auth codex)
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}                 # or API key
 ```
 
 ### Local config
@@ -90,7 +134,8 @@ Learnings live in `.mergecraft/learnings.md` and are seeded/persisted across run
 | Command | Purpose |
 |---------|---------|
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` + example workflow |
-| `mergecraft auth codex` / `auth claude` | Store credentials via `gh secret set` |
+| `mergecraft auth claude` | Save a Claude Pro/Max subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) via `gh secret set` |
+| `mergecraft auth codex` | Save a ChatGPT subscription credential (`CODEX_AUTH_JSON`) via `gh secret set` |
 | `mergecraft watch --pr N` | Stream PR/issue timeline as JSONL |
 | `mergecraft diff-review` | Offline local git/patch review (no GitHub PR posting) |
 | `mergecraft gha` | Action runtime entry (used by Docker Action) |
@@ -144,7 +189,15 @@ Coding style and CI patterns are adapted from
 (Python 3.14, uv, loguru, Makefile-gated Ruff/mypy/pytest). This repo does
 **not** include a workflow that invokes `mergecraft/mergecraft`.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor workflow.
+
+## Security
+
+BYOK by design: your provider credentials and repo contents never leave
+GitHub Actions / your machine and this repo's own code. See
+[SECURITY.md](SECURITY.md) to report a vulnerability, and
+[REVIEW-CHECKS.md](REVIEW-CHECKS.md) for what a review does (and never does).
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

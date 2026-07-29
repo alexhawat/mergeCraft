@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs
+
+- Rewrite README with a 3-step quickstart and a dedicated Authentication section
+  documenting Claude/Codex subscription auth (`mergecraft auth claude` /
+  `auth codex`, `CLAUDE_CODE_OAUTH_TOKEN` / `CODEX_AUTH_JSON`) alongside API keys.
+- Add OSS governance files for parity with sevn-bot/sevn: `SECURITY.md`,
+  `CODE_OF_CONDUCT.md`, `.github/CODEOWNERS`, `.github/PULL_REQUEST_TEMPLATE.md`,
+  and `.github/ISSUE_TEMPLATE/` (bug report, feature request, security contact link).
+
 ### Fixed
 
 - Wire D7 sandbox planning into adapter execution; fail-closed trust tier when the GitHub
