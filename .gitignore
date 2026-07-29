@@ -16,6 +16,9 @@ build/
 .venv/
 venv/
 
+# CI checkpoint (make ci-resume)
+.ci-progress
+
 # Tooling caches
 .mypy_cache/
 .ruff_cache/

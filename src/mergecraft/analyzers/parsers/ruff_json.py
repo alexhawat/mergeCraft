@@ -36,6 +36,10 @@ def parse_ruff_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) ->
         start_line = coerce_line(location.get("row", 1))
         end_line = start_line
         native_level = str(item.get("severity") or "warning")
+        fix = item.get("fix") if manifest.supports_fix else None
+        autofix = None
+        if isinstance(fix, dict) and str(fix.get("applicability") or "") in {"safe", "unsafe"}:
+            autofix = str(fix.get("message") or "Apply ruff fix")
         findings.append(
             make_finding(
                 tool=manifest.id,
@@ -48,6 +52,7 @@ def parse_ruff_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) ->
                 start_line=start_line,
                 end_line=end_line,
                 source="analyzer",
+                autofix=autofix,
             )
         )
     return findings

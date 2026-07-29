@@ -1,0 +1,8 @@
+{
+  "breakingChanges": [
+    {
+      "id": "response-property-removed",
+      "level": "breaking"
+    }
+  ]
+}

@@ -28,9 +28,9 @@ def _event_name() -> str:
 
 
 def derive_trust_tier(
+    event: dict[str, Any] | None = None,
     *,
-    event: dict[str, Any] | None,
-    shell: str,
+    shell: str = "restricted",
     offline: bool = False,
 ) -> TrustTier:
     """Derive trust tier from the native GitHub event shape (W0.4 probe)."""

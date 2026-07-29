@@ -4,10 +4,16 @@ languages: ["python"]
 detect:
   files:
     - "*.py"
-command: ["ruff", "check", "{files}"]
+command:
+  - ruff
+  - check
+  - --output-format
+  - json
+  - --ignore-noqa
+  - "{files}"
 scope: diff
 parser: ruff_json
-supports_fix: false
+supports_fix: true
 default_enabled: auto
 version: "0.15.12"
 runtime: repo-native

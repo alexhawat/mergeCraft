@@ -1,0 +1,30 @@
+id: stylelint
+category: lint
+languages:
+- css
+detect:
+  files:
+  - '*.css'
+  - '*.scss'
+  - stylelint.config.js
+  - .stylelintrc.json
+command:
+- stylelint
+- --formatter
+- json
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 16.12.0
+runtime: repo-native
+timeout_s: 120
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: null

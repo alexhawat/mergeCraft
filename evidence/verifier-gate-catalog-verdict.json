@@ -1,0 +1,100 @@
+{
+  "verdict": "changes_required",
+  "sha": "495bc21",
+  "date": "2026-07-29",
+  "findings": [
+    {
+      "id": "V1-C4-pipeline-dead",
+      "severity": "high",
+      "file": "src/mergecraft/analyzers/adapters.py:236",
+      "summary": "run_analyzer_pipeline → run_adapter does not route oasdiff/buf through run_differential_adapter; planted breaking-change findings missed on the production run_analyzers path.",
+      "evidence": "evidence/verifier-gate-report.json v1_fixture.missed: [oasdiff@openapi/v1.yaml, buf@proto/user/v1/user.proto]; runtime: oasdiff run_adapter skipped (JSON parse empty), buf run_adapter skipped (unknown parser buf_native); contracts.run_differential_adapter with base_ref=fixture-base returns 1 and 2 findings respectively."
+    },
+    {
+      "id": "V4-differential-seam",
+      "severity": "high",
+      "file": "src/mergecraft/analyzers/pipeline.py:130",
+      "summary": "requires_base_run() / run_differential_adapter exist in contracts.py but pipeline always calls run_adapter; buf_native parsed only in contracts._run_buf, not parsers/__init__.py.",
+      "evidence": "src/mergecraft/analyzers/parsers/__init__.py:28-40 has no buf_native; adapters.py has zero references to run_differential_adapter or DIFFERENTIAL_CONTRACT_TOOLS."
+    },
+    {
+      "id": "V1-squawk-noise",
+      "severity": "medium",
+      "file": "src/mergecraft/analyzers/adapters.py:236",
+      "summary": "squawk via run_adapter emits 6 findings vs 1 via run_differential_adapter on the same fixture — potential D14 noise if generic path stays enabled without base scoping.",
+      "evidence": "runtime compare: squawk run_adapter=6 findings, run_differential_adapter(base_ref=fixture-base)=1 finding."
+    },
+    {
+      "id": "V1-no-open-pr",
+      "severity": "info",
+      "file": "evidence/verifier-gate-report.json",
+      "summary": "No open PR on alexhawat/mergeCraft; wave-branch diff pre-0.0.1...HEAD used as real-PR surrogate (261 files, inline 8/8 within D14 budget).",
+      "evidence": "gh pr list --repo alexhawat/mergeCraft returned []; evidence/v-diff-review-fixture-prompt.txt wires run_analyzers + mergecraft-verifier."
+    }
+  ],
+  "checks": {
+    "V.1": {
+      "status": "fail",
+      "evidence": [
+        "evidence/verifier-gate-report.json — 13/15 planted hits via run_analyzer_pipeline; oasdiff+buf missed",
+        "evidence/v-diff-review-fixture-prompt.txt — diff-review dry-run OK (run_analyzers wired)",
+        "evidence/verifier-gate-report.json v1_wave_branch — 261-file branch diff: 70 findings, inline 8 ≤ D14 budget 8"
+      ]
+    },
+    "V.2": {
+      "status": "pass",
+      "evidence": [
+        "MERGECRAFT_PYTEST_JOBS=0: 293/293 analyzer tests pass including test_redaction.py (172 parametrized canary cases)",
+        "Serialized pipeline JSON grep: secret_hits_in_serialized_pipeline [] (CANARY_SECRET + PLANTED_AWS_SECRET absent)"
+      ]
+    },
+    "V.3": {
+      "status": "pass",
+      "evidence": [
+        "config.trufflehog_verify_enabled: fork_event_tier=false, untrusted_literal=false even with analyzers.trufflehog.verify:true in repo config",
+        "trusted_with_config_true=true (opt-in only on trusted tier)",
+        "tests/analyzers/test_adapters_supply_chain.py::test_trufflehog_verification_off_on_fork PASSED"
+      ]
+    },
+    "V.4": {
+      "status": "fail",
+      "evidence": [
+        "make catalog-check — 57 manifests OK",
+        "test_catalog_docs.py — doc rows, fixtures, severity_map complete",
+        "test_registry.py::test_exclusive_group_never_both_enable_by_default PASSED",
+        "FAIL: oasdiff/buf unreachable from run_analyzers production path (see V4-differential-seam)"
+      ]
+    },
+    "V.5": {
+      "status": "pass",
+      "evidence": [
+        "All C1-C6 adapter modules assert planted findings caught (path+line), not manifest-parse-only",
+        "test_adapters_github.py — behavioral planted-finding + no-invention on untouched paths",
+        "No inspect.iscoroutinefunction/callable-only adapter tests in catalog suite"
+      ]
+    },
+    "V.6": {
+      "status": "pass",
+      "evidence": [
+        "Catalog wave Python (f6a9f8f^..495bc21): 30 files under src/mergecraft/analyzers/ + analyzers_cmd.py",
+        "Documented bespoke: C4.5 parsers (2), C5 agentsec readers (5), C6 catalog_docs + cli (2), C1-C4 category adapters (detect/pattern/supply_chain/contracts/config + W4 parsers)",
+        "All entries match docs/CONTRIBUTING-ANALYZERS.md exception table — no silent per-tool bespoke beyond documented categories"
+      ]
+    },
+    "V.7": {
+      "status": "changes_required",
+      "evidence": ["V.1 and V.4 blocking findings above"]
+    },
+    "V.8": {
+      "status": "committed",
+      "evidence": ["evidence/verifier-gate-catalog-verdict.json (this file)"]
+    }
+  },
+  "fix_required": [
+    "Route DIFFERENTIAL_CONTRACT_TOOLS (oasdiff, squawk, buf) from run_adapter or pipeline to contracts.run_differential_adapter with resolved base_ref (offline diff-review + PR events).",
+    "Ensure buf breaking findings parse on the production path (buf_native handled in differential adapter, not generic parse_output).",
+    "Re-run verifier gate after fix; squawk should emit exactly one migration finding via production path."
+  ],
+  "final_unblocked": false,
+  "thermos_unblocked": false
+}

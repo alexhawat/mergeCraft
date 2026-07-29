@@ -1,0 +1,10 @@
+id: skill-prompt-injection
+kind: skill
+severity: Major
+confidence: likely
+message: Skill instruction contains prompt-injection-shaped override of prior instructions
+remediation: Remove instructions that override safety gates or prior system context; document intent explicitly without bypass phrasing.
+requires_verification: true
+match:
+  fields: [body, description, content]
+  pattern: '(?i)(ignore\s+(all\s+)?prior\s+instructions|disregard\s+(previous|above)|override\s+(system|safety)|before\s+answering\s+the\s+user)'

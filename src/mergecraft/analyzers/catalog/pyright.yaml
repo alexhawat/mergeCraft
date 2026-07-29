@@ -1,0 +1,25 @@
+id: pyright
+category: lint
+languages: ["python"]
+detect:
+  files:
+    - "*.py"
+command:
+  - pyright
+  - --outputjson
+  - "{files}"
+scope: diff
+parser: pyright_json
+supports_fix: false
+default_enabled: auto
+version: "1.1.409"
+runtime: repo-native
+timeout_s: 300
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  information: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: python-typecheck

@@ -48,6 +48,7 @@ dev = [
     "types-PyYAML==6.0.12.20260510",
     "types-jsonschema==4.25.1.20250822",
     "pyright==1.1.409",
+    "basedpyright==1.39.9",
     "pytest-cov==6.0.0",
     "pytest-randomly==3.16.0",
     "pytest-split==0.11.0",
@@ -67,6 +68,7 @@ include = ["src/mergecraft", "tests", "README.md", "pyproject.toml"]
 target-version = "py314"
 line-length = 100
 src = ["src", "tests", "scripts"]
+extend-exclude = ["tests/analyzers/fixtures/repo"]
 
 [tool.ruff.lint]
 select = [

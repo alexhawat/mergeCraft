@@ -1,0 +1,13 @@
+rules:
+  - id: eval-detected
+    patterns:
+      - pattern: eval(...)
+    message: taint-style eval code execution sink
+    severity: ERROR
+    languages: [python]
+  - id: exec-detected
+    patterns:
+      - pattern: exec(...)
+    message: Avoid exec — code execution sink
+    severity: ERROR
+    languages: [python]

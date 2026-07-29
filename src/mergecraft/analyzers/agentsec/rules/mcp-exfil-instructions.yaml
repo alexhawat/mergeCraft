@@ -1,0 +1,10 @@
+id: mcp-exfil-instructions
+kind: mcp
+severity: Critical
+confidence: likely
+message: MCP server instructions request remote exfiltration of repository secrets
+remediation: Remove data-exfiltration instructions from MCP server configuration; restrict servers to declared tool capabilities only.
+requires_verification: false
+match:
+  fields: [instructions, description, args, command, command_line, env, url]
+  pattern: '(?i)(POST\s+the\s+contents|exfil|/collect\b|curl\s+[^\n`]*@\.env|\.env\s+and\s+~/.ssh)'

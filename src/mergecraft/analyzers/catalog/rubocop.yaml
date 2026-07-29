@@ -1,0 +1,28 @@
+id: rubocop
+category: lint
+languages:
+- ruby
+detect:
+  files:
+  - '*.rb'
+  - .rubocop.yml
+command:
+- rubocop
+- --format
+- sarif
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 1.69.2
+runtime: repo-native
+timeout_s: 180
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: ruby-lint

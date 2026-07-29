@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.analyzers.pipeline import run_analyzer_pipeline
 from mergecraft.config import load_repo_settings
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
@@ -40,6 +39,12 @@ def run_analyzers_tool(ctx: ToolContext):
 
         settings = load_repo_settings(root=repo_root, load_learnings_files=False).analyzers
         offline = ctx.payload.event.trigger == "unknown"
+        from mergecraft.analyzers.pipeline import run_analyzer_pipeline
+
+        base_ref = params.get("base_ref")
+        if base_ref is not None:
+            base_ref = str(base_ref).strip() or None
+
         run_state = run_analyzer_pipeline(
             repo_root=repo_root,
             changed_files=changed,
@@ -47,6 +52,7 @@ def run_analyzers_tool(ctx: ToolContext):
             diff_text=diff_text,
             inline_budget=settings.inline_budget,
             offline=offline,
+            base_ref=base_ref,
         )
         _store_run_state(ctx, run_state)
 
@@ -104,6 +110,14 @@ def run_analyzers_tool(ctx: ToolContext):
                     "type": "string",
                     "description": "Optional on-disk unified diff for scoping findings to hunks.",
                 },
+                "base_ref": {
+                    "type": "string",
+                    "description": (
+                        "Optional git base ref for differential contract analyzers "
+                        "(oasdiff, squawk, buf). Defaults to fixture-base companions or "
+                        "the repo merge base when available."
+                    ),
+                },
             },
             "additionalProperties": False,
         },
@@ -125,11 +139,19 @@ def analyzer_findings_tool(ctx: ToolContext):
         findings = list(run_state.findings)
         inline = list(run_state.inline)
         if omit_pending_major:
-            findings = [row for row in findings if row.get("severity") not in {"Critical", "Major"}]
+            from mergecraft.analyzers.finding import Finding
+            from mergecraft.analyzers.review_gate import filter_for_review
+
+            finding_objs = [Finding.model_validate(row) for row in findings]
+            published = filter_for_review(
+                finding_objs,
+                verified_ids=set(run_state.verified_ids),
+                require_verification=True,
+            )
+            published_fps = {item.fingerprint for item in published}
+            findings = [row for row in findings if row.get("fingerprint") in published_fps]
             inline = [
-                row
-                for row in inline
-                if row.get("finding", {}).get("severity") not in {"Critical", "Major"}
+                row for row in inline if row.get("finding", {}).get("fingerprint") in published_fps
             ]
         return {
             "available": True,
@@ -166,6 +188,5 @@ def analyzer_findings_tool(ctx: ToolContext):
 
 __all__ = [
     "analyzer_findings_tool",
-    "run_analyzer_pipeline",
     "run_analyzers_tool",
 ]

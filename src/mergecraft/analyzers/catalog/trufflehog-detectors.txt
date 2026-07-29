@@ -1,0 +1,9 @@
+detectors:
+  - name: AWSAccessKey
+    keywords:
+      - AKIA
+      - AWS_SECRET
+      - AWS_ACCESS
+    regex:
+      access_key: 'AKIA[A-Z0-9_]{16,}'
+    primary_regex_name: access_key

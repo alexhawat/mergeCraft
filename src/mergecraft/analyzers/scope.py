@@ -215,12 +215,12 @@ def annotate_introduced_by_pr(
     """Set ``introduced_by_pr`` per D6 — ``unknown`` unless a base run confirms novelty."""
     annotated: list[Finding] = []
     for finding in findings:
-        if not base_run_performed:
-            value = "unknown"
-        elif is_new_in_base:
+        if finding.introduced_by_pr in {"true", "false"}:
+            annotated.append(finding)
+            continue
+        value = "unknown"
+        if base_run_performed and is_new_in_base:
             value = "true"
-        else:
-            value = "false"
         annotated.append(finding.model_copy(update={"introduced_by_pr": value}))
     return annotated
 

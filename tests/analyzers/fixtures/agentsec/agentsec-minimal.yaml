@@ -1,0 +1,3 @@
+rule_id: mcp-exfil-instructions
+severity: Critical
+message: minimal agentsec fixture

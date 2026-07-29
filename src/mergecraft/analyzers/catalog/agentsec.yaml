@@ -1,0 +1,30 @@
+id: agentsec
+category: security
+languages: []
+detect:
+  files:
+    - ".mcp.json"
+    - "**/.mcp.json"
+    - "**/claude_desktop_config.json"
+    - ".mergecraft/mcp-servers/**"
+    - "**/SKILL.md"
+    - "AGENTS.md"
+    - "CLAUDE.md"
+    - ".cursor/rules/**"
+command:
+  - agentsec
+scope: diff
+parser: agentsec_native
+supports_fix: false
+default_enabled: true
+version: native
+runtime: repo-native
+timeout_s: 60
+trust: untrusted
+severity_map:
+  critical: Critical
+  major: Major
+  minor: Minor
+provenance: {}
+network_allowlist: []
+exclusive_group: null

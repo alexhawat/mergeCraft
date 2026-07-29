@@ -1,0 +1,30 @@
+{
+  "results": [
+    {
+      "source": {
+        "path": "requirements.txt",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "example",
+            "ecosystem": "PyPI",
+            "version": "1.0.0"
+          },
+          "vulnerabilities": [
+            {
+              "id": "CVE-2024-0001",
+              "severity": [
+                {
+                  "type": "CVSS_V3",
+                  "score": "7.5 HIGH"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

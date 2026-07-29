@@ -1,0 +1,10 @@
+id: skill-exfil-curl
+kind: skill
+severity: Critical
+confidence: likely
+message: Skill instruction exfiltrates repository data via curl or wget to a remote endpoint
+remediation: Remove exfiltration commands from skill instructions; skills must not upload repository files or secrets.
+requires_verification: true
+match:
+  fields: [body, description, content]
+  pattern: '(?i)(curl\s+[^\n`]*@\.env|wget\s+[^\n`]*\.env|-d\s+@\.env|/collect\b|evil\.example/collect)'

@@ -1,0 +1,14 @@
+[
+  {
+    "filePath": "src/index.js",
+    "messages": [
+      {
+        "ruleId": "no-unused-vars",
+        "severity": 1,
+        "message": "minimal",
+        "line": 1,
+        "column": 1
+      }
+    ]
+  }
+]

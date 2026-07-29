@@ -1,0 +1,33 @@
+id: clang-tidy
+category: lint
+languages:
+- c
+- cpp
+detect:
+  files:
+  - compile_commands.json
+  - '*.cpp'
+  - '*.cc'
+command:
+- clang-tidy
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 19.1.0
+runtime: container
+timeout_s: 600
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://hub.docker.com/_/clang
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+network_allowlist: []
+exclusive_group: null
+declared_unavailable: requires compile_commands.json — mergeCraft never guesses compiler
+  flags (C4)

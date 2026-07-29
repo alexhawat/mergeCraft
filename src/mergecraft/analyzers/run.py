@@ -72,6 +72,10 @@ def _sandbox_preexec(context: SandboxContext) -> None:
             resource.RLIMIT_NPROC,
             (context.max_processes, context.max_processes),
         )
+    if context.memory_mb > 0:
+        with contextlib.suppress(OSError):
+            byte_limit = context.memory_mb * 1024 * 1024
+            resource.setrlimit(resource.RLIMIT_AS, (byte_limit, byte_limit))
 
 
 def _truncate(text: str, *, output_path: str | None = None) -> str:
@@ -118,11 +122,19 @@ def run_plan(
         timeout_s = min(timeout_s, sandbox_context.timeout_s)
     command = _command_string(plan.argv)
     preexec_fn = None
+    run_argv = list(plan.argv)
     if sandbox_context is not None and sandbox_context.read_only_source and sys.platform != "win32":
         preexec_fn = lambda: _sandbox_preexec(sandbox_context)  # noqa: E731
+        from mergecraft.mcp.shell import detect_sandbox_method
+
+        method = detect_sandbox_method()
+        if method == "unshare":
+            run_argv = ["unshare", "--pid", "--fork", "--mount-proc", *plan.argv]
+        elif method == "sudo-unshare":
+            run_argv = ["sudo", "unshare", "--pid", "--fork", "--mount-proc", *plan.argv]
     try:
         completed = subprocess.run(
-            list(plan.argv),
+            run_argv,
             cwd=cwd,
             capture_output=True,
             text=True,

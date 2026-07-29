@@ -1,0 +1,2 @@
+# Base revision: no known CVE for requests at this pin (catalog C2 differential)
+requests==2.31.0

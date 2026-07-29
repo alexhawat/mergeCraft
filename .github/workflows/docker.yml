@@ -1,17 +1,8 @@
 # SPDX-License-Identifier: MIT
 name: Docker
 
+# Advisory/manual only on PRs (catalog F.2). Post-merge publish runs via CI/CD + workflow_dispatch.
 on:
-  pull_request:
-    branches: [main, pre-0.0.1]
-    paths:
-      - Dockerfile
-      - Dockerfile.analyzers
-      - docker-entrypoint.sh
-      - pyproject.toml
-      - uv.lock
-      - src/**
-      - .github/workflows/docker.yml
   push:
     branches: [main, pre-0.0.1]
     paths:

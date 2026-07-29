@@ -1,0 +1,54 @@
+id: trivy
+category: vuln
+languages: []
+detect:
+  files:
+    - "requirements*.txt"
+    - "*requirements*.txt"
+    - "Pipfile.lock"
+    - "poetry.lock"
+    - "package-lock.json"
+    - "yarn.lock"
+    - "pnpm-lock.yaml"
+    - "go.sum"
+    - "Gemfile.lock"
+    - "Cargo.lock"
+    - "Dockerfile"
+    - "Dockerfile.*"
+    - "*.dockerfile"
+    - "docker-compose*.{yml,yaml}"
+    - "*.{tf,tfvars}"
+command:
+  - trivy
+  - fs
+  - --format
+  - json
+  - --scanners
+  - vuln
+  - "{files}"
+scope: diff
+parser: trivy_json
+supports_fix: false
+default_enabled: auto
+version: "0.72.0"
+runtime: managed
+timeout_s: 300
+trust: untrusted
+severity_map:
+  critical: Critical
+  high: Major
+  medium: Minor
+  low: Trivial
+  unknown: Minor
+provenance:
+  linux-amd64:
+    url: https://github.com/aquasecurity/trivy/releases/download/v0.72.0/trivy_0.72.0_Linux-64bit.tar.gz
+    sha256: "bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea"
+  darwin-arm64:
+    url: https://github.com/aquasecurity/trivy/releases/download/v0.72.0/trivy_0.72.0_macOS-64bit.tar.gz
+    sha256: "ee5e60df8a98e5b89fd74a6d86f9e5c7e9a266a35002cb1e43291698b3bfee08"
+network_allowlist:
+  - "https://ghcr.io"
+  - "https://trivy-db.github.io"
+  - "https://mirror.gcr.io"
+exclusive_group: dependency-vuln

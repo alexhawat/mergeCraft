@@ -12,7 +12,7 @@ PIP_AUDIT_CACHE ?= $(CURDIR)/.cache/pip-audit
 PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
-	precommit build ci ci-static docker-build clean
+	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -53,6 +53,9 @@ typecheck: ## mypy strict
 pyright: ## Supplemental Pyright pass
 	$(UV) run pyright src/mergecraft
 
+catalog-check: ## Manifest fixture/doc/severity gate (C5/C6)
+	$(UV) run python -m mergecraft.analyzers.catalog_docs
+
 PYTEST_SPLIT := $(if $(MERGECRAFT_TEST_SPLITS),--splits $(MERGECRAFT_TEST_SPLITS) --group $(MERGECRAFT_TEST_GROUP) --splitting-algorithm least_duration,)
 
 test: ## Unit tests
@@ -76,10 +79,24 @@ precommit: ## Run pre-commit on all files
 build: ## Build wheel/sdist
 	$(UV) build
 
-ci-static: lockcheck lint typecheck pyright build ## Static/build tier
+ci-static: lockcheck lint typecheck pyright catalog-check build ## Static/build tier
 	@echo "ci-static OK"
 
-ci: ci-static test security ## Full gate
+# Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
+CI_STEPS := lockcheck lint typecheck pyright catalog-check build security test
+
+ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
+	@echo $(CI_STEPS)
+
+ci-resume: ## Resumable gate: run ci steps in order, checkpoint passes, stop at first failure, resume on re-run
+	@chmod +x scripts/ci_resume.sh 2>/dev/null || true
+	@./scripts/ci_resume.sh
+
+ci-reset: ## Clear the ci-resume checkpoint (start the gate over)
+	@chmod +x scripts/ci_resume.sh 2>/dev/null || true
+	@./scripts/ci_resume.sh --reset
+
+ci: ci-static security test ## Full gate
 	@echo "ci OK"
 
 docker-build: ## Build action Docker image

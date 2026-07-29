@@ -1,0 +1,10 @@
+id: mcp-unpinned-npx
+kind: mcp
+severity: Major
+confidence: likely
+message: MCP server uses unpinned npx or uvx package invocation
+remediation: Pin MCP server package versions and avoid -y/--yes auto-install flags; use a lockfile or explicit version constraint.
+requires_verification: false
+match:
+  fields: [command, args, command_line]
+  pattern: '(?i)(npx\s+(-y|--yes)|\bnpx\b[^\n]*\s-y\b|\buvx\b[^\n]*\s(--from\s+)?[^\s@]+(?:\s|$)(?!@))'

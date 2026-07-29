@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package user.v1;
+
+// Base revision for buf breaking detection (catalog C4).
+message User {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+}
