@@ -244,6 +244,34 @@ def run_adapter(
     repo_root = repo_root.resolve()
     manifest = _manifest_by_id(tool_id)
 
+    if tool_id == "agentsec":
+        from mergecraft.analyzers.agentsec import scan_manifests
+
+        scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
+        if not scoped_files:
+            reason = "skipped agentsec: no changed files match detect globs"
+            logger.info("{}", reason)
+            return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
+
+        result = scan_manifests(
+            repo_root=repo_root,
+            changed_files=scoped_files,
+            tier=tier,
+        )
+        if result.skipped:
+            return AdapterRunResult(
+                findings=[],
+                skipped=True,
+                skip_reason=result.skip_reason,
+                version_note="ran mergeCraft native agent-security policy engine",
+                config_note="native YAML rules",
+            )
+        return AdapterRunResult(
+            findings=_normalize_paths(result.findings, repo_root=repo_root),
+            version_note="ran mergeCraft native agent-security policy engine",
+            config_note="native YAML rules",
+        )
+
     plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
     if plan.mode == "skip":
         logger.info("{}", plan.reason)

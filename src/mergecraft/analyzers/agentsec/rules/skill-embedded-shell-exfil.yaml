@@ -1,0 +1,10 @@
+id: skill-embedded-shell-exfil
+kind: skill
+severity: Major
+confidence: possible
+message: Skill instruction embeds shell commands that may exfiltrate repository data
+remediation: Move operational commands to version-controlled scripts; skills should describe intent, not execute shell one-liners against secrets.
+requires_verification: true
+match:
+  fields: [body, content]
+  pattern: '(?i)(first\s+run\s+`(curl|wget|bash|sh)\s|run\s+`(curl|wget).*(secret|\.env|id_rsa))'

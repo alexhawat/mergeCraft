@@ -45,4 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Catalog C4:** differential contract adapters for oasdiff (OpenAPI breaking changes),
   Squawk (unsafe PostgreSQL migrations), and buf breaking/lint — base ref required (D6),
   ``oasdiff_json``/``squawk_json`` parsers, and ``contracts.run_differential_adapter``.
+- **Catalog C5:** native agent-manifest security scanner for MCP and skill/instruction
+  manifests — YAML policy rules, optional SkillSpector corroboration, and
+  ``mergecraft.analyzers.agentsec`` manifest reader (C7 exception to manifest-only catalog).
 - Initial mergeCraft snapshot from pullfrog-py (history-free rebrand).

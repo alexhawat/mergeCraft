@@ -1,0 +1,10 @@
+id: skill-safety-gate-override
+kind: skill
+severity: Major
+confidence: likely
+message: Skill instruction disables safety gates or verification requirements
+remediation: Remove instructions that bypass safety checks; file reviewed exceptions under withdrawn findings when the bypass is intentional.
+requires_verification: true
+match:
+  fields: [body, content]
+  pattern: '(?i)(disable\s+(safety|verification)|never\s+verify|skip\s+(all\s+)?checks|do\s+not\s+(ask|confirm))'

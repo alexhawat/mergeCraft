@@ -83,6 +83,17 @@ def resolve_analyzer(
     managed_version: str | None = None,
 ) -> AnalyzerPlan:
     """Resolve D4's preference chain for one manifest."""
+    if manifest.id == "agentsec":
+        return AnalyzerPlan(
+            manifest_id=manifest.id,
+            mode="repo-native",
+            argv=("agentsec",),
+            cwd=repo_root,
+            timeout_s=manifest.timeout_s,
+            version_note="ran mergeCraft native agent-security policy engine",
+            config_note="native YAML rules",
+        )
+
     config_note: str | None = None
     if repo_has_tool is None:
         resolution, skip_reason = resolve_repo_tool(
