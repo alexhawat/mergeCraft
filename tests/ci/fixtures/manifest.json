@@ -1,0 +1,20 @@
+{
+  "captured_at": "2026-07-29",
+  "redaction": "Secrets redacted at capture (K8); canary planted in canary_in_ci_log.json",
+  "raw_logs": [
+    "sevn-pullfrog-attempt1-drift.zip",
+    "sevn-tests-shard4.zip",
+    "mergecraft-ci-make.zip",
+    "mergecraft-catalog-tests-shard1.zip",
+    "sevn-drift-gates.zip"
+  ],
+  "fixtures": [
+    "blame_maps_to_diff_hunk.json",
+    "blame_unrelated_to_pr.json",
+    "canary_in_ci_log.json",
+    "flaky_retry_pass.json",
+    "multi_job_single_root_cause.json",
+    "pre_existing_unrelated_failure.json",
+    "truncation_overflow.json"
+  ]
+}
