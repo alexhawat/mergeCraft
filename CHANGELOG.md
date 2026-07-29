@@ -39,4 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (``supply_chain.run_differential_scan``), TruffleHog secret scanning with rotation-first
   remediation and verify-off-by-default policy (``config.trufflehog_verify_enabled``),
   and ``dependency-vuln`` exclusive-group dedup hooks (D12).
+- **Catalog C3:** pattern-scanner backend with Semgrep (pip-provisioned), swappable
+  OpenGrep, and ast-grep structural rules — repo rules preferred, SARIF ingest scoped to
+  changed files, and Critical/Major taint hits gated on ``mergecraft-verifier`` (D11).
 - Initial mergeCraft snapshot from pullfrog-py (history-free rebrand).

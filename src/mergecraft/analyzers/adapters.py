@@ -5,6 +5,7 @@ from __future__ import annotations
 import platform
 import sys
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
@@ -20,8 +21,6 @@ from mergecraft.analyzers.sandbox import plan_sandbox
 from mergecraft.analyzers.trust import build_analyzer_env
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import AnalyzerManifest
     from mergecraft.analyzers.sandbox import SandboxContext
@@ -119,6 +118,25 @@ def _provision_managed_argv(
     manifest: AnalyzerManifest,
     repo_root: Path,
 ) -> AnalyzerPlan | None:
+    if manifest.id == "semgrep":
+        from mergecraft.analyzers.pattern import provision_pip_script
+
+        cache_dir = repo_root / ".mergecraft" / "analyzer-cache"
+        try:
+            script = provision_pip_script(
+                package="semgrep",
+                version=manifest.version,
+                script="semgrep",
+                cache_dir=cache_dir,
+            )
+        except OSError as exc:
+            logger.info("{}", exc)
+            return None
+        argv = list(plan.argv)
+        if argv and argv[0] == manifest.command[0]:
+            argv[0] = str(script)
+        return replace(plan, argv=tuple(argv))
+
     baked = resolve_baked_binary(manifest)
     if baked is not None:
         argv = list(plan.argv)
@@ -272,12 +290,32 @@ def run_adapter(
         changed_files=scoped_files,
         tier=tier,
     )
+
+    absolute_files = [
+        str((repo_root / rel).resolve()) if not Path(rel).is_absolute() else rel
+        for rel in scoped_files
+    ]
+    config_note = plan.config_note
+    if tool_id in {"semgrep", "opengrep", "ast-grep"}:
+        from mergecraft.analyzers.pattern import (
+            augment_pattern_env,
+            prepare_pattern_plan,
+            scope_pattern_findings,
+        )
+
+        plan, ruleset = prepare_pattern_plan(
+            plan,
+            manifest=manifest,
+            repo_root=repo_root,
+            file_paths=absolute_files,
+        )
+        config_note = plan.config_note or f"ruleset: {ruleset.name} ({ruleset.source})"
+        plan = replace(plan, env=augment_pattern_env(dict(plan.env), scratch_dir=scratch_dir))
+
     outcome = run_plan(plan, sandbox_context=sandbox_context)
     if not outcome.ran or outcome.output_path is None:
         reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
-
-    from pathlib import Path
 
     try:
         findings = parse_output_file(
@@ -308,10 +346,15 @@ def run_adapter(
     if tool_id == "trufflehog":
         findings = _finalize_trufflehog_findings(findings, repo_root=repo_root)
 
+    if tool_id in {"semgrep", "opengrep", "ast-grep"}:
+        from mergecraft.analyzers.pattern import scope_pattern_findings
+
+        findings = scope_pattern_findings(findings, changed_files=scoped_files)
+
     return AdapterRunResult(
         findings=_normalize_paths(findings, repo_root=repo_root),
         version_note=plan.version_note,
-        config_note=plan.config_note,
+        config_note=config_note,
     )
 
 

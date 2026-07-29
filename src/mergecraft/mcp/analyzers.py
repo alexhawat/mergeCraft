@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.analyzers.pipeline import run_analyzer_pipeline
 from mergecraft.config import load_repo_settings
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
@@ -40,6 +39,8 @@ def run_analyzers_tool(ctx: ToolContext):
 
         settings = load_repo_settings(root=repo_root, load_learnings_files=False).analyzers
         offline = ctx.payload.event.trigger == "unknown"
+        from mergecraft.analyzers.pipeline import run_analyzer_pipeline
+
         run_state = run_analyzer_pipeline(
             repo_root=repo_root,
             changed_files=changed,
@@ -166,6 +167,5 @@ def analyzer_findings_tool(ctx: ToolContext):
 
 __all__ = [
     "analyzer_findings_tool",
-    "run_analyzer_pipeline",
     "run_analyzers_tool",
 ]

@@ -11,6 +11,7 @@ from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.lockfile import lock_digest
 from mergecraft.analyzers.registry import detect_enabled
+from mergecraft.analyzers.review_gate import filter_for_review
 from mergecraft.analyzers.scope import (
     annotate_introduced_by_pr,
     base_comparison_available,
@@ -251,4 +252,4 @@ def analyzer_run_metadata(*, tool_id: str, result: object) -> dict[str, str]:
     return payload
 
 
-__all__ = ["analyzer_run_metadata", "run_analyzer_pipeline"]
+__all__ = ["analyzer_run_metadata", "filter_for_review", "run_analyzer_pipeline"]

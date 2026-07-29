@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 TrustTier = Literal["trusted", "untrusted"]
 
 
-def _raw_analyzers(repo_root: Path) -> dict[str, Any]:
+def raw_analyzers_block(repo_root: Path) -> dict[str, Any]:
+    """Return the raw ``analyzers`` mapping from repo config, if any."""
     path = _resolve_config_path(root=repo_root)
     if path is None:
         return {}
@@ -26,6 +27,10 @@ def _raw_analyzers(repo_root: Path) -> dict[str, Any]:
         return {}
     analyzers = loaded.get("analyzers")
     return analyzers if isinstance(analyzers, dict) else {}
+
+
+def _raw_analyzers(repo_root: Path) -> dict[str, Any]:
+    return raw_analyzers_block(repo_root)
 
 
 def trufflehog_verify_enabled(
@@ -49,4 +54,4 @@ def trufflehog_verify_enabled(
     return False
 
 
-__all__ = ["trufflehog_verify_enabled"]
+__all__ = ["raw_analyzers_block", "trufflehog_verify_enabled"]

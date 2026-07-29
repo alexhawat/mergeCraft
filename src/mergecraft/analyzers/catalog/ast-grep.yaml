@@ -1,0 +1,43 @@
+id: ast-grep
+category: security
+languages: ["python", "javascript", "typescript", "go", "java", "rust", "c", "cpp"]
+detect:
+  files:
+    - "*.py"
+    - "*.js"
+    - "*.ts"
+    - "*.tsx"
+    - "*.go"
+    - "*.java"
+    - "*.rs"
+    - "*.{c,h,cpp,hpp,cc,cxx}"
+command:
+  - ast-grep
+  - scan
+  - --format
+  - sarif
+  - "{files}"
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: auto
+version: "0.44.1"
+runtime: managed
+timeout_s: 300
+trust: untrusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://github.com/ast-grep/ast-grep/releases/download/0.44.1/app-x86_64-unknown-linux-gnu.zip
+    sha256: "611f9e5e76f2611ecea1a35dd3468ceedf600641a11224b80341d79c6ee7b9dd"
+  linux-arm64:
+    url: https://github.com/ast-grep/ast-grep/releases/download/0.44.1/app-aarch64-unknown-linux-gnu.zip
+    sha256: "077a4ab0c628154ef3cb79fecaf11dabca7f8a41f2c7260c022f263a52c1b021"
+  darwin-arm64:
+    url: https://github.com/ast-grep/ast-grep/releases/download/0.44.1/app-aarch64-apple-darwin.zip
+    sha256: "0a2fef273b0ff1238b8307add911714f92021d25b919fa3ec9b6b2e046bb29cf"
+network_allowlist: []
+exclusive_group: pattern-scanner
