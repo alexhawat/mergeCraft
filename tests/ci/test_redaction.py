@@ -16,7 +16,6 @@ def _paths_from_normalized(normalized: dict[str, object], redact: object) -> lis
     ]
 
 
-@pytest.mark.xfail(reason="green after K1: CI ingest redaction at normalization", strict=False)
 def test_canary_never_in_normalized_excerpt_or_fingerprint_input() -> None:
     normalize = import_module("mergecraft.ci.normalize")
     redact = import_analyzer_module("mergecraft.analyzers.redact")
@@ -26,7 +25,6 @@ def test_canary_never_in_normalized_excerpt_or_fingerprint_input() -> None:
         assert CANARY_SECRET not in material
 
 
-@pytest.mark.xfail(reason="green after K1: artifact paths redacted at ingest", strict=False)
 def test_canary_never_in_artifact_paths() -> None:
     normalize = import_module("mergecraft.ci.normalize")
     fixture = load_fixture("canary_in_ci_log.json")

@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CI pipeline intelligence (K1): ``PipelineProvider`` protocol with ``GitHubActionsProvider``
+  (delegates ``get_check_suite_logs`` behind the provider), honest CircleCI/GitLab/Azure stubs,
+  normalized failure shape with stable fingerprints, and ingest-time log redaction via
+  ``analyzers/redact.py``.
 - Review integration for analyzers: `run_analyzers` and `analyzer_findings` MCP tools,
   read-only `mergecraft-verifier` subagent for Critical/Major hits (D11), mechanical
   findings section and pre-merge Analyzers row, offline `diff-review` wiring, and

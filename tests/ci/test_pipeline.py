@@ -18,7 +18,6 @@ def _raw_job(fixture: dict[str, object]) -> dict[str, object]:
     return job
 
 
-@pytest.mark.xfail(reason="green after K1: provider normalization module", strict=False)
 def test_normalize_emits_full_shape_from_recorded_fixture() -> None:
     normalize = import_module("mergecraft.ci.normalize")
     fixture = load_fixture("multi_job_single_root_cause.json")
@@ -34,7 +33,6 @@ def test_normalize_emits_full_shape_from_recorded_fixture() -> None:
     assert normalized["failure_fingerprint"]
 
 
-@pytest.mark.xfail(reason="green after K1: failure fingerprint stability", strict=False)
 def test_same_failure_signature_yields_identical_fingerprint() -> None:
     normalize = import_module("mergecraft.ci.normalize")
     fixture = load_fixture("multi_job_single_root_cause.json")
@@ -43,7 +41,6 @@ def test_same_failure_signature_yields_identical_fingerprint() -> None:
     assert len(set(fps)) == 1
 
 
-@pytest.mark.xfail(reason="green after K1: fingerprint ignores run-specific noise", strict=False)
 def test_fingerprint_stable_across_run_ids() -> None:
     normalize = import_module("mergecraft.ci.normalize")
     fixture = load_fixture("multi_job_single_root_cause.json")
@@ -57,7 +54,6 @@ def test_fingerprint_stable_across_run_ids() -> None:
 
 
 @pytest.mark.parametrize("provider_id", STUB_PROVIDER_IDS)
-@pytest.mark.xfail(reason="green after K1: stub providers skip with named reason", strict=False)
 def test_stub_provider_skips_with_named_reason(provider_id: str) -> None:
     providers = import_module("mergecraft.ci.providers")
     provider = providers.get_provider(provider_id)
@@ -67,7 +63,6 @@ def test_stub_provider_skips_with_named_reason(provider_id: str) -> None:
     assert failures == []
 
 
-@pytest.mark.xfail(reason="green after K1: GitHubActionsProvider implements protocol", strict=False)
 def test_github_actions_provider_detects_github_context() -> None:
     providers = import_module("mergecraft.ci.providers")
     provider = providers.get_provider("github_actions")
@@ -75,7 +70,6 @@ def test_github_actions_provider_detects_github_context() -> None:
     assert provider.supports_retry_state is True
 
 
-@pytest.mark.xfail(reason="green after K1: empty-result stubs forbidden (K1)", strict=False)
 def test_stub_provider_never_returns_silent_empty_without_skip() -> None:
     providers = import_module("mergecraft.ci.providers")
     for provider_id in STUB_PROVIDER_IDS:
