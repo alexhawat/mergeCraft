@@ -133,6 +133,14 @@ def test_pr_summary_format_includes_mechanical_findings_section() -> None:
     assert "### 🔧 Mechanical findings" in PR_SUMMARY_FORMAT
 
 
+def test_review_modes_reference_ci_intelligence_tool() -> None:
+    for agent, prefix in (("claude", "mcp__mergecraft__"), ("opencode", "mergecraft_")):
+        for name in ("Review", "IncrementalReview"):
+            prompt = next(m for m in compute_modes(agent) if m.name == name).prompt or ""
+            assert f"{prefix}analyze_ci_failures" in prompt, (agent, name)
+            assert "preMergeSummary" in prompt, (agent, name)
+
+
 def test_review_modes_reference_analyzer_tools() -> None:
     for agent, prefix in (("claude", "mcp__mergecraft__"), ("opencode", "mergecraft_")):
         for name in ("Review", "IncrementalReview"):

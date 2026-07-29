@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Thermos T.1: wire C2 supply-chain CVE delta through ``run_adapter``; extract shared
+- Wire K3 CI intelligence to the `analyze_ci_failures` MCP tool — fetches check-suite logs,
+  clusters failures, and returns review-ready `section`, `preMergeSummary`, `comments`, and
+  `stats`; Review/IncrementalReview prompts call the tool instead of manual log clustering.
   ``execution.py`` orchestration; register ``buf_native`` parser; gate ``verified_only``
   findings via ``filter_for_review``; require detect-glob match for ``default_enabled``
   tools; skip managed provisioning when scoped files are empty; harden scratch path writes,

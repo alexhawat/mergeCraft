@@ -30,20 +30,56 @@ def _ci_finding(path: str, line: int, message: str) -> object:
 
 
 def test_ci_failures_section_lists_clustered_root_causes() -> None:
-    review_ci = import_module("mergecraft.ci.review")
-    cluster = import_module("mergecraft.ci.cluster")
-    normalize = import_module("mergecraft.ci.normalize")
+    intelligence = import_module("mergecraft.ci.intelligence")
     fixture = load_fixture("multi_job_single_root_cause.json")
-    normalized = [normalize.normalize_failure(job) for job in fixture["jobs"]]
-    clustered = cluster.cluster_failures(normalized)
-    section = review_ci.render_ci_failures_section(clustered)
+    payload = intelligence.intelligence_from_failures(
+        fixture["jobs"],
+        pr_diff_paths=["tests/analyzers/test_adapters_supply_chain.py"],
+    )
+    section = payload["section"]
     assert CI_SECTION_HEADING in section
     assert "Verify (tests" in section
-    assert (
-        "flaky" in section.lower()
-        or "root cause" in section.lower()
-        or "cluster" in section.lower()
+    assert "**Flaky verdict:**" in section
+    assert "**Blame verdict:**" in section
+    assert payload["stats"]["clusterCount"] == 1
+    assert payload["stats"]["failureCount"] == len(fixture["jobs"])
+
+
+def test_analyze_ci_failures_orchestrator_path_renders_verdict_lines() -> None:
+    intelligence = import_module("mergecraft.ci.intelligence")
+    unrelated = load_fixture("pre_existing_unrelated_failure.json")
+    payload = intelligence.intelligence_from_failures(
+        unrelated["jobs"],
+        pr_diff_paths=unrelated["pr_diff_paths"],
+        base_branch_status=unrelated["base_branch"]["same_fingerprint_conclusion"],
     )
+    section = payload["section"]
+    assert "**Flaky verdict:**" in section
+    assert "**Blame verdict:** probably_not_this_pr" in section
+    assert "probably not this pr" in section.lower()
+    assert payload["preMergeSummary"]
+    assert payload["stats"]["prAttributedCount"] == 0
+
+
+def test_analyze_ci_failures_end_to_end_from_raw_jobs() -> None:
+    review_ci = import_module("mergecraft.ci.review")
+    intelligence = import_module("mergecraft.ci.intelligence")
+    fixture = load_fixture("blame_maps_to_diff_hunk.json")
+    reports, stats, overflow = review_ci.analyze_ci_failures(
+        [fixture["job"]],
+        pr_diff_paths=fixture["pr_diff_paths"],
+    )
+    payload = intelligence.build_ci_intelligence_payload(
+        reports,
+        stats,
+        overflow,
+        raw_failures=[fixture["job"]],
+    )
+    assert stats.cluster_count == 1
+    assert stats.pr_attributed_count == 1
+    assert overflow == 0
+    assert "**Blame verdict:** caused_by_pr" in payload["section"]
+    assert len(payload["comments"]) == 1
 
 
 def test_ci_finding_clusters_with_analyzer_on_same_line() -> None:
