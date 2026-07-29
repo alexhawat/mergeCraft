@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Thermos T.1: wire C2 supply-chain CVE delta through ``run_adapter``; extract shared
+- Wire K3 CI intelligence to the `analyze_ci_failures` MCP tool — fetches check-suite logs,
+  clusters failures, and returns review-ready `section`, `preMergeSummary`, `comments`, and
+  `stats`; Review/IncrementalReview prompts call the tool instead of manual log clustering.
   ``execution.py`` orchestration; register ``buf_native`` parser; gate ``verified_only``
   findings via ``filter_for_review``; require detect-glob match for ``default_enabled``
   tools; skip managed provisioning when scoped files are empty; harden scratch path writes,
@@ -35,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CI pipeline intelligence (K1): ``PipelineProvider`` protocol with ``GitHubActionsProvider``
+  (delegates ``get_check_suite_logs`` behind the provider), honest CircleCI/GitLab/Azure stubs,
+  normalized failure shape with stable fingerprints, and ingest-time log redaction via
+  ``analyzers/redact.py``.
+- CI pipeline intelligence (K2): root-cause clustering, flaky/pre-existing detection,
+  failure-to-hunk blame, explicit truncation notices, and verification routing for
+  PR-attributed CI findings.
+- CI review integration (K3): ``### 🚨 CI failures`` section with clustered root causes,
+  flaky/blame verdicts, pre-merge CI row, inline fix suggestions for contained hunks, and
+  ``REVIEW-CHECKS.md`` CI section.
 - Review integration for analyzers: `run_analyzers` and `analyzer_findings` MCP tools,
   read-only `mergecraft-verifier` subagent for Critical/Major hits (D11), mechanical
   findings section and pre-merge Analyzers row, offline `diff-review` wiring, and

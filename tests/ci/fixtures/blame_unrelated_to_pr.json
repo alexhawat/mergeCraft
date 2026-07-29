@@ -1,0 +1,24 @@
+{
+  "fixture_id": "blame_unrelated_to_pr",
+  "source_run": {
+    "repo": "sevn-bot/sevn",
+    "run_id": 30367621815
+  },
+  "job": {
+    "job_id": 90302842661,
+    "job_name": "Verify (drift gates)",
+    "step_name": "Infra + docs + skills + parity tiers",
+    "command": "make ci-infra",
+    "exit_code": 2,
+    "log_excerpt": "2026-07-28T14:17:55.2757174Z ok -- validation done\n2026-07-28T14:17:55.5871714Z ok -- validation done\n2026-07-28T14:17:55.8892111Z ok -- validation done\n2026-07-28T14:17:56.1976260Z ok -- validation done\n2026-07-28T14:17:56.5063023Z ok -- validation done\n2026-07-28T14:17:56.8178413Z ok -- validation done\n2026-07-28T14:17:57.1333071Z ok -- validation done\n2026-07-28T14:17:57.4359919Z ok -- validation done\n2026-07-28T14:17:57.4654972Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run python scripts/check_infra_parity.py\n2026-07-28T14:17:58.0381684Z ok -- validation done\n2026-07-28T14:17:58.0749840Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run python scripts/export_triage_schema.py\n2026-07-28T14:18:03.3740043Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run python scripts/check_mission_control_schema.py\n2026-07-28T14:18:08.1206491Z \u001b[32m2026-07-28 14:18:08.120\u001b[0m | \u001b[1mINFO    \u001b[0m | \u001b[36msevn.gateway.http_server\u001b[0m:\u001b[36m_mount_mission_control_spa\u001b[0m:\u001b[36m385\u001b[0m - \u001b[1mMission Control SPA mounted at /mission from /home/runner/work/sevn/sevn/src/sevn/ui/spa/dashboard\u001b[0m\n2026-07-28T14:18:08.4091888Z \u001b[32m2026-07-28 14:18:08.408\u001b[0m | \u001b[1mINFO    \u001b[0m | \u001b[36msevn.gateway.http_server\u001b[0m:\u001b[36m_mount_mission_control_spa\u001b[0m:\u001b[36m385\u001b[0m - \u001b[1mMission Control SPA mounted at /mission from /home/runner/work/sevn/sevn/src/sevn/ui/spa/dashboard\u001b[0m\n2026-07-28T14:18:08.4430978Z mission-control-schema-check: 0 violation(s), 3 warning(s) -> reports/mission-control-schema-gap.json\n2026-07-28T14:18:09.2988529Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run python scripts/check_git_guards.py\n2026-07-28T14:18:09.3757427Z check-git-guards: ok\n2026-07-28T14:18:09.3829268Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run python scripts/generate_agent_context_manifest.py\n2026-07-28T14:18:10.5703731Z agent-context-manifest-generate: golden in sync -> infra/agent-context.manifest.json\n2026-07-28T14:18:10.6689545Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run python scripts/check_telegram_menu.py\n2026-07-28T14:18:14.0099419Z telegram-menu-check: 0 violation(s); registry 292/303 implemented -> reports/telegram-menu-gap.json\n2026-07-28T14:18:14.4639528Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run python scripts/check_telegram_menu_docs.py\n2026-07-28T14:18:17.8637869Z telegram-menu-docs-check: 0 violation(s), 26 warning(s) -> reports/telegram-menu-docs-gap.json\n2026-07-28T14:18:18.3062320Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run python scripts/check_cli_help_docs.py\n2026-07-28T14:18:21.6050786Z cli-help-docs-check ok: 45 root commands, 7 guides\n2026-07-28T14:18:22.0553417Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run sevn readme check --repo .\n2026-07-28T14:18:28.1415966Z warning: root: contains PLACEHOLDER asset label (TODO)\n2026-07-28T14:18:28.1417212Z readme check: ok\n2026-07-28T14:18:28.6339381Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run python scripts/gen_subagents_chart.py --check\n2026-07-28T14:18:28.7061978Z subagents chart OK: /home/runner/work/sevn/sevn/about-sevn.bot/assets/subagents-chart.svg\n2026-07-28T14:18:28.7136065Z /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run python scripts/build_about_site.py --check\n2026-07-28T14:18:32.3145848Z about-site-check: ok\n2026-07-28T14:18:32.7721507Z PYTHONPATH=. /opt/hostedtoolcache/uv/0.6.9/x86_64/uv run sevn about-docs check --repo .\n2026-07-28T14:18:39.6477641Z spec-25-cicd-full: stale fingerprint (run about-docs extract)\n2026-07-28T14:18:40.1148031Z make: *** [Makefile:335: about-docs-check] Error 1\n2026-07-28T14:18:40.1165677Z ##[error]Process completed with exit code 2.\n2026-07-28T14:18:40.1260872Z Post job cleanup.\n2026-07-28T14:18:40.1399652Z Post job cleanup.\n2026-07-28T14:18:40.2256562Z [command]/usr/bin/git version\n2026-07-28T14:18:40.2326329Z git version 2.54.0",
+    "artifacts": [],
+    "retry_state": null,
+    "error_signature": "make: *** [ci-infra] Error 2",
+    "failure_fingerprint": "e1c374bac6c4083f"
+  },
+  "pr_diff_paths": [
+    ".github/workflows/ci.yml"
+  ],
+  "expected_verdict": "probably_not_this_pr",
+  "base_branch_status": "failure"
+}

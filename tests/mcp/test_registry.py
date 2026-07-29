@@ -42,6 +42,7 @@ EXPECTED_CORE_TOOLS = {
     "list_pull_request_reviews",
     "resolve_review_thread",
     "get_check_suite_logs",
+    "analyze_ci_failures",
     "add_labels",
     "remove_labels",
     "git",
