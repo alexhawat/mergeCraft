@@ -1,0 +1,30 @@
+id: buf
+category: contract
+languages: []
+detect:
+  files:
+    - "proto/**/*.proto"
+    - "**/*.proto"
+command:
+  - buf
+  - breaking
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: auto
+version: "1.50.0"
+runtime: managed
+timeout_s: 180
+trust: untrusted
+severity_map:
+  breaking: Major
+  lint: Minor
+provenance:
+  linux-amd64:
+    url: https://github.com/bufbuild/buf/releases/download/v1.50.0/buf-Linux-x86_64
+    sha256: "154ea883ce098eac4fa106ff9ee4e4964bb97f809dd8ec9c34a432b466ce1494"
+  darwin-arm64:
+    url: https://github.com/bufbuild/buf/releases/download/v1.50.0/buf-Darwin-arm64
+    sha256: "4a215517d0bcb37c47b9178e2668d7651a7fef9a482cef482227ad09796cdfc0"
+network_allowlist: []
+exclusive_group: null

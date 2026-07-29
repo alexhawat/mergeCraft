@@ -27,7 +27,9 @@ _PARSER_NATIVE_SEVERITIES: dict[str, frozenset[str]] = {
     "eslint_json": frozenset({"error", "warning"}),
     "mypy_json": frozenset({"error", "warning", "note"}),
     "pyright_json": frozenset({"error", "warning", "information"}),
+    "oasdiff_json": frozenset({"breaking", "warning", "info"}),
     "osv_json": frozenset({"critical", "high", "medium", "low"}),
+    "squawk_json": frozenset({"error", "warning"}),
     "trivy_json": frozenset({"critical", "high", "medium", "low", "unknown"}),
     "trufflehog_jsonl": frozenset({"verified", "unverified"}),
 }

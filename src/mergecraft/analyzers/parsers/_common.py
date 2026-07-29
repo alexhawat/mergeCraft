@@ -18,6 +18,8 @@ _MANIFEST_CATEGORY_TO_TAXONOMY: dict[str, str] = {
     "security": "Security & Privacy",
     "vuln": "Security & Privacy",
     "secrets": "Security & Privacy",
+    "contract": "Functional Correctness",
+    "migration": "Data Integrity & Atomicity",
 }
 
 _CONFIDENCE_ALIASES: dict[str, str] = {

@@ -42,4 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Catalog C3:** pattern-scanner backend with Semgrep (pip-provisioned), swappable
   OpenGrep, and ast-grep structural rules — repo rules preferred, SARIF ingest scoped to
   changed files, and Critical/Major taint hits gated on ``mergecraft-verifier`` (D11).
+- **Catalog C4:** differential contract adapters for oasdiff (OpenAPI breaking changes),
+  Squawk (unsafe PostgreSQL migrations), and buf breaking/lint — base ref required (D6),
+  ``oasdiff_json``/``squawk_json`` parsers, and ``contracts.run_differential_adapter``.
 - Initial mergeCraft snapshot from pullfrog-py (history-free rebrand).

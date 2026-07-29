@@ -1,0 +1,36 @@
+id: squawk
+category: migration
+languages: []
+detect:
+  files:
+    - "db/migrations/**/*.sql"
+    - "db/migrations/*.sql"
+    - "migrations/**/*.sql"
+    - "migrations/*.sql"
+    - "alembic/versions/**/*.sql"
+    - "alembic/versions/*.sql"
+command:
+  - squawk
+  - --reporter=json
+  - --assume-in-transaction
+  - "{files}"
+scope: diff
+parser: squawk_json
+supports_fix: false
+default_enabled: auto
+version: "2.61.0"
+runtime: managed
+timeout_s: 120
+trust: untrusted
+severity_map:
+  error: Major
+  warning: Minor
+provenance:
+  linux-amd64:
+    url: https://github.com/sbdchd/squawk/releases/download/v2.61.0/squawk-linux-x64
+    sha256: "35e0f95573f0fb59fe6b68bcb84a0b1d3bd0937d84c51432b3978bd61e23b645"
+  darwin-arm64:
+    url: https://github.com/sbdchd/squawk/releases/download/v2.61.0/squawk-darwin-arm64
+    sha256: "81d6906c6e957057fb52d5fabebdbc8b5f4dad81c16e66cb9383c8f492c4e1d8"
+network_allowlist: []
+exclusive_group: null

@@ -1,0 +1,35 @@
+id: oasdiff
+category: contract
+languages: []
+detect:
+  files:
+    - "openapi/**/*.{yaml,yml,json}"
+    - "openapi/*.{yaml,yml,json}"
+    - "openapi*.{yaml,yml,json}"
+    - "**/openapi.{yaml,yml,json}"
+command:
+  - oasdiff
+  - breaking
+  - --format
+  - json
+scope: diff
+parser: oasdiff_json
+supports_fix: false
+default_enabled: auto
+version: "1.26.1"
+runtime: managed
+timeout_s: 120
+trust: untrusted
+severity_map:
+  breaking: Major
+  warning: Minor
+  info: Trivial
+provenance:
+  linux-amd64:
+    url: https://github.com/oasdiff/oasdiff/releases/download/v1.26.1/oasdiff_1.26.1_linux_amd64.tar.gz
+    sha256: "ea0007fe536c7915785f754885d2afdb11352d6a14531950edf9d601a2baa674"
+  darwin-arm64:
+    url: https://github.com/oasdiff/oasdiff/releases/download/v1.26.1/oasdiff_1.26.1_darwin_all.tar.gz
+    sha256: "ac3f56e9b7f3c717355768bc6943b5b54461f43e5c87d1e20027e2209093d2aa"
+network_allowlist: []
+exclusive_group: null
