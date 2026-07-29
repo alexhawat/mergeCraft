@@ -105,7 +105,33 @@ Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif
 
 **Lockfile (D24):** `.mergecraft/analyzers.lock` records resolved tool id, version, source, and SHA256; the pre-merge **Analyzers** row echoes the digest.
 
-Implementation: [`src/mergecraft/mcp/analyzers.py`](src/mergecraft/mcp/analyzers.py), [`src/mergecraft/agents/verifier.py`](src/mergecraft/agents/verifier.py), [`src/mergecraft/review_checks.py`](src/mergecraft/review_checks.py) (repo gates).
+### CI pipeline intelligence (`get_check_suite_logs`)
+
+When CI failed on the PR head, mergeCraft reads GitHub Actions check-suite logs via `get_check_suite_logs` and normalizes failures behind `GitHubActionsProvider`.
+
+**What is read**
+
+- Failed workflow job/step names, exit codes, and redacted log excerpts
+- Retry attempt history and base-branch run fingerprints (when available)
+- PR diff paths for blame overlap
+
+**What is inferred**
+
+- Root-cause clustering by failure fingerprint (twelve shards from one broken import → one finding)
+- Flaky vs stable vs pre-existing classification from retry flips and base-branch evidence
+- PR attribution (`caused_by_pr` vs `probably_not_this_pr`) from diff overlap — never asserted without evidence
+- Truncation when more failures exist than the configured cap (default 3)
+
+**What is explicitly not claimed**
+
+- mergeCraft does not re-run CI, retry jobs, or push fix commits
+- Non-GitHub providers (CircleCI, GitLab, Azure) are honestly stubbed — no silent empty results
+- A failure outside the diff is **reported, not blamed** on the author
+- Flaky failures are named flaky rather than treated as the author's defect
+
+The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit; pushing a fix commit stays behind the existing `push` permission.
+
+Implementation: [`src/mergecraft/ci/review.py`](src/mergecraft/ci/review.py), [`src/mergecraft/ci/cluster.py`](src/mergecraft/ci/cluster.py), [`src/mergecraft/mcp/check_suite.py`](src/mergecraft/mcp/check_suite.py).
 
 ## 3. Pull request hygiene
 
@@ -117,6 +143,7 @@ Assertions about the pull request itself rather than its code. These always appe
 - **Scope** — does the diff do things neither the description nor a linked issue asked for? Out-of-scope paths get named.
 - **Mechanical gates** — the result from `run_static_checks` (repo gates).
 - **Analyzers** — the result from `run_analyzers` (catalog tools): how many ran, how many skipped (with reasons), lockfile digest.
+- **CI** — pipeline intelligence on failing check suites: failure count, cluster count, flaky count, PR-attributed count, and whether truncation occurred. Flaky or probably-not-this-PR failures are reported here, not blamed on the author.
 
 A flagged row here is fixed by editing the PR's title, body, or issue links — not its code — so these never also become inline comments. The one exception is a failing mechanical gate, which is a real code finding and is raised inline too.
 

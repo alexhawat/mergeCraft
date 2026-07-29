@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.review_taxonomy import finding_fingerprint
 from tests.analyzers.support import import_module as import_analyzer_module
 from tests.ci.support import (
@@ -20,7 +18,7 @@ def _ci_finding(path: str, line: int, message: str) -> object:
     return finding_mod.make_finding(
         tool="ci",
         rule_id="pytest-failure",
-        category="Reliability & Testing",
+        category="Stability & Availability",
         severity="Major",
         confidence="likely",
         message=message,
@@ -31,9 +29,6 @@ def _ci_finding(path: str, line: int, message: str) -> object:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after K3: CI failures section renders clustered causes", strict=False
-)
 def test_ci_failures_section_lists_clustered_root_causes() -> None:
     review_ci = import_module("mergecraft.ci.review")
     cluster = import_module("mergecraft.ci.cluster")
@@ -51,9 +46,6 @@ def test_ci_failures_section_lists_clustered_root_causes() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after K3: CI and analyzer findings merge on same line", strict=False
-)
 def test_ci_finding_clusters_with_analyzer_on_same_line() -> None:
     cluster = import_analyzer_module("mergecraft.analyzers.cluster")
     message = "import error in adapter module"
@@ -79,7 +71,6 @@ def test_ci_finding_clusters_with_analyzer_on_same_line() -> None:
     assert len(grouped[0].evidence) >= 2
 
 
-@pytest.mark.xfail(reason="green after K3: truncation count is visible (K5)", strict=False)
 def test_truncation_statement_when_failures_exceed_cap() -> None:
     review_ci = import_module("mergecraft.ci.review")
     fixture = load_fixture("truncation_overflow.json")
@@ -92,7 +83,6 @@ def test_truncation_statement_when_failures_exceed_cap() -> None:
     assert str(overflow) in section or "not analyzed" in section.lower()
 
 
-@pytest.mark.xfail(reason="green after K3: CI section respects D14 inline budget", strict=False)
 def test_ci_section_respects_inline_budget() -> None:
     review_ci = import_module("mergecraft.ci.review")
     budget = import_analyzer_module("mergecraft.analyzers.budget")

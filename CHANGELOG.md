@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (delegates ``get_check_suite_logs`` behind the provider), honest CircleCI/GitLab/Azure stubs,
   normalized failure shape with stable fingerprints, and ingest-time log redaction via
   ``analyzers/redact.py``.
+- CI pipeline intelligence (K2): root-cause clustering, flaky/pre-existing detection,
+  failure-to-hunk blame, explicit truncation notices, and verification routing for
+  PR-attributed CI findings.
+- CI review integration (K3): ``### 🚨 CI failures`` section with clustered root causes,
+  flaky/blame verdicts, pre-merge CI row, inline fix suggestions for contained hunks, and
+  ``REVIEW-CHECKS.md`` CI section.
 - Review integration for analyzers: `run_analyzers` and `analyzer_findings` MCP tools,
   read-only `mergecraft-verifier` subagent for Critical/Major hits (D11), mechanical
   findings section and pre-merge Analyzers row, offline `diff-review` wiring, and

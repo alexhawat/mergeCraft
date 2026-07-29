@@ -107,6 +107,7 @@ def test_pre_merge_checks_table_present() -> None:
         "| Linked issues |",
         "| Scope |",
         "| Analyzers |",
+        "| CI |",
     ):
         assert row in PR_SUMMARY_FORMAT, row
 
@@ -114,6 +115,18 @@ def test_pre_merge_checks_table_present() -> None:
 def test_pr_summary_format_names_every_confidence_value() -> None:
     for value in FINDING_CONFIDENCES:
         assert value in PR_SUMMARY_FORMAT, value
+
+
+def test_pr_summary_format_includes_ci_failures_section() -> None:
+    assert "### 🚨 CI failures" in PR_SUMMARY_FORMAT
+    assert "reported, not blamed" in PR_SUMMARY_FORMAT
+
+
+def test_review_modes_ci_failures_reported_not_blamed() -> None:
+    for name in ("Review", "IncrementalReview"):
+        prompt = next(m for m in modes if m.name == name).prompt or ""
+        assert "reported, not blamed" in prompt, name
+        assert "### 🚨 CI failures" in prompt, name
 
 
 def test_pr_summary_format_includes_mechanical_findings_section() -> None:

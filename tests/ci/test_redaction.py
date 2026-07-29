@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from tests.analyzers.support import import_module as import_analyzer_module
 from tests.ci.support import CANARY_SECRET, import_module, load_fixture
 
@@ -35,7 +33,6 @@ def test_canary_never_in_artifact_paths() -> None:
     assert CANARY_SECRET not in joined
 
 
-@pytest.mark.xfail(reason="green after K3: review comment body stays clean", strict=False)
 def test_canary_never_in_review_comment_body() -> None:
     review_ci = import_module("mergecraft.ci.review")
     normalize = import_module("mergecraft.ci.normalize")
