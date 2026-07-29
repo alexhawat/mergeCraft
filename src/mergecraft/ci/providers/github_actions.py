@@ -11,12 +11,11 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.ci.log_excerpt import analyze_log
+from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation
 
 if TYPE_CHECKING:
     from mergecraft.ci.types import ProviderContext, RawFailure
     from mergecraft.mcp.context import ToolContext
-
-_DEFAULT_TRUNCATION_CAP = 3
 
 
 class GitHubActionsProvider:
@@ -37,7 +36,7 @@ class GitHubActionsProvider:
         ctx: ToolContext,
         *,
         check_suite_id: int,
-        truncation_cap: int = _DEFAULT_TRUNCATION_CAP,
+        truncation_cap: int = DEFAULT_TRUNCATION_CAP,
     ) -> dict[str, Any]:
         """Download failed workflow logs for a check suite (legacy MCP contract)."""
         payload = await ctx.github.get(
@@ -60,7 +59,8 @@ class GitHubActionsProvider:
         temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
         Path(temp).mkdir(parents=True, exist_ok=True)
         jobs_out: list[dict[str, Any]] = []
-        for run in failed[:truncation_cap]:
+        selected, _overflow = apply_truncation(failed, cap=truncation_cap)
+        for run in selected:
             run_id = run["id"]
             try:
                 response = await ctx.github._client.get(

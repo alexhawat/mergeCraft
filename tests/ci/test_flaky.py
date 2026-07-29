@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
 from tests.ci.support import import_module, load_fixture
 
 
-@pytest.mark.xfail(reason="green after K2: retry outcome flip classifies flaky", strict=False)
 def test_same_fingerprint_different_retry_outcomes_is_flaky() -> None:
     flaky_mod = import_module("mergecraft.ci.flaky")
     fixture = load_fixture("flaky_retry_pass.json")
@@ -21,9 +18,6 @@ def test_same_fingerprint_different_retry_outcomes_is_flaky() -> None:
     assert verdict.evidence
 
 
-@pytest.mark.xfail(
-    reason="green after K2: base branch failure is pre-existing not PR fault", strict=False
-)
 def test_base_branch_same_fingerprint_is_pre_existing() -> None:
     flaky_mod = import_module("mergecraft.ci.flaky")
     pre_existing = load_fixture("pre_existing_unrelated_failure.json")
@@ -44,7 +38,6 @@ def test_base_branch_same_fingerprint_is_pre_existing() -> None:
     assert verdict.blame_on_author is False
 
 
-@pytest.mark.xfail(reason="green after K2: flaky verdict cites base branch evidence", strict=False)
 def test_flaky_verdict_names_base_branch_not_author() -> None:
     flaky_mod = import_module("mergecraft.ci.flaky")
     fixture = load_fixture("flaky_retry_pass.json")

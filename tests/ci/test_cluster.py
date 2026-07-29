@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
 from tests.ci.support import import_module, load_fixture
 
 
-@pytest.mark.xfail(reason="green after K2: twelve jobs one root cause", strict=False)
 def test_twelve_jobs_one_broken_import_produce_one_finding() -> None:
     cluster = import_module("mergecraft.ci.cluster")
     normalize = import_module("mergecraft.ci.normalize")
@@ -22,7 +19,6 @@ def test_twelve_jobs_one_broken_import_produce_one_finding() -> None:
     assert len(job_names) >= 1
 
 
-@pytest.mark.xfail(reason="green after K2: distinct root causes stay distinct", strict=False)
 def test_distinct_signatures_remain_separate_findings() -> None:
     cluster = import_module("mergecraft.ci.cluster")
     normalize = import_module("mergecraft.ci.normalize")
@@ -36,7 +32,6 @@ def test_distinct_signatures_remain_separate_findings() -> None:
     assert len(findings) == 2
 
 
-@pytest.mark.xfail(reason="green after K2: cluster keys on fingerprint then command", strict=False)
 def test_cluster_groups_by_fingerprint_before_command() -> None:
     cluster = import_module("mergecraft.ci.cluster")
     normalize = import_module("mergecraft.ci.normalize")
