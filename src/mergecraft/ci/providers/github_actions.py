@@ -59,7 +59,7 @@ class GitHubActionsProvider:
         temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
         Path(temp).mkdir(parents=True, exist_ok=True)
         jobs_out: list[dict[str, Any]] = []
-        selected, _overflow = apply_truncation(failed, cap=truncation_cap)
+        selected, overflow = apply_truncation(failed, cap=truncation_cap)
         for run in selected:
             run_id = run["id"]
             try:
@@ -96,7 +96,13 @@ class GitHubActionsProvider:
                     "full_log_path": full_path,
                 }
             )
-        return {"check_suite_id": check_suite_id, "jobs": jobs_out, "count": len(jobs_out)}
+        return {
+            "check_suite_id": check_suite_id,
+            "jobs": jobs_out,
+            "count": len(jobs_out),
+            "total_failed_runs": len(failed),
+            "overflow": overflow,
+        }
 
     @staticmethod
     def _decode_log_archive(raw: bytes | bytearray) -> str:

@@ -110,12 +110,12 @@ def test_ci_finding_clusters_with_analyzer_on_same_line() -> None:
 def test_truncation_statement_when_failures_exceed_cap() -> None:
     review_ci = import_module("mergecraft.ci.review")
     fixture = load_fixture("truncation_overflow.json")
+    overflow = len(fixture["failed_runs"]) - DEFAULT_TRUNCATION_CAP
     section = review_ci.render_ci_failures_section(
         [],
-        raw_failures=fixture["failed_runs"],
-        truncation_cap=DEFAULT_TRUNCATION_CAP,
+        raw_failures=fixture["failed_runs"][:DEFAULT_TRUNCATION_CAP],
+        overflow=overflow,
     )
-    overflow = len(fixture["failed_runs"]) - DEFAULT_TRUNCATION_CAP
     assert str(overflow) in section or "not analyzed" in section.lower()
 
 

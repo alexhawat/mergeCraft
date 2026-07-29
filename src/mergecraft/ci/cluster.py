@@ -15,8 +15,8 @@ _CI_TOOL = "ci"
 
 
 def cluster_key(item: NormalizedFailure) -> str:
-    """Cluster by failure fingerprint, then shared command."""
-    return f"{item['failure_fingerprint']}:{item['command'].strip()}"
+    """Cluster by failure fingerprint (command is already in the hash input)."""
+    return item["failure_fingerprint"]
 
 
 def _failure_message(item: NormalizedFailure) -> str:

@@ -105,9 +105,9 @@ Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif
 
 **Lockfile (D24):** `.mergecraft/analyzers.lock` records resolved tool id, version, source, and SHA256; the pre-merge **Analyzers** row echoes the digest.
 
-### CI pipeline intelligence (`get_check_suite_logs`)
+### CI pipeline intelligence (`analyze_ci_failures`)
 
-When CI failed on the PR head, mergeCraft reads GitHub Actions check-suite logs via `get_check_suite_logs` and normalizes failures behind `GitHubActionsProvider`.
+When CI failed on the PR head, mergeCraft calls `analyze_ci_failures`, which wraps `get_check_suite_logs` and normalizes failures behind `GitHubActionsProvider`.
 
 **What is read**
 
@@ -131,7 +131,7 @@ When CI failed on the PR head, mergeCraft reads GitHub Actions check-suite logs 
 
 The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit; pushing a fix commit stays behind the existing `push` permission.
 
-Implementation: [`src/mergecraft/ci/review.py`](src/mergecraft/ci/review.py), [`src/mergecraft/ci/cluster.py`](src/mergecraft/ci/cluster.py), [`src/mergecraft/mcp/check_suite.py`](src/mergecraft/mcp/check_suite.py).
+Implementation: [`src/mergecraft/ci/intelligence.py`](src/mergecraft/ci/intelligence.py), [`src/mergecraft/ci/review.py`](src/mergecraft/ci/review.py), [`src/mergecraft/ci/cluster.py`](src/mergecraft/ci/cluster.py), [`src/mergecraft/mcp/ci_intelligence.py`](src/mergecraft/mcp/ci_intelligence.py), [`src/mergecraft/mcp/check_suite.py`](src/mergecraft/mcp/check_suite.py).
 
 ## 3. Pull request hygiene
 

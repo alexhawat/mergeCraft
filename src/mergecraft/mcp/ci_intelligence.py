@@ -67,7 +67,11 @@ def analyze_ci_failures_tool(ctx: ToolContext):
                 },
                 "retry_attempts": {
                     "type": "object",
-                    "description": "Optional retry attempts keyed by failure fingerprint.",
+                    "description": (
+                        "Optional retry attempts keyed by failure fingerprint. Fingerprints "
+                        "come from a prior analyze_ci_failures response (clusters[].fingerprint) "
+                        "or from normalizing fixture failures; omit when retry history is unknown."
+                    ),
                 },
                 "fix_suggestions": {
                     "type": "object",

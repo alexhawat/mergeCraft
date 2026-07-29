@@ -71,12 +71,18 @@ def analyze_ci_failures(
     retry_attempts: dict[str, list[dict[str, Any]]] | None = None,
     base_branch_status: str | None = None,
     truncation_cap: int = DEFAULT_TRUNCATION_CAP,
+    total_failure_count: int | None = None,
+    truncation_overflow: int | None = None,
 ) -> tuple[list[CiClusterReport], CiReviewStats, int]:
     """Cluster, classify, and blame normalized/raw failures for review publishing."""
     from mergecraft.ci.cluster import cluster_failures
     from mergecraft.ci.normalize import normalize_failure
 
-    analyzed_raw, overflow = apply_truncation(failures, cap=truncation_cap)
+    if truncation_overflow is not None:
+        analyzed_raw = failures
+        overflow = truncation_overflow
+    else:
+        analyzed_raw, overflow = apply_truncation(failures, cap=truncation_cap)
     normalized = [normalize_failure(item) for item in analyzed_raw]
     clustered = cluster_failures(normalized)
 
@@ -126,7 +132,7 @@ def analyze_ci_failures(
         )
 
     stats = CiReviewStats(
-        failure_count=len(failures),
+        failure_count=total_failure_count if total_failure_count is not None else len(failures),
         cluster_count=len(reports),
         flaky_count=flaky_count,
         pr_attributed_count=pr_attributed_count,
@@ -152,7 +158,7 @@ def render_ci_failures_section(
     clustered: list[Finding],
     *,
     raw_failures: list[dict[str, Any]] | None = None,
-    truncation_cap: int = DEFAULT_TRUNCATION_CAP,
+    overflow: int = 0,
     flaky_verdicts: dict[str, FlakyVerdict] | None = None,
     blame_verdicts: dict[str, BlameVerdict] | None = None,
     failure_excerpts: dict[str, str] | None = None,
@@ -161,10 +167,6 @@ def render_ci_failures_section(
     flaky_verdicts = flaky_verdicts or {}
     blame_verdicts = blame_verdicts or {}
     failure_excerpts = failure_excerpts or {}
-
-    overflow = 0
-    if raw_failures is not None:
-        _, overflow = apply_truncation(raw_failures, cap=truncation_cap)
 
     if not clustered and overflow <= 0:
         return ""
@@ -202,10 +204,9 @@ def render_ci_failures_section(
                 ]
             )
     elif raw_failures is not None:
-        analyzed_count = min(len(raw_failures), truncation_cap)
-        lines.append(
-            f"CI reported {len(raw_failures)} failing runs; {analyzed_count} analyzed (cap)."
-        )
+        analyzed_count = len(raw_failures)
+        total_runs = analyzed_count + overflow
+        lines.append(f"CI reported {total_runs} failing runs; {analyzed_count} analyzed (cap).")
         lines.append("")
 
     notice = truncation_notice(overflow=overflow)

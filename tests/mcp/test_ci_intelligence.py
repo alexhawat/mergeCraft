@@ -103,6 +103,33 @@ async def test_analyze_ci_failures_tool_returns_review_payload(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+async def test_analyze_ci_failures_tool_reports_provider_truncation(tmp_path: Path) -> None:
+    fixture = load_fixture("truncation_overflow.json")
+    log_text = str(fixture["failed_runs"][0]["log_excerpt"])
+    runs = [
+        {
+            "id": 90000000000 + index,
+            "name": run["job_name"],
+            "conclusion": "failure",
+            "html_url": f"http://x/{index}",
+        }
+        for index, run in enumerate(fixture["failed_runs"])
+    ]
+    ctx = _ctx(tmp_path, _FakeGitHub(runs=runs, log_bytes=_log_zip(log_text)))
+    tool = analyze_ci_failures_tool(ctx)
+
+    raw = await tool.execute({"check_suite_id": 42})
+    payload = json.loads(raw.content[0]["text"])
+
+    overflow = len(fixture["failed_runs"]) - 3
+    assert payload["available"] is True
+    assert payload["stats"]["truncated"] is True
+    assert payload["stats"]["overflow"] == overflow
+    assert payload["stats"]["failureCount"] == len(fixture["failed_runs"])
+    assert str(overflow) in payload["section"] or "not analyzed" in payload["section"].lower()
+
+
+@pytest.mark.asyncio
 async def test_analyze_ci_failures_tool_no_failures(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, _FakeGitHub(runs=[], log_bytes=b""))
     tool = analyze_ci_failures_tool(ctx)

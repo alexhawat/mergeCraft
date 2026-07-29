@@ -65,7 +65,7 @@ def normalize_failure(raw: dict[str, Any]) -> NormalizedFailure:
     typed = cast("RawFailure", raw)
     job = str(raw.get("job_name") or raw.get("job") or "unknown")
     step = str(raw.get("step_name") or raw.get("step") or "unknown")
-    command = str(raw.get("command") or "")
+    command = redact_secrets(str(raw.get("command") or ""))
     exit_code = _coerce_exit_code(typed)
 
     source_excerpt = str(raw.get("log_excerpt") or raw.get("log_text") or "")

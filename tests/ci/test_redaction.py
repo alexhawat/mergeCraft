@@ -40,3 +40,18 @@ def test_canary_never_in_review_comment_body() -> None:
     normalized = normalize.normalize_failure(fixture)
     body = review_ci.render_ci_failure_comment([normalized])
     assert CANARY_SECRET not in body
+
+
+def test_canary_never_in_normalized_command_or_cluster_message() -> None:
+    cluster = import_module("mergecraft.ci.cluster")
+    normalize = import_module("mergecraft.ci.normalize")
+    review_ci = import_module("mergecraft.ci.review")
+    fixture = load_fixture("canary_in_ci_log.json")
+    fixture = dict(fixture)
+    fixture["command"] = f"pytest tests/foo --token={CANARY_SECRET}"
+    normalized = normalize.normalize_failure(fixture)
+    assert CANARY_SECRET not in normalized["command"]
+    finding = cluster.failure_to_finding(normalized)
+    assert CANARY_SECRET not in finding.message
+    reports, _, _ = review_ci.analyze_ci_failures([fixture])
+    assert CANARY_SECRET not in reports[0].finding.message

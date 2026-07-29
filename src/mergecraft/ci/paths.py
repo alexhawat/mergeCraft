@@ -4,16 +4,32 @@ from __future__ import annotations
 
 import re
 
-_FAILED_TEST = re.compile(
-    r"FAILED\s+((?:tests|src|scripts)/[^\s:]+\.py(?:::[\w_]+)?)",
-    re.I,
+_SOURCE_EXTENSIONS = (
+    "py",
+    "js",
+    "ts",
+    "tsx",
+    "jsx",
+    "go",
+    "rs",
+    "java",
+    "rb",
+    "php",
+    "md",
+    "yaml",
+    "yml",
+    "json",
+    "toml",
+    "cs",
+    "kt",
+    "swift",
 )
-_ERROR_FILE = re.compile(
-    r"^\s*((?:tests|src|scripts)/[^\s:]+\.py):\d+:",
-    re.M,
-)
-_SPEC_PATH = re.compile(r"(about-sevn\.bot/specs/[^\s]+\.md)", re.I)
-_SCRIPT_PATH = re.compile(r"(scripts/[^\s]+\.py)", re.I)
+_EXT_GROUP = "|".join(_SOURCE_EXTENSIONS)
+_REPO_PATH = rf"(?:[\w.-]+/)+[\w.-]+\.(?:{_EXT_GROUP})"
+
+_FAILED_TEST = re.compile(rf"FAILED\s+({_REPO_PATH}(?:::[\w_]+)?)", re.I)
+_PYTEST_NODE = re.compile(rf"\b({_REPO_PATH}(?:::[\w_]+)?)\s", re.I)
+_TRACE_FILE = re.compile(rf"^\s*({_REPO_PATH}):(\d+):", re.M | re.I)
 
 
 def extract_failure_paths(log_excerpt: str) -> list[str]:
@@ -23,17 +39,17 @@ def extract_failure_paths(log_excerpt: str) -> list[str]:
 
     def _add(raw: str) -> None:
         path = raw.split("::", 1)[0]
+        if path.startswith(("/", "\\")) or "://" in path:
+            return
         if path not in seen:
             seen.add(path)
             paths.append(path)
 
     for match in _FAILED_TEST.finditer(log_excerpt):
         _add(match.group(1))
-    for match in _ERROR_FILE.finditer(log_excerpt):
+    for match in _TRACE_FILE.finditer(log_excerpt):
         _add(match.group(1))
-    for match in _SPEC_PATH.finditer(log_excerpt):
-        _add(match.group(1))
-    for match in _SCRIPT_PATH.finditer(log_excerpt):
+    for match in _PYTEST_NODE.finditer(log_excerpt):
         _add(match.group(1))
     return paths
 

@@ -70,6 +70,7 @@ def build_ci_intelligence_payload(
     section = render_ci_failures_section(
         clustered,
         raw_failures=raw_failures,
+        overflow=overflow,
         flaky_verdicts=flaky_verdicts,
         blame_verdicts=blame_verdicts,
         failure_excerpts=failure_excerpts,
@@ -147,6 +148,8 @@ async def run_ci_intelligence(
 
     suite = await _GITHUB_PROVIDER.fetch_check_suite_logs(ctx, check_suite_id=check_suite_id)
     jobs = suite.get("jobs") or []
+    provider_overflow = int(suite.get("overflow") or 0)
+    total_failed_runs = int(suite.get("total_failed_runs") or len(jobs))
     if not jobs:
         reason = str(suite.get("message") or "no failed workflow runs found for this check suite")
         return {
@@ -173,6 +176,8 @@ async def run_ci_intelligence(
         base_branch_runs=base_branch_runs,
         retry_attempts=retry_attempts,
         base_branch_status=base_branch_status,
+        total_failure_count=total_failed_runs,
+        truncation_overflow=provider_overflow,
     )
     payload = build_ci_intelligence_payload(
         reports,
