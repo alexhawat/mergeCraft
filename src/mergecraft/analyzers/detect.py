@@ -267,8 +267,10 @@ def _ensure_npm_dependencies(repo_root: Path, *, tool: str) -> str | None:
     bin_path = node_modules / ".bin" / tool
     if eslint_entry.is_file() or bin_path.is_file():
         return None
-    if node_modules.is_dir():
-        shutil.rmtree(node_modules)
+    if not _dependency_mentions_tool(repo_root, tool) and not _script_mentions_tool(
+        repo_root, tool
+    ):
+        return f"skipped {tool}: not declared in package.json"
     if shutil.which("npm") is None:
         return f"skipped {tool}: npm unavailable to install repo dependencies"
     logger.info("installing npm dependencies for repo-native {}", tool)

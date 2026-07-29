@@ -184,6 +184,8 @@ def probe_capabilities() -> SandboxCapabilities:
 
 def _required_for_untrusted(caps: SandboxCapabilities) -> list[str]:
     missing: list[str] = []
+    if not caps.pid_namespace:
+        missing.append("pid namespace")
     if not caps.network_namespace:
         missing.append("network namespace")
     if not caps.read_only_bind:

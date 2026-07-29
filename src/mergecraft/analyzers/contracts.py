@@ -2,32 +2,36 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
-from mergecraft.analyzers.adapters import AdapterRunResult, _finalize_plan, _provision_managed_argv
-from mergecraft.analyzers.finding import Finding, make_finding
-from mergecraft.analyzers.parsers._common import map_confidence, taxonomy_category
+from mergecraft.analyzers.adapters import AdapterRunResult
+from mergecraft.analyzers.execution import provision_resolved_plan, run_argv
+from mergecraft.analyzers.parsers.buf_native import parse_buf_breaking_json, parse_buf_lint_json
 from mergecraft.analyzers.parsers.oasdiff_json import parse_oasdiff_json
 from mergecraft.analyzers.parsers.squawk_json import parse_squawk_json
-from mergecraft.analyzers.registry import filter_changed_files_for_manifest, load_catalog
+from mergecraft.analyzers.paths import safe_repo_relative_path
+from mergecraft.analyzers.registry import filter_changed_files_for_manifest, get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, resolve_analyzer
-from mergecraft.analyzers.run import run_plan
-from mergecraft.analyzers.sandbox import plan_sandbox
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
 TrustTier = Literal["trusted", "untrusted"]
 
 DIFFERENTIAL_CONTRACT_TOOLS: frozenset[str] = frozenset({"oasdiff", "squawk", "buf"})
 _FIXTURE_BASE_REF = "fixture-base"
-_BUF_LINT_FINDING_CAP = 3
+
+
+def _missing_base_skip_reason(tool_id: str, base_ref: str | None) -> str:
+    if not base_ref:
+        return f"skipped {tool_id}: base ref unavailable (D6)"
+    return f"skipped {tool_id}: base ref {base_ref!r} unavailable (D6)"
+
 
 _SQUAWK_RULE_PRIORITY: tuple[str, ...] = (
     "ban-concurrent-index-creation-in-transaction",
@@ -38,20 +42,6 @@ _SQUAWK_RULE_PRIORITY: tuple[str, ...] = (
     "prefer-robust-stmts",
     "transaction-nesting",
 )
-
-
-def _manifest_by_id(tool_id: str) -> AnalyzerManifest:
-    for manifest in load_catalog():
-        if manifest.id == tool_id:
-            return manifest
-    msg = f"unknown analyzer id: {tool_id!r}"
-    raise KeyError(msg)
-
-
-def _missing_base_skip_reason(tool_id: str, base_ref: str | None) -> str:
-    if not base_ref:
-        return f"skipped {tool_id}: base ref unavailable (D6)"
-    return f"skipped {tool_id}: base ref {base_ref!r} unavailable (D6)"
 
 
 def _fixture_base_rel(head_path: str) -> str:
@@ -70,6 +60,8 @@ def _git_ref_available(repo_root: Path, base_ref: str) -> bool:
 
 
 def _resolve_base_file(repo_root: Path, head_path: str, base_ref: str) -> Path | None:
+    if safe_repo_relative_path(repo_root, head_path) is None:
+        return None
     if base_ref == _FIXTURE_BASE_REF:
         candidate = repo_root / _fixture_base_rel(head_path)
         return candidate if candidate.is_file() else None
@@ -83,8 +75,10 @@ def _resolve_base_file(repo_root: Path, head_path: str, base_ref: str) -> Path |
     )
     if result.returncode != 0:
         return None
-    scratch = repo_root / ".mergecraft" / "analyzer-scratch" / "base" / base_ref
-    dest = scratch / head_path
+    scratch_rel = f".mergecraft/analyzer-scratch/base/{base_ref}/{head_path}"
+    dest = safe_repo_relative_path(repo_root, scratch_rel)
+    if dest is None:
+        return None
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(result.stdout, encoding="utf-8")
     return dest
@@ -96,16 +90,7 @@ def _provision_plan(
     manifest: AnalyzerManifest,
     repo_root: Path,
 ) -> AnalyzerPlan | None:
-    if plan.mode == "skip":
-        return None
-    if plan.mode == "managed":
-        provisioned = _provision_managed_argv(plan, manifest=manifest, repo_root=repo_root)
-        if provisioned is None:
-            return None
-        plan = provisioned
-    if not plan.argv:
-        return None
-    return plan
+    return provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
 
 
 def _run_argv(
@@ -117,39 +102,14 @@ def _run_argv(
     tier: TrustTier,
     scratch_suffix: str = "",
 ) -> tuple[str | None, str | None]:
-    plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
-    provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
-    if provisioned is None:
-        return None, plan.reason or f"skipped {manifest.id}: provisioning failed"
-
-    finalized = _finalize_plan(
-        replace(provisioned, argv=argv, cwd=repo_root),
+    return run_argv(
         manifest=manifest,
         repo_root=repo_root,
+        argv=argv,
         changed_files=changed_files,
         tier=tier,
+        scratch_suffix=scratch_suffix,
     )
-    scratch = repo_root / ".mergecraft" / "analyzer-scratch" / f"{manifest.id}{scratch_suffix}"
-    scratch.mkdir(parents=True, exist_ok=True)
-    sandbox = plan_sandbox(
-        manifest=manifest,
-        tier=tier,
-        repo_root=repo_root,
-        scratch_dir=scratch,
-    )
-    if not sandbox.can_run:
-        return None, sandbox.skip_reason
-
-    outcome = run_plan(finalized, sandbox_context=sandbox.context)
-    if not outcome.ran:
-        return None, outcome.output or f"skipped {manifest.id}: analyzer did not run"
-
-    raw = (
-        Path(outcome.output_path).read_text(encoding="utf-8")
-        if outcome.output_path
-        else outcome.output
-    )
-    return raw, None
 
 
 def _collapse_squawk_findings(findings: list[Finding]) -> list[Finding]:
@@ -171,105 +131,6 @@ def _collapse_squawk_findings(findings: list[Finding]) -> list[Finding]:
             break
         collapsed.append(chosen)
     return collapsed
-
-
-def _parse_buf_breaking_json(
-    raw: str,
-    *,
-    manifest: AnalyzerManifest,
-    repo_root: Path,
-    head_path: str,
-) -> list[Finding]:
-    category = taxonomy_category(manifest)
-    findings: list[Finding] = []
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            item = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(item, dict):
-            continue
-        violation_type = str(item.get("type") or "")
-        if violation_type == "FILE_NO_DELETE":
-            continue
-        path = str(item.get("path") or head_path)
-        try:
-            rel = Path(path).resolve().relative_to(repo_root.resolve()).as_posix()
-        except ValueError:
-            rel = Path(path).name
-        message = str(item.get("message") or violation_type)
-        if "deleted" in message.casefold():
-            message = message.replace("deleted", "removed").replace("Deleted", "removed")
-        if "break" not in message.casefold() and "removed" not in message.casefold():
-            message = f"Breaking change: {message}"
-        line_no = int(item.get("start_line") or 1)
-        end_line = int(item.get("end_line") or line_no)
-        findings.append(
-            make_finding(
-                tool=manifest.id,
-                rule_id=violation_type or "buf-breaking",
-                category=category,
-                severity=manifest.severity_map.get("breaking", "Major"),
-                confidence=map_confidence(None),
-                message=message,
-                path=rel,
-                start_line=max(line_no, 1),
-                end_line=max(end_line, 1),
-                source="analyzer",
-                introduced_by_pr="true",
-            )
-        )
-    return findings
-
-
-def _parse_buf_lint_json(
-    raw: str,
-    *,
-    manifest: AnalyzerManifest,
-    repo_root: Path,
-) -> list[Finding]:
-    category = taxonomy_category(manifest)
-    findings: list[Finding] = []
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            item = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(item, dict):
-            continue
-        path = str(item.get("path") or "unknown")
-        try:
-            rel = Path(path).resolve().relative_to(repo_root.resolve()).as_posix()
-        except ValueError:
-            rel = Path(path).name
-        rule_id = str(item.get("type") or "buf-lint")
-        message = str(item.get("message") or rule_id)
-        line_no = int(item.get("start_line") or 1)
-        end_line = int(item.get("end_line") or line_no)
-        findings.append(
-            make_finding(
-                tool=manifest.id,
-                rule_id=rule_id,
-                category=category,
-                severity=manifest.severity_map.get("lint", "Minor"),
-                confidence=map_confidence(None),
-                message=message,
-                path=rel,
-                start_line=max(line_no, 1),
-                end_line=max(end_line, 1),
-                source="analyzer",
-                introduced_by_pr="true",
-            )
-        )
-        if len(findings) >= _BUF_LINT_FINDING_CAP:
-            break
-    return findings
 
 
 def _run_oasdiff(
@@ -443,7 +304,7 @@ def _run_buf(
             return AdapterRunResult(findings=[], skipped=True, skip_reason=err)
         if raw:
             findings.extend(
-                _parse_buf_breaking_json(
+                parse_buf_breaking_json(
                     raw,
                     manifest=manifest,
                     repo_root=repo_root,
@@ -461,7 +322,7 @@ def _run_buf(
             scratch_suffix=f"-lint-{Path(head_rel).stem}",
         )
         if lint_raw:
-            findings.extend(_parse_buf_lint_json(lint_raw, manifest=manifest, repo_root=repo_root))
+            findings.extend(parse_buf_lint_json(lint_raw, manifest=manifest, repo_root=repo_root))
 
     return AdapterRunResult(findings=findings)
 
@@ -487,7 +348,7 @@ def run_differential_adapter(
             skip_reason=_missing_base_skip_reason(tool_id, base_ref),
         )
 
-    manifest = _manifest_by_id(tool_id)
+    manifest = get_manifest(tool_id)
     if tool_id == "oasdiff":
         return _run_oasdiff(
             manifest=manifest,

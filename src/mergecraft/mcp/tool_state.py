@@ -115,6 +115,7 @@ class AnalyzerRunState:
     mechanical_section: str | None = None
     pre_merge_summary: str | None = None
     lockfile_digest: str | None = None
+    verified_ids: set[str] = field(default_factory=set)
 
 
 @dataclass(slots=True)

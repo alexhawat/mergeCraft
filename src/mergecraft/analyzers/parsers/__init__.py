@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from mergecraft.analyzers.finding import Finding
+from mergecraft.analyzers.parsers.buf_native import parse_buf_native
 from mergecraft.analyzers.parsers.eslint_json import parse_eslint_json
 from mergecraft.analyzers.parsers.mypy_json import parse_mypy_json
 from mergecraft.analyzers.parsers.oasdiff_json import parse_oasdiff_json
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 ParserFn = Callable[..., list[Finding]]
 
 _PARSERS: dict[str, ParserFn] = {
+    "buf_native": parse_buf_native,
     "sarif": parse_sarif,
     "ruff_json": parse_ruff_json,
     "eslint_json": parse_eslint_json,

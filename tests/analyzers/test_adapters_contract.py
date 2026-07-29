@@ -14,14 +14,21 @@ def _catalog_ids() -> set[str]:
     return {manifest.id for manifest in registry.load_catalog()}
 
 
-def _run_differential(tool_id: str, repo_root: Path, *, base_ref: str | None):
-    contracts = import_module("mergecraft.analyzers.contracts")
-    return contracts.run_differential_adapter(
+def _run(
+    tool_id: str,
+    repo_root: Path,
+    changed_files: list[str] | None = None,
+    *,
+    tier: str = "trusted",
+    base_ref: str | None = "fixture-base",
+):
+    adapters = import_module("mergecraft.analyzers.adapters")
+    return adapters.run_adapter(
         tool_id=tool_id,
         repo_root=repo_root,
-        changed_files=list(C4_CONTRACT_TOOLS.values()),
+        changed_files=changed_files or list(C4_CONTRACT_TOOLS.values()),
+        tier=tier,
         base_ref=base_ref,
-        tier="trusted",
     )
 
 
@@ -30,7 +37,7 @@ def test_breaking_api_change_reported_once(tool_id: str, adapter_fixture_repo: P
     if tool_id not in _catalog_ids():
         pytest.fail(f"{tool_id} manifest missing from catalog")
 
-    result = _run_differential(tool_id, adapter_fixture_repo, base_ref="fixture-base")
+    result = _run(tool_id, adapter_fixture_repo)
     assert not result.skipped, result.skip_reason
     breaking = [
         f
@@ -45,11 +52,7 @@ def test_unsafe_migration_reported_once(adapter_fixture_repo: Path) -> None:
     if tool_id not in _catalog_ids():
         pytest.fail(f"{tool_id} manifest missing from catalog")
 
-    result = _run_differential(
-        tool_id,
-        adapter_fixture_repo,
-        base_ref="fixture-base",
-    )
+    result = _run(tool_id, adapter_fixture_repo)
     assert not result.skipped, result.skip_reason
     migration_path = C4_CONTRACT_TOOLS[tool_id]
     unsafe = [f for f in result.findings if f.path == migration_path]
@@ -61,7 +64,14 @@ def test_skips_with_reason_when_base_ref_missing(tool_id: str, adapter_fixture_r
     if tool_id not in _catalog_ids():
         pytest.fail(f"{tool_id} manifest missing from catalog")
 
-    result = _run_differential(tool_id, adapter_fixture_repo, base_ref=None)
+    contracts = import_module("mergecraft.analyzers.contracts")
+    result = contracts.run_differential_adapter(
+        tool_id=tool_id,
+        repo_root=adapter_fixture_repo,
+        changed_files=list(C4_CONTRACT_TOOLS.values()),
+        base_ref=None,
+        tier="trusted",
+    )
     assert result.skipped is True
     assert result.skip_reason, f"{tool_id} must skip with a named reason when base ref missing (D6)"
     reason = result.skip_reason.casefold()

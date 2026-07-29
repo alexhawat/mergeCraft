@@ -139,11 +139,19 @@ def analyzer_findings_tool(ctx: ToolContext):
         findings = list(run_state.findings)
         inline = list(run_state.inline)
         if omit_pending_major:
-            findings = [row for row in findings if row.get("severity") not in {"Critical", "Major"}]
+            from mergecraft.analyzers.finding import Finding
+            from mergecraft.analyzers.review_gate import filter_for_review
+
+            finding_objs = [Finding.model_validate(row) for row in findings]
+            published = filter_for_review(
+                finding_objs,
+                verified_ids=set(run_state.verified_ids),
+                require_verification=True,
+            )
+            published_fps = {item.fingerprint for item in published}
+            findings = [row for row in findings if row.get("fingerprint") in published_fps]
             inline = [
-                row
-                for row in inline
-                if row.get("finding", {}).get("severity") not in {"Critical", "Major"}
+                row for row in inline if row.get("finding", {}).get("fingerprint") in published_fps
             ]
         return {
             "available": True,

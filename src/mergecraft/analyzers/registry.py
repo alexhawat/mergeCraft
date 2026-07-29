@@ -71,6 +71,15 @@ def _detect_matches(manifest: AnalyzerManifest, changed_files: list[str]) -> boo
     return any(_matches_detect_patterns(changed, patterns) for changed in changed_files)
 
 
+def get_manifest(tool_id: str) -> AnalyzerManifest:
+    """Return one catalog manifest by id."""
+    for manifest in load_catalog():
+        if manifest.id == tool_id:
+            return manifest
+    msg = f"unknown analyzer id: {tool_id!r}"
+    raise KeyError(msg)
+
+
 def _settings_enabled(
     manifest: AnalyzerManifest,
     settings: dict[str, Any],
@@ -82,8 +91,6 @@ def _settings_enabled(
         return bool(override["enabled"])
     if analyzers.get("enabled") is False:
         return False
-    if manifest.default_enabled is True:
-        return True
     if manifest.default_enabled is False:
         return False
     return None
@@ -170,13 +177,14 @@ def detect_enabled(
         enabled = _settings_enabled(manifest, settings)
         if enabled is False:
             continue
-        if enabled is None:
-            if not _detect_matches(manifest, changed_files):
-                continue
-            if manifest.default_enabled == "auto" and not _auto_manifest_enabled(
-                manifest, repo_root
-            ):
-                continue
+        if not _detect_matches(manifest, changed_files):
+            continue
+        if (
+            enabled is None
+            and manifest.default_enabled == "auto"
+            and not _auto_manifest_enabled(manifest, repo_root)
+        ):
+            continue
         candidates.append(manifest)
 
     grouped: dict[str, list[AnalyzerManifest]] = {}
@@ -240,6 +248,7 @@ def warn_unknown_analyzer_overrides(settings: dict[str, Any]) -> None:
 __all__ = [
     "detect_enabled",
     "filter_changed_files_for_manifest",
+    "get_manifest",
     "known_analyzer_ids",
     "load_catalog",
     "select_enabled_analyzers",

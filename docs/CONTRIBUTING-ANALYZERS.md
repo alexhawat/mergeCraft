@@ -58,6 +58,8 @@ severities (`Critical`, `Major`, `Minor`, `Trivial`). CI calls `severity_map_com
 | `oasdiff_json`, `squawk_json` parsers (C4.5) | Differential contract output shapes — only new parsers in the catalog plan. |
 | `agentsec/*` manifest readers (C5) | MCP/skill manifests are inputs, not linter stdout; rules stay YAML (C7). |
 | `catalog_docs.py`, `cli/analyzers_cmd.py` (C6) | Contributor path and enforced catalog documentation. |
+| `execution.py`, `adapters.py`, `contracts.py`, `supply_chain.py` (C2/C4) | Category adapter routing and shared run orchestration — not per-tool bespoke parsers. |
+| `detect.py`, `pattern.py` (C1/C3) | Repo-native tool resolution and pattern-scanner backend selection. |
 | `declared_unavailable` + `resolve_analyzer` skip (C6.4) | Honest skip for compile-db and non-Linux tools without fake runs. |
 
 ## Declared-but-not-runnable (C6.4)

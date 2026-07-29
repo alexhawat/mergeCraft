@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING, Literal
 from loguru import logger
 
 from mergecraft.analyzers.adapters import AdapterRunResult
+from mergecraft.analyzers.execution import finalize_plan, provision_resolved_plan
 from mergecraft.analyzers.parsers import parse_output
 from mergecraft.analyzers.parsers.osv_json import _severity_rank
-from mergecraft.analyzers.registry import load_catalog
+from mergecraft.analyzers.paths import safe_repo_relative_path
+from mergecraft.analyzers.registry import get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv
 from mergecraft.analyzers.run import run_plan
 from mergecraft.analyzers.sandbox import plan_sandbox
@@ -26,22 +28,16 @@ if TYPE_CHECKING:
 
 TrustTier = Literal["trusted", "untrusted"]
 
+SUPPLY_CHAIN_DIFF_TOOLS: frozenset[str] = frozenset({"osv-scanner", "trivy"})
+
 _PKG_LINE_RE = re.compile(r"^\s*(?:[a-zA-Z0-9_.-]+\s*=\s*)?([a-zA-Z0-9_.-]+)")
-
-
-def _manifest_by_id(tool_id: str) -> AnalyzerManifest:
-    for manifest in load_catalog():
-        if manifest.id == tool_id:
-            return manifest
-    msg = f"unknown analyzer id: {tool_id!r}"
-    raise KeyError(msg)
 
 
 def _snapshot_dir(repo_root: Path, files: list[str]) -> Path:
     root = Path(tempfile.mkdtemp(prefix="mergecraft-supply-"))
     for rel in files:
-        src = repo_root / rel
-        if not src.is_file():
+        src = safe_repo_relative_path(repo_root, rel)
+        if src is None or not src.is_file():
             continue
         dest = root / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -55,18 +51,20 @@ def _provision_plan(
     manifest: AnalyzerManifest,
     repo_root: Path,
 ) -> AnalyzerPlan | None:
-    from mergecraft.analyzers.adapters import _provision_managed_argv
+    return provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
 
-    if plan.mode == "skip":
-        return None
-    if plan.mode == "managed":
-        provisioned = _provision_managed_argv(plan, manifest=manifest, repo_root=repo_root)
-        if provisioned is None:
-            return None
-        plan = provisioned
-    if not plan.argv:
-        return None
-    return plan
+
+def _resolve_base_file_rel(repo_root: Path, head_rel: str, base_ref: str | None) -> str | None:
+    from mergecraft.analyzers.contracts import _fixture_base_rel, _resolve_base_file
+
+    companion = _fixture_base_rel(head_rel)
+    if (repo_root / companion).is_file():
+        return companion
+    if base_ref:
+        resolved = _resolve_base_file(repo_root, head_rel, base_ref)
+        if resolved is not None and resolved.is_file():
+            return str(resolved.relative_to(repo_root.resolve()))
+    return None
 
 
 def _is_direct_dependency(manifest_path: Path, package_name: str) -> bool:
@@ -207,11 +205,10 @@ def _run_osv_scan(
     if provisioned is None:
         return [], plan.reason or f"skipped {manifest.id}: provisioning failed"
 
-    existing = [rel for rel in lockfiles if (repo_root / rel).is_file()]
+    existing = [rel for rel in lockfiles if safe_repo_relative_path(repo_root, rel) is not None]
     argv = expand_analyzer_argv(provisioned.argv, repo_root=repo_root, changed_files=existing)
-    from mergecraft.analyzers.adapters import _finalize_plan
 
-    finalized = _finalize_plan(
+    finalized = finalize_plan(
         replace(provisioned, argv=argv, cwd=repo_root),
         manifest=manifest,
         repo_root=repo_root,
@@ -298,9 +295,7 @@ def _run_trivy_fs(
 
     binary = provisioned.argv[0] if provisioned.argv else "trivy"
     argv = (binary, "fs", "--format", "json", "--scanners", "vuln", str(repo_root))
-    from mergecraft.analyzers.adapters import _finalize_plan
-
-    finalized = _finalize_plan(
+    finalized = finalize_plan(
         replace(provisioned, argv=argv, cwd=repo_root),
         manifest=manifest,
         repo_root=repo_root,
@@ -378,9 +373,7 @@ def _run_trivy_config(
         return [], None
     binary = provisioned.argv[0] if provisioned.argv else "trivy"
     argv = (binary, "config", "--format", "json", *paths)
-    from mergecraft.analyzers.adapters import _finalize_plan
-
-    finalized = _finalize_plan(
+    finalized = finalize_plan(
         replace(provisioned, argv=argv, cwd=repo_root),
         manifest=manifest,
         repo_root=repo_root,
@@ -460,7 +453,7 @@ def run_differential_scan(
 ) -> AdapterRunResult:
     """Run base and head supply-chain scans; publish only the CVE delta (C2.1/C2.2)."""
     repo_root = repo_root.resolve()
-    manifest = _manifest_by_id(tool_id)
+    manifest = get_manifest(tool_id)
 
     if not head_files:
         return AdapterRunResult(
@@ -493,4 +486,42 @@ def run_differential_scan(
     return AdapterRunResult(findings=_delta_findings(base_findings, head_findings))
 
 
-__all__ = ["run_differential_scan"]
+def run_supply_chain_adapter(
+    *,
+    tool_id: str,
+    repo_root: Path,
+    changed_files: list[str],
+    base_ref: str | None,
+    tier: TrustTier = "trusted",
+) -> AdapterRunResult:
+    """Run differential supply-chain adapters through the production adapter path (C2)."""
+    from mergecraft.analyzers.registry import filter_changed_files_for_manifest
+
+    if tool_id not in SUPPLY_CHAIN_DIFF_TOOLS:
+        msg = f"unsupported supply-chain tool: {tool_id}"
+        raise ValueError(msg)
+
+    manifest = get_manifest(tool_id)
+    scoped = filter_changed_files_for_manifest(manifest, changed_files)
+    if not scoped:
+        return AdapterRunResult(
+            findings=[],
+            skipped=True,
+            skip_reason=f"skipped {tool_id}: no changed files match detect globs",
+        )
+
+    base_files: list[str] = []
+    for head_rel in scoped:
+        base_rel = _resolve_base_file_rel(repo_root, head_rel, base_ref)
+        base_files.append(base_rel or head_rel)
+
+    return run_differential_scan(
+        tool_id=tool_id,
+        repo_root=repo_root,
+        head_files=scoped,
+        base_files=base_files,
+        tier=tier,
+    )
+
+
+__all__ = ["SUPPLY_CHAIN_DIFF_TOOLS", "run_differential_scan", "run_supply_chain_adapter"]

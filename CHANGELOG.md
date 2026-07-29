@@ -9,9 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Thermos T.1: wire C2 supply-chain CVE delta through ``run_adapter``; extract shared
+  ``execution.py`` orchestration; register ``buf_native`` parser; gate ``verified_only``
+  findings via ``filter_for_review``; require detect-glob match for ``default_enabled``
+  tools; skip managed provisioning when scoped files are empty; harden scratch path writes,
+  pinned download redirects, sandbox pid-namespace requirement, and ``RLIMIT_AS`` memory cap.
 - Wire D7 sandbox planning into adapter execution; fail-closed trust tier when the GitHub
   event is missing; redact analyzer artifacts before persist; apply repo ``inlineBudget``;
   extract canonical ``analyzers/pipeline.py``; use baked binaries when ``MERGECRAFT_ANALYZERS=full``.
+
+### Changed
+
+- **Migration:** repos not ready for the analyzer catalog should set
+  ``analyzers.enabled: false`` in ``.mergecraft/config.yaml`` or ``INPUT_ANALYZERS: off`` in
+  the GitHub Action until they opt in.
 
 ### Added
 

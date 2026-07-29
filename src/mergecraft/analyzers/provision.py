@@ -70,8 +70,18 @@ def _download_pinned_url(url: str, dest: Path) -> None:
     if parsed.scheme != "https" or not parsed.netloc:
         msg = f"refusing unpinned or non-https download url: {url!r}"
         raise ProvisionError(msg)
+    initial_host = parsed.netloc.casefold()
+    allowed_hosts = {
+        initial_host,
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+    }
     try:
         with httpx.stream("GET", url, follow_redirects=True, timeout=120.0) as response:
+            final_host = (response.url.host or "").casefold()
+            if response.url.scheme != "https" or final_host not in allowed_hosts:
+                msg = f"refusing redirect from pinned download url {url!r} to {response.url!r}"
+                raise ProvisionError(msg)
             response.raise_for_status()
             with dest.open("wb") as handle:
                 for chunk in response.iter_bytes():
@@ -285,11 +295,19 @@ def resolve_baked_binary(manifest: AnalyzerManifest) -> Path | None:
     return None
 
 
+def platform_key() -> str:
+    """Return the managed-binary platform key for this host."""
+    from mergecraft.analyzers.execution import provision_platform_key
+
+    return provision_platform_key()
+
+
 __all__ = [
     "BAKED_ANALYZER_ROOT",
     "ProvisionError",
     "ProvisionResult",
     "fetch_unpinned",
+    "platform_key",
     "provision_managed_binary",
     "resolve_baked_binary",
     "resolve_with_lock",
