@@ -124,6 +124,7 @@ async def test_static_checks_declared_but_cannot_run_when_shell_disabled(
         static_checks=[StaticCheckConfig(name="lint", command="python -c 'pass'")],
         enabled=True,
     )
+    ctx.trust_tier = "untrusted"
     payload = await _run(ctx)
     assert payload["ran"] is False
     reason = str(payload.get("reason", "")).lower()
@@ -131,3 +132,21 @@ async def test_static_checks_declared_but_cannot_run_when_shell_disabled(
     status_values = {str(check.get("status", "")).lower() for check in checks}
     assert "declared but cannot run" in reason or "declared-but-cannot-run" in status_values
     assert checks, "configured gates must appear as explicit unavailable rows"
+
+
+@pytest.mark.asyncio
+async def test_static_checks_run_when_shell_disabled_but_trusted_offline(
+    tmp_path: Path,
+) -> None:
+    """Offline diff-review keeps shell disabled for security but still runs declared gates."""
+    ctx = _ctx(
+        tmp_path,
+        shell="disabled",
+        static_checks=[StaticCheckConfig(name="lint", command="python -c 'pass'")],
+        enabled=True,
+    )
+    ctx.trust_tier = "trusted"
+    payload = await _run(ctx)
+    assert payload["ran"] is True
+    assert payload["allPassed"] is True
+    assert payload["checks"][0]["status"] == "passed"

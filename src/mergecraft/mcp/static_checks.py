@@ -49,7 +49,7 @@ def run_static_checks_tool(ctx: ToolContext):
                 "checks": [],
             }
 
-        if ctx.payload.shell == "disabled" and ctx.static_checks:
+        if ctx.payload.shell == "disabled" and ctx.static_checks and ctx.trust_tier != "trusted":
             reason = (
                 "staticChecks are configured but cannot run in this environment — "
                 "shell is disabled on pull-request events"

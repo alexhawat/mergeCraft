@@ -11,7 +11,10 @@ from mergecraft.mcp.comment import add_footer
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
 from mergecraft.review_taxonomy import stamp_finding_fingerprint
-from mergecraft.utils.learnings import merge_learnings_delta_into_review_body
+from mergecraft.utils.learnings import (
+    ensure_learnings_review_delta,
+    merge_learnings_delta_into_review_body,
+)
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -79,6 +82,7 @@ def create_pull_request_review_tool(ctx: ToolContext):
 
         payload: dict[str, Any] = {"event": event}
         if body:
+            await ensure_learnings_review_delta(ctx.tool_state)
             body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body))
             payload["body"] = add_footer(ctx, body_with_delta)
         if params.get("commit_id"):

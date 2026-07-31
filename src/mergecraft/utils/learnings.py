@@ -99,14 +99,39 @@ def build_learnings_review_delta(*, before: str, after: str) -> str:
     )
 
 
+async def ensure_learnings_review_delta(tool_state: ToolState) -> None:
+    """Populate review delta from the agent tmpfile when learnings changed mid-run."""
+    if not persist_is_ephemeral():
+        tool_state.learnings_review_delta = None
+        return
+    file_path = tool_state.learnings_file_path
+    if not file_path:
+        tool_state.learnings_review_delta = None
+        return
+    current = await read_learnings_file(file_path)
+    if current is None:
+        tool_state.learnings_review_delta = None
+        return
+    seed = (tool_state.learnings_seed or "").strip()
+    if current == seed:
+        tool_state.learnings_review_delta = None
+        return
+    tool_state.learnings_review_delta = build_learnings_review_delta(
+        before=seed,
+        after=current,
+    )
+
+
 def merge_learnings_delta_into_review_body(tool_state: ToolState, body: str) -> str:
     """Append ephemeral learnings delta to review or PR-comment bodies."""
     delta = tool_state.learnings_review_delta
     if not delta or not delta.strip():
         return body
     cleaned = body.rstrip()
-    if "### Learnings delta" in cleaned:
-        return cleaned
+    marker = "### Learnings delta"
+    if marker in cleaned:
+        prefix = cleaned.split(marker, 1)[0].rstrip()
+        return f"{prefix}\n\n{delta.rstrip()}" if prefix else delta.rstrip()
     return f"{cleaned}\n\n{delta.rstrip()}"
 
 
@@ -132,10 +157,7 @@ async def persist_learnings(ctx: ToolContext) -> None:
         )
         if persist_is_ephemeral():
             logger.warning(_EPHEMERAL_LEARNINGS_WARNING, dest)
-            ctx.tool_state.learnings_review_delta = build_learnings_review_delta(
-                before=seed,
-                after=current,
-            )
+            await ensure_learnings_review_delta(ctx.tool_state)
         else:
             logger.info("» learnings updated at {}", dest)
     except OSError as exc:
@@ -172,6 +194,7 @@ __all__ = [
     "MAX_LEARNINGS_LENGTH",
     "XREPO_LEARNINGS_FILE_NAME",
     "build_learnings_review_delta",
+    "ensure_learnings_review_delta",
     "learnings_file_path",
     "merge_learnings_delta_into_review_body",
     "persist_is_ephemeral",

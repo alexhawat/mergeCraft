@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -11,11 +13,14 @@ from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, 
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
-from mergecraft.utils.learnings import persist_learnings, seed_learnings_file
+from mergecraft.utils.learnings import (
+    ensure_learnings_review_delta,
+    merge_learnings_delta_into_review_body,
+    persist_learnings,
+    seed_learnings_file,
+)
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from _pytest.monkeypatch import MonkeyPatch
 
 
@@ -88,3 +93,62 @@ async def test_persist_learnings_warns_ephemeral_and_surfaces_delta(
     assert delta is not None
     assert delta.strip()
     assert delta_line.strip() in delta or "## Review memory" in delta
+
+
+@pytest.mark.asyncio
+async def test_ensure_learnings_review_delta_before_persist(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Review/comment paths can surface the delta before post-run persist_learnings."""
+    workspace = tmp_path / "runner-workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(workspace))
+
+    seed = "# Learnings\n\n## Build\n- keep this\n"
+    delta_line = "- reviewer added this during the run\n"
+    updated = seed + f"\n## Review memory\n{delta_line}"
+
+    learnings_path = await seed_learnings_file(tmpdir=str(tmp_path / "agent-tmp"), current=updated)
+    ctx = _ctx(tmp_path, learnings_file_path=learnings_path, learnings_seed=seed)
+
+    await ensure_learnings_review_delta(ctx.tool_state)
+    body = merge_learnings_delta_into_review_body(ctx.tool_state, "## Review\n\nLooks good.")
+    assert "### Learnings delta" in body
+    assert delta_line.strip() in body
+    assert ctx.tool_state.learnings_review_delta is not None
+
+
+@pytest.mark.asyncio
+async def test_ensure_learnings_review_delta_refreshes_after_later_edits(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Progress and final review must reflect the latest learnings tmpfile contents."""
+    workspace = tmp_path / "runner-workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(workspace))
+
+    seed = "# Learnings\n\n## Build\n- keep this\n"
+    first_edit = seed + "\n## Review memory\n- first edit\n"
+    second_edit = first_edit + "\n- second edit\n"
+
+    learnings_path = await seed_learnings_file(
+        tmpdir=str(tmp_path / "agent-tmp"), current=first_edit
+    )
+    ctx = _ctx(tmp_path, learnings_file_path=learnings_path, learnings_seed=seed)
+
+    await ensure_learnings_review_delta(ctx.tool_state)
+    first_body = merge_learnings_delta_into_review_body(ctx.tool_state, "progress")
+    assert "- first edit" in first_body
+    assert "- second edit" not in first_body
+
+    await asyncio.to_thread(Path(learnings_path).write_text, second_edit, encoding="utf-8")
+    await ensure_learnings_review_delta(ctx.tool_state)
+    second_body = merge_learnings_delta_into_review_body(ctx.tool_state, "review")
+    assert "- second edit" in second_body
+
+    stale_progress = merge_learnings_delta_into_review_body(ctx.tool_state, first_body)
+    assert "- second edit" in stale_progress
+    after_section = stale_progress.split("**After:**", 1)[1]
+    assert "- second edit" in after_section
