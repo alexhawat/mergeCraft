@@ -114,10 +114,6 @@ def test_tool_is_withheld_when_static_checks_disabled(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="green after W7: declared-but-cannot-run when shell disabled (#8)",
-    strict=False,
-)
 async def test_static_checks_declared_but_cannot_run_when_shell_disabled(
     tmp_path: Path,
 ) -> None:

@@ -69,7 +69,7 @@ Your repo's own gate — unchanged from prior mergeCraft behavior:
 - **Discovered gates** — with nothing declared, mergecraft looks for `lint`, `format-check`, `typecheck`, and `ci-static` Makefile targets. Skipped when `make` is not installed.
 - **Nothing found** → skipped. mergecraft will **not** substitute a linter of its own (`except A, B:` is legal on Python 3.14 and a syntax error on 3.13 — version mismatch manufactures false positives).
 
-Each gate returns one of four statuses; only **`failed`** is a finding:
+Each gate returns one of five statuses; only **`failed`** is a finding:
 
 | Status | Meaning |
 |---|---|
@@ -77,6 +77,9 @@ Each gate returns one of four statuses; only **`failed`** is a finding:
 | `failed` | ran, non-zero exit — a finding |
 | `timed_out` | exceeded the per-gate timeout |
 | `unavailable` | executable not installed — judged nothing |
+| `declared-but-cannot-run` | gate is declared in config but this environment cannot execute it (for example `shell: disabled` on a pull-request event) — judged nothing, but the gate is visible instead of silently omitted |
+
+When `staticChecks` are configured but every gate is `unavailable` or `declared-but-cannot-run`, `run_static_checks` returns `ran: false` with an explicit reason and one row per configured gate so the **Mechanical gates** pre-merge row can report skipped instead of implying the repo has no gates.
 
 ### Catalog analyzers (`run_analyzers`)
 
@@ -109,6 +112,8 @@ Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif
 
 When CI failed on the PR head, mergeCraft calls `analyze_ci_failures`, which wraps `get_check_suite_logs` and normalizes failures behind `GitHubActionsProvider`.
 
+To discover a `check_suite_id` for a commit, call `list_check_runs` with the PR head SHA (or `get_check_suite` when you already have an id). Then pass that id to `get_check_suite_logs` or `analyze_ci_failures`.
+
 **What is read**
 
 - Failed workflow job/step names, exit codes, and redacted log excerpts
@@ -131,7 +136,7 @@ When CI failed on the PR head, mergeCraft calls `analyze_ci_failures`, which wra
 
 The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit; pushing a fix commit stays behind the existing `push` permission.
 
-Implementation: [`src/mergecraft/ci/intelligence.py`](src/mergecraft/ci/intelligence.py), [`src/mergecraft/ci/review.py`](src/mergecraft/ci/review.py), [`src/mergecraft/ci/cluster.py`](src/mergecraft/ci/cluster.py), [`src/mergecraft/mcp/ci_intelligence.py`](src/mergecraft/mcp/ci_intelligence.py), [`src/mergecraft/mcp/check_suite.py`](src/mergecraft/mcp/check_suite.py).
+Implementation: [`src/mergecraft/ci/intelligence.py`](src/mergecraft/ci/intelligence.py), [`src/mergecraft/ci/review.py`](src/mergecraft/ci/review.py), [`src/mergecraft/ci/cluster.py`](src/mergecraft/ci/cluster.py), [`src/mergecraft/mcp/ci_intelligence.py`](src/mergecraft/mcp/ci_intelligence.py), [`src/mergecraft/mcp/check_suite.py`](src/mergecraft/mcp/check_suite.py), [`src/mergecraft/mcp/check_runs.py`](src/mergecraft/mcp/check_runs.py).
 
 ## 3. Pull request hygiene
 

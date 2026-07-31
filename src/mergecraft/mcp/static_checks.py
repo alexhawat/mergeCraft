@@ -9,7 +9,7 @@ from loguru import logger
 
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
-from mergecraft.review_checks import plan_checks, run_checks
+from mergecraft.review_checks import declared_cannot_run_outcomes, plan_checks, run_checks
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -49,6 +49,18 @@ def run_static_checks_tool(ctx: ToolContext):
                 "checks": [],
             }
 
+        if ctx.payload.shell == "disabled" and ctx.static_checks:
+            reason = (
+                "staticChecks are configured but cannot run in this environment — "
+                "shell is disabled on pull-request events"
+            )
+            outcomes = declared_cannot_run_outcomes(checks, reason=reason)
+            return {
+                "ran": False,
+                "reason": reason,
+                "checks": [_serialize(o) for o in outcomes],
+            }
+
         outcomes = run_checks(checks, root=root)
         executed = [o for o in outcomes if o.ran]
         logger.info(
@@ -86,8 +98,8 @@ def run_static_checks_tool(ctx: ToolContext):
             "when none of its gates are installed in this environment; either way "
             "report the check as skipped rather than running a linter or interpreter "
             "of your own, whose version may not match the repo's. Per-gate status is "
-            "passed, failed, timed_out, or unavailable — only `failed` says anything "
-            "about the diff."
+            "passed, failed, timed_out, unavailable, or declared-but-cannot-run — "
+            "only `failed` says anything about the diff."
         ),
         input_schema={
             "type": "object",

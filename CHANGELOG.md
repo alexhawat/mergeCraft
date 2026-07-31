@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Reviewers can list GitHub check suites for a commit via `list_check_runs` and fetch
+  one suite by id via `get_check_suite`, then pass the id to `get_check_suite_logs`
+  (#8)
+- Configured `staticChecks` now report a `declared-but-cannot-run` row when the gate
+  cannot execute in this environment (for example `shell: disabled`), instead of
+  disappearing silently (#8)
+
 ### Docs
 
 - Rewrite README with a 3-step quickstart and a dedicated Authentication section

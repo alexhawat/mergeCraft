@@ -82,7 +82,6 @@ def _ctx(tmp_path: Path, *, github: GitHubClient | None = None) -> ToolContext:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after W7: list_check_runs MCP tool (#8)", strict=False)
 async def test_list_check_runs_returns_check_suite_data_for_ref(tmp_path: Path) -> None:
     """New MCP tool must expose check suites for a ref via GitHubClient list/get helpers."""
     check_runs = importlib.import_module("mergecraft.mcp.check_runs")
@@ -107,10 +106,6 @@ async def test_list_check_runs_returns_check_suite_data_for_ref(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="green after W7: get_check_suite MCP tool detail path (#8)",
-    strict=False,
-)
 async def test_get_check_suite_tool_returns_suite_detail(tmp_path: Path) -> None:
     """Companion tool must fetch one suite by id (GitHubClient.get_check_suite)."""
     check_runs = importlib.import_module("mergecraft.mcp.check_runs")
