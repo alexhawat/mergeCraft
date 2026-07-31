@@ -9,10 +9,20 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.tool_state import ToolState
 
 LEARNINGS_FILE_NAME = "mergecraft-learnings.md"
 XREPO_LEARNINGS_FILE_NAME = "mergecraft-xrepo-learnings.md"
 MAX_LEARNINGS_LENGTH = 100_000
+
+_EPHEMERAL_LEARNINGS_WARNING = (
+    "learnings written to checkout workspace at {} — this will not survive an "
+    "ephemeral CI runner unless the repo commits `.mergecraft/learnings.md`"
+)
+_EPHEMERAL_XREPO_LEARNINGS_WARNING = (
+    "xrepo learnings written to checkout workspace at {} — this will not survive an "
+    "ephemeral CI runner unless the repo commits `.mergecraft/xrepo-learnings.md`"
+)
 
 
 def truncate_at_line_boundary(text: str, max_length: int = MAX_LEARNINGS_LENGTH) -> str:
@@ -55,7 +65,17 @@ async def read_learnings_file(path: str) -> str | None:
     return truncate_at_line_boundary(raw.strip(), MAX_LEARNINGS_LENGTH)
 
 
-def _local_persist_path(*, owner: str, name: str, kind: str = "learnings") -> Path:
+def _has_durable_persist_path() -> bool:
+    """Contents-API auto-commit path (D7 — deferred)."""
+    return False
+
+
+def persist_is_ephemeral() -> bool:
+    """True when only workspace-local persist is available (e.g. Action checkout)."""
+    return not _has_durable_persist_path()
+
+
+def _local_persist_path(*, kind: str = "learnings") -> Path:
     workspace = Path(os_environ_workspace())
     if kind == "xrepo":
         return workspace / ".mergecraft" / "xrepo-learnings.md"
@@ -66,6 +86,28 @@ def os_environ_workspace() -> str:
     import os
 
     return os.environ.get("GITHUB_WORKSPACE") or os.getcwd()
+
+
+def build_learnings_review_delta(*, before: str, after: str) -> str:
+    """Before→after block for PR/review output when persistence is ephemeral."""
+    return (
+        "### Learnings delta\n\n"
+        "Copy the **After** block into `.mergecraft/learnings.md` "
+        "(this run could not persist durably):\n\n"
+        f"**Before:**\n\n{before.rstrip()}\n\n"
+        f"**After:**\n\n{after.rstrip()}"
+    )
+
+
+def merge_learnings_delta_into_review_body(tool_state: ToolState, body: str) -> str:
+    """Append ephemeral learnings delta to review or PR-comment bodies."""
+    delta = tool_state.learnings_review_delta
+    if not delta or not delta.strip():
+        return body
+    cleaned = body.rstrip()
+    if "### Learnings delta" in cleaned:
+        return cleaned
+    return f"{cleaned}\n\n{delta.rstrip()}"
 
 
 async def persist_learnings(ctx: ToolContext) -> None:
@@ -82,13 +124,20 @@ async def persist_learnings(ctx: ToolContext) -> None:
     if current == seed:
         logger.debug("learnings tmpfile unchanged from seed — skipping persist")
         return
-    dest = _local_persist_path(owner=ctx.repo.owner, name=ctx.repo.name)
+    dest = _local_persist_path()
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(
             current + ("\n" if current and not current.endswith("\n") else ""), encoding="utf-8"
         )
-        logger.info("» learnings updated at {}", dest)
+        if persist_is_ephemeral():
+            logger.warning(_EPHEMERAL_LEARNINGS_WARNING, dest)
+            ctx.tool_state.learnings_review_delta = build_learnings_review_delta(
+                before=seed,
+                after=current,
+            )
+        else:
+            logger.info("» learnings updated at {}", dest)
     except OSError as exc:
         logger.warning("learnings persist failed: {}", exc)
 
@@ -104,13 +153,16 @@ async def persist_xrepo_learnings(ctx: ToolContext) -> None:
     seed = (ctx.tool_state.xrepo_learnings_seed or "").strip()
     if current == seed:
         return
-    dest = _local_persist_path(owner=ctx.repo.owner, name=ctx.repo.name, kind="xrepo")
+    dest = _local_persist_path(kind="xrepo")
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(
             current + ("\n" if current and not current.endswith("\n") else ""), encoding="utf-8"
         )
-        logger.info("» xrepo learnings updated at {}", dest)
+        if persist_is_ephemeral():
+            logger.warning(_EPHEMERAL_XREPO_LEARNINGS_WARNING, dest)
+        else:
+            logger.info("» xrepo learnings updated at {}", dest)
     except OSError as exc:
         logger.warning("xrepo learnings persist failed: {}", exc)
 
@@ -119,7 +171,10 @@ __all__ = [
     "LEARNINGS_FILE_NAME",
     "MAX_LEARNINGS_LENGTH",
     "XREPO_LEARNINGS_FILE_NAME",
+    "build_learnings_review_delta",
     "learnings_file_path",
+    "merge_learnings_delta_into_review_body",
+    "persist_is_ephemeral",
     "persist_learnings",
     "persist_xrepo_learnings",
     "read_learnings_file",

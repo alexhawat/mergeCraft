@@ -44,9 +44,6 @@ def _ctx(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="green after W6: ephemeral learnings warning + review delta (#7)", strict=False
-)
 async def test_persist_learnings_warns_ephemeral_and_surfaces_delta(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

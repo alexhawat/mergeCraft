@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permissions flag, CI env) at warning level on non-zero exit; propagate the
   diagnosable error into Action failure output and the `mergecraft` check-run
   summary ([#15](https://github.com/alexhawat/mergeCraft/issues/15)).
+- Learnings updates on ephemeral Action runners now log a warning instead of a false
+  success and include the before→after delta in the posted review or progress comment
+  so operators can commit `.mergecraft/learnings.md` deliberately ([#7](https://github.com/alexhawat/mergeCraft/issues/7)).
 - Wire K3 CI intelligence to the `analyze_ci_failures` MCP tool — fetches check-suite logs,
   clusters failures, and returns review-ready `section`, `preMergeSummary`, `comments`, and
   `stats`; Review/IncrementalReview prompts call the tool instead of manual log clustering.
