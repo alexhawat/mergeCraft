@@ -127,8 +127,9 @@ This matters when `main` is a stub (for example, only `LICENSE`) while real work
 lands on another branch such as `pre-0.0.1`: keep
 `.github/workflows/mergecraft.yml` on **`main`** (or whichever branch GitHub
 lists as default), not only on the trunk. mergeCraft itself is an example —
-there is no workflow under `.github/workflows/` yet, and the default branch does
-not match the development trunk.
+there is no **mergeCraft review** workflow under `.github/workflows/` yet (CI,
+release, Docker, and CodeQL workflows exist; only `mergecraft.yml` is missing),
+and the default branch does not match the development trunk.
 
 ### `pull_request` vs `pull_request_target`
 

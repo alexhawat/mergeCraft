@@ -138,7 +138,7 @@ jobs:
             now="$(date +%s)"
             elapsed=$(( now - started ))
 
-            if runs="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" 2>/dev/null)"; then
+            if runs="$(gh api --paginate "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" 2>/dev/null | jq -s '{check_runs: [.[].check_runs[]?]}')" ; then
               total="$(printf '%s' "${runs}" | jq "${jq_verify} | length")"
               pending="$(printf '%s' "${runs}" | jq "${jq_verify} | map(select(.status != \"completed\")) | length")"
 
@@ -258,8 +258,12 @@ jobs:
             # check_suite id, because no MCP tool can discover one.
             case "${CI_STATE}" in
               complete)
-                if [ "${CI_FAILED_COUNT}" -gt 0 ] 2>/dev/null && [ -n "${CI_CHECK_SUITE_ID}" ]; then
-                  text="${text} CI has finished on this head commit and ${CI_FAILED_COUNT} job(s) FAILED (${CI_FAILED_NAMES}). Call get_check_suite_logs with check_suite_id ${CI_CHECK_SUITE_ID} and ground your review in those failures — report the underlying defect, not the log line."
+                if [ "${CI_FAILED_COUNT}" -gt 0 ] 2>/dev/null; then
+                  if [ -n "${CI_CHECK_SUITE_ID}" ]; then
+                    text="${text} CI has finished on this head commit and ${CI_FAILED_COUNT} job(s) FAILED (${CI_FAILED_NAMES}). Call get_check_suite_logs with check_suite_id ${CI_CHECK_SUITE_ID} and ground your review in those failures — report the underlying defect, not the log line."
+                  else
+                    text="${text} CI has finished on this head commit and ${CI_FAILED_COUNT} job(s) FAILED (${CI_FAILED_NAMES}). get_check_suite_logs is unavailable (check_suite id unknown); still treat these mechanical failures as blocking and note the limitation."
+                  fi
                 else
                   text="${text} CI has finished green on this head commit, so lint, typecheck, and the full test suite already pass; do not speculate about mechanical failures those gates would have caught, and spend the review on logic, design, and missing coverage."
                 fi

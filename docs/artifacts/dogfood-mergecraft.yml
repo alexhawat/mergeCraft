@@ -1,8 +1,5 @@
-# DO NOT commit this path to .github/workflows/ on pre-0.0.1 (D6).
 # Review artifact for mergeCraft dogfooding — land on main via operator PR (see dogfood-main-landing.md).
-# Render: MERGECRAFT_EXAMPLE_BASE_BRANCHES='[pre-0.0.1]' MERGECRAFT_EXAMPLE_CI_JOB_PREFIX='Verify (' #   MERGECRAFT_EXAMPLE_ACTION_PIN_HARDENED=<full-sha> uv run python scripts/render_example_workflows.py --variant hardened
-# (then copy output; this file is the pre-rendered result.)
-
+# Do NOT commit this path to .github/workflows/ on pre-0.0.1 from Batch C (plan D6).
 # mergeCraft PR review — hardened reference workflow.
 #
 # Auto-reviews PRs on open / ready / new commits, posting inline comments plus a
@@ -143,7 +140,7 @@ jobs:
             now="$(date +%s)"
             elapsed=$(( now - started ))
 
-            if runs="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" 2>/dev/null)"; then
+            if runs="$(gh api --paginate "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" 2>/dev/null | jq -s '{check_runs: [.[].check_runs[]?]}')" ; then
               total="$(printf '%s' "${runs}" | jq "${jq_verify} | length")"
               pending="$(printf '%s' "${runs}" | jq "${jq_verify} | map(select(.status != \"completed\")) | length")"
 
@@ -263,8 +260,12 @@ jobs:
             # check_suite id, because no MCP tool can discover one.
             case "${CI_STATE}" in
               complete)
-                if [ "${CI_FAILED_COUNT}" -gt 0 ] 2>/dev/null && [ -n "${CI_CHECK_SUITE_ID}" ]; then
-                  text="${text} CI has finished on this head commit and ${CI_FAILED_COUNT} job(s) FAILED (${CI_FAILED_NAMES}). Call get_check_suite_logs with check_suite_id ${CI_CHECK_SUITE_ID} and ground your review in those failures — report the underlying defect, not the log line."
+                if [ "${CI_FAILED_COUNT}" -gt 0 ] 2>/dev/null; then
+                  if [ -n "${CI_CHECK_SUITE_ID}" ]; then
+                    text="${text} CI has finished on this head commit and ${CI_FAILED_COUNT} job(s) FAILED (${CI_FAILED_NAMES}). Call get_check_suite_logs with check_suite_id ${CI_CHECK_SUITE_ID} and ground your review in those failures — report the underlying defect, not the log line."
+                  else
+                    text="${text} CI has finished on this head commit and ${CI_FAILED_COUNT} job(s) FAILED (${CI_FAILED_NAMES}). get_check_suite_logs is unavailable (check_suite id unknown); still treat these mechanical failures as blocking and note the limitation."
+                  fi
                 else
                   text="${text} CI has finished green on this head commit, so lint, typecheck, and the full test suite already pass; do not speculate about mechanical failures those gates would have caught, and spend the review on logic, design, and missing coverage."
                 fi

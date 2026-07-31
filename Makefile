@@ -90,7 +90,7 @@ ci-static: lockcheck lint typecheck pyright catalog-check build example-workflow
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check build security test
+CI_STEPS := lockcheck lint typecheck pyright catalog-check build example-workflows-check security test
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)
