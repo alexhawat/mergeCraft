@@ -96,6 +96,31 @@ async def test_report_status_checks_posts_neutral_approval_when_review_incomplet
 
 
 @pytest.mark.asyncio
+async def test_report_status_checks_preserves_approval_when_run_fails_later(
+    tmp_path: Path,
+) -> None:
+    """Approval recorded before a later run failure must not be masked as neutral."""
+    github = _RecordingGitHub()
+    ctx = _ctx(
+        tmp_path,
+        github=github,
+        approval=ApprovalRecord(would_approve=False, sha=REVIEWED_SHA),
+    )
+
+    await report_status_checks(ctx, run_succeeded=False)
+
+    approval_checks = _approval_checks(github)
+    assert len(approval_checks) == 1
+    check = approval_checks[0]
+    assert check["conclusion"] == "failure"
+    summary = check["output"]["summary"]
+    assert (
+        "would not approve" in check["output"]["title"].lower() or "not approve" in summary.lower()
+    )
+    assert REVIEWED_SHA in summary or REVIEWED_SHA[:7] in summary
+
+
+@pytest.mark.asyncio
 async def test_report_status_checks_anchors_approval_to_pr_head_sha(
     tmp_path: Path,
 ) -> None:

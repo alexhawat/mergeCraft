@@ -95,11 +95,11 @@ async def report_status_checks(
         logger.debug("status checks: {} post failed: {}", COMPLETION_CHECK, err)
 
     approval = ctx.tool_state.approval
-    if run_succeeded and approval and approval.would_approve:
+    if approval and approval.would_approve:
         approval_conclusion: Conclusion = "success"
         approval_title = "mergeCraft would approve"
         approval_summary = "mergeCraft has no outstanding review feedback on this PR."
-    elif run_succeeded and approval and not approval.would_approve:
+    elif approval and not approval.would_approve:
         approval_conclusion = "failure"
         approval_title = "mergeCraft would not approve"
         approval_summary = (
