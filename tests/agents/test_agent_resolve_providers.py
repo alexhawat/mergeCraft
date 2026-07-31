@@ -39,10 +39,6 @@ _FAIL_LOUD_CASES = (
         "openai/gpt-5.6-sol",
         ("OPENAI_API_KEY", "CODEX_AUTH_JSON"),
         id="openai-api-slug",
-        marks=pytest.mark.xfail(
-            reason="green after W13: OPENAI_API_KEY resolve (#11)",
-            strict=False,
-        ),
     ),
     pytest.param(
         "google/gemini-3.1-pro-preview",
@@ -95,10 +91,6 @@ def test_resolve_runtime_agent_fail_loud_without_credentials(
         pytest.param(
             "openai/gpt-5.6-sol",
             id="openai-api-slug",
-            marks=pytest.mark.xfail(
-                reason="green after W13: OPENAI_API_KEY resolve (#11)",
-                strict=False,
-            ),
         ),
         pytest.param(
             "google/gemini-3.1-pro-preview",
@@ -147,7 +139,6 @@ def test_resolve_runtime_agent_selects_codex_with_codex_auth_json(
     assert "codex" in agents
 
 
-@pytest.mark.xfail(reason="green after W13: OPENAI_API_KEY resolve (#11)", strict=False)
 def test_resolve_runtime_agent_selects_codex_with_openai_api_key_only(
     monkeypatch: MonkeyPatch,
 ) -> None:

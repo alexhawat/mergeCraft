@@ -77,6 +77,20 @@ env:
   CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
 ```
 
+**OpenAI API key example** — set `OPENAI_API_KEY` and point the repo at any
+`openai/*` model (same Codex CLI harness as the subscription path):
+
+```yaml
+# .mergecraft/config.yaml
+model: openai/gpt
+```
+
+```yaml
+# workflow env (API key path)
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
 ### Consumer workflow
 
 ```yaml
@@ -107,9 +121,9 @@ jobs:
           # Claude — pick one:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}  # subscription (mergecraft auth claude)
           # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}           # or API key
-          # Codex / OpenAI — pick one:
+          # Codex / OpenAI — pick one (see Authentication above):
           # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}               # subscription (mergecraft auth codex)
-          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}                 # or API key
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}                 # API key + model: openai/gpt
 ```
 
 Ready-made workflow files live under [`examples/workflows/`](examples/workflows/):

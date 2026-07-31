@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `codex exec` CLI with mergeCraft MCP config, reviewer/verifier instructions,
   and the same push/shell permission gates as Claude Code; resolves when
   `CODEX_AUTH_JSON` is set; Docker image installs `@openai/codex`.
+- OpenAI API key path on the Codex harness: `OPENAI_API_KEY`-only runs resolve
+  to the same `codex` agent for any `openai/*` model; fail-loud when neither
+  `OPENAI_API_KEY` nor `CODEX_AUTH_JSON` is configured.
 - CI pipeline intelligence (K1): ``PipelineProvider`` protocol with ``GitHubActionsProvider``
   (delegates ``get_check_suite_logs`` behind the provider), honest CircleCI/GitLab/Azure stubs,
   normalized failure shape with stable fingerprints, and ingest-time log redaction via

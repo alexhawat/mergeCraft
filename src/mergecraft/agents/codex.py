@@ -24,6 +24,7 @@ from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROM
 from mergecraft.types import MERGECRAFT_MCP_NAME
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
+OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 
 
 def _strip_provider_prefix(specifier: str) -> str:
@@ -78,14 +79,20 @@ def _save_codex_writeback_state(*, auth_path: Path, auth_json: str) -> None:
     os.environ["STATE_codex_writeback"] = payload  # noqa: SIM112 — matches action/post.py _get_state("codex_writeback")
 
 
+def _has_openai_api_key() -> bool:
+    return bool(os.environ.get(OPENAI_API_KEY_ENV, "").strip())
+
+
 def _setup_codex_auth(ctx: AgentRunContext, *, codex_home: Path) -> None:
     raw = os.environ.get(CODEX_AUTH_ENV, "").strip()
-    if not raw:
+    if raw:
+        codex_home.mkdir(parents=True, exist_ok=True)
+        auth_path = codex_home / "auth.json"
+        auth_path.write_text(raw, encoding="utf-8")
+        _save_codex_writeback_state(auth_path=auth_path, auth_json=raw)
         return
-    codex_home.mkdir(parents=True, exist_ok=True)
-    auth_path = codex_home / "auth.json"
-    auth_path.write_text(raw, encoding="utf-8")
-    _save_codex_writeback_state(auth_path=auth_path, auth_json=raw)
+    if _has_openai_api_key():
+        logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
 
 
 def _build_subagent_instructions() -> str:
