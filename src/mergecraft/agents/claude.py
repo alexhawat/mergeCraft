@@ -93,6 +93,35 @@ def ctx_tmpdir_fallback() -> str:
     return os.environ.get("MERGECRAFT_TEMP_DIR") or "/tmp"
 
 
+_STDERR_TAIL_LINES = 20
+
+
+def _claude_attempt_context(*, model: str | None, skip_permissions: bool) -> str:
+    parts = [f"model={model or 'default'}"]
+    if skip_permissions:
+        parts.append("--dangerously-skip-permissions")
+    if os.environ.get("CI") == "true":
+        parts.append("CI=true")
+    return ", ".join(parts)
+
+
+def _build_claude_failure_error(
+    *,
+    returncode: int,
+    stderr: str,
+    model: str | None,
+    skip_permissions: bool,
+) -> str:
+    context = _claude_attempt_context(model=model, skip_permissions=skip_permissions)
+    stderr_lines = [line for line in (stderr or "").strip().splitlines() if line.strip()]
+    if stderr_lines:
+        tail = stderr_lines[-_STDERR_TAIL_LINES:]
+        stderr_part = "; stderr tail: " + " | ".join(tail)
+    else:
+        stderr_part = " (no stderr output)"
+    return f"claude exited {returncode} ({context}){stderr_part}"
+
+
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     env = dict(os.environ)
     # Agent process keeps full env (needs LLM keys). Secrets are filtered at MCP shell.
@@ -137,7 +166,8 @@ def _run_claude_once(
     if continue_session:
         cmd.append("--continue")
     # Permission mode: skip interactive prompts in CI
-    if os.environ.get("CI") == "true":
+    skip_permissions = os.environ.get("CI") == "true"
+    if skip_permissions:
         cmd.append("--dangerously-skip-permissions")
 
     system = ctx.instructions.system
@@ -164,8 +194,8 @@ def _run_claude_once(
 
     stdout = completed.stdout or ""
     stderr = completed.stderr or ""
-    if stderr.strip():
-        for line in stderr.strip().splitlines()[-20:]:
+    if completed.returncode == 0 and stderr.strip():
+        for line in stderr.strip().splitlines()[-_STDERR_TAIL_LINES:]:
             logger.debug("[claude] {}", line)
 
     usage: AgentUsage | None = None
@@ -213,10 +243,23 @@ def _run_claude_once(
         pass
 
     if completed.returncode != 0:
+        context = _claude_attempt_context(model=model, skip_permissions=skip_permissions)
+        logger.warning(
+            "claude CLI failed (exit={}, {}); stdout={!r}; stderr={!r}",
+            completed.returncode,
+            context,
+            stdout,
+            stderr,
+        )
         return AgentResult(
             success=False,
             output=output or None,
-            error=stderr.strip() or f"claude exited {completed.returncode}",
+            error=_build_claude_failure_error(
+                returncode=completed.returncode,
+                stderr=stderr,
+                model=model,
+                skip_permissions=skip_permissions,
+            ),
             usage=usage,
         )
     return AgentResult(success=True, output=output or None, usage=usage)

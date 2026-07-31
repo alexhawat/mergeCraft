@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Surface `claude` CLI stdout/stderr, exit code, and attempt context (model,
+  permissions flag, CI env) at warning level on non-zero exit; propagate the
+  diagnosable error into Action failure output and the `mergecraft` check-run
+  summary ([#15](https://github.com/alexhawat/mergeCraft/issues/15)).
 - Wire K3 CI intelligence to the `analyze_ci_failures` MCP tool — fetches check-suite logs,
   clusters failures, and returns review-ready `section`, `preMergeSummary`, `comments`, and
   `stats`; Review/IncrementalReview prompts call the tool instead of manual log clustering.

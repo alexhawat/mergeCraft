@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
 import subprocess
 from typing import TYPE_CHECKING
 
-import pytest
 from loguru import logger
 
 from mergecraft.agents.claude import _run_claude_once
@@ -15,6 +15,8 @@ from mergecraft.mcp.tool_state import init_tool_state
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 
 def _run_ctx(
@@ -31,7 +33,6 @@ def _run_ctx(
     )
 
 
-@pytest.mark.xfail(reason="green after W2: diagnosable claude CLI exit (#15)", strict=False)
 def test_claude_exit_with_empty_streams_surfaces_diagnosable_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -45,7 +46,8 @@ def test_claude_exit_with_empty_streams_surfaces_diagnosable_error(
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="")
 
-    monkeypatch.setattr("mergecraft.agents.claude.subprocess.run", _fake_run)
+    claude_module = importlib.import_module("mergecraft.agents.claude")
+    monkeypatch.setattr(claude_module.subprocess, "run", _fake_run)
 
     log_records: list[tuple[str, str]] = []
 

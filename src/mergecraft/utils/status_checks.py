@@ -43,7 +43,12 @@ async def _create_check_run(
     )
 
 
-async def report_status_checks(ctx: ToolContext, *, run_succeeded: bool) -> None:
+async def report_status_checks(
+    ctx: ToolContext,
+    *,
+    run_succeeded: bool,
+    failure_reason: str | None = None,
+) -> None:
     """Post opt-in status checks. Best-effort; never raises into the run outcome."""
     payload = ctx.payload
     status_enabled = getattr(payload, "status_checks", False) or (
@@ -80,7 +85,10 @@ async def report_status_checks(ctx: ToolContext, *, run_succeeded: bool) -> None
             summary=(
                 "The mergeCraft run finished successfully."
                 if run_succeeded
-                else "The mergeCraft run failed or timed out. See the run logs for details."
+                else (
+                    failure_reason
+                    or "The mergeCraft run failed or timed out. See the run logs for details."
+                )
             ),
         )
     except Exception as err:

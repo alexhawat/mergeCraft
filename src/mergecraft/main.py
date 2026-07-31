@@ -336,7 +336,11 @@ async def main() -> MainResult:
 
         if tool_context:
             await persist_learnings(tool_context)
-            await report_status_checks(tool_context, run_succeeded=result.success)
+            await report_status_checks(
+                tool_context,
+                run_succeeded=result.success,
+                failure_reason=result.error if not result.success else None,
+            )
 
         if not result.success:
             return MainResult(success=False, error=result.error or "agent execution failed")
@@ -350,7 +354,11 @@ async def main() -> MainResult:
         if tool_context:
             try:
                 await persist_learnings(tool_context)
-                await report_status_checks(tool_context, run_succeeded=False)
+                await report_status_checks(
+                    tool_context,
+                    run_succeeded=False,
+                    failure_reason=error_message,
+                )
             except Exception:
                 pass
         return MainResult(success=False, error=error_message)
