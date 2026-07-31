@@ -23,7 +23,6 @@ def _load_gemini_module():
         pytest.fail(f"mergecraft.agents.gemini not implemented: {exc}")
 
 
-@pytest.mark.xfail(reason="green after W14: Gemini harness contract (#12)", strict=False)
 def test_gemini_harness_invokes_cli_and_parses_agent_result(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

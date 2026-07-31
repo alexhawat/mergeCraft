@@ -22,6 +22,7 @@ console = Console()
 
 CODEX_AUTH_SECRET = "CODEX_AUTH_JSON"
 CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN"
+GEMINI_API_SECRET = "GEMINI_API_KEY"
 CLAUDE_OAUTH_TOKEN_PREFIX = "sk-ant-oat"
 
 
@@ -145,3 +146,51 @@ def auth_claude() -> None:
             f"  https://github.com/{repo_slug}/settings/secrets/actions"
         )
     console.print(f"[green]saved {CLAUDE_OAUTH_SECRET}[/green] to GitHub Actions secrets")
+
+
+def _validate_gemini_api_key(api_key: str) -> bool:
+    try:
+        import urllib.error
+        import urllib.request
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=1"
+        with urllib.request.urlopen(url, timeout=15) as response:
+            return bool(response.status == 200)
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            return False
+        logger.warning("gemini key validation returned HTTP {} — saving anyway", exc.code)
+        return True
+    except OSError as exc:
+        logger.warning("gemini key validation skipped (network): {}", exc)
+        return True
+
+
+@app.command("gemini")
+def auth_gemini() -> None:
+    """Save a Gemini API key as GEMINI_API_KEY."""
+    _get_gh_token()
+    owner, repo = _parse_git_remote()
+    repo_slug = f"{owner}/{repo}"
+    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    console.print(
+        "create an API key at [cyan]https://aistudio.google.com/apikey[/cyan], then paste it below."
+    )
+    try:
+        api_key = getpass.getpass("Gemini API key (Enter to cancel): ").strip()
+    except EOFError, KeyboardInterrupt:
+        console.print("canceled.")
+        raise typer.Exit(0) from None
+    if not api_key:
+        console.print("canceled.")
+        raise typer.Exit(0)
+    if not _validate_gemini_api_key(api_key):
+        _bail("Gemini API key validation failed (401/403). Check the key and retry.")
+
+    console.print(f"saving [cyan]{GEMINI_API_SECRET}[/cyan] via gh secret set...")
+    if not _set_gh_secret(name=GEMINI_API_SECRET, value=api_key, repo_slug=repo_slug):
+        _bail(
+            f"could not set secret — set it manually at:\n"
+            f"  https://github.com/{repo_slug}/settings/secrets/actions"
+        )
+    console.print(f"[green]saved {GEMINI_API_SECRET}[/green] to GitHub Actions secrets")

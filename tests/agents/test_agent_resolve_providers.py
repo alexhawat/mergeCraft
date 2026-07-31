@@ -44,10 +44,6 @@ _FAIL_LOUD_CASES = (
         "google/gemini-3.1-pro-preview",
         ("GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"),
         id="google-gemini-slug",
-        marks=pytest.mark.xfail(
-            reason="green after W14: Gemini resolve (#12)",
-            strict=False,
-        ),
     ),
     pytest.param(
         "cursor/cloud-agent",
@@ -95,10 +91,6 @@ def test_resolve_runtime_agent_fail_loud_without_credentials(
         pytest.param(
             "google/gemini-3.1-pro-preview",
             id="google-gemini-slug",
-            marks=pytest.mark.xfail(
-                reason="green after W14: Gemini resolve (#12)",
-                strict=False,
-            ),
         ),
         pytest.param(
             "cursor/cloud-agent",
@@ -150,7 +142,6 @@ def test_resolve_runtime_agent_selects_codex_with_openai_api_key_only(
     assert agent.name == "codex"
 
 
-@pytest.mark.xfail(reason="green after W14: Gemini resolve (#12)", strict=False)
 def test_resolve_runtime_agent_selects_gemini_with_gemini_api_key(
     monkeypatch: MonkeyPatch,
 ) -> None:

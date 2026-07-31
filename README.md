@@ -51,10 +51,12 @@ the provider you configure. You can authenticate either with a **subscription**
 |----------|-----------------------------|---------|
 | Anthropic Claude | `mergecraft auth claude` → saves `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Claude Pro/Max) | `ANTHROPIC_API_KEY` secret |
 | OpenAI Codex | `mergecraft auth codex` → saves `CODEX_AUTH_JSON` from `codex login --device-auth` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` secret |
+| Google Gemini | `mergecraft auth gemini` → saves `GEMINI_API_KEY` from a pasted AI Studio key | `GEMINI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY` secret |
 
 Using a subscription means the GitHub Action authenticates as *you* through the
 official `claude` / `codex` CLIs — the same credential your local coding agent
-already uses — instead of paying per-token via a separate API key. Run the
+already uses — instead of paying per-token via a separate API key. Gemini uses
+the official `gemini` CLI with an API key from Google AI Studio. Run the
 relevant `mergecraft auth ...` command from the repo you want reviewed; it
 detects the `origin` remote and stores the secret with `gh secret set`
 automatically (or prints the manual `Settings → Secrets` steps if `gh` isn't
@@ -91,6 +93,21 @@ env:
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
+**Gemini API key example** — set `GEMINI_API_KEY` and point the repo at a
+curated `google/*` slug (`gemini-pro` → `google/gemini-3.1-pro-preview`,
+`gemini-flash` → `google/gemini-3.5-flash`):
+
+```yaml
+# .mergecraft/config.yaml
+model: google/gemini-3.1-pro-preview
+```
+
+```yaml
+# workflow env (API key path)
+env:
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+```
+
 ### Consumer workflow
 
 ```yaml
@@ -124,6 +141,8 @@ jobs:
           # Codex / OpenAI — pick one (see Authentication above):
           # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}               # subscription (mergecraft auth codex)
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}                 # API key + model: openai/gpt
+          # Gemini — API key (mergecraft auth gemini):
+          # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}                 # + model: google/gemini-3.1-pro-preview
 ```
 
 Ready-made workflow files live under [`examples/workflows/`](examples/workflows/):
@@ -240,6 +259,7 @@ Learnings live in `.mergecraft/learnings.md` and are seeded/persisted across run
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` + example workflow |
 | `mergecraft auth claude` | Save a Claude Pro/Max subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) via `gh secret set` |
 | `mergecraft auth codex` | Save a ChatGPT subscription credential (`CODEX_AUTH_JSON`) via `gh secret set` |
+| `mergecraft auth gemini` | Save a Gemini API key (`GEMINI_API_KEY`) via `gh secret set` |
 | `mergecraft watch --pr N` | Stream PR/issue timeline as JSONL |
 | `mergecraft diff-review` | Offline local git/patch review (no GitHub PR posting) |
 | `mergecraft gha` | Action runtime entry (used by Docker Action) |

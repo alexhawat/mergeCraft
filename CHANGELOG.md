@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAI API key path on the Codex harness: `OPENAI_API_KEY`-only runs resolve
   to the same `codex` agent for any `openai/*` model; fail-loud when neither
   `OPENAI_API_KEY` nor `CODEX_AUTH_JSON` is configured.
+- Gemini agent harness (`agents/gemini.py`): invokes the official `gemini` CLI
+  with mergeCraft MCP settings; resolves when `GEMINI_API_KEY` or
+  `GOOGLE_GENERATIVE_AI_API_KEY` is set for `google/*` models; Docker image
+  installs `@google/gemini-cli`; `mergecraft auth gemini` saves the API key via
+  `gh secret set`.
 - CI pipeline intelligence (K1): ``PipelineProvider`` protocol with ``GitHubActionsProvider``
   (delegates ``get_check_suite_logs`` behind the provider), honest CircleCI/GitLab/Azure stubs,
   normalized failure shape with stable fingerprints, and ingest-time log redaction via

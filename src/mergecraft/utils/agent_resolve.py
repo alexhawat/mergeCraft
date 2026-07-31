@@ -49,12 +49,27 @@ def _has_openai_api_key_auth() -> bool:
     return _has_env("OPENAI_API_KEY")
 
 
+def _has_gemini_auth() -> bool:
+    return _has_env("GEMINI_API_KEY") or _has_env("GOOGLE_GENERATIVE_AI_API_KEY")
+
+
 def _fail_loud_for_openai(*, model: str) -> None:
     hints = ("CODEX_AUTH_JSON", "OPENAI_API_KEY")
     env_list = ", ".join(hints)
     msg = (
         f"OpenAI model {model!r} selected but no credential is configured. "
         f"Set {env_list} (subscription via `mergecraft auth codex`, or an API key secret) "
+        "or choose a different model."
+    )
+    raise ValueError(msg)
+
+
+def _fail_loud_for_google(*, model: str) -> None:
+    hints = ("GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY")
+    env_list = ", ".join(hints)
+    msg = (
+        f"Google model {model!r} selected but no credential is configured. "
+        f"Set {env_list} (via `mergecraft auth gemini` or a GitHub Actions secret) "
         "or choose a different model."
     )
     raise ValueError(msg)
@@ -124,6 +139,11 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
             if _has_codex_subscription_auth() or _has_openai_api_key_auth():
                 return agents["codex"]
             _fail_loud_for_openai(model=model)
+
+        if provider == "google":
+            if _has_gemini_auth():
+                return agents["gemini"]
+            _fail_loud_for_google(model=model)
 
         if provider == "anthropic" and _has_claude_code_auth():
             return agents["claude"]
