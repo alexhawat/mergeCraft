@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # ── agent / MCP ───────────────────────────────────────────────────────────────
 
-AgentId = Literal["claude", "codex", "gemini", "opencode"]
+AgentId = Literal["claude", "codex", "cursor", "gemini", "opencode"]
 
 MERGECRAFT_MCP_NAME = "mergecraft"
 # Back-compat alias matching the TS export name style in prompts/docs.

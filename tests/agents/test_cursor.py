@@ -22,7 +22,6 @@ def _load_cursor_module():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after W15: Cursor Cloud harness contract (#13)", strict=False)
 async def test_cursor_harness_launches_cloud_agent_and_parses_agent_result(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

@@ -79,6 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GOOGLE_GENERATIVE_AI_API_KEY` is set for `google/*` models; Docker image
   installs `@google/gemini-cli`; `mergecraft auth gemini` saves the API key via
   `gh secret set`.
+- Cursor Cloud Agent harness (`agents/cursor.py`, Phase A / D9): launches a
+  remote cloud agent via the Cursor API (`CURSOR_API_KEY`); polls to terminal
+  status and surfaces the dashboard URL in agent metadata; local Cursor CLI
+  detection remains deferred; `mergecraft auth cursor` saves the API key via
+  `gh secret set`.
 - CI pipeline intelligence (K1): ``PipelineProvider`` protocol with ``GitHubActionsProvider``
   (delegates ``get_check_suite_logs`` behind the provider), honest CircleCI/GitLab/Azure stubs,
   normalized failure shape with stable fingerprints, and ingest-time log redaction via

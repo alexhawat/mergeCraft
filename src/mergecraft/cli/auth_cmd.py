@@ -23,6 +23,7 @@ console = Console()
 CODEX_AUTH_SECRET = "CODEX_AUTH_JSON"
 CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN"
 GEMINI_API_SECRET = "GEMINI_API_KEY"
+CURSOR_API_SECRET = "CURSOR_API_KEY"
 CLAUDE_OAUTH_TOKEN_PREFIX = "sk-ant-oat"
 
 
@@ -194,3 +195,61 @@ def auth_gemini() -> None:
             f"  https://github.com/{repo_slug}/settings/secrets/actions"
         )
     console.print(f"[green]saved {GEMINI_API_SECRET}[/green] to GitHub Actions secrets")
+
+
+def _validate_cursor_api_key(api_key: str) -> bool:
+    try:
+        import base64
+        import urllib.error
+        import urllib.request
+
+        token = base64.b64encode(f"{api_key}:".encode()).decode("ascii")
+        request = urllib.request.Request(
+            "https://api.cursor.com/v1/agents?limit=1",
+            headers={
+                "Authorization": f"Basic {token}",
+                "Accept": "application/json",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return bool(response.status == 200)
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            return False
+        logger.warning("cursor key validation returned HTTP {} — saving anyway", exc.code)
+        return True
+    except OSError as exc:
+        logger.warning("cursor key validation skipped (network): {}", exc)
+        return True
+
+
+@app.command("cursor")
+def auth_cursor() -> None:
+    """Save a Cursor API key as CURSOR_API_KEY."""
+    _get_gh_token()
+    owner, repo = _parse_git_remote()
+    repo_slug = f"{owner}/{repo}"
+    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    console.print(
+        "create an API key in the Cursor dashboard, then paste it below "
+        "(Cloud Agent API — Phase A; local Cursor CLI is not wired yet)."
+    )
+    try:
+        api_key = getpass.getpass("Cursor API key (Enter to cancel): ").strip()
+    except EOFError, KeyboardInterrupt:
+        console.print("canceled.")
+        raise typer.Exit(0) from None
+    if not api_key:
+        console.print("canceled.")
+        raise typer.Exit(0)
+    if not _validate_cursor_api_key(api_key):
+        _bail("Cursor API key validation failed (401/403). Check the key and retry.")
+
+    console.print(f"saving [cyan]{CURSOR_API_SECRET}[/cyan] via gh secret set...")
+    if not _set_gh_secret(name=CURSOR_API_SECRET, value=api_key, repo_slug=repo_slug):
+        _bail(
+            f"could not set secret — set it manually at:\n"
+            f"  https://github.com/{repo_slug}/settings/secrets/actions"
+        )
+    console.print(f"[green]saved {CURSOR_API_SECRET}[/green] to GitHub Actions secrets")

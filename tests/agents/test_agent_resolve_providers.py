@@ -49,10 +49,6 @@ _FAIL_LOUD_CASES = (
         "cursor/cloud-agent",
         ("CURSOR_API_KEY",),
         id="cursor-cloud-slug",
-        marks=pytest.mark.xfail(
-            reason="green after W15: Cursor Cloud resolve (#13)",
-            strict=False,
-        ),
     ),
 )
 
@@ -95,10 +91,6 @@ def test_resolve_runtime_agent_fail_loud_without_credentials(
         pytest.param(
             "cursor/cloud-agent",
             id="cursor-cloud-slug",
-            marks=pytest.mark.xfail(
-                reason="green after W15: Cursor Cloud resolve (#13)",
-                strict=False,
-            ),
         ),
     ],
 )
@@ -154,7 +146,6 @@ def test_resolve_runtime_agent_selects_gemini_with_gemini_api_key(
     assert "gemini" in agents
 
 
-@pytest.mark.xfail(reason="green after W15: Cursor Cloud resolve (#13)", strict=False)
 def test_resolve_runtime_agent_selects_cursor_with_cursor_api_key(
     monkeypatch: MonkeyPatch,
 ) -> None:
