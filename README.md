@@ -98,6 +98,17 @@ jobs:
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}                 # or API key
 ```
 
+Ready-made workflow files live under [`examples/workflows/`](examples/workflows/):
+
+- [`mergecraft.yml`](examples/workflows/mergecraft.yml) — minimal getting-started
+  example (`pull_request`, comment triggers).
+- [`mergecraft-hardened.yml`](examples/workflows/mergecraft-hardened.yml) — use
+  this one when the review is a **required check** (`pull_request_target`,
+  wait-for-CI, approval enforcement).
+
+Both are rendered from templates in `scripts/example_workflows/` (`make examples`
+to regenerate; CI fails on drift).
+
 ### Where the workflow must live (`pull_request_target`)
 
 Under GitHub's Nov 2025 policy (**effective 2025-12-08**), a

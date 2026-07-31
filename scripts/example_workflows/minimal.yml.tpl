@@ -44,7 +44,7 @@ jobs:
       #     GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
 
       - name: Run mergeCraft
-        uses: alexhawat/mergeCraft@pre-0.0.1
+        uses: __ACTION_REPO__@__ACTION_PIN__
         with:
           prompt: >
             ${{ github.event_name == 'pull_request'
