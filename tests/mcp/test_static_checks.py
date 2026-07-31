@@ -111,3 +111,27 @@ def test_tool_is_withheld_when_static_checks_disabled(tmp_path: Path) -> None:
     assert "run_static_checks" not in names
     names = {t.name for t in build_common_tools(_ctx(tmp_path, enabled=True))}
     assert "run_static_checks" in names
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    reason="green after W7: declared-but-cannot-run when shell disabled (#8)",
+    strict=False,
+)
+async def test_static_checks_declared_but_cannot_run_when_shell_disabled(
+    tmp_path: Path,
+) -> None:
+    """Configured staticChecks with shell disabled must report explicitly, not omit silently."""
+    ctx = _ctx(
+        tmp_path,
+        shell="disabled",
+        static_checks=[StaticCheckConfig(name="lint", command="python -c 'pass'")],
+        enabled=True,
+    )
+    payload = await _run(ctx)
+    assert payload["ran"] is False
+    reason = str(payload.get("reason", "")).lower()
+    checks = payload.get("checks") or []
+    status_values = {str(check.get("status", "")).lower() for check in checks}
+    assert "declared but cannot run" in reason or "declared-but-cannot-run" in status_values
+    assert checks, "configured gates must appear as explicit unavailable rows"
