@@ -95,7 +95,6 @@ async def test_report_status_checks_posts_neutral_approval_when_review_incomplet
     assert "did not complete" in summary.lower() or "not complete" in summary.lower()
 
 
-@pytest.mark.xfail(reason="green after W4: anchor approval check to PR head SHA (#6)", strict=False)
 @pytest.mark.asyncio
 async def test_report_status_checks_anchors_approval_to_pr_head_sha(
     tmp_path: Path,

@@ -112,11 +112,14 @@ async def report_status_checks(
             "The mergeCraft review did not complete, so no approval decision was recorded."
         )
 
+    if approval and approval.sha:
+        approval_summary = f"{approval_summary} Reviewed commit: {approval.sha}."
+
     try:
         await _create_check_run(
             ctx,
             name=APPROVAL_CHECK,
-            head_sha=approval.sha or head_sha if approval else head_sha,
+            head_sha=head_sha,
             conclusion=approval_conclusion,
             title=approval_title,
             summary=approval_summary,
