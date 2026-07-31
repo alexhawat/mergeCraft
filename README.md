@@ -98,6 +98,70 @@ jobs:
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}                 # or API key
 ```
 
+### Where the workflow must live (`pull_request_target`)
+
+Under GitHub's Nov 2025 policy (**effective 2025-12-08**), a
+`pull_request_target` workflow is resolved from the repository's **default
+branch** — not from the PR's base branch. Three consequences:
+
+- The **default-branch copy runs for every PR**, whatever base branch the PR
+  targets.
+- A PR that **edits the workflow cannot review itself** with its own changes;
+  updates take effect on the **next** PR after merge.
+- If your **trunk is not the default branch**, a copy of the workflow on the
+  trunk is **inert**. It never runs, must be hand-mirrored onto the default
+  branch forever, and the two copies drift.
+
+This matters when `main` is a stub (for example, only `LICENSE`) while real work
+lands on another branch such as `pre-0.0.1`: keep
+`.github/workflows/mergecraft.yml` on **`main`** (or whichever branch GitHub
+lists as default), not only on the trunk. mergeCraft itself is an example —
+there is no workflow under `.github/workflows/` yet, and the default branch does
+not match the development trunk.
+
+### `pull_request` vs `pull_request_target`
+
+| Trigger | When to use | Trade-off |
+|---------|-------------|-----------|
+| `pull_request` | The review job is **not** a required check | Simpler and safer — no repository secrets in scope for fork PRs |
+| `pull_request_target` | The review job **is** a required check | Runs with secrets; must never execute PR-authored code |
+
+GitHub **skips** `pull_request` workflows when `refs/pull/N/merge` cannot be
+built — i.e. whenever the PR has a **merge conflict**. If the review job is a
+required check, that leaves the check permanently missing and the PR
+unmergeable even after the conflict is fixed. `pull_request_target` still fires
+on `synchronize` in that state.
+
+The cost of `pull_request_target` is that it runs with repository secrets in
+scope, so the workflow must not execute PR-authored scripts or checkout untrusted
+code. Use same-repo guards, `push: disabled`, and `shell: disabled` in
+mergeCraft config. **If the review is not a required check, prefer plain
+`pull_request`.**
+
+### Pin parity across copies
+
+Many repos pin the action SHA in more than one place — the workflow, a Makefile
+variable for local `mergecraft diff-review`, a devcontainer, or docs. Gate those
+copies against each other in CI. The non-obvious part:
+
+> Read the workflow side from the **default branch**, not from the working tree:
+>
+> ```bash
+> git show origin/main:.github/workflows/mergecraft.yml
+> ```
+
+Comparing a working-tree copy that never executes against a local pin verifies
+two values that do not matter, while the pin that actually runs goes unchecked.
+A SHA bumped only on the default branch stays invisible to a gate that reads the
+PR checkout.
+
+- **Bump order: default branch first, local pin second.** The gate compares
+  against the default branch, so reversing the order fails until the default
+  branch catches up.
+- The gate should **skip with a warning** when the default-branch ref is
+  unreachable (offline local runs) and **hard-fail under `CI`** — otherwise a
+  network hiccup turns the check into a decorative no-op.
+
 ### Local config
 
 Create `.mergecraft/config.yaml` (see [`examples/config.yaml`](examples/config.yaml)):
