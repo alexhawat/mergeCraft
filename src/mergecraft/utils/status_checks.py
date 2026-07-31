@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 COMPLETION_CHECK = "mergecraft"
 APPROVAL_CHECK = "mergecraft-approval"
-Conclusion = Literal["success", "failure"]
+Conclusion = Literal["success", "failure", "neutral"]
 
 
 async def _create_check_run(
@@ -95,26 +95,34 @@ async def report_status_checks(
         logger.debug("status checks: {} post failed: {}", COMPLETION_CHECK, err)
 
     approval = ctx.tool_state.approval
-    if run_succeeded and approval:
-        try:
-            await _create_check_run(
-                ctx,
-                name=APPROVAL_CHECK,
-                head_sha=approval.sha or head_sha,
-                conclusion="success" if approval.would_approve else "failure",
-                title=(
-                    "mergeCraft would approve"
-                    if approval.would_approve
-                    else "mergeCraft would not approve"
-                ),
-                summary=(
-                    "mergeCraft has no outstanding review feedback on this PR."
-                    if approval.would_approve
-                    else "mergeCraft has outstanding review feedback or requested changes on this PR."
-                ),
-            )
-        except Exception as err:
-            logger.debug("status checks: {} post failed: {}", APPROVAL_CHECK, err)
+    if run_succeeded and approval and approval.would_approve:
+        approval_conclusion: Conclusion = "success"
+        approval_title = "mergeCraft would approve"
+        approval_summary = "mergeCraft has no outstanding review feedback on this PR."
+    elif run_succeeded and approval and not approval.would_approve:
+        approval_conclusion = "failure"
+        approval_title = "mergeCraft would not approve"
+        approval_summary = (
+            "mergeCraft has outstanding review feedback or requested changes on this PR."
+        )
+    else:
+        approval_conclusion = "neutral"
+        approval_title = "mergeCraft review did not complete"
+        approval_summary = (
+            "The mergeCraft review did not complete, so no approval decision was recorded."
+        )
+
+    try:
+        await _create_check_run(
+            ctx,
+            name=APPROVAL_CHECK,
+            head_sha=approval.sha or head_sha if approval else head_sha,
+            conclusion=approval_conclusion,
+            title=approval_title,
+            summary=approval_summary,
+        )
+    except Exception as err:
+        logger.debug("status checks: {} post failed: {}", APPROVAL_CHECK, err)
 
 
 __all__ = ["APPROVAL_CHECK", "COMPLETION_CHECK", "report_status_checks"]

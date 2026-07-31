@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Always post the `mergecraft-approval` status check on PR runs when status checks
+  are enabled; use `neutral` when the review did not complete so a failed run no
+  longer leaves a missing check that branch protection can misread as pass
+  ([#5](https://github.com/alexhawat/mergeCraft/issues/5)).
 - Surface `claude` CLI stdout/stderr, exit code, and attempt context (model,
   permissions flag, CI env) at warning level on non-zero exit; propagate the
   diagnosable error into Action failure output and the `mergecraft` check-run

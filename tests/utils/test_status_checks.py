@@ -77,9 +77,6 @@ def _approval_checks(github: _RecordingGitHub) -> list[dict[str, Any]]:
     ],
     ids=["run_failed", "run_ok_no_approval"],
 )
-@pytest.mark.xfail(
-    reason="green after W3: neutral approval when review incomplete (#5)", strict=False
-)
 @pytest.mark.asyncio
 async def test_report_status_checks_posts_neutral_approval_when_review_incomplete(
     tmp_path: Path,

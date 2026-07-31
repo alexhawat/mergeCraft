@@ -170,9 +170,14 @@ The Action reads the native `GITHUB_EVENT_PATH` / `GITHUB_EVENT_NAME`, so
 workflows can trigger on `pull_request` (e.g. auto-review on open/sync),
 `issue_comment`, or `pull_request_review_comment` events and the agent gets PR
 context (number, branch, `is_pr`) automatically — no hand-built `~mergecraft` JSON
-payload required. With `status_checks: enabled`, PR runs post the `mergecraft` and
-`mergecraft-approval` commit-status checks (gate on the latter). An explicit
-`~mergecraft` payload event still takes precedence when provided.
+payload required. With `status_checks: enabled`, PR runs always post the `mergecraft`
+and `mergecraft-approval` commit-status checks. The approval check has three
+outcomes: `success` when mergeCraft would approve, `failure` when it would not,
+and `neutral` when the review did not complete (agent crash, timeout, or no
+approval recorded). GitHub branch protection treats `neutral` as non-blocking by
+default — gate on `success`/`failure` explicitly in your enforce step if you
+require a completed review. An explicit `~mergecraft` payload event still takes
+precedence when provided.
 
 ## Development
 
