@@ -63,6 +63,20 @@ authenticated).
 Only set the env var(s) for the provider(s) you actually use — see the
 workflow example below, where the unused lines are commented out.
 
+**Codex subscription example** — set `CODEX_AUTH_JSON` and point the repo at a
+Codex-family model:
+
+```yaml
+# .mergecraft/config.yaml
+model: openai/gpt-codex
+```
+
+```yaml
+# workflow env (subscription path)
+env:
+  CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+```
+
 ### Consumer workflow
 
 ```yaml

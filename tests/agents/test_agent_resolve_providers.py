@@ -39,25 +39,33 @@ _FAIL_LOUD_CASES = (
         "openai/gpt-5.6-sol",
         ("OPENAI_API_KEY", "CODEX_AUTH_JSON"),
         id="openai-api-slug",
+        marks=pytest.mark.xfail(
+            reason="green after W13: OPENAI_API_KEY resolve (#11)",
+            strict=False,
+        ),
     ),
     pytest.param(
         "google/gemini-3.1-pro-preview",
         ("GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"),
         id="google-gemini-slug",
+        marks=pytest.mark.xfail(
+            reason="green after W14: Gemini resolve (#12)",
+            strict=False,
+        ),
     ),
     pytest.param(
         "cursor/cloud-agent",
         ("CURSOR_API_KEY",),
         id="cursor-cloud-slug",
+        marks=pytest.mark.xfail(
+            reason="green after W15: Cursor Cloud resolve (#13)",
+            strict=False,
+        ),
     ),
 )
 
 
 @pytest.mark.parametrize(("model", "credential_env_hints"), _FAIL_LOUD_CASES)
-@pytest.mark.xfail(
-    reason="green after W12-W15: D12 fail-loud resolve_runtime_agent",
-    strict=False,
-)
 def test_resolve_runtime_agent_fail_loud_without_credentials(
     model: str,
     credential_env_hints: tuple[str, ...],
@@ -77,10 +85,38 @@ def test_resolve_runtime_agent_fail_loud_without_credentials(
     )
 
 
-@pytest.mark.parametrize("model", [case.values[0] for case in _FAIL_LOUD_CASES])
-@pytest.mark.xfail(
-    reason="green after W12-W15: D12 fail-loud resolve_runtime_agent",
-    strict=False,
+@pytest.mark.parametrize(
+    "model",
+    [
+        pytest.param(
+            "openai/gpt-5.3-codex",
+            id="codex-subscription-slug",
+        ),
+        pytest.param(
+            "openai/gpt-5.6-sol",
+            id="openai-api-slug",
+            marks=pytest.mark.xfail(
+                reason="green after W13: OPENAI_API_KEY resolve (#11)",
+                strict=False,
+            ),
+        ),
+        pytest.param(
+            "google/gemini-3.1-pro-preview",
+            id="google-gemini-slug",
+            marks=pytest.mark.xfail(
+                reason="green after W14: Gemini resolve (#12)",
+                strict=False,
+            ),
+        ),
+        pytest.param(
+            "cursor/cloud-agent",
+            id="cursor-cloud-slug",
+            marks=pytest.mark.xfail(
+                reason="green after W15: Cursor Cloud resolve (#13)",
+                strict=False,
+            ),
+        ),
+    ],
 )
 def test_resolve_runtime_agent_never_returns_opencode_for_provider_models(
     model: str,
@@ -99,7 +135,6 @@ def test_resolve_runtime_agent_never_returns_opencode_for_provider_models(
     )
 
 
-@pytest.mark.xfail(reason="green after W12: codex subscription resolve (#10)", strict=False)
 def test_resolve_runtime_agent_selects_codex_with_codex_auth_json(
     monkeypatch: MonkeyPatch,
 ) -> None:

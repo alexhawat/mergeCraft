@@ -23,7 +23,6 @@ def _load_codex_module():
         pytest.fail(f"mergecraft.agents.codex not implemented: {exc}")
 
 
-@pytest.mark.xfail(reason="green after W12: codex harness contract (#10)", strict=False)
 def test_codex_harness_invokes_cli_and_parses_agent_result(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

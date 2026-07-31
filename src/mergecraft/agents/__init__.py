@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from mergecraft.agents.claude import claude
+from mergecraft.agents.codex import codex
 from mergecraft.agents.opencode import opencode
 from mergecraft.agents.shared import Agent, AgentImpl, AgentResult, AgentRunContext, AgentUsage
 
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
 
 agents: dict[str, AgentImpl] = {
     "claude": claude,
+    "codex": codex,
     "opencode": opencode,
 }
 
@@ -34,6 +36,7 @@ __all__ = [
     "AgentUsage",
     "agents",
     "claude",
+    "codex",
     "opencode",
     "resolve_agent",
 ]

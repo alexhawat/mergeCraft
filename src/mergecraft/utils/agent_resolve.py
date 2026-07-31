@@ -11,6 +11,7 @@ from mergecraft.agents import agents, resolve_agent
 from mergecraft.models import (
     BEDROCK_MODEL_ID_ENV,
     VERTEX_MODEL_ID_ENV,
+    get_model_managed_credentials,
     get_model_provider,
     is_bedrock_anthropic_id,
     is_vertex_anthropic_id,
@@ -39,6 +40,25 @@ def _has_bedrock_auth() -> bool:
 
 def _has_vertex_auth() -> bool:
     return _has_env("GOOGLE_APPLICATION_CREDENTIALS") or _has_env("VERTEX_SERVICE_ACCOUNT_JSON")
+
+
+def _has_codex_subscription_auth() -> bool:
+    return _has_env("CODEX_AUTH_JSON")
+
+
+def _is_codex_family_model(model: str) -> bool:
+    _, model_id = model.split("/", 1) if "/" in model else ("", model)
+    return "codex" in model_id.lower()
+
+
+def _fail_loud_for_openai_codex(*, model: str) -> None:
+    hints = get_model_managed_credentials(model) or ["CODEX_AUTH_JSON"]
+    env_list = ", ".join(hints)
+    msg = (
+        f"OpenAI Codex model {model!r} selected but no subscription credential is configured. "
+        f"Set {env_list} (e.g. `mergecraft auth codex`) or choose a different model."
+    )
+    raise ValueError(msg)
 
 
 def _resolve_slug(slug: str) -> str | None:
@@ -98,10 +118,17 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
     if model:
         try:
             provider = get_model_provider(model)
-            if provider == "anthropic" and _has_claude_code_auth():
-                return agents["claude"]
-        except Exception:
-            pass
+        except ValueError:
+            provider = None
+
+        if provider == "openai":
+            if _has_codex_subscription_auth():
+                return agents["codex"]
+            if _is_codex_family_model(model):
+                _fail_loud_for_openai_codex(model=model)
+
+        if provider == "anthropic" and _has_claude_code_auth():
+            return agents["claude"]
 
     return agents["opencode"]
 

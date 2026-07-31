@@ -67,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (same-repo secret guard, PR-number concurrency, wait-for-CI, base-ref fetch,
   full-SHA pin, approval-check enforcement) plus a template renderer with
   `make example-workflows-check` wired into `make ci-static`.
+- Codex subscription agent harness (`agents/codex.py`): invokes the official
+  `codex exec` CLI with mergeCraft MCP config, reviewer/verifier instructions,
+  and the same push/shell permission gates as Claude Code; resolves when
+  `CODEX_AUTH_JSON` is set; Docker image installs `@openai/codex`.
 - CI pipeline intelligence (K1): ``PipelineProvider`` protocol with ``GitHubActionsProvider``
   (delegates ``get_check_suite_logs`` behind the provider), honest CircleCI/GitLab/Azure stubs,
   normalized failure shape with stable fingerprints, and ingest-time log redaction via
