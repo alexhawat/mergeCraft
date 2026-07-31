@@ -48,25 +48,44 @@ def _build_subagent_instructions() -> str:
     )
 
 
-def write_mcp_config(ctx: AgentRunContext) -> str:
-    """Write Gemini ``settings.json`` under the run temp dir and return its path."""
-    gemini_home = _gemini_home(ctx)
-    gemini_home.mkdir(parents=True, exist_ok=True)
+def _build_instruction_text(ctx: AgentRunContext) -> str:
     instructions_parts: list[str] = []
     if ctx.instructions.system:
         instructions_parts.append(ctx.instructions.system)
     instructions_parts.append(_build_subagent_instructions())
-    instructions_path = gemini_home / "mergecraft-instructions.md"
-    instructions_path.write_text("\n\n".join(instructions_parts), encoding="utf-8")
+    return "\n\n".join(instructions_parts)
+
+
+def _build_gemini_prompt(ctx: AgentRunContext, prompt: str) -> str:
+    sections = [_build_instruction_text(ctx)]
+    user = (prompt or ctx.instructions.user or "").strip()
+    if user:
+        sections.append(user)
+    return "\n\n".join(sections)
+
+
+def write_mcp_config(ctx: AgentRunContext) -> str:
+    """Write Gemini ``settings.json`` under the run temp dir and return its path."""
+    gemini_home = _gemini_home(ctx)
+    gemini_home.mkdir(parents=True, exist_ok=True)
+    instructions_path = gemini_home / "GEMINI.md"
+    instructions_path.write_text(_build_instruction_text(ctx), encoding="utf-8")
+
+    server_config: dict[str, object] = {
+        "httpUrl": ctx.mcp_server_url,
+        "trust": True,
+    }
+    excluded_tools = [str(name) for name in ctx.subagent_denied_tools]
+    if excluded_tools:
+        server_config["excludeTools"] = excluded_tools
 
     settings = {
         "mcpServers": {
-            MERGECRAFT_MCP_NAME: {
-                "httpUrl": ctx.mcp_server_url,
-                "trust": True,
-            }
+            MERGECRAFT_MCP_NAME: server_config,
         },
-        "contextFileName": str(instructions_path.name),
+        "context": {
+            "fileName": "GEMINI.md",
+        },
     }
     config_path = gemini_home / "settings.json"
     config_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
@@ -185,7 +204,7 @@ def _run_gemini_once(
     if ctx.resolved_model:
         model = _strip_provider_prefix(ctx.resolved_model)
 
-    user_prompt = prompt or ctx.instructions.user
+    user_prompt = _build_gemini_prompt(ctx, prompt)
     cmd = [
         cli,
         "-p",

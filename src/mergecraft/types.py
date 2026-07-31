@@ -26,10 +26,10 @@ def format_mcp_tool_ref(agent_id: AgentId, tool_name: str) -> str:
     match agent_id:
         case "claude":
             return f"mcp__{MERGECRAFT_MCP_NAME}__{tool_name}"
-        case "opencode" | "codex":
+        case "opencode" | "codex" | "cursor":
             return f"{MERGECRAFT_MCP_NAME}_{tool_name}"
         case "gemini":
-            return f"@{MERGECRAFT_MCP_NAME}/{tool_name}"
+            return f"mcp_{MERGECRAFT_MCP_NAME}_{tool_name}"
         case _:
             raise ValueError(f"unknown agent id: {agent_id!r}")
 

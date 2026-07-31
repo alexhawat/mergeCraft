@@ -126,6 +126,28 @@ class AgentRunContext:
     on_tool_use: Callable[[AgentToolUseEvent], None] | None = None
 
 
+def payload_shell_mode(ctx: AgentRunContext) -> str:
+    """Read ``shell`` from dict or dataclass payloads (Action uses a dict)."""
+    payload = ctx.payload
+    shell = payload.get("shell") if isinstance(payload, dict) else getattr(payload, "shell", None)
+    return str(shell or "restricted")
+
+
+def payload_event_branch(ctx: AgentRunContext) -> str | None:
+    """Read PR head branch from dict or dataclass event payloads."""
+    payload = ctx.payload
+    event = payload.get("event") if isinstance(payload, dict) else getattr(payload, "event", None)
+    if isinstance(event, dict):
+        branch = event.get("branch")
+    elif event is not None:
+        branch = getattr(event, "branch", None)
+    else:
+        branch = None
+    if isinstance(branch, str) and branch.strip():
+        return branch.strip()
+    return None
+
+
 class Agent(Protocol):
     name: AgentId
 

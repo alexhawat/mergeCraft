@@ -19,6 +19,7 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    payload_shell_mode,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.types import MERGECRAFT_MCP_NAME
@@ -83,14 +84,42 @@ def _has_openai_api_key() -> bool:
     return bool(os.environ.get(OPENAI_API_KEY_ENV, "").strip())
 
 
+def _codex_subscription_auth_usable(raw: str) -> bool:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    if _extract_refresh_token(raw):
+        return True
+    tokens = data.get("tokens")
+    if isinstance(tokens, dict):
+        for key in ("access_token", "access", "refresh_token", "refresh"):
+            val = tokens.get(key)
+            if isinstance(val, str) and val.strip():
+                return True
+    for key in ("access_token", "access"):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip():
+            return True
+    return False
+
+
 def _setup_codex_auth(ctx: AgentRunContext, *, codex_home: Path) -> None:
     raw = os.environ.get(CODEX_AUTH_ENV, "").strip()
-    if raw:
+    if raw and _codex_subscription_auth_usable(raw):
         codex_home.mkdir(parents=True, exist_ok=True)
         auth_path = codex_home / "auth.json"
         auth_path.write_text(raw, encoding="utf-8")
         _save_codex_writeback_state(auth_path=auth_path, auth_json=raw)
         return
+    if raw:
+        logger.warning(
+            "{} is set but not usable subscription JSON — falling back to {} when present",
+            CODEX_AUTH_ENV,
+            OPENAI_API_KEY_ENV,
+        )
     if _has_openai_api_key():
         logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
 
@@ -108,7 +137,7 @@ def _build_subagent_instructions() -> str:
 
 
 def _sandbox_mode(ctx: AgentRunContext) -> str:
-    shell = str(getattr(ctx.payload, "shell", None) or "restricted")
+    shell = payload_shell_mode(ctx)
     if shell == "enabled":
         return "workspace-write"
     return "read-only"
@@ -264,8 +293,6 @@ def _run_codex_once(
     if model:
         cmd.extend(["--model", model])
     cmd.extend(["--sandbox", _sandbox_mode(ctx)])
-    if os.environ.get("CI") == "true":
-        cmd.append("--dangerously-bypass-approvals-and-sandbox")
     if continue_session:
         cmd.extend(["resume", "--last"])
     cmd.append(prompt or ctx.instructions.user)

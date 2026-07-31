@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 def _has_env(name: str) -> bool:
     val = os.environ.get(name)
-    return isinstance(val, str) and len(val) > 0
+    return isinstance(val, str) and bool(val.strip())
 
 
 def _has_claude_code_auth() -> bool:
@@ -42,7 +42,12 @@ def _has_vertex_auth() -> bool:
 
 
 def _has_codex_subscription_auth() -> bool:
-    return _has_env("CODEX_AUTH_JSON")
+    raw = os.environ.get("CODEX_AUTH_JSON", "").strip()
+    if not raw:
+        return False
+    from mergecraft.agents.codex import _codex_subscription_auth_usable
+
+    return _codex_subscription_auth_usable(raw)
 
 
 def _has_openai_api_key_auth() -> bool:

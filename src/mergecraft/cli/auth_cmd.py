@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import NoReturn
 
+import httpx
 import typer
 from loguru import logger
 from rich.console import Console
@@ -151,18 +152,20 @@ def auth_claude() -> None:
 
 def _validate_gemini_api_key(api_key: str) -> bool:
     try:
-        import urllib.error
-        import urllib.request
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=1"
-        with urllib.request.urlopen(url, timeout=15) as response:
-            return bool(response.status == 200)
-    except urllib.error.HTTPError as exc:
-        if exc.code in {401, 403}:
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                params={"key": api_key, "pageSize": 1},
+            )
+        if response.status_code == 200:
+            return True
+        if response.status_code in {401, 403}:
             return False
-        logger.warning("gemini key validation returned HTTP {} — saving anyway", exc.code)
+        logger.warning(
+            "gemini key validation returned HTTP {} — saving anyway", response.status_code
+        )
         return True
-    except OSError as exc:
+    except httpx.HTTPError as exc:
         logger.warning("gemini key validation skipped (network): {}", exc)
         return True
 
@@ -200,26 +203,26 @@ def auth_gemini() -> None:
 def _validate_cursor_api_key(api_key: str) -> bool:
     try:
         import base64
-        import urllib.error
-        import urllib.request
 
         token = base64.b64encode(f"{api_key}:".encode()).decode("ascii")
-        request = urllib.request.Request(
-            "https://api.cursor.com/v1/agents?limit=1",
-            headers={
-                "Authorization": f"Basic {token}",
-                "Accept": "application/json",
-            },
-            method="GET",
-        )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return bool(response.status == 200)
-    except urllib.error.HTTPError as exc:
-        if exc.code in {401, 403}:
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(
+                "https://api.cursor.com/v1/agents",
+                params={"limit": 1},
+                headers={
+                    "Authorization": f"Basic {token}",
+                    "Accept": "application/json",
+                },
+            )
+        if response.status_code == 200:
+            return True
+        if response.status_code in {401, 403}:
             return False
-        logger.warning("cursor key validation returned HTTP {} — saving anyway", exc.code)
+        logger.warning(
+            "cursor key validation returned HTTP {} — saving anyway", response.status_code
+        )
         return True
-    except OSError as exc:
+    except httpx.HTTPError as exc:
         logger.warning("cursor key validation skipped (network): {}", exc)
         return True
 

@@ -69,7 +69,9 @@ def test_gemini_harness_invokes_cli_and_parses_agent_result(
     assert captured, "expected gemini harness to invoke subprocess.run"
     cmd = captured[0]
     assert cmd[0] == "/usr/bin/gemini"
-    assert "review this diff" in cmd
+    prompt_arg = cmd[cmd.index("-p") + 1]
+    assert "review this diff" in prompt_arg
+    assert "mergecraft-reviewer" in prompt_arg
 
     assert result.success is True
     assert result.output is not None

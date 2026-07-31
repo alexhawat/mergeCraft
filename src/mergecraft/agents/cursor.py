@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -15,6 +16,7 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    payload_event_branch,
 )
 from mergecraft.integrations.cursor_cloud.client import (
     CURSOR_API_KEY_ENV,
@@ -39,6 +41,8 @@ _TERMINAL_STATUSES = frozenset(
         "FAILED",
         "CANCELLED",
         "ERROR",
+        "EXPIRED",
+        "expired",
     }
 )
 _POLL_INTERVAL_S = 5.0
@@ -65,15 +69,17 @@ def _repo_url_from_ctx(ctx: AgentRunContext) -> str:
 
 
 def _starting_ref_from_ctx(ctx: AgentRunContext) -> str:
-    event = getattr(ctx.payload, "event", None)
-    branch = getattr(event, "branch", None) if event is not None else None
-    if isinstance(branch, str) and branch.strip():
-        return branch.strip()
+    branch = payload_event_branch(ctx)
+    if branch:
+        return branch
     repo = primary_repo_state(ctx.tool_state)
-    if repo.default_branch:
-        return repo.default_branch
+    push_dest = repo.push_dest
+    if push_dest is not None and push_dest.remote_branch.strip():
+        return push_dest.remote_branch.strip()
     if repo.initial_head and repo.initial_head.kind == "branch":
         return repo.initial_head.name
+    if repo.default_branch:
+        return repo.default_branch
     return "main"
 
 
@@ -88,8 +94,20 @@ def _build_review_prompt(ctx: AgentRunContext) -> str:
     return "\n\n".join(parts) if parts else "Review this pull request."
 
 
+def _mcp_url_unreachable_from_cloud(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host in {"127.0.0.1", "localhost", "::1"} or host.startswith("127.")
+
+
 def _build_mcp_servers(ctx: AgentRunContext) -> list[dict[str, Any]]:
     if not ctx.mcp_server_url:
+        return []
+    if _mcp_url_unreachable_from_cloud(ctx.mcp_server_url):
+        logger.warning(
+            "cursor cloud agent cannot reach mergeCraft MCP at {} — "
+            "MCP tools are omitted; the cloud run uses the review prompt only",
+            ctx.mcp_server_url,
+        )
         return []
     return [
         {
@@ -216,7 +234,10 @@ async def _run_cursor_once(*, ctx: AgentRunContext) -> AgentResult:
             metadata={"dashboard_url": dashboard_url} if dashboard_url else {},
         )
 
-    await client.list_artifacts(run_id)
+    try:
+        await client.list_artifacts(run_id)
+    except RuntimeError as exc:
+        logger.warning("cursor cloud artifact listing failed (run already terminal): {}", exc)
 
     status = str(run.get("status") or "")
     output = _result_text_from_run(run)
@@ -225,7 +246,7 @@ async def _run_cursor_once(*, ctx: AgentRunContext) -> AgentResult:
     if dashboard_url:
         metadata["dashboard_url"] = dashboard_url
 
-    if status.upper() in {"FAILED", "FAILURE", "ERROR", "CANCELLED", "CANCELED"}:
+    if status.upper() in {"FAILED", "FAILURE", "ERROR", "CANCELLED", "CANCELED", "EXPIRED"}:
         detail = str(run.get("error") or run.get("message") or status)
         return AgentResult(
             success=False,
