@@ -244,8 +244,27 @@ PR checkout.
 
 Create `.mergecraft/config.yaml` (see [`examples/config.yaml`](examples/config.yaml)):
 
+**Single model (legacy scalar):**
+
 ```yaml
 model: anthropic/claude-sonnet
+push: restricted
+shell: restricted
+prApproveEnabled: false
+signedCommits: false
+```
+
+**Ordered preference list** — try each entry in order; optional per-slug backups via
+`modelFallbacks` (runtime chain resolution lands in a later release):
+
+```yaml
+models:
+  - anthropic/claude-sonnet
+  - openai/gpt-5.3-codex
+  - google/gemini-3.1-pro-preview
+modelFallbacks:
+  anthropic/claude-sonnet:
+    - anthropic/claude-opus
 push: restricted
 shell: restricted
 prApproveEnabled: false

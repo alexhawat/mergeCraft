@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `.mergecraft/config.yaml` accepts an ordered `models` list and optional
+  `modelFallbacks` map for per-slug backup chains; the legacy scalar `model` key
+  still works unchanged (#14)
 - Reviewers can list GitHub check suites for a commit via `list_check_runs` and fetch
   one suite by id via `get_check_suite`, then pass the id to `get_check_suite_logs`
   (#8)

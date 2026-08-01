@@ -87,6 +87,8 @@ class RepoSettings(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     model: str | None = None
+    models: list[str] | None = None
+    model_fallbacks: dict[str, list[str]] | None = Field(default=None, alias="modelFallbacks")
     modes: list[ModeDefinition] = Field(default_factory=list)
     setup_script: str | None = Field(default=None, alias="setupScript")
     post_checkout_script: str | None = Field(default=None, alias="postCheckoutScript")
@@ -156,6 +158,8 @@ def default_settings() -> RepoSettings:
     return RepoSettings.model_validate(
         {
             "model": None,
+            "models": None,
+            "model_fallbacks": None,
             "modes": [],
             "setup_script": None,
             "post_checkout_script": None,

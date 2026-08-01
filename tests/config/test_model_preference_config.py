@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import RepoSettings
 
@@ -22,9 +20,6 @@ _ORDERED_MODELS = (
 )
 
 
-@pytest.mark.xfail(
-    reason="green after W17: models list parses into RepoSettings (#14)", strict=False
-)
 def test_load_repo_settings_parses_models_ordered_list(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -48,7 +43,6 @@ models:
     assert settings.models == list(_ORDERED_MODELS)
 
 
-@pytest.mark.xfail(reason="green after W17: scalar model back-compat unchanged (#14)", strict=False)
 def test_load_repo_settings_scalar_model_unchanged_without_models_list(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
