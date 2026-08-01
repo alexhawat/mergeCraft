@@ -36,6 +36,18 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve slim image tags
+        id: slim-tags
+        run: |
+          {
+            echo 'tags<<EOF'
+            echo 'ghcr.io/alexhawat/mergecraft:latest'
+            echo "ghcr.io/alexhawat/mergecraft:${GITHUB_SHA}"
+            if [ "${{ github.event_name }}" != "push" ]; then
+              echo 'mergecraft:ci'
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
       - name: Build slim
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -43,12 +55,21 @@ jobs:
           file: Dockerfile
           push: ${{ github.event_name == 'push' }}
           load: ${{ github.event_name != 'push' }}
-          tags: |
-            ghcr.io/alexhawat/mergecraft:latest
-            ghcr.io/alexhawat/mergecraft:${{ github.sha }}
-            mergecraft:ci
+          tags: ${{ steps.slim-tags.outputs.tags }}
           cache-from: type=gha,scope=mergeCraft-slim
           cache-to: type=gha,mode=max,scope=mergeCraft-slim
+      - name: Resolve analyzers image tags
+        id: analyzers-tags
+        run: |
+          {
+            echo 'tags<<EOF'
+            echo 'ghcr.io/alexhawat/mergecraft:analyzers'
+            echo "ghcr.io/alexhawat/mergecraft:analyzers-${GITHUB_SHA}"
+            if [ "${{ github.event_name }}" != "push" ]; then
+              echo 'mergecraft-analyzers:ci'
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
       - name: Build analyzers
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -56,10 +77,7 @@ jobs:
           file: Dockerfile.analyzers
           push: ${{ github.event_name == 'push' }}
           load: ${{ github.event_name != 'push' }}
-          tags: |
-            ghcr.io/alexhawat/mergecraft:analyzers
-            ghcr.io/alexhawat/mergecraft:analyzers-${{ github.sha }}
-            mergecraft-analyzers:ci
+          tags: ${{ steps.analyzers-tags.outputs.tags }}
           cache-from: type=gha,scope=mergeCraft-analyzers
           cache-to: type=gha,mode=max,scope=mergeCraft-analyzers
       - name: Entrypoint smoke (slim)
