@@ -143,6 +143,7 @@ class ToolState:
     learnings_file_path: str | None = None
     learnings_seed: str | None = None
     learnings_persist_attempted: bool = False
+    learnings_review_delta: str | None = None
     xrepo_learnings_file_path: str | None = None
     xrepo_learnings_seed: str | None = None
     xrepo_learnings_persist_attempted: bool = False

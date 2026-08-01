@@ -35,6 +35,9 @@ coverage.xml
 *.swp
 .DS_Store
 
+# Graphify knowledge graph (built on demand with `graphify update .`)
+graphify-out/
+
 # Local operator
 .ignorelocal/
 

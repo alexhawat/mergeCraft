@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 CHECK_TIMEOUT_S = 300
 MAX_OUTPUT_CHARS = 8_000
 
-CheckStatus = Literal["passed", "failed", "timed_out", "unavailable"]
+CheckStatus = Literal["passed", "failed", "timed_out", "unavailable", "declared-but-cannot-run"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +42,7 @@ class AnalyzerOutcome:
 
     @property
     def ran(self) -> bool:
-        return self.status != "unavailable"
+        return self.status not in {"unavailable", "declared-but-cannot-run"}
 
 
 def _run_tmpdir(plan: AnalyzerPlan) -> Path:

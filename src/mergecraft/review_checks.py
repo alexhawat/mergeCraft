@@ -133,6 +133,23 @@ def run_checks(checks: list[StaticCheck], *, root: Path) -> list[StaticCheckOutc
     return run_plans(plans)
 
 
+def declared_cannot_run_outcomes(
+    checks: list[StaticCheck],
+    *,
+    reason: str,
+) -> list[StaticCheckOutcome]:
+    """Return explicit rows when configured gates cannot execute in this environment."""
+    return [
+        StaticCheckOutcome(
+            name=check.name,
+            command=check.command,
+            status="declared-but-cannot-run",
+            output=reason,
+        )
+        for check in checks
+    ]
+
+
 __all__ = [
     "CHECK_TIMEOUT_S",
     "DISCOVERABLE_TARGETS",
@@ -142,6 +159,7 @@ __all__ = [
     "StaticCheck",
     "StaticCheckConfig",
     "StaticCheckOutcome",
+    "declared_cannot_run_outcomes",
     "discover_makefile_targets",
     "plan_checks",
     "run_checks",

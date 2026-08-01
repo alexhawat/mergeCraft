@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse
 
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.mcp.analyzers import analyzer_findings_tool, run_analyzers_tool
+from mergecraft.mcp.check_runs import get_check_suite_tool, list_check_runs_tool
 from mergecraft.mcp.check_suite import get_check_suite_logs_tool
 from mergecraft.mcp.checkout import checkout_pr_tool
 from mergecraft.mcp.ci_intelligence import analyze_ci_failures_tool
@@ -97,6 +98,8 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
         list_pull_request_reviews_tool(ctx),
         resolve_review_thread_tool(ctx),
         get_check_suite_logs_tool(ctx),
+        list_check_runs_tool(ctx),
+        get_check_suite_tool(ctx),
         analyze_ci_failures_tool(ctx),
         add_labels_tool(ctx),
         remove_labels_tool(ctx),

@@ -8,6 +8,10 @@ from loguru import logger
 
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import ProgressComment, ReviewReplyRecord, primary_repo_state
+from mergecraft.utils.learnings import (
+    ensure_learnings_review_delta,
+    merge_learnings_delta_into_review_body,
+)
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -192,7 +196,9 @@ def report_progress_tool(ctx: ToolContext):
                 ),
             }
 
-        body_with_footer = add_footer(ctx, body)
+        await ensure_learnings_review_delta(ctx.tool_state)
+        body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, body)
+        body_with_footer = add_footer(ctx, body_with_delta)
 
         if target_plan and ctx.tool_state.existing_plan_comment_id:
             result = await ctx.github.update_issue_comment(
