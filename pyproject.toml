@@ -37,7 +37,7 @@ mergecraft = "mergecraft.cli.app:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest==9.0.3",
+    "pytest==9.1.1",
     "pytest-asyncio==1.3.0",
     "pytest-xdist==3.8.0",
     "ruff==0.15.22",
