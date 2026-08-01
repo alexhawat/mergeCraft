@@ -50,7 +50,7 @@ dev = [
     "pyright==1.1.411",
     "basedpyright==1.39.9",
     "pytest-cov==6.0.0",
-    "pytest-randomly==3.16.0",
+    "pytest-randomly==4.1.0",
     "pytest-split==0.11.0",
     "types-aiofiles==25.1.0.20251011",
 ]
