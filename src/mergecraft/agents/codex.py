@@ -26,6 +26,7 @@ from mergecraft.types import MERGECRAFT_MCP_NAME
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
+CODEX_REVIEW_PERMISSION_PROFILE = "mergecraft-review"
 
 
 def _strip_provider_prefix(specifier: str) -> str:
@@ -143,6 +144,54 @@ def _sandbox_mode(ctx: AgentRunContext) -> str:
     return "read-only"
 
 
+def _codex_use_permission_profiles(ctx: AgentRunContext) -> bool:
+    """Return True when Codex must use permission profiles for MCP network access.
+
+    Codex legacy ``sandbox_mode = "read-only"`` has no network knob — only
+    ``[sandbox_workspace_write].network_access`` exists, and it is ignored in
+    read-only mode. Passing ``--sandbox read-only`` forces that legacy path, so
+    read-only PR reviews with a localhost mergecraft MCP must use permission
+    profiles instead.
+    """
+    return bool(ctx.mcp_server_url) and _sandbox_mode(ctx) == "read-only"
+
+
+def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
+    disabled_tools = [str(name) for name in ctx.subagent_denied_tools]
+    lines.extend(
+        [
+            "",
+            f"[mcp_servers.{MERGECRAFT_MCP_NAME}]",
+            f"url = {_toml_string(ctx.mcp_server_url)}",
+        ]
+    )
+    if disabled_tools:
+        lines.append(f"disabled_tools = {_toml_string_list(disabled_tools)}")
+
+
+def _append_read_only_mcp_network_lines(lines: list[str]) -> None:
+    profile = CODEX_REVIEW_PERMISSION_PROFILE
+    lines.extend(
+        [
+            "",
+            f"default_permissions = {_toml_string(profile)}",
+            "",
+            f"[permissions.{profile}]",
+            'extends = ":read-only"',
+            "",
+            f"[permissions.{profile}.network]",
+            "enabled = true",
+            "allow_local_binding = true",
+            "",
+            f"[permissions.{profile}.network.domains]",
+            '"api.openai.com" = "allow"',
+            '"*.openai.com" = "allow"',
+            '"127.0.0.1" = "allow"',
+            '"localhost" = "allow"',
+        ]
+    )
+
+
 def write_mcp_config(ctx: AgentRunContext) -> str:
     """Write Codex ``config.toml`` under ``$CODEX_HOME`` and return its path."""
     codex_home = _codex_home(ctx)
@@ -154,25 +203,18 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     instructions_path = codex_home / "mergecraft-instructions.md"
     instructions_path.write_text("\n\n".join(instructions_parts), encoding="utf-8")
 
-    disabled_tools = [str(name) for name in ctx.subagent_denied_tools]
     sandbox_mode = _sandbox_mode(ctx)
+    use_permission_profiles = _codex_use_permission_profiles(ctx)
     lines = [
         f"approval_policy = {_toml_string('never' if os.environ.get('CI') == 'true' else 'on-request')}",
-        f"sandbox_mode = {_toml_string(sandbox_mode)}",
         f"experimental_instructions_file = {_toml_string(str(instructions_path))}",
         f"model_reasoning_effort = {_toml_string('high')}",
-        "",
-        f"[mcp_servers.{MERGECRAFT_MCP_NAME}]",
-        f"url = {_toml_string(ctx.mcp_server_url)}",
     ]
-    if disabled_tools:
-        lines.append(f"disabled_tools = {_toml_string_list(disabled_tools)}")
-    # mergeCraft PR reviews run with shell disabled → read-only sandbox. Codex still
-    # needs localhost HTTP to the mergecraft MCP server (checkout_pr, review submit,
-    # CI logs, …). Without network_access the tool set is empty and Codex falls back
-    # to requesting its optional GitHub plugin instead.
-    if ctx.mcp_server_url:
-        if sandbox_mode == "workspace-write":
+    if use_permission_profiles:
+        _append_read_only_mcp_network_lines(lines)
+    else:
+        lines.append(f"sandbox_mode = {_toml_string(sandbox_mode)}")
+        if ctx.mcp_server_url and sandbox_mode == "workspace-write":
             lines.extend(
                 [
                     "",
@@ -180,14 +222,9 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
                     "network_access = true",
                 ]
             )
-        else:
-            lines.extend(
-                [
-                    "",
-                    "[sandbox_read_only]",
-                    "network_access = true",
-                ]
-            )
+
+    if ctx.mcp_server_url:
+        _append_mcp_server_lines(lines, ctx)
 
     config_path = codex_home / "config.toml"
     config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -305,7 +342,10 @@ def _run_codex_once(
     ]
     if model:
         cmd.extend(["--model", model])
-    cmd.extend(["--sandbox", _sandbox_mode(ctx)])
+    # Legacy ``--sandbox read-only`` cannot reach localhost MCP; permission profiles
+    # in config.toml own sandbox/network policy for that case.
+    if not _codex_use_permission_profiles(ctx):
+        cmd.extend(["--sandbox", _sandbox_mode(ctx)])
     if continue_session:
         cmd.extend(["resume", "--last"])
     cmd.append(prompt or ctx.instructions.user)

@@ -81,8 +81,8 @@ def test_codex_harness_invokes_cli_and_parses_agent_result(
     assert result.usage.output_tokens > 0
 
 
-def test_write_mcp_config_enables_network_in_read_only_sandbox(tmp_path: Path) -> None:
-    """shell=disabled → read-only sandbox must still reach localhost MCP."""
+def test_write_mcp_config_uses_permission_profiles_for_read_only_mcp(tmp_path: Path) -> None:
+    """shell=disabled + MCP → permission profiles (legacy read-only has no network knob)."""
     codex_module = _load_codex_module()
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
     ctx.payload.shell = "disabled"
@@ -90,13 +90,17 @@ def test_write_mcp_config_enables_network_in_read_only_sandbox(tmp_path: Path) -
     config_path = Path(codex_module.write_mcp_config(ctx))
     text = config_path.read_text(encoding="utf-8")
 
-    assert 'sandbox_mode = "read-only"' in text
-    assert "[sandbox_read_only]" in text
-    assert "network_access = true" in text
+    assert "sandbox_mode" not in text
+    assert "[permissions.mergecraft-review]" in text
+    assert 'extends = ":read-only"' in text
+    assert "[permissions.mergecraft-review.network]" in text
+    assert "enabled = true" in text
+    assert "allow_local_binding = true" in text
+    assert "[sandbox_read_only]" not in text
     assert "[mcp_servers.mergecraft]" in text
 
 
-def test_write_mcp_config_omits_network_when_no_mcp_url(tmp_path: Path) -> None:
+def test_write_mcp_config_omits_permission_profiles_without_mcp_url(tmp_path: Path) -> None:
     codex_module = _load_codex_module()
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
     ctx.mcp_server_url = ""
@@ -105,4 +109,57 @@ def test_write_mcp_config_omits_network_when_no_mcp_url(tmp_path: Path) -> None:
     config_path = Path(codex_module.write_mcp_config(ctx))
     text = config_path.read_text(encoding="utf-8")
 
+    assert 'sandbox_mode = "read-only"' in text
+    assert "default_permissions" not in text
     assert "network_access" not in text
+    assert "[mcp_servers.mergecraft]" not in text
+
+
+def test_write_mcp_config_enables_network_in_workspace_write_sandbox(tmp_path: Path) -> None:
+    codex_module = _load_codex_module()
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+    ctx.payload.shell = "enabled"
+
+    config_path = Path(codex_module.write_mcp_config(ctx))
+    text = config_path.read_text(encoding="utf-8")
+
+    assert 'sandbox_mode = "workspace-write"' in text
+    assert "[sandbox_workspace_write]" in text
+    assert "network_access = true" in text
+    assert "default_permissions" not in text
+
+
+def test_run_codex_once_omits_sandbox_flag_for_permission_profiles(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    codex_module = _load_codex_module()
+    monkeypatch.setenv("CI", "true")
+    captured: list[list[str]] = []
+
+    def _fake_run(
+        cmd: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        captured.append(list(cmd))
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout='{"result":"ok"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(codex_module.subprocess, "run", _fake_run)
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+    ctx.payload.shell = "disabled"
+    codex_module.write_mcp_config(ctx)
+
+    codex_module._run_codex_once(
+        cli="/usr/bin/codex",
+        prompt="review",
+        ctx=ctx,
+        mcp_config=str(tmp_path / "unused"),
+    )
+
+    cmd = captured[0]
+    assert "--sandbox" not in cmd
