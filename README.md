@@ -244,8 +244,28 @@ PR checkout.
 
 Create `.mergecraft/config.yaml` (see [`examples/config.yaml`](examples/config.yaml)):
 
+**Single model (legacy scalar):**
+
 ```yaml
 model: anthropic/claude-sonnet
+push: restricted
+shell: restricted
+prApproveEnabled: false
+signedCommits: false
+```
+
+**Ordered preference list** — try each entry in order; optional per-slug backups via
+`modelFallbacks`; runtime skips entries without credentials and advances on retryable
+provider failures:
+
+```yaml
+models:
+  - anthropic/claude-sonnet
+  - openai/gpt-5.3-codex
+  - google/gemini-3.1-pro-preview
+modelFallbacks:
+  anthropic/claude-sonnet:
+    - anthropic/claude-opus
 push: restricted
 shell: restricted
 prApproveEnabled: false
@@ -280,6 +300,9 @@ Learnings live in `.mergecraft/learnings.md` and are seeded/persisted across run
 | `mergecraft auth codex` | Save a ChatGPT subscription credential (`CODEX_AUTH_JSON`) via `gh secret set` |
 | `mergecraft auth gemini` | Save a Gemini API key (`GEMINI_API_KEY`) via `gh secret set` |
 | `mergecraft auth cursor` | Save a Cursor Cloud API key (`CURSOR_API_KEY`) via `gh secret set` |
+| `mergecraft models list` | List curated model slugs and whether local credentials are detected |
+| `mergecraft models set <slug> [<slug>…]` | Write an ordered `models:` preference list to `.mergecraft/config.yaml` |
+| `mergecraft models show` | Show effective model order (config + `MERGECRAFT_MODEL`) and which slug would win now |
 | `mergecraft watch --pr N` | Stream PR/issue timeline as JSONL |
 | `mergecraft diff-review` | Offline local git/patch review (no GitHub PR posting) |
 | `mergecraft gha` | Action runtime entry (used by Docker Action) |

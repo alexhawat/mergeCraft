@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `.mergecraft/config.yaml` accepts an ordered `models` list and optional
+  `modelFallbacks` map for per-slug backup chains; the legacy scalar `model` key
+  still works unchanged (#14)
+- `mergecraft models list`, `models set`, and `models show` CLI commands for
+  inspecting the curated catalog, writing an ordered preference list, and
+  previewing which slug would run (#14)
+- Runtime model chain resolution: skip entries without credentials, advance on
+  retryable provider failures, and log selected/skipped slugs at Action-visible
+  levels (#14)
 - Reviewers can list GitHub check suites for a commit via `list_check_runs` and fetch
   one suite by id via `get_check_suite`, then pass the id to `get_check_suite_logs`
   (#8)
@@ -27,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Action `model` input and explicit chain selection no longer lose to
+  `MERGECRAFT_MODEL`; missing agent binaries are skipped when walking the chain;
+  retryable chain advancement is wired through the Action entrypoint (#14)
 - Always post the `mergecraft-approval` status check on PR runs when status checks
   are enabled; use `neutral` when the review did not complete so a failed run no
   longer leaves a missing check that branch protection can misread as pass
