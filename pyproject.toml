@@ -45,7 +45,7 @@ dev = [
     "pre-commit==4.6.0",
     "bandit[toml]==1.9.4",
     "pip-audit==2.10.1",
-    "types-PyYAML==6.0.12.20260510",
+    "types-PyYAML==6.0.12.20260724",
     "types-jsonschema==4.25.1.20250822",
     "pyright==1.1.409",
     "basedpyright==1.39.9",
