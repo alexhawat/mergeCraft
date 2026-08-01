@@ -129,7 +129,7 @@ class ToolState:
     approval: ApprovalRecord | None = None
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None
-    progress_comment: ProgressComment | None | Literal[False] = None
+    progress_comment: ProgressComment | Literal[False] | None = None
     # None = unset, ProgressComment = active, False = deliberately deleted (TS uses null)
     had_progress_comment: bool = False
     last_progress_body: str | None = None
