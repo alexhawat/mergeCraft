@@ -1,0 +1,28 @@
+id: smarty-lint
+category: lint
+languages:
+- smarty
+detect:
+  files:
+  - '*.tpl'
+  - .smarty-lint.json
+command:
+- smarty-lint
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 1.0.0
+runtime: repo-native
+timeout_s: 120
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: null
+declared_unavailable: manifest-only — Smarty Lint not bundled on Linux runners (C6
+  out of scope)

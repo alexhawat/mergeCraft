@@ -1,0 +1,10 @@
+id: mcp-remote-install-script
+kind: mcp
+severity: Major
+confidence: likely
+message: MCP server configuration references a remote installation script
+remediation: Avoid curl|bash or wget piped install patterns; vendor and pin MCP server binaries locally.
+requires_verification: false
+match:
+  fields: [command, args, command_line, url, install, instructions]
+  pattern: '(?i)(curl\s+[^\n|]*\|\s*(ba)?sh|wget\s+-O\s+-[^\n|]*\|\s*sh|bash\s+<\(\s*curl)'

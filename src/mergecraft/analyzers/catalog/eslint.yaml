@@ -1,0 +1,30 @@
+id: eslint
+category: lint
+languages: ["javascript", "typescript"]
+detect:
+  files:
+    - "*.js"
+    - "*.jsx"
+    - "*.ts"
+    - "*.tsx"
+    - "*.mjs"
+    - "*.cjs"
+command:
+  - eslint
+  - --format
+  - json
+  - "{files}"
+scope: diff
+parser: eslint_json
+supports_fix: false
+default_enabled: auto
+version: "8.57.0"
+runtime: repo-native
+timeout_s: 180
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+provenance: {}
+network_allowlist: []
+exclusive_group: js-lint

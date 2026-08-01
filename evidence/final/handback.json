@@ -1,0 +1,33 @@
+{
+  "wave": "Final",
+  "plan": "mergecraft-analyzer-catalog-wave-plan.md",
+  "date": "2026-07-29",
+  "sha": "03b3571",
+  "worktree": "/Users/alex/Documents/code/sevn.bot/mergecraft-analyzer-catalog",
+  "branch": "wave/analyzer-catalog",
+  "checks": {
+    "F.1": "worktree wave/analyzer-catalog @ pending; 0 xfail / strict=True in tests/analyzers/",
+    "F.2": "make ci green — 491 passed (~112s); lockcheck lint typecheck pyright catalog-check build security test",
+    "F.3": "57 manifests; verifier pass @ 3afa32c; fixture pipeline inline 8/8 (D14 budget); branch diff 70 findings inline 8/8",
+    "F.4": {
+      "docker_analyzers": "blocked — Docker daemon hung (context canceled / _ping timeout)",
+      "note": "Re-run: docker build -f Dockerfile.analyzers -t mergecraft-analyzers:catalog-final ."
+    }
+  },
+  "shipped": [
+    "Catalog C0–C6: 57 analyzer manifests + fixtures + docs/ANALYZERS.md",
+    "Repo-native language gates, supply chain, pattern scanners, differential contracts, agentsec",
+    "mergecraft analyzers CLI (list/detect/run/explain/export/lock)",
+    "docs/CONTRIBUTING-ANALYZERS.md contributor path",
+    "491 unit tests / 0 xfails"
+  ],
+  "w02_baseline_delta": {
+    "d14_cap": 8,
+    "w02_median_agent_inline": 16,
+    "catalog_fixture_pipeline_inline": 8,
+    "catalog_branch_diff_inline": 8,
+    "make_ci_final": "~112s / 491 tests",
+    "parent_w7_tests": 285
+  },
+  "next_gate": "Thermos (D23, blocking — skipped per operator request)"
+}

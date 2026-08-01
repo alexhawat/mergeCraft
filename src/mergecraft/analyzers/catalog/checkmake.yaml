@@ -1,0 +1,30 @@
+id: checkmake
+category: lint
+languages:
+- make
+detect:
+  files:
+  - Makefile
+  - makefile
+  - '*.mk'
+command:
+- checkmake
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 0.2.2
+runtime: managed
+timeout_s: 60
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://github.com/mrtazz/checkmake/releases/download/0.2.2/checkmake-0.2.2.linux.amd64
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+network_allowlist: []
+exclusive_group: null

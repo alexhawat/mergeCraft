@@ -1,0 +1,46 @@
+name: "Get Installation Token"
+description: "Get a GitHub App installation token for the current repository"
+author: "Alex Hawat"
+
+inputs:
+  repos:
+    description: "Comma-separated list of additional repo names to grant access to (e.g., 'repo1,repo2'). Current repo is always included."
+    required: false
+  app_id:
+    description: "GitHub App ID (defaults to GITHUB_APP_ID env)."
+    required: false
+  private_key:
+    description: "GitHub App private key PEM (defaults to GITHUB_APP_PRIVATE_KEY env)."
+    required: false
+  installation_id:
+    description: "Installation ID (defaults to GITHUB_APP_INSTALLATION_ID or repo lookup)."
+    required: false
+
+outputs:
+  token:
+    description: "GitHub App installation token"
+    value: ${{ steps.mint.outputs.token }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Mint installation token
+      id: mint
+      shell: bash
+      env:
+        INPUT_REPOS: ${{ inputs.repos }}
+        GITHUB_APP_ID: ${{ inputs.app_id || env.GITHUB_APP_ID }}
+        GITHUB_APP_PRIVATE_KEY: ${{ inputs.private_key || env.GITHUB_APP_PRIVATE_KEY }}
+        GITHUB_APP_INSTALLATION_ID: ${{ inputs.installation_id || env.GITHUB_APP_INSTALLATION_ID }}
+      run: |
+        set -euo pipefail
+        python3 "${{ github.action_path }}/main.py"
+    - name: Revoke on cleanup
+      if: always()
+      shell: bash
+      env:
+        STATE_token: ${{ steps.mint.outputs.token }}
+        MERGECRAFT_TOKEN_POST: "1"
+      run: |
+        set -euo pipefail
+        python3 "${{ github.action_path }}/main.py" --post

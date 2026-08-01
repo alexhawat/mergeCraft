@@ -1,0 +1,28 @@
+id: htmlhint
+category: lint
+languages:
+- html
+detect:
+  files:
+  - '*.html'
+  - .htmlhintrc
+command:
+- htmlhint
+- --format
+- json
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 1.1.4
+runtime: repo-native
+timeout_s: 60
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: null

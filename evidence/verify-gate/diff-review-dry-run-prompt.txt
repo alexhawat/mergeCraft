@@ -1,0 +1,20 @@
+You are running an **offline** local diff review (mergecraft diff-review).
+There is no GitHub pull request. Do **not** call `checkout_pr`, `create_pull_request_review`, `create_pull_request`, `push_branch`, `commit_changes`, or any other GitHub-mutating / push tool.
+
+1. Call `select_mode` with mode **Review**.
+2. Your first substantive action: **read** the authoritative unified diff at `/var/folders/2p/9stl57x50yv7zfs2zn_lzchh0000gn/T/mergecraft-diff-review-_8t51hdh/review.diff` end-to-end (start with any TOC / file headers). Do not re-derive the diff via `git diff` unless that file is empty/unreadable.
+3. Investigate the working tree with read-only tools only as needed.
+   When `run_analyzers` is available, call it with the diff's changed paths and `diff_path: /var/folders/2p/9stl57x50yv7zfs2zn_lzchh0000gn/T/mergecraft-diff-review-_8t51hdh/review.diff` before drafting findings; use `analyzer_findings` for placement and dispatch `mergecraft-verifier` for Critical/Major analyzer hits.
+4. Produce a complete review body using the Review mode format (preamble + cross-cutting sections + optional nitpicks). Put the full markdown review in your final response and, if available, `set_output` with key `review`.
+5. Do not modify files, commit, or push.
+
+Base ref: (provided diff file)
+Diff path: `/var/folders/2p/9stl57x50yv7zfs2zn_lzchh0000gn/T/mergecraft-diff-review-_8t51hdh/review.diff`
+
+## Diff summary
+
+4 file(s) changed:
+- .github/workflows/broken.yml
+- .github/workflows/unpinned-action.yml
+- scripts/deploy.sh
+- Dockerfile

@@ -1,0 +1,12 @@
+# Planted: unpinned action ref for zizmor (W6)
+name: Unpinned action
+on:
+  push:
+    branches: [main]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: some-org/unverified-action@main
+      - run: echo done

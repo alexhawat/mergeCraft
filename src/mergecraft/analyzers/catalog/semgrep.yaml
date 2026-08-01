@@ -1,0 +1,34 @@
+id: semgrep
+category: security
+languages: ["python", "javascript", "typescript", "go", "java", "ruby", "rust"]
+detect:
+  files:
+    - "*.py"
+    - "*.js"
+    - "*.ts"
+    - "*.tsx"
+    - "*.go"
+    - "*.java"
+    - "*.rb"
+    - "*.rs"
+command:
+  - semgrep
+  - scan
+  - --quiet
+  - --sarif
+  - "{files}"
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: true
+version: "1.170.0"
+runtime: managed
+timeout_s: 300
+trust: untrusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: pattern-scanner

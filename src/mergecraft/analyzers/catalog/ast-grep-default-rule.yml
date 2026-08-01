@@ -1,0 +1,6 @@
+id: eval-call
+language: python
+rule:
+  pattern: eval($X)
+message: taint-style eval code execution sink
+severity: error

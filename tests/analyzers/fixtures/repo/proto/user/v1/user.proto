@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package user.v1;
+
+// Head revision: breaking change — removed email field (catalog C4).
+message User {
+  string id = 1;
+  string name = 2;
+}

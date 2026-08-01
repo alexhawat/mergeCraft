@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: MIT
+# Lean post-merge delivery (adapted from sevn; no mergecraft review job).
+name: CI/CD
+
+on:
+  push:
+    branches: [main, pre-0.0.1]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: ci-cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Full verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: make ci
+        run: make ci
+
+  publish-ghcr:
+    name: Publish GHCR image
+    needs: verify
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push slim
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/alexhawat/mergecraft:latest
+            ghcr.io/alexhawat/mergecraft:${{ github.sha }}
+          cache-from: type=gha,scope=mergeCraft-slim
+          cache-to: type=gha,mode=max,scope=mergeCraft-slim
+      - name: Build and push analyzers
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile.analyzers
+          push: true
+          tags: |
+            ghcr.io/alexhawat/mergecraft:analyzers
+            ghcr.io/alexhawat/mergecraft:analyzers-${{ github.sha }}
+          cache-from: type=gha,scope=mergeCraft-analyzers
+          cache-to: type=gha,mode=max,scope=mergeCraft-analyzers
+
+  release:
+    name: GitHub Release
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: softprops/action-gh-release@6da8fa9354acfd0aee3ea35f3aba2d3a4a1c0c5f # v2.4.0
+        with:
+          generate_release_notes: true

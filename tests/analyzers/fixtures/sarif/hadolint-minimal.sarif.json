@@ -1,0 +1,23 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": { "driver": { "name": "hadolint", "rules": [{ "id": "DL3007" }] } },
+      "results": [
+        {
+          "ruleId": "DL3007",
+          "level": "error",
+          "message": { "text": "Using latest is prone to errors if the image gets updated" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "Dockerfile" },
+                "region": { "startLine": 2, "endLine": 2 }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

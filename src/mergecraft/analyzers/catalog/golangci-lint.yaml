@@ -1,0 +1,31 @@
+id: golangci-lint
+category: lint
+languages:
+- go
+detect:
+  files:
+  - '*.go'
+command:
+- golangci-lint
+- run
+- --out-format
+- sarif
+- '{files}'
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: 1.62.2
+runtime: managed
+timeout_s: 300
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://github.com/golangci/golangci-lint/releases/download/v1.62.2/golangci-lint-1.62.2-linux-amd64.tar.gz
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+network_allowlist: []
+exclusive_group: go-lint

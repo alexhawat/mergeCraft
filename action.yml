@@ -1,0 +1,68 @@
+name: "mergeCraft Action (Python)"
+description: "Execute coding agents with a prompt (standalone BYOK Python runtime)"
+author: "Alex Hawat"
+
+inputs:
+  prompt:
+    description: "Prompt to send to the agent (string or JSON payload)"
+    required: false
+  prompt_file:
+    description: "Path to a file (relative to GITHUB_WORKSPACE) whose contents are used as the prompt. Set exactly one of prompt or prompt_file."
+    required: false
+  timeout:
+    description: "Maximum run duration (e.g., 10m, 1h30m). Default: 1h"
+    required: false
+  model:
+    description: "Model to use — a curated slug (e.g. anthropic/claude-opus) or a raw models.dev specifier. Overrides repo settings."
+    required: false
+  cwd:
+    description: "Working directory for the agent (defaults to GITHUB_WORKSPACE)"
+    required: false
+  push:
+    description: "Git push permission: disabled, restricted, or enabled. Default: enabled"
+    required: false
+  shell:
+    description: "Shell permission: disabled, restricted, or enabled."
+    required: false
+  status_checks:
+    description: "Post mergecraft and mergecraft-approval commit-status checks: disabled (default) or enabled."
+    required: false
+  analyzers:
+    description: "Analyzer execution tier: off (disabled), auto (detect + provision), or full (baked image tools). Default: auto"
+    required: false
+    default: auto
+  output_schema:
+    description: "JSON Schema (draft-07) for structured output validation."
+    required: false
+  token:
+    description: "GitHub-provided token with job-scoped permissions."
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  result:
+    description: "Set when the prompt requests it; required when output_schema is provided."
+    value: ${{ steps.run.outputs.result }}
+
+runs:
+  using: "docker"
+  image: "Dockerfile"
+  entrypoint: "/entrypoint.sh"
+  args:
+    - "gha"
+  env:
+    INPUT_PROMPT: ${{ inputs.prompt }}
+    INPUT_PROMPT_FILE: ${{ inputs.prompt_file }}
+    INPUT_TIMEOUT: ${{ inputs.timeout }}
+    INPUT_MODEL: ${{ inputs.model }}
+    INPUT_CWD: ${{ inputs.cwd }}
+    INPUT_PUSH: ${{ inputs.push }}
+    INPUT_SHELL: ${{ inputs.shell }}
+    INPUT_STATUS_CHECKS: ${{ inputs.status_checks }}
+    INPUT_ANALYZERS: ${{ inputs.analyzers }}
+    INPUT_OUTPUT_SCHEMA: ${{ inputs.output_schema }}
+    INPUT_TOKEN: ${{ inputs.token }}
+
+branding:
+  icon: "code"
+  color: "green"

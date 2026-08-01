@@ -1,0 +1,43 @@
+id: opengrep
+category: security
+languages: ["python", "javascript", "typescript", "go", "java", "ruby", "rust"]
+detect:
+  files:
+    - "*.py"
+    - "*.js"
+    - "*.ts"
+    - "*.tsx"
+    - "*.go"
+    - "*.java"
+    - "*.rb"
+    - "*.rs"
+command:
+  - opengrep
+  - scan
+  - --quiet
+  - --sarif
+  - "{files}"
+scope: diff
+parser: sarif
+supports_fix: false
+default_enabled: false
+version: "1.26.0"
+runtime: managed
+timeout_s: 300
+trust: untrusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance:
+  linux-amd64:
+    url: https://github.com/opengrep/opengrep/releases/download/v1.26.0/opengrep_manylinux_x86
+    sha256: "40c21299eeddabf743b856daa843d24f9d4a027130671cd45b3b21776fd9ab26"
+  linux-arm64:
+    url: https://github.com/opengrep/opengrep/releases/download/v1.26.0/opengrep_manylinux_aarch64
+    sha256: "3042a3b1aa98fa93407b9d66a45ab1f179b5b367e76965f56afdbd2c038fb1fa"
+  darwin-arm64:
+    url: https://github.com/opengrep/opengrep/releases/download/v1.26.0/opengrep_osx_arm64
+    sha256: "513ff8491f7254c9a672cf8421136a537eb53b2a8af748568bd697acdc59eefe"
+network_allowlist: []
+exclusive_group: pattern-scanner

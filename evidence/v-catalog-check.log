@@ -1,0 +1,2 @@
+/Users/alex/.local/bin/uv run python -m mergecraft.analyzers.catalog_docs
+2026-07-29 10:35:50.244 | INFO     | __main__:main:204 - catalog OK — 57 manifests

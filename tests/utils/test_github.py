@@ -1,0 +1,123 @@
+"""Tests for GitHub client + local run-context assembly."""
+
+from __future__ import annotations
+
+import httpx
+import pytest
+
+from mergecraft.config.settings import default_settings
+from mergecraft.utils.github import GitHubClient, parse_repo_context, resolve_run_context_data
+
+
+def test_parse_repo_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/widgets")
+    ctx = parse_repo_context()
+    assert ctx.owner == "acme"
+    assert ctx.name == "widgets"
+
+    monkeypatch.delenv("GITHUB_REPOSITORY")
+    with pytest.raises(ValueError, match="required"):
+        parse_repo_context()
+
+    with pytest.raises(ValueError, match="Invalid"):
+        parse_repo_context("nonsplit")
+
+
+@pytest.mark.asyncio
+async def test_github_client_rest_helpers() -> None:
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        path = request.url.path
+        if path == "/repos/acme/widgets":
+            return httpx.Response(200, json={"full_name": "acme/widgets", "private": False})
+        if path.endswith("/issues/1"):
+            return httpx.Response(200, json={"number": 1, "title": "hi"})
+        if path.endswith("/issues/1/comments"):
+            return httpx.Response(200, json=[{"id": 9, "body": "c"}])
+        if path.endswith("/pulls/2"):
+            return httpx.Response(200, json={"number": 2})
+        if path.endswith("/pulls/2/reviews"):
+            return httpx.Response(200, json=[{"id": 3}])
+        if path.endswith("/statuses/abc"):
+            return httpx.Response(201, json={"state": "success"})
+        if path.endswith("/check-suites"):
+            return httpx.Response(200, json={"total_count": 0, "check_suites": []})
+        if path == "/graphql":
+            return httpx.Response(200, json={"data": {"viewer": {"login": "bot"}}})
+        return httpx.Response(404, json={"message": "nope"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="https://api.github.com",
+        headers={"Authorization": "Bearer t"},
+    ) as raw:
+        client = GitHubClient("t", client=raw)
+        repo = await client.get_repo("acme", "widgets")
+        assert repo["full_name"] == "acme/widgets"
+        issue = await client.get_issue("acme", "widgets", 1)
+        assert issue["number"] == 1
+        comments = await client.list_issue_comments("acme", "widgets", 1)
+        assert comments[0]["id"] == 9
+        pr = await client.get_pull("acme", "widgets", 2)
+        assert pr["number"] == 2
+        reviews = await client.list_reviews("acme", "widgets", 2)
+        assert reviews[0]["id"] == 3
+        status = await client.create_status(
+            "acme", "widgets", "abc", state="success", context="mergecraft"
+        )
+        assert status["state"] == "success"
+        suites = await client.list_check_suites_for_ref("acme", "widgets", "main")
+        assert suites["total_count"] == 0
+        gql = await client.graphql("query { viewer { login } }")
+        assert gql["viewer"]["login"] == "bot"
+
+    assert ("GET", "/repos/acme/widgets") in calls
+    assert ("POST", "/graphql") in calls
+
+
+@pytest.mark.asyncio
+async def test_resolve_run_context_data_local_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/widgets")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/repos/acme/widgets"
+        return httpx.Response(
+            200,
+            json={"full_name": "acme/widgets", "private": True, "default_branch": "main"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="https://api.github.com",
+        headers={"Authorization": "Bearer t"},
+    ) as raw:
+        client = GitHubClient("t", client=raw)
+        ctx = await resolve_run_context_data(client, settings=default_settings())
+
+    assert ctx.repo.owner == "acme"
+    assert ctx.repo.name == "widgets"
+    assert ctx.repo.data["private"] is True
+    assert ctx.oss is False
+    assert ctx.api_token == ""
+    assert ctx.plan == "none"
+    assert ctx.proxy_model is None
+    assert ctx.db_secrets is None
+    assert ctx.repo_settings.push == "restricted"
+
+
+@pytest.mark.asyncio
+async def test_graphql_errors_raise() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"errors": [{"message": "boom"}]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.github.com") as raw:
+        client = GitHubClient("t", client=raw)
+        with pytest.raises(RuntimeError, match="GraphQL"):
+            await client.graphql("query { x }")

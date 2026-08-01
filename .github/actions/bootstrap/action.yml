@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MIT
+# Local composite: install uv (pinned) and run `make setup`.
+name: Bootstrap mergecraft toolchain
+description: Install uv (pinned) and run make setup.
+
+inputs:
+  uv-version:
+    description: uv version to install (keep in sync across all jobs here).
+    required: false
+    # 0.6.9 only had 3.14 alphas and segfaulted under pre-commit; use current uv.
+    default: "0.11.29"
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      with:
+        version: ${{ inputs.uv-version }}
+        python-version: "3.14"
+        enable-cache: true
+
+    - name: Bootstrap toolchain (make setup)
+      shell: bash
+      env:
+        # Prefer the uv just installed by setup-uv; skip git hooks in CI.
+        CI: "true"
+        MERGECRAFT_SKIP_PRECOMMIT: "1"
+      run: |
+        export PATH="$(dirname "$(command -v uv)"):$PATH"
+        make setup UV="$(command -v uv)"

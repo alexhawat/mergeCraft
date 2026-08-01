@@ -1,0 +1,2 @@
+# Planted: known-vulnerable pin for OSV/Trivy (catalog C2)
+requests==2.25.0
