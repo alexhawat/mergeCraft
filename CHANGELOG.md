@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mergecraft models list`, `models set`, and `models show` CLI commands for
   inspecting the curated catalog, writing an ordered preference list, and
   previewing which slug would run (#14)
+- Runtime model chain resolution: skip entries without credentials, advance on
+  retryable provider failures, and log selected/skipped slugs at Action-visible
+  levels (#14)
 - Reviewers can list GitHub check suites for a commit via `list_check_runs` and fetch
   one suite by id via `get_check_suite`, then pass the id to `get_check_suite_logs`
   (#8)

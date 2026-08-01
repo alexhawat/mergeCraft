@@ -255,7 +255,8 @@ signedCommits: false
 ```
 
 **Ordered preference list** — try each entry in order; optional per-slug backups via
-`modelFallbacks` (runtime chain resolution lands in a later release):
+`modelFallbacks`; runtime skips entries without credentials and advances on retryable
+provider failures:
 
 ```yaml
 models:

@@ -13,8 +13,12 @@ from rich.table import Table
 
 from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
-from mergecraft.models import MODEL_ALIASES, get_model_provider
-from mergecraft.utils.agent_resolve import resolve_model
+from mergecraft.models import MODEL_ALIASES
+from mergecraft.utils.agent_resolve import (
+    effective_model_slugs,
+    has_credentials_for_slug,
+    resolve_model,
+)
 
 if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
@@ -31,70 +35,12 @@ def _bail(msg: str) -> NoReturn:
     raise typer.Exit(1)
 
 
-def _has_env(name: str) -> bool:
-    val = os.environ.get(name)
-    return isinstance(val, str) and bool(val.strip())
-
-
-def _has_claude_code_auth() -> bool:
-    return _has_env("CLAUDE_CODE_OAUTH_TOKEN") or _has_env("ANTHROPIC_API_KEY")
-
-
-def _has_codex_subscription_auth() -> bool:
-    raw = os.environ.get("CODEX_AUTH_JSON", "").strip()
-    if not raw:
-        return False
-    from mergecraft.agents.codex import _codex_subscription_auth_usable
-
-    return _codex_subscription_auth_usable(raw)
-
-
-def _has_openai_api_key_auth() -> bool:
-    return _has_env("OPENAI_API_KEY")
-
-
-def _has_gemini_auth() -> bool:
-    return _has_env("GEMINI_API_KEY") or _has_env("GOOGLE_GENERATIVE_AI_API_KEY")
-
-
-def _has_cursor_auth() -> bool:
-    return _has_env("CURSOR_API_KEY")
-
-
-def has_credentials_for_slug(slug: str) -> bool:
-    """Return whether the current environment has credentials for ``slug``."""
-    try:
-        provider = get_model_provider(slug)
-    except ValueError:
-        return False
-
-    if provider == "anthropic":
-        return _has_claude_code_auth()
-    if provider == "openai":
-        return _has_codex_subscription_auth() or _has_openai_api_key_auth()
-    if provider == "google":
-        return _has_gemini_auth()
-    if provider == "cursor":
-        return _has_cursor_auth()
-    return False
-
-
 def _configured_model_slugs(settings: RepoSettings) -> list[str]:
     if settings.models:
         return list(settings.models)
     if settings.model:
         return [settings.model]
     return []
-
-
-def effective_model_slugs(settings: RepoSettings) -> list[str]:
-    """Config order with ``MERGECRAFT_MODEL`` promoted to the front when set."""
-    base = _configured_model_slugs(settings)
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
-    if not env_model:
-        return base
-    rest = [slug for slug in base if slug != env_model]
-    return [env_model, *rest]
 
 
 def _winning_slug(settings: RepoSettings) -> str | None:

@@ -25,7 +25,12 @@ from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import ProgressComment, init_tool_state
 from mergecraft.modes import Mode, compute_modes
 from mergecraft.review_checks import StaticCheckConfig
-from mergecraft.utils.agent_resolve import resolve_model, resolve_runtime_agent
+from mergecraft.utils.agent_resolve import (
+    effective_model_chain,
+    resolve_model,
+    resolve_runtime_agent,
+    select_runnable_model_slug,
+)
 from mergecraft.utils.git_setup import create_temp_directory, setup_git, wipe_runner_leak_surface
 from mergecraft.utils.github import GitHubClient, resolve_run_context_data
 from mergecraft.utils.instructions import resolve_instructions
@@ -146,7 +151,11 @@ async def main() -> MainResult:
         if cwd and os.getcwd() != cwd:
             os.chdir(cwd)
 
-        resolved_model = resolve_model(slug=payload.get("model"))
+        if effective_model_chain(settings):
+            selected_slug = select_runnable_model_slug(settings=settings)
+            resolved_model = resolve_model(slug=selected_slug)
+        else:
+            resolved_model = resolve_model(slug=payload.get("model"))
         agent = resolve_runtime_agent(model=resolved_model)
         agent_id = agent.name
         tool_state.model = payload.get("proxyModel") or resolved_model or payload.get("model")

@@ -45,10 +45,6 @@ def _chain_settings(slugs: list[str]) -> RepoSettings:
     return RepoSettings.model_validate({"models": slugs})
 
 
-@pytest.mark.xfail(
-    reason="green after W19: chain skips entries without required credentials (#14)",
-    strict=False,
-)
 def test_model_chain_skips_slugs_without_credentials(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -73,10 +69,6 @@ def test_model_chain_skips_slugs_without_credentials(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="green after W19: chain advances on retryable provider failure (#14)",
-    strict=False,
-)
 async def test_model_chain_advances_on_retryable_provider_failure(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -117,10 +109,6 @@ async def test_model_chain_advances_on_retryable_provider_failure(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="green after W19: chain caps total attempts at max depth (#14)",
-    strict=False,
-)
 async def test_model_chain_caps_attempts_at_max_depth(
     monkeypatch: MonkeyPatch,
 ) -> None:
