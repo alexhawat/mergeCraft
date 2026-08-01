@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
 
-def loads_trivy_object(raw: str) -> dict[str, object]:
+def loads_trivy_object(raw: str) -> dict[str, Any]:
     """Parse trivy JSON, tolerating log lines that precede the object.
 
     Trivy (and some CI sandboxes) can emit timestamped INFO lines before the
@@ -35,7 +35,7 @@ def loads_trivy_object(raw: str) -> dict[str, object]:
         except json.JSONDecodeError:
             continue
         if isinstance(payload, dict):
-            return payload
+            return cast("dict[str, Any]", payload)
     msg = "trivy JSON output must be an object"
     raise ValueError(msg)
 
