@@ -423,7 +423,9 @@ def resolve_payload(
         "~mergecraft": True,
         "version": (json_payload.version if json_payload else None) or _package_version(),
         "model": model,
-        "modelExplicit": (json_payload.model_explicit if json_payload else None) or False,
+        "modelExplicit": bool(
+            (json_payload.model_explicit if json_payload else None) or inputs.model
+        ),
         "prompt": prompt,
         "triggerer": triggerer,
         "baseInstructions": json_payload.base_instructions if json_payload else None,

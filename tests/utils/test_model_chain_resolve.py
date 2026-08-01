@@ -50,6 +50,10 @@ def test_model_chain_skips_slugs_without_credentials(
 ) -> None:
     _clear_provider_env(monkeypatch)
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve._agent_binary_available",
+        lambda _slug: True,
+    )
 
     select_runnable_model_slug = cast(
         "Callable[..., str]",
@@ -75,6 +79,10 @@ async def test_model_chain_advances_on_retryable_provider_failure(
     _clear_provider_env(monkeypatch)
     monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve._agent_binary_available",
+        lambda _slug: True,
+    )
 
     run_with_model_chain = cast(
         "Callable[..., Awaitable[tuple[str, AgentResult]]]",
@@ -114,6 +122,10 @@ async def test_model_chain_caps_attempts_at_max_depth(
 ) -> None:
     _clear_provider_env(monkeypatch)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve._agent_binary_available",
+        lambda _slug: True,
+    )
 
     run_with_model_chain = cast(
         "Callable[..., Awaitable[tuple[str, AgentResult]]]",

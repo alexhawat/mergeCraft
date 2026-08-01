@@ -85,6 +85,10 @@ def has_credentials_for_slug(slug: str) -> bool:
         return _has_gemini_auth()
     if provider == "cursor":
         return _has_cursor_auth()
+    if provider == "bedrock":
+        return _has_bedrock_auth() and bool(os.environ.get(BEDROCK_MODEL_ID_ENV, "").strip())
+    if provider == "vertex":
+        return _has_vertex_auth() and bool(os.environ.get(VERTEX_MODEL_ID_ENV, "").strip())
     return False
 
 
@@ -220,15 +224,12 @@ def select_runnable_model_slug(*, settings: RepoSettings) -> str:
         if not has_credentials_for_slug(slug):
             skipped.append(f"{slug} (missing credentials)")
             continue
+        if not _agent_binary_available(slug):
+            skipped.append(f"{slug} (agent binary missing)")
+            continue
         if skipped:
             logger.warning("» model chain skipped backups: {}", ", ".join(skipped))
-        if _agent_binary_available(slug):
-            logger.info("» model chain selected slug={}", slug)
-        else:
-            logger.warning(
-                "» model chain selected slug={} (credentials present; agent binary missing)",
-                slug,
-            )
+        logger.info("» model chain selected slug={}", slug)
         return slug
 
     if skipped:
@@ -262,10 +263,8 @@ async def run_with_model_chain(
             skipped.append(f"{slug} (missing credentials)")
             continue
         if not _agent_binary_available(slug):
-            logger.warning(
-                "» model chain slug={} has credentials but agent binary missing — still eligible",
-                slug,
-            )
+            skipped.append(f"{slug} (agent binary missing)")
+            continue
         runnable.append(slug)
 
     if skipped:
@@ -369,11 +368,12 @@ def _resolve_slug(slug: str) -> str | None:
     return resolve_cli_model(slug)
 
 
-def resolve_model(*, slug: str | None = None) -> str | None:
+def resolve_model(*, slug: str | None = None, respect_env_override: bool = True) -> str | None:
     """Resolve the effective model string for this run."""
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
-    if env_model:
-        return _resolve_slug(env_model) or env_model
+    if respect_env_override:
+        env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
+        if env_model:
+            return _resolve_slug(env_model) or env_model
 
     cleaned = (slug or "").strip()
     if cleaned:

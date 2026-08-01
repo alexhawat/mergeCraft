@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Action `model` input and explicit chain selection no longer lose to
+  `MERGECRAFT_MODEL`; missing agent binaries are skipped when walking the chain;
+  retryable chain advancement is wired through the Action entrypoint (#14)
 - Always post the `mergecraft-approval` status check on PR runs when status checks
   are enabled; use `neutral` when the review did not complete so a failed run no
   longer leaves a missing check that branch protection can misread as pass

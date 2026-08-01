@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -29,6 +29,7 @@ from mergecraft.utils.agent_resolve import (
     effective_model_chain,
     resolve_model,
     resolve_runtime_agent,
+    run_with_model_chain,
     select_runnable_model_slug,
 )
 from mergecraft.utils.git_setup import create_temp_directory, setup_git, wipe_runner_leak_surface
@@ -151,11 +152,20 @@ async def main() -> MainResult:
         if cwd and os.getcwd() != cwd:
             os.chdir(cwd)
 
-        if effective_model_chain(settings):
+        payload_model = payload.get("model")
+        model_explicit = bool(payload.get("modelExplicit"))
+        use_model_chain = bool(effective_model_chain(settings)) and not model_explicit
+        selected_slug: str | None
+
+        if use_model_chain:
             selected_slug = select_runnable_model_slug(settings=settings)
-            resolved_model = resolve_model(slug=selected_slug)
+            resolved_model = resolve_model(slug=selected_slug, respect_env_override=False)
         else:
-            resolved_model = resolve_model(slug=payload.get("model"))
+            resolved_model = resolve_model(
+                slug=payload_model if isinstance(payload_model, str) else None,
+                respect_env_override=not model_explicit,
+            )
+            selected_slug = payload_model if isinstance(payload_model, str) else None
         agent = resolve_runtime_agent(model=resolved_model)
         agent_id = agent.name
         tool_state.model = payload.get("proxyModel") or resolved_model or payload.get("model")
@@ -310,10 +320,66 @@ async def main() -> MainResult:
         )
 
         timeout_raw = payload.get("timeout")
-        agent_task = asyncio.create_task(agent.run(run_ctx))
+
+        async def _run_agent_once(slug: str) -> AgentResult:
+            attempt_model = resolve_model(slug=slug, respect_env_override=False)
+            attempt_agent = resolve_runtime_agent(model=attempt_model)
+            attempt_agent_id = attempt_agent.name
+
+            if attempt_agent_id == agent_id:
+                attempt_ctx = replace(run_ctx, resolved_model=attempt_model)
+            else:
+                attempt_modes = [
+                    *compute_modes(attempt_agent_id, settings.signed_commits),
+                    *_custom_modes(settings.modes),
+                ]
+                attempt_instructions = resolve_instructions(
+                    payload=payload,
+                    repo=run_context.repo,
+                    modes=attempt_modes,
+                    agent_id=attempt_agent_id,
+                    output_schema=output_schema,
+                    signed_commits=settings.signed_commits,
+                    learnings_file_path=tool_state.learnings_file_path,
+                    learnings_headings=settings.learnings_headings,
+                    setup_hook_failure="",
+                    xrepo_brief=settings.xrepo_brief,
+                    xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
+                    xrepo_learnings_headings=settings.xrepo_learnings_headings,
+                )
+                attempt_denied = subagent_denied_tool_names(
+                    replace(tool_context, agent_id=attempt_agent_id),
+                    output_schema,
+                )
+                attempt_ctx = replace(
+                    run_ctx,
+                    resolved_model=attempt_model,
+                    instructions=attempt_instructions,
+                    subagent_denied_tools=attempt_denied,
+                )
+                tool_context.agent_id = attempt_agent_id
+                tool_context.modes = attempt_modes
+                tool_context.resolved_model = attempt_model
+                logger.info(
+                    "» model chain advanced to agent={} model={}",
+                    attempt_agent_id,
+                    attempt_model or "(auto)",
+                )
+            return await attempt_agent.run(attempt_ctx)
+
+        async def _execute_agent() -> tuple[str | None, AgentResult]:
+            if use_model_chain:
+                winning_slug, chain_result = await run_with_model_chain(
+                    settings=settings,
+                    run_once=_run_agent_once,
+                )
+                return winning_slug, chain_result
+            return selected_slug, await agent.run(run_ctx)
+
+        agent_task = asyncio.create_task(_execute_agent())
 
         if timeout_raw == TIMEOUT_DISABLED:
-            result: AgentResult = await agent_task
+            winning_slug, result = await agent_task
         else:
             usable = resolve_timeout_ms(timeout_raw)
             if timeout_raw and usable is None:
@@ -322,11 +388,18 @@ async def main() -> MainResult:
                 )
             timeout_ms = usable if usable is not None else 3_600_000
             try:
-                result = await asyncio.wait_for(agent_task, timeout=timeout_ms / 1000.0)
+                winning_slug, result = await asyncio.wait_for(
+                    agent_task, timeout=timeout_ms / 1000.0
+                )
             except TimeoutError:
                 agent_task.cancel()
                 msg = f"agent run timed out after {timeout_raw or '1h'}"
                 raise RuntimeError(msg) from None
+
+        if winning_slug:
+            resolved_model = resolve_model(slug=winning_slug, respect_env_override=False)
+            tool_state.model = payload.get("proxyModel") or resolved_model or payload_model
+            tool_context.resolved_model = resolved_model
 
         if result.usage:
             tool_state.usage_entries.append(result.usage)
