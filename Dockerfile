@@ -3,6 +3,10 @@
 FROM python:3.14-slim-bookworm
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-bookworm-slim /usr/local/bin/npm /usr/local/bin/npm
+COPY --from=node:22-bookworm-slim /usr/local/bin/npx /usr/local/bin/npx
+COPY --from=node:22-bookworm-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -33,7 +37,7 @@ RUN apt-get update -qq \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update -qq \
-    && apt-get install -qq -y --no-install-recommends gh nodejs npm \
+    && apt-get install -qq -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI — required by the `claude` agent (BYOK auth via
