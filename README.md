@@ -299,6 +299,9 @@ Learnings live in `.mergecraft/learnings.md` and are seeded/persisted across run
 | `mergecraft auth codex` | Save a ChatGPT subscription credential (`CODEX_AUTH_JSON`) via `gh secret set` |
 | `mergecraft auth gemini` | Save a Gemini API key (`GEMINI_API_KEY`) via `gh secret set` |
 | `mergecraft auth cursor` | Save a Cursor Cloud API key (`CURSOR_API_KEY`) via `gh secret set` |
+| `mergecraft models list` | List curated model slugs and whether local credentials are detected |
+| `mergecraft models set <slug> [<slug>…]` | Write an ordered `models:` preference list to `.mergecraft/config.yaml` |
+| `mergecraft models show` | Show effective model order (config + `MERGECRAFT_MODEL`) and which slug would win now |
 | `mergecraft watch --pr N` | Stream PR/issue timeline as JSONL |
 | `mergecraft diff-review` | Offline local git/patch review (no GitHub PR posting) |
 | `mergecraft gha` | Action runtime entry (used by Docker Action) |

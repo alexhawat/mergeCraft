@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -37,10 +36,6 @@ models:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W18: mergecraft models show prints effective order (#14)",
-    strict=False,
-)
 def test_models_show_prints_config_order_with_env_override(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
