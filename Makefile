@@ -12,7 +12,8 @@ PIP_AUDIT_CACHE ?= $(CURDIR)/.cache/pip-audit
 PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
-	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean
+	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
+	examples example-workflows-check
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -79,11 +80,17 @@ precommit: ## Run pre-commit on all files
 build: ## Build wheel/sdist
 	$(UV) build
 
-ci-static: lockcheck lint typecheck pyright catalog-check build ## Static/build tier
+examples: ## Render example workflow YAML from templates
+	$(UV) run python scripts/render_example_workflows.py
+
+example-workflows-check: ## Fail when committed example workflows drift from templates
+	$(UV) run python scripts/render_example_workflows.py --check
+
+ci-static: lockcheck lint typecheck pyright catalog-check build example-workflows-check ## Static/build tier
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check build security test
+CI_STEPS := lockcheck lint typecheck pyright catalog-check build example-workflows-check security test
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)
