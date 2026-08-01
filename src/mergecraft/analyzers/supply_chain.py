@@ -133,8 +133,10 @@ def _manifest_paths(repo_root: Path, files: list[str]) -> dict[str, Path]:
 def _package_names_from_trivy(raw: str) -> dict[str, str]:
     mapping: dict[str, str] = {}
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
+        from mergecraft.analyzers.parsers.trivy_json import loads_trivy_object
+
+        payload = loads_trivy_object(raw)
+    except json.JSONDecodeError, ValueError:
         return mapping
     for result in payload.get("Results") or []:
         if not isinstance(result, dict):
@@ -294,7 +296,16 @@ def _run_trivy_fs(
         return [], plan.reason or f"skipped {manifest.id}: provisioning failed"
 
     binary = provisioned.argv[0] if provisioned.argv else "trivy"
-    argv = (binary, "fs", "--format", "json", "--scanners", "vuln", str(repo_root))
+    argv = (
+        binary,
+        "fs",
+        "--quiet",
+        "--format",
+        "json",
+        "--scanners",
+        "vuln",
+        str(repo_root),
+    )
     finalized = finalize_plan(
         replace(provisioned, argv=argv, cwd=repo_root),
         manifest=manifest,
@@ -372,7 +383,7 @@ def _run_trivy_config(
     if not paths:
         return [], None
     binary = provisioned.argv[0] if provisioned.argv else "trivy"
-    argv = (binary, "config", "--format", "json", *paths)
+    argv = (binary, "config", "--quiet", "--format", "json", *paths)
     finalized = finalize_plan(
         replace(provisioned, argv=argv, cwd=repo_root),
         manifest=manifest,
