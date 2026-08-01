@@ -26,17 +26,23 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_resolve_agent_claude_and_opencode() -> None:
+def test_resolve_agent_claude_opencode_codex_gemini_and_cursor() -> None:
     claude = resolve_agent("claude")
     opencode = resolve_agent("opencode")
+    codex_agent = resolve_agent("codex")
+    gemini_agent = resolve_agent("gemini")
+    cursor_agent = resolve_agent("cursor")
     assert claude.name == "claude"
     assert opencode.name == "opencode"
-    assert set(agents) == {"claude", "opencode"}
+    assert codex_agent.name == "codex"
+    assert gemini_agent.name == "gemini"
+    assert cursor_agent.name == "cursor"
+    assert set(agents) == {"claude", "codex", "cursor", "gemini", "opencode"}
 
 
 def test_resolve_agent_unknown_raises() -> None:
     with pytest.raises(ValueError, match="unknown agent"):
-        resolve_agent("codex")
+        resolve_agent("not-a-real-agent")
 
 
 def test_subagent_denied_tools_derived_from_mutates(tmp_path: Path) -> None:

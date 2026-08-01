@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # ── agent / MCP ───────────────────────────────────────────────────────────────
 
-AgentId = Literal["claude", "opencode"]
+AgentId = Literal["claude", "codex", "cursor", "gemini", "opencode"]
 
 MERGECRAFT_MCP_NAME = "mergecraft"
 # Back-compat alias matching the TS export name style in prompts/docs.
@@ -26,8 +26,10 @@ def format_mcp_tool_ref(agent_id: AgentId, tool_name: str) -> str:
     match agent_id:
         case "claude":
             return f"mcp__{MERGECRAFT_MCP_NAME}__{tool_name}"
-        case "opencode":
+        case "opencode" | "codex" | "cursor":
             return f"{MERGECRAFT_MCP_NAME}_{tool_name}"
+        case "gemini":
+            return f"mcp_{MERGECRAFT_MCP_NAME}_{tool_name}"
         case _:
             raise ValueError(f"unknown agent id: {agent_id!r}")
 

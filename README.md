@@ -51,10 +51,15 @@ the provider you configure. You can authenticate either with a **subscription**
 |----------|-----------------------------|---------|
 | Anthropic Claude | `mergecraft auth claude` → saves `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Claude Pro/Max) | `ANTHROPIC_API_KEY` secret |
 | OpenAI Codex | `mergecraft auth codex` → saves `CODEX_AUTH_JSON` from `codex login --device-auth` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` secret |
+| Google Gemini | `mergecraft auth gemini` → saves `GEMINI_API_KEY` from a pasted AI Studio key | `GEMINI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY` secret |
+| Cursor Cloud | `mergecraft auth cursor` → saves `CURSOR_API_KEY` from a pasted Cursor API key | `CURSOR_API_KEY` secret |
 
 Using a subscription means the GitHub Action authenticates as *you* through the
 official `claude` / `codex` CLIs — the same credential your local coding agent
-already uses — instead of paying per-token via a separate API key. Run the
+already uses — instead of paying per-token via a separate API key. Gemini uses
+the official `gemini` CLI with an API key from Google AI Studio. **Cursor Cloud**
+(issue #13 Phase A) runs a remote cloud agent via the Cursor API — there is no
+local `cursor` CLI harness in mergeCraft yet (Phase B deferred). Run the
 relevant `mergecraft auth ...` command from the repo you want reviewed; it
 detects the `origin` remote and stores the secret with `gh secret set`
 automatically (or prints the manual `Settings → Secrets` steps if `gh` isn't
@@ -62,6 +67,63 @@ authenticated).
 
 Only set the env var(s) for the provider(s) you actually use — see the
 workflow example below, where the unused lines are commented out.
+
+**Codex subscription example** — set `CODEX_AUTH_JSON` and point the repo at a
+Codex-family model:
+
+```yaml
+# .mergecraft/config.yaml
+model: openai/gpt-codex
+```
+
+```yaml
+# workflow env (subscription path)
+env:
+  CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+```
+
+**OpenAI API key example** — set `OPENAI_API_KEY` and point the repo at any
+`openai/*` model (same Codex CLI harness as the subscription path):
+
+```yaml
+# .mergecraft/config.yaml
+model: openai/gpt
+```
+
+```yaml
+# workflow env (API key path)
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+**Gemini API key example** — set `GEMINI_API_KEY` and point the repo at a
+curated `google/*` slug (`gemini-pro` → `google/gemini-3.1-pro-preview`,
+`gemini-flash` → `google/gemini-3.5-flash`):
+
+```yaml
+# .mergecraft/config.yaml
+model: google/gemini-3.1-pro-preview
+```
+
+```yaml
+# workflow env (API key path)
+env:
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+```
+
+**Cursor Cloud example** — set `CURSOR_API_KEY` and point the repo at
+`cursor/cloud-agent` (remote cloud agent; local Cursor CLI deferred):
+
+```yaml
+# .mergecraft/config.yaml
+model: cursor/cloud-agent
+```
+
+```yaml
+# workflow env (Cloud Agent API path)
+env:
+  CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+```
 
 ### Consumer workflow
 
@@ -93,9 +155,13 @@ jobs:
           # Claude — pick one:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}  # subscription (mergecraft auth claude)
           # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}           # or API key
-          # Codex / OpenAI — pick one:
+          # Codex / OpenAI — pick one (see Authentication above):
           # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}               # subscription (mergecraft auth codex)
-          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}                 # or API key
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}                 # API key + model: openai/gpt
+          # Gemini — API key (mergecraft auth gemini):
+          # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}                 # + model: google/gemini-3.1-pro-preview
+          # Cursor Cloud — API key (mergecraft auth cursor; local CLI deferred):
+          # CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}                 # + model: cursor/cloud-agent
 ```
 
 Ready-made workflow files live under [`examples/workflows/`](examples/workflows/):
@@ -212,6 +278,8 @@ Learnings live in `.mergecraft/learnings.md` and are seeded/persisted across run
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` + example workflow |
 | `mergecraft auth claude` | Save a Claude Pro/Max subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) via `gh secret set` |
 | `mergecraft auth codex` | Save a ChatGPT subscription credential (`CODEX_AUTH_JSON`) via `gh secret set` |
+| `mergecraft auth gemini` | Save a Gemini API key (`GEMINI_API_KEY`) via `gh secret set` |
+| `mergecraft auth cursor` | Save a Cursor Cloud API key (`CURSOR_API_KEY`) via `gh secret set` |
 | `mergecraft watch --pr N` | Stream PR/issue timeline as JSONL |
 | `mergecraft diff-review` | Offline local git/patch review (no GitHub PR posting) |
 | `mergecraft gha` | Action runtime entry (used by Docker Action) |

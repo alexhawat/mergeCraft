@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 def _has_env(name: str) -> bool:
     val = os.environ.get(name)
-    return isinstance(val, str) and len(val) > 0
+    return isinstance(val, str) and bool(val.strip())
 
 
 def _has_claude_code_auth() -> bool:
@@ -39,6 +39,60 @@ def _has_bedrock_auth() -> bool:
 
 def _has_vertex_auth() -> bool:
     return _has_env("GOOGLE_APPLICATION_CREDENTIALS") or _has_env("VERTEX_SERVICE_ACCOUNT_JSON")
+
+
+def _has_codex_subscription_auth() -> bool:
+    raw = os.environ.get("CODEX_AUTH_JSON", "").strip()
+    if not raw:
+        return False
+    from mergecraft.agents.codex import _codex_subscription_auth_usable
+
+    return _codex_subscription_auth_usable(raw)
+
+
+def _has_openai_api_key_auth() -> bool:
+    return _has_env("OPENAI_API_KEY")
+
+
+def _has_gemini_auth() -> bool:
+    return _has_env("GEMINI_API_KEY") or _has_env("GOOGLE_GENERATIVE_AI_API_KEY")
+
+
+def _has_cursor_auth() -> bool:
+    return _has_env("CURSOR_API_KEY")
+
+
+def _fail_loud_for_openai(*, model: str) -> None:
+    hints = ("CODEX_AUTH_JSON", "OPENAI_API_KEY")
+    env_list = ", ".join(hints)
+    msg = (
+        f"OpenAI model {model!r} selected but no credential is configured. "
+        f"Set {env_list} (subscription via `mergecraft auth codex`, or an API key secret) "
+        "or choose a different model."
+    )
+    raise ValueError(msg)
+
+
+def _fail_loud_for_google(*, model: str) -> None:
+    hints = ("GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY")
+    env_list = ", ".join(hints)
+    msg = (
+        f"Google model {model!r} selected but no credential is configured. "
+        f"Set {env_list} (via `mergecraft auth gemini` or a GitHub Actions secret) "
+        "or choose a different model."
+    )
+    raise ValueError(msg)
+
+
+def _fail_loud_for_cursor(*, model: str) -> None:
+    hints = ("CURSOR_API_KEY",)
+    env_list = ", ".join(hints)
+    msg = (
+        f"Cursor model {model!r} selected but no credential is configured. "
+        f"Set {env_list} (via `mergecraft auth cursor` or a GitHub Actions secret) "
+        "or choose a different model."
+    )
+    raise ValueError(msg)
 
 
 def _resolve_slug(slug: str) -> str | None:
@@ -98,10 +152,26 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
     if model:
         try:
             provider = get_model_provider(model)
-            if provider == "anthropic" and _has_claude_code_auth():
-                return agents["claude"]
-        except Exception:
-            pass
+        except ValueError:
+            provider = None
+
+        if provider == "openai":
+            if _has_codex_subscription_auth() or _has_openai_api_key_auth():
+                return agents["codex"]
+            _fail_loud_for_openai(model=model)
+
+        if provider == "google":
+            if _has_gemini_auth():
+                return agents["gemini"]
+            _fail_loud_for_google(model=model)
+
+        if provider == "cursor":
+            if _has_cursor_auth():
+                return agents["cursor"]
+            _fail_loud_for_cursor(model=model)
+
+        if provider == "anthropic" and _has_claude_code_auth():
+            return agents["claude"]
 
     return agents["opencode"]
 

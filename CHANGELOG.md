@@ -67,6 +67,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (same-repo secret guard, PR-number concurrency, wait-for-CI, base-ref fetch,
   full-SHA pin, approval-check enforcement) plus a template renderer with
   `make example-workflows-check` wired into `make ci-static`.
+- Codex subscription agent harness (`agents/codex.py`): invokes the official
+  `codex exec` CLI with mergeCraft MCP config, reviewer/verifier instructions,
+  and the same push/shell permission gates as Claude Code; resolves when
+  `CODEX_AUTH_JSON` is set; Docker image installs `@openai/codex`.
+- OpenAI API key path on the Codex harness: `OPENAI_API_KEY`-only runs resolve
+  to the same `codex` agent for any `openai/*` model; fail-loud when neither
+  `OPENAI_API_KEY` nor `CODEX_AUTH_JSON` is configured.
+- Gemini agent harness (`agents/gemini.py`): invokes the official `gemini` CLI
+  with mergeCraft MCP settings; resolves when `GEMINI_API_KEY` or
+  `GOOGLE_GENERATIVE_AI_API_KEY` is set for `google/*` models; Docker image
+  installs `@google/gemini-cli`; `mergecraft auth gemini` saves the API key via
+  `gh secret set`.
+- Cursor Cloud Agent harness (`agents/cursor.py`, Phase A / D9): launches a
+  remote cloud agent via the Cursor API (`CURSOR_API_KEY`); polls to terminal
+  status and surfaces the dashboard URL in agent metadata; local Cursor CLI
+  detection remains deferred (Phase B); `mergecraft auth cursor` saves the API key via
+  `gh secret set`.
+- Batch D Final gate hardening: httpx-based `auth gemini`/`auth cursor` key
+  validation (Bandit-clean), usable-only `CODEX_AUTH_JSON` resolution, Gemini
+  system-prompt delivery, Cursor loopback MCP omission for cloud runs, and
+  dict-payload shell/branch reads for Action runs.
 - CI pipeline intelligence (K1): ``PipelineProvider`` protocol with ``GitHubActionsProvider``
   (delegates ``get_check_suite_logs`` behind the provider), honest CircleCI/GitLab/Azure stubs,
   normalized failure shape with stable fingerprints, and ingest-time log redaction via
