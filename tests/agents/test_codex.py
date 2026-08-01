@@ -5,14 +5,13 @@ from __future__ import annotations
 import importlib
 import json
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from _pytest.monkeypatch import MonkeyPatch
 
 
@@ -80,3 +79,30 @@ def test_codex_harness_invokes_cli_and_parses_agent_result(
     assert result.usage.agent == "codex"
     assert result.usage.input_tokens > 0
     assert result.usage.output_tokens > 0
+
+
+def test_write_mcp_config_enables_network_in_read_only_sandbox(tmp_path: Path) -> None:
+    """shell=disabled → read-only sandbox must still reach localhost MCP."""
+    codex_module = _load_codex_module()
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+    ctx.payload.shell = "disabled"
+
+    config_path = Path(codex_module.write_mcp_config(ctx))
+    text = config_path.read_text(encoding="utf-8")
+
+    assert 'sandbox_mode = "read-only"' in text
+    assert "[sandbox_read_only]" in text
+    assert "network_access = true" in text
+    assert "[mcp_servers.mergecraft]" in text
+
+
+def test_write_mcp_config_omits_network_when_no_mcp_url(tmp_path: Path) -> None:
+    codex_module = _load_codex_module()
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+    ctx.mcp_server_url = ""
+    ctx.payload.shell = "disabled"
+
+    config_path = Path(codex_module.write_mcp_config(ctx))
+    text = config_path.read_text(encoding="utf-8")
+
+    assert "network_access" not in text

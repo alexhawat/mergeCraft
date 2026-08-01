@@ -167,14 +167,27 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     ]
     if disabled_tools:
         lines.append(f"disabled_tools = {_toml_string_list(disabled_tools)}")
-    if sandbox_mode == "workspace-write":
-        lines.extend(
-            [
-                "",
-                "[sandbox_workspace_write]",
-                "network_access = true",
-            ]
-        )
+    # mergeCraft PR reviews run with shell disabled → read-only sandbox. Codex still
+    # needs localhost HTTP to the mergecraft MCP server (checkout_pr, review submit,
+    # CI logs, …). Without network_access the tool set is empty and Codex falls back
+    # to requesting its optional GitHub plugin instead.
+    if ctx.mcp_server_url:
+        if sandbox_mode == "workspace-write":
+            lines.extend(
+                [
+                    "",
+                    "[sandbox_workspace_write]",
+                    "network_access = true",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "",
+                    "[sandbox_read_only]",
+                    "network_access = true",
+                ]
+            )
 
     config_path = codex_home / "config.toml"
     config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
