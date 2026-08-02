@@ -13,7 +13,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
-	examples example-workflows-check
+	examples example-workflows-check bench-review
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -105,6 +105,14 @@ ci-reset: ## Clear the ci-resume checkpoint (start the gate over)
 
 ci: ci-static security test ## Full gate
 	@echo "ci OK"
+
+bench-review: ## Run ReviewBench via Harbor (requires evals/reviewbench corpus)
+	@if [ ! -d evals/reviewbench ]; then \
+	  echo "ReviewBench corpus not present — frozen tasks live in sevn-bot/tripll#64"; \
+	  echo "See evals/README.md"; \
+	  exit 2; \
+	fi
+	$(UV) run harbor run -d evals/reviewbench --agent mergecraft.harbor.agent:MergecraftReviewAgent
 
 docker-build: ## Build action Docker image
 	docker build -t mergeCraft:local -f Dockerfile .
