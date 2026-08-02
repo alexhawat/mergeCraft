@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import tempfile
 from dataclasses import dataclass
@@ -11,12 +10,17 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from pydantic import ValidationError
 
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.shared import AgentRunContext
-from mergecraft.analyzers.finding import Finding
+from mergecraft.analyzers.finding import (
+    STRUCTURED_OUTPUT_REQUIRED_MSG,
+    findings_output_schema,
+    parse_findings_payload,
+    write_findings_json,
+)
 from mergecraft.config import load_repo_settings
+from mergecraft.config.settings import RepoInfo
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import init_tool_state
@@ -24,7 +28,7 @@ from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.utils.agent_resolve import resolve_model, resolve_runtime_agent
 from mergecraft.utils.github import GitHubClient
-from mergecraft.utils.instructions import ResolvedInstructions
+from mergecraft.utils.instructions import resolve_instructions
 from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff, summarize_diff
 from mergecraft.utils.skills import install_bundled_skills
 
@@ -37,20 +41,6 @@ class OfflineReviewResult:
     diff_path: str | None = None
     empty_diff: bool = False
     structured_output: str | None = None
-
-
-def findings_output_schema() -> dict[str, Any]:
-    """JSON Schema for structured findings output derived from ``Finding``."""
-    return {
-        "type": "object",
-        "properties": {
-            "findings": {
-                "type": "array",
-                "items": Finding.model_json_schema(),
-            }
-        },
-        "required": ["findings"],
-    }
 
 
 def build_offline_review_prompt(
@@ -102,34 +92,41 @@ def build_offline_review_prompt(
     )
 
 
-def _parse_and_validate_findings(raw: str) -> list[dict[str, Any]]:
-    """Parse structured output JSON and validate each finding."""
+def _finalize_structured_findings(
+    result: OfflineReviewResult,
+    json_path: Path,
+) -> OfflineReviewResult:
+    """Validate agent structured output and write findings JSON."""
+    if not result.success:
+        return result
+
+    structured_raw = result.structured_output
+    if not structured_raw:
+        return OfflineReviewResult(
+            success=False,
+            error=STRUCTURED_OUTPUT_REQUIRED_MSG,
+            diff_path=result.diff_path,
+        )
+
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        msg = f"invalid JSON in set_output: {exc}"
-        raise ValueError(msg) from exc
-    if not isinstance(data, dict):
-        msg = "set_output must be a JSON object with a findings array"
-        raise ValueError(msg)
-    findings_raw = data.get("findings")
-    if not isinstance(findings_raw, list):
-        msg = "set_output must contain a findings array"
-        raise ValueError(msg)
-    validated: list[dict[str, Any]] = []
-    for index, item in enumerate(findings_raw):
-        try:
-            validated.append(Finding.model_validate(item).model_dump())
-        except ValidationError as exc:
-            msg = f"finding[{index}] does not conform to Finding schema: {exc}"
-            raise ValueError(msg) from exc
-    return validated
+        findings = parse_findings_payload(structured_raw)
+    except ValueError as exc:
+        return OfflineReviewResult(
+            success=False,
+            error=str(exc),
+            diff_path=result.diff_path,
+        )
 
+    try:
+        write_findings_json(json_path, findings)
+    except OSError as exc:
+        return OfflineReviewResult(
+            success=False,
+            error=f"failed to write findings JSON: {exc}",
+            diff_path=result.diff_path,
+        )
 
-def _write_findings_json(json_path: Path, findings: list[dict[str, Any]]) -> None:
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps({"findings": findings}, indent=2, ensure_ascii=False)
-    json_path.write_text(f"{payload}\n", encoding="utf-8")
+    return result
 
 
 async def run_offline_diff_review(
@@ -157,6 +154,14 @@ async def run_offline_diff_review(
         return OfflineReviewResult(success=False, error=str(exc))
 
     if materialization.empty:
+        if json_path is not None:
+            try:
+                write_findings_json(json_path, [])
+            except OSError as exc:
+                return OfflineReviewResult(
+                    success=False,
+                    error=f"failed to write findings JSON: {exc}",
+                )
         return OfflineReviewResult(
             success=True,
             output="no changes to review (empty diff).",
@@ -164,12 +169,12 @@ async def run_offline_diff_review(
             empty_diff=True,
         )
 
-    json_mode = json_path is not None
+    output_schema = findings_output_schema() if json_path is not None else None
     prompt = build_offline_review_prompt(
         diff_path=materialization.path,
         base_ref=materialization.base_ref,
         extra=prompt_extra,
-        json_mode=json_mode,
+        json_mode=output_schema is not None,
     )
 
     if dry_run:
@@ -186,41 +191,12 @@ async def run_offline_diff_review(
         prompt=prompt,
         model=model,
         tmpdir=out_dir,
-        json_mode=json_mode,
+        output_schema=output_schema,
     )
-    if not result.success or json_path is None:
+    if json_path is None:
         return result
 
-    structured_raw = result.structured_output or result.output
-    if not structured_raw:
-        return OfflineReviewResult(
-            success=False,
-            error=(
-                "output_schema was provided but agent did not call set_output — "
-                "structured output is required"
-            ),
-            diff_path=result.diff_path,
-        )
-
-    try:
-        findings = _parse_and_validate_findings(structured_raw)
-    except ValueError as exc:
-        return OfflineReviewResult(
-            success=False,
-            error=str(exc),
-            diff_path=result.diff_path,
-        )
-
-    try:
-        _write_findings_json(json_path, findings)
-    except OSError as exc:
-        return OfflineReviewResult(
-            success=False,
-            error=f"failed to write findings JSON: {exc}",
-            diff_path=result.diff_path,
-        )
-
-    return result
+    return _finalize_structured_findings(result, json_path)
 
 
 async def _run_agent_review(
@@ -230,7 +206,7 @@ async def _run_agent_review(
     prompt: str,
     model: str | None,
     tmpdir: Path,
-    json_mode: bool = False,
+    output_schema: dict[str, Any] | None = None,
 ) -> OfflineReviewResult:
     stop_mcp = None
     github: GitHubClient | None = None
@@ -284,17 +260,23 @@ async def _run_agent_review(
             analyzers_settings_enabled=settings.analyzers.enabled,
         )
 
-        output_schema = findings_output_schema() if json_mode else None
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
         tool_context.mcp_server_url = mcp_url
         skills_home = str(tmpdir / "home")
         Path(skills_home).mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(install_bundled_skills, home=skills_home)
 
-        instructions = ResolvedInstructions(
-            full=prompt,
-            system="Offline mergecraft diff-review. Read-only. Do not post GitHub reviews or push.",
-            user=prompt,
+        instructions = resolve_instructions(
+            payload={
+                "event": {"trigger": "unknown", "title": "offline diff-review"},
+                "shell": "disabled",
+                "push": "disabled",
+                "prompt": prompt,
+            },
+            repo=RepoInfo(owner="local", name=cwd.name),
+            modes=modes,
+            agent_id=agent.name,
+            output_schema=output_schema,
         )
         run_ctx = AgentRunContext(
             payload=payload,
@@ -312,32 +294,18 @@ async def _run_agent_review(
         result = await agent.run(run_ctx)
         structured_output = tool_state.output
         markdown_output = result.output
-        if json_mode and not structured_output:
-            return OfflineReviewResult(
-                success=False,
-                error=(
-                    "output_schema was provided but agent did not call set_output — "
-                    "structured output is required"
-                ),
-                diff_path=str(materialization.path),
-            )
         if not result.success:
             return OfflineReviewResult(
                 success=False,
-                output=markdown_output or structured_output,
-                error=result.error or "agent failed",
-                diff_path=str(materialization.path),
-            )
-        if json_mode:
-            return OfflineReviewResult(
-                success=True,
                 output=markdown_output,
                 structured_output=structured_output,
+                error=result.error or "agent failed",
                 diff_path=str(materialization.path),
             )
         return OfflineReviewResult(
             success=True,
-            output=markdown_output or structured_output,
+            output=markdown_output,
+            structured_output=structured_output,
             diff_path=str(materialization.path),
         )
     except Exception as exc:

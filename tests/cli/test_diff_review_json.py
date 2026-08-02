@@ -4,40 +4,18 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 from tests.analyzers.support import import_module as import_analyzer_module
 from typer.testing import CliRunner
 
+from mergecraft.analyzers.finding import Finding, findings_output_schema
 from mergecraft.cli.app import app
 from mergecraft.offline_review import OfflineReviewResult, build_offline_review_prompt
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-_FINDING_FIELDS = frozenset(
-    {
-        "tool",
-        "rule_id",
-        "category",
-        "severity",
-        "confidence",
-        "message",
-        "path",
-        "start_line",
-        "end_line",
-        "fingerprint",
-        "evidence",
-        "remediation",
-        "autofix",
-        "introduced_by_pr",
-        "source",
-        "cluster_id",
-    }
-)
 
 _SAMPLE_PATCH = (
     "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
@@ -66,14 +44,6 @@ def _sample_finding_dict() -> dict[str, object]:
     return finding.model_dump()
 
 
-def _import_findings_output_schema() -> Callable[[], dict[str, Any]]:
-    try:
-        from mergecraft.offline_review import findings_output_schema
-    except ImportError:
-        from mergecraft.utils.payload import findings_output_schema
-    return findings_output_schema
-
-
 def _step_four_block(prompt: str) -> str:
     match = re.search(r"4\. (.+?)\n5\.", prompt, flags=re.DOTALL)
     assert match is not None, "expected numbered step 4 in offline review prompt"
@@ -81,8 +51,7 @@ def _step_four_block(prompt: str) -> str:
 
 
 def test_findings_output_schema_is_valid_json_schema() -> None:
-    schema_fn = _import_findings_output_schema()
-    schema = schema_fn()
+    schema = findings_output_schema()
 
     assert schema.get("type") == "object"
     properties = schema.get("properties")
@@ -96,8 +65,12 @@ def test_findings_output_schema_is_valid_json_schema() -> None:
 
     item_properties = items.get("properties")
     assert isinstance(item_properties, dict)
-    assert frozenset(item_properties) >= _FINDING_FIELDS
+    assert frozenset(item_properties) >= frozenset(Finding.model_json_schema()["properties"])
     assert schema.get("required") == ["findings"]
+
+    severity = item_properties.get("severity")
+    assert isinstance(severity, dict)
+    assert "enum" in severity
 
 
 def test_build_offline_review_prompt_requires_set_output_when_json_mode(
@@ -142,6 +115,33 @@ def test_cli_diff_review_json_dry_run_does_not_write_file(tmp_path: Path) -> Non
     assert not json_out.exists()
 
 
+def test_cli_diff_review_json_empty_diff_writes_empty_findings(tmp_path: Path) -> None:
+    patch = tmp_path / "empty.diff"
+    patch.write_text("\n", encoding="utf-8")
+    json_out = tmp_path / "findings.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "diff-review",
+            "--diff",
+            str(patch),
+            "--cwd",
+            str(tmp_path),
+            "--json",
+            str(json_out),
+        ],
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == 0, combined
+    assert json_out.is_file(), combined
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+    assert payload == {"findings": []}
+    assert "wrote" in combined.lower()
+
+
 def _install_fake_agent_review(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -161,7 +161,8 @@ def _install_fake_agent_review(
             )
         return OfflineReviewResult(
             success=True,
-            output=payload,
+            output="# Review\n\nLooks good.",
+            structured_output=payload,
             diff_path=str(materialization.path),
         )
 
