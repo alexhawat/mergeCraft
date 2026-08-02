@@ -80,7 +80,6 @@ def _step_four_block(prompt: str) -> str:
     return match.group(1)
 
 
-@pytest.mark.xfail(reason="green after W2: findings_output_schema helper", strict=False)
 def test_findings_output_schema_is_valid_json_schema() -> None:
     schema_fn = _import_findings_output_schema()
     schema = schema_fn()

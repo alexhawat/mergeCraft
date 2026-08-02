@@ -7,11 +7,13 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.shared import AgentRunContext
+from mergecraft.analyzers.finding import Finding
 from mergecraft.config import load_repo_settings
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.server import start_mcp_http_server
@@ -32,6 +34,20 @@ class OfflineReviewResult:
     error: str | None = None
     diff_path: str | None = None
     empty_diff: bool = False
+
+
+def findings_output_schema() -> dict[str, Any]:
+    """JSON Schema for structured findings output derived from ``Finding``."""
+    return {
+        "type": "object",
+        "properties": {
+            "findings": {
+                "type": "array",
+                "items": Finding.model_json_schema(),
+            }
+        },
+        "required": ["findings"],
+    }
 
 
 def build_offline_review_prompt(
