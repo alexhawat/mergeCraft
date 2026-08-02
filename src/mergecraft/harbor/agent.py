@@ -7,7 +7,7 @@ import os
 import re
 import shlex
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any
 
 from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
 from harbor.agents.utils import get_api_key_var_names_from_model_name
@@ -45,15 +45,12 @@ class MergecraftReviewAgent(BaseInstalledAgent):
     """Install mergecraft with ``uv tool install`` and run structured diff reviews."""
 
     @staticmethod
-    @override
     def name() -> str:
         return "mergecraft"
 
-    @override
     def get_version_command(self) -> str | None:
         return f"{_path_env()}; mergecraft --help | head -1"
 
-    @override
     def parse_version(self, stdout: str) -> str:
         text = stdout.strip()
         for line in text.splitlines():
@@ -62,7 +59,6 @@ class MergecraftReviewAgent(BaseInstalledAgent):
                 return line
         return text or "unknown"
 
-    @override
     async def install(self, environment: BaseEnvironment) -> None:
         install_ref = self._get_env("MERGECRAFT_INSTALL_REF") or DEFAULT_INSTALL_REF
         install_spec = f"{MERGECRAFT_GIT_URL}@{install_ref}"
@@ -137,7 +133,6 @@ class MergecraftReviewAgent(BaseInstalledAgent):
 
         return env
 
-    @override
     @with_prompt_template
     async def run(
         self,
@@ -167,7 +162,6 @@ class MergecraftReviewAgent(BaseInstalledAgent):
             env=self._build_run_env(),
         )
 
-    @override
     def populate_context_post_run(self, context: AgentContext) -> None:
         findings_file = self.logs_dir / FINDINGS_FILENAME
         if not findings_file.exists():
