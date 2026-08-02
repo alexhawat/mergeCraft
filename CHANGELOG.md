@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft diff-review --json PATH` writes structured findings validated against
+  the `Finding` schema for offline benchmark/scoring workflows (#30)
 - `.mergecraft/config.yaml` accepts an ordered `models` list and optional
   `modelFallbacks` map for per-slug backup chains; the legacy scalar `model` key
   still works unchanged (#14)

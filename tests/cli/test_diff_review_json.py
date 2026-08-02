@@ -100,7 +100,6 @@ def test_findings_output_schema_is_valid_json_schema() -> None:
     assert schema.get("required") == ["findings"]
 
 
-@pytest.mark.xfail(reason="green after W3: json_mode prompt requirement", strict=False)
 def test_build_offline_review_prompt_requires_set_output_when_json_mode(
     tmp_path: Path,
 ) -> None:
@@ -119,7 +118,6 @@ def test_build_offline_review_prompt_requires_set_output_when_json_mode(
     assert "if available" not in step_four
 
 
-@pytest.mark.xfail(reason="green after W3: --json dry-run wiring", strict=False)
 def test_cli_diff_review_json_dry_run_does_not_write_file(tmp_path: Path) -> None:
     patch = tmp_path / "change.diff"
     patch.write_text(_SAMPLE_PATCH, encoding="utf-8")
@@ -178,7 +176,6 @@ def _install_fake_agent_review(
     ],
     ids=["valid_finding", "invalid_finding"],
 )
-@pytest.mark.xfail(reason="green after W3: --json validation wiring", strict=False)
 def test_cli_diff_review_json_validates_findings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -221,7 +218,6 @@ def test_cli_diff_review_json_validates_findings(
         ), combined
 
 
-@pytest.mark.xfail(reason="green after W3: --json in help", strict=False)
 def test_cli_diff_review_help_lists_json() -> None:
     result = runner.invoke(app, ["diff-review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0
