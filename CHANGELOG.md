@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional `mergecraft[harbor]` extra with `MergecraftReviewAgent` — installs
+  mergecraft via `uv tool install` and runs `diff-review --json` inside Harbor task
+  environments for ReviewBench evals (#30)
+- `evals/README.md` documents the benchmark layout; frozen task corpus tracked in
+  [tripll#64](https://github.com/sevn-bot/tripll/issues/64)
 - `.mergecraft/config.yaml` accepts an ordered `models` list and optional
   `modelFallbacks` map for per-slug backup chains; the legacy scalar `model` key
   still works unchanged (#14)
