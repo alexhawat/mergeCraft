@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MIT
+# Craft release configuration — https://getsentry.github.io/craft/
+minVersion: '2.21.0'
+
+github:
+  owner: alexhawat
+  repo: mergeCraft
+
+versioning:
+  policy: auto
+
+changelog:
+  filePath: CHANGELOG.md
+  policy: auto
+
+artifactProvider:
+  name: github
+  config:
+    artifacts:
+      CI/CD:
+        - artifact-python-dist
+
+requireNames:
+  - /^merge[_-]craft.*\.(whl|tar\.gz)$/
+
+postReleaseCommand: bash scripts/post-release.sh
+
+targets:
+  - name: pypi
+    includeNames: /^merge[_-]craft.*$/
+  - name: github
+    tagPrefix: v
+  - name: docker
+    id: slim
+    source: ghcr.io/alexhawat/mergecraft
+    target: ghcr.io/alexhawat/mergecraft
+  - name: docker
+    id: slim-latest
+    source: ghcr.io/alexhawat/mergecraft
+    target:
+      image: ghcr.io/alexhawat/mergecraft
+      format: '{{{image}}}:latest'
+  - name: docker
+    id: analyzers
+    source:
+      image: ghcr.io/alexhawat/mergecraft
+      format: '{{{image}}}:analyzers-{{{revision}}}'
+    target:
+      image: ghcr.io/alexhawat/mergecraft
+      format: '{{{image}}}:analyzers-{{{version}}}'
+  - name: docker
+    id: analyzers-latest
+    source:
+      image: ghcr.io/alexhawat/mergecraft
+      format: '{{{image}}}:analyzers-{{{revision}}}'
+    target:
+      image: ghcr.io/alexhawat/mergecraft
+      format: '{{{image}}}:analyzers'

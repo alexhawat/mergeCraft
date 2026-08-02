@@ -304,7 +304,7 @@ Learnings live in `.mergecraft/learnings.md` and are seeded/persisted across run
 | `mergecraft models set <slug> [<slug>…]` | Write an ordered `models:` preference list to `.mergecraft/config.yaml` |
 | `mergecraft models show` | Show effective model order (config + `MERGECRAFT_MODEL`) and which slug would win now |
 | `mergecraft watch --pr N` | Stream PR/issue timeline as JSONL |
-| `mergecraft diff-review` | Offline local git/patch review (no GitHub PR posting) |
+| `mergecraft diff-review` | Offline local git/patch review (no GitHub PR posting); optional `--json` for structured findings |
 | `mergecraft gha` | Action runtime entry (used by Docker Action) |
 | `mergecraft gha token [--post]` | Installation token mint / post write-back |
 
@@ -321,10 +321,14 @@ uv run mergecraft diff-review --base origin/main --model anthropic/claude-sonnet
 
 # Review an existing patch without git
 uv run mergecraft diff-review --diff changes.patch --dry-run
+
+# Structured findings JSON (machine-readable Finding[] for benchmarks/scoring)
+uv run mergecraft diff-review --diff changes.patch --json findings.json
 ```
 
 `--dry-run` materializes the unified diff and prints the Review prompt without
-invoking an agent (no LLM keys required).
+invoking an agent (no LLM keys required). With `--json`, `--dry-run` does not
+create the JSON file.
 
 ## Action inputs
 

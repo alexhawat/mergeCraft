@@ -1,0 +1,35 @@
+# Craft auto-changelog categories (extends GitHub release.yml format).
+# https://getsentry.github.io/craft/configuration/#auto-mode
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+    authors:
+      - dependabot[bot]
+      - renovate[bot]
+  categories:
+    - title: Breaking Changes
+      commit_patterns:
+        - '^(?<type>\w+(?:\([^)]+\))?!:\s*)'
+      semver: major
+    - title: Added
+      commit_patterns:
+        - '^(?<type>feat(?:\([^)]+\))?!?:\s*)'
+      semver: minor
+    - title: Fixed
+      commit_patterns:
+        - '^(?<type>fix(?:\([^)]+\))?!?:\s*)'
+        - '^Revert "'
+      semver: patch
+    - title: Changed
+      commit_patterns:
+        - '^(?<type>(?:refactor|perf)(?:\([^)]+\))?!?:\s*)'
+      semver: patch
+    - title: Docs
+      commit_patterns:
+        - '^(?<type>docs?(?:\([^)]+\))?!?:\s*)'
+      semver: patch
+    - title: Internal
+      commit_patterns:
+        - '^(?<type>(?:build|chore|ci|test|style|meta)(?:\([^)]+\))?!?:\s*)'
+      semver: patch

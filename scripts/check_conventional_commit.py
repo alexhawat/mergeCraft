@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 _PATTERN = re.compile(
-    r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)"
+    r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|release|meta)"
     r"(\([a-z0-9._-]+\))?!?: .{1,72}$"
 )
 

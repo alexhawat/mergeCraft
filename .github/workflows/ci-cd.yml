@@ -4,7 +4,7 @@ name: CI/CD
 
 on:
   push:
-    branches: [main, pre-0.0.1]
+    branches: [main, pre-0.0.1, "release/**"]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -27,10 +27,28 @@ jobs:
       - name: make ci
         run: make ci
 
+  build-dist:
+    name: Build Python dist
+    needs: verify
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: uv build
+        run: uv build
+      - name: Upload Python dist
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: artifact-python-dist
+          path: dist/*
+          if-no-files-found: error
+
   publish-ghcr:
     name: Publish GHCR image
     needs: verify
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1')
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -63,14 +81,3 @@ jobs:
             ghcr.io/alexhawat/mergecraft:analyzers-${{ github.sha }}
           cache-from: type=gha,scope=mergeCraft-analyzers
           cache-to: type=gha,mode=max,scope=mergeCraft-analyzers
-
-  release:
-    name: GitHub Release
-    needs: verify
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: softprops/action-gh-release@6da8fa9354acfd0aee3ea35f3aba2d3a4a1c0c5f # v2.4.0
-        with:
-          generate_release_notes: true

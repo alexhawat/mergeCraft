@@ -7,12 +7,20 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.shared import AgentRunContext
+from mergecraft.analyzers.finding import (
+    STRUCTURED_OUTPUT_REQUIRED_MSG,
+    findings_output_schema,
+    parse_findings_payload,
+    write_findings_json,
+)
 from mergecraft.config import load_repo_settings
+from mergecraft.config.settings import RepoInfo
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import init_tool_state
@@ -20,7 +28,7 @@ from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.utils.agent_resolve import resolve_model, resolve_runtime_agent
 from mergecraft.utils.github import GitHubClient
-from mergecraft.utils.instructions import ResolvedInstructions
+from mergecraft.utils.instructions import resolve_instructions
 from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff, summarize_diff
 from mergecraft.utils.skills import install_bundled_skills
 
@@ -32,6 +40,7 @@ class OfflineReviewResult:
     error: str | None = None
     diff_path: str | None = None
     empty_diff: bool = False
+    structured_output: str | None = None
 
 
 def build_offline_review_prompt(
@@ -39,6 +48,7 @@ def build_offline_review_prompt(
     diff_path: Path,
     base_ref: str | None,
     extra: str | None = None,
+    json_mode: bool = False,
 ) -> str:
     """Build the user prompt for an offline Review-mode run."""
     summary = summarize_diff(diff_path.read_text(encoding="utf-8"))
@@ -46,6 +56,20 @@ def build_offline_review_prompt(
     extra_block = (
         f"\n## Additional instructions\n\n{extra.strip()}\n" if extra and extra.strip() else ""
     )
+    if json_mode:
+        step_four = (
+            "4. Call `set_output` with structured findings — **required**. Each item must "
+            "conform to the schema exposed by the set_output tool. You may also put a "
+            "complete markdown review in your final response (preamble + cross-cutting "
+            "sections + optional nitpicks).\n"
+        )
+    else:
+        step_four = (
+            "4. Produce a complete review body using the Review mode format "
+            "(preamble + cross-cutting sections + optional nitpicks). "
+            "Put the full markdown review in your final response and, if available, "
+            "`set_output` with key `review`.\n"
+        )
     return (
         "You are running an **offline** local diff review (mergecraft diff-review).\n"
         "There is no GitHub pull request. Do **not** call `checkout_pr`, "
@@ -59,16 +83,50 @@ def build_offline_review_prompt(
         "   When `run_analyzers` is available, call it with the diff's changed paths and "
         f"`diff_path: {diff_path}` before drafting findings; use `analyzer_findings` for "
         "placement and dispatch `mergecraft-verifier` for Critical/Major analyzer hits.\n"
-        "4. Produce a complete review body using the Review mode format "
-        "(preamble + cross-cutting sections + optional nitpicks). "
-        "Put the full markdown review in your final response and, if available, "
-        "`set_output` with key `review`.\n"
+        f"{step_four}"
         "5. Do not modify files, commit, or push.\n\n"
         f"{base_line}"
         f"Diff path: `{diff_path}`\n\n"
         f"## Diff summary\n\n{summary}\n"
         f"{extra_block}"
     )
+
+
+def _finalize_structured_findings(
+    result: OfflineReviewResult,
+    json_path: Path,
+) -> OfflineReviewResult:
+    """Validate agent structured output and write findings JSON."""
+    if not result.success:
+        return result
+
+    structured_raw = result.structured_output
+    if not structured_raw:
+        return OfflineReviewResult(
+            success=False,
+            error=STRUCTURED_OUTPUT_REQUIRED_MSG,
+            diff_path=result.diff_path,
+        )
+
+    try:
+        findings = parse_findings_payload(structured_raw)
+    except ValueError as exc:
+        return OfflineReviewResult(
+            success=False,
+            error=str(exc),
+            diff_path=result.diff_path,
+        )
+
+    try:
+        write_findings_json(json_path, findings)
+    except OSError as exc:
+        return OfflineReviewResult(
+            success=False,
+            error=f"failed to write findings JSON: {exc}",
+            diff_path=result.diff_path,
+        )
+
+    return result
 
 
 async def run_offline_diff_review(
@@ -79,6 +137,7 @@ async def run_offline_diff_review(
     model: str | None = None,
     prompt_extra: str | None = None,
     dry_run: bool = False,
+    json_path: Path | None = None,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
     cwd = cwd.resolve()
@@ -95,6 +154,14 @@ async def run_offline_diff_review(
         return OfflineReviewResult(success=False, error=str(exc))
 
     if materialization.empty:
+        if json_path is not None:
+            try:
+                write_findings_json(json_path, [])
+            except OSError as exc:
+                return OfflineReviewResult(
+                    success=False,
+                    error=f"failed to write findings JSON: {exc}",
+                )
         return OfflineReviewResult(
             success=True,
             output="no changes to review (empty diff).",
@@ -102,10 +169,12 @@ async def run_offline_diff_review(
             empty_diff=True,
         )
 
+    output_schema = findings_output_schema() if json_path is not None else None
     prompt = build_offline_review_prompt(
         diff_path=materialization.path,
         base_ref=materialization.base_ref,
         extra=prompt_extra,
+        json_mode=output_schema is not None,
     )
 
     if dry_run:
@@ -116,13 +185,18 @@ async def run_offline_diff_review(
             empty_diff=False,
         )
 
-    return await _run_agent_review(
+    result = await _run_agent_review(
         cwd=cwd,
         materialization=materialization,
         prompt=prompt,
         model=model,
         tmpdir=out_dir,
+        output_schema=output_schema,
     )
+    if json_path is None:
+        return result
+
+    return _finalize_structured_findings(result, json_path)
 
 
 async def _run_agent_review(
@@ -132,6 +206,7 @@ async def _run_agent_review(
     prompt: str,
     model: str | None,
     tmpdir: Path,
+    output_schema: dict[str, Any] | None = None,
 ) -> OfflineReviewResult:
     stop_mcp = None
     github: GitHubClient | None = None
@@ -185,22 +260,29 @@ async def _run_agent_review(
             analyzers_settings_enabled=settings.analyzers.enabled,
         )
 
-        mcp_url, stop_mcp = start_mcp_http_server(tool_context)
+        mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
         tool_context.mcp_server_url = mcp_url
         skills_home = str(tmpdir / "home")
         Path(skills_home).mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(install_bundled_skills, home=skills_home)
 
-        instructions = ResolvedInstructions(
-            full=prompt,
-            system="Offline mergecraft diff-review. Read-only. Do not post GitHub reviews or push.",
-            user=prompt,
+        instructions = resolve_instructions(
+            payload={
+                "event": {"trigger": "unknown", "title": "offline diff-review"},
+                "shell": "disabled",
+                "push": "disabled",
+                "prompt": prompt,
+            },
+            repo=RepoInfo(owner="local", name=cwd.name),
+            modes=modes,
+            agent_id=agent.name,
+            output_schema=output_schema,
         )
         run_ctx = AgentRunContext(
             payload=payload,
             mcp_server_url=mcp_url,
             tmpdir=str(tmpdir),
-            subagent_denied_tools=subagent_denied_tool_names(tool_context),
+            subagent_denied_tools=subagent_denied_tool_names(tool_context, output_schema),
             instructions=instructions,
             tool_state=tool_state,
             api_token="",
@@ -210,17 +292,20 @@ async def _run_agent_review(
         logger.info("» offline diff-review via agent={}", agent.name)
         await agent.install()
         result = await agent.run(run_ctx)
-        output = result.output or tool_state.output
+        structured_output = tool_state.output
+        markdown_output = result.output
         if not result.success:
             return OfflineReviewResult(
                 success=False,
-                output=output,
+                output=markdown_output,
+                structured_output=structured_output,
                 error=result.error or "agent failed",
                 diff_path=str(materialization.path),
             )
         return OfflineReviewResult(
             success=True,
-            output=output,
+            output=markdown_output,
+            structured_output=structured_output,
             diff_path=str(materialization.path),
         )
     except Exception as exc:
