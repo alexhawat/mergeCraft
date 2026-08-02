@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: MIT
+# Craft-driven release: prepare release branch, wait for CI/CD artifacts, publish.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (semver, major/minor/patch, or auto)'
+        required: false
+        default: auto
+      force:
+        description: Force release despite release-blocker label
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: getsentry/craft/.github/workflows/release.yml@v2
+    with:
+      version: ${{ inputs.version }}
+      force: ${{ inputs.force && 'true' || 'false' }}
+      publish_repo: self
+    secrets: inherit
