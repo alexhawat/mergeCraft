@@ -54,6 +54,11 @@ def run(
         "-o",
         help="Write the review markdown (or dry-run prompt) to this file.",
     ),
+    json_output: Path | None = typer.Option(
+        None,
+        "--json",
+        help="Write structured findings JSON to this file.",
+    ),
     prompt: str | None = typer.Option(
         None,
         "--prompt",
@@ -85,6 +90,7 @@ def run(
             model=model,
             prompt_extra=prompt,
             dry_run=dry_run,
+            json_path=json_output,
         )
     )
 
@@ -100,8 +106,11 @@ def run(
     if output is not None:
         output.write_text(text, encoding="utf-8")
         console.print(f"[green]wrote[/green] {output}")
-    else:
+    elif json_output is None:
         console.print(text)
+
+    if json_output is not None and result.success and not dry_run:
+        console.print(f"[green]wrote[/green] {json_output}")
 
     if result.empty_diff:
         raise typer.Exit(0)
