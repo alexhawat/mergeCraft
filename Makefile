@@ -112,7 +112,7 @@ bench-review: ## Run ReviewBench via Harbor (requires evals/reviewbench corpus)
 	  echo "See evals/README.md"; \
 	  exit 2; \
 	fi
-	$(UV) run harbor run -d evals/reviewbench --agent mergecraft.harbor.agent:MergecraftReviewAgent
+	$(UV) run --extra harbor harbor run -d evals/reviewbench --agent mergecraft.harbor.agent:MergecraftReviewAgent
 
 docker-build: ## Build action Docker image
 	docker build -t mergeCraft:local -f Dockerfile .

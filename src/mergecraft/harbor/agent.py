@@ -121,8 +121,12 @@ class MergecraftReviewAgent(BaseInstalledAgent):
                         api_value = self._get_env(api_key_var)
                         if api_value is not None:
                             env[api_key_var] = api_value
-            except ValueError:
-                pass
+            except ValueError as exc:
+                self.logger.warning(
+                    "Unknown model %r for API key lookup: %s",
+                    self.model_name,
+                    exc,
+                )
 
         for key, value in os.environ.items():
             if key.startswith("MERGECRAFT_") and key not in env:
@@ -167,13 +171,13 @@ class MergecraftReviewAgent(BaseInstalledAgent):
     def populate_context_post_run(self, context: AgentContext) -> None:
         findings_file = self.logs_dir / FINDINGS_FILENAME
         if not findings_file.exists():
-            self.logger.debug("No findings.json produced at %s", findings_file)
+            self.logger.warning("Expected %s but file is missing", findings_file)
             return
 
         try:
             payload: dict[str, Any] = json.loads(findings_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            self.logger.debug("Failed to read findings.json: %s", exc)
+            self.logger.warning("Failed to read %s: %s", findings_file, exc)
             return
 
         findings = payload.get("findings")
