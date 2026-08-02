@@ -29,11 +29,17 @@ def fork_pr_event() -> dict[str, Any]:
     return FORK_PULL_REQUEST_EVENT.copy()
 
 
+def _ignore_analyzer_cache(_dir: str, names: list[str]) -> set[str]:
+    if Path(_dir).name == ".mergecraft":
+        return {"analyzer-cache"}
+    return set()
+
+
 @pytest.fixture
 def adapter_fixture_repo(fixture_repo: Path, tmp_path: Path) -> Path:
     """Isolated copy of the W0.8 fixture so parallel workers do not share analyzer cache."""
     import shutil
 
     dest = tmp_path / "fixture-repo"
-    shutil.copytree(fixture_repo, dest)
+    shutil.copytree(fixture_repo, dest, ignore=_ignore_analyzer_cache)
     return dest

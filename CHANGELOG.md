@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `mergecraft diff-review --json PATH` writes structured findings validated against
   the `Finding` schema for offline benchmark/scoring workflows (#30)
+- Optional `mergecraft[harbor]` extra with `MergecraftReviewAgent` — installs
+  mergecraft via `uv tool install` and runs `diff-review --json` inside Harbor task
+  environments for ReviewBench evals (#30)
+- `evals/README.md` documents the benchmark layout; frozen task corpus tracked in
+  [tripll#64](https://github.com/sevn-bot/tripll/issues/64)
+- `make bench-review` stub runs Harbor when `evals/reviewbench/` exists; exits 2
+  with a tripll#64 pointer until the corpus lands (#30)
 - `.mergecraft/config.yaml` accepts an ordered `models` list and optional
   `modelFallbacks` map for per-slug backup chains; the legacy scalar `model` key
   still works unchanged (#14)
