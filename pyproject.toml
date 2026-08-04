@@ -49,7 +49,7 @@ dev = [
     "bandit[toml]==1.9.4",
     "pip-audit==2.10.1",
     "types-PyYAML==6.0.12.20260724",
-    "types-jsonschema==4.25.1.20250822",
+    "types-jsonschema==4.26.0.20260518",
     "pyright==1.1.411",
     "basedpyright==1.39.9",
     "pytest-cov==6.0.0",
