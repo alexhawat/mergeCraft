@@ -55,7 +55,7 @@ dev = [
     "pytest-cov==6.0.0",
     "pytest-randomly==4.1.0",
     "pytest-split==0.11.0",
-    "types-aiofiles==25.1.0.20251011",
+    "types-aiofiles==25.1.0.20260518",
 ]
 
 [tool.hatch.build.targets.wheel]
