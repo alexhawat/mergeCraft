@@ -125,6 +125,30 @@ def _setup_codex_auth(ctx: AgentRunContext, *, codex_home: Path) -> None:
         logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
 
 
+def _codex_mcp_tool_preamble() -> str:
+    """Steer Codex away from the interactive GitHub *plugin* install path.
+
+    Codex 0.14x treats a bare ``checkout_pr`` mention as a request for the
+    optional GitHub plugin. That plugin is not installed in the Action image,
+    so the agent aborts and mergeCraft posts ``mergecraft-approval: neutral``
+    (issue #40). Tools already live on the localhost ``mergecraft`` MCP server
+    and are presented as ``mergecraft_<tool>``.
+    """
+    return (
+        "## mergeCraft MCP tools (Codex)\n\n"
+        "GitHub/PR operations use the localhost **mergecraft** MCP server "
+        f"(config key `[mcp_servers.{MERGECRAFT_MCP_NAME}]`). Tool names are "
+        f"prefixed: e.g. `{MERGECRAFT_MCP_NAME}_checkout_pr`, "
+        f"`{MERGECRAFT_MCP_NAME}_create_pull_request_review`, "
+        f"`{MERGECRAFT_MCP_NAME}_get_check_suite_logs`.\n\n"
+        "Do **not** install, request, enable, or wait for any GitHub plugin / "
+        "GitHub integration — those are unrelated to mergeCraft and will never "
+        "become available in this non-interactive CI session. If a user prompt "
+        "says bare `checkout_pr`, call "
+        f"`{MERGECRAFT_MCP_NAME}_checkout_pr` instead."
+    )
+
+
 def _build_subagent_instructions() -> str:
     return "\n\n".join(
         [
@@ -197,6 +221,8 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     codex_home = _codex_home(ctx)
     codex_home.mkdir(parents=True, exist_ok=True)
     instructions_parts: list[str] = []
+    if ctx.mcp_server_url:
+        instructions_parts.append(_codex_mcp_tool_preamble())
     if ctx.instructions.system:
         instructions_parts.append(ctx.instructions.system)
     instructions_parts.append(_build_subagent_instructions())
