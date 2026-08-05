@@ -131,6 +131,26 @@ def test_write_mcp_config_omits_permission_profiles_without_mcp_url(tmp_path: Pa
     assert "[mcp_servers.mergecraft]" not in text
 
 
+def test_write_mcp_config_auto_approves_mergecraft_tools(tmp_path: Path) -> None:
+    """Read-only reviews must not need an approver for their own MCP tools.
+
+    Codex only auto-approves an MCP tool call when the permission profile grants
+    full disk write access, which the review profile deliberately does not. With
+    ``approval_policy = "never"`` and nobody to answer the elicitation, every
+    call resolves to "user cancelled MCP tool call" unless the server declares
+    its tools pre-approved.
+    """
+    codex_module = _load_codex_module()
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+    ctx.payload.shell = "disabled"
+
+    config_path = Path(codex_module.write_mcp_config(ctx))
+    text = config_path.read_text(encoding="utf-8")
+
+    server_block = text.split("[mcp_servers.mergecraft]", 1)[1]
+    assert 'default_tools_approval_mode = "approve"' in server_block
+
+
 def test_write_mcp_config_enables_network_in_workspace_write_sandbox(tmp_path: Path) -> None:
     codex_module = _load_codex_module()
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
