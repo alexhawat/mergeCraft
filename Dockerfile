@@ -41,11 +41,17 @@ RUN apt-get update -qq \
 # Claude Code CLI — required by the `claude` agent (BYOK auth via
 # CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY). Installed globally so it is on
 # PATH for the unprivileged `mergecraft` runtime user.
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli \
+#
+# opencode-ai backs the `opencode` agent, which resolve_runtime_agent() picks for
+# every model whose provider is not anthropic/openai/google/cursor. Without it
+# that path raised FileNotFoundError, so no third-party OpenAI-compatible
+# provider was reachable at all.
+RUN npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli opencode-ai \
     && npm cache clean --force \
     && claude --version \
     && codex --version \
-    && gemini --version
+    && gemini --version \
+    && opencode --version
 
 WORKDIR /opt/mergecraft
 
