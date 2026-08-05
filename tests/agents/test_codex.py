@@ -99,6 +99,22 @@ def test_write_mcp_config_uses_permission_profiles_for_read_only_mcp(tmp_path: P
     assert "[sandbox_read_only]" not in text
     assert "[mcp_servers.mergecraft]" in text
 
+    instructions = (tmp_path / ".codex" / "mergecraft-instructions.md").read_text(encoding="utf-8")
+    assert "Do **not** install, request, enable, or wait for any GitHub plugin" in instructions
+    assert "mergecraft_checkout_pr" in instructions
+
+
+def test_write_mcp_config_omits_github_plugin_preamble_without_mcp_url(tmp_path: Path) -> None:
+    codex_module = _load_codex_module()
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+    ctx.mcp_server_url = ""
+    ctx.payload.shell = "disabled"
+
+    codex_module.write_mcp_config(ctx)
+    instructions = (tmp_path / ".codex" / "mergecraft-instructions.md").read_text(encoding="utf-8")
+    assert "GitHub plugin" not in instructions
+    assert "mergecraft_checkout_pr" not in instructions
+
 
 def test_write_mcp_config_omits_permission_profiles_without_mcp_url(tmp_path: Path) -> None:
     codex_module = _load_codex_module()
