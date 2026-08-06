@@ -58,14 +58,13 @@ def test_create_temp_directory_prefers_runner_temp_over_tmp(
     runner.mkdir()
     monkeypatch.setenv("RUNNER_TEMP", str(runner))
     monkeypatch.delenv("MERGECRAFT_TEMP_PARENT", raising=False)
-    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    # Do not monkeypatch MERGECRAFT_TEMP_DIR: create_temp_directory writes
+    # os.environ directly, and a later setenv undo would re-leak the value.
+    os.environ.pop("MERGECRAFT_TEMP_DIR", None)
 
     try:
         created = create_temp_directory()
-        # create_temp_directory writes os.environ directly; re-bind via
-        # monkeypatch so xdist siblings do not inherit MERGECRAFT_TEMP_DIR.
-        monkeypatch.setenv("MERGECRAFT_TEMP_DIR", created)
         assert created.startswith(str(runner))
         assert not _is_under_forbidden_temp(Path(created))
         assert os.environ["MERGECRAFT_TEMP_DIR"] == created
@@ -87,11 +86,10 @@ def test_create_temp_directory_skips_forbidden_runner_temp(
     monkeypatch.setenv("RUNNER_TEMP", str(runner))
     monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
     monkeypatch.delenv("MERGECRAFT_TEMP_PARENT", raising=False)
-    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    os.environ.pop("MERGECRAFT_TEMP_DIR", None)
 
     try:
         created = create_temp_directory()
-        monkeypatch.setenv("MERGECRAFT_TEMP_DIR", created)
         assert created.startswith(str(cache_home / "mergecraft" / "tmp"))
         assert not created.startswith(str(runner))
         assert not _is_under_forbidden_temp(Path(created))
