@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -41,19 +42,55 @@ def test_askpass_returns_x_access_token_for_username(tmp_path: Path) -> None:
     assert "ghs_secrettoken" not in user.stdout
 
 
+def _safe_staging_root(label: str) -> Path:
+    """Stage outside pytest's /tmp tree so Codex-forbidden-root checks apply."""
+    root = Path.home() / ".cache" / "mergecraft-test" / f"{label}-{os.getpid()}"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def test_create_temp_directory_prefers_runner_temp_over_tmp(
-    tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Codex PATH aliases need CODEX_HOME outside /tmp — prefer RUNNER_TEMP."""
-    runner = tmp_path / "runner-temp"
+    staging = _safe_staging_root("runner")
+    runner = staging / "runner-temp"
     runner.mkdir()
     monkeypatch.setenv("RUNNER_TEMP", str(runner))
     monkeypatch.delenv("MERGECRAFT_TEMP_PARENT", raising=False)
     monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
 
-    created = create_temp_directory()
-    assert created.startswith(str(runner))
-    assert not _is_under_forbidden_temp(Path(created))
-    assert os.environ["MERGECRAFT_TEMP_DIR"] == created
+    try:
+        created = create_temp_directory()
+        assert created.startswith(str(runner))
+        assert not _is_under_forbidden_temp(Path(created))
+        assert os.environ["MERGECRAFT_TEMP_DIR"] == created
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def test_create_temp_directory_skips_forbidden_runner_temp(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """RUNNER_TEMP under /tmp is rejected; fall back to XDG cache."""
+    # Stage under a real forbidden root (pytest's tmp_path may be /var/folders).
+    forbidden_root = Path("/tmp") / f"mergecraft-test-forbidden-{os.getpid()}"
+    runner = forbidden_root / "runner-temp"
+    runner.mkdir(parents=True)
+    assert _is_under_forbidden_temp(runner)
+    cache_home = _safe_staging_root("xdg")
+    monkeypatch.setenv("RUNNER_TEMP", str(runner))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+    monkeypatch.delenv("MERGECRAFT_TEMP_PARENT", raising=False)
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+
+    try:
+        created = create_temp_directory()
+        assert created.startswith(str(cache_home / "mergecraft" / "tmp"))
+        assert not created.startswith(str(runner))
+        assert not _is_under_forbidden_temp(Path(created))
+        assert os.environ["MERGECRAFT_TEMP_DIR"] == created
+    finally:
+        shutil.rmtree(forbidden_root, ignore_errors=True)
+        shutil.rmtree(cache_home, ignore_errors=True)
