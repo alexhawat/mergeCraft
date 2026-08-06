@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep mergeCraft run temp / ``CODEX_HOME`` outside ``/tmp`` (prefer
+  ``RUNNER_TEMP`` or ``~/.cache/mergecraft``) so Codex can install PATH-alias
+  helper binaries; Codex 0.14x refuses helpers under world-writable temp and
+  exits non-zero, leaving ``mergecraft-approval`` neutral until a fallback
+  reviewer completes
 - Action `model` input and explicit chain selection no longer lose to
   `MERGECRAFT_MODEL`; missing agent binaries are skipped when walking the chain;
   retryable chain advancement is wired through the Action entrypoint (#14)

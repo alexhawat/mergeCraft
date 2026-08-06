@@ -99,7 +99,9 @@ def test_write_mcp_config_uses_permission_profiles_for_read_only_mcp(tmp_path: P
     assert "[sandbox_read_only]" not in text
     assert "[mcp_servers.mergecraft]" in text
 
-    instructions = (tmp_path / ".codex" / "mergecraft-instructions.md").read_text(encoding="utf-8")
+    instructions = (codex_module._codex_home(ctx) / "mergecraft-instructions.md").read_text(
+        encoding="utf-8"
+    )
     assert "Do **not** install, request, enable, or wait for any GitHub plugin" in instructions
     assert "mergecraft_checkout_pr" in instructions
 
@@ -111,7 +113,9 @@ def test_write_mcp_config_omits_github_plugin_preamble_without_mcp_url(tmp_path:
     ctx.payload.shell = "disabled"
 
     codex_module.write_mcp_config(ctx)
-    instructions = (tmp_path / ".codex" / "mergecraft-instructions.md").read_text(encoding="utf-8")
+    instructions = (codex_module._codex_home(ctx) / "mergecraft-instructions.md").read_text(
+        encoding="utf-8"
+    )
     assert "GitHub plugin" not in instructions
     assert "mergecraft_checkout_pr" not in instructions
 
@@ -223,3 +227,32 @@ def test_run_codex_once_omits_sandbox_flag_for_permission_profiles(
 
     cmd = captured[0]
     assert "--sandbox" not in cmd
+
+
+def test_codex_home_relocates_off_tmp(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """CODEX_HOME must not sit under /tmp (Codex PATH-alias refusal)."""
+    codex_module = _load_codex_module()
+    forbidden = tmp_path / "fake-tmp" / "mergecraft-run"
+    forbidden.mkdir(parents=True)
+    safe = tmp_path / "runner-temp"
+    safe.mkdir()
+
+    monkeypatch.setattr(
+        codex_module,
+        "_is_under_forbidden_temp",
+        lambda path: (
+            Path(path).resolve() == forbidden.resolve()
+            or str(Path(path).resolve()).startswith(str(forbidden.resolve()))
+        ),
+    )
+    monkeypatch.setenv("RUNNER_TEMP", str(safe))
+    monkeypatch.delenv("MERGECRAFT_CODEX_HOME_PARENT", raising=False)
+    monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+
+    ctx = make_agent_run_context(forbidden, resolved_model="openai/gpt-5.3-codex")
+    home = codex_module._codex_home(ctx)
+    assert str(home).startswith(str(safe))
+    assert home.name == ".codex"

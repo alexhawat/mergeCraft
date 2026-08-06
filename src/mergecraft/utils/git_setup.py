@@ -19,11 +19,58 @@ ShellPerm = Literal["disabled", "restricted", "enabled"]
 MERGECRAFT_BOT_EMAIL = "226033991+mergecraft[bot]@users.noreply.github.com"
 MERGECRAFT_BOT_NAME = "mergecraft[bot]"
 
+# Codex refuses PATH-alias helper binaries when CODEX_HOME is under these roots
+# ("Refusing to create helper binaries under temporary dir /tmp"). Keep the
+# mergeCraft run temp (and thus $CODEX_HOME) outside them.
+_FORBIDDEN_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/usr/tmp")
+
+
+def _is_under_forbidden_temp(path: Path) -> bool:
+    """Return True when ``path`` resolves under a Codex-forbidden temp root."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for root in _FORBIDDEN_TEMP_ROOTS:
+        try:
+            resolved.relative_to(Path(root).resolve())
+        except ValueError, OSError:
+            continue
+        else:
+            return True
+    return False
+
+
+def _safe_temp_parent() -> Path | None:
+    """Prefer a parent Codex accepts for PATH aliases (not world-writable /tmp)."""
+    for key in ("MERGECRAFT_TEMP_PARENT", "RUNNER_TEMP"):
+        raw = os.environ.get(key, "").strip()
+        if not raw:
+            continue
+        candidate = Path(raw)
+        if candidate.is_dir() and not _is_under_forbidden_temp(candidate):
+            return candidate
+    cache = (
+        Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")) / "mergecraft" / "tmp"
+    )
+    try:
+        cache.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    if _is_under_forbidden_temp(cache):
+        return None
+    return cache
+
 
 def create_temp_directory() -> str:
     import tempfile
 
-    shared = tempfile.mkdtemp(prefix="mergecraft-")
+    parent = _safe_temp_parent()
+    shared = (
+        tempfile.mkdtemp(prefix="mergecraft-", dir=str(parent))
+        if parent is not None
+        else tempfile.mkdtemp(prefix="mergecraft-")
+    )
     os.environ["MERGECRAFT_TEMP_DIR"] = shared
     logger.info("» created temp dir at {}", shared)
     return shared

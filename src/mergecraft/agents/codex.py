@@ -28,14 +28,60 @@ CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 CODEX_REVIEW_PERMISSION_PROFILE = "mergecraft-review"
 
+# Mirrors mergecraft.utils.git_setup — Codex refuses PATH aliases under these.
+_FORBIDDEN_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/usr/tmp")
+
 
 def _strip_provider_prefix(specifier: str) -> str:
     slash = specifier.find("/")
     return specifier[slash + 1 :] if slash > 0 else specifier
 
 
+def _is_under_forbidden_temp(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for root in _FORBIDDEN_TEMP_ROOTS:
+        try:
+            resolved.relative_to(Path(root).resolve())
+        except ValueError, OSError:
+            continue
+        else:
+            return True
+    return False
+
+
+def _safe_codex_home_parent(ctx: AgentRunContext) -> Path:
+    """Parent for ``CODEX_HOME`` that Codex will accept for PATH aliases."""
+    tmp = Path(ctx.tmpdir)
+    if not _is_under_forbidden_temp(tmp):
+        return tmp
+    for key in ("MERGECRAFT_CODEX_HOME_PARENT", "RUNNER_TEMP", "GITHUB_WORKSPACE"):
+        raw = os.environ.get(key, "").strip()
+        if not raw:
+            continue
+        candidate = Path(raw)
+        if _is_under_forbidden_temp(candidate):
+            continue
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        return candidate / tmp.name
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")) / "mergecraft"
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache / tmp.name
+
+
 def _codex_home(ctx: AgentRunContext) -> Path:
-    return Path(ctx.tmpdir) / ".codex"
+    """Return ``$CODEX_HOME`` for this run.
+
+    Codex 0.14x refuses to install PATH-alias helper binaries when home is under
+    ``/tmp`` (world-writable temp). Prefer the run tmpdir when it is safe;
+    otherwise relocate under ``RUNNER_TEMP`` / workspace / cache.
+    """
+    return _safe_codex_home_parent(ctx) / ".codex"
 
 
 def _toml_string(value: str) -> str:
