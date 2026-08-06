@@ -63,10 +63,14 @@ def test_create_temp_directory_prefers_runner_temp_over_tmp(
 
     try:
         created = create_temp_directory()
+        # create_temp_directory writes os.environ directly; re-bind via
+        # monkeypatch so xdist siblings do not inherit MERGECRAFT_TEMP_DIR.
+        monkeypatch.setenv("MERGECRAFT_TEMP_DIR", created)
         assert created.startswith(str(runner))
         assert not _is_under_forbidden_temp(Path(created))
         assert os.environ["MERGECRAFT_TEMP_DIR"] == created
     finally:
+        os.environ.pop("MERGECRAFT_TEMP_DIR", None)
         shutil.rmtree(staging, ignore_errors=True)
 
 
@@ -87,10 +91,12 @@ def test_create_temp_directory_skips_forbidden_runner_temp(
 
     try:
         created = create_temp_directory()
+        monkeypatch.setenv("MERGECRAFT_TEMP_DIR", created)
         assert created.startswith(str(cache_home / "mergecraft" / "tmp"))
         assert not created.startswith(str(runner))
         assert not _is_under_forbidden_temp(Path(created))
         assert os.environ["MERGECRAFT_TEMP_DIR"] == created
     finally:
+        os.environ.pop("MERGECRAFT_TEMP_DIR", None)
         shutil.rmtree(forbidden_root, ignore_errors=True)
         shutil.rmtree(cache_home, ignore_errors=True)
