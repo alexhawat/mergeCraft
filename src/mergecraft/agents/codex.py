@@ -187,6 +187,16 @@ def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
             "",
             f"[mcp_servers.{MERGECRAFT_MCP_NAME}]",
             f"url = {_toml_string(ctx.mcp_server_url)}",
+            # Without this, every tool call is auto-cancelled in CI. Codex
+            # auto-approves an MCP call only when the permission profile grants
+            # full disk write access (codex_mcp::mcp_permission_prompt_is_auto_approved),
+            # and the read-only review profile does not. `approval_policy =
+            # "never"` then means the elicitation is never answered, so the call
+            # resolves to "user cancelled MCP tool call" — with no interactive
+            # user anywhere in the pipeline. The server is ours and the action
+            # already runs with push/shell disabled, so approving its tools up
+            # front is the intended posture.
+            'default_tools_approval_mode = "approve"',
         ]
     )
     if disabled_tools:
