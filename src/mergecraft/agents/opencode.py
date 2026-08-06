@@ -26,6 +26,35 @@ from mergecraft.agents.shared import (
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.types import MERGECRAFT_MCP_NAME
 
+CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
+CUSTOM_PROVIDER_API_KEY_ENV = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
+
+
+def build_custom_provider(model: str | None) -> dict[str, object] | None:
+    """Describe an OpenAI-compatible provider declared through the environment.
+
+    The provider id is the segment of ``model`` before the first slash, so
+    ``nous/deepseek/deepseek-v4-flash`` registers provider ``nous`` serving model
+    ``deepseek/deepseek-v4-flash``. Returns ``None`` unless both the base URL and
+    the API key are set, since opencode cannot authenticate with either alone.
+    """
+    base_url = os.environ.get(CUSTOM_PROVIDER_BASE_URL_ENV, "").strip()
+    api_key = os.environ.get(CUSTOM_PROVIDER_API_KEY_ENV, "").strip()
+    if not (base_url and api_key and model):
+        return None
+    slash = model.find("/")
+    if slash <= 0:
+        return None
+    provider_id, model_id = model[:slash].lower(), model[slash + 1 :]
+    return {
+        provider_id: {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": provider_id,
+            "options": {"baseURL": base_url, "apiKey": api_key},
+            "models": {model_id: {"name": model_id}},
+        }
+    }
+
 
 def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
     fs_perm = build_opencode_native_fs_permission()
@@ -65,6 +94,9 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
         slash = model.find("/")
         if slash > 0:
             config["enabled_providers"] = [model[:slash].lower()]
+    provider = build_custom_provider(model)
+    if provider is not None:
+        config["provider"] = provider
     return json.dumps(config)
 
 

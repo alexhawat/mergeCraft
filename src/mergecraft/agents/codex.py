@@ -43,11 +43,6 @@ def _toml_string(value: str) -> str:
     return f'"{escaped}"'
 
 
-def _toml_string_list(values: list[str]) -> str:
-    inner = ", ".join(_toml_string(item) for item in values)
-    return f"[{inner}]"
-
-
 def _extract_refresh_token(auth_json: str) -> str | None:
     try:
         data = json.loads(auth_json)
@@ -125,6 +120,30 @@ def _setup_codex_auth(ctx: AgentRunContext, *, codex_home: Path) -> None:
         logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
 
 
+def _codex_mcp_tool_preamble() -> str:
+    """Steer Codex away from the interactive GitHub *plugin* install path.
+
+    Codex 0.14x treats a bare ``checkout_pr`` mention as a request for the
+    optional GitHub plugin. That plugin is not installed in the Action image,
+    so the agent aborts and mergeCraft posts ``mergecraft-approval: neutral``
+    (issue #40). Tools already live on the localhost ``mergecraft`` MCP server
+    and are presented as ``mergecraft_<tool>``.
+    """
+    return (
+        "## mergeCraft MCP tools (Codex)\n\n"
+        "GitHub/PR operations use the localhost **mergecraft** MCP server "
+        f"(config key `[mcp_servers.{MERGECRAFT_MCP_NAME}]`). Tool names are "
+        f"prefixed: e.g. `{MERGECRAFT_MCP_NAME}_checkout_pr`, "
+        f"`{MERGECRAFT_MCP_NAME}_create_pull_request_review`, "
+        f"`{MERGECRAFT_MCP_NAME}_get_check_suite_logs`.\n\n"
+        "Do **not** install, request, enable, or wait for any GitHub plugin / "
+        "GitHub integration — those are unrelated to mergeCraft and will never "
+        "become available in this non-interactive CI session. If a user prompt "
+        "says bare `checkout_pr`, call "
+        f"`{MERGECRAFT_MCP_NAME}_checkout_pr` instead."
+    )
+
+
 def _build_subagent_instructions() -> str:
     return "\n\n".join(
         [
@@ -157,16 +176,31 @@ def _codex_use_permission_profiles(ctx: AgentRunContext) -> bool:
 
 
 def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
-    disabled_tools = [str(name) for name in ctx.subagent_denied_tools]
     lines.extend(
         [
             "",
             f"[mcp_servers.{MERGECRAFT_MCP_NAME}]",
             f"url = {_toml_string(ctx.mcp_server_url)}",
+            # Without this, every tool call is auto-cancelled in CI. Codex
+            # auto-approves an MCP call only when the permission profile grants
+            # full disk write access (codex_mcp::mcp_permission_prompt_is_auto_approved),
+            # and the read-only review profile does not. `approval_policy =
+            # "never"` then means the elicitation is never answered, so the call
+            # resolves to "user cancelled MCP tool call" — with no interactive
+            # user anywhere in the pipeline. The server is ours and the action
+            # already runs with push/shell disabled, so approving its tools up
+            # front is the intended posture.
+            'default_tools_approval_mode = "approve"',
         ]
     )
-    if disabled_tools:
-        lines.append(f"disabled_tools = {_toml_string_list(disabled_tools)}")
+    # Do NOT put ctx.subagent_denied_tools into ``disabled_tools``. That list is
+    # every mutates=True MCP tool (checkout_pr, create_pull_request_review, …)
+    # and exists to keep *subagents* read-only. Wiring it onto the main session's
+    # MCP server hides those tools from the reviewer itself, so Codex can inspect
+    # a PR but can never check it out or submit a review — mergecraft-approval
+    # stays neutral forever. Subagent read-only posture stays in the instructions
+    # preamble (_build_subagent_instructions); Claude's harness never disabled
+    # these tools for the primary agent either.
 
 
 def _append_read_only_mcp_network_lines(lines: list[str]) -> None:
@@ -197,6 +231,8 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     codex_home = _codex_home(ctx)
     codex_home.mkdir(parents=True, exist_ok=True)
     instructions_parts: list[str] = []
+    if ctx.mcp_server_url:
+        instructions_parts.append(_codex_mcp_tool_preamble())
     if ctx.instructions.system:
         instructions_parts.append(ctx.instructions.system)
     instructions_parts.append(_build_subagent_instructions())

@@ -189,6 +189,10 @@ def _tool_result_to_rpc(result: ToolResult | Any) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
 
 
+def _is_notification(message: Any) -> bool:
+    return isinstance(message, dict) and "id" not in message
+
+
 def create_mcp_app(tools: list[ToolSpec]) -> FastAPI:
     by_name = {t.name: t for t in tools}
     app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.0.1")
@@ -201,7 +205,7 @@ def create_mcp_app(tools: list[ToolSpec]) -> FastAPI:
         req_id = body.get("id")
         method = body.get("method")
         params = body.get("params") or {}
-        if method in {"initialize", "notifications/initialized"}:
+        if method == "initialize":
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
@@ -269,9 +273,16 @@ def create_mcp_app(tools: list[ToolSpec]) -> FastAPI:
                 },
                 status_code=400,
             )
+        items = body if isinstance(body, list) else [body]
+        # A JSON-RPC message with no `id` is a notification. The streamable-HTTP
+        # spec requires 202 with an empty body for a notification-only POST;
+        # answering one with a response object (`"id": null`) makes a strict
+        # client — Codex's rmcp — fail to deserialize it, kill the transport
+        # worker mid-handshake, and report the server as "not ready".
+        if all(_is_notification(item) for item in items):
+            return Response(status_code=202)
         if isinstance(body, list):
-            results = [await handle_rpc(item) for item in body]
-            return JSONResponse(results)
+            return JSONResponse([await handle_rpc(item) for item in items])
         return JSONResponse(await handle_rpc(body))
 
     return app
