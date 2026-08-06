@@ -151,6 +151,30 @@ def test_write_mcp_config_auto_approves_mergecraft_tools(tmp_path: Path) -> None
     assert 'default_tools_approval_mode = "approve"' in server_block
 
 
+def test_write_mcp_config_keeps_mutating_tools_for_the_main_session(
+    tmp_path: Path,
+) -> None:
+    """Subagent deny list must not hide checkout/review tools from Codex itself.
+
+    ``subagent_denied_tools`` is every mutates=True MCP tool. Putting that list
+    into Codex's ``disabled_tools`` made the primary reviewer unable to call
+    ``checkout_pr`` or ``create_pull_request_review``, so every review posted
+    ``mergecraft-approval=neutral`` even when Codex wanted to approve.
+    """
+    codex_module = _load_codex_module()
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+    ctx.payload.shell = "disabled"
+    ctx.subagent_denied_tools = ("checkout_pr", "create_pull_request_review", "push_branch")
+
+    config_path = Path(codex_module.write_mcp_config(ctx))
+    text = config_path.read_text(encoding="utf-8")
+
+    server_block = text.split("[mcp_servers.mergecraft]", 1)[1]
+    assert "disabled_tools" not in server_block
+    assert "checkout_pr" not in server_block
+    assert "create_pull_request_review" not in server_block
+
+
 def test_write_mcp_config_enables_network_in_workspace_write_sandbox(tmp_path: Path) -> None:
     codex_module = _load_codex_module()
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")

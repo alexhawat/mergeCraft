@@ -43,11 +43,6 @@ def _toml_string(value: str) -> str:
     return f'"{escaped}"'
 
 
-def _toml_string_list(values: list[str]) -> str:
-    inner = ", ".join(_toml_string(item) for item in values)
-    return f"[{inner}]"
-
-
 def _extract_refresh_token(auth_json: str) -> str | None:
     try:
         data = json.loads(auth_json)
@@ -181,7 +176,6 @@ def _codex_use_permission_profiles(ctx: AgentRunContext) -> bool:
 
 
 def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
-    disabled_tools = [str(name) for name in ctx.subagent_denied_tools]
     lines.extend(
         [
             "",
@@ -199,8 +193,14 @@ def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
             'default_tools_approval_mode = "approve"',
         ]
     )
-    if disabled_tools:
-        lines.append(f"disabled_tools = {_toml_string_list(disabled_tools)}")
+    # Do NOT put ctx.subagent_denied_tools into ``disabled_tools``. That list is
+    # every mutates=True MCP tool (checkout_pr, create_pull_request_review, …)
+    # and exists to keep *subagents* read-only. Wiring it onto the main session's
+    # MCP server hides those tools from the reviewer itself, so Codex can inspect
+    # a PR but can never check it out or submit a review — mergecraft-approval
+    # stays neutral forever. Subagent read-only posture stays in the instructions
+    # preamble (_build_subagent_instructions); Claude's harness never disabled
+    # these tools for the primary agent either.
 
 
 def _append_read_only_mcp_network_lines(lines: list[str]) -> None:
