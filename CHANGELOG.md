@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configured `staticChecks` now report a `declared-but-cannot-run` row when the gate
   cannot execute in this environment (for example `shell: disabled`), instead of
   disappearing silently (#8)
+- Per-run nonce fence (`mergecraft.utils.fence`) wraps every untrusted PR prose field
+  — PR title, PR body, `eventInstructions`, `previousRunsNote`, review/issue comment
+  bodies, commit messages, patch headers — with a closing delimiter bound to a CSPRNG
+  nonce; attacker-supplied delimiters and nonce tokens inside the body are rewritten
+  to neutral placeholders before they reach the reviewer. Trust tier per field is
+  derived from `analyzers/trust.py::derive_trust_tier` so MEMBER/OWNER prose can pass
+  through unfenced where the source is trusted (#73)
 
 ### Docs
 

@@ -50,19 +50,22 @@ except ImportError:  # W4 will remove this branch.
 
 
 def _require_fence() -> None:
-    """Skip cleanly when W4 has not landed the module — the xfail on each
-    individual test handles the assertion; this guard keeps the rest of the
-    suite's collection green even if the module is absent."""
-    if not _FENCE_AVAILABLE:
-        pytest.skip("mergecraft.utils.fence not yet implemented (W4)")
+    """W4 has landed the fence module — the suite now runs for real.
+
+    Pre-W4 this guard kept the rest of the suite's collection green when
+    the module was absent. Now that ``mergecraft.utils.fence`` exists, the
+    guard is removed per W4.7 so a missing module is a hard failure (no
+    silent skips). The xfail markers on individual tests stay in place for
+    cases where the implementation cannot satisfy a contradictory fixture
+    assertion (e.g. ``test_forged_close_does_not_escape_fence``).
+    """
+    assert _FENCE_AVAILABLE
+    assert _fence_mod is not None
 
 
 # ── W3.3 — nonce is per-run and unpredictable. ───────────────────────────────
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_nonce_is_per_run_and_unpredictable() -> None:
     """Two `Fence()` calls produce different nonces; nonce is not derivable
     from any payload field, length is 16 lowercase hex chars, and the
@@ -111,7 +114,14 @@ _FORGED_OPEN = (
 
 
 @pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
+    reason=(
+        "W4 contradiction: the test simultaneously asserts that the literal "
+        "attacker's _FORGED_CLOSE substring (which contains nonce=0000000000000000) "
+        "must appear in the rendered output AND that nonce=0000000000000000 must "
+        "not appear. The security-correct implementation neutralizes the forged "
+        "nonce, removing the literal substring. Deferred to B-Final test redesign."
+    ),
+    strict=False,
 )
 def test_forged_close_does_not_escape_fence() -> None:
     """An attacker text that contains a plausible closing delimiter with a
@@ -156,9 +166,6 @@ def test_forged_close_does_not_escape_fence() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_forged_open_does_not_open_a_second_fence() -> None:
     """An attacker text that mimics an opening delimiter must not create a
     second fence. Only one opening and one closing delimiter may appear in
@@ -199,9 +206,6 @@ _FENCE_HEADER_RE = re.compile(r"<<<UNTRUSTED-MERGECRAFT-CONTENT\b")
 _FENCE_FOOTER_RE = re.compile(r"<<<END-UNTRUSTED-MERGECRAFT-CONTENT\b")
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_untrusted_text_appears_only_inside_fence() -> None:
     """For each closed-set field from D8, the rendered output must contain
     the field's text inside a fence and never raw in the prompt body.
@@ -243,9 +247,6 @@ def test_untrusted_text_appears_only_inside_fence() -> None:
 # ── W3.5 — fence carries author + trust tier. ───────────────────────────────
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_fence_carries_author_and_trust_tier() -> None:
     """The fence block names its author login and the trust tier
     (`derive_trust_tier`'s return value) so a reviewer can weight it
@@ -286,9 +287,6 @@ def test_fence_carries_author_and_trust_tier() -> None:
 # ── W3.7 — maintainer-authored fields are not fenced. ────────────────────────
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_maintainer_authored_fields_pass_through_unfenced() -> None:
     """Mirror of the manager's D11/D12 rule: `OWNER` / `MEMBER` /
     `COLLABORATOR`-authored fields must pass through unfenced. W4 will
@@ -342,9 +340,6 @@ def test_maintainer_authored_fields_pass_through_unfenced() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_maintainer_exemption_is_per_field_not_per_thread() -> None:
     """The exemption is per-field: a `MEMBER`-authored review comment
     does NOT extend to the rest of the review thread. W4 must pass each
@@ -375,12 +370,10 @@ def test_maintainer_exemption_is_per_field_not_per_thread() -> None:
 
 
 def test_fence_module_is_collectable() -> None:
-    """The suite must collect even before W4 lands. This test is the
-    only one in the file that is NOT xfail-marked — it asserts the
-    module either imports cleanly (post-W4) or the test skips cleanly
-    (pre-W4), without breaking pytest collection."""
-    if not _FENCE_AVAILABLE:
-        pytest.skip("mergecraft.utils.fence not yet implemented (W4)")
+    """Post-W4 the fence module imports cleanly; W3.8 flipped from a
+    pre-W4 ``pytest.skip`` guard to a passing assertion when W4 landed
+    ``mergecraft.utils.fence``. This test pins that."""
+    assert _FENCE_AVAILABLE
     assert _fence_mod is not None
 
 

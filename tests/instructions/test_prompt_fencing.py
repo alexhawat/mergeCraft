@@ -25,8 +25,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 from mergecraft.config.settings import RepoInfo
 from mergecraft.modes import Mode
 from mergecraft.utils.instructions import resolve_instructions
@@ -42,8 +40,14 @@ except ImportError:  # W4 will remove this branch.
 
 
 def _require_fence() -> None:
-    if not _FENCE_AVAILABLE:
-        pytest.skip("mergecraft.utils.fence not yet implemented (W4)")
+    """W4 has landed the fence module — the suite now runs for real.
+
+    Pre-W4 this guard kept the rest of the suite's collection green when
+    the module was absent. Now that ``mergecraft.utils.fence`` exists, the
+    guard is removed per W4.7 so a missing module is a hard failure.
+    """
+    assert _FENCE_AVAILABLE
+    assert _fence_mod is not None
 
 
 _REAL_NONCE = "0123456789abcdef"
@@ -83,9 +87,6 @@ def _resolve(payload: dict, **overrides):  # type: ignore[no-untyped-def]
 # ── W3.4 — D8 enumeration across the prompt-assembly surface. ───────────────
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_every_pr_title_in_prompt_is_fenced() -> None:
     """W4 must route the PR title through the fence at the
     `_build_event_title` / `_build_event_metadata` assembly points
@@ -114,9 +115,6 @@ def test_every_pr_title_in_prompt_is_fenced() -> None:
     _assert_fenced(resolved.full, needle=title_text, nonce_must_bind=False)
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_every_pr_body_in_prompt_is_fenced() -> None:
     """W4 must route the PR body through the fence at the same call
     sites. As of W0 (`src/mergecraft/utils/instructions.py:151-158`),
@@ -153,9 +151,6 @@ def test_every_pr_body_in_prompt_is_fenced() -> None:
         _assert_fenced(resolved.full, needle=injection, nonce_must_bind=False)
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_every_event_instructions_in_prompt_is_fenced() -> None:
     """W4 must fence `eventInstructions` (the `pull_request_review_comment`
     / `issue_comment` / `previousRunsNote` text path) — the D8 enumeration
@@ -180,9 +175,6 @@ def test_every_event_instructions_in_prompt_is_fenced() -> None:
     _assert_fenced(resolved.full, needle=needle, nonce_must_bind=False)
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_every_previous_runs_note_in_prompt_is_fenced() -> None:
     """`previousRunsNote` carries prior-run text into the new run's
     prompt. It is part of the D8 closed set (PR prose / comment text
@@ -239,9 +231,6 @@ def _read_diff_for_offline(tmp_path):  # type: ignore[no-untyped-def]
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_offline_diff_review_fences_extra_instructions(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """`build_offline_review_prompt` accepts an `extra` block from the
     operator. In a fork PR, the diff is attacker-controlled AND the
@@ -256,9 +245,6 @@ def test_offline_diff_review_fences_extra_instructions(tmp_path) -> None:  # typ
     _assert_fenced(prompt, needle=needle, nonce_must_bind=False)
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_offline_diff_summary_lists_paths_unfenced() -> None:
     """Diff path summaries are operator-supplied file lists — NOT the
     D8 closed set. They are not fenced (the SUMMARY block in
@@ -335,9 +321,6 @@ def _split_sections(prompt: str) -> dict[str, str]:
     return sections
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_injected_pr_body_does_not_change_surrounding_prompt() -> None:
     """The issue's primary acceptance criterion, asserted at the prompt-
     assembly level (W3.1).
@@ -403,9 +386,6 @@ def test_injected_pr_body_does_not_change_surrounding_prompt() -> None:
 # ── W3.1 (continued) — same property on the offline review prompt. ──────────
 
 
-@pytest.mark.xfail(
-    reason="green after W4: fence untrusted PR/comment text with per-run nonce (#73)", strict=False
-)
 def test_offline_diff_review_fences_commit_messages() -> None:
     """Commit messages and patch headers are D8 closed-set fields; the
     offline diff-review path (W3.6) embeds them into the user prompt
