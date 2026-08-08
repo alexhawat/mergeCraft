@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
 from tests.evidence.support import import_module
-
-pytestmark = pytest.mark.xfail(reason="green after W1", strict=False)
-
 
 _REQUIRED_SECTIONS: tuple[str, ...] = (
     "schema_version",

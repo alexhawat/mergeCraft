@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Merge Evidence Packet: every run emits a versioned, structured
+  `MergeEvidencePacket` (`src/mergecraft/evidence/packet.py`) that composes
+  the existing `Finding` model and derives its JSON Schema from the Pydantic
+  models (no hand-written schema). `PACKET_SCHEMA_VERSION = "1.0.0"` is
+  required and pinned; `tests/evidence/test_packet_schema.py` enforces the
+  contract. The packet is assembled by `build_packet()` (pure) and emitted
+  by `write_packet()` (I/O shell) under `mergecraft.evidence.{build,emit}`,
+  and ships with `docs/evidence-packet.md` as the field reference (#47, W1).
 - `mergecraft diff-review --json PATH` writes structured findings validated against
   the `Finding` schema for offline benchmark/scoring workflows (#30)
 - Optional `mergecraft[harbor]` extra with `MergecraftReviewAgent` — installs

@@ -10,8 +10,6 @@ from pydantic import ValidationError
 
 from tests.evidence.support import import_module, sample_minimal_packet_dict
 
-pytestmark = pytest.mark.xfail(reason="green after W1", strict=False)
-
 
 def test_evidence_packet_round_trips_through_json() -> None:
     """A fully populated packet serializes to JSON and re-validates with zero errors."""

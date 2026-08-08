@@ -3,19 +3,15 @@
 Pin the contract that the packet's JSON Schema must come from the Pydantic
 models (mirroring ``mergecraft.analyzers.finding.findings_output_schema`` at
 ``src/mergecraft/analyzers/finding.py:138``) and that the version is asserted
-(D7). Tests are xfail until W1 lands ``src/mergecraft/evidence/packet.py``.
+(D7).
 """
 
 from __future__ import annotations
 
 import json
 
-import pytest
-
 from tests.analyzers.support import import_module as import_finding_module
 from tests.evidence.support import import_module
-
-pytestmark = pytest.mark.xfail(reason="green after W1", strict=False)
 
 
 def test_evidence_packet_schema_is_derived_not_handwritten() -> None:
