@@ -90,3 +90,57 @@ When W4 lands:
 1. W4 removes all `green after W4: …` xfail markers from this directory.
 2. The full test run for `tests/tracing/instrumentation/` becomes a clean pass.
 3. Any test that flips from xfail to fail on W4 lands is a W4 bug, not a test bug.
+---
+
+# Batch D — exporters, extra, CLI/action, docs (W7 RED)
+
+Wave plan: `.ignorelocal/waves/issues-tracing-observability-wave-plan.md`
+Worktree: `mergecraft-trc-d-exporters` @ `wave/trc-d-exporters`
+
+## xfail schedule
+
+All tests under `tests/tracing/exporters/` are W7 contracts implemented by W8. Every cross-wave marker uses `green after W8: …` and `strict=False`; W8 removes the markers after implementation. Tests that genuinely depend on `logfire` / `opentelemetry` use `pytest.importorskip(...)` so they return a skip (not a fail) when the extra is uninstalled — that satisfies W7.5 from the test side.
+
+## Contract matrix
+
+| Contract | Unit | Integration | Functional / edge / error | Primary tests |
+|----------|------|-------------|---------------------------|---------------|
+| W7.1 `logfire` and `otel` share one OTLP code path (D5) | same class for both `sink_factory` resolutions | endpoint + headers flow through the same module path | resolve to the same exporter module | `tests/tracing/exporters/test_otlp_pipeline.py::test_logfire_and_otel_share_one_code_path`, `..._share_endpoint_resolution` |
+| W7.2 absent token = no export, no error | `tokenRef`/`MERGECRAFT_LOGFIRE_TOKEN` resolution | factory returns a sink with no network call | warning logged; factory does not raise | `tests/tracing/exporters/test_logfire_sink.py` |
+| W7.3 OTLP exports to arbitrary endpoint + headers | endpoint + headers parser | sink exports spans to a self-hosted collector by IP | default endpoint when unset | `tests/tracing/exporters/test_otlp_pipeline.py::test_otel_sink_exports_to_arbitrary_endpoint_and_headers`, `..._uses_default_endpoint_when_unset` |
+| W7.4 `tokenRef` is resolved, never inlined (D5) | `model_dump` does not contain the literal value | YAML round-trip preserves reference, drops value | logs do not contain value; `mergecraft config tracing` redacts value | `tests/tracing/exporters/test_token_resolution.py` |
+| W7.5 extra uninstalled is a clean no-op (convention 5, D6) | `import mergecraft` succeeds without `logfire`/`opentelemetry` | factory degrades to a stub with a clear warning | optional extra declared in `pyproject.toml` | `tests/tracing/exporters/test_optional_extra.py` |
+| W7.6 CLI flag > env > `.mergecraft/config.yaml` > default (off) | precedence arithmetic | `mergecraft diff-review --help` exposes new flags | `--no-tracing` wins over `MERGECRAFT_TRACING=true`; `--logfire-token` wins over env; `--trace-dir` wins over YAML | `tests/tracing/exporters/test_cli_precedence.py` |
+| W7.7 `action.yml` inputs map to config | `INPUT_TRACING`, `INPUT_TRACING_TO`, `INPUT_LOGFIRE_TOKEN`, `INPUT_OTEL_ENDPOINT` resolution | `tracing` shorthand expands correctly | `INPUT_LOGFIRE_TOKEN` distinct from `INPUT_TOKEN`; `GITHUB_WORKSPACE` honoured for local sink path | `tests/tracing/exporters/test_action_inputs.py` |
+| W7.8 remote sink failure never fails the run (convention 6) | unreachable endpoint swallows the error | caller result unchanged; warning logged | `flush()` is idempotent | `tests/tracing/exporters/test_otlp_pipeline.py::test_remote_sink_failure_never_fails_the_run`, `..._flush_is_idempotent_when_unreachable` |
+| W8.4 surface (preview) | `mergecraft config tracing` and `mergecraft traces <run-id>` exist | `config tracing` shows redacted sinks; `traces` reads local JSONL | redaction applies to dump; missing run id is a clean exit | `tests/tracing/exporters/test_config_tracing_cmd.py` |
+| Integration — `logfire` + `otel` + local fan-out (D7) | redacting wrapper outside the multi-sink | three sinks composed under one redaction boundary | redaction applies to remote transport; payload cap propagates | `tests/tracing/exporters/test_integration.py` |
+
+## Shared fixtures
+
+`tests/tracing/exporters/conftest.py` supplies an isolated env helper, a loopback-only fake OTLP endpoint, a free TCP port picker, and a canonical event payload. The exporter tests use `pytest.importorskip("logfire" / "opentelemetry")` to gate the installed path; uninstalled path tests inject a stub module into `sys.modules` to simulate the missing extra.
+
+## RED acceptance
+
+The suite must collect without import errors, pass `make lint` and `make typecheck`, and remain non-strict xfail until W8 ships the OTLP pipeline (`mergecraft.tracing.exporters`), the CLI precedence helper (`mergecraft.cli.tracing_precedence`), the action-input resolver (`mergecraft.action.inputs`), and the `mergecraft config tracing` / `mergecraft traces` commands. The W2.3 `NullSink` and the W2.1 `TraceSinkEntry.tokenRef` already satisfy four contracts (the corresponding tests will xpass rather than xfail when W7 lands — confirmed on the W7 RED sweep 2026-08-09 with the run below).
+
+```
+27 passed (Batch A RED-turned-green by W2)
+60 collected (Batch D RED)  →  20 skipped (logfire/opentelemetry absent), 36 xfailed, 4 xpassed
+make lint      → clean
+make typecheck → clean
+```
+
+## W7 deliverables
+
+| Wave | Status | Evidence |
+|------|--------|----------|
+| W7.1 shared OTLP code path | RED (`strict=False`) | `tests/tracing/exporters/test_otlp_pipeline.py` |
+| W7.2 absent token semantics | RED | `tests/tracing/exporters/test_logfire_sink.py` |
+| W7.3 arbitrary endpoint + headers | RED | `tests/tracing/exporters/test_otlp_pipeline.py` |
+| W7.4 `tokenRef` never inlined | RED (2 XPASS confirm partial structural coverage from W2) | `tests/tracing/exporters/test_token_resolution.py` |
+| W7.5 optional extra no-op | RED | `tests/tracing/exporters/test_optional_extra.py` |
+| W7.6 CLI/env/config precedence | RED | `tests/tracing/exporters/test_cli_precedence.py` |
+| W7.7 `action.yml` inputs | RED | `tests/tracing/exporters/test_action_inputs.py` |
+| W7.8 remote failure isolation | RED | `tests/tracing/exporters/test_otlp_pipeline.py` |
+| W7.9 commit + push | DONE | `201416f` on `origin/wave/trc-d-exporters` |

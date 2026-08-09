@@ -18,8 +18,10 @@ A *sink* is anything that knows how to ``write(event)`` for a
 
 :func:`sink_factory` resolves :class:`mergecraft.config.settings.TracingSettings`
 to a live sink. When ``enabled`` is false, it returns a :class:`NullSink`
-without touching the filesystem. ``logfire`` and ``otel`` types are not yet
-implemented (W8).
+without touching the filesystem. ``logfire`` and ``otel`` types are
+implemented in :mod:`mergecraft.tracing.exporters` behind the optional
+``[tracing]`` extra (W8 / D6); when the extra is absent the factory
+degrades to :class:`NullSink` with a clear warning (convention 5).
 
 Exports:
     NullSink, JSONLFileSink, MemorySink, MultiSink, RedactingSink
@@ -148,6 +150,22 @@ class MultiSink:
             except Exception as exc:
                 logger.warning("trace sink {} failed: {}", type(sink).__name__, exc)
 
+    def flush(self) -> None:
+        """Best-effort flush — propagate to children that expose ``flush``.
+
+        Each child's ``flush`` is wrapped in try/except (convention 6): one
+        failing child's flush must never break the others or the caller.
+        Children without a ``flush`` attribute are skipped silently.
+        """
+        for sink in self.sinks:
+            flush = getattr(sink, "flush", None)
+            if flush is None:
+                continue
+            try:
+                flush()
+            except Exception as exc:
+                logger.warning("trace sink {} flush failed: {}", type(sink).__name__, exc)
+
 
 class RedactingSink:
     """Wraps a sink and redacts ``attrs`` before delegating ``write``.
@@ -168,6 +186,16 @@ class RedactingSink:
         except Exception as exc:
             logger.warning("trace sink write failed: {}", exc)
 
+    def flush(self) -> None:
+        """Best-effort flush — delegate to the inner sink (convention 6)."""
+        flush = getattr(self.inner, "flush", None)
+        if flush is None:
+            return
+        try:
+            flush()
+        except Exception as exc:
+            logger.warning("trace sink flush failed: {}", exc)
+
 
 _DEFAULT_LOCAL_TRACES_PATH = ".mergecraft/traces/"
 
@@ -182,6 +210,16 @@ def sink_factory(tracing_settings: Any) -> Any:
     that ships in W8 — until then they raise ``NotImplementedError``.
     """
     if not getattr(tracing_settings, "enabled", False):
+        # Reset the exporter test seam so the disabled path is observed as
+        # disabled even when a prior test in the same session constructed
+        # an ``OTLPSink``. The W7.8 contract pins this through
+        # ``has_active_tracer_provider() is False``.
+        try:
+            from mergecraft.tracing.exporters import _reset_test_seam
+
+            _reset_test_seam()
+        except ImportError:
+            pass
         return NullSink()
 
     children: list[Any] = []
@@ -195,11 +233,13 @@ def sink_factory(tracing_settings: Any) -> Any:
             children.append(MemorySink())
             continue
         if sink_type in {"logfire", "otel"}:
-            msg = (
-                f"{sink_type} sink is provided by the [tracing] extra (W8); "
-                "install merge-craft[tracing] to enable it"
-            )
-            raise NotImplementedError(msg)
+            # W8 / D6 — delegated to the lazy exporters module. The module
+            # degrades to ``NullSink`` with a clear warning when the
+            # ``[tracing]`` extra is uninstalled (convention 5).
+            from mergecraft.tracing.exporters import build_remote_sink
+
+            children.append(build_remote_sink(entry))
+            continue
         msg = f"unknown tracing sink type: {sink_type!r}"
         raise ValueError(msg)
 

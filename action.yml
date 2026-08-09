@@ -53,6 +53,35 @@ inputs:
       (not a fresh PR). Default off; mergeCraft never auto-adds.
     required: false
     default: "false"
+  tracing:
+    description: |
+      Tracing enablement (W8.5 / W7.7): true / false. Wins over the
+      .mergecraft/config.yaml ``tracing.enabled`` block when set. Unset
+      defers to the config (default off).
+    required: false
+    default: ""
+  tracing-to:
+    description: |
+      Tracing shorthand (W8.5 / W7.7): ``local_files`` / ``logfire`` /
+      ``otel``. Wins over the config block. ``logfire`` requires the
+      optional ``[tracing]`` extra plus ``${{ secrets.LOGFIRE_TOKEN }}``;
+      ``otel`` requires an ``otel-endpoint``.
+    required: false
+    default: ""
+  logfire-token:
+    description: |
+      Direct logfire token (W8.5 / W7.7). Wire as
+      ``${{ secrets.LOGFIRE_TOKEN }}`` so the secret never appears in
+      the workflow file. Held at runtime only; never inlined into
+      config dumps.
+    required: false
+    default: ""
+  otel-endpoint:
+    description: |
+      OTLP collector URL (W8.5 / W7.7): e.g.
+      ``http://127.0.0.1:4318/v1/traces``. Wins over the config block.
+    required: false
+    default: ""
 
 outputs:
   result:
@@ -90,6 +119,10 @@ runs:
     MERGECRAFT_CODEX_SANDBOX: ${{ inputs.codex_sandbox }}
     INPUT_TOKEN: ${{ inputs.token }}
     INPUT_SUGGEST_EVAL_ADD: ${{ inputs.suggest_eval_add }}
+    INPUT_TRACING: ${{ inputs.tracing }}
+    INPUT_TRACING_TO: ${{ inputs.tracing-to }}
+    INPUT_LOGFIRE_TOKEN: ${{ inputs.logfire-token }}
+    INPUT_OTEL_ENDPOINT: ${{ inputs.otel-endpoint }}
 
 branding:
   icon: "code"

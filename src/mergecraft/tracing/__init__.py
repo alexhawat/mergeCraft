@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES, cap_event_attrs
 from mergecraft.tracing.event import TraceEvent
+from mergecraft.tracing.exporters import (
+    OTLPSink,
+    resolve_token_ref,
+)
 from mergecraft.tracing.redaction import DENY_KEYS, redact_attrs, redact_event
 from mergecraft.tracing.sinks import (
     JSONLFileSink,
@@ -38,6 +42,7 @@ __all__ = [
     "NullSink",
     "NullSpan",
     "NullTracer",
+    "OTLPSink",
     "RedactingSink",
     "Span",
     "TraceEvent",
@@ -49,5 +54,6 @@ __all__ = [
     "redact_event",
     "resolve_correlation_from_env",
     "resolve_session_id",
+    "resolve_token_ref",
     "sink_factory",
 ]

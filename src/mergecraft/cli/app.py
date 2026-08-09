@@ -15,6 +15,7 @@ from mergecraft.cli import (
     init_cmd,
     learnings_cmd,
     models_cmd,
+    tracing_cmd,
     watch_cmd,
 )
 
@@ -36,6 +37,9 @@ app.command("diff-review")(diff_review_cmd.run)
 app.add_typer(gha_cmd.app, name="gha")
 app.add_typer(learnings_cmd.app, name="learnings")
 app.add_typer(eval_cmd.app, name="eval")
+# W8.4 — ``mergecraft config tracing`` + ``mergecraft traces <run-id>``.
+app.add_typer(tracing_cmd.config_app, name="config")
+app.add_typer(tracing_cmd.app, name="traces")
 
 
 @app.callback(invoke_without_command=True)
