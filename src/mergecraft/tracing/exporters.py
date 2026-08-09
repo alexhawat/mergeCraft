@@ -552,8 +552,8 @@ def _event_for_emit(*, kind: str, attrs: dict[str, Any], session_id: str) -> Any
 def _build_logfire_sink(
     entry: Any,
     logfire_module: Any | None,
-) -> OTLPSink:
-    """Construct an :class:`OTLPSink` for a ``logfire`` config entry."""
+) -> Any:
+    """Construct a Logfire sink, or a no-op when no token resolves."""
     token = resolve_token_ref(getattr(entry, "token_ref", None))
     if token is None:
         token = resolve_token_ref("MERGECRAFT_LOGFIRE_TOKEN")
@@ -562,10 +562,9 @@ def _build_logfire_sink(
             "tracing logfire sink: no token resolved (set tokenRef or "
             "MERGECRAFT_LOGFIRE_TOKEN); sink will be a no-op"
         )
-        # Return an OTLPSink with empty headers — writes degrade to no-ops
-        # because the OTLP endpoint rejects anonymous exports. The sink is
-        # still a real :class:`OTLPSink` (structural contract: both types
-        # share the class) but it cannot reach the network.
+        from mergecraft.tracing.sinks import NullSink
+
+        return NullSink()
     return OTLPSink.for_logfire(
         project=getattr(entry, "project", None),
         token=token,

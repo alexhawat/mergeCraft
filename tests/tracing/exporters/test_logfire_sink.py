@@ -44,8 +44,13 @@ def test_absent_token_means_no_export_and_no_error(
         }
     ).tracing
     captured: list[str] = []
+    provider_calls: list[None] = []
     sink_id = loguru.logger.add(
         lambda record: captured.append(record.record["message"]), level="WARNING"
+    )
+    monkeypatch.setattr(
+        "mergecraft.tracing.exporters._setup_tracer_provider",
+        lambda *_args, **_kwargs: provider_calls.append(None),
     )
     try:
         sink = sink_factory(settings)
@@ -54,11 +59,15 @@ def test_absent_token_means_no_export_and_no_error(
     finally:
         loguru.logger.remove(sink_id)
 
-    # No exception escaped, and a warning explains the missing token so the
-    # operator can debug.
-    assert any(
-        "token" in message.lower() or "logfire" in message.lower() for message in captured
-    ), f"expected a warning about the missing token, got: {captured!r}"
+    assert provider_calls == []
+    token_warnings = [
+        message
+        for message in captured
+        if "token" in message.lower() or "logfire" in message.lower()
+    ]
+    assert len(token_warnings) == 1, (
+        f"expected exactly one warning about the missing token, got: {captured!r}"
+    )
 
 
 def test_absent_token_does_not_raise_at_factory_time() -> None:
