@@ -7,7 +7,6 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -27,7 +26,6 @@ class RaisingSink:
         raise OSError("trace disk unavailable")
 
 
-@pytest.mark.xfail(reason="green after W2: daily JSONL rotation", strict=False)
 def test_jsonl_sink_writes_rotating_daily_files(
     trace_dir: Path, trace_event_data: dict[str, Any]
 ) -> None:
@@ -47,7 +45,6 @@ def test_jsonl_sink_writes_rotating_daily_files(
     ]
 
 
-@pytest.mark.xfail(reason="green after W2: malformed JSONL tolerance", strict=False)
 def test_jsonl_reader_skips_malformed_lines(trace_dir: Path) -> None:
     from mergecraft.tracing import read_jsonl_events
 
@@ -57,7 +54,6 @@ def test_jsonl_reader_skips_malformed_lines(trace_dir: Path) -> None:
     assert [event["span_id"] for event in read_jsonl_events(path)] == ["valid"]
 
 
-@pytest.mark.xfail(reason="green after W2: multi-sink fan-out", strict=False)
 def test_multiple_sinks_receive_every_event(trace_event_data: dict[str, Any]) -> None:
     from mergecraft.tracing import MultiSink, TraceEvent
 
@@ -68,7 +64,6 @@ def test_multiple_sinks_receive_every_event(trace_event_data: dict[str, Any]) ->
     assert second.events == [event]
 
 
-@pytest.mark.xfail(reason="green after W2: best-effort sink failure", strict=False)
 def test_sink_failure_never_fails_the_run(trace_event_data: dict[str, Any]) -> None:
     from mergecraft.tracing import MultiSink, TraceEvent
 
@@ -83,7 +78,6 @@ def test_sink_failure_never_fails_the_run(trace_event_data: dict[str, Any]) -> N
     assert any("trace disk unavailable" in message for message in messages)
 
 
-@pytest.mark.xfail(reason="green after W2: retention purge", strict=False)
 def test_retention_purge_removes_expired_local_traces(trace_dir: Path) -> None:
     from mergecraft.tracing import JSONLFileSink
 
@@ -103,11 +97,9 @@ def test_retention_purge_removes_expired_local_traces(trace_dir: Path) -> None:
     assert retained.exists()
 
 
-@pytest.mark.xfail(reason="green after W2: disabled tracing no-op", strict=False)
 def test_tracing_disabled_is_a_true_noop(trace_dir: Path) -> None:
-    from mergecraft.tracing import NullSink, sink_factory
-
     from mergecraft.config import RepoSettings
+    from mergecraft.tracing import NullSink, sink_factory
 
     attrs_calls = 0
 
@@ -123,11 +115,9 @@ def test_tracing_disabled_is_a_true_noop(trace_dir: Path) -> None:
     assert not trace_dir.exists()
 
 
-@pytest.mark.xfail(reason="green after W2: tracing disabled mid-run", strict=False)
 def test_tracing_disabled_mid_run_takes_null_path(trace_dir: Path) -> None:
-    from mergecraft.tracing import NullSink, sink_factory
-
     from mergecraft.config import RepoSettings
+    from mergecraft.tracing import NullSink, sink_factory
 
     settings = RepoSettings.model_validate({"tracing": {"enabled": False}})
     sink = sink_factory(settings.tracing)

@@ -4,13 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-@pytest.mark.xfail(reason="green after W2: tracing config round-trip", strict=False)
 def test_tracing_block_parses_and_defaults_disabled(tmp_path: Path) -> None:
     from mergecraft.config import RepoSettings, load_repo_settings
 
@@ -33,7 +30,6 @@ def test_tracing_block_parses_and_defaults_disabled(tmp_path: Path) -> None:
     }
 
 
-@pytest.mark.xfail(reason="green after W2: shorthand sink normalization", strict=False)
 def test_shorthand_normalises_to_sink_list() -> None:
     from mergecraft.config import RepoSettings
 
@@ -44,7 +40,6 @@ def test_shorthand_normalises_to_sink_list() -> None:
     assert not hasattr(settings.tracing, "to")
 
 
-@pytest.mark.xfail(reason="green after W2: trace event shape", strict=False)
 def test_trace_event_shape(trace_event_data: dict[str, Any]) -> None:
     from mergecraft.tracing import TraceEvent
 
@@ -52,7 +47,6 @@ def test_trace_event_shape(trace_event_data: dict[str, Any]) -> None:
     assert event.model_dump() == trace_event_data
 
 
-@pytest.mark.xfail(reason="green after W2: optional parent span", strict=False)
 def test_trace_event_accepts_missing_parent_span(trace_event_data: dict[str, Any]) -> None:
     from mergecraft.tracing import TraceEvent
 
@@ -62,7 +56,6 @@ def test_trace_event_accepts_missing_parent_span(trace_event_data: dict[str, Any
     assert event.attrs
 
 
-@pytest.mark.xfail(reason="green after W2: empty event attributes", strict=False)
 def test_trace_event_accepts_empty_attrs(trace_event_data: dict[str, Any]) -> None:
     from mergecraft.tracing import TraceEvent
 

@@ -22,11 +22,9 @@ DENY_KEYS = (
 )
 
 
-@pytest.mark.xfail(reason="green after W2: redaction before fan-out", strict=False)
 def test_redaction_happens_once_before_fan_out() -> None:
-    from mergecraft.tracing import MultiSink, RedactingSink, sink_factory
-
     from mergecraft.config import RepoSettings
+    from mergecraft.tracing import MultiSink, RedactingSink, sink_factory
 
     config = RepoSettings.model_validate(
         {
@@ -46,7 +44,6 @@ def test_redaction_happens_once_before_fan_out() -> None:
 
 
 @pytest.mark.parametrize("secret_value", ["ghp_abcdefghijklmnopqrstuvwxyz123456", "sk-secretvalue"])
-@pytest.mark.xfail(reason="green after W2: secret value redaction", strict=False)
 def test_no_secret_value_reaches_any_sink(
     secret_value: str, trace_event_data: dict[str, Any]
 ) -> None:
@@ -61,7 +58,6 @@ def test_no_secret_value_reaches_any_sink(
 
 
 @pytest.mark.parametrize("deny_key", DENY_KEYS)
-@pytest.mark.xfail(reason="green after W2: deny-key redaction", strict=False)
 def test_no_deny_key_value_reaches_any_sink(
     deny_key: str, trace_event_data: dict[str, Any]
 ) -> None:
@@ -78,7 +74,6 @@ def test_no_deny_key_value_reaches_any_sink(
     ("payload_bytes", "is_truncated"),
     [(64 * 1024, False), (64 * 1024 + 1, True)],
 )
-@pytest.mark.xfail(reason="green after W2: attrs payload cap", strict=False)
 def test_attrs_payload_capped_with_truncation_marker(
     payload_bytes: int, is_truncated: bool, trace_event_data: dict[str, Any]
 ) -> None:

@@ -9,7 +9,14 @@ from typing import Any, Literal
 
 import yaml
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from mergecraft.classify import RuleSet
 from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
@@ -82,6 +89,103 @@ class AnalyzersSettings(BaseModel):
     pattern: AnalyzerPatternSettings = Field(default_factory=AnalyzerPatternSettings)
 
 
+# D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.
+# The block is opt-in: a repo that does not declare one sees identical behaviour,
+# identical performance, and zero egress (convention 9). See docs/TRACING.md.
+# D15: no trust-related field; the doc states plainly that enabling a remote sink
+# exports reviewed-repo content (W2.9 / W8.7).
+
+
+class TraceSinkEntry(BaseModel):
+    """One sink entry in ``tracing.sinks``.
+
+    The ``_drop_unset`` serializer keeps the round-trip output identical to the
+    YAML input: fields the operator never set are dropped from the dump (W1.1).
+    Pydantic v2 only honours ``exclude_defaults`` from the outer
+    ``model_dump(..., exclude_defaults=True)`` call, not from a nested model's
+    ``model_config`` — so the filter is applied here at serialization time.
+
+    The dump key may be an alias (when ``by_alias=True``) or the field name; the
+    filter checks against ``__pydantic_fields_set__`` in both forms.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    type: str
+    path: str | None = None
+    token_ref: str | None = Field(default=None, alias="tokenRef")
+    project: str | None = None
+    endpoint: str | None = None
+    headers: dict[str, str] | None = None
+
+    @model_serializer(mode="wrap")
+    def _drop_unset(self, handler: Any) -> dict[str, Any]:
+        """Drop fields that were not explicitly set on this model instance."""
+        fields_set = self.__pydantic_fields_set__
+        return {
+            key: value
+            for key, value in handler(self).items()
+            if key in fields_set or _field_name_for(self, key) in fields_set
+        }
+
+
+_SHORTHAND_LOCAL_FILES_DEFAULT_PATH = ".mergecraft/traces/"
+
+
+def _field_name_for(model: BaseModel, alias_or_name: str) -> str:
+    """Map a serialized key (alias or field name) to the underlying field name.
+
+    ``__pydantic_fields_set__`` tracks field names, but ``model_dump(by_alias=True)``
+    emits aliases. This helper translates either back to the field name so the
+    "drop unset fields" filter works in both cases.
+    """
+    fields = type(model).model_fields
+    if alias_or_name in fields:
+        return alias_or_name
+    for name, info in fields.items():
+        if info.alias == alias_or_name:
+            return name
+    return alias_or_name
+
+
+class TracingSettings(BaseModel):
+    """Tracing configuration block — sinks, retention, redaction.
+
+    The shorthand form ``tracing: {enabled: true, to: local_files}`` is parsed
+    into the canonical ``sinks`` list at validation time (D9); only the list
+    shape exists downstream.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    enabled: bool = False
+    retention_days: int = Field(default=30, alias="retentionDays")
+    sinks: list[TraceSinkEntry] = Field(default_factory=list)
+    redaction: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_shorthand(cls, data: object) -> object:
+        """Expand the ``to: <shorthand>`` form into the canonical ``sinks`` list.
+
+        ``local_files`` expands to ``[{"type": "jsonl_file", "path": ".mergecraft/traces/"}]``;
+        unknown shorthand values raise. The shorthand key is consumed and not
+        preserved on the model — exactly one shape exists downstream.
+        """
+        if not isinstance(data, dict):
+            return data
+        shorthand = data.pop("to", None)
+        if shorthand is None:
+            return data
+        if data.get("sinks"):
+            return data
+        if shorthand == "local_files":
+            data["sinks"] = [{"type": "jsonl_file", "path": _SHORTHAND_LOCAL_FILES_DEFAULT_PATH}]
+            return data
+        msg = f"unknown tracing shorthand: {shorthand!r}"
+        raise ValueError(msg)
+
+
 class RepoSettings(BaseModel):
     """Per-repo runtime settings — local equivalent of upstream ``RepoSettings``."""
 
@@ -127,6 +231,7 @@ class RepoSettings(BaseModel):
     xrepo_learnings_headings: list[LearningsHeading] = Field(
         default_factory=list, alias="xrepoLearningsHeadings"
     )
+    tracing: TracingSettings = Field(default_factory=TracingSettings)
 
     @field_validator("push", "shell", mode="before")
     @classmethod
