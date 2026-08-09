@@ -122,4 +122,25 @@ All tests under `tests/tracing/exporters/` are W7 contracts implemented by W8. E
 
 ## RED acceptance
 
-The suite must collect without import errors, pass `make lint` and `make typecheck`, and remain non-strict xfail until W8 ships the OTLP pipeline (`mergecraft.tracing.exporters`), the CLI precedence helper (`mergecraft.cli.tracing_precedence`), the action-input resolver (`mergecraft.action.inputs`), and the `mergecraft config tracing` / `mergecraft traces` commands. The W2.3 `NullSink` and the W2.1 `TraceSinkEntry.tokenRef` already satisfy four contracts (the corresponding tests will xpass rather than xfail when W7 lands — confirmed on the W7 RED sweep 2026-08-09).
+The suite must collect without import errors, pass `make lint` and `make typecheck`, and remain non-strict xfail until W8 ships the OTLP pipeline (`mergecraft.tracing.exporters`), the CLI precedence helper (`mergecraft.cli.tracing_precedence`), the action-input resolver (`mergecraft.action.inputs`), and the `mergecraft config tracing` / `mergecraft traces` commands. The W2.3 `NullSink` and the W2.1 `TraceSinkEntry.tokenRef` already satisfy four contracts (the corresponding tests will xpass rather than xfail when W7 lands — confirmed on the W7 RED sweep 2026-08-09 with the run below).
+
+```
+27 passed (Batch A RED-turned-green by W2)
+60 collected (Batch D RED)  →  20 skipped (logfire/opentelemetry absent), 36 xfailed, 4 xpassed
+make lint      → clean
+make typecheck → clean
+```
+
+## W7 deliverables
+
+| Wave | Status | Evidence |
+|------|--------|----------|
+| W7.1 shared OTLP code path | RED (`strict=False`) | `tests/tracing/exporters/test_otlp_pipeline.py` |
+| W7.2 absent token semantics | RED | `tests/tracing/exporters/test_logfire_sink.py` |
+| W7.3 arbitrary endpoint + headers | RED | `tests/tracing/exporters/test_otlp_pipeline.py` |
+| W7.4 `tokenRef` never inlined | RED (2 XPASS confirm partial structural coverage from W2) | `tests/tracing/exporters/test_token_resolution.py` |
+| W7.5 optional extra no-op | RED | `tests/tracing/exporters/test_optional_extra.py` |
+| W7.6 CLI/env/config precedence | RED | `tests/tracing/exporters/test_cli_precedence.py` |
+| W7.7 `action.yml` inputs | RED | `tests/tracing/exporters/test_action_inputs.py` |
+| W7.8 remote failure isolation | RED | `tests/tracing/exporters/test_otlp_pipeline.py` |
+| W7.9 commit + push | DONE | `201416f` on `origin/wave/trc-d-exporters` |
