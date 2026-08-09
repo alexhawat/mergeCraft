@@ -1,0 +1,337 @@
+"""Runtime seam that turns a finished run into an on-disk evidence packet (#96).
+
+Batches A and B (#47, #41, #42, #48) shipped the packet model, the pure
+builder, the I/O shell, and the blast-radius classifier — but no consumer.
+Nothing under ``action/``, ``cli/`` or ``agents/`` called them, so no run
+ever emitted a packet and ``blast_radius`` could only ever be ``None``.
+This module is that missing consumer.
+
+It is deliberately the *only* place that knows how to read a live run's
+state. The builder stays pure, the classifier stays pure, and everything
+environment-shaped (tool state, temp dirs, ``RUNNER_TEMP``) is confined
+here. Wiring a consumer is not a schema change, so
+``PACKET_SCHEMA_VERSION`` is untouched (D7).
+
+Exports:
+    emit_run_packet: Build and write the packet for a completed run.
+    resolve_packet_path: Resolve the stable on-disk destination.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
+
+from mergecraft.analyzers.scope import parse_diff_scope
+from mergecraft.classify import ChangeSet, classify_blast_radius
+from mergecraft.evidence.build import build_packet
+from mergecraft.evidence.emit import write_packet
+from mergecraft.evidence.packet import DeterministicCheck
+
+if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
+    from mergecraft.classify import BlastRadiusClassification
+    from mergecraft.evidence.packet import MergeEvidencePacket
+    from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.tool_state import ToolState
+
+PACKET_FILENAME = "merge-evidence-packet.json"
+"""Stable basename for the emitted packet, under whichever directory wins."""
+
+_PACKET_DIR_ENV = "MERGECRAFT_EVIDENCE_DIR"
+"""Operator override for the packet's parent directory."""
+
+
+def resolve_packet_path(*, tmpdir: str, change_slug: str) -> Path:
+    """Return the stable on-disk destination for this run's packet.
+
+    Resolution order, first hit wins:
+
+    1. ``MERGECRAFT_EVIDENCE_DIR`` — explicit operator override.
+    2. ``RUNNER_TEMP`` — the GitHub-provided per-job scratch directory. It
+       survives the step, so a later ``actions/upload-artifact`` step can
+       read it, and it is *outside* the checkout, so the packet can never
+       be swept into a commit by an agent running ``git add -A``.
+    3. ``tmpdir`` — the run's own temp dir (local / offline runs).
+
+    ``change_slug`` disambiguates concurrent runs sharing a directory.
+    """
+    override = os.environ.get(_PACKET_DIR_ENV)
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if override:
+        base = Path(override)
+    elif runner_temp:
+        base = Path(runner_temp) / "mergecraft"
+    else:
+        base = Path(tmpdir) / "evidence"
+    return base / f"{change_slug}-{PACKET_FILENAME}"
+
+
+def _slugify(change_id: str) -> str:
+    """Reduce a ``owner/repo#123`` change id to a filesystem-safe slug."""
+    return "".join(char if char.isalnum() or char in "-_" else "-" for char in change_id).strip("-")
+
+
+def _read_diff_text(state: Any) -> str:
+    """Return the run's unified diff text, preferring the full-PR diff.
+
+    The incremental diff covers only commits since the last review, so it
+    understates blast radius. The packet is evidence for the *merge*, which
+    lands the whole PR — so the full diff is authoritative and the
+    incremental one is only a fallback.
+    """
+    for attr in ("diff_path", "incremental_diff_path"):
+        raw = getattr(state, attr, None)
+        if not raw:
+            continue
+        path = Path(raw)
+        if path.is_file():
+            try:
+                return path.read_text(encoding="utf-8")
+            except OSError as err:
+                logger.debug("evidence packet: cannot read {} ({}) — {}", attr, path, err)
+    return ""
+
+
+def changed_paths_from_diff(diff_text: str) -> list[str]:
+    """Return every path the diff touches, reusing the analyzer scope parser.
+
+    ``analyzers/scope.py`` already parses a unified diff and, on top of the
+    hunk ranges, explicitly identifies changed workflows, migrations,
+    lockfiles and dependency manifests (its "scope exceptions"). Those are
+    precisely the paths that drive blast radius, so this reuses that signal
+    rather than writing a second diff parser with its own idea of what a
+    migration looks like.
+
+    Unioning the exception sets in matters: a lockfile or workflow changed
+    with no surviving hunk range would otherwise drop out of the path list
+    and silently soften the classification.
+    """
+    if not diff_text.strip():
+        return []
+    scope = parse_diff_scope(diff_text)
+    paths: set[str] = set(scope.hunk_ranges)
+    paths |= set(scope.added_files)
+    paths |= set(scope.changed_lockfiles)
+    paths |= set(scope.changed_workflows)
+    paths |= set(scope.changed_migrations)
+    paths |= set(scope.changed_dependency_manifests)
+    return sorted(paths)
+
+
+def _diff_stats(diff_text: str) -> dict[str, object]:
+    """Summarise a diff into the ``diff_stats`` shape the classifier reads.
+
+    The classifier inspects ``diff`` for destructive tokens (``drop table``,
+    ``rm -rf``, credential assignments) and ``lines_added`` / ``lines_deleted``
+    for its small-isolated-change carve-out.
+    """
+    added = 0
+    deleted = 0
+    for line in diff_text.splitlines():
+        if line.startswith("+") and not line.startswith("+++"):
+            added += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            deleted += 1
+    return {"diff": diff_text, "lines_added": added, "lines_deleted": deleted}
+
+
+def classify_run_blast_radius(diff_text: str) -> BlastRadiusClassification | None:
+    """Classify the run's diff, or return ``None`` when there is no diff.
+
+    Returning ``None`` for an empty diff keeps the packet honest: a run with
+    nothing to classify records an absent section rather than a fabricated
+    ``low`` lane.
+    """
+    paths = changed_paths_from_diff(diff_text)
+    if not paths:
+        return None
+    change: ChangeSet = {"changed_paths": paths, "diff_stats": _diff_stats(diff_text)}
+    return classify_blast_radius(change)
+
+
+def _deterministic_checks(state: ToolState) -> list[DeterministicCheck]:
+    """Project the analyzer run's per-analyzer status rows into packet rows.
+
+    The command string comes from the analyzer catalog manifest, so the
+    packet records what actually ran rather than a reconstructed guess. An
+    analyzer missing from the catalog still yields a row — dropping it would
+    understate the evidence.
+    """
+    run_state = getattr(state, "analyzer_run", None)
+    rows = list(getattr(run_state, "analyzers", []) or [])
+    if not rows:
+        return []
+
+    from mergecraft.analyzers.registry import get_manifest
+
+    checks: list[DeterministicCheck] = []
+    for row in rows:
+        try:
+            command = " ".join(get_manifest(row.id).command)
+        except Exception:  # unknown analyzer id must not lose the row
+            command = row.id
+        checks.append(DeterministicCheck(name=row.id, status=row.status, command=command))
+    return checks
+
+
+def _self_assessment(state: ToolState) -> dict[str, Any] | None:
+    """Translate the legacy ``ApprovalRecord`` into the packet's input shape.
+
+    ``build_packet`` already maps ``would_approve`` onto ``approved``; this
+    only has to hand it the dict.
+    """
+    approval = getattr(state, "approval", None)
+    if approval is None:
+        return None
+    return {"would_approve": approval.would_approve, "sha": approval.sha}
+
+
+def _structural_findings(
+    ctx: ToolContext,
+    extra: list[Finding] | None = None,
+) -> list[Finding]:
+    """Return the typed findings the approval gate reads, plus any extras.
+
+    Reuses ``status_checks._load_structural_findings`` so the packet and the
+    ``mergecraft-approval`` check-run can never disagree about what the run
+    found — one loader, one answer.
+
+    ``extra`` carries findings a caller already holds in typed form (the
+    offline path parses the agent's ``set_output`` payload). Merging is
+    deduplicated on ``Finding.fingerprint`` — the model's own stable content
+    hash — because an analyzer finding the agent also reported must not be
+    counted twice by a gate that is monotone in blockers.
+    """
+    from mergecraft.utils.status_checks import _load_structural_findings
+
+    merged: list[Finding] = list(_load_structural_findings(ctx))
+    if not extra:
+        return merged
+    seen = {item.fingerprint for item in merged}
+    for item in extra:
+        if item.fingerprint in seen:
+            continue
+        seen.add(item.fingerprint)
+        merged.append(item)
+    return merged
+
+
+def build_run_packet(
+    ctx: ToolContext,
+    *,
+    change_id: str,
+    run_succeeded: bool,
+    extra_findings: list[Finding] | None = None,
+) -> MergeEvidencePacket:
+    """Assemble the packet for a completed run, decision included.
+
+    The decision is computed in two passes because the gate consumes a
+    packet: build the evidence, hand it to ``decide_approval``, then attach
+    the returned verdict. That keeps the verdict a pure function of the
+    evidence actually recorded, rather than of a parallel set of inputs.
+    """
+    from mergecraft.agents.gates import decide_approval
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    state = ctx.tool_state
+    repo_state = primary_repo_state(state)
+    diff_text = _read_diff_text(repo_state)
+    blast_radius = classify_run_blast_radius(diff_text)
+
+    packet = build_packet(
+        change_id=change_id,
+        agent_id=ctx.agent_id,
+        agent_version=_agent_version(),
+        model=ctx.resolved_model or state.model or "(unresolved)",
+        files_changed=changed_paths_from_diff(diff_text),
+        findings=_structural_findings(ctx, extra_findings),
+        deterministic_checks=_deterministic_checks(state),
+        self_assessment=_self_assessment(state),
+        blast_radius=blast_radius,
+    )
+    decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
+    return packet.model_copy(update={"decision": decision})
+
+
+def _agent_version() -> str:
+    from mergecraft import __version__
+
+    return __version__
+
+
+def _change_id(ctx: ToolContext) -> str | None:
+    """Return ``owner/repo#123`` for a PR run, or ``None`` when there is no change.
+
+    The packet is evidence *for one proposed merge*. A run with no pull
+    request (an issue comment, a scheduled job) has no merge to attest to,
+    so it emits nothing rather than a packet with an invented ``change_id``.
+    """
+    pull_number = ctx.tool_state.pr_number or ctx.payload.event.issue_number
+    if not isinstance(pull_number, int) or ctx.payload.event.is_pr is not True:
+        return None
+    return f"{ctx.repo.owner}/{ctx.repo.name}#{pull_number}"
+
+
+def emit_run_packet(
+    ctx: ToolContext,
+    *,
+    run_succeeded: bool,
+    change_id: str | None = None,
+    extra_findings: list[Finding] | None = None,
+    output_path: Path | None = None,
+) -> Path | None:
+    """Build and write this run's evidence packet; return its path.
+
+    Best-effort by construction: a packet is an audit artifact, so failing
+    to write one must never turn a successful review into a failed run. All
+    failures are logged and swallowed, and ``None`` means "no packet", never
+    "the run is broken".
+
+    ``change_id`` overrides the PR-derived identifier — the offline
+    ``diff-review`` path has a real change to attest to but no pull request.
+    ``output_path`` overrides the resolved destination.
+
+    Returns ``None`` when the run has no change to attest to.
+    """
+    resolved_change_id = change_id or _change_id(ctx)
+    if resolved_change_id is None:
+        logger.debug("evidence packet: run has no pull request — nothing to attest")
+        return None
+    try:
+        packet = build_run_packet(
+            ctx,
+            change_id=resolved_change_id,
+            run_succeeded=run_succeeded,
+            extra_findings=extra_findings,
+        )
+        path = output_path or resolve_packet_path(
+            tmpdir=ctx.tmpdir, change_slug=_slugify(resolved_change_id)
+        )
+        written = write_packet(packet, output_path=path)
+    except Exception as err:  # an audit artifact never fails the run
+        logger.warning("evidence packet: emission failed — {}", err)
+        return None
+    lane = packet.blast_radius.lane if packet.blast_radius else "(unclassified)"
+    verdict = packet.decision.verdict if packet.decision else "(none)"
+    logger.info(
+        "» merge evidence packet: {} (change={}, lane={}, verdict={})",
+        written,
+        resolved_change_id,
+        lane,
+        verdict,
+    )
+    return written
+
+
+__all__ = [
+    "PACKET_FILENAME",
+    "build_run_packet",
+    "changed_paths_from_diff",
+    "classify_run_blast_radius",
+    "emit_run_packet",
+    "resolve_packet_path",
+]

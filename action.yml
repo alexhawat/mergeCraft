@@ -55,6 +55,16 @@ outputs:
   result:
     description: "Set when the prompt requests it; required when output_schema is provided."
     value: ${{ steps.run.outputs.result }}
+  evidence_packet:
+    description: |
+      Path to this run's Merge Evidence Packet JSON (#47) — the versioned,
+      structured record of the findings, deterministic checks, blast-radius
+      lane, self-assessment, and decision behind the review. Written under
+      RUNNER_TEMP (override the directory with MERGECRAFT_EVIDENCE_DIR), so a
+      later `actions/upload-artifact` step can publish it. Empty when the run
+      had no pull request to attest to. Schema:
+      `docs/evidence-packet.md`.
+    value: ${{ steps.run.outputs.evidence_packet }}
 
 runs:
   using: "docker"

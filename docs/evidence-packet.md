@@ -1,10 +1,50 @@
 # The Merge Evidence Packet
 
-Every mergeCraft run emits one **versioned, structured packet** that records
-the durable evidence behind the merge decision. The packet is the
-single artifact a human or a later tool reads to reconstruct why a PR was
-auto-merged, blocked, or escalated — and it is **durable**, meaning it
-survives the run and can be re-validated later.
+Every mergeCraft run **that reviews a pull request** emits one **versioned,
+structured packet** recording the durable evidence behind the merge decision.
+The packet is the single artifact a human or a later tool reads to reconstruct
+why a PR was auto-merged, blocked, or escalated — and it is **durable**,
+meaning it survives the run and can be re-validated later.
+
+A run with no pull request to attest to (an issue comment, a scheduled job)
+emits nothing rather than a packet with an invented `change_id`.
+
+## Where the packet lands
+
+The emitter writes to the first of these that is set:
+
+| Destination | When |
+|---|---|
+| `$MERGECRAFT_EVIDENCE_DIR` | An operator sets it explicitly. |
+| `$RUNNER_TEMP/mergecraft/` | Default under GitHub Actions. |
+| the run's temp directory | Local / offline runs. |
+
+The filename is `<change-slug>-merge-evidence-packet.json`. `RUNNER_TEMP` is
+deliberate on both counts: it survives the step, so a later
+`actions/upload-artifact` can publish it, and it sits **outside** the
+checkout, so an agent running `git add -A` can never sweep the packet into a
+commit.
+
+The Action exposes the resolved path as its **`evidence_packet` output**, and
+logs it. A workflow attaches it like this:
+
+```yaml
+- id: review
+  uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    prompt: /review
+
+- name: Upload merge evidence packet
+  if: steps.review.outputs.evidence_packet != ''
+  uses: actions/upload-artifact@v4
+  with:
+    name: merge-evidence-packet
+    path: ${{ steps.review.outputs.evidence_packet }}
+```
+
+Locally, `mergecraft diff-review --evidence-packet PATH` writes the packet for
+an offline review; without the flag it lands in the run's temp directory and
+the path is logged.
 
 This document is the normative field reference. The schema is the
 contract; the prose below explains the contract field-by-field, with a
@@ -40,7 +80,11 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.2.0`.
+The current version is `1.3.0`.
+
+Wiring a consumer is **not** a shape change: #96 gave these models their first
+runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
+not move.
 
 ### Version history
 
@@ -59,6 +103,10 @@ The current version is `1.2.0`.
   validate the lane, lane policy, reason, next action, and detected categories.
   The field remains optional, but its existing type changed, so D7 requires a
   minor bump.
+
+- `1.3.0` — W12 (#44). Promotes the `evals` section from `dict[str, Any]` to
+  `list[EvalMetadata] | None`. Additive — a packet that previously set `evals`
+  to `None` continues to validate.
 
 ## Top-level fields
 

@@ -214,6 +214,7 @@ def checkout_pr_tool(ctx: ToolContext):
                     parts.append(f.get("patch") + "\n")
             diff = "".join(parts)
         Path(diff_path).write_text(diff, encoding="utf-8")
+        state.diff_path = diff_path
 
         result: dict[str, Any] = {
             "pullNumber": pull_number,

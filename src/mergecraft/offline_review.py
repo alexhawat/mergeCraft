@@ -15,6 +15,7 @@ from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.shared import AgentRunContext
 from mergecraft.analyzers.finding import (
     STRUCTURED_OUTPUT_REQUIRED_MSG,
+    Finding,
     findings_output_schema,
     parse_findings_payload,
     write_findings_json,
@@ -23,7 +24,7 @@ from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import RepoInfo
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.server import start_mcp_http_server
-from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.utils.agent_resolve import resolve_model, resolve_runtime_agent
@@ -42,6 +43,9 @@ class OfflineReviewResult:
     diff_path: str | None = None
     empty_diff: bool = False
     structured_output: str | None = None
+    # On-disk path of the run's merge evidence packet (#47 / #96), or None
+    # when no packet was produced (dry run, empty diff, emission failure).
+    evidence_packet_path: str | None = None
 
 
 def build_offline_review_prompt(
@@ -128,6 +132,7 @@ def _finalize_structured_findings(
             success=False,
             error=STRUCTURED_OUTPUT_REQUIRED_MSG,
             diff_path=result.diff_path,
+            evidence_packet_path=result.evidence_packet_path,
         )
 
     try:
@@ -137,6 +142,7 @@ def _finalize_structured_findings(
             success=False,
             error=str(exc),
             diff_path=result.diff_path,
+            evidence_packet_path=result.evidence_packet_path,
         )
 
     try:
@@ -146,9 +152,61 @@ def _finalize_structured_findings(
             success=False,
             error=f"failed to write findings JSON: {exc}",
             diff_path=result.diff_path,
+            evidence_packet_path=result.evidence_packet_path,
         )
 
     return result
+
+
+def _offline_change_id(cwd: Path, materialization: DiffMaterialization) -> str:
+    """Return the ``change_id`` an offline review attests to.
+
+    There is no pull request, so the packet addresses the local working tree
+    and the base it was diffed against — enough for a human to reconstruct
+    what was reviewed.
+    """
+    base = materialization.base_ref or "patch"
+    return f"local/{cwd.name}@{base}"
+
+
+def _emit_offline_packet(
+    tool_context: ToolContext,
+    *,
+    cwd: Path,
+    materialization: DiffMaterialization,
+    run_succeeded: bool,
+    structured_output: str | None,
+    output_path: Path | None,
+) -> str | None:
+    """Emit the evidence packet for an offline review (#96).
+
+    The offline path holds the agent's findings in typed form (its
+    ``set_output`` payload), so they are merged into the packet on top of the
+    analyzer findings. A malformed payload is skipped rather than fatal — the
+    caller reports that error separately, and a packet with analyzer evidence
+    only still beats no packet.
+    """
+    from mergecraft.evidence.run_packet import emit_run_packet
+
+    extra: list[Finding] = []
+    if structured_output:
+        try:
+            # ``parse_findings_payload`` validates and then dumps back to dicts;
+            # the packet dedupes on ``Finding.fingerprint``, so re-type them.
+            extra = [
+                Finding.model_validate(row) for row in parse_findings_payload(structured_output)
+            ]
+        except ValueError as exc:
+            logger.debug("offline evidence packet: unparsable structured output — {}", exc)
+
+    written = emit_run_packet(
+        tool_context,
+        run_succeeded=run_succeeded,
+        change_id=_offline_change_id(cwd, materialization),
+        extra_findings=extra,
+        output_path=output_path,
+    )
+    return str(written) if written else None
 
 
 async def run_offline_diff_review(
@@ -160,6 +218,7 @@ async def run_offline_diff_review(
     prompt_extra: str | None = None,
     dry_run: bool = False,
     json_path: Path | None = None,
+    evidence_packet_path: Path | None = None,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
     cwd = cwd.resolve()
@@ -214,6 +273,7 @@ async def run_offline_diff_review(
         model=model,
         tmpdir=out_dir,
         output_schema=output_schema,
+        evidence_packet_path=evidence_packet_path,
     )
     if json_path is None:
         return result
@@ -229,6 +289,7 @@ async def _run_agent_review(
     model: str | None,
     tmpdir: Path,
     output_schema: dict[str, Any] | None = None,
+    evidence_packet_path: Path | None = None,
 ) -> OfflineReviewResult:
     stop_mcp = None
     github: GitHubClient | None = None
@@ -237,6 +298,10 @@ async def _run_agent_review(
         # the prompt forbids them.
         github = GitHubClient(token="")
         tool_state = init_tool_state(owner="local", name=cwd.name, dir=str(cwd))
+        # Point the shared evidence seam at the patch this run reviewed, so the
+        # offline packet classifies blast radius from the same diff the agent
+        # read — exactly as the Action path does via ``checkout_pr``.
+        primary_repo_state(tool_state).diff_path = str(materialization.path)
         resolved_model = resolve_model(slug=model)
         agent = resolve_runtime_agent(model=resolved_model)
         modes = compute_modes(agent.name, signed_commits=False)
@@ -282,6 +347,10 @@ async def _run_agent_review(
             trust_tier="trusted",
             analyzers_settings_enabled=settings.analyzers.enabled,
             suggest_eval_add=False,
+            # Carried so the evidence packet can attribute findings to the
+            # model that actually produced them (#96); previously unset, which
+            # left the packet's agent.model reading "(unresolved)".
+            resolved_model=resolved_model,
         )
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
@@ -318,6 +387,15 @@ async def _run_agent_review(
         result = await agent.run(run_ctx)
         structured_output = tool_state.output
         markdown_output = result.output
+        packet_path = await asyncio.to_thread(
+            _emit_offline_packet,
+            tool_context,
+            cwd=cwd,
+            materialization=materialization,
+            run_succeeded=result.success,
+            structured_output=structured_output,
+            output_path=evidence_packet_path,
+        )
         if not result.success:
             return OfflineReviewResult(
                 success=False,
@@ -325,12 +403,14 @@ async def _run_agent_review(
                 structured_output=structured_output,
                 error=result.error or "agent failed",
                 diff_path=str(materialization.path),
+                evidence_packet_path=packet_path,
             )
         return OfflineReviewResult(
             success=True,
             output=markdown_output,
             structured_output=structured_output,
             diff_path=str(materialization.path),
+            evidence_packet_path=packet_path,
         )
     except Exception as exc:
         logger.exception("offline diff-review failed")

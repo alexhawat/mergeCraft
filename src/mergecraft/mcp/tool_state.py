@@ -62,6 +62,11 @@ class RepoToolState:
     commentable_lines_checkout_sha: str | None = None
     before_sha: str | None = None
     diff_coverage: Any = None
+    # Full-PR unified diff written by ``checkout_pr``. Retained on the state
+    # (not just returned to the agent as ``diffPath``) so end-of-run consumers
+    # — the merge evidence packet's blast-radius classification, #96 — can
+    # read the same authoritative patch the reviewer read.
+    diff_path: str | None = None
     # Incremental review scope (C4): the commit mergeCraft last reviewed, the
     # patch covering everything since it, and that patch's changed paths. All
     # three stay ``None`` when no prior review is recoverable.
