@@ -144,6 +144,22 @@ class ToolState:
     learnings_seed: str | None = None
     learnings_persist_attempted: bool = False
     learnings_review_delta: str | None = None
+    # D10 / W6.2 — provenance + quarantine gate for new learning entries.
+    # New entries land in a ``## Staging`` section by default; only entries
+    # whose provenance chain contains an ``OWNER``/``MEMBER``/``COLLABORATOR``
+    # author may be promoted, and promotion is opt-in via
+    # ``autopromote_learnings`` (D10, #74).
+    autopromote_learnings: bool = False
+    # Run identity (GitHub Actions run id) for provenance records.
+    run_id: str | None = None
+    # PR number the run is acting on (None for non-PR runs).
+    pr_number: int | None = None
+    # Author login of the triggerer / comment author (provenance source).
+    author: str | None = None
+    # GitHub ``author_association`` of the triggering comment / event.
+    author_association: str | None = None
+    # ``derive_trust_tier()``'s return value for this run (trusted|untrusted).
+    trust_tier: str | None = None
     xrepo_learnings_file_path: str | None = None
     xrepo_learnings_seed: str | None = None
     xrepo_learnings_persist_attempted: bool = False

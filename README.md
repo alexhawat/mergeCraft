@@ -285,7 +285,23 @@ With no `staticChecks`, mergecraft discovers `lint` / `format-check` / `typechec
 
 **Analyzers** (actionlint, zizmor, ShellCheck, Hadolint in this release) run deterministically from YAML manifests when paths match — the reviewer calls `run_analyzers` early and places verified hits inline or in `### 🔧 Mechanical findings`. You can override enablement in `analyzers:`; editing the catalog remains possible but is not the headline workflow (D19).
 
-Learnings live in `.mergecraft/learnings.md` and are seeded/persisted across runs.
+## Learnings — staging and promotion
+
+`.mergecraft/learnings.md` holds durable cross-run context (test commands, conventions, gotchas, architecture notes) seeded into every review. Since this file is **attacker-controllable input** in any non-maintainer context (a fork PR body, a contributor comment, an agent-written entry from prior untrusted text), entries are now provenance-gated (D10, #74):
+
+- **Every persisted entry carries a provenance record** (`run_id`, `pr_number`, `source_field`, `author_login`, `author_association`, `trust_tier`, `timestamp`) rendered as a structured HTML comment line immediately above the entry.
+- **New entries land in `## Staging` by default.** Only entries whose author association is `OWNER`/`MEMBER`/`COLLABORATOR` may be promoted into `## Active`, and promotion is opt-in via `autopromoteLearnings: true` in `.mergecraft/config.yaml`.
+- **Quarantined entries never reach the reviewer prompt.** The active section is the only one `build_learnings_section()` reads; staging entries are visible to the audit (`mergecraft learnings staging`) but not to the model.
+- **Active entries are fenced at seed time** via the W4 nonce fence (`mergecraft.utils.fence`). An entry carrying a forged closing delimiter cannot restructure the instruction block — the entry is wrapped in a nonce-bound envelope before the model reads it.
+
+The default is **fail-closed**: a reviewer reading the active section sees only maintainer-authored entries, and a fork PR's attempt to inject `Learning:` text into `.mergecraft/learnings.md` is quarantined and surfaced for human review rather than silently promoted. To restore the legacy auto-promote behaviour (where every entry the agent wrote during a run landed in the file verbatim), set:
+
+```yaml
+# .mergecraft/config.yaml
+autopromoteLearnings: true
+```
+
+Inspect what was seeded into a given run with `mergecraft learnings influence --repo PATH --json` — the listing names each entry's heading and its originating run id / author / tier so the audit can answer "which learnings entered this review?" without reading the whole file.
 
 ## What the review checks
 
@@ -307,6 +323,9 @@ Learnings live in `.mergecraft/learnings.md` and are seeded/persisted across run
 | `mergecraft diff-review` | Offline local git/patch review (no GitHub PR posting); optional `--json` for structured findings |
 | `mergecraft gha` | Action runtime entry (used by Docker Action) |
 | `mergecraft gha token [--post]` | Installation token mint / post write-back |
+| `mergecraft learnings influence [--repo PATH] [--json]` | List active + staging learnings entries with their provenance record (run id, author, trust tier, timestamp) |
+| `mergecraft learnings active [--repo PATH] [--json]` | List only the active (promoted) entries |
+| `mergecraft learnings staging [--repo PATH] [--json]` | List only the staging (quarantined) entries |
 
 Bin: `mergecraft` (not the upstream `mergecraft` / `pf` names).
 

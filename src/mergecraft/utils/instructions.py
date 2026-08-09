@@ -53,6 +53,8 @@ def build_learnings_section(
     *,
     file_path: str | None,
     headings: list[LearningsHeading],
+    fence: Fence | None = None,
+    active_entries: list[dict[str, Any]] | None = None,
 ) -> str:
     if not file_path:
         return ""
@@ -80,7 +82,76 @@ def build_learnings_section(
             "before relying on it.\n\n"
             f"{render_learnings_toc(headings)}"
         )
-    return f"************* LEARNINGS *************\n\n{intro}\n\n{toc_body}"
+
+    body = f"************* LEARNINGS *************\n\n{intro}\n\n{toc_body}"
+
+    # W6.4 — seed-time fence for active learnings entries (D7 reuse from
+    # W4's `mergecraft.utils.fence`). Active entries are the curated,
+    # promote-only view — but they were originally seeded from PR
+    # prose, contributor comments, or agent-generated text, so every
+    # entry is enclosed in a single W4 nonce fence block. A forged
+    # closer inside any entry cannot restructure the surrounding
+    # instruction block. The fence is omitted entirely when there are
+    # no active entries to surface (the empty case). When the
+    # persisted file has no `## Active` heading yet (a pre-W6 layout),
+    # the entries are still fenced — the seed itself is the audit
+    # record and any entry carrying an attacker payload must reach
+    # the model already enclosed.
+    if active_entries and fence is not None:
+        block_chunks: list[str] = []
+        entry_authors: list[str] = []
+        entry_tiers: list[str] = []
+        for entry in active_entries:
+            heading = str(entry.get("heading") or "").strip()
+            entry_body = str(entry.get("body") or "").strip()
+            provenance = entry.get("provenance")
+            author = "unknown"
+            trust = "untrusted"
+            if provenance is not None and hasattr(provenance, "author_login"):
+                author = str(provenance.author_login)
+            if provenance is not None and hasattr(provenance, "trust_tier"):
+                trust = str(provenance.trust_tier)
+            # Skip the H1 `# Learnings` heading line — it's a file
+            # marker, not an entry. The body parser can pick it up
+            # when the file has no ``## Active`` heading yet.
+            if not heading and entry_body.startswith("# "):
+                continue
+            if heading:
+                block_chunks.append(
+                    f"## {heading}\n\n{entry_body}" if entry_body else f"## {heading}"
+                )
+            elif entry_body:
+                block_chunks.append(entry_body)
+            entry_authors.append(author)
+            entry_tiers.append(trust)
+        if block_chunks:
+            chunk_text = "\n\n".join(block_chunks)
+            label = "learning_active_entries"
+            # D7 — the fence carries the author + tier of the most
+            # sensitive entry in the bundle (a single ``untrusted`` entry
+            # poisons the whole block from the model's perspective).
+            tier = "untrusted" if "untrusted" in entry_tiers else "trusted"
+            author = entry_authors[0] if entry_authors else "unknown"
+            fenced = render_untrusted(
+                chunk_text,
+                author=author,
+                tier=tier,
+                label=label,
+                nonce=fence.nonce,
+            )
+            body = (
+                f"{body}\n\n"
+                "### Active entries (curated, fenced per W4)\n\n"
+                "The active section's entries are wrapped in a single "
+                "W4 nonce fence so an entry containing a forged "
+                "delimiter cannot restructure this prompt. The "
+                "provenance line on each entry names the run id, "
+                "author, and trust tier so a reviewer can weight "
+                "trust per `docs/REVIEW-DOCTRINE.md`.\n\n"
+                f"{fenced}"
+            )
+
+    return body
 
 
 def _toonish(data: dict[str, Any]) -> str:
@@ -504,9 +575,28 @@ Trust the tools — do not repeatedly verify after successful operations. Except
 2. Post a comment via {MERGECRAFT_MCP_NAME} explaining what blocked you
 3. Make your blocker comment specific and actionable"""
 
+    # W6.4 — load the active (promoted) entries from the persisted
+    # learnings file so ``build_learnings_section`` can fence them via
+    # the W4 nonce fence (D7 reuse). The load is local-only and
+    # best-effort: a missing file, an unreadable body, or an empty
+    # active section all collapse to no fenced content.
+    active_entries: list[dict[str, Any]] = []
+    if learnings_file_path:
+        try:
+            from pathlib import Path as _Path
+
+            raw = _Path(learnings_file_path).read_text(encoding="utf-8")
+        except OSError:
+            raw = ""
+        if raw:
+            from mergecraft.utils.learnings import list_active_entries as _list_active
+
+            active_entries = _list_active(raw)
     learnings_section = build_learnings_section(
         file_path=learnings_file_path,
         headings=headings,
+        fence=fence,
+        active_entries=active_entries,
     )
     runtime_section = f"************* RUNTIME *************\n\n{runtime}"
 
@@ -540,9 +630,17 @@ Trust the tools — do not repeatedly verify after successful operations. Except
             xrepo_section,
             setup_failure,
             procedure,
+            # W6.4 — place learnings BEFORE event_context so the
+            # seed-time fence for active entries is the first fence
+            # the model encounters in the prompt. This pins the W5.6
+            # test's invariant that a forged delimiter inside an entry
+            # cannot restructure the instruction block, since the entry
+            # is already enclosed before the model reads the event
+            # metadata (which contains its own pr_title / pr_body
+            # fences).
+            learnings_section,
             event_context,
             system,
-            learnings_section,
             runtime_section,
         )
         if part
