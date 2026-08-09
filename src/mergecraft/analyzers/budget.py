@@ -6,7 +6,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mergecraft.analyzers.finding import Finding
-from mergecraft.review_taxonomy import BODY_ONLY_EFFORT, BODY_ONLY_SEVERITY, FINDING_SEVERITIES
+from mergecraft.review_taxonomy import (
+    BODY_ONLY_EFFORT,
+    BODY_ONLY_SEVERITY,
+    FINDING_SEVERITIES,
+    finding_fingerprint,
+)
 
 MECHANICAL_SECTION_HEADING = "### 🔧 Mechanical findings"
 
@@ -58,6 +63,22 @@ def _sort_key(item: Finding | dict[str, Any]) -> tuple[int, int, str, int]:
     return (_source_rank(item), _severity_rank(item), path, line)
 
 
+def _overflow_fingerprint(item: dict[str, Any], *, path: str, message: str) -> str:
+    """Return a per-finding fingerprint for an overflowed agent finding.
+
+    The agent rarely supplies its own ``fingerprint``. Falling back to a shared
+    literal would give every overflow finding the same identity, so downstream
+    dedup and the withdrawn-findings memory could not tell them apart. Derive
+    one from the finding's own content instead, matching how inline agent
+    comments are stamped (``path`` + comment body).
+    """
+    supplied = str(item.get("fingerprint", "") or "").strip()
+    if supplied:
+        return supplied
+    body = str(item.get("body", "") or "") or message
+    return finding_fingerprint(path=path, body=body)
+
+
 def _render_mechanical_section(mechanical: list[Finding]) -> str | None:
     if not mechanical:
         return None
@@ -102,6 +123,8 @@ def place_findings(
         if isinstance(item, Finding):
             mechanical.append(item)
         elif not _is_body_only_finding(item):
+            message = str(item.get("message", item.get("body", "")))
+            path = str(item.get("path", ""))
             mechanical.append(
                 Finding(
                     tool=str(item.get("tool", "agent")),
@@ -109,11 +132,11 @@ def place_findings(
                     category=str(item.get("category", "Maintainability & Code Quality")),
                     severity=str(item.get("severity", "Minor")),
                     confidence=str(item.get("confidence", "likely")),
-                    message=str(item.get("message", item.get("body", ""))),
-                    path=str(item.get("path", "")),
+                    message=message,
+                    path=path,
                     start_line=int(item.get("line", item.get("start_line", 1))),
                     end_line=int(item.get("end_line", item.get("line", item.get("start_line", 1)))),
-                    fingerprint=str(item.get("fingerprint", "agent-inline")),
+                    fingerprint=_overflow_fingerprint(item, path=path, message=message),
                     evidence=[],
                     remediation=None,
                     autofix=None,

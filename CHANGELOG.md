@@ -204,6 +204,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Findings pushed out of the inline budget into the mechanical section now keep
+  a distinct identity each, so a re-review recognises which ones it already
+  raised and a withdrawn finding stays withdrawn; previously every overflowed
+  agent finding shared one identity and they were indistinguishable across runs
 - Keep mergeCraft run temp / ``CODEX_HOME`` outside ``/tmp`` (prefer
   ``RUNNER_TEMP`` or ``~/.cache/mergecraft``) so Codex can install PATH-alias
   helper binaries; Codex 0.14x refuses helpers under world-writable temp and
