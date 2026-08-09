@@ -28,6 +28,25 @@ CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 CODEX_REVIEW_PERMISSION_PROFILE = "mergecraft-review"
 
+# Codex CLI's Linux platform sandbox is bubblewrap + Landlock. Inside a
+# container that is *already* namespaced — such as a Docker container action —
+# bwrap cannot create a second unprivileged user namespace, and every
+# ``codex exec`` dies before doing any work, including a bare ``pwd``. Codex
+# recognises these strings for its own probe path but ships no non-interactive
+# fallback for a real exec, so mergeCraft has to name the failure itself (#70).
+USER_NAMESPACE_FAILURES: tuple[str, ...] = (
+    "No permissions to create a new namespace",
+    "kernel does not allow non-privileged user namespaces",
+    "Failed to create new user namespace",
+)
+
+# Operator escape hatch. mergeCraft never selects this on its own: relaxing an
+# OS-level sandbox is a judgement about the *environment*, which only the
+# workflow author can make. Setting it says "this runner is already an
+# ephemeral, isolated container; the nested sandbox is redundant".
+CODEX_SANDBOX_ENV = "MERGECRAFT_CODEX_SANDBOX"
+CODEX_SANDBOX_UNSANDBOXED = "danger-full-access"
+
 # Mirrors mergecraft.utils.git_setup — Codex refuses PATH aliases under these.
 _FORBIDDEN_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/usr/tmp")
 
@@ -202,7 +221,64 @@ def _build_subagent_instructions() -> str:
     )
 
 
+def _operator_sandbox_override() -> str | None:
+    """Return the operator's explicit Codex sandbox choice, if any (#70).
+
+    mergeCraft only honours a value it recognises. An unrecognised value is
+    ignored with a warning rather than passed through to the CLI, so a typo
+    cannot silently widen or narrow the sandbox.
+    """
+    raw = os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower()
+    if not raw:
+        return None
+    if raw == CODEX_SANDBOX_UNSANDBOXED:
+        return CODEX_SANDBOX_UNSANDBOXED
+    logger.warning(
+        "ignoring {}={!r}: the only supported value is {!r}",
+        CODEX_SANDBOX_ENV,
+        raw,
+        CODEX_SANDBOX_UNSANDBOXED,
+    )
+    return None
+
+
+def _sandbox_is_disabled_by_operator() -> bool:
+    """True when the workflow explicitly opted out of Codex's platform sandbox."""
+    return _operator_sandbox_override() == CODEX_SANDBOX_UNSANDBOXED
+
+
+def is_user_namespace_failure(text: str) -> bool:
+    """True when CLI output carries bubblewrap's nested-namespace signature (#70)."""
+    return any(signature in text for signature in USER_NAMESPACE_FAILURES)
+
+
+def user_namespace_failure_hint() -> str:
+    """Return the actionable remedy for a nested-sandbox failure (#70).
+
+    The failure is environmental, not a reviewer error, and the two are worth
+    telling apart: a caller that swallows this with ``continue-on-error`` would
+    otherwise see no difference between "this runner cannot sandbox Codex" and
+    "the review ran and found nothing".
+    """
+    return (
+        "Codex could not start its Linux platform sandbox: bubblewrap cannot create "
+        "a user namespace inside a container that is already namespaced (a Docker "
+        "container action, or a runner without unprivileged user namespaces). No "
+        "review ran.\n"
+        "Remedies:\n"
+        f"  - If the runner is already an ephemeral, isolated container, set "
+        f"{CODEX_SANDBOX_ENV}={CODEX_SANDBOX_UNSANDBOXED} on the mergeCraft step to "
+        "skip Codex's redundant nested sandbox. mergeCraft's own shell/push controls "
+        "still apply.\n"
+        "  - On a self-hosted runner, enable unprivileged user namespaces "
+        "(sysctl kernel.unprivileged_userns_clone=1).\n"
+        "  - Or run the review with a provider that does not nest a sandbox."
+    )
+
+
 def _sandbox_mode(ctx: AgentRunContext) -> str:
+    if _sandbox_is_disabled_by_operator():
+        return CODEX_SANDBOX_UNSANDBOXED
     shell = payload_shell_mode(ctx)
     if shell == "enabled":
         return "workspace-write"
@@ -457,10 +533,21 @@ def _run_codex_once(
     output, usage = _parse_codex_stdout(stdout)
 
     if completed.returncode != 0:
+        error = stderr.strip() or f"codex exited {completed.returncode}"
+        # bwrap fails on the very first exec, so this is the difference between
+        # "the environment cannot run Codex" and "the reviewer errored" (#70).
+        if is_user_namespace_failure(f"{stderr}\n{stdout}"):
+            logger.error(
+                "codex platform sandbox could not start; no review ran. Set {}={} "
+                "if this runner is already an isolated container.",
+                CODEX_SANDBOX_ENV,
+                CODEX_SANDBOX_UNSANDBOXED,
+            )
+            error = f"{user_namespace_failure_hint()}\n\ncodex stderr:\n{error}"
         return AgentResult(
             success=False,
             output=output or None,
-            error=stderr.strip() or f"codex exited {completed.returncode}",
+            error=error,
             usage=usage,
         )
     return AgentResult(success=True, output=output or None, usage=usage)

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Codex reviews inside a container runner now fail loudly instead of silently.
+  Codex CLI runs its own bubblewrap sandbox; inside a Docker container action
+  that is already namespaced it cannot create a nested namespace, so every call
+  died before doing any work — and `continue-on-error` made that look like a
+  review that simply found nothing. mergeCraft now recognises the failure and
+  returns the remedy with it. New `codex_sandbox: danger-full-access` Action
+  input (env `MERGECRAFT_CODEX_SANDBOX`) skips the redundant nested sandbox on
+  runners that are already ephemeral and isolated. mergeCraft never selects it
+  on its own, an unrecognised value is ignored rather than forwarded, and the
+  `shell` / `push` controls remain the security boundary either way (#70)
 - Review quality can now be measured. `mergecraft eval score` grades a run's
   findings against a frozen benchmark baseline by **locating** issues — a
   baseline issue counts as found when a reported finding overlaps its line range

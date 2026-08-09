@@ -98,6 +98,26 @@ env:
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
+> **Codex inside a container runner.** Codex CLI runs its own bubblewrap +
+> Landlock sandbox on Linux. Inside a container that is already namespaced — a
+> Docker container action, or a runner without unprivileged user namespaces —
+> bubblewrap cannot create a nested namespace and **every** Codex call fails
+> before doing any work, including a bare `pwd`. mergeCraft reports that
+> explicitly rather than letting `continue-on-error` swallow it as an empty
+> review. If the runner is already ephemeral and isolated, skip the redundant
+> nested sandbox:
+>
+> ```yaml
+> - uses: alexhawat/mergeCraft@v0
+>   with:
+>     codex_sandbox: danger-full-access
+> ```
+>
+> mergeCraft never sets this itself — whether a second sandbox is redundant is a
+> fact about *your* runner. mergeCraft's own `shell` and `push` controls are
+> unaffected either way; they remain the security boundary. See
+> [issue #70](https://github.com/alexhawat/mergeCraft/issues/70).
+
 **Gemini API key example** — set `GEMINI_API_KEY` and point the repo at a
 curated `google/*` slug (`gemini-pro` → `google/gemini-3.1-pro-preview`,
 `gemini-flash` → `google/gemini-3.5-flash`):
