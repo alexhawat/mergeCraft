@@ -310,6 +310,17 @@ Inspect what was seeded into a given run with `mergecraft learnings influence --
 
 [**REVIEW-CHECKS.md**](REVIEW-CHECKS.md) lists every check a mergecraft review applies, grouped — code lenses, mechanical gates, PR hygiene, how findings are graded and filtered, and what it deliberately never reports.
 
+> [!NOTE]
+> **LLM judges are a secondary signal here, never the gate.** Before a `Critical` or `Major`
+> finding is published, a second read-only agent (`mergecraft-verifier`) re-reads the cited code
+> and returns confirm / downgrade / drop. That judge runs **after** the deterministic checks —
+> analyzers and your repo's own gates settle every mechanically checkable fact first, and the
+> judge never overrules a tool result. Its model is pinned per provider (a different tier from the
+> agent that wrote the finding) and its model, provider, judge version and rubric version are
+> logged with every verdict, so a verdict stays auditable after a model default changes. On a
+> high blast-radius change (migrations, auth, secrets, irreversible infra), one judge cannot
+> retire a finding on its own. Treat judge output as evidence, not as a merge decision.
+
 ## CLI
 
 | Command | Purpose |

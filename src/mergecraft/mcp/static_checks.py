@@ -28,6 +28,10 @@ def _serialize(outcome: StaticCheckOutcome) -> dict[str, Any]:
 
 def run_static_checks_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
+        # Recorded before the early returns: a repo that declares no gate still
+        # completed the deterministic pass, and the D14 ordering gate asks
+        # whether that pass happened, not whether it found anything.
+        ctx.tool_state.static_checks_ran = True
         state = primary_repo_state(ctx.tool_state)
         root = Path(state.dir)
         changed = [str(f) for f in (params.get("changed_files") or [])]

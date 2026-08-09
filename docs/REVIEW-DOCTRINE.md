@@ -47,6 +47,52 @@ gate output is evidence, not the finding itself.
 list is empty, startup **raises** — refusing to run a review subagent with the mutation gate
 effectively disabled. The verification agent (W7) inherits the same guard.
 
+## Verification covers every source, including ourselves (C6)
+
+**A `Critical`/`Major` finding is a hypothesis until a second read-only agent has read the
+cited code — whatever wrote it.** `should_verify()` was always severity-only; the source
+condition lived in its two call sites (`analyzers/review_gate.py`, `ci/verification.py`), both
+of which only ever fed it tool output. The effect was that the noisiest source — the reviewing
+model's own findings — was the one source that never got checked. `verify_agent_findings` and
+`record_finding_verdict` close that, on the same terms as the analyzer path: severity gate,
+withdrawn-memory skip, and a dispatch cap.
+
+**The cap is the inline budget, not a new knob.** Verification exists to protect what gets
+published, so it can never cost more than publication does: dispatches are capped at
+`analyzers.inlineBudget` and spent on `Critical` before `Major`. **Cost:** on a diff with more
+than `inlineBudget` blocking findings, the overflow publishes unverified — the alternative
+(unbounded judge dispatches on the worst diffs) is worse.
+
+**A `drop` is durable.** It writes the verifier's reason under `WITHDRAWN_FINDINGS_HEADING` with
+the finding's own fingerprint, so the same claim is skipped before verification on every later
+run — the same section, parser and identity analyzer suppression already uses. Verifying a
+finding the author refuted last month is the failure this prevents.
+
+## LLM judges are secondary evaluators (D14, #45)
+
+**The verifier is an LLM judging an LLM, so it is pinned, logged, ordered last, and never
+decisive alone.**
+
+- **Ordered last.** `verify_agent_findings` returns `ready:false` and `record_finding_verdict`
+  refuses a verdict until `run_analyzers` or `run_static_checks` has run. Deterministically
+  checkable facts are settled by tools; the judge only rules on what tools cannot decide.
+- **Pinned.** `PINNED_JUDGE_MODELS` fixes the judge model per provider (`claude` →
+  `claude-sonnet-5`) and `agents/claude.py` dispatches from that same constant, so the model
+  recorded and the model run cannot diverge. A provider without a pin still records a complete
+  identity, marked `model_pinned=false`.
+- **Logged.** Every verdict carries judge provider, model, whether the model was pinned,
+  `VERIFIER_JUDGE_VERSION` and `VERIFIER_RUBRIC_VERSION`. A rubric edit bumps the version rather
+  than silently reinterpreting archived verdicts.
+- **Outcome-based.** The rubric is five binary questions about the code (`cited-code-exists`,
+  `mechanism-holds`, `reachable`, `introduced-here`, `not-already-refuted`). Nothing in it scores
+  quality, style, tone, or length — a judge that grades prose grades noise.
+- **Not decisive on high-stakes lanes.** On the `high` blast-radius lane a `drop` is escalated for
+  a second judge or a human instead of being written to the withdrawn section. Retracting a real
+  finding on a migration or an auth change is the expensive direction to be wrong in.
+
+**Cost:** a run whose reviewer never calls the deterministic tools gets no verification at all.
+That is deliberate — a judge with nothing to be secondary to is the failure mode #45 names.
+
 ## Shell permission and static checks
 
 **`run_static_checks` is withheld under `shell: disabled`.** Gates execute commands the repo

@@ -211,6 +211,10 @@ class ToolState:
     agent_diagnostic: Any = None
     browser_daemon: Any = None
     analyzer_run: AnalyzerRunState | None = None
+    # True once ``run_static_checks`` has been called this session. Read by the
+    # verification tools (D14): an LLM judge may not evaluate a finding before
+    # the deterministic checks it is meant to supplement have had their turn.
+    static_checks_ran: bool = False
 
 
 def repo_key(owner: str, name: str) -> str:
