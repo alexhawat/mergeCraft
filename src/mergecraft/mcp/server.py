@@ -248,12 +248,25 @@ def create_mcp_app(tools: list[ToolSpec]) -> FastAPI:
                     "id": req_id,
                     "error": {"code": -32601, "message": f"Unknown tool: {name}"},
                 }
-            result = await tool.execute(arguments)
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": _tool_result_to_rpc(result),
+            from mergecraft.config.settings import RepoSettings
+            from mergecraft.tracing.tracer import get_tracer_from_settings
+
+            tracer = get_tracer_from_settings(RepoSettings())
+            call_attrs: dict[str, Any] = {
+                "tool.name": name,
+                "tool.server": MERGECRAFT_MCP_NAME,
             }
+            with tracer.start_span("tool.call", attrs_source=lambda: dict(call_attrs)) as _span:
+                try:
+                    result = await tool.execute(arguments)
+                except Exception as exc:
+                    _span.set_status("error", str(exc))
+                    raise
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": _tool_result_to_rpc(result),
+                }
         return {
             "jsonrpc": "2.0",
             "id": req_id,

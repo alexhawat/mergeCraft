@@ -431,19 +431,26 @@ async def main() -> MainResult:
 
         packet_path: str | None = None
         if tool_context:
-            await persist_learnings(tool_context)
-            await report_status_checks(
-                tool_context,
-                run_succeeded=result.success,
-                failure_reason=result.error if not result.success else None,
-            )
-            # Emit the merge evidence packet last, so it records the run's
-            # final state. A blocked or failed run is exactly when the
-            # evidence matters most, so this runs on both branches below.
-            written = await asyncio.to_thread(
-                emit_run_packet, tool_context, run_succeeded=result.success
-            )
-            packet_path = str(written) if written else None
+            from mergecraft.tracing.tracer import get_tracer_from_settings
+
+            tracer = get_tracer_from_settings(settings)
+            with tracer.start_span(
+                "mergecraft.publish",
+                attrs_source=lambda: {"run_succeeded": bool(result.success)},
+            ) as _publish_span:
+                await persist_learnings(tool_context)
+                await report_status_checks(
+                    tool_context,
+                    run_succeeded=result.success,
+                    failure_reason=result.error if not result.success else None,
+                )
+                # Emit the merge evidence packet last, so it records the run's
+                # final state. A blocked or failed run is exactly when the
+                # evidence matters most, so this runs on both branches below.
+                written = await asyncio.to_thread(
+                    emit_run_packet, tool_context, run_succeeded=result.success
+                )
+                packet_path = str(written) if written else None
 
         if not result.success:
             return MainResult(

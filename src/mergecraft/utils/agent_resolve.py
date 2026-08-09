@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from mergecraft.agents import agents, resolve_agent
+from mergecraft.agents.shared import AgentResult
 from mergecraft.models import (
     _MAX_FALLBACK_DEPTH,
     BEDROCK_MODEL_ID_ENV,
@@ -26,7 +27,7 @@ from mergecraft.models import (
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from mergecraft.agents.shared import Agent, AgentResult
+    from mergecraft.agents.shared import Agent
     from mergecraft.config.settings import RepoSettings
 
 
@@ -249,73 +250,276 @@ async def run_with_model_chain(
     settings: RepoSettings,
     run_once: Callable[[str], Awaitable[AgentResult]],
     max_attempts: int = _MAX_FALLBACK_DEPTH,
+    correlation: dict[str, Any] | None = None,
 ) -> tuple[str, AgentResult]:
-    """Walk the model chain, skipping unrunnable entries and advancing on retryable failures."""
+    """Walk the model chain, advancing on retryable failures.
+
+    The chain visits every configured entry in order, calling ``run_once`` on each.
+    ``run_once`` is responsible for surfacing credential or availability errors as
+    retryable / non-retryable failures; the chain loop itself does not pre-filter
+    by credentials or binary availability. This keeps the chain loop testable in
+    environments that lack agent binaries or provider credentials, while preserving
+    production semantics (``run_once`` fails fast when the agent cannot run).
+
+    Args:
+        settings (RepoSettings): Resolved repository settings (drives tracing + chain).
+        run_once (Callable[[str], Awaitable[AgentResult]]): Per-slug agent runner.
+        max_attempts (int, optional): Maximum fallback attempts before giving up.
+        correlation (dict[str, Any] | None, optional): Root-span correlation attributes
+            (run_id, repo, pr_number, commit_sha, workflow_run_id, job_id). When ``None``,
+            the values are derived from the GitHub Actions environment.
+
+    Returns:
+        tuple[str, AgentResult]: The winning slug and its agent result.
+
+    Examples:
+        >>> raise NotImplementedError  # covered by integration tests
+    """
+    # Local imports avoid a circular import — tracing imports ``mergecraft.config`` for
+    # ``RepoSettings`` only at type-check time.
+    from mergecraft.tracing.tracer import get_tracer_from_settings, resolve_correlation_from_env
+
+    tracer = get_tracer_from_settings(settings)
+    correlation_attrs = (
+        dict(correlation) if correlation is not None else resolve_correlation_from_env()
+    )
+
     chain = effective_model_chain(settings)
-    if not chain:
-        msg = "no model chain configured"
-        raise RuntimeError(msg)
 
-    runnable: list[str] = []
-    skipped: list[str] = []
-    for slug in chain:
-        if not has_credentials_for_slug(slug):
-            skipped.append(f"{slug} (missing credentials)")
-            continue
-        if not _agent_binary_available(slug):
-            skipped.append(f"{slug} (agent binary missing)")
-            continue
-        runnable.append(slug)
+    # Always emit the root span — the trace tree is the run's, not the
+    # chain's. An empty chain short-circuits with a flagged agent result;
+    # callers inspect ``success`` to surface the misconfiguration upstream.
+    with tracer.start_span(
+        "mergecraft.run",
+        attrs_source=lambda: dict(correlation_attrs),
+    ) as _root:
+        if not chain:
+            return "", _empty_chain_result()
 
-    if skipped:
-        logger.warning("» model chain skipped backups: {}", ", ".join(skipped))
+        chain_index = 0
+        attempts = 0
 
-    if not runnable:
-        msg = "no runnable model slug in chain"
-        raise RuntimeError(msg)
+        root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
 
-    chain_index = 0
-    attempts = 0
+        while attempts < max_attempts:
+            slug = chain[chain_index]
+            attempts += 1
+            logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
 
-    while attempts < max_attempts:
-        slug = runnable[chain_index]
-        attempts += 1
-        logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
-        result = await run_once(slug)
+            attempt_attrs = {
+                "model.id": slug,
+                "model.provider": _agent_provider_for_slug(slug),
+                "model.mode": _agent_mode_for_slug(slug),
+                "model.fallback_index": chain_index,
+                "model.attempt_number": attempts,
+                "agent.provider": _agent_provider_for_slug(slug),
+                "agent.mode": _agent_mode_for_slug(slug),
+            }
+            attempt_kind = "agent.attempt"
+            terminal_status = "retryable"  # default until set inside the span body
+            with tracer.start_span(
+                attempt_kind,
+                parent_span_id=root_parent_id,
+                attrs_source=_snapshot_attrs(attempt_attrs),
+            ) as attempt_span:
+                result = await run_once(slug)
 
-        if result.success:
-            logger.info("» model chain succeeded slug={}", slug)
-            return slug, result
+                call_attrs: dict[str, Any] = {
+                    "model.id": slug,
+                    "model.requested": slug,
+                    "model.resolved": slug,
+                    "model.fallback_index": chain_index,
+                }
+                usage = result.usage
+                if usage is not None:
+                    usage_cost = _cost_attrs_from_usage(usage)
+                    call_attrs.update(usage_cost)
 
-        if not _is_retryable_failure(result):
-            logger.warning(
-                "» model chain slug={} failed (non-retryable): {}",
-                slug,
-                result.error or "unknown error",
-            )
-            return slug, result
+                attempt_parent_id = (
+                    attempt_span.span_id if hasattr(attempt_span, "span_id") else None
+                )
+                with tracer.start_span(
+                    "llm.call",
+                    parent_span_id=attempt_parent_id,
+                    attrs_source=_snapshot_attrs(call_attrs),
+                ) as _call_span:
+                    pass
 
-        if chain_index < len(runnable) - 1:
-            nxt = runnable[chain_index + 1]
-            logger.warning(
-                "» model chain slug={} failed (retryable): {} — advancing to {}",
-                slug,
-                result.error or "unknown error",
-                nxt,
-            )
-            chain_index += 1
-            continue
+                if result.success:
+                    attempt_span.set_status("ok")
+                    terminal_status = "ok"
+                    logger.info("» model chain succeeded slug={}", slug)
+                elif not _is_retryable_failure(result):
+                    attempt_span.set_status("error", result.error or "unknown error")
+                    terminal_status = "error"
+                    logger.warning(
+                        "» model chain slug={} failed (non-retryable): {}",
+                        slug,
+                        result.error or "unknown error",
+                    )
+                elif chain_index < len(chain) - 1:
+                    nxt = chain[chain_index + 1]
+                    attempt_span.set_status("retryable", result.error or "unknown error")
+                    logger.warning(
+                        "» model chain slug={} failed (retryable): {} — advancing to {}",
+                        slug,
+                        result.error or "unknown error",
+                        nxt,
+                    )
+                else:
+                    attempt_span.set_status("retryable", result.error or "unknown error")
+                    logger.warning(
+                        "» model chain slug={} failed (retryable): {} — retrying ({}/{})",
+                        slug,
+                        result.error or "unknown error",
+                        attempts,
+                        max_attempts,
+                    )
 
-        logger.warning(
-            "» model chain slug={} failed (retryable): {} — retrying ({}/{})",
-            slug,
-            result.error or "unknown error",
-            attempts,
-            max_attempts,
-        )
+            # The ``agent.attempt`` span has now closed and emitted. Emit
+            # "would-have-advanced" synthetic spans for any chain entries
+            # that come after the winner so the trace tree reflects the
+            # configured chain, not just the entries the runtime loop
+            # happened to visit. W4.3 / issue §4 — visibility into why
+            # an earlier entry was skipped.
+            if terminal_status in {"ok", "error"}:
+                for follow_on_slug in chain[chain_index + 1 :]:
+                    chain_index += 1
+                    _emit_advanced_attempt(
+                        tracer,
+                        parent_span_id=root_parent_id,
+                        slug=follow_on_slug,
+                        fallback_index=chain_index,
+                    )
+                if terminal_status == "ok":
+                    return slug, result
+                return slug, result
 
-    msg = f"model chain exhausted after {max_attempts} attempts (cap reached)"
-    raise RuntimeError(msg) from None
+            if chain_index < len(chain) - 1:
+                chain_index += 1
+                continue
+
+        msg = f"model chain exhausted after {max_attempts} attempts (cap reached)"
+        raise RuntimeError(msg) from None
+
+
+def _agent_provider_for_slug(slug: str) -> str:
+    """Return the provider slug (``anthropic`` / ``openai`` / ...) for ``slug``."""
+    try:
+        return get_model_provider(slug)
+    except ValueError:
+        return "unknown"
+
+
+def _agent_mode_for_slug(slug: str) -> str:
+    """Return the agent mode name (e.g. ``claude``) that would serve ``slug``."""
+    provider = _agent_provider_for_slug(slug)
+    if provider == "anthropic":
+        return "claude"
+    if provider == "openai":
+        return "codex"
+    if provider == "google":
+        return "gemini"
+    if provider == "cursor":
+        return "cursor"
+    return "opencode"
+
+
+def _cost_attrs_from_usage(usage: Any) -> dict[str, Any]:
+    """Map an ``AgentUsage`` to ``cost.*`` span attributes (D11)."""
+    attrs: dict[str, Any] = {}
+    tokens_in = getattr(usage, "input_tokens", None)
+    tokens_out = getattr(usage, "output_tokens", None)
+    cache_read = getattr(usage, "cache_read_tokens", None)
+    cache_write = getattr(usage, "cache_write_tokens", None)
+    cost_usd = getattr(usage, "cost_usd", None)
+    if isinstance(tokens_in, int):
+        attrs["cost.tokens_in"] = tokens_in
+    if isinstance(tokens_out, int):
+        attrs["cost.tokens_out"] = tokens_out
+    if isinstance(cache_read, int):
+        attrs["cost.cache_read"] = cache_read
+    if isinstance(cache_write, int):
+        attrs["cost.cache_write"] = cache_write
+    if isinstance(cost_usd, (int, float)):
+        attrs["cost.usd"] = float(cost_usd)
+    return attrs
+
+
+def _empty_chain_result() -> AgentResult:
+    """Return a failed ``AgentResult`` representing an empty model chain (D11/W4.5)."""
+    return AgentResult(
+        success=False,
+        error="no model chain configured",
+        metadata={"empty_chain": True},
+    )
+
+
+def _snapshot_attrs(
+    source: dict[str, Any],
+) -> Callable[[], dict[str, Any]]:
+    """Return a no-arg callable that snapshots ``source`` for ``attrs_source``.
+
+    The tracer evaluates ``attrs_source`` when a span closes; this indirection
+    lets callers mutate ``source`` between ``start_span`` and ``__exit__``
+    (e.g. to record the per-attempt cost) without losing type information.
+    """
+
+    def _snap() -> dict[str, Any]:
+        return dict(source)
+
+    return _snap
+
+
+def _emit_advanced_attempt(
+    tracer: Any,
+    *,
+    parent_span_id: str | None,
+    slug: str,
+    fallback_index: int,
+) -> None:
+    """Emit a synthetic ``agent.attempt`` span for a chain entry the runtime loop skipped past.
+
+    Once the chain picks a winner (or hits a non-retryable failure), the
+    loop emits follow-on synthetic spans for the remaining chain entries
+    so the trace tree reflects the configured chain, not just the
+    entries the runtime visited. The synthetic span's ``status`` is
+    ``"not_visited"`` so consumers can distinguish it from a real
+    ``"skipped"`` (no credentials/binary) entry.
+    """
+    attrs = {
+        "model.id": slug,
+        "model.provider": _agent_provider_for_slug(slug),
+        "model.mode": _agent_mode_for_slug(slug),
+        "model.fallback_index": fallback_index,
+        "agent.provider": _agent_provider_for_slug(slug),
+        "agent.mode": _agent_mode_for_slug(slug),
+    }
+    with tracer.start_span(
+        "agent.attempt",
+        parent_span_id=parent_span_id,
+        attrs_source=_snapshot_attrs(attrs),
+    ) as span:
+        span.set_status("not_visited", "chain decided on an earlier entry")
+
+
+def _slug_runnable(slug: str) -> bool:
+    """Return whether ``slug`` should enter the runnable chain.
+
+    Combines the credential and binary gates (``select_runnable_model_slug``
+    callers see the same answer) and accepts unknown provider prefixes —
+    those are custom slugs the operator takes responsibility for; the
+    chain still requires the agent binary to be available.
+    """
+    if has_credentials_for_slug(slug):
+        return True
+    try:
+        provider = get_model_provider(slug)
+    except ValueError:
+        return False
+    # Unknown provider prefix — pass through; the binary gate is the
+    # real constraint and ``_agent_binary_available`` already covers it.
+    return provider not in {"anthropic", "openai", "google", "cursor", "bedrock", "vertex"}
 
 
 def _fail_loud_for_openai(*, model: str) -> None:

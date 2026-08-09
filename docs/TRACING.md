@@ -1,9 +1,10 @@
 # Tracing — configuration, sinks, redaction, retention
 
-> Status: **skeleton** — Batch A. W2 covers the config schema, the canonical
-> span model, the local JSONL sink, and the redaction boundary. Batch D
-> (W8) fills in the remote exporters, the optional extra, and the CLI /
-> `action.yml` surface. Reference issue: [#56][i56].
+> Status: **active**. Batch A (W2) covers the config schema, the canonical
+> span model, the local JSONL sink, and the redaction boundary. Batch B
+> (W4) wires the span tree at every production seam — see "Span tree"
+> below. Batch D (W8) fills in the remote exporters, the optional extra,
+> and the CLI / `action.yml` surface. Reference issue: [#56][i56].
 
 [i56]: https://github.com/alexhawat/mergeCraft/issues/56
 
@@ -144,10 +145,72 @@ There is no config-level trust gate. D15's hard requirement is that the
 statement above appears plainly in this document, so the operator sees
 it the first time they reach for a remote sink.
 
+## Span tree (W4 — Batch B)
+
+Every tracing-enabled run emits one **root span** (`mergecraft.run`) with
+the run lifecycle, and a fixed set of **child spans** at the existing
+seams. Spans carry `parent_span_id` pointers so the tree is reconstructible
+from any sink's flat event stream. The root is the only span whose
+`parent_span_id` is `None` — convention 9.
+
+```text
+mergecraft.run                       (root; run_id, repo, pr_number,
+                                       commit_sha, workflow_run_id, job_id)
+├── mergecraft.prep                  (toolchain install: language servers,
+│                                       linters, action deps)
+├── mergecraft.analyzers.pipeline    (W7: detect, run, scope, cluster,
+│    │                                  budget — analyzer fan-out)
+│    └── analyzer.run  ×N            (analyzer.id, exit_code,
+│                                       findings_count, duration_ms,
+│                                       skipped, error)
+├── agent.attempt  ×N                (per fallback entry; model.id,
+│    │                                  agent.provider, agent.mode,
+│    │                                  agent.cli_argv — redacted,
+│    │                                  model.fallback_index, status,
+│    │                                  error)
+│    └── llm.call                    (cost.tokens_in, cost.tokens_out,
+│                                       cost.cache_read, cost.cache_write,
+│                                       cost.usd)
+├── tool.call  ×N                    (tool.name, tool.server)
+└── mergecraft.publish               (finalisation: persist learnings,
+                                        report status checks, emit packet)
+```
+
+### Attributes per kind
+
+| Kind                          | Required attributes (issue §4 + W4.4)                                                                 |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `mergecraft.run`              | `run_id`, `repo`, `pr_number`, `commit_sha`, `workflow_run_id`, `job_id` (correlation from env or kwarg) |
+| `mergecraft.prep`             | (no required attrs beyond span defaults)                                                              |
+| `mergecraft.analyzers.pipeline` | (no required attrs beyond span defaults)                                                             |
+| `analyzer.run`                | `analyzer.id`, `analyzer.exit_code`, `analyzer.findings_count`, `analyzer.duration_ms`                |
+| `agent.attempt`               | `model.id`, `agent.provider`, `agent.mode`, `agent.cli_argv` (redacted), `model.fallback_index`, `status` |
+| `llm.call`                    | `cost.tokens_in`, `cost.tokens_out`, `cost.cache_read`, `cost.cache_write`, `cost.usd`                 |
+| `tool.call`                   | `tool.name`, `tool.server`                                                                            |
+| `mergecraft.publish`          | (no required attrs beyond span defaults)                                                              |
+
+### Defaults and guarantees
+
+- The default is **off** (convention 9). When `tracing.enabled` is `false`,
+  `get_tracer_from_settings` returns a `NullTracer` whose `start_span`
+  returns a `NullSpan` that short-circuits every emit — no sink is touched,
+  no `attrs_source` callable is invoked, no directory is created.
+- The tracer is **never on the critical path** (convention 6). Any
+  exception inside an emit site is caught by `MultiSink.write` and logged
+  at `logger.warning` with the sink type and message; the run continues.
+- **Redaction runs once, before fan-out** (D7). Every emit traverses a
+  `RedactingSink` wrapper around `MultiSink`. The `MemorySink` that
+  structural tests use also redacts on write, so test assertions and the
+  production path see the same surface.
+- **Correlation fields** are read from the `correlation` kwarg at the
+  emit site if provided; otherwise they are derived from `GITHUB_*` env
+  vars (`GITHUB_RUN_ID`, `GITHUB_REPOSITORY`, `GITHUB_PR_NUMBER`,
+  `GITHUB_SHA`, `GITHUB_JOB`). Local dev runs that lack those vars get
+  safe placeholders rather than `None`.
+
 ## What's next
 
 | Batch | Wave  | Scope                                                |
 | ----- | ----- | ---------------------------------------------------- |
-| B     | W4    | Span tree instrumentation at existing seams           |
 | C     | W6    | `stream-json` migration for per-tool spans            |
 | D     | W8    | `logfire` + `otel` exporters, CLI / action inputs, complete docs |

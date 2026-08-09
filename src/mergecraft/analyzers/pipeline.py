@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -24,6 +25,7 @@ from mergecraft.mcp.review import format_analyzer_inline_body
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from mergecraft.config.settings import AnalyzersSettings
@@ -33,6 +35,17 @@ TrustTier = Literal["trusted", "untrusted"]
 
 def _serialize_finding(finding: Finding) -> dict[str, Any]:
     return finding.model_dump()
+
+
+def _snapshot_attrs(
+    source: dict[str, Any],
+) -> Callable[[], dict[str, Any]]:
+    """Return a no-arg callable that snapshots ``source`` for ``attrs_source``."""
+
+    def _snap() -> dict[str, Any]:
+        return dict(source)
+
+    return _snap
 
 
 def _load_learnings(repo_root: Path) -> str:
@@ -87,6 +100,10 @@ def run_analyzer_pipeline(
     base_ref: str | None = None,
 ) -> AnalyzerRunState:
     """Run enabled analyzers end-to-end and return scoped, budgeted findings."""
+    from mergecraft.tracing.tracer import get_tracer_from_settings
+
+    full_settings = load_repo_settings(root=repo_root, load_learnings_files=False)
+    tracer = get_tracer_from_settings(full_settings)
     settings = _analyzers_settings(repo_root)
     if not settings.enabled:
         return AnalyzerRunState(
@@ -111,112 +128,156 @@ def run_analyzer_pipeline(
             ),
         )
 
-    rows: list[AnalyzerStatusRow] = []
-    raw_findings: list[Finding] = []
+    with tracer.start_span(
+        "mergecraft.analyzers.pipeline",
+        attrs_source=lambda: {"tier": tier, "changed_file_count": len(changed_files)},
+    ) as parent_span:
+        rows: list[AnalyzerStatusRow] = []
+        raw_findings: list[Finding] = []
 
-    from mergecraft.analyzers.adapters import run_adapter
+        from mergecraft.analyzers.adapters import run_adapter
 
-    for manifest in manifests:
-        decision = evaluate_manifest_for_tier(manifest=manifest, tier=tier)
-        if decision.skipped:
-            rows.append(
-                AnalyzerStatusRow(
-                    id=manifest.id,
-                    status="unavailable",
-                    reason=decision.reason,
+        for manifest in manifests:
+            decision = evaluate_manifest_for_tier(manifest=manifest, tier=tier)
+            if decision.skipped:
+                rows.append(
+                    AnalyzerStatusRow(
+                        id=manifest.id,
+                        status="unavailable",
+                        reason=decision.reason,
+                    )
                 )
-            )
-            continue
-        try:
-            result = run_adapter(
-                tool_id=manifest.id,
+                continue
+            run_attrs: dict[str, Any] = {"analyzer.id": manifest.id}
+            parent_id = parent_span.span_id if hasattr(parent_span, "span_id") else None
+            with tracer.start_span(
+                "analyzer.run",
+                parent_span_id=parent_id,
+                attrs_source=_snapshot_attrs(run_attrs),
+            ) as child_span:
+                run_started = time.perf_counter()
+                exit_code = 0
+                findings_count = 0
+                try:
+                    result = run_adapter(
+                        tool_id=manifest.id,
+                        repo_root=repo_root,
+                        changed_files=changed_files,
+                        tier=tier,
+                        base_ref=base_ref,
+                        offline=offline,
+                    )
+                except (KeyError, OSError, ValueError) as exc:
+                    logger.info("analyzer {} unavailable: {}", manifest.id, exc)
+                    rows.append(
+                        AnalyzerStatusRow(
+                            id=manifest.id,
+                            status="unavailable",
+                            reason=str(exc),
+                        )
+                    )
+                    exit_code = 1
+                    run_attrs["analyzer.exit_code"] = exit_code
+                    run_attrs["analyzer.findings_count"] = 0
+                    run_attrs["analyzer.duration_ms"] = round(
+                        (time.perf_counter() - run_started) * 1000
+                    )
+                    run_attrs["error"] = str(exc)
+                    child_span.set_status("error", str(exc))
+                    continue
+
+                if result.skipped:
+                    rows.append(
+                        AnalyzerStatusRow(
+                            id=manifest.id,
+                            status="unavailable",
+                            reason=result.skip_reason,
+                        )
+                    )
+                    run_attrs["analyzer.exit_code"] = 0
+                    run_attrs["analyzer.findings_count"] = 0
+                    run_attrs["analyzer.duration_ms"] = round(
+                        (time.perf_counter() - run_started) * 1000
+                    )
+                    run_attrs["analyzer.skipped"] = True
+                    continue
+
+                findings_count = len(result.findings)
+                status = "failed" if result.findings else "passed"
+                rows.append(
+                    AnalyzerStatusRow(
+                        id=manifest.id,
+                        status=status,
+                        finding_count=findings_count,
+                    )
+                )
+                raw_findings.extend(result.findings)
+                run_attrs["analyzer.exit_code"] = exit_code
+                run_attrs["analyzer.findings_count"] = findings_count
+                run_attrs["analyzer.duration_ms"] = round(
+                    (time.perf_counter() - run_started) * 1000
+                )
+
+        learnings_text = _load_learnings(repo_root)
+        if diff_text.strip():
+            scoped = scope_findings(
+                raw_findings,
+                diff_text=diff_text,
                 repo_root=repo_root,
-                changed_files=changed_files,
-                tier=tier,
-                base_ref=base_ref,
-                offline=offline,
+                learnings_text=learnings_text,
             )
-        except (KeyError, OSError, ValueError) as exc:
-            logger.info("analyzer {} unavailable: {}", manifest.id, exc)
-            rows.append(
-                AnalyzerStatusRow(
-                    id=manifest.id,
-                    status="unavailable",
-                    reason=str(exc),
-                )
-            )
-            continue
+        else:
+            scoped = suppress_withdrawn_findings(raw_findings, learnings_text)
 
-        if result.skipped:
-            rows.append(
-                AnalyzerStatusRow(
-                    id=manifest.id,
-                    status="unavailable",
-                    reason=result.skip_reason,
-                )
-            )
-            continue
-
-        status = "failed" if result.findings else "passed"
-        rows.append(
-            AnalyzerStatusRow(
-                id=manifest.id,
-                status=status,
-                finding_count=len(result.findings),
-            )
+        base_run = base_comparison_available(
+            base_comparison=settings.base_comparison,
+            offline=offline,
         )
-        raw_findings.extend(result.findings)
+        scoped = annotate_introduced_by_pr(scoped, base_run_performed=base_run)
 
-    learnings_text = _load_learnings(repo_root)
-    if diff_text.strip():
-        scoped = scope_findings(
-            raw_findings,
-            diff_text=diff_text,
-            repo_root=repo_root,
-            learnings_text=learnings_text,
+        clustered = cluster_findings(scoped)
+        budget = (
+            inline_budget
+            if inline_budget is not None
+            else (settings.inline_budget or default_inline_budget())
         )
-    else:
-        scoped = suppress_withdrawn_findings(raw_findings, learnings_text)
+        placement = place_findings(clustered, inline_budget=budget)
 
-    base_run = base_comparison_available(
-        base_comparison=settings.base_comparison,
-        offline=offline,
-    )
-    scoped = annotate_introduced_by_pr(scoped, base_run_performed=base_run)
+        serialized = [_serialize_finding(f) for f in clustered]
+        inline_payload: list[dict[str, Any]] = []
+        for item in placement.inline:
+            if isinstance(item, Finding):
+                inline_payload.append(
+                    {
+                        "finding": _serialize_finding(item),
+                        "inlineBody": format_analyzer_inline_body(item),
+                        "path": item.path,
+                        "line": item.start_line,
+                    }
+                )
 
-    clustered = cluster_findings(scoped)
-    budget = (
-        inline_budget
-        if inline_budget is not None
-        else (settings.inline_budget or default_inline_budget())
-    )
-    placement = place_findings(clustered, inline_budget=budget)
+        lock_path = repo_root / ".mergecraft" / "analyzers.lock"
+        digest = lock_digest(lock_path)
+        summary = _build_pre_merge_summary(rows, lockfile_digest_value=digest)
 
-    serialized = [_serialize_finding(f) for f in clustered]
-    inline_payload: list[dict[str, Any]] = []
-    for item in placement.inline:
-        if isinstance(item, Finding):
-            inline_payload.append(
-                {
-                    "finding": _serialize_finding(item),
-                    "inlineBody": format_analyzer_inline_body(item),
-                    "path": item.path,
-                    "line": item.start_line,
-                }
+        executed = [row for row in rows if row.status in {"passed", "failed"}]
+        if not executed:
+            return AnalyzerRunState(
+                ran=False,
+                reason=(
+                    "every enabled analyzer was skipped in this environment — report the "
+                    "Analyzers pre-merge row as skipped, not failed"
+                ),
+                analyzers=rows,
+                findings=serialized,
+                inline=inline_payload,
+                mechanical_section=placement.mechanical_section,
+                pre_merge_summary=summary,
+                lockfile_digest=digest,
             )
 
-    lock_path = repo_root / ".mergecraft" / "analyzers.lock"
-    digest = lock_digest(lock_path)
-    summary = _build_pre_merge_summary(rows, lockfile_digest_value=digest)
-
-    executed = [row for row in rows if row.status in {"passed", "failed"}]
-    if not executed:
         return AnalyzerRunState(
-            ran=False,
-            reason=(
-                "every enabled analyzer was skipped in this environment — report the "
-                "Analyzers pre-merge row as skipped, not failed"
-            ),
+            ran=True,
             analyzers=rows,
             findings=serialized,
             inline=inline_payload,
@@ -224,16 +285,6 @@ def run_analyzer_pipeline(
             pre_merge_summary=summary,
             lockfile_digest=digest,
         )
-
-    return AnalyzerRunState(
-        ran=True,
-        analyzers=rows,
-        findings=serialized,
-        inline=inline_payload,
-        mechanical_section=placement.mechanical_section,
-        pre_merge_summary=summary,
-        lockfile_digest=digest,
-    )
 
 
 def analyzer_run_metadata(*, tool_id: str, result: object) -> dict[str, str]:

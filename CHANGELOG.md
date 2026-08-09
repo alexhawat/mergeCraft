@@ -66,6 +66,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   schema, sink types, the redaction guarantee, the retention rule, and
   the D15 note that enabling a remote sink exports reviewed-repo content
   (#56, W2)
+- `tracing:` block now emits a full per-run span tree at every production
+  seam. The W3 RED suite is the contract; W4 wires the emit sites. A
+  run is rooted at `mergecraft.run` (with `run_id`, `repo`, `pr_number`,
+  `commit_sha`, `workflow_run_id`, `job_id` derived from env or the new
+  `correlation` kwarg) and fans out to `mergecraft.prep`,
+  `mergecraft.analyzers.pipeline` (each child `analyzer.run` carrying
+  `analyzer.id`, `analyzer.exit_code`, `analyzer.findings_count`,
+  `analyzer.duration_ms`), `agent.attempt` per fallback entry (with
+  `model.id`, `agent.provider`, `agent.mode`, redacted `agent.cli_argv`,
+  `model.fallback_index`, `status`), each attempt's `llm.call` (with
+  `cost.tokens_in`, `cost.tokens_out`, `cost.cache_read`,
+  `cost.cache_write`, `cost.usd` consumed from `AgentUsage` — D11),
+  each MCP `tool.call` (`tool.name`, `tool.server`), and
+  `mergecraft.publish`. The tracer is **never on the critical path**
+  (convention 6) and is a true no-op when `tracing.enabled` is false
+  (convention 9). `docs/TRACING.md` gains a "Span tree" section with
+  the per-kind attribute table. `usage_entries` stays on `ToolState`
+  for backward compat; the W3.5 consumer contract is now satisfied by
+  the cost.* attributes on `llm.call` (#56, W4)
 
 - Reviews now actually emit a Merge Evidence Packet. Every run that reviews a
   pull request writes one versioned JSON record of the findings, the analyzer
