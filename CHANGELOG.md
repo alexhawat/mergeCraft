@@ -95,6 +95,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quarantined entries with their provenance records as JSON (audit-friendly) or
   human-readable text (D11, #74 proposal item 5).
 
+### Changed
+
+- Batch B (blast radius) is PR-ready: `MergeEvidencePacket.blast_radius` is
+  populated end-to-end by `classify_blast_radius()` via the packet overload
+  of `decide_approval()`. The lane policy is advisory — `autoMergeEnabled`
+  remains `False` (D11) and the Batch D thermostat in
+  `.ignorelocal/waves/issues-merge-evidence-gating-wave-plan.md` owns the
+  gate outcome → action map. `make ci` is green on `wave/evi-b-blast`
+  (666 passed, 1 skipped, 3 documented pre-existing xfails from the
+  security plan's Batch B/W3/W4). `tests/evidence/test_blast_radius.py`
+  ships 24/24 passing (#42, #48, B-Final).
+
 ### Docs
 
 - `docs/REVIEW-DOCTRINE.md` adds a "Green is evidence, not proof" section
