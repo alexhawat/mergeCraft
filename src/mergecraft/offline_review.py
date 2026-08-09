@@ -27,6 +27,7 @@ from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.utils.agent_resolve import resolve_model, resolve_runtime_agent
+from mergecraft.utils.fence import Fence, render_untrusted
 from mergecraft.utils.github import GitHubClient
 from mergecraft.utils.instructions import resolve_instructions
 from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff, summarize_diff
@@ -54,7 +55,9 @@ def build_offline_review_prompt(
     summary = summarize_diff(diff_path.read_text(encoding="utf-8"))
     base_line = f"Base ref: `{base_ref}`\n" if base_ref else "Base ref: (provided diff file)\n"
     extra_block = (
-        f"\n## Additional instructions\n\n{extra.strip()}\n" if extra and extra.strip() else ""
+        "\n## Additional instructions\n\n" + _render_offline_extra_block(extra) + "\n"
+        if extra and extra.strip()
+        else ""
     )
     if json_mode:
         step_four = (
@@ -89,6 +92,25 @@ def build_offline_review_prompt(
         f"Diff path: `{diff_path}`\n\n"
         f"## Diff summary\n\n{summary}\n"
         f"{extra_block}"
+    )
+
+
+def _render_offline_extra_block(extra: str) -> str:
+    """Wrap the offline ``extra`` block in the per-run fence.
+
+    The block is operator-supplied via the CLI ``--prompt-extra`` flag, but
+    a fork PR can route a malicious comment string into it. Treat it as
+    untrusted (D8) and fence it; the W4.4 trust tier derivation is the
+    upstream caller's responsibility (CLI/Action sets ``author_association``
+    to ``NONE`` here so the fence is applied unconditionally).
+    """
+    fence = Fence()
+    return render_untrusted(
+        extra.strip(),
+        author="operator",
+        tier="untrusted",
+        label="offline_extra",
+        nonce=fence.nonce,
     )
 
 

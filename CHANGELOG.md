@@ -33,6 +33,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configured `staticChecks` now report a `declared-but-cannot-run` row when the gate
   cannot execute in this environment (for example `shell: disabled`), instead of
   disappearing silently (#8)
+- Per-run nonce fence (`mergecraft.utils.fence`) wraps every untrusted PR prose field
+  — PR title, PR body, `eventInstructions`, `previousRunsNote`, review/issue comment
+  bodies, commit messages, patch headers — with a closing delimiter bound to a CSPRNG
+  nonce; attacker-supplied delimiters and nonce tokens inside the body are rewritten
+  to neutral placeholders before they reach the reviewer. Trust tier per field is
+  derived from `analyzers/trust.py::derive_trust_tier` so MEMBER/OWNER prose can pass
+  through unfenced where the source is trusted (#73)
+- Per-entry provenance record (`LearningProvenance` in `mergecraft.utils.learnings`)
+  names the run id, PR number, source field, author login, author association, trust
+  tier, and timestamp on every persisted learning entry; new entries land in a
+  `## Staging` section by default with a provenance comment line, and only entries
+  whose author association is `OWNER`/`MEMBER`/`COLLABORATOR` may be promoted when
+  the new opt-in `autopromoteLearnings: true` config flag is set. Quarantined entries
+  never reach the reviewer prompt and the active section is fenced at seed time via
+  the W4 nonce fence, so an entry carrying a forged closing delimiter cannot
+  restructure the instruction block (#74).
+  **BREAKING:** the default for new learning entries is now fail-closed — entries
+  persist into the staging section instead of the active section unless
+  `autopromoteLearnings: true` is set in `.mergecraft/config.yaml` (D10 of
+  `.ignorelocal/waves/issues-security-trust-boundary-wave-plan.md`).
+- New `mergecraft learnings` CLI subcommand with `influence`, `active`, and `staging`
+  listings; `influence` reads `.mergecraft/learnings.md` and emits the curated and
+  quarantined entries with their provenance records as JSON (audit-friendly) or
+  human-readable text (D11, #74 proposal item 5).
 
 ### Docs
 

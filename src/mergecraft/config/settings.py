@@ -106,6 +106,12 @@ class RepoSettings(BaseModel):
     learnings_headings: list[LearningsHeading] = Field(
         default_factory=list, alias="learningsHeadings"
     )
+    # D10 / W6.5 — opt-in auto-promote flag for new learning entries.
+    # Default ``False`` (fail-closed): new entries land in the staging
+    # section and only promote after an explicit approval call. Setting
+    # this to ``True`` restores the legacy auto-promote behaviour for
+    # trusted maintainer authors. See ``utils/learnings.py`` and #74.
+    autopromote_learnings: bool = Field(default=False, alias="autopromoteLearnings")
     env_allowlist: str | None = Field(default=None, alias="envAllowlist")
     # Extra GitHub logins (comma-separated) permitted to invoke mergeCraft by
     # comment even when ``comment.author_association`` is outside the trusted
@@ -182,6 +188,7 @@ def default_settings() -> RepoSettings:
             "analyzers": {},
             "learnings": None,
             "learnings_headings": [],
+            "autopromote_learnings": False,
             "env_allowlist": None,
             "xrepo_brief": None,
             "xrepo_learnings": None,

@@ -263,6 +263,12 @@ async def main() -> MainResult:
             learnings_path = await seed_learnings_file(tmpdir=tmpdir, current=settings.learnings)
             tool_state.learnings_file_path = learnings_path
             tool_state.learnings_seed = (settings.learnings or "").strip()
+            # D10 / W6.5 — wire the opt-in auto-promote flag from
+            # ``RepoSettings`` into ``tool_state`` so ``persist_learnings``
+            # honors it. Default is fail-closed (staging only); setting
+            # ``autopromoteLearnings: true`` restores legacy behaviour for
+            # trusted maintainer authors (see ``utils/learnings.py``).
+            tool_state.autopromote_learnings = settings.autopromote_learnings
             logger.info(
                 "» learnings seeded at {} (existing={})",
                 learnings_path,
