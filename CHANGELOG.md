@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Blast-radius classifier: `classify_blast_radius()` maps changed paths and
+  optional diff text to typed low, medium, or high merge lanes using a shipped
+  declarative rule set with additive per-category overrides. The pure classifier
+  covers migrations, sensitive code and config, generated files, public APIs,
+  dependencies, untested source, and irreversible infrastructure (#48, W6).
 - Merge Evidence Packet: every run emits a versioned, structured
   `MergeEvidencePacket` (`src/mergecraft/evidence/packet.py`) that composes
   the existing `Finding` model and derives its JSON Schema from the Pydantic

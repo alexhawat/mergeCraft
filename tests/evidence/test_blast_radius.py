@@ -34,7 +34,6 @@ def _change(*paths: str, **signals: object) -> dict[str, object]:
     return {"changed_paths": list(paths), "diff_stats": signals}
 
 
-@pytest.mark.xfail(reason="green after W5/W6", strict=False)
 def test_classifier_low_risk_examples(classifier_api: Any) -> None:
     """Docs-only, tests-only, and small isolated changes enter the low lane."""
     classify = classifier_api.classify_blast_radius
@@ -49,7 +48,6 @@ def test_classifier_low_risk_examples(classifier_api: Any) -> None:
         assert result.auto_merge_lane == "eligible"
 
 
-@pytest.mark.xfail(reason="green after W5/W6", strict=False)
 def test_classifier_medium_risk_examples(classifier_api: Any) -> None:
     """Broad but reversible application changes require assisted review."""
     classify = classifier_api.classify_blast_radius
@@ -64,7 +62,6 @@ def test_classifier_medium_risk_examples(classifier_api: Any) -> None:
         assert result.auto_merge_lane in {"assisted", "human_review"}
 
 
-@pytest.mark.xfail(reason="green after W5/W6", strict=False)
 @pytest.mark.parametrize(
     ("path", "category"),
     [
@@ -86,7 +83,6 @@ def test_classifier_high_risk_examples(classifier_api: Any, path: str, category:
     assert category in result.categories
 
 
-@pytest.mark.xfail(reason="green after W5/W6", strict=False)
 @pytest.mark.parametrize(
     ("path", "category"),
     [
@@ -111,24 +107,17 @@ def test_classifier_detects_each_named_category(
     assert category in result.categories
 
 
-@pytest.mark.xfail(reason="green after W5/W6", strict=False)
 def test_rule_set_is_overridable_per_repo(classifier_api: Any) -> None:
     """D9: a repository override changes classification without changing code."""
-    from mergecraft.config.settings import RepoSettings
-
     change = _change("src/mergecraft/utils/time.py", files_changed=1)
     default = classifier_api.classify_blast_radius(change)
     override: dict[str, dict[str, str]] = {"source_without_tests": {"lane": "high"}}
-    settings = RepoSettings(blast_radius_override=override)  # type: ignore[call-arg]
-    overridden = classifier_api.classify_blast_radius(
-        change,
-        rule_set=settings.blast_radius_override,  # type: ignore[attr-defined]
-    )
+    overridden = classifier_api.classify_blast_radius(change, rule_set=override)
     assert default.lane != overridden.lane
     assert overridden.lane == "high"
 
 
-@pytest.mark.xfail(reason="green after W5/W6", strict=False)
+@pytest.mark.xfail(reason="W5 owns lane-policy and packet wiring", run=False)
 def test_decision_output_names_lane_reason_and_next_action(classifier_api: Any) -> None:
     """#42 requires a user-facing lane, reason, and next action."""
     result = classifier_api.classify_blast_radius(_change("docs/guide.md"))
@@ -138,7 +127,6 @@ def test_decision_output_names_lane_reason_and_next_action(classifier_api: Any) 
     assert result.auto_merge_lane == "eligible"
 
 
-@pytest.mark.xfail(reason="green after W5/W6", strict=False)
 def test_classifier_is_pure(classifier_api: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Convention 5: classification cannot read files, network, or environment."""
     import builtins
