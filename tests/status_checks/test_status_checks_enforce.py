@@ -1,6 +1,6 @@
-"""W7 RED suite for #75 — enforce-path tests (D13, D14).
+"""W8 GREEN suite for #75 — enforce-path tests (D13, D14).
 
-These tests pin the *enforce* contract W8 must satisfy:
+These tests pin the *enforce* contract W8 satisfies:
 
 - W7.3 (D13): a crashed / timed-out / no-findings run yields an
   ``mergecraft-approval`` conclusion that the hardened enforce step
@@ -17,18 +17,12 @@ These tests pin the *enforce* contract W8 must satisfy:
   2. The MCP tool ``create_pull_request_review`` — untrusted tier
      never sends ``event="APPROVE"`` to GitHub regardless of
      ``pr_approve_enabled`` and the agent's boolean.
-
-Both tests are decorated with ``@pytest.mark.xfail(reason="green after
-W8", strict=False)`` because the inert behaviour does not yet exist on
-this branch — W8 will add it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
-
-import pytest
 
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.trust import derive_trust_tier
@@ -43,14 +37,14 @@ if TYPE_CHECKING:
 
 
 def _decide_approval() -> Callable[..., Any]:
-    """Return ``decide_approval`` from the W8 module it lands in."""
+    """Return ``decide_approval`` from the W8 module it lives in."""
     from mergecraft.agents import gates as _gates
 
     fn = getattr(_gates, "decide_approval", None)
-    if fn is None:  # pragma: no cover - W7 expects this until W8 lands
+    if fn is None:  # pragma: no cover - W8 ships this
         msg = (
-            "decide_approval is not yet defined in mergecraft.agents.gates "
-            "(W8 deliverable — W7.3/W7.4 are xfail until it lands)"
+            "decide_approval is not defined in mergecraft.agents.gates "
+            "(W8 deliverable — this fixture requires it)"
         )
         raise AttributeError(msg)
     return fn
@@ -87,7 +81,6 @@ def _context_factory() -> Any:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 def test_crashed_run_does_not_leave_permissive_gate() -> None:
     """A run that raises or times out yields a conclusion the hardened
     enforce step treats as blocking (D13).
@@ -115,7 +108,6 @@ def test_crashed_run_does_not_leave_permissive_gate() -> None:
     assert conclusion is not None
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 def test_timed_out_run_with_findings_yields_failure() -> None:
     """A timed-out run that *did* record a blocker before timing out must
     still surface ``failure``. The decision is the monotone-OR of run
@@ -152,7 +144,6 @@ def test_timed_out_run_with_findings_yields_failure() -> None:
     assert conclusion == "failure", "a timed-out run with a blocker finding must surface 'failure'"
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 async def test_report_status_checks_surfaces_neutral_for_crashed_run(
     tmp_path: Path,
 ) -> None:
@@ -238,7 +229,6 @@ async def test_report_status_checks_surfaces_neutral_for_crashed_run(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 def test_fork_pr_cannot_self_approve_at_decision_layer(
     blocked_pr_event: dict,
 ) -> None:
@@ -271,7 +261,6 @@ def test_fork_pr_cannot_self_approve_at_decision_layer(
     assert conclusion in ("failure", "neutral")
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 async def test_fork_pr_cannot_self_approve_at_tool_layer(
     tmp_path: Path,
 ) -> None:
@@ -341,7 +330,6 @@ async def test_fork_pr_cannot_self_approve_at_tool_layer(
     _ = httpx.__name__
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 async def test_in_repo_pr_with_pr_approve_enabled_can_self_approve(
     tmp_path: Path,
 ) -> None:

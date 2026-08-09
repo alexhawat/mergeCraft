@@ -1,40 +1,32 @@
-# Security — structural approval gate (#75) — test plan (W7 RED)
+# Security — structural approval gate (#75) — test plan (W7 RED → W8 GREEN)
 
 Wave plan: `.ignorelocal/waves/issues-security-trust-boundary-wave-plan.md`
 Worktree: `mergecraft-sec-d-structural-gate` @ `wave/sec-d-structural-gate`
 
 ## xfail schedule
 
-| Wave | Test | Marker reason |
-|------|------|---------------|
-| **W8** | `tests/status_checks/test_decide_approval.py::test_narrative_approval_with_blocker_finding_yields_failure` | `green after W8: derive approval from typed findings, not narrative (#75)` |
-| **W8** | `tests/status_checks/test_decide_approval.py::test_approval_conclusion_is_pure_function_of_findings[narrative-approve]` | same |
-| **W8** | `tests/status_checks/test_decide_approval.py::test_approval_conclusion_is_pure_function_of_findings[narrative-block]` | same |
-| **W8** | `tests/status_checks/test_decide_approval.py::test_approval_conclusion_is_pure_function_of_findings[narrative-unrecorded]` | same |
-| **W8** | `tests/status_checks/test_decide_approval.py::test_agent_approved_flag_is_advisory_only_with_empty_findings` | same |
-| **W8** | `tests/status_checks/test_decide_approval.py::test_agent_approved_flag_is_advisory_only_with_blocking_findings` | same |
-| **W8** | `tests/status_checks/test_decide_approval.py::test_approval_record_remains_an_advisory_input` | same |
-| **W8** | `tests/status_checks/test_decide_approval.py::test_no_second_finding_model_introduced` | same |
-| **W8** | `tests/status_checks/test_decide_approval.py::test_finding_source_is_preserved_for_evidence_audit` | same |
-| **W8** | `tests/status_checks/test_status_checks_enforce.py::test_crashed_run_does_not_leave_permissive_gate` | same |
-| **W8** | `tests/status_checks/test_status_checks_enforce.py::test_timed_out_run_with_findings_yields_failure` | same |
-| **W8** | `tests/status_checks/test_status_checks_enforce.py::test_report_status_checks_surfaces_neutral_for_crashed_run` | same |
-| **W8** | `tests/status_checks/test_status_checks_enforce.py::test_fork_pr_cannot_self_approve_at_decision_layer` | same |
-| **W8** | `tests/status_checks/test_status_checks_enforce.py::test_fork_pr_cannot_self_approve_at_tool_layer` | same |
-| **W8** | `tests/status_checks/test_status_checks_enforce.py::test_in_repo_pr_with_pr_approve_enabled_can_self_approve` | same |
+All W7 xfail markers were removed at W8. The 15 tests in
+`tests/status_checks/` now pass on the structural-approval gate (`make
+ci` green, 623 passed; the status_checks subtree is 15 / 15).
 
-All cross-wave markers use `strict=False`. The in-repo regression guard
-`test_in_repo_pr_with_pr_approve_enabled_can_self_approve` already passes
-pre-W8 (the current code does send `event="APPROVE"` for trusted runs); it
-is marked xfail only to keep the W7 cycle consistent. W8 un-xfails it
-alongside the rest.
+The in-repo regression guard
+`test_in_repo_pr_with_pr_approve_enabled_can_self_approve` already passed
+pre-W8 (the prior code did send `event="APPROVE"` for trusted runs); it
+was marked xfail only to keep the W7 cycle consistent and is now plain.
+
+The pre-W8
+`tests/utils/test_status_checks.py::test_report_status_checks_preserves_approval_when_run_fails_later`
+was renamed to `test_report_status_checks_neutral_for_crashed_run_with_recorded_approval`
+and rewritten to assert the W8 / D13 contract: a recorded
+`ApprovalRecord(would_approve=False)` does not flip a crashed run to
+`failure` — the conclusion is `neutral` regardless, and the reviewed
+commit SHA is preserved in the summary so operators can audit the run.
 
 No non-xfail collection tests guard this suite. The conftest does a
 `import mergecraft.analyzers.finding` and
 `import mergecraft.utils.status_checks` at module load so a missing
 module is a hard collection failure rather than a deferred runtime
-error — the existing fixtures in `tests/utils/test_status_checks.py`
-already exercise the same surface.
+error.
 
 ## Contract matrix
 
@@ -69,7 +61,7 @@ The conftest also imports `mergecraft.analyzers.finding.Finding` and
 module load so a missing import is a hard collection failure rather
 than a deferred test fixture error.
 
-## What W8 must satisfy (D12, D13, D14)
+## What W8 satisfies (D12, D13, D14)
 
 The decision function lands in `src/mergecraft/agents/gates.py` (W8.1)
 with this contract:
@@ -91,19 +83,27 @@ def decide_approval(
 - `tier="untrusted"` ⇒ never `"success"` and never `"neutral"` with
   blocker prerequisites; the gate is inert for fork PRs and
   `pull_request_target` regardless of `pr_approve_enabled` (D14).
-- `tier="trusted"` + no blockers + `run_succeeded=True` ⇒ `"success"`.
+- `tier="trusted"` + no blockers + `run_succeeded=True` + at least one
+  non-blocker finding ⇒ `"success"`.
 
-`report_status_checks()` (W8.2) must call `decide_approval()` instead
+`report_status_checks()` (W8.2) calls `decide_approval()` instead
 of reading `approval.would_approve` directly. The agent's boolean stays
 in `ApprovalRecord.would_approve` (W8.3) as an advisory input the
 trajectory/evidence work in the merge-evidence plan reads after the
 fact (#41).
 
-`create_pull_request_review` (W8.5) must not send `event="APPROVE"` to
+`create_pull_request_review` (W8.5) does not send `event="APPROVE"` to
 GitHub when `ctx.trust_tier == "untrusted"`, even with
 `pr_approve_enabled=True` and `approved=True`. The advisory record
 (`ApprovalRecord(would_approve=True, sha=...)`) is still stored — the
 guard is at the wire-call layer, not the storage layer.
+
+W8.6 emits the decision inputs (findings count, severities present,
+`run_succeeded`, `tier`, `has_blocker`) into the check-run summary so
+the conclusion is reconstructible from the stored findings alone (#75
+proposal item 4). The full durable artifact lives in the merge-evidence
+plan's `MergeEvidencePacket` (#47); W8 does not introduce a second
+packet format.
 
 ## Cross-file pins
 
@@ -121,11 +121,11 @@ read-only for this plan. The analyze-evidence plan owns the signature.
 not modified. W7.6's structural guard fails if W8 introduces a
 parallel model.
 
-## Out of scope for W7
+## Out of scope for W8
 
-- W8 implementation. W7 pins the contract; W8 makes it green.
-- The `examples/workflows/mergecraft-hardened.yml` enforce step (W8.4).
-- `README.md` semantics update (W8.7).
-- `CHANGELOG.md` BREAKING bullets (W8.9).
+- The merge-evidence plan's W2/W9 (they rebase onto this branch).
+- The `examples/workflows/mergecraft.yml` minimal template (unchanged
+  by W8; only the hardened template's enforce step moved).
+- The merge-evidence plan's `MergeEvidencePacket` durable artifact.
 - Any change to `derive_trust_tier()` itself (analyzer plan owns it).
 - Any extension of `Finding` (merge-evidence plan owns it, additively).

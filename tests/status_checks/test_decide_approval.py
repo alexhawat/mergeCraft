@@ -1,13 +1,7 @@
-"""W7 RED suite for #75 structural approval gate — pure decision function.
+"""W8 GREEN suite for #75 structural approval gate — pure decision function.
 
-These tests pin the contract W8 must implement in
-``src/mergecraft/agents/gates.py`` (or a sibling module under
-``src/mergecraft/agents/``). Every test is marked
-``@pytest.mark.xfail(reason="green after W8", strict=False)`` because the
-function ``decide_approval(findings, *, run_succeeded, tier) -> Conclusion``
-does not yet exist on this branch — W8 will add it.
-
-The contract under test (D12, D13):
+These tests pin the contract ``decide_approval`` satisfies in W8
+(``src/mergecraft/agents/gates.py``):
 
 - ``decide_approval`` is a *pure function* of the finding list, the run
   completion state, and the trust tier. Narrative (``ApprovalRecord``,
@@ -41,37 +35,29 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# Module-availability guard for the future decision function. W8 will land
-# ``decide_approval`` in `src/mergecraft/agents/gates.py` (or a sibling
-# module); the import is inside a helper so the failure mode is a clear
-# AttributeError / ImportError on the test rather than a top-level collection
-# crash that hides the actual assertion.
+# Module-availability helper — W8 added ``decide_approval`` to
+# ``mergecraft.agents.gates``. The import is inside a helper so the failure
+# mode is a clear AttributeError on the test rather than a top-level
+# collection crash that hides the actual assertion.
 # ---------------------------------------------------------------------------
 
 
 def _decide_approval() -> Callable[..., Any]:
-    """Return ``decide_approval`` from the W8 module it lands in.
-
-    W8's outline (from the plan, W8.1): a pure function
-    ``decide_approval(findings: list[Finding], *, run_succeeded: bool,
-    tier: TrustTier) -> Conclusion`` in `src/mergecraft/agents/gates.py`.
-    The module may add it as a sibling helper rather than renaming the file.
-    """
+    """Return ``decide_approval`` from the W8 module it lives in."""
     from mergecraft.agents import gates as _gates
 
     fn = getattr(_gates, "decide_approval", None)
-    if fn is None:  # pragma: no cover - W7 expects this until W8 lands
+    if fn is None:  # pragma: no cover - W8 ships this
         msg = (
-            "decide_approval is not yet defined in mergecraft.agents.gates "
-            "(W8 deliverable — W7.1–W7.6 are xfail until it lands)"
+            "decide_approval is not defined in mergecraft.agents.gates "
+            "(W8 deliverable — this fixture requires it)"
         )
         raise AttributeError(msg)
     return fn
 
 
 def _approval_conclusion_module() -> Any:
-    """Return the module that defines ``Conclusion`` (per W8.1 it reuses
-    ``utils/status_checks.Conclusion``)."""
+    """Return the module that defines ``Conclusion``."""
     from mergecraft.utils import status_checks as _sc
 
     return _sc
@@ -82,7 +68,6 @@ def _approval_conclusion_module() -> Any:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 def test_narrative_approval_with_blocker_finding_yields_failure(
     blocker_finding: Finding,
 ) -> None:
@@ -106,7 +91,10 @@ def test_narrative_approval_with_blocker_finding_yields_failure(
         tier="trusted",
     )
 
-    assert conclusion == sc.Conclusion  # type: ignore[attr-defined]
+    # The conclusion must be one of the wire-shape literals the Conclusion
+    # type alias advertises — i.e. a typed string, not a parallel model.
+    assert conclusion in ("success", "failure", "neutral")
+    assert hasattr(sc, "Conclusion")  # the literal type alias is exported
     assert conclusion == "failure", (
         "approval gate must be derived from findings, not narrative — "
         "a blocker must yield 'failure' even when the agent said 'approved'"
@@ -119,7 +107,6 @@ def test_narrative_approval_with_blocker_finding_yields_failure(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 @pytest.mark.parametrize(
     "narrative_would_approve",
     [True, False, None],
@@ -173,7 +160,6 @@ def test_approval_conclusion_is_pure_function_of_findings(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 def test_agent_approved_flag_is_advisory_only_with_empty_findings(
     clean_findings: list[Finding],
 ) -> None:
@@ -205,7 +191,6 @@ def test_agent_approved_flag_is_advisory_only_with_empty_findings(
     )
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 def test_agent_approved_flag_is_advisory_only_with_blocking_findings(
     blocker_finding: Finding,
 ) -> None:
@@ -228,7 +213,6 @@ def test_agent_approved_flag_is_advisory_only_with_blocking_findings(
     )
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 def test_approval_record_remains_an_advisory_input(
     tmp_path: Path,
 ) -> None:
@@ -268,12 +252,11 @@ def test_approval_record_remains_an_advisory_input(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 def test_no_second_finding_model_introduced() -> None:
     """D12: the approval path imports ``Finding`` from
     ``analyzers/finding.py`` and defines no parallel model.
 
-    Asserted by inspecting the module W8 will add the decision function
+    Asserted by inspecting the module W8 added the decision function
     to (``src/mergecraft/agents/gates.py``) and the ``analyzers``
     package for parallel models.
     """
@@ -305,7 +288,6 @@ def test_no_second_finding_model_introduced() -> None:
     assert finding_mod.Finding is Finding
 
 
-@pytest.mark.xfail(reason="green after W8", strict=False)
 def test_finding_source_is_preserved_for_evidence_audit() -> None:
     """Findings carry a ``source`` field (analyzer / agent / ci) that the
     approval conclusion must respect when distinguishing "agent claims

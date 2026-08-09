@@ -309,6 +309,23 @@ jobs:
 
       # Gate on the approval check-run rather than on the review step's exit code,
       # so agent infrastructure failures do not read as "changes requested".
+      #
+      # W8.4 (D13): the approval conclusion is computed structurally from the
+      # typed `Finding` list + run state + trust tier — narrative ("approved",
+      # "not approved") never enters the decision. The hardened enforce step
+      # treats anything other than `success` as blocking:
+      #
+      # - `failure` ⇒ review surfaced a blocker (Critical/Major finding) — block.
+      # - `neutral` ⇒ the run crashed / timed out / produced no findings, or
+      #   the trust tier is `untrusted` (fork PR / pull_request_target) — block.
+      #   `neutral` is the wire-shape that means "no permissive gate"; an
+      #   injected PR that suppresses its findings still surfaces `neutral`
+      #   because the structural decision reads the typed finding list.
+      # - `success` ⇒ review completed, no blockers, at least one finding — pass.
+      # - absent (no `mergecraft-approval` check posted at all, e.g. the
+      #   review step never ran) ⇒ still fail open. The required check
+      #   pattern relies on a posted check; if no check exists, the GitHub
+      #   branch-protection rule itself blocks the merge, not this step.
       - name: Fail when mergeCraft would not approve
         if: github.event_name == 'pull_request_target' && env.HAS_AUTH == 'true'
         env:
@@ -332,14 +349,18 @@ jobs:
             exit 0
           fi
           case "${conclusion}" in
+            success)
+              echo "mergeCraft approval: structural gate passed (no blockers in the typed Finding list)."
+              ;;
             failure)
-              echo "::error title=mergeCraft requested changes::mergecraft-approval failed — address the review feedback on this PR."
+              echo "::error title=mergeCraft requested changes::mergecraft-approval failed — the typed Finding list contains a Critical or Major finding."
               exit 1
               ;;
-            success)
-              echo "mergeCraft approval: no outstanding review feedback."
+            neutral)
+              echo "::error title=mergeCraft review incomplete::mergecraft-approval is 'neutral' — the run crashed, timed out, produced no findings, or ran on an untrusted tier. This is treated as blocking by W8 (D13)."
+              exit 1
               ;;
             *)
-              echo "::notice title=mergeCraft approval not posted::No mergecraft-approval check on ${HEAD_SHA}. Not blocking."
+              echo "::notice title=mergeCraft approval not posted::No mergecraft-approval check on ${HEAD_SHA}. Not blocking (fail-open for missing check — branch protection handles the missing required check)."
               ;;
           esac

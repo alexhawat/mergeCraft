@@ -1,4 +1,21 @@
-"""Opt-in commit-status check-runs (``mergecraft`` / ``mergecraft-approval``)."""
+"""Opt-in commit-status check-runs (``mergecraft`` / ``mergecraft-approval``).
+
+The approval check-run is computed structurally (W8): the conclusion is a pure
+function of the typed ``Finding`` list, the run's completion state, and the
+trust tier. Narrative (``ApprovalRecord.would_approve``, ``result.output``,
+anything the model wrote) is recorded separately as an advisory input and is
+never the sole positive input — see ``decide_approval`` in
+``mergecraft.agents.gates`` for the full contract (D12, D13, D14).
+
+Wire-shape semantics:
+
+- ``success`` — run completed, trust tier is trusted, no blockers in the finding
+  list, and at least one finding attests the review ran.
+- ``failure`` — at least one ``Critical`` or ``Major`` finding; the agent's
+  narrative cannot outvote a blocker.
+- ``neutral`` — run crashed / timed out / produced no findings / untrusted tier;
+  the hardened enforce step treats this as blocking (#75, D13).
+"""
 
 from __future__ import annotations
 
@@ -12,6 +29,35 @@ if TYPE_CHECKING:
 COMPLETION_CHECK = "mergecraft"
 APPROVAL_CHECK = "mergecraft-approval"
 Conclusion = Literal["success", "failure", "neutral"]
+
+
+def _load_structural_findings(ctx: ToolContext) -> list[Any]:
+    """Return the typed ``Finding`` objects the approval gate reads.
+
+    Reads ``ctx.tool_state.analyzer_run.findings`` (stored as dicts by the
+    analyzer pipeline) and validates them against ``analyzers.finding.Finding``.
+    Validation errors are logged at debug level and skipped — a malformed
+    analyzer row must not crash the run; it just drops from the structural set.
+    The merge-evidence plan's W1 owns the durable store; this loader is the
+    minimal hook the approval gate needs today.
+    """
+    run_state = getattr(ctx.tool_state, "analyzer_run", None)
+    if run_state is None:
+        return []
+    raw = list(getattr(run_state, "findings", []) or [])
+    if not raw:
+        return []
+    from mergecraft.analyzers.finding import Finding, FindingValidationError
+
+    typed: list[Any] = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        try:
+            typed.append(Finding.model_validate(row))
+        except FindingValidationError as err:
+            logger.debug("status checks: dropping malformed finding row: {}", err)
+    return typed
 
 
 async def _create_check_run(
@@ -94,19 +140,46 @@ async def report_status_checks(
     except Exception as err:
         logger.debug("status checks: {} post failed: {}", COMPLETION_CHECK, err)
 
+    # --- Approval gate (W8.2): structural conclusion, not narrative. ---------
+    # The agent's boolean is still in ApprovalRecord.would_approve (W8.3) as an
+    # advisory input the merge-evidence plan reads; the conclusion is computed
+    # from typed findings + run state + tier only.
+    from mergecraft.agents.gates import (
+        approval_decision_inputs,
+        decide_approval,
+        decision_summary_lines,
+        log_decision,
+    )
+
+    findings = _load_structural_findings(ctx)
+    tier = getattr(ctx, "trust_tier", "trusted")
+    approval_conclusion: Conclusion = decide_approval(
+        findings,
+        run_succeeded=run_succeeded,
+        tier=tier,  # type: ignore[arg-type]
+    )
+    decision_inputs = approval_decision_inputs(
+        findings,
+        run_succeeded=run_succeeded,
+        tier=tier,  # type: ignore[arg-type]
+    )
+    log_decision(
+        findings,
+        run_succeeded=run_succeeded,
+        tier=tier,  # type: ignore[arg-type]
+        conclusion=approval_conclusion,
+    )
+
     approval = ctx.tool_state.approval
-    if approval and approval.would_approve:
-        approval_conclusion: Conclusion = "success"
+    if approval_conclusion == "success":
         approval_title = "mergeCraft would approve"
         approval_summary = "mergeCraft has no outstanding review feedback on this PR."
-    elif approval and not approval.would_approve:
-        approval_conclusion = "failure"
+    elif approval_conclusion == "failure":
         approval_title = "mergeCraft would not approve"
         approval_summary = (
             "mergeCraft has outstanding review feedback or requested changes on this PR."
         )
     else:
-        approval_conclusion = "neutral"
         approval_title = "mergeCraft review did not complete"
         approval_summary = (
             "The mergeCraft review did not complete, so no approval decision was recorded."
@@ -114,6 +187,9 @@ async def report_status_checks(
 
     if approval and approval.sha:
         approval_summary = f"{approval_summary} Reviewed commit: {approval.sha}."
+    approval_summary = f"{approval_summary}\nDecision inputs:\n" + "\n".join(
+        decision_summary_lines(decision_inputs)
+    )
 
     try:
         await _create_check_run(

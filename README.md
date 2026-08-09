@@ -364,13 +364,29 @@ workflows can trigger on `pull_request` (e.g. auto-review on open/sync),
 `issue_comment`, or `pull_request_review_comment` events and the agent gets PR
 context (number, branch, `is_pr`) automatically — no hand-built `~mergecraft` JSON
 payload required. With `status_checks: enabled`, PR runs always post the `mergecraft`
-and `mergecraft-approval` commit-status checks. The approval check has three
-outcomes: `success` when mergeCraft would approve, `failure` when it would not,
-and `neutral` when the review did not complete (agent crash, timeout, or no
-approval recorded). GitHub branch protection treats `neutral` as non-blocking by
-default — gate on `success`/`failure` explicitly in your enforce step if you
-require a completed review. An explicit `~mergecraft` payload event still takes
-precedence when provided.
+and `mergecraft-approval` commit-status checks.
+
+The approval check is **structural**: its conclusion is a pure function of the
+typed `Finding` list, the run's completion state, and the trust tier. Narrative
+(`create_pull_request_review(approved=true|false)`) is recorded as an advisory
+input only — it is never the sole positive input. The wire-shape has three
+outcomes:
+
+- `success` — run completed, trust tier is trusted, no `Critical` or `Major`
+  finding in the list, and at least one finding attests the review ran.
+- `failure` — at least one `Critical` or `Major` finding. The agent's
+  `approved=true` cannot outvote a blocker.
+- `neutral` — run crashed / timed out / produced no findings, **or** trust tier
+  is `untrusted` (fork PR / `pull_request_target`).
+
+GitHub branch protection treats `neutral` as non-blocking by default. The
+hardened example workflow ships an enforce step (`Fail when mergeCraft would
+not approve`) that flips `neutral` to blocking — wire it into your branch
+protection rule if you want the gate to require a clean structural conclusion,
+not just a missing check. The pre-W8 "neutral is non-blocking" framing is
+removed: a crashed / injected / fork-suppressed review must not pass the gate
+silently. An explicit `~mergecraft` payload event still takes precedence when
+provided.
 
 ## Development
 
