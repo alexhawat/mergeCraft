@@ -10,6 +10,7 @@ from mergecraft.cli import (
     analyzers_cmd,
     auth_cmd,
     diff_review_cmd,
+    eval_cmd,
     gha_cmd,
     init_cmd,
     learnings_cmd,
@@ -34,6 +35,7 @@ app.command("watch")(watch_cmd.run)
 app.command("diff-review")(diff_review_cmd.run)
 app.add_typer(gha_cmd.app, name="gha")
 app.add_typer(learnings_cmd.app, name="learnings")
+app.add_typer(eval_cmd.app, name="eval")
 
 
 @app.callback(invoke_without_command=True)

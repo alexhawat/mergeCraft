@@ -250,6 +250,7 @@ async def _run_agent_review(
             prompt=prompt,
             generate_summary=False,
             status_checks=False,
+            suggest_eval_add=False,
         )
         settings = load_repo_settings(root=cwd, load_learnings_files=False)
         tool_context = ToolContext(
@@ -280,6 +281,7 @@ async def _run_agent_review(
             analyzers_mode="auto",
             trust_tier="trusted",
             analyzers_settings_enabled=settings.analyzers.enabled,
+            suggest_eval_add=False,
         )
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)

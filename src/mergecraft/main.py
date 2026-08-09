@@ -86,6 +86,7 @@ def _payload_to_ctx(payload: dict[str, Any]) -> ResolvedPayload:
         cwd=payload.get("cwd"),
         generate_summary=bool(payload.get("generateSummary")),
         status_checks=bool(payload.get("statusChecks")),
+        suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         timeout=payload.get("timeout"),
         prompt=str(payload.get("prompt") or ""),
         xrepo=payload.get("xrepo"),
@@ -251,6 +252,7 @@ async def main() -> MainResult:
             oss=run_context.oss,
             plan="unknown",
             resolved_model=resolved_model,
+            suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         )
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)

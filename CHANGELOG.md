@@ -19,6 +19,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declarative rule set with additive per-category overrides. The pure classifier
   covers migrations, sensitive code and config, generated files, public APIs,
   dependencies, untested source, and irreversible infrastructure (#48, W6).
+- File-backed Failure Memory and Eval Bank (#51, W11): a local, file-backed
+  case store under `evals/cases/` (D13) with `mergecraft eval add | list | replay`
+  CLI subcommands. The `Case` model is validated against the merged evidence
+  packet's verdict vocabulary (`auto_merge`, `block`, `request_changes`,
+  `require_human_review`, `unavailable`, `neutral`) and **embeds**
+  `mergecraft.utils.learnings.LearningProvenance` as its provenance record
+  (D5, cross-file contract from `docs/test-plans/cross-file-deps.md`). The
+  pure core lives at `src/mergecraft/evals/store.py` (parse / render /
+  list / replay / diff — no I/O at import time, no `os.environ` reads); the
+  thin I/O shell wraps it at `src/mergecraft/cli/eval_cmd.py`. Replay is
+  deterministic: `replay_case(case, current_decision)` returns a
+  `ReplayDiff` with `passed` / `regression` / `blocked` status; the CLI
+  exits `2` on a regression so a CI loop can latch on drift. The CLI is
+  non-interactive (all flags). The bank is local — no database, no hosted
+  service — and tests use the `synthetic` ID prefix so the committed
+  corpus never looks like a real historical failure. User-facing manual
+  at `docs/eval-bank.md`. The bank is for *reviewer learning*; it does not
+  enable auto-merge (D11).
+- Promote-to-permanent-test workflow over the bank (#44, W12): a `mergecraft eval
+  promote <case-id>` CLI subcommand writes a pytest test under `tests/evals/permanent/`
+  that re-runs the case against the current code via `replay_case`. The generated
+  test embeds the case payload (round-tripped through `Case.model_validate_json`) so
+  it carries no bank-disk dependency; the running code's verdict is wired via
+  `MERGECRAFT_PERMANENT_CURRENT_DECISION`. The merge-evidence packet's `evals`
+  section is now a typed `list[EvalMetadata]` (`schema_version` bumped to `1.2.0`,
+  additive minor) — each row is a lightweight summary of a replay run; the full
+  case continues to live under `evals/cases/<case_id>.md`. `mergecraft eval list`
+  gains first-class filters for `--category=rejected` and `--category=reverted`
+  (two distinct failure modes — operator rejected pre-merge, was reverted
+  post-merge). The `create_pull_request_review` MCP tool logs a one-line
+  `logger.info` suggestion to capture the run as a case when the action input
+  `suggest_eval_add` is `true`, the trust tier is `trusted`, the trigger is a
+  re-review (not a fresh PR), and the run produced no positive findings — the log
+  is informational; the agent never auto-adds. `docs/eval-bank.md` gains a
+  "Workflow: rejected & reverted PRs" section; `docs/REVIEW-DOCTRINE.md` gains a
+  "Failure memory" section that cross-references the bank. The bank does not
+  enable auto-merge (D11); promote produces tests, not gates.
 - Merge Evidence Packet: every run emits a versioned, structured
   `MergeEvidencePacket` (`src/mergecraft/evidence/packet.py`) that composes
   the existing `Finding` model and derives its JSON Schema from the Pydantic
