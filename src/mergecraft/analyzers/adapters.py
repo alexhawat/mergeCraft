@@ -135,8 +135,14 @@ def run_adapter(
     tier: TrustTier = "trusted",
     base_ref: str | None = None,
     offline: bool = False,
+    allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
-    """Run one catalog analyzer and return normalized findings."""
+    """Run one catalog analyzer and return normalized findings.
+
+    ``allow_repo_binaries=False`` (set by the pipeline under ``shell:
+    disabled``) forbids ``resolve_analyzer()`` from preferring a binary the
+    repo provides, so only mergeCraft's pinned managed binary can run (#35).
+    """
     repo_root = repo_root.resolve()
     manifest = get_manifest(tool_id)
 
@@ -155,6 +161,7 @@ def run_adapter(
             changed_files=changed_files,
             base_ref=resolved_base,
             tier=tier,
+            allow_repo_binaries=allow_repo_binaries,
         )
 
     if tool_id in SUPPLY_CHAIN_DIFF_TOOLS:
@@ -172,6 +179,7 @@ def run_adapter(
             changed_files=changed_files,
             base_ref=resolved_base,
             tier=tier,
+            allow_repo_binaries=allow_repo_binaries,
         )
 
     if tool_id == "agentsec":
@@ -208,7 +216,12 @@ def run_adapter(
         logger.info("{}", reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
-    plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
+    plan = resolve_analyzer(
+        manifest=manifest,
+        repo_root=repo_root,
+        managed_available=True,
+        allow_repo_binaries=allow_repo_binaries,
+    )
     if plan.mode == "skip":
         logger.info("{}", plan.reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=plan.reason)

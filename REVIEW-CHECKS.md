@@ -140,7 +140,9 @@ Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif
 
 **Execution preference (D4):** `repo-native` → existing CI result → managed pinned binary → container → **skip with a named reason**. Skipped is skipped — never a finding, never a failed pre-merge row.
 
-**Trust tiers (D7):** `trusted` (same-repo PR, `workflow_dispatch`, offline `diff-review`) vs `untrusted` (fork PR / `pull_request_target` — no secrets, network deny-by-default, no PR-authored command construction; trusted-only manifests skip with reasons). `shell: disabled` withholds both gate and analyzer tools on PR events; offline `diff-review` runs analyzers at trusted tier without shell.
+**Trust tiers (D7):** `trusted` (same-repo PR, `workflow_dispatch`, offline `diff-review`) vs `untrusted` (fork PR / `pull_request_target` — no secrets, network deny-by-default, no PR-authored command construction; trusted-only manifests skip with reasons). Offline `diff-review` runs analyzers at trusted tier without shell.
+
+**`shell: disabled` (#35):** hardening the workflow no longer costs you the catalog. Repo-declared gates stay withheld — they run command strings the PR author controls — but mergeCraft's own **`managed` / `container` analyzers still run**, because their argv comes verbatim from a manifest mergeCraft ships and a repo-provided binary may not stand in for the pinned one. `repo-native` manifests are withheld, each with a named reason, since they exist to run the repo's own tool against the repo's own config. What a consumer sees on a `pull_request_target` + `shell: disabled` run: analyzer rows for the managed tools that matched the diff, `unavailable` rows naming why each other manifest was withheld, and the `staticChecks` gates reported as `declared-but-cannot-run`. The full runtime × shell × trust matrix is generated into [`docs/ANALYZERS.md`](docs/ANALYZERS.md).
 
 **Scoping (D6):** analyzers run on **head** by default; findings outside the diff hunks are dropped unless the path is an explicit exception (new file, dependency manifest, lockfile, workflow, migration). `introduced_by_pr: unknown` when no base run happened — never implied `true`.
 

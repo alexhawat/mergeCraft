@@ -81,8 +81,18 @@ def resolve_analyzer(
     repo_tool_path: str | None = None,
     repo_tool_version: str | None = None,
     managed_version: str | None = None,
+    allow_repo_binaries: bool = True,
 ) -> AnalyzerPlan:
-    """Resolve D4's preference chain for one manifest."""
+    """Resolve D4's preference chain for one manifest.
+
+    The chain normally prefers a binary the repo provides (``.venv/bin``,
+    ``node_modules/.bin``, …) over mergeCraft's pinned managed one, for every
+    manifest regardless of declared ``runtime``. ``allow_repo_binaries=False``
+    removes that step so only the pinned binary can run — what ``shell:
+    disabled`` requires, since the working tree is then PR-authored (#35, D5).
+    """
+    if not allow_repo_binaries:
+        repo_has_tool = False
     if manifest.declared_unavailable:
         return AnalyzerPlan(
             manifest_id=manifest.id,

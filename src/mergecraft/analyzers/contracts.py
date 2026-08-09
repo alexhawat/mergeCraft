@@ -140,6 +140,7 @@ def _run_oasdiff(
     changed_files: list[str],
     base_ref: str,
     tier: TrustTier,
+    allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
     scoped = filter_changed_files_for_manifest(manifest, changed_files)
     if not scoped:
@@ -162,7 +163,12 @@ def _run_oasdiff(
             return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
         head_path = repo_root / head_rel
-        plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
+        plan = resolve_analyzer(
+            manifest=manifest,
+            repo_root=repo_root,
+            managed_available=True,
+            allow_repo_binaries=allow_repo_binaries,
+        )
         provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
         if provisioned is None:
             reason = plan.reason or f"skipped {manifest.id}: provisioning failed"
@@ -196,6 +202,7 @@ def _run_squawk(
     changed_files: list[str],
     base_ref: str,
     tier: TrustTier,
+    allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
     _ = base_ref
     scoped = filter_changed_files_for_manifest(manifest, changed_files)
@@ -214,7 +221,12 @@ def _run_squawk(
             skip_reason=f"skipped {manifest.id}: migration paths missing on disk",
         )
 
-    plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
+    plan = resolve_analyzer(
+        manifest=manifest,
+        repo_root=repo_root,
+        managed_available=True,
+        allow_repo_binaries=allow_repo_binaries,
+    )
     provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
         reason = plan.reason or f"skipped {manifest.id}: provisioning failed"
@@ -253,6 +265,7 @@ def _run_buf(
     changed_files: list[str],
     base_ref: str,
     tier: TrustTier,
+    allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
     scoped = filter_changed_files_for_manifest(manifest, changed_files)
     if not scoped:
@@ -275,7 +288,12 @@ def _run_buf(
             return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
         head_path = repo_root / head_rel
-        plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
+        plan = resolve_analyzer(
+            manifest=manifest,
+            repo_root=repo_root,
+            managed_available=True,
+            allow_repo_binaries=allow_repo_binaries,
+        )
         provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
         if provisioned is None:
             reason = plan.reason or f"skipped {manifest.id}: provisioning failed"
@@ -334,6 +352,7 @@ def run_differential_adapter(
     changed_files: list[str],
     base_ref: str | None,
     tier: TrustTier = "trusted",
+    allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
     """Run a differential contract adapter; requires an explicit base ref (D6)."""
     repo_root = repo_root.resolve()
@@ -356,6 +375,7 @@ def run_differential_adapter(
             changed_files=changed_files,
             base_ref=base_ref,
             tier=tier,
+            allow_repo_binaries=allow_repo_binaries,
         )
     if tool_id == "squawk":
         return _run_squawk(
@@ -364,6 +384,7 @@ def run_differential_adapter(
             changed_files=changed_files,
             base_ref=base_ref,
             tier=tier,
+            allow_repo_binaries=allow_repo_binaries,
         )
     if tool_id == "buf":
         return _run_buf(
@@ -372,6 +393,7 @@ def run_differential_adapter(
             changed_files=changed_files,
             base_ref=base_ref,
             tier=tier,
+            allow_repo_binaries=allow_repo_binaries,
         )
     msg = f"unsupported differential contract tool: {tool_id}"
     raise ValueError(msg)

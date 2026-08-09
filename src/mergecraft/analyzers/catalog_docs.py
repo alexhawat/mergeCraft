@@ -133,6 +133,82 @@ def _default_enabled_label(value: bool | str) -> str:
     return "auto"
 
 
+def _shell_trust_matrix_lines() -> list[str]:
+    """Render the runtime x shell x trust matrix from the live predicates (#35, D5).
+
+    Derived from ``SHELL_DISABLED_ELIGIBLE_RUNTIMES`` and the catalog itself so
+    the published matrix cannot drift away from the code that enforces it.
+    """
+    from mergecraft.analyzers.trust import SHELL_DISABLED_ELIGIBLE_RUNTIMES
+
+    counts: dict[tuple[str, str], int] = {}
+    for manifest in load_catalog():
+        key = (manifest.runtime, manifest.trust)
+        counts[key] = counts.get(key, 0) + 1
+
+    lines = [
+        "",
+        "## Runtime x shell x trust",
+        "",
+        "Which analyzers run is decided on two independent axes, each of which can",
+        "skip a manifest with a named reason — a skip is an outcome, never a failure.",
+        "",
+        "- **shell** (`shell:` in the workflow) — may mergeCraft execute anything the",
+        "  PR could have written? Enforced by `evaluate_manifest_for_shell()`.",
+        "- **trust** (derived from the event) — `pull_request_target` and fork-head PRs",
+        "  are `untrusted`. Enforced by `evaluate_manifest_for_tier()`.",
+        "",
+        "Under `shell: disabled`, eligible runtimes are "
+        + " and ".join(
+            f"`{value}`" for value in sorted(SHELL_DISABLED_ELIGIBLE_RUNTIMES, reverse=True)
+        )
+        + ".",
+        "Their argv is copied verbatim out of a manifest mergeCraft ships, and a binary",
+        "the repo provides may not stand in for the pinned one, so nothing the PR",
+        "authored is executed. `runtime: repo-native` stays withheld because it exists",
+        "to run the *repo's* tool against the *repo's* config.",
+        "",
+        "| runtime | trust | `shell: disabled` | `shell: restricted` / `enabled` |",
+        "|---------|-------|-------------------|----------------------------------|",
+    ]
+    for runtime in ("repo-native", "managed", "container"):
+        for trust in ("trusted", "untrusted"):
+            count = counts.get((runtime, trust), 0)
+            if not count:
+                continue
+            eligible = runtime in SHELL_DISABLED_ELIGIBLE_RUNTIMES
+            if not eligible:
+                disabled_cell = "withheld — `runtime` needs repo-provided tooling"
+            elif trust == "trusted":
+                disabled_cell = "runs on trusted events; skipped with a reason on untrusted ones"
+            else:
+                disabled_cell = "**runs** (pinned binary only)"
+            other_cell = (
+                "runs" if trust == "untrusted" else "runs on trusted events; skipped on untrusted"
+            )
+            lines.append(f"| `{runtime}` ({count}) | `{trust}` | {disabled_cell} | {other_cell} |")
+
+    lines.extend(
+        [
+            "",
+            "Passing the shell axis is necessary, not sufficient: a `container` manifest",
+            "is eligible but still reports `unavailable` wherever no container runtime is",
+            "present, and the seven `declared_unavailable` manifests keep their own skip",
+            "reason. In the shipped Action image that leaves the `managed` rows as the",
+            "analyzers a `shell: disabled` run actually executes.",
+            "",
+            "Repo-declared `staticChecks` are a third thing and are **always** withheld",
+            "under `shell: disabled`, on every event: they run command strings the PR",
+            "author controls. They report `declared-but-cannot-run` rather than vanishing.",
+            "",
+            "`agentsec` declares `runtime: repo-native` and is therefore withheld under",
+            "`shell: disabled`, even though it runs in-process with no repo binary. That",
+            "is deliberate: eligibility is read off the declared runtime and nothing else.",
+        ]
+    )
+    return lines
+
+
 def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) -> str:
     """Render ``docs/ANALYZERS.md`` from catalog manifests."""
     rows = sorted(manifests or load_catalog(), key=lambda m: m.id)
@@ -167,6 +243,7 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             f"{_default_enabled_label(manifest.default_enabled)} | {manifest.runtime} | "
             f"{manifest.trust} | {group} | {note_text} |"
         )
+    lines.extend(_shell_trust_matrix_lines())
     lines.extend(
         [
             "",

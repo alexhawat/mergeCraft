@@ -62,6 +62,44 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `yamllint` | lint | yaml | disabled | managed | untrusted | — | — |
 | `zizmor` | ci | — | auto | managed | untrusted | — | — |
 
+## Runtime x shell x trust
+
+Which analyzers run is decided on two independent axes, each of which can
+skip a manifest with a named reason — a skip is an outcome, never a failure.
+
+- **shell** (`shell:` in the workflow) — may mergeCraft execute anything the
+  PR could have written? Enforced by `evaluate_manifest_for_shell()`.
+- **trust** (derived from the event) — `pull_request_target` and fork-head PRs
+  are `untrusted`. Enforced by `evaluate_manifest_for_tier()`.
+
+Under `shell: disabled`, eligible runtimes are `managed` and `container`.
+Their argv is copied verbatim out of a manifest mergeCraft ships, and a binary
+the repo provides may not stand in for the pinned one, so nothing the PR
+authored is executed. `runtime: repo-native` stays withheld because it exists
+to run the *repo's* tool against the *repo's* config.
+
+| runtime | trust | `shell: disabled` | `shell: restricted` / `enabled` |
+|---------|-------|-------------------|----------------------------------|
+| `repo-native` (23) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
+| `repo-native` (1) | `untrusted` | withheld — `runtime` needs repo-provided tooling | runs |
+| `managed` (12) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
+| `managed` (17) | `untrusted` | **runs** (pinned binary only) | runs |
+| `container` (4) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
+
+Passing the shell axis is necessary, not sufficient: a `container` manifest
+is eligible but still reports `unavailable` wherever no container runtime is
+present, and the seven `declared_unavailable` manifests keep their own skip
+reason. In the shipped Action image that leaves the `managed` rows as the
+analyzers a `shell: disabled` run actually executes.
+
+Repo-declared `staticChecks` are a third thing and are **always** withheld
+under `shell: disabled`, on every event: they run command strings the PR
+author controls. They report `declared-but-cannot-run` rather than vanishing.
+
+`agentsec` declares `runtime: repo-native` and is therefore withheld under
+`shell: disabled`, even though it runs in-process with no repo binary. That
+is deliberate: eligibility is read off the declared runtime and nothing else.
+
 ## Overrides
 
 Enable or disable tools in ``.mergecraft/config.yaml``:

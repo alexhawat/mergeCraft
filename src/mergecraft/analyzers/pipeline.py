@@ -19,7 +19,11 @@ from mergecraft.analyzers.scope import (
     scope_findings,
     suppress_withdrawn_findings,
 )
-from mergecraft.analyzers.trust import evaluate_manifest_for_tier
+from mergecraft.analyzers.trust import (
+    allow_repo_provided_binaries,
+    evaluate_manifest_for_shell,
+    evaluate_manifest_for_tier,
+)
 from mergecraft.config import load_repo_settings
 from mergecraft.mcp.review import format_analyzer_inline_body
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow
@@ -98,8 +102,14 @@ def run_analyzer_pipeline(
     inline_budget: int | None = None,
     offline: bool = False,
     base_ref: str | None = None,
+    shell: str = "restricted",
 ) -> AnalyzerRunState:
-    """Run enabled analyzers end-to-end and return scoped, budgeted findings."""
+    """Run enabled analyzers end-to-end and return scoped, budgeted findings.
+
+    ``shell`` is the run's shell policy (``ctx.payload.shell``). Under
+    ``"disabled"`` only manifests whose argv mergeCraft ships are selected, and
+    repo-provided binaries may not stand in for the pinned ones (#35, D5).
+    """
     from mergecraft.tracing.tracer import get_tracer_from_settings
 
     full_settings = load_repo_settings(root=repo_root, load_learnings_files=False)
@@ -128,9 +138,15 @@ def run_analyzer_pipeline(
             ),
         )
 
+    repo_binaries_allowed = allow_repo_provided_binaries(shell=shell)
+
     with tracer.start_span(
         "mergecraft.analyzers.pipeline",
-        attrs_source=lambda: {"tier": tier, "changed_file_count": len(changed_files)},
+        attrs_source=lambda: {
+            "tier": tier,
+            "shell": shell,
+            "changed_file_count": len(changed_files),
+        },
     ) as parent_span:
         rows: list[AnalyzerStatusRow] = []
         raw_findings: list[Finding] = []
@@ -139,6 +155,8 @@ def run_analyzer_pipeline(
 
         for manifest in manifests:
             decision = evaluate_manifest_for_tier(manifest=manifest, tier=tier)
+            if not decision.skipped:
+                decision = evaluate_manifest_for_shell(manifest=manifest, shell=shell)
             if decision.skipped:
                 rows.append(
                     AnalyzerStatusRow(
@@ -166,6 +184,7 @@ def run_analyzer_pipeline(
                         tier=tier,
                         base_ref=base_ref,
                         offline=offline,
+                        allow_repo_binaries=repo_binaries_allowed,
                     )
                 except (KeyError, OSError, ValueError) as exc:
                     logger.info("analyzer {} unavailable: {}", manifest.id, exc)

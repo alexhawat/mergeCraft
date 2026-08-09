@@ -53,6 +53,9 @@ def run_analyzers_tool(ctx: ToolContext):
             inline_budget=settings.inline_budget,
             offline=offline,
             base_ref=base_ref,
+            # #35 — the surface now registers under `shell: disabled`, so the
+            # shell has to reach manifest selection or the withhold is lost.
+            shell=str(ctx.payload.shell),
         )
         _store_run_state(ctx, run_state)
 
