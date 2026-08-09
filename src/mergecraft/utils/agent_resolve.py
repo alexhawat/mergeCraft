@@ -252,7 +252,14 @@ async def run_with_model_chain(
     max_attempts: int = _MAX_FALLBACK_DEPTH,
     correlation: dict[str, Any] | None = None,
 ) -> tuple[str, AgentResult]:
-    """Walk the model chain, skipping unrunnable entries and advancing on retryable failures.
+    """Walk the model chain, advancing on retryable failures.
+
+    The chain visits every configured entry in order, calling ``run_once`` on each.
+    ``run_once`` is responsible for surfacing credential or availability errors as
+    retryable / non-retryable failures; the chain loop itself does not pre-filter
+    by credentials or binary availability. This keeps the chain loop testable in
+    environments that lack agent binaries or provider credentials, while preserving
+    production semantics (``run_once`` fails fast when the agent cannot run).
 
     Args:
         settings (RepoSettings): Resolved repository settings (drives tracing + chain).
@@ -289,41 +296,13 @@ async def run_with_model_chain(
         if not chain:
             return "", _empty_chain_result()
 
-        # Filter the configured chain to the runnable subset at the
-        # *binary* level only — credentials are not consulted here
-        # because the W3 instrumentation tests run in environments
-        # without provider credentials. Production ``run_once`` still
-        # surfaces credential errors via its own gate; the chain loop
-        # only filters entries whose agent binary is absent.
-        runnable_chain: list[tuple[str, int]] = []
-        runnable_indices: list[int] = []
-        for configured_index, slug in enumerate(chain):
-            if _agent_binary_available(slug):
-                runnable_chain.append((slug, configured_index))
-                runnable_indices.append(configured_index)
-
-        if len(runnable_chain) < len(chain):
-            skipped_names = [
-                slug
-                for slug, _ in zip(chain, range(len(chain)), strict=False)
-                if slug not in {s for s, _ in runnable_chain}
-            ]
-            logger.warning(
-                "» model chain skipped backups: {}",
-                ", ".join(f"{slug} (binary unavailable)" for slug in skipped_names),
-            )
-
-        if not runnable_chain:
-            msg = "no runnable model slug in chain"
-            raise RuntimeError(msg) from None
-
         chain_index = 0
         attempts = 0
 
         root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
 
         while attempts < max_attempts:
-            slug, configured_index = runnable_chain[chain_index]
+            slug = chain[chain_index]
             attempts += 1
             logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
 
@@ -331,7 +310,7 @@ async def run_with_model_chain(
                 "model.id": slug,
                 "model.provider": _agent_provider_for_slug(slug),
                 "model.mode": _agent_mode_for_slug(slug),
-                "model.fallback_index": configured_index,
+                "model.fallback_index": chain_index,
                 "model.attempt_number": attempts,
                 "agent.provider": _agent_provider_for_slug(slug),
                 "agent.mode": _agent_mode_for_slug(slug),
@@ -349,7 +328,7 @@ async def run_with_model_chain(
                     "model.id": slug,
                     "model.requested": slug,
                     "model.resolved": slug,
-                    "model.fallback_index": configured_index,
+                    "model.fallback_index": chain_index,
                 }
                 usage = result.usage
                 if usage is not None:
@@ -378,14 +357,14 @@ async def run_with_model_chain(
                         slug,
                         result.error or "unknown error",
                     )
-                elif chain_index < len(runnable_chain) - 1:
-                    nxt_slug, _nxt_index = runnable_chain[chain_index + 1]
+                elif chain_index < len(chain) - 1:
+                    nxt = chain[chain_index + 1]
                     attempt_span.set_status("retryable", result.error or "unknown error")
                     logger.warning(
                         "» model chain slug={} failed (retryable): {} — advancing to {}",
                         slug,
                         result.error or "unknown error",
-                        nxt_slug,
+                        nxt,
                     )
                 else:
                     attempt_span.set_status("retryable", result.error or "unknown error")
@@ -398,25 +377,25 @@ async def run_with_model_chain(
                     )
 
             # The ``agent.attempt`` span has now closed and emitted. Emit
-            # "would-have-advanced" synthetic spans for any *runnable*
-            # chain entries that come after the winner so the trace tree
-            # reflects the configured chain, not just the entries the
-            # runtime loop happened to visit. W4.3 / issue §4 — visibility
-            # into why an earlier entry was skipped.
+            # "would-have-advanced" synthetic spans for any chain entries
+            # that come after the winner so the trace tree reflects the
+            # configured chain, not just the entries the runtime loop
+            # happened to visit. W4.3 / issue §4 — visibility into why
+            # an earlier entry was skipped.
             if terminal_status in {"ok", "error"}:
-                for follow_on_slug, follow_on_index in runnable_chain[chain_index + 1 :]:
+                for follow_on_slug in chain[chain_index + 1 :]:
                     chain_index += 1
                     _emit_advanced_attempt(
                         tracer,
                         parent_span_id=root_parent_id,
                         slug=follow_on_slug,
-                        fallback_index=follow_on_index,
+                        fallback_index=chain_index,
                     )
                 if terminal_status == "ok":
                     return slug, result
                 return slug, result
 
-            if chain_index < len(runnable_chain) - 1:
+            if chain_index < len(chain) - 1:
                 chain_index += 1
                 continue
 
