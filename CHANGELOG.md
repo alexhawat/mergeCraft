@@ -26,6 +26,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   have — it is a second opinion on top of the deterministic checks, never a
   replacement for them — and on a high blast-radius change (migrations, auth,
   secrets, irreversible infra) it cannot retire a finding on its own (#45)
+- Optional `tracing:` block on `.mergecraft/config.yaml` plus a local JSONL
+  sink (`type: jsonl_file`) under `src/mergecraft/tracing/`. Tracing is
+  **off by default** (convention 9) — a repo that does not declare the
+  block sees identical behaviour, identical performance, and zero egress.
+  The block accepts the shorthand `to: local_files` (D9), normalises it
+  into the canonical `sinks` list at parse time, and ships redaction that
+  reuses `analyzers/redact.py` and `utils/secrets.py` so `ghp_…` / `sk-…`
+  values and a deny-key list (`authorization`, `cookie`, `api_key`,
+  `secret`, `password`, `access_token`, `refresh_token`, `id_token`,
+  `bearer_token`, `auth_token`) cannot reach any sink (D7). The local
+  sink rotates daily (`YYYY-MM-DD.jsonl`), caps `attrs` at 64 KiB with a
+  truncation marker (D8), and purges files older than `retentionDays`
+  (default 30). Remote exporters (`logfire`, `otel`) and the optional
+  `tracing` extra land in Batch D (W8); W2 ships the surface and the
+  structural guarantee that no sink is ever reachable without going
+  through the redaction boundary. `docs/TRACING.md` carries the config
+  schema, sink types, the redaction guarantee, the retention rule, and
+  the D15 note that enabling a remote sink exports reviewed-repo content
+  (#56, W2)
 
 - Reviews now actually emit a Merge Evidence Packet. Every run that reviews a
   pull request writes one versioned JSON record of the findings, the analyzer
