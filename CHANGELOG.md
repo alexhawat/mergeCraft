@@ -85,6 +85,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the per-kind attribute table. `usage_entries` stays on `ToolState`
   for backward compat; the W3.5 consumer contract is now satisfied by
   the cost.* attributes on `llm.call` (#56, W4)
+- `logfire` and `otel` remote exporters (`OTLPSink`) — one OTLP pipeline
+  serving both sink types (D5). Imports of `logfire` / `opentelemetry`
+  are lazy and guarded inside the configure branch; with the optional
+  `[tracing]` extra uninstalled, `make ci-resume` passes (convention 5)
+  and `sink_factory` resolves `logfire` / `otel` to `NullSink` with a
+  clear warning (convention 8, no network call). `tokenRef` resolves
+  asynchronously against `MERGECRAFT_LOGFIRE_TOKEN` (W7.4); the resolved
+  token is held at runtime only — it never appears in config dumps, YAML
+  round-trips, or the `mergecraft config tracing` output (D5).
+  `action.yml` exposes `tracing`, `tracing-to`, `logfire-token`, and
+  `otel-endpoint` inputs (W7.7) so a consumer wires tracing without
+  touching YAML. The CLI adds `--tracing` / `--no-tracing`,
+  `--tracing-to`, `--trace-dir`, `--logfire-token`, `--otel-endpoint` on
+  `mergecraft diff-review`, plus `mergecraft config tracing` (resolved
+  settings with the token redacted) and `mergecraft traces <run-id>`
+  (read back a local run). The precedence is **CLI flag > env var >
+  `.mergecraft/config.yaml` > default (off)** (W7.6). The full
+  reference lives in `docs/TRACING.md` and the D14
+  `actions/upload-artifact@v4` snippet with `if: always()` is documented
+  in both `README.md` and `docs/TRACING.md` (#56, W8).
 
 - Reviews now actually emit a Merge Evidence Packet. Every run that reviews a
   pull request writes one versioned JSON record of the findings, the analyzer

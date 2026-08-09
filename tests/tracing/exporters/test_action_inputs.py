@@ -21,11 +21,6 @@ from typing import Any
 
 import pytest
 
-pytestmark = [
-    pytest.mark.xfail(reason="green after W8: action.yml inputs and mapping", strict=False),
-]
-
-
 # ---------------------------------------------------------------------------
 # W7.7 — action inputs map to TracingSettings.
 # ---------------------------------------------------------------------------

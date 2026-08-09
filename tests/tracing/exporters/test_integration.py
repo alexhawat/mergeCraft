@@ -14,10 +14,6 @@ from typing import Any
 
 import pytest
 
-pytestmark = [
-    pytest.mark.xfail(reason="green after W8: end-to-end exporter composition", strict=False),
-]
-
 
 def test_logfire_and_otel_sinks_compose_with_local_sink() -> None:
     """A single repo can configure ``local_files``, ``logfire``, and ``otel`` simultaneously.

@@ -15,15 +15,12 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
-pytestmark = [
-    pytest.mark.xfail(
-        reason="green after W8: mergecraft config tracing and traces CLI", strict=False
-    ),
-]
+if TYPE_CHECKING:
+    import pytest
 
 _RUNNER = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")

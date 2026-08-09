@@ -13,11 +13,6 @@ from typing import Any
 
 import pytest
 
-pytestmark = [
-    pytest.mark.xfail(reason="green after W8: logfire sink + token resolution", strict=False),
-]
-
-
 # ---------------------------------------------------------------------------
 # W7.2 — absent token = no export, no error.
 # ---------------------------------------------------------------------------

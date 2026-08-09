@@ -19,13 +19,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = [
-    pytest.mark.xfail(
-        reason="green after W8: optional [tracing] extra and degraded paths", strict=False
-    ),
-]
-
-
 # ---------------------------------------------------------------------------
 # W7.5 — extra uninstalled is a clean no-op (convention 5, D6).
 # ---------------------------------------------------------------------------
@@ -38,10 +31,9 @@ def test_importing_mergecraft_does_not_require_logfire() -> None:
     sink factory, not at module top level.
     """
     # Smoke test: importing mergecraft works in the current environment.
-    import mergecraft.tracing.exporters  # type: ignore[attr-defined]
-
     import mergecraft
     import mergecraft.tracing
+    import mergecraft.tracing.exporters  # type: ignore[attr-defined]
     import mergecraft.tracing.sinks
 
     assert mergecraft is not None

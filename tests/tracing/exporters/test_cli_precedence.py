@@ -22,11 +22,6 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-pytestmark = [
-    pytest.mark.xfail(reason="green after W8: CLI / env / config precedence", strict=False),
-]
-
-
 _RUNNER = CliRunner()
 _ANSI = __import__("re").compile(r"\x1b\[[0-9;]*m")
 
@@ -64,7 +59,7 @@ def test_default_is_off() -> None:
     ("layer", "set_up"),
     [
         ("cli_only", lambda env, config: None),  # CLI flag wins (set below)
-        ("env_only", lambda env, config: env.__setitem__("MERGECRAFT_TRACING", "true")),
+        ("env_only", lambda env, config: env.setenv("MERGECRAFT_TRACING", "true")),
         ("config_only", lambda env, config: config.write_text("tracing:\n  enabled: true\n")),
         ("default_only", lambda env, config: None),
     ],

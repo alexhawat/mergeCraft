@@ -1,10 +1,10 @@
 # Tracing — configuration, sinks, redaction, retention
 
-> Status: **active**. Batch A (W2) covers the config schema, the canonical
-> span model, the local JSONL sink, and the redaction boundary. Batch B
-> (W4) wires the span tree at every production seam — see "Span tree"
-> below. Batch D (W8) fills in the remote exporters, the optional extra,
-> and the CLI / `action.yml` surface. Reference issue: [#56][i56].
+> Status: **complete**. Batch A (W2) covers the config schema, canonical span
+> model, local JSONL sink, and redaction boundary; Batch B (W4) wires the
+> production span tree; Batch D (W8) ships remote exporters, the optional
+> extra, CLI / `action.yml` inputs, and complete documentation. Reference
+> issue: [#56][i56].
 
 [i56]: https://github.com/alexhawat/mergeCraft/issues/56
 
@@ -213,4 +213,94 @@ mergecraft.run                       (root; run_id, repo, pr_number,
 | Batch | Wave  | Scope                                                |
 | ----- | ----- | ---------------------------------------------------- |
 | C     | W6    | `stream-json` migration for per-tool spans            |
-| D     | W8    | `logfire` + `otel` exporters, CLI / action inputs, complete docs |
+| D     | W8    | `logfire` + `otel` exporters, CLI / action inputs, complete docs (DONE) |
+
+## Self-hosted endpoints (W8.1 / D5)
+
+The `otel` sink accepts any OTLP/HTTP collector URL. The token / API key
+travels as an `Authorization: Bearer …` header; the `headers` map on the
+config entry can carry extra static headers for proxies, tenants, or
+custom routing.
+
+```yaml
+tracing:
+  enabled: true
+  sinks:
+    - type: otel
+      endpoint: https://otel.internal.example.com:4318/v1/traces
+      headers:
+        x-tenant: mergecraft
+```
+
+For Logfire, the endpoint is hard-coded to the public ingest URL
+(`https://logfire.pydantic.dev/api/v1/otlp/v1/traces`); the `project`
+field is forwarded as the `x-logfire-project` header. The token is
+resolved through `tokenRef` (D5) — see *Token resolution* below.
+
+## Token resolution (W8.2 / D5)
+
+`logfire` tokens are referenced by name, never inlined. The factory
+resolves a `tokenRef` against `os.environ` at run time; when the
+reference is unset, the resolver falls back to the canonical
+`MERGECRAFT_LOGFIRE_TOKEN` env var. The resolved value is held in
+runtime memory only — it never appears in config dumps, YAML
+round-trips, or the `mergecraft config tracing` output. The CLI
+renders the value as `*** (redacted)` even in the table form.
+
+When the token cannot be resolved, the sink is constructed but emits a
+warning and degrades to a no-op for the network path. The local
+`jsonl_file` sink (when configured) keeps writing.
+
+## Action inputs (W8.5 / W7.7)
+
+`action.yml` exposes four inputs so a consuming repo can wire tracing
+without touching `.mergecraft/config.yaml`:
+
+| Input            | Maps to                                              |
+| ---------------- | ---------------------------------------------------- |
+| `tracing`        | `tracing.enabled` (overrides config)                 |
+| `tracing-to`     | `tracing.to` shorthand (overrides config)            |
+| `logfire-token`  | resolved logfire token (D5 — held at runtime only)   |
+| `otel-endpoint`  | `tracing.sinks[].endpoint` for the `otel` sink type  |
+
+The Action wraps `${{ secrets.LOGFIRE_TOKEN }}` into `logfire-token`
+so the secret never appears in the workflow file.
+
+## CLI surface (W8.4 / W7.6)
+
+```text
+mergecraft diff-review --tracing|--no-tracing [--tracing-to <shorthand>] \
+                       [--trace-dir <path>] [--logfire-token <token>] \
+                       [--otel-endpoint <url>]
+mergecraft config tracing     # render resolved state with token redacted
+mergecraft traces <run-id>    # read back local JSONL spans for a run id
+```
+
+The precedence order is **CLI flag > env var > `.mergecraft/config.yaml`
+> default (off)**. `--no-tracing` wins over any lower-precedence
+`true`. The full table is asserted by `tests/tracing/exporters/test_cli_precedence.py`.
+
+`mergecraft config tracing` does **not** require the `tracing` extra
+— it operates on resolved settings, not on the live exporters.
+
+## Artifact upload (W8.6 / D14)
+
+The Action writes local traces under `.mergecraft/traces/`. A typical
+workflow ships them out of CI with `actions/upload-artifact@v4`:
+
+```yaml
+- uses: alexhawat/mergecraft@<ref>
+  with:
+    tracing: "true"
+    tracing-to: local_files
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: mergecraft-traces
+    path: .mergecraft/traces/
+```
+
+`if: always()` ensures the artifact is uploaded even when the review
+exits non-zero — the trace is the most useful when the run failed.
+The path is `.mergecraft/traces/` by default; override with the
+`trace_dir` config field or the `--trace-dir` flag.

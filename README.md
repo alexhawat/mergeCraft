@@ -357,6 +357,8 @@ Inspect what was seeded into a given run with `mergecraft learnings influence --
 | `mergecraft diff-review` | Offline local git/patch review (no GitHub PR posting); optional `--json` for structured findings |
 | `mergecraft gha` | Action runtime entry (used by Docker Action) |
 | `mergecraft gha token [--post]` | Installation token mint / post write-back |
+| `mergecraft config tracing` | Show resolved tracing config with the logfire token redacted |
+| `mergecraft traces <run-id>` | Read back local JSONL traces for a run id (re-redacts on render) |
 | `mergecraft learnings influence [--repo PATH] [--json]` | List active + staging learnings entries with their provenance record (run id, author, trust tier, timestamp) |
 | `mergecraft learnings active [--repo PATH] [--json]` | List only the active (promoted) entries |
 | `mergecraft learnings staging [--repo PATH] [--json]` | List only the staging (quarantined) entries |
@@ -383,12 +385,72 @@ uv run mergecraft diff-review --diff changes.patch --json findings.json
 invoking an agent (no LLM keys required). With `--json`, `--dry-run` does not
 create the JSON file.
 
+## Tracing
+
+Tracing is opt-in and **off by default** — a repo that does not declare a
+`tracing:` block in `.mergecraft/config.yaml` never touches the filesystem
+and never makes a network call. When enabled, mergeCraft writes a per-run
+span tree (review, agent turn, tool call, LLM call) to local JSONL files
+and, behind the optional `[tracing]` extra, to remote OTLP endpoints
+(Logfire or any self-hosted collector). Full reference:
+[`docs/TRACING.md`](docs/TRACING.md).
+
+```yaml
+# .mergecraft/config.yaml
+tracing:
+  enabled: true
+  retentionDays: 30
+  redaction: true
+  sinks:
+    - type: jsonl_file
+      path: .mergecraft/traces/
+    # Behind `pip install merge-craft[tracing]`:
+    # - type: logfire        # requires tokenRef or MERGECRAFT_LOGFIRE_TOKEN
+    # - type: otel           # requires endpoint
+```
+
+Wire tracing from the Action without editing config:
+
+```yaml
+- uses: alexhawat/mergecraft@<ref>
+  with:
+    tracing: "true"
+    tracing-to: local_files   # or `logfire` / `otel`
+    logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
+    otel-endpoint: https://otel.internal.example.com:4318/v1/traces
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: mergecraft-traces
+    path: .mergecraft/traces/
+```
+
+Inspect a run after the fact:
+
+```bash
+uv run mergecraft config tracing     # resolved sinks, token redacted
+uv run mergecraft traces <run-id>    # read back local spans
+```
+
+> Enabling a **remote** sink (`logfire`, `otel`) exports reviewed-repo
+> content — the prompts the reviewer received, the tool inputs and outputs
+> it produced, and the model's reasoning — to the configured endpoint
+> using the operator's token or API key. **BYOK** means the operator owns
+> both the credential and the responsibility for what leaves the runner.
+> Scope workflows at the GitHub Actions level
+> (`if: github.event.pull_request.head.repo.fork == false`) when the
+> reviewer should not exfiltrate fork-PR content. See `docs/TRACING.md`
+> (D15).
+
 ## Action inputs
 
 Same contract as upstream mergecraft: `prompt`, `prompt_file`, `timeout`, `model`,
 `cwd`, `push`, `shell`, `status_checks`, `output_schema`, `token` → output `result`,
 plus `allow_pr_target_comments` (default `false`) — see
 [Comment-trigger authorization](#comment-trigger-authorization).
+
+Tracing inputs (`tracing`, `tracing-to`, `logfire-token`, `otel-endpoint`) — see
+[Tracing](#tracing).
 
 ### Native event triggers
 

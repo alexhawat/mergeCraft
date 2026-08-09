@@ -12,13 +12,6 @@ from typing import Any
 
 import pytest
 
-pytestmark = [
-    pytest.mark.xfail(
-        reason="green after W8: OTLP exporter behind a batch processor", strict=False
-    ),
-]
-
-
 # ---------------------------------------------------------------------------
 # W7.1 — `logfire` and `otel` share one code path (D5).
 # ---------------------------------------------------------------------------

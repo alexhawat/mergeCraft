@@ -78,6 +78,43 @@ def run(
         "--dry-run",
         help="Materialize the diff and print the Review prompt without invoking an agent.",
     ),
+    tracing: bool | None = typer.Option(
+        None,
+        "--tracing/--no-tracing",
+        help=(
+            "Override tracing enablement for this invocation. "
+            "Wins over MERGECRAFT_TRACING and .mergecraft/config.yaml (W8.4 / W7.6)."
+        ),
+    ),
+    tracing_to: str | None = typer.Option(
+        None,
+        "--tracing-to",
+        help=(
+            "Override the tracing shorthand: local_files, logfire, or otel. "
+            "Wins over MERGECRAFT_TRACING_TO and the config block (W8.4 / W7.6)."
+        ),
+    ),
+    trace_dir: Path | None = typer.Option(
+        None,
+        "--trace-dir",
+        help="Override the jsonl_file sink path for local traces (W8.4 / W7.6).",
+    ),
+    logfire_token: str | None = typer.Option(
+        None,
+        "--logfire-token",
+        help=(
+            "Resolve the logfire token directly. Wins over MERGECRAFT_LOGFIRE_TOKEN "
+            "and the config block (W8.4 / W7.6)."
+        ),
+    ),
+    otel_endpoint: str | None = typer.Option(
+        None,
+        "--otel-endpoint",
+        help=(
+            "Override the OTLP collector endpoint. Wins over MERGECRAFT_OTEL_ENDPOINT "
+            "and the config block (W8.4 / W7.6)."
+        ),
+    ),
 ) -> None:
     """Review a local git diff offline (no GitHub Action / PR posting).
 

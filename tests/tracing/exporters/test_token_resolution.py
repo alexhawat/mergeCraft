@@ -16,10 +16,6 @@ import re
 import pytest
 from typer.testing import CliRunner
 
-pytestmark = [
-    pytest.mark.xfail(reason="green after W8: tokenRef resolution and redaction", strict=False),
-]
-
 # A canary that follows the real Logfire-token shape but is unique to these
 # tests; any leaked occurrence is a hard failure.
 _CANARY = "logfire-canary-abcdef0123456789-AAA"
