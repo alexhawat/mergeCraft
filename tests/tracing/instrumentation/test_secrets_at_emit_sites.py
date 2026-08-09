@@ -28,7 +28,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from tests.tracing.instrumentation.conftest import (
     make_agent_result,
     make_agent_usage,
@@ -73,7 +72,6 @@ def _serialised_events(sink_events: list[Any]) -> str:
     )
 
 
-@pytest.mark.xfail(reason="green after W4: redaction at emit sites", strict=False)
 def test_no_secret_value_reaches_any_sink_from_real_emit_sites(captured_sink: Any) -> None:
     """W3.7 (deny-value) — ``ghp_…`` / ``sk-…`` substrings are redacted at emit time.
 
@@ -105,7 +103,6 @@ def test_no_secret_value_reaches_any_sink_from_real_emit_sites(captured_sink: An
     assert _SK_CANARY not in serialised, f"unredacted sk- canary reached sink: {serialised[:500]}"
 
 
-@pytest.mark.xfail(reason="green after W4: redaction at emit sites", strict=False)
 def test_agent_cli_argv_is_redacted(captured_sink: Any) -> None:
     """W3.7 (D7) — ``agent.cli_argv`` must be redacted at the emit site.
 
@@ -145,7 +142,6 @@ def test_agent_cli_argv_is_redacted(captured_sink: Any) -> None:
     assert canary not in serialised, f"argv canary leaked through cli_argv: {serialised[:500]}"
 
 
-@pytest.mark.xfail(reason="green after W4: redaction at emit sites", strict=False)
 def test_deny_key_attributes_are_redacted(captured_sink: Any) -> None:
     """W3.7 (deny-key) — values of deny-key attrs are replaced wholesale."""
     settings = _build_settings()

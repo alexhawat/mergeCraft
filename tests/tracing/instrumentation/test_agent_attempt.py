@@ -110,7 +110,6 @@ def test_one_agent_attempt_span_for_skipped_entry(captured_sink: Any) -> None:
     assert attempts[0].attrs.get("model.fallback_index") == 0
 
 
-@pytest.mark.xfail(reason="green after W4: agent.attempt per fallback entry", strict=False)
 def test_one_agent_attempt_span_per_retryable_failure(captured_sink: Any) -> None:
     """W3.2 (retried) — entry 0 fails retryably; entry 1 succeeds.
 
@@ -146,7 +145,6 @@ def test_one_agent_attempt_span_per_retryable_failure(captured_sink: Any) -> Non
     assert attempts[1].status == "ok"
 
 
-@pytest.mark.xfail(reason="green after W4: agent.attempt per fallback entry", strict=False)
 def test_one_agent_attempt_span_when_chain_is_singleton(captured_sink: Any) -> None:
     """W3.2 (edge — single-entry chain) — exactly one span, index 0."""
     settings = _build_settings(models=["anthropic/claude-sonnet"])
@@ -160,7 +158,6 @@ def test_one_agent_attempt_span_when_chain_is_singleton(captured_sink: Any) -> N
     assert attempts[0].attrs.get("model.fallback_index") == 0
 
 
-@pytest.mark.xfail(reason="green after W4: agent.attempt per fallback entry", strict=False)
 def test_agent_attempt_span_carries_provider_model_and_mode(captured_sink: Any) -> None:
     """W3.2 (attrs) — the issue's §4 attributes on ``agent.attempt``.
 

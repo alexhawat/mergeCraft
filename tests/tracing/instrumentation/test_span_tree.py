@@ -94,7 +94,6 @@ def test_span_tree_shape(captured_sink: Any) -> None:
             )
 
 
-@pytest.mark.xfail(reason="green after W4: span tree instrumentation", strict=False)
 def test_correlation_attributes_present(
     captured_sink: Any, correlation_fields: dict[str, Any]
 ) -> None:
@@ -137,7 +136,6 @@ def test_correlation_attributes_present(
         )
 
 
-@pytest.mark.xfail(reason="green after W4: span tree instrumentation", strict=False)
 def test_instrumentation_is_noop_when_disabled(disabled_tracing: Any, tmp_path: Path) -> None:
     """W3.6 / convention 9 — tracing off means no spans and no filesystem work.
 
@@ -161,7 +159,6 @@ def test_instrumentation_is_noop_when_disabled(disabled_tracing: Any, tmp_path: 
     assert hasattr(disabled_tracing, "write")
 
 
-@pytest.mark.xfail(reason="green after W4: span tree instrumentation", strict=False)
 def test_run_root_is_single_when_tracing_enabled(captured_sink: Any) -> None:
     """W3.1 (negative) — only one root span is emitted per run.
 

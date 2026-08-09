@@ -55,7 +55,6 @@ def _drive_chain(settings: Any, results: list[Any]) -> Any:
     return asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
 
 
-@pytest.mark.xfail(reason="green after W4: usage_entries consumer or deletion", strict=False)
 def test_usage_entries_are_consumed(captured_sink: Any) -> None:
     """W3.5 — token + cost attributes reach ``llm.call`` spans.
 
@@ -95,7 +94,6 @@ def test_usage_entries_are_consumed(captured_sink: Any) -> None:
         )
 
 
-@pytest.mark.xfail(reason="green after W4: usage_entries consumer or deletion", strict=False)
 def test_usage_entries_field_may_be_deleted(captured_sink: Any) -> None:
     """W3.5 — D11 alternative: the field may be deleted.
 
