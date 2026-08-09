@@ -41,6 +41,72 @@ def enrich_analyzer_comment_body(body: str) -> str:
     return body
 
 
+_FRESH_PR_TRIGGERS: frozenset[str] = frozenset(
+    {"pull_request_opened", "pull_request_ready_for_review"}
+)
+
+
+def _is_rereview_trigger(trigger: str | None) -> bool:
+    """Return True iff the run's trigger is a re-review (not a fresh PR).
+
+    A re-review is any trigger that is **not** a fresh PR — synchronize,
+    review_requested, review_submitted, review_comment, issue_comment, or
+    similar. The trigger vocabulary is in
+    ``mergecraft.utils.payload.PayloadTrigger``; the two values that
+    name a fresh PR are the ones we exclude.
+
+    Args:
+        trigger: The trigger string from the run's payload event, or
+            ``None`` for non-GitHub / offline runs.
+
+    Returns:
+        True when the trigger is not a fresh PR. Returns False when
+        the trigger is unknown / unset — an unknown trigger is treated
+        as a fresh PR so we never surface the suggestion on a run
+        whose re-review status we cannot prove.
+    """
+    if not trigger:
+        return False
+    return trigger not in _FRESH_PR_TRIGGERS
+
+
+def _maybe_suggest_eval_add(ctx: ToolContext) -> None:
+    """Log a one-line suggestion to add the run to the eval bank (#44, W12.4).
+
+    Fires when:
+
+    - ``ctx.suggest_eval_add`` is True (opt-in via action input).
+    - The trust tier is ``trusted`` (the suggestion is never surfaced
+      on fork PRs or untrusted runs).
+    - The trigger is a re-review (not a fresh PR; fresh PRs do not
+      produce a *rejected / reverted* failure mode yet).
+    - The run produced no positive findings.
+
+    The function only logs — it never auto-adds. The eval bank is for
+    *operator review*, not auto-capture.
+    """
+    if not getattr(ctx, "suggest_eval_add", False):
+        return
+    if ctx.trust_tier != "trusted":
+        return
+    trigger = ctx.payload.event.trigger
+    if not _is_rereview_trigger(trigger):
+        return
+    # Positive signal: any analyzer finding attributed to the PR. The
+    # analyzer pipeline writes into ``tool_state.analyzer_run.findings``
+    # (a list of dicts); a missing or empty list means the run found
+    # nothing.
+    analyzer_run = getattr(ctx.tool_state, "analyzer_run", None)
+    positive_findings = bool(getattr(analyzer_run, "findings", None))
+    if positive_findings:
+        return
+    logger.info(
+        "» suggest_eval_add: re-review produced no positive findings; "
+        "consider capturing this run as a case via `mergecraft eval add` "
+        "(never auto-added; #44, W12.4)",
+    )
+
+
 def create_pull_request_review_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         pull_number = int(params["pull_number"])
@@ -147,6 +213,7 @@ def create_pull_request_review_tool(ctx: ToolContext):
             node_id=str(result.get("node_id") or ""),
             reviewed_sha=payload.get("commit_id"),
         )
+        _maybe_suggest_eval_add(ctx)
         # #41 / W2.1 — the agent's ``approved`` boolean is recorded here as
         # the legacy ``ApprovalRecord`` and (separately, when the packet is
         # built at the end of the run) as the packet's ``self_assessment``

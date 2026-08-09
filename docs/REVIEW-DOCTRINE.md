@@ -145,6 +145,40 @@ must anchor every surviving finding. The fence is the technical mechanism that m
 this rule enforceable — without it, prose and instruction share a channel and a
 sufficiently verbose injection can steer a review.
 
+## Failure memory
+
+The **eval bank** is mergeCraft's failure memory — the durable, file-backed case store
+for failures a run should have caught and did not. The doctrine is **replay, not
+re-execution.** A case captures a *failure mode*, not a *replay driver*. The replay
+engine is a pure function of the case and the running code's verdict; the bank does not
+re-run the agent, the analyzers, or the merge-evidence pipeline.
+
+The bank surfaces two distinct failure modes:
+
+- **`rejected`** — the reviewer said *no* before merge. The case asserts the packet
+  should have produced a `block` verdict and the related finding.
+- **`reverted`** — the merge made it past the reviewer but had to be rolled back. The
+  case asserts the packet should have caught the regression that the revert exposed.
+
+A failure mode is captured as a case by the operator, never by the agent. The
+`create_pull_request_review` MCP tool logs a one-line suggestion at `logger.info` when
+the run produced no positive findings on a re-review with trusted provenance and the
+operator has opted in via the `suggest_eval_add` action input. The agent never
+auto-adds — the bank is for *operator review*, not auto-capture.
+
+The bank's promoted-tests workflow (`mergecraft eval promote <case-id>`) is the
+regression net: a case promoted into `tests/evals/permanent/` re-runs the replay on
+every CI. Drift surfaces as a failing pytest assertion alongside the rest of the suite.
+
+The packet records the breadcrumb-and-summary of which bank cases the run attached to
+its verdict via `MergeEvidencePacket.evals` (a typed `list[EvalMetadata]`; schema
+`1.2.0`). The full case continues to live under `evals/cases/<case_id>.md`; the packet
+row is the operator-facing reference.
+
+The cross-reference is **one-way**: the doctrine refers to the bank, the bank refers
+back to the doctrine. The bank does not embed doctrine; the doctrine does not embed
+case payloads. The protocol is the join key (`case_id`).
+
 ## Provenance
 
 (Harvested from pullfrog-py commits; see the heading above for sources.)

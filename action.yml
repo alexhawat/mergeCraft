@@ -42,6 +42,14 @@ inputs:
     description: "GitHub-provided token with job-scoped permissions."
     required: false
     default: ${{ github.token }}
+  suggest_eval_add:
+    description: |
+      Opt-in (W12.4 / #44): when true, log a logger.info suggestion to add
+      the run to the eval bank when the run produced no positive
+      findings, the trust tier is trusted, and the trigger is a re-review
+      (not a fresh PR). Default off; mergeCraft never auto-adds.
+    required: false
+    default: "false"
 
 outputs:
   result:
@@ -67,6 +75,7 @@ runs:
     INPUT_OUTPUT_SCHEMA: ${{ inputs.output_schema }}
     INPUT_ALLOW_PR_TARGET_COMMENTS: ${{ inputs.allow_pr_target_comments }}
     INPUT_TOKEN: ${{ inputs.token }}
+    INPUT_SUGGEST_EVAL_ADD: ${{ inputs.suggest_eval_add }}
 
 branding:
   icon: "code"

@@ -127,7 +127,7 @@ invalid — there is no file at that path to delete.
 
 ## CLI
 
-The bank ships three subcommands under `mergecraft eval`. All three
+The bank ships four subcommands under `mergecraft eval`. All four
 operate on the default `evals/cases/` directory; pass `--bank` to
 override.
 
@@ -165,6 +165,8 @@ List cases in the bank. Optional filters:
 ```bash
 mergecraft eval list                              # every case
 mergecraft eval list --category missed_finding    # only missed findings
+mergecraft eval list --category rejected          # only rejected-pr cases
+mergecraft eval list --category reverted          # only reverted-pr cases
 mergecraft eval list --since 2026-08-01           # submitted since
 mergecraft eval list --id-prefix synthetic        # synthetic test fixtures
 mergecraft eval list --json                       # JSON output
@@ -199,6 +201,109 @@ The diff has three statuses:
 | `regression` | The current verdict differs from the expected one. |
 | `blocked` | No current verdict was provided (the replay engine is unavailable). |
 
+### `mergecraft eval promote <case-id>`
+
+Promote a case into a permanent pytest test under `tests/evals/permanent/`:
+
+```bash
+mergecraft eval promote synthetic-001 \
+  --target-dir tests/evals/permanent
+```
+
+The promoted test re-runs the case against the current code via
+`mergecraft.evals.store.replay_case` and fails when the replay verdict
+drifts from the case's recorded expected decision. The default replay
+verdict is `None`, so a fresh promotion does not break the suite;
+operators wire the running code's verdict via the
+`MERGECRAFT_PERMANENT_CURRENT_DECISION` env var to surface drift.
+
+The test self-contains the case payload (round-tripped through
+`Case.model_validate_json`) so it carries no bank-disk dependency. The
+function name is `test_permanent_<case_id>` and the file name is
+`test_permanent_<case_id>.py`. Promoting twice without `--overwrite`
+exits non-zero — the CLI refuses to clobber a committed test.
+
+## Workflow: rejected & reverted PRs
+
+The two most common failure modes that should never recur are **rejected**
+PRs (a maintainer rejected the merge) and **reverted** PRs (the merge
+shipped but was reverted). They are distinct failure modes in the bank:
+
+- `rejected` — the reviewer said *no* before merge. The case asserts the
+  packet should have produced a `block` verdict and the related finding.
+- `reverted` — the merge made it past the reviewer but had to be rolled
+  back. The case asserts the packet should have caught the regression
+  that the revert exposed.
+
+The bank surfaces both with first-class filters:
+
+```bash
+mergecraft eval list --category rejected   # only rejected-pr cases
+mergecraft eval list --category reverted   # only reverted-pr cases
+```
+
+The `--category` filter is exact-match on the case's `category` field;
+both values are accepted by the CLI's `--category` argument and the
+canonical `CATEGORY_REJECTED` / `CATEGORY_REVERTED` literals are exported
+from `mergecraft.evals.store` for downstream consumers.
+
+### End-to-end: from a reverted PR to a permanent test
+
+1. A revert PR is filed. The operator notices the bank has no case for
+   that failure mode yet.
+2. The operator hand-writes a case:
+
+   ```bash
+   mergecraft eval add \
+     --id <short-sha> \
+     --title "reverted: missed the regression on src/x.py" \
+     --category reverted \
+     --failure-mode <failure-mode> \
+     --expected-finding "src/x.py:42: <the regression>" \
+     --expected-decision block \
+     --body "..."
+   ```
+
+3. The case is replayed to confirm it captures the failure:
+
+   ```bash
+   mergecraft eval replay <short-sha> --current-decision <whatever-the-running-code-says>
+   ```
+
+   The CLI exits `2` on a regression, `0` on pass, so a CI loop can
+   latch on it.
+
+4. The case is promoted into a permanent test that pytest will run on
+   every CI:
+
+   ```bash
+   mergecraft eval promote <short-sha>
+   ```
+
+   The generated test embeds the case payload and re-runs the
+   replay. The next CI run that drifts the verdict fails the
+   permanent test alongside the rest of the suite.
+
+5. The packet's `evals` section records the replay as a typed
+   `EvalMetadata` row (schema `1.2.0`). The `MergeEvidencePacket.evals`
+   list is the breadcrumb-and-summary of which bank cases the run
+   attached to its verdict.
+
+### Auto-prompt on re-review
+
+The `create_pull_request_review` MCP tool logs a one-line suggestion at
+`logger.info` when:
+
+- The action input `suggest_eval_add` is `true` (default `false`).
+- The trust tier is `trusted` (the suggestion is never surfaced on
+  fork PRs or untrusted runs).
+- The trigger is a re-review — not a fresh PR (fresh PRs do not yet
+  produce a *rejected / reverted* failure mode).
+- The run produced no positive findings.
+
+The log line is informational. The agent never auto-adds. The eval bank
+is for *operator review*, not auto-capture.
+
 ## Governance rules
 
 The wave plan pins the following rules (D5, D13, D11):
@@ -226,12 +331,21 @@ The wave plan pins the following rules (D5, D13, D11):
 ## Source
 
 - `src/mergecraft/evals/store.py` — the pure core (schema, parse,
-  render, list, replay).
+  render, list, replay, promote-to-permanent-test).
 - `src/mergecraft/cli/eval_cmd.py` — the I/O shell (`add`, `list`,
-  `replay`).
-- `tests/evals/test_store.py`, `tests/evals/test_replay.py` — the
-  pinned tests for the store and the replay diff.
-- `tests/cli/test_eval_cmd.py` — the CLI tests.
+  `replay`, `promote`).
+- `src/mergecraft/evidence/packet.py` — the typed `EvalMetadata`
+  breadcrumb on `MergeEvidencePacket.evals` (W12.2; schema `1.2.0`).
+- `src/mergecraft/mcp/review.py` — the `create_pull_request_review` MCP
+  tool + the `_maybe_suggest_eval_add` auto-prompt (W12.4).
+- `tests/evals/test_store.py`, `tests/evals/test_replay.py`,
+  `tests/evals/test_promote.py` — the pinned tests for the store,
+  the replay diff, and the promote-to-permanent-test workflow.
+- `tests/evidence/test_packet_evals.py` — the typed `EvalMetadata`
+  packet tests.
+- `tests/cli/test_eval_cmd.py` — the CLI tests (including the
+  `--category=rejected` / `--category=reverted` filters).
 - `docs/test-plans/cross-file-deps.md` — the cross-file contract the
   bank inherits from the security Batch C plan.
-- Issue [#51](https://github.com/alexhawat/mergeCraft/issues/51).
+- Issue [#44](https://github.com/alexhawat/mergeCraft/issues/44),
+  Issue [#51](https://github.com/alexhawat/mergeCraft/issues/51).

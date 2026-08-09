@@ -12,8 +12,12 @@ recorded ``self_assessment`` from the computed ``decision`` verdict — the
 agent's ``approved`` boolean is now carried as a dedicated ``SelfAssessment``
 row alongside the ``Decision`` so the two signals are independently
 inspectable and the verdict is never a function of the agent's prose alone.
-Batches B / C / E extend the nullable-until-later sections (blast radius,
-trajectory, evals).
+W12 (#44) wires the Failure Memory and Eval Bank into the ``evals`` section:
+a list of :class:`mergecraft.evals.store.EvalMetadata` rows (lightweight
+summaries; the full case lives under ``evals/cases/``).
+
+Batches B / C extend the nullable-until-later sections (blast radius,
+trajectory).
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from pydantic.fields import FieldInfo
 
 from mergecraft.analyzers.finding import Finding
 from mergecraft.classify import BlastRadiusClassification  # noqa: TC001
+from mergecraft.evals.store import EvalMetadata
 
 # D7 — the packet is versioned from day one. Any field-level change (additive
 # or otherwise) that is not accompanied by a bump of this literal must fail
@@ -39,7 +44,13 @@ from mergecraft.classify import BlastRadiusClassification  # noqa: TC001
 # - 1.2.0 — W5 (#42) replaces the untyped ``blast_radius`` placeholder with
 #   ``BlastRadiusClassification``. The section remains optional, but populated
 #   packets now carry a validated lane, reason, next action, and lane policy.
-PACKET_SCHEMA_VERSION = "1.2.0"
+# - 1.3.0 — W12 (#44) promotes the ``evals`` section from ``dict[str, Any]``
+#   to ``list[EvalMetadata]``. Additive (minor bump); a packet that
+#   previously set ``evals`` to ``None`` continues to validate, and a
+#   packet that previously set it to a dict is no longer wire-compatible
+#   — no live consumer reads the legacy dict shape today, so the bump is
+#   safe.
+PACKET_SCHEMA_VERSION = "1.3.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]
@@ -139,9 +150,13 @@ class MergeEvidencePacket(BaseModel):
     """The versioned, structured record of one mergeCraft run.
 
     Top-level required fields are the ones every run can populate today.
-    ``blast_radius``, ``trajectory``, and ``evals`` are nullable until later
+    ``blast_radius`` and ``trajectory`` remain nullable until later
     batches land — they are *typed* ``| None`` here, not omitted, so the
-    packet's downstream contract is fixed from W1 (D4).
+    packet's downstream contract is fixed from W1 (D4). The ``evals``
+    section is typed ``list[EvalMetadata] | None`` from W12 (#44): each
+    row is a lightweight summary of a replay run attached to this
+    packet's verdict; the full case continues to live under
+    ``evals/cases/<case_id>.md``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -156,7 +171,7 @@ class MergeEvidencePacket(BaseModel):
     decision: Decision | None = None
     blast_radius: BlastRadiusClassification | None = None
     trajectory: dict[str, Any] | None = None
-    evals: dict[str, Any] | None = None
+    evals: list[EvalMetadata] | None = None
 
 
 def packet_output_schema() -> dict[str, Any]:
@@ -170,7 +185,8 @@ def packet_output_schema() -> dict[str, Any]:
     Pydantic v2 emits nested models via ``$ref`` into ``$defs`` by default,
     which would leak the wrong shape into the WA-T.1 assertion. The Finding
     schema is therefore inlined into the ``findings.items`` slot, so the
-    packet's wire schema matches ``Finding`` field-for-field (D3).
+    packet's wire schema matches ``Finding`` field-for-field (D3). The
+    ``evals`` section inlines ``EvalMetadata`` for the same reason.
     """
     schema = MergeEvidencePacket.model_json_schema()
     findings = schema.get("properties", {}).get("findings")
@@ -178,6 +194,11 @@ def packet_output_schema() -> dict[str, Any]:
         items = findings.get("items")
         if isinstance(items, dict) and "$ref" in items:
             findings["items"] = Finding.model_json_schema()
+    evals = schema.get("properties", {}).get("evals")
+    if isinstance(evals, dict):
+        items = evals.get("items")
+        if isinstance(items, dict) and "$ref" in items:
+            evals["items"] = EvalMetadata.model_json_schema()
     return schema
 
 

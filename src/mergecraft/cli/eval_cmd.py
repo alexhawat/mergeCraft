@@ -31,13 +31,18 @@ from rich.console import Console
 
 from mergecraft.evals.store import (
     CASE_FILE_SUFFIX,
+    CATEGORY_REJECTED,
+    CATEGORY_REVERTED,
     DEFAULT_BANK_DIR,
+    FAILURE_CATEGORIES,
+    PERMANENT_TEST_DIR_NAME,
     Case,
     ReplayDiff,
     add_case,
     list_cases,
     load_case,
     replay_case,
+    write_permanent_test,
 )
 from mergecraft.utils.learnings import LearningProvenance
 
@@ -356,4 +361,72 @@ def replay(
         raise typer.Exit(2)
 
 
-__all__ = ["app"]
+# ── promote ────────────────────────────────────────────────────────────
+
+
+def _default_permanent_dir() -> Path:
+    """Return the default permanent-test target directory.
+
+    Resolves against the current working directory so the CLI works
+    regardless of where it is invoked from. Tests pass an explicit
+    ``--target-dir`` to override.
+    """
+    return Path("tests") / "evals" / PERMANENT_TEST_DIR_NAME
+
+
+@app.command("promote")
+def promote(
+    case_id: str = typer.Argument(
+        ...,
+        help="Case id to promote into a permanent pytest test.",
+    ),
+    target_dir: Path | None = typer.Option(
+        None,
+        "--target-dir",
+        help=("Directory to write the promoted test into (default: tests/evals/permanent/)."),
+    ),
+    bank: Path | None = typer.Option(
+        None,
+        "--bank",
+        help="Bank directory (default: evals/cases/).",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Overwrite an existing permanent test for the same case.",
+    ),
+) -> None:
+    """Promote a case into a permanent pytest test file (#44, W12.1).
+
+    The promoted test re-runs the case against the current code via
+    ``mergecraft.evals.store.replay_case`` and fails when the replay
+    verdict drifts from the case's recorded expected decision. The
+    default replay verdict is ``None`` so a fresh promotion does not
+    break the suite; operators wire the running code's verdict via
+    the ``MERGECRAFT_PERMANENT_CURRENT_DECISION`` env var to surface
+    drift.
+    """
+    bank_dir = _bank_dir(bank)
+    case_path = _case_path(bank_dir, case_id)
+    if not case_path.is_file():
+        _bail(f"case {case_id!r} not found at {case_path}")
+    try:
+        case = load_case(case_path)
+    except Exception as exc:
+        _bail(f"could not load case {case_id!r}: {exc}")
+    out_dir = target_dir if target_dir is not None else _default_permanent_dir()
+    try:
+        target = write_permanent_test(out_dir, case, overwrite=overwrite)
+    except FileExistsError:
+        _bail(
+            f"permanent test for case {case_id!r} already exists at {out_dir}; "
+            "use --overwrite to replace"
+        )
+    except ValueError as exc:
+        _bail(str(exc))
+    except OSError as exc:
+        _bail(f"could not write permanent test to {out_dir}: {exc}")
+    console.print(f"[green]promoted case {case_id}[/green] → {target}")
+
+
+__all__ = ["CATEGORY_REJECTED", "CATEGORY_REVERTED", "FAILURE_CATEGORIES", "app"]

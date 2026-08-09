@@ -21,6 +21,7 @@ from mergecraft.utils.time_parse import (
 )
 
 StatusChecksInput = Literal["disabled", "enabled"]
+SuggestEvalAddInput = Literal["disabled", "enabled"]
 ProgressCommentType = Literal["issue", "review"]
 
 COLLABORATOR_PERMISSIONS: frozenset[AuthorPermission] = frozenset({"admin", "maintain", "write"})
@@ -114,8 +115,11 @@ class ActionInputs(BaseModel):
     cwd: str | None = None
     output_schema: str | None = None
     analyzers: str | None = None
+    suggest_eval_add: SuggestEvalAddInput | None = None
 
-    @field_validator("push", "shell", "status_checks", "analyzers", mode="before")
+    @field_validator(
+        "push", "shell", "status_checks", "analyzers", "suggest_eval_add", mode="before"
+    )
     @classmethod
     def _empty_to_none(cls, value: object) -> object:
         if value == "" or value is None:
@@ -480,6 +484,7 @@ def resolve_non_prompt_inputs() -> ActionInputs:
             "push": get_action_input("push") or None,
             "shell": get_action_input("shell") or None,
             "status_checks": get_action_input("status_checks") or None,
+            "suggest_eval_add": get_action_input("suggest_eval_add") or None,
         }
     )
 
@@ -572,6 +577,7 @@ def resolve_payload(
         "push": inputs.push or settings.push or "restricted",
         "shell": resolved_shell,
         "statusChecks": inputs.status_checks == "enabled",
+        "suggestEvalAdd": inputs.suggest_eval_add == "enabled",
         "proxyModel": None,
     }
 

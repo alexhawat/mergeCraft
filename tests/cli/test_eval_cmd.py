@@ -26,12 +26,13 @@ runner = CliRunner()
 
 
 def test_eval_help_lists_subcommands() -> None:
-    """``mergecraft eval --help`` surfaces the three subcommands."""
+    """``mergecraft eval --help`` surfaces the four subcommands."""
     result = runner.invoke(app, ["eval", "--help"])
     assert result.exit_code == 0, result.stdout + result.stderr
     assert "add" in result.stdout
     assert "list" in result.stdout
     assert "replay" in result.stdout
+    assert "promote" in result.stdout
 
 
 # ── add ────────────────────────────────────────────────────────────────
@@ -209,6 +210,62 @@ def test_eval_list_filters_by_category(tmp_path: Path) -> None:
     assert "synthetic-002" not in result.stdout
 
 
+def test_eval_list_filters_by_category_rejected(tmp_path: Path) -> None:
+    """``--category=rejected`` returns only the rejected cases (W12.3 / #44)."""
+    _add_synthetic(tmp_path, case_id="synthetic-001", category="missed_finding")
+    _add_synthetic(tmp_path, case_id="synthetic-rej", category="rejected")
+    result = runner.invoke(
+        app,
+        ["eval", "list", "--bank", str(tmp_path), "--category", "rejected"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "synthetic-rej" in result.stdout
+    assert "synthetic-001" not in result.stdout
+
+
+def test_eval_list_filters_by_category_reverted(tmp_path: Path) -> None:
+    """``--category=reverted`` returns only the reverted cases (W12.3 / #44).
+
+    Rejected and reverted are two distinct failure modes — the bank
+    surface them separately so the regression view surfaces both
+    classes with no overlap.
+    """
+    _add_synthetic(tmp_path, case_id="synthetic-001", category="missed_finding")
+    _add_synthetic(tmp_path, case_id="synthetic-rej", category="rejected")
+    _add_synthetic(tmp_path, case_id="synthetic-rev", category="reverted")
+    result = runner.invoke(
+        app,
+        ["eval", "list", "--bank", str(tmp_path), "--category", "reverted"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "synthetic-rev" in result.stdout
+    # Sibling categories stay invisible.
+    assert "synthetic-rej" not in result.stdout
+    assert "synthetic-001" not in result.stdout
+
+
+def test_eval_list_distinguishes_rejected_and_reverted(tmp_path: Path) -> None:
+    """``--category=rejected`` and ``--category=reverted`` are independent (#44)."""
+    _add_synthetic(tmp_path, case_id="synthetic-rej", category="rejected")
+    _add_synthetic(tmp_path, case_id="synthetic-rev", category="reverted")
+
+    rej_result = runner.invoke(
+        app,
+        ["eval", "list", "--bank", str(tmp_path), "--category", "rejected", "--json"],
+    )
+    assert rej_result.exit_code == 0, rej_result.stdout + rej_result.stderr
+    rej_payload = json.loads(rej_result.stdout)
+    assert {c["id"] for c in rej_payload} == {"synthetic-rej"}
+
+    rev_result = runner.invoke(
+        app,
+        ["eval", "list", "--bank", str(tmp_path), "--category", "reverted", "--json"],
+    )
+    assert rev_result.exit_code == 0, rev_result.stdout + rev_result.stderr
+    rev_payload = json.loads(rev_result.stdout)
+    assert {c["id"] for c in rev_payload} == {"synthetic-rev"}
+
+
 def test_eval_list_filters_by_id_prefix(tmp_path: Path) -> None:
     """``--id-prefix`` filters by id prefix."""
     _add_synthetic(tmp_path, case_id="synthetic-001")
@@ -300,6 +357,96 @@ def test_eval_replay_reports_missing_case(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         ["eval", "replay", "synthetic-missing", "--bank", str(tmp_path)],
+    )
+    assert result.exit_code == 1
+
+
+# ── promote (W12.1) ────────────────────────────────────────────────────
+
+
+def test_eval_promote_writes_test_under_target_dir(tmp_path: Path) -> None:
+    """``mergecraft eval promote <id>`` writes a permanent test under the target dir."""
+    _add_synthetic(tmp_path, case_id="synthetic-001")
+    target_dir = tmp_path / "permanent"
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            "promote",
+            "synthetic-001",
+            "--bank",
+            str(tmp_path),
+            "--target-dir",
+            str(target_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    promoted = target_dir / "test_permanent_synthetic_001.py"
+    assert promoted.is_file()
+
+
+def test_eval_promote_default_target_is_tests_evals_permanent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default ``--target-dir`` resolves relative to the cwd."""
+    _add_synthetic(tmp_path, case_id="synthetic-001")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        ["eval", "promote", "synthetic-001", "--bank", str(tmp_path)],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    default = tmp_path / "tests" / "evals" / "permanent" / "test_permanent_synthetic_001.py"
+    assert default.is_file()
+
+
+def test_eval_promote_refuses_overwrite_by_default(tmp_path: Path) -> None:
+    """``mergecraft eval promote`` refuses to overwrite an existing test."""
+    _add_synthetic(tmp_path, case_id="synthetic-001")
+    target_dir = tmp_path / "permanent"
+    first = runner.invoke(
+        app,
+        [
+            "eval",
+            "promote",
+            "synthetic-001",
+            "--bank",
+            str(tmp_path),
+            "--target-dir",
+            str(target_dir),
+        ],
+    )
+    assert first.exit_code == 0, first.stdout + first.stderr
+    second = runner.invoke(
+        app,
+        [
+            "eval",
+            "promote",
+            "synthetic-001",
+            "--bank",
+            str(tmp_path),
+            "--target-dir",
+            str(target_dir),
+        ],
+    )
+    assert second.exit_code != 0
+
+
+def test_eval_promote_reports_missing_case(tmp_path: Path) -> None:
+    """``mergecraft eval promote <missing>`` exits 1."""
+    target_dir = tmp_path / "permanent"
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            "promote",
+            "synthetic-missing",
+            "--bank",
+            str(tmp_path),
+            "--target-dir",
+            str(target_dir),
+        ],
     )
     assert result.exit_code == 1
 

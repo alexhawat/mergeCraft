@@ -45,6 +45,7 @@ class ResolvedPayload:
     cwd: str | None = None
     generate_summary: bool = False
     status_checks: bool = False
+    suggest_eval_add: bool = False
     timeout: str | None = None
     prompt: str = ""
     xrepo: Any = None
@@ -88,3 +89,9 @@ class ToolContext:
     oss: bool = False
     plan: AccountPlan = "unknown"
     resolved_model: str | None = None
+    # W12.4 — opt-in. When True, `create_pull_request_review` logs a
+    # `logger.info` suggestion to add the run to the eval bank when the
+    # run produced no positive findings, the trust tier is `trusted`,
+    # and the trigger is a re-review (not a fresh PR). Default False
+    # (no suggestion). mergeCraft never auto-adds (#44).
+    suggest_eval_add: bool = False

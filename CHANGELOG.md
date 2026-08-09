@@ -37,6 +37,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corpus never looks like a real historical failure. User-facing manual
   at `docs/eval-bank.md`. The bank is for *reviewer learning*; it does not
   enable auto-merge (D11).
+- Promote-to-permanent-test workflow over the bank (#44, W12): a `mergecraft eval
+  promote <case-id>` CLI subcommand writes a pytest test under `tests/evals/permanent/`
+  that re-runs the case against the current code via `replay_case`. The generated
+  test embeds the case payload (round-tripped through `Case.model_validate_json`) so
+  it carries no bank-disk dependency; the running code's verdict is wired via
+  `MERGECRAFT_PERMANENT_CURRENT_DECISION`. The merge-evidence packet's `evals`
+  section is now a typed `list[EvalMetadata]` (`schema_version` bumped to `1.2.0`,
+  additive minor) — each row is a lightweight summary of a replay run; the full
+  case continues to live under `evals/cases/<case_id>.md`. `mergecraft eval list`
+  gains first-class filters for `--category=rejected` and `--category=reverted`
+  (two distinct failure modes — operator rejected pre-merge, was reverted
+  post-merge). The `create_pull_request_review` MCP tool logs a one-line
+  `logger.info` suggestion to capture the run as a case when the action input
+  `suggest_eval_add` is `true`, the trust tier is `trusted`, the trigger is a
+  re-review (not a fresh PR), and the run produced no positive findings — the log
+  is informational; the agent never auto-adds. `docs/eval-bank.md` gains a
+  "Workflow: rejected & reverted PRs" section; `docs/REVIEW-DOCTRINE.md` gains a
+  "Failure memory" section that cross-references the bank. The bank does not
+  enable auto-merge (D11); promote produces tests, not gates.
 - Merge Evidence Packet: every run emits a versioned, structured
   `MergeEvidencePacket` (`src/mergecraft/evidence/packet.py`) that composes
   the existing `Finding` model and derives its JSON Schema from the Pydantic
