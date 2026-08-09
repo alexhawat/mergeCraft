@@ -63,6 +63,10 @@ from mergecraft.mcp.shared import JsonSchema, ToolResult, ToolSpec
 from mergecraft.mcp.shell import kill_background_tool, shell_tool
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.upload import upload_file_tool
+from mergecraft.mcp.verification import (
+    record_finding_verdict_tool,
+    verify_agent_findings_tool,
+)
 from mergecraft.mcp.xrepo import checkout_repo_tool, list_repos_tool
 from mergecraft.types import MERGECRAFT_MCP_NAME
 
@@ -106,6 +110,11 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
         git_tool(ctx),
         git_fetch_tool(ctx),
         upload_file_tool(ctx),
+        # C6 — agent-authored findings reach the verifier through these two.
+        # Registered unconditionally: the reviewer writes findings on every
+        # run, including runs where no analyzer matched the diff.
+        verify_agent_findings_tool(ctx),
+        record_finding_verdict_tool(ctx),
     ]
     if ctx.static_checks_enabled:
         tools.append(run_static_checks_tool(ctx))

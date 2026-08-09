@@ -47,6 +47,27 @@ gate output is evidence, not the finding itself.
 list is empty, startup **raises** — refusing to run a review subagent with the mutation gate
 effectively disabled. The verification agent (W7) inherits the same guard.
 
+## Verification covers every source, including ourselves (C6)
+
+**A `Critical`/`Major` finding is a hypothesis until a second read-only agent has read the
+cited code — whatever wrote it.** `should_verify()` was always severity-only; the source
+condition lived in its two call sites (`analyzers/review_gate.py`, `ci/verification.py`), both
+of which only ever fed it tool output. The effect was that the noisiest source — the reviewing
+model's own findings — was the one source that never got checked. `verify_agent_findings` and
+`record_finding_verdict` close that, on the same terms as the analyzer path: severity gate,
+withdrawn-memory skip, and a dispatch cap.
+
+**The cap is the inline budget, not a new knob.** Verification exists to protect what gets
+published, so it can never cost more than publication does: dispatches are capped at
+`analyzers.inlineBudget` and spent on `Critical` before `Major`. **Cost:** on a diff with more
+than `inlineBudget` blocking findings, the overflow publishes unverified — the alternative
+(unbounded judge dispatches on the worst diffs) is worse.
+
+**A `drop` is durable.** It writes the verifier's reason under `WITHDRAWN_FINDINGS_HEADING` with
+the finding's own fingerprint, so the same claim is skipped before verification on every later
+run — the same section, parser and identity analyzer suppression already uses. Verifying a
+finding the author refuted last month is the failure this prevents.
+
 ## Shell permission and static checks
 
 **`run_static_checks` is withheld under `shell: disabled`.** Gates execute commands the repo

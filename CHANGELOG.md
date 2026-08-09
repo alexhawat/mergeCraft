@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The reviewer's own `Critical` and `Major` findings are now double-checked
+  before they are published, not just the ones its linters and CI produced. A
+  second read-only agent re-reads the cited code and returns confirm, downgrade,
+  or drop; a dropped finding is written to `## Withdrawn review findings` in the
+  learnings file, so the same false positive is never raised again. Findings
+  already refuted there are skipped without being re-checked, and the number of
+  checks per run is capped at the repo's existing `analyzers.inlineBudget` —
+  `Critical` findings are checked before `Major` ones, and there is no new knob
+  to configure. Beyond that cap the extra findings publish unchecked
 - Reviews now actually emit a Merge Evidence Packet. Every run that reviews a
   pull request writes one versioned JSON record of the findings, the analyzer
   checks that ran, the blast-radius lane, the agent's self-assessment, and the

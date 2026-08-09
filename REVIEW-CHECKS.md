@@ -242,6 +242,28 @@ The axes are also a sweep: a PR that writes persistent state with no Data Integr
 
 Values live in [`src/mergecraft/review_taxonomy.py`](src/mergecraft/review_taxonomy.py); a test asserts the prompt still names every one of them.
 
+### Verification before publication
+
+Every `Critical` / `Major` finding is a hypothesis until a second, read-only agent
+(`mergecraft-verifier`) has read the cited code. That applied to analyzer and CI findings from
+the start; it now applies to the findings the reviewing agent wrote itself, which is the source
+most likely to be wrong.
+
+Before publishing, the reviewer hands its own `Critical` / `Major` findings to
+`verify_agent_findings`, which returns one dispatch brief per finding — the finding, its cited
+file, and the withdrawn-findings section. Three things bound the cost:
+
+- **Severity** — `Minor` and `Trivial` findings are never verified.
+- **Memory** — a finding whose fingerprint already appears under `## Withdrawn review findings` is
+  skipped outright, not re-verified.
+- **Budget** — dispatches are capped at the repo's `analyzers.inlineBudget` (default 8), spent on
+  `Critical` before `Major`. Verification never costs more than publication, and there is no
+  second knob to tune.
+
+Each verdict goes back through `record_finding_verdict`: **confirm** publishes as drafted,
+**downgrade** re-grades, and **drop** writes the verifier's reason under
+`## Withdrawn review findings` so the finding stays refuted on every later run.
+
 ## 6. Findings that get dropped
 
 What mergecraft deliberately does **not** report — this is most of what keeps a review readable:
@@ -257,7 +279,7 @@ What mergecraft deliberately does **not** report — this is most of what keeps 
 
 ## 7. Memory across runs
 
-- **Withdrawn findings** — when an author refutes a review finding and `AddressReviews` accepts the pushback, it records the *reason* in `.mergecraft/learnings.md` under `## Withdrawn review findings (known non-issues)`. Later reviews read that section first and treat it as binding, so a false positive is argued once instead of on every PR.
+- **Withdrawn findings** — when an author refutes a review finding and `AddressReviews` accepts the pushback, it records the *reason* in `.mergecraft/learnings.md` under `## Withdrawn review findings (known non-issues)`. A `drop` verdict from the verifier writes to the same section, so a finding the reviewer refuted *before publishing* is also refuted permanently. Later reviews read that section first and treat it as binding, so a false positive is argued once instead of on every PR.
 - **Finding fingerprints** — each inline comment is stamped server-side with a content hash of its path and body (`<!-- mergecraft-finding:v1:… -->`). Whitespace and case are normalized, so a re-raised finding is recognizable across runs even when reworded.
 - **Repo learnings** — test commands, conventions, gotchas, and architecture notes persist in the same file and are loaded into every run.
 

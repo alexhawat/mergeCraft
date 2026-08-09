@@ -61,6 +61,16 @@ _CONTRACTS: Final[tuple[_Contract, ...]] = (
         defined_in="classify/blast_radius.py",
         why="no reachable caller means packet.blast_radius is always None (#42, #48)",
     ),
+    _Contract(
+        symbol="plan_agent_verifications",
+        defined_in="agents/verifier.py",
+        why="no reachable caller means agent-authored findings never reach the verifier (C6)",
+    ),
+    _Contract(
+        symbol="record_verifier_verdict",
+        defined_in="agents/verifier.py",
+        why="no reachable caller means a `drop` verdict never becomes a withdrawn finding (C6)",
+    ),
 )
 
 
@@ -226,3 +236,30 @@ def test_packet_emission_is_wired_into_the_action_orchestrator() -> None:
     assert "emit_run_packet" in invoked, (
         "main.py no longer invokes emit_run_packet() — no Action run emits an evidence packet"
     )
+
+
+def test_agent_finding_verification_is_offered_on_every_run() -> None:
+    """Pinned to the tool registry, not just to reachability.
+
+    `plan_agent_verifications` staying reachable proves a module calls it. It
+    does not prove the reviewing agent can ever *reach* that module: the tools
+    are the only door in, and a door built behind an `if` the Action never
+    takes is the same dead code by another name.
+    """
+    invoked = _invoked_names(_parsed((_SRC_DIR / "mcp" / "server.py").resolve()))
+    for factory in ("verify_agent_findings_tool", "record_finding_verdict_tool"):
+        assert factory in invoked, (
+            f"mcp/server.py no longer registers {factory}() — the reviewing agent has no "
+            "way to send its own findings to the verifier (C6)"
+        )
+
+
+def test_review_prompts_tell_the_agent_to_verify_its_own_findings() -> None:
+    """The tools are agent-driven, so an unnamed tool is an unused tool."""
+    from mergecraft.modes import compute_modes
+
+    prompts = {mode.name: mode.prompt or "" for mode in compute_modes("claude")}
+    for mode_name in ("Review", "IncrementalReview"):
+        prompt = prompts[mode_name]
+        assert "verify_agent_findings" in prompt, f"{mode_name} never names verify_agent_findings"
+        assert "record_finding_verdict" in prompt, f"{mode_name} never names record_finding_verdict"

@@ -89,6 +89,33 @@ def test_minor_and_below_skip_verifier(severity: str) -> None:
     assert verifier.should_verify(finding) is False
 
 
+def test_verifier_prompt_covers_agent_authored_findings() -> None:
+    """The subagent used to be told it only ever judged analyzer output (C6)."""
+    verifier = import_module("mergecraft.agents.verifier")
+    prompt = verifier.VERIFIER_SYSTEM_PROMPT
+    assert "written by the reviewing agent" in prompt
+
+
+def test_agent_finding_identity_matches_the_published_fingerprint() -> None:
+    """The withdrawn-skip only works if both ends derive the same identity."""
+    verifier = import_module("mergecraft.agents.verifier")
+    taxonomy = import_module("mergecraft.review_taxonomy")
+    finding = verifier.AgentFinding(
+        path="src/app.py", body="the retry double-charges", severity="Major"
+    )
+    assert finding.identity() == taxonomy.finding_fingerprint(
+        path="src/app.py", body="the retry double-charges"
+    )
+
+
+def test_two_agent_findings_on_one_path_get_distinct_identities() -> None:
+    """PR #93 replaced a shared literal with per-item fingerprints; hold that."""
+    verifier = import_module("mergecraft.agents.verifier")
+    first = verifier.AgentFinding(path="src/app.py", body="first problem", severity="Critical")
+    second = verifier.AgentFinding(path="src/app.py", body="second problem", severity="Critical")
+    assert first.identity() != second.identity()
+
+
 def test_dropped_finding_writes_withdrawn_reason(tmp_path: Path) -> None:
     verifier = import_module("mergecraft.agents.verifier")
     learnings = tmp_path / "learnings.md"
