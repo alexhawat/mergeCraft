@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Re-reviews now read only what changed since the last mergeCraft review. A
+  re-review gets a second patch covering the commits pushed since the review it
+  last posted, so a push to a large PR no longer pays for a full re-read. The
+  patch is offered only when a prior reviewed commit is recoverable and the range
+  is non-empty; otherwise the re-review works from the full diff as before
+- Review threads for findings the new commits fixed are now closed on the next
+  re-review, instead of sitting open asking for a change that already landed. A
+  thread closes only when mergeCraft raised it, nobody else replied to it, the new
+  commits touched its file, and the fresh review did not raise it again
+
 - Merge-lane policy maps blast radius to a typed packet signal: low changes are
   `eligible`, medium changes are `assisted`, and high changes are `forbidden`.
   `MergeEvidencePacket.blast_radius` now validates `BlastRadiusClassification`,
@@ -148,6 +158,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (666 passed, 1 skipped, 3 documented pre-existing xfails from the
   security plan's Batch B/W3/W4). `tests/evidence/test_blast_radius.py`
   ships 24/24 passing (#42, #48, B-Final).
+
+### Removed
+
+- Dropped the change-impact (`impactPath`) step from the review prompts. No
+  release ever produced that file, so the instruction only spent tokens and
+  invited the reviewer to claim it had consulted an artifact that did not exist.
+  Change-impact extraction is tracked as its own piece of work (#94)
 
 ### Docs
 
