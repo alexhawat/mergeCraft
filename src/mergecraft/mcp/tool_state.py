@@ -88,6 +88,14 @@ class ApprovalRecord:
     structurally by ``mergecraft.agents.gates.decide_approval`` from the typed
     ``Finding`` list, the run's completion state, and the trust tier (D12).
 
+    W2 of the merge-evidence plan (#41) split this signal from the evidence
+    verdict: ``build_packet()`` translates the legacy ``ApprovalRecord`` into
+    the packet's ``self_assessment`` row, and the structural ``Decision``
+    lives in its own sibling field. The legacy ``tool_state.approval``
+    surface stays for backward compatibility with consumers that still
+    read ``would_approve`` directly; new code should consume the packet's
+    ``self_assessment`` row instead.
+
     The field exists for the trajectory / merge-evidence plan (#41) so the
     recorded "self-assessment" can be compared against the structural
     conclusion after the fact. It is not consulted by ``report_status_checks``

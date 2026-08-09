@@ -21,6 +21,7 @@ from mergecraft.evidence.packet import (
     Decision,
     DeterministicCheck,
     MergeEvidencePacket,
+    SelfAssessment,
 )
 
 
@@ -58,6 +59,34 @@ def _coerce_deterministic_checks(
     return rows
 
 
+def _coerce_self_assessment(
+    raw: dict[str, Any] | SelfAssessment | None,
+) -> SelfAssessment | None:
+    """Validate the recorded self-assessment into the ``SelfAssessment`` model (#41, W2.1).
+
+    Accepts either an already-typed ``SelfAssessment`` or a dict that mirrors
+    the ``ApprovalRecord`` shape the legacy ``mcp/review.py`` tool emits
+    (``would_approve`` -> ``approved``, ``sha`` passed through). Unknown
+    fields are rejected — ``extra="forbid"`` is the packet-level honesty rule
+    (W2.4).
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, SelfAssessment):
+        return raw
+    if isinstance(raw, dict):
+        # ``ApprovalRecord`` uses ``would_approve``; the packet uses
+        # ``approved``. Translate so the legacy path can be passed in
+        # without rewriting the call site.
+        if "approved" not in raw and "would_approve" in raw:
+            translated = {**raw, "approved": raw["would_approve"]}
+            translated.pop("would_approve", None)
+            raw = translated
+        return SelfAssessment.model_validate(raw)
+    msg = f"self_assessment must be a dict or SelfAssessment, got {type(raw).__name__}"
+    raise TypeError(msg)
+
+
 def _agent_metadata(
     *,
     agent_id: str,
@@ -80,10 +109,10 @@ def build_packet(
     files_changed: list[str],
     findings: list[dict[str, Any]] | list[Finding] | None,
     deterministic_checks: list[dict[str, Any]] | list[DeterministicCheck] | None,
+    self_assessment: dict[str, Any] | SelfAssessment | None = None,
     decision: Decision | None = None,
     ci_check_runs: dict[str, Any] | None = None,
     ci_intelligence: dict[str, Any] | None = None,
-    self_assessment: dict[str, Any] | None = None,
     usage_entries: Any = None,
 ) -> MergeEvidencePacket:
     """Assemble a :class:`MergeEvidencePacket` from structured sources.
@@ -93,12 +122,23 @@ def build_packet(
     metadata. The function is **pure** — it performs no I/O and never
     reads ``os.environ``. The emitter writes the result to disk.
 
+    W2 (#41) attaches the agent's recorded self-assessment as its own
+    sibling field (``self_assessment``), distinct from the structural
+    evidence verdict (``decision``). The two are independently populated:
+    ``self_assessment`` carries the agent's ``approved`` boolean + the
+    reviewed ``sha``; ``decision`` carries the structural verdict. The
+    verdict function refuses ``auto_merge`` when the recorded self-
+    assessment is the only positive signal — see
+    :func:`mergecraft.agents.gates.decide_approval` and ``tests/evidence/
+    test_self_assessment.py``.
+
     Nullable-until-later sections (``blast_radius``, ``trajectory``,
     ``evals``) are intentionally left as ``None`` here; Batches B / C / E
     extend the packet with their own ``build_packet`` overlays.
     """
     coerced_findings = _coerce_findings(findings)
     coerced_checks = _coerce_deterministic_checks(deterministic_checks)
+    coerced_self_assessment = _coerce_self_assessment(self_assessment)
 
     if ci_check_runs is not None:
         logger.debug(
@@ -115,6 +155,12 @@ def build_packet(
             "build_packet received {} usage_entries (Batch C consumer)",
             len(usage_entries) if hasattr(usage_entries, "__len__") else 0,
         )
+    if coerced_self_assessment is not None:
+        logger.debug(
+            "build_packet received self_assessment approved={} sha={}",
+            coerced_self_assessment.approved,
+            (coerced_self_assessment.sha or "")[:7] or "(none)",
+        )
 
     packet = MergeEvidencePacket(
         schema_version=PACKET_SCHEMA_VERSION,
@@ -127,14 +173,17 @@ def build_packet(
         files_changed=list(files_changed),
         findings=coerced_findings,
         deterministic_checks=coerced_checks,
+        self_assessment=coerced_self_assessment,
         decision=decision,
     )
 
-    # Attachment of unbounded-dict inputs is deferred to W2 / Batch C. The
-    # packet shape is frozen at W1; W2 attaches ``self_assessment`` and
-    # Batch C attaches ``trajectory`` as sibling fields rather than
-    # nested dicts, so updating the model is a strict version bump (D7).
-    _ = (self_assessment,)
+    # Trajectory / usage_entries / ci_check_runs / ci_intelligence are still
+    # deferred (Batch C for trajectory; W9+ for the rest). They are logged at
+    # debug level above for diagnostics and intentionally *not* attached to
+    # the packet here — Batch C owns ``trajectory`` as a sibling field
+    # rather than a nested dict, so updating the model is a strict version
+    # bump (D7).
+    _ = (ci_check_runs, ci_intelligence, usage_entries)
     return packet
 
 

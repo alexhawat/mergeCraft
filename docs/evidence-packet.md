@@ -40,7 +40,19 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.0.0`.
+The current version is `1.1.0`.
+
+### Version history
+
+- `1.0.0` — initial schema (#47, W1). Required top-level fields, nullable
+  `blast_radius` / `trajectory` / `evals` (D4), `Decision` row shape.
+- `1.1.0` — W2 (#41). Adds the `self_assessment: SelfAssessment | None`
+  section as a sibling of `decision`. Additive — the wire shape is
+  backwards-compatible; the verdict function reads the new field but a
+  packet with `decision=None` and no `self_assessment` validates as
+  before. The legacy `ApprovalRecord.would_approve` surface stays for
+  backward compatibility; the packet's `self_assessment` row is the
+  explicit "what the agent *said*" record.
 
 ## Top-level fields
 
@@ -94,16 +106,36 @@ this is the **mechanical evidence** that backs the merge verdict.
 
 ### `decision` — required (`Decision | None`)
 
-The evidence verdict. W1 ships the **shape**; W2 populates this field
-from `decide_approval()` (the function the security plan's Batch D
+The evidence verdict. W1 ships the **shape**; W2 (#41) populates this
+field from `decide_approval()` (the function the security plan's Batch D
 lands — D5). Until W2 the field is typically `{"verdict": "block",
 "reason": "self-assessment-only run", "decided_by": "..."}`.
 
 | Field | Type | Notes |
 |------|------|-------|
-| `verdict` | `str` | One of `auto_merge`, `block`, `request_changes`, `require_human_review`, `unavailable`. |
+| `verdict` | `str` | One of `auto_merge`, `block`, `request_changes`, `require_human_review`, `unavailable`, `neutral`. |
 | `reason` | `str` | Human-readable explanation. |
 | `decided_by` | `str` | Dotted path of the function that produced the verdict. |
+
+### `self_assessment` — `SelfAssessment | None` (added in W2, #41)
+
+The agent's recorded self-assessment — what it **said**. Distinct from
+the `decision` row, which is what the evidence **proved**. The two
+fields are populated independently: `self_assessment` carries the
+agent's `approved` boolean + the reviewed commit SHA; `decision` carries
+the structural verdict computed from typed findings + run state + trust
+tier.
+
+The `self_assessment` row is **advisory only**. When the packet carries
+an explicit `decision` row, that row is returned verbatim by
+`decide_approval(packet, …)` (#41 hard rule). When the packet does
+**not** carry an explicit verdict and the recorded `self_assessment` is
+the only positive signal, the verdict is `neutral`, never `auto_merge`.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `approved` | `bool` | The agent's `approved` boolean from `create_pull_request_review`. |
+| `sha` | `str \| None` | The reviewed commit SHA. |
 
 ### `blast_radius` — `dict[str, Any] | None` (nullable until Batch B)
 
@@ -129,7 +161,7 @@ also the canonical fixture used by the WA-T round-trip tests:
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "change_id": "alexhawat/mergeCraft#42",
   "agent": {
     "id": "claude",
@@ -164,6 +196,10 @@ also the canonical fixture used by the WA-T round-trip tests:
       "command": "ruff check src tests scripts"
     }
   ],
+  "self_assessment": {
+    "approved": false,
+    "sha": "0123456789abcdef0123456789abcdef01234567"
+  },
   "decision": {
     "verdict": "block",
     "reason": "self-assessment-only run",

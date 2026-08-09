@@ -42,9 +42,15 @@ def sample_minimal_packet_dict() -> dict[str, Any]:
 
     Sections marked nullable-until-later (B/C/E) are explicitly present and
     ``None`` per the WA-T.4 contract — never omitted.
+
+    The schema version mirrors ``mergecraft.evidence.packet.PACKET_SCHEMA_VERSION``
+    at import time so a schema-version bump in the production module fails
+    the round-trip suite rather than silently desyncing the fixture.
     """
+    from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION
+
     return {
-        "schema_version": "1.0.0",
+        "schema_version": PACKET_SCHEMA_VERSION,
         "change_id": "alexhawat/mergeCraft#42",
         "agent": {
             "id": "claude",

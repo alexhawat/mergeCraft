@@ -8,6 +8,7 @@ from mergecraft.evidence.packet import (
     Decision,
     DeterministicCheck,
     MergeEvidencePacket,
+    SelfAssessment,
     packet_output_schema,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "Decision",
     "DeterministicCheck",
     "MergeEvidencePacket",
+    "SelfAssessment",
     "packet_output_schema",
 ]

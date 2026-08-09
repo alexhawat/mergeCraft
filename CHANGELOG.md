@@ -12,11 +12,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Merge Evidence Packet: every run emits a versioned, structured
   `MergeEvidencePacket` (`src/mergecraft/evidence/packet.py`) that composes
   the existing `Finding` model and derives its JSON Schema from the Pydantic
-  models (no hand-written schema). `PACKET_SCHEMA_VERSION = "1.0.0"` is
+  models (no hand-written schema). `PACKET_SCHEMA_VERSION = "1.1.0"` is
   required and pinned; `tests/evidence/test_packet_schema.py` enforces the
   contract. The packet is assembled by `build_packet()` (pure) and emitted
   by `write_packet()` (I/O shell) under `mergecraft.evidence.{build,emit}`,
   and ships with `docs/evidence-packet.md` as the field reference (#47, W1).
+  W2 (#41) adds the `self_assessment: SelfAssessment | None` section as a
+  sibling of `decision` and bumps the schema to `1.1.0` (additive minor).
+- Merge-evidence packet `self_assessment` row carries the agent's
+  `approved` boolean + the reviewed commit SHA — distinct from the
+  structural `decision` verdict. `mergecraft.evidence.build._coerce_self_assessment`
+  translates the legacy `ApprovalRecord` shape (`would_approve` /
+  `sha`) into the packet row, so existing `mcp/review.py` call sites keep
+  working unchanged. The legacy `tool_state.approval` surface is preserved
+  for backward compatibility (#41, W2.1).
+- `decide_approval()` overload in `src/mergecraft/agents/gates.py` now
+  accepts a `MergeEvidencePacket` as the first positional argument and
+  returns a `Decision` row whose `verdict` is authoritative over the
+  recorded `self_assessment` (#41, W2.2, W2.3). The legacy `list[Finding]`
+  overload is unchanged and `report_status_checks()` keeps working — the
+  function remains a pure function of typed findings, run state, and trust
+  tier; the packet overload adds the self-assessment split on top. The
+  `#41` hard rule — a self-assessment-only run cannot reach `auto_merge`
+  — is pinned by
+  `tests/evidence/test_self_assessment.py::test_self_assessment_alone_blocks_auto_merge`.
 - `mergecraft diff-review --json PATH` writes structured findings validated against
   the `Finding` schema for offline benchmark/scoring workflows (#30)
 - Optional `mergecraft[harbor]` extra with `MergecraftReviewAgent` — installs
@@ -68,6 +87,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Docs
 
+- `docs/REVIEW-DOCTRINE.md` adds a "Green is evidence, not proof" section
+  that documents the #41 hard rule (agent self-assessment is recorded but
+  never sufficient) and the evidence-weighting table — typed `Finding`s,
+  `DeterministicCheck` rows, CI check-runs, `self_assessment` (advisory),
+  `decision` (authoritative). Adds an "Honesty about unavailable signals"
+  subsection that names PR #17's `staticChecks` vocabulary as the
+  precedent (W2.5, #41).
+- `REVIEW-CHECKS.md` adds a "Mechanical evidence — what counts" section
+  that distinguishes typed findings, deterministic checks, CI check-runs,
+  and the agent's recorded self-assessment (advisory only) from the
+  packet's `decision` row (authoritative); lists what does **not** count
+  as mechanical evidence even when it appears in a check-run summary or
+  in the agent's prose (#41, W2.5).
 - Rewrite README with a 3-step quickstart and a dedicated Authentication section
   documenting Claude/Codex subscription auth (`mergecraft auth claude` /
   `auth codex`, `CLAUDE_CODE_OAUTH_TOKEN` / `CODEX_AUTH_JSON`) alongside API keys.

@@ -147,6 +147,15 @@ def create_pull_request_review_tool(ctx: ToolContext):
             node_id=str(result.get("node_id") or ""),
             reviewed_sha=payload.get("commit_id"),
         )
+        # #41 / W2.1 — the agent's ``approved`` boolean is recorded here as
+        # the legacy ``ApprovalRecord`` and (separately, when the packet is
+        # built at the end of the run) as the packet's ``self_assessment``
+        # row. The two are populated from the same call but kept
+        # structurally distinct so the structural verdict (``Decision``)
+        # can never be derived from the agent's prose. The legacy field
+        # stays for backward compatibility with consumers that still
+        # read ``tool_state.approval.would_approve``; ``build_packet()``
+        # translates it into the packet's ``self_assessment`` row.
         ctx.tool_state.approval = ApprovalRecord(
             would_approve=approved,
             sha=payload.get("commit_id"),

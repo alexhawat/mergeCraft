@@ -7,9 +7,13 @@ findings, deterministic checks, CI check outcomes, and agent metadata. It is
 the schema is derived from the Pydantic models here, mirroring the precedent
 in ``mergecraft.analyzers.finding.findings_output_schema`` (D3, D7).
 
-W1 ships the schema, the assembly, and the emitter. W2 will populate the
-``decision`` field and split it from ``self_assessment``. Batches B / C / E
-extend the nullable-until-later sections (blast radius, trajectory, evals).
+W1 shipped the schema, the assembly, and the emitter. W2 (#41) splits the
+recorded ``self_assessment`` from the computed ``decision`` verdict — the
+agent's ``approved`` boolean is now carried as a dedicated ``SelfAssessment``
+row alongside the ``Decision`` so the two signals are independently
+inspectable and the verdict is never a function of the agent's prose alone.
+Batches B / C / E extend the nullable-until-later sections (blast radius,
+trajectory, evals).
 """
 
 from __future__ import annotations
@@ -25,7 +29,13 @@ from mergecraft.analyzers.finding import Finding
 # or otherwise) that is not accompanied by a bump of this literal must fail
 # ``test_packet_schema_version_is_pinned`` at the gate. Bumps are mandatory,
 # not optional.
-PACKET_SCHEMA_VERSION = "1.0.0"
+#
+# Version history:
+# - 1.0.0 — W1 initial schema (#47)
+# - 1.1.0 — W2 (#41) adds the ``self_assessment`` section as a sibling of
+#   ``decision``. Additive (minor bump); the verdict function reads the
+#   ``self_assessment`` field but the wire shape is backwards-compatible.
+PACKET_SCHEMA_VERSION = "1.1.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]
@@ -83,7 +93,13 @@ class Decision(BaseModel):
     from ``decide_approval()`` (D5). ``verdict`` is a string until W9 closes
     the action vocabulary; today, expected values are ``"auto_merge"`` /
     ``"block"`` / ``"request_changes"`` / ``"require_human_review"`` /
-    ``"unavailable"``.
+    ``"unavailable"`` / ``"neutral"``.
+
+    The Decision row is the *authoritative* verdict: when ``decide_approval()``
+    is asked to consume a packet, an explicit ``Decision.verdict`` wins over
+    every other signal — including the agent's recorded self-assessment. That
+    is the #41 hard rule: the agent's prose cannot outvote the structural
+    evidence verdict.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -91,6 +107,28 @@ class Decision(BaseModel):
     verdict: str
     reason: str
     decided_by: str
+
+
+class SelfAssessment(BaseModel):
+    """The agent's recorded self-assessment — what it *said* (#41).
+
+    Distinct from the evidence verdict. The agent calls
+    ``create_pull_request_review(approved=...)`` during the run; that boolean
+    is captured here as the agent's own statement about the PR, with the
+    reviewed commit SHA so the recording is traceable.
+
+    This row is **advisory**. It is never the sole positive input to a
+    decision — when the ``Decision`` field on the same packet is absent and
+    the only positive signal is ``self_assessment.approved == True``, the
+    decision function refuses ``auto_merge``. The verdict is computed from
+    structural evidence (typed findings, deterministic checks, run state,
+    trust tier), not from this row.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    approved: bool
+    sha: str | None = None
 
 
 class MergeEvidencePacket(BaseModel):
@@ -110,6 +148,7 @@ class MergeEvidencePacket(BaseModel):
     files_changed: list[str]
     findings: list[Finding]
     deterministic_checks: list[DeterministicCheck]
+    self_assessment: SelfAssessment | None = None
     decision: Decision | None = None
     blast_radius: dict[str, Any] | None = None
     trajectory: dict[str, Any] | None = None
@@ -144,5 +183,6 @@ __all__ = [
     "Decision",
     "DeterministicCheck",
     "MergeEvidencePacket",
+    "SelfAssessment",
     "packet_output_schema",
 ]

@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from tests.evidence.support import import_module, sample_finding_dict
-
-pytestmark = pytest.mark.xfail(reason="green after W1/W2", strict=False)
 
 
 def test_self_assessment_is_recorded_separately_from_evidence() -> None:
@@ -38,15 +34,47 @@ def test_self_assessment_field_carries_approved_and_sha() -> None:
     self_assessment_field = fields["self_assessment"]
     annotation = getattr(self_assessment_field, "annotation", None)
     annotation_str = str(annotation)
-    # The nested type must carry the boolean and the commit sha.
-    assert "approved" in annotation_str or _is_optional_bool(annotation)
-    assert "sha" in annotation_str or "commit" in annotation_str
+    # The nested type must carry the boolean and the commit sha. The WA-T
+    # contract accepts either an annotation that stringifies to mention
+    # them by name, or a nested model whose fields carry them. W2 lands
+    # a typed ``SelfAssessment`` nested model so both checks succeed.
+    nested_fields = _nested_field_names(annotation)
+    assert (
+        "approved" in annotation_str or _is_optional_bool(annotation) or "approved" in nested_fields
+    )
+    assert "sha" in annotation_str or "commit" in annotation_str or "sha" in nested_fields
 
 
 def _is_optional_bool(annotation: object) -> bool:
     """Best-effort: True if the annotation ultimately holds a bool."""
     args = getattr(annotation, "__args__", ())
     return any("bool" in str(arg) for arg in args) or "bool" in str(annotation)
+
+
+def _nested_field_names(annotation: object) -> set[str]:
+    """Return the set of ``model_fields`` keys from any Pydantic model nested in ``annotation``.
+
+    Unwraps ``Optional[...]`` / ``Union[..., None]`` and returns the union of
+    field names across every nested model — or an empty set when the
+    annotation is not a Pydantic model reference.
+    """
+    names: set[str] = set()
+    queue: list[object] = [annotation]
+    seen: set[int] = set()
+    while queue:
+        current = queue.pop(0)
+        ident = id(current)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        args = getattr(current, "__args__", ())
+        if args:
+            queue.extend(args)
+            continue
+        model_fields = getattr(current, "model_fields", None)
+        if isinstance(model_fields, dict):
+            names.update(model_fields.keys())
+    return names
 
 
 def test_self_assessment_alone_blocks_auto_merge() -> None:
