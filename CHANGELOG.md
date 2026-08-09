@@ -61,6 +61,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runners that are already ephemeral and isolated. mergeCraft never selects it
   on its own, an unrecognised value is ignored rather than forwarded, and the
   `shell` / `push` controls remain the security boundary either way (#70)
+- The eval bank now actually catches regressions. A case can record the
+  findings, run outcome and trust tier from a merge evidence packet
+  (`mergecraft eval add --from-packet`), and replay re-decides it with the
+  current `decide_approval()` instead of asking an operator to type the verdict
+  in. Before this a promoted case produced a test whose only unconditional
+  assertion was a tautology, so it passed in CI no matter what the gate did.
+  Seeded with the three merge-gate failures issue #75 shipped: agent prose
+  outvoting a blocking finding, a crashed run staying permissive, and an
+  untrusted run self-approving. Cases without recorded evidence keep their old
+  behaviour. Also fixes `mergecraft eval gate` reporting every promoted case as
+  unpromoted, and widens the bank's verdict vocabulary, which had drifted from
+  what `decide_approval()` actually emits (#44, #51)
 - Review quality can now be measured. `mergecraft eval score` grades a run's
   findings against a frozen benchmark baseline by **locating** issues — a
   baseline issue counts as found when a reported finding overlaps its line range

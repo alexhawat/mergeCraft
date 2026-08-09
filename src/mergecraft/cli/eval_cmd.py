@@ -48,6 +48,7 @@ from mergecraft.evals.store import (
     add_case,
     list_cases,
     load_case,
+    permanent_test_path,
     replay_case,
     write_permanent_test,
 )
@@ -202,6 +203,15 @@ def add(
         "--body",
         help="Free-form description of the failure mode (markdown).",
     ),
+    from_packet: Path | None = typer.Option(
+        None,
+        "--from-packet",
+        help=(
+            "Merge evidence packet (JSON) to record as the case's replay input. "
+            "Without it the case cannot be re-decided and a promoted test only "
+            "checks that the case still parses."
+        ),
+    ),
     bank: Path | None = typer.Option(
         None,
         "--bank",
@@ -230,6 +240,13 @@ def add(
         author=author,
         trust_tier=trust_tier,
     )
+    recorded_findings: list[dict[str, Any]] | None = None
+    run_succeeded = True
+    trust_tier_recorded = "trusted"
+    if from_packet is not None:
+        recorded_findings, run_succeeded, trust_tier_recorded = _replay_inputs_from_packet(
+            from_packet
+        )
     try:
         case = Case(
             id=case_id,
@@ -244,6 +261,9 @@ def add(
             replay_command=f"mergecraft eval replay {case_id}",
             provenance=provenance,
             body=body,
+            recorded_findings=recorded_findings,
+            run_succeeded=run_succeeded,
+            trust_tier=trust_tier_recorded,
         )
     except ValidationError as exc:
         _bail(f"case failed validation: {exc}")
@@ -436,6 +456,39 @@ def promote(
     console.print(f"[green]promoted case {case_id}[/green] → {target}")
 
 
+def _replay_inputs_from_packet(path: Path) -> tuple[list[dict[str, Any]], bool, str]:
+    """Extract ``decide_approval()``'s three inputs from a merge evidence packet.
+
+    Returns ``(findings_rows, run_succeeded, trust_tier)``. The rows are stored
+    verbatim rather than re-validated here: a schema change that invalidates
+    them should surface at replay time as "cannot decide", not be silently
+    dropped at capture time.
+    """
+    if not path.is_file():
+        _bail(f"{path} is not a file")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _bail(f"could not read packet {path}: {exc}")
+    if not isinstance(payload, dict):
+        _bail(f"{path}: expected a merge evidence packet object")
+    rows = payload.get("findings")
+    if not isinstance(rows, list):
+        _bail(f"{path}: packet has no 'findings' array")
+    findings = [row for row in rows if isinstance(row, dict)]
+    run = payload.get("run")
+    run_succeeded = True
+    if isinstance(run, dict) and isinstance(run.get("succeeded"), bool):
+        run_succeeded = bool(run["succeeded"])
+    tier = "trusted"
+    for holder in (payload, run if isinstance(run, dict) else {}):
+        value = holder.get("trust_tier") if isinstance(holder, dict) else None
+        if value in {"trusted", "untrusted"}:
+            tier = str(value)
+            break
+    return findings, run_succeeded, tier
+
+
 def _read_json_or_jsonl(path: Path) -> Any:
     """Decode a corpus file that may be JSON or JSON Lines.
 
@@ -521,7 +574,10 @@ def gate(
             duplicates.append({"id": case.id, "path": str(path), "first": seen[case.id]})
         else:
             seen[case.id] = str(path)
-        if not (permanent_dir / f"test_{case.id.replace('-', '_')}.py").is_file():
+        # Ask the store for the path rather than rebuilding the name here —
+        # reconstructing it got the `test_permanent_` prefix wrong and reported
+        # every promoted case as unpromoted.
+        if not permanent_test_path(permanent_dir, case.id).is_file():
             unpromoted.append(case.id)
 
     failures = len(broken) + len(duplicates)

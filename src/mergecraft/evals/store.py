@@ -128,8 +128,20 @@ _CASE_FIELDS: tuple[str, ...] = (
 # ``mergecraft.evidence.packet.Decision.verdict``. The store does not
 # re-export the type — it stays as a string literal so the bank does
 # not silently fall out of sync when the packet's verdict enum evolves.
+#
+# The mirror had drifted. ``decide_approval()`` wraps its ``Conclusion``
+# verbatim into ``Decision.verdict`` (``agents/gates.py``), so a packet
+# produced today carries ``success`` / ``failure`` / ``neutral`` — of which
+# only ``neutral`` was accepted here. A case could therefore never record the
+# verdict the code actually computes. Both vocabularies are accepted: the
+# check-run one because it is what ships, and the lane one because the
+# thermostat work (W9) is specified to introduce it.
 _EXPECTED_VERDICT_VALUES: frozenset[str] = frozenset(
     {
+        # Check-run conclusions — what `decide_approval()` emits today.
+        "success",
+        "failure",
+        # Lane verdicts — reserved for the W9 thermostat overlay.
         "auto_merge",
         "block",
         "request_changes",
@@ -252,6 +264,21 @@ class Case(BaseModel):
     replay_command: str = Field(min_length=1)
     provenance: LearningProvenance
     body: str = ""
+
+    # ── replay inputs (optional; #44/C7) ──────────────────────────────
+    # Without these a replay cannot compute anything and must be handed a
+    # verdict by an operator, which makes a promoted test assert nothing in
+    # CI. With them, ``decide_approval()`` recomputes the verdict from the
+    # same structured evidence the run recorded — pure, deterministic, and
+    # needing no agent, network, or API key.
+    recorded_findings: list[dict[str, Any]] | None = None
+    run_succeeded: bool = True
+    trust_tier: str = "trusted"
+
+    @property
+    def is_replayable(self) -> bool:
+        """True when the case carries enough evidence to recompute a verdict."""
+        return self.recorded_findings is not None
 
     @field_validator("expected_decision")
     @classmethod
@@ -683,6 +710,39 @@ def list_cases(
     return cases
 
 
+def recompute_decision(case: Case) -> str | None:
+    """Recompute a case's verdict from its recorded evidence (#44, C7).
+
+    This is the link that makes a promoted test a real regression test rather
+    than a tautology. ``decide_approval()`` is a pure function of typed
+    findings, the run's completion state, and the trust tier — so a case that
+    stored those three can be re-decided by the *current* code with no agent,
+    no network, and no API key, which is exactly what a CI gate needs.
+
+    Returns ``None`` when the case predates the recorded-evidence fields or
+    its rows no longer validate against the current ``Finding`` schema. A
+    schema change that invalidates stored evidence is itself worth surfacing,
+    so this reports "cannot decide" rather than guessing a verdict.
+    """
+    if case.recorded_findings is None:
+        return None
+    # Imported lazily: the store is the bank's pure data layer, and importing
+    # the gate at module scope would tie every bank read to the agent stack.
+    from mergecraft.agents.gates import decide_approval
+    from mergecraft.analyzers.finding import Finding
+
+    try:
+        findings = [Finding.model_validate(row) for row in case.recorded_findings]
+    except ValidationError as exc:
+        logger.warning("case {}: recorded findings no longer validate: {}", case.id, exc)
+        return None
+    # Branch rather than cast: the tier literal is a security-relevant input,
+    # and an unrecognised value must fall back to the restrictive side.
+    if case.trust_tier == "untrusted":
+        return str(decide_approval(findings, run_succeeded=case.run_succeeded, tier="untrusted"))
+    return str(decide_approval(findings, run_succeeded=case.run_succeeded, tier="trusted"))
+
+
 def _format_diff(case: Case, current: str | None) -> ReplayDiff:
     """Build a :class:`ReplayDiff` from a case and a current verdict.
 
@@ -720,15 +780,24 @@ def replay_case(case: Case, *, current_decision: str | None) -> ReplayDiff:
     """Replay a case against the current code, given a verdict.
 
     The replay function is **pure**. It does not invoke the agent, does
-    not start a subprocess, does not read ``os.environ``. The CLI shell
-    is responsible for asking the running code for a verdict and
-    passing it in. That separation is what makes the diff deterministic
-    and the function unit-testable.
+    not start a subprocess, does not read ``os.environ``.
+
+    When ``current_decision`` is omitted and the case recorded its evidence,
+    the verdict is recomputed by :func:`recompute_decision` — still pure, since
+    ``decide_approval()`` is itself a pure function. That is what lets a
+    promoted test detect a regression in CI instead of waiting for an operator
+    to supply a verdict by hand. A case with no recorded evidence keeps the
+    original behaviour and lands in the ``blocked`` state.
+
+    An explicitly passed verdict always wins over the recomputed one: the
+    caller is asserting what the running code produced, and that has to be able
+    to contradict the stored evidence.
 
     Args:
         case: The case to replay.
-        current_decision: The verdict the current code produced, or
-            ``None`` when the replay environment was unavailable.
+        current_decision: The verdict the current code produced. When
+            ``None``, it is recomputed from the case's recorded evidence if
+            present, and left unresolved otherwise.
 
     Returns:
         A :class:`ReplayDiff` capturing the structural comparison.
@@ -759,7 +828,11 @@ def replay_case(case: Case, *, current_decision: str | None) -> ReplayDiff:
         >>> r.status
         'regression'
     """
-    return _format_diff(case, current_decision)
+    # An explicit verdict always wins: the operator is asserting what the
+    # running code produced, and that must be able to contradict the stored
+    # evidence — otherwise a case could never catch its own staleness.
+    resolved = current_decision if current_decision is not None else recompute_decision(case)
+    return _format_diff(case, resolved)
 
 
 def diff_cases(a: Case, b: Case) -> dict[str, Any]:
@@ -883,7 +956,6 @@ discovered by pytest via the standard collection rules — no separate
 from __future__ import annotations
 
 from mergecraft.evals.store import Case, replay_case
-
 
 _PERMANENT_CASE_PAYLOAD = {payload!r}
 
