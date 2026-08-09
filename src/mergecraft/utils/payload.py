@@ -24,6 +24,7 @@ StatusChecksInput = Literal["disabled", "enabled"]
 ProgressCommentType = Literal["issue", "review"]
 
 COLLABORATOR_PERMISSIONS: frozenset[AuthorPermission] = frozenset({"admin", "maintain", "write"})
+TRUSTED_AUTHOR_ASSOCIATIONS: frozenset[str] = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
 PayloadTrigger = Literal[
     "pull_request_opened",
@@ -187,7 +188,85 @@ def _head_ref(pr: dict[str, Any]) -> str | None:
     return head.get("ref") if isinstance(head, dict) else None
 
 
-def resolve_native_event() -> dict[str, Any] | None:
+def _is_comment_event(event_name: str) -> bool:
+    return event_name in {"issue_comment", "pull_request_review_comment"}
+
+
+def _parse_allowlist(raw: str | None) -> tuple[str, ...]:
+    """Split a comma-separated allowlist into a tuple of stripped, lowercased names.
+
+    Empty / whitespace-only entries are dropped. Empty input → empty tuple, which
+    is the default (association gate only) — see W2.3.
+    """
+    if not raw:
+        return ()
+    names = [part.strip() for part in raw.split(",")]
+    return tuple(name for name in names if name)
+
+
+def _extract_comment(data: dict[str, Any]) -> dict[str, Any]:
+    comment = data.get("comment")
+    return comment if isinstance(comment, dict) else {}
+
+
+def _comment_association(data: dict[str, Any]) -> str | None:
+    """Read ``comment.author_association`` from the raw GitHub event payload.
+
+    Returns the raw string value (``"OWNER"`` / ``"NONE"`` / …) or ``None`` when
+    the field is absent or non-string. The body is never consulted — D5 forbids
+    inferring authorization from attacker-controlled text.
+    """
+    comment = _extract_comment(data)
+    raw = comment.get("author_association")
+    if isinstance(raw, str):
+        return raw
+    return None
+
+
+def _comment_login(data: dict[str, Any]) -> str | None:
+    """Read ``comment.user.login`` from the raw GitHub event payload, if present."""
+    comment = _extract_comment(data)
+    user = comment.get("user")
+    if isinstance(user, dict):
+        login = user.get("login")
+        if isinstance(login, str):
+            return login
+    return None
+
+
+def _allow_pr_target_comments_optin() -> bool:
+    """True when the workflow explicitly opts in to ``pull_request_target`` comment invocation.
+
+    D6: default is refuse; opt-in is a deliberate workflow-level choice.
+    """
+    raw = get_action_input("allow_pr_target_comments")
+    return raw.strip().lower() in {"true", "1", "yes", "on"}
+
+
+def _comment_invocation_allowed(
+    *, event_name: str, data: dict[str, Any], allowlist: tuple[str, ...] = ()
+) -> tuple[bool, str | None]:
+    """Authorize a comment-driven invocation.
+
+    Returns ``(True, association)`` when the comment is permitted to dispatch the
+    agent, ``(False, reason)`` otherwise. The reason is a short identifier
+    suitable for logging — never the comment body.
+    """
+    association = _comment_association(data)
+    if not association:
+        return False, "missing_author_association"
+    if event_name == "pull_request_target" and not _allow_pr_target_comments_optin():
+        return False, "pull_request_target_refused_default"
+    if association not in TRUSTED_AUTHOR_ASSOCIATIONS:
+        # Optional escape hatch: a maintainer-defined allowlist of extra logins.
+        # Empty default = association gate only.
+        login = _comment_login(data)
+        if not login or login.lower() not in {name.lower() for name in allowlist}:
+            return False, f"association={association}"
+    return True, association
+
+
+def resolve_native_event(*, allowlist: tuple[str, ...] = ()) -> dict[str, Any] | None:
     """Build a ``PayloadEvent``-shaped dict from the native GitHub Actions event.
 
     Reads ``GITHUB_EVENT_NAME`` + ``GITHUB_EVENT_PATH`` so a workflow that triggers
@@ -196,6 +275,13 @@ def resolve_native_event() -> dict[str, Any] | None:
     without the caller hand-building a ``~mergecraft`` JSON payload. Returns ``None``
     when there is no usable context, so callers fall back to the ``unknown``
     trigger — preserving prior behavior for local / non-Actions runs.
+
+    Authorization gate (D5, D6, W2.1-W2.4): for ``issue_comment`` and
+    ``pull_request_review_comment`` the comment's ``author_association`` must be
+    in ``TRUSTED_AUTHOR_ASSOCIATIONS`` (``OWNER`` / ``MEMBER`` / ``COLLABORATOR``)
+    or its login must appear in ``allowlist``. Under ``pull_request_target`` the
+    comment-driven path is refused unless the opt-in input is set. The refusal
+    is logged at warning level; the comment body is never logged.
     """
     event_name = os.environ.get("GITHUB_EVENT_NAME") or ""
     if not event_name:
@@ -204,6 +290,49 @@ def resolve_native_event() -> dict[str, Any] | None:
     if data is None:
         return None
     action = str(data.get("action") or "")
+
+    # Comment-driven invocation gate (D5, D6). Fires whenever the payload carries
+    # a ``comment`` field: the canonical GitHub events (``issue_comment`` /
+    # ``pull_request_review_comment``) plus the ``pull_request_target`` case where
+    # a workflow is configured to receive comment-shaped data under secrets-in-scope.
+    if isinstance(data.get("comment"), dict) and (
+        _is_comment_event(event_name) or event_name == "pull_request_target"
+    ):
+        allowed, reason = _comment_invocation_allowed(
+            event_name=event_name, data=data, allowlist=allowlist
+        )
+        if not allowed:
+            logger.warning("comment trigger refused: event={} reason={}", event_name, reason)
+            return None
+        # Authorization passed — dispatch as the comment event shape.
+        if event_name == "pull_request_review_comment":
+            pr = data.get("pull_request")
+            if not isinstance(pr, dict) or pr.get("number") is None:
+                return None
+            comment = _extract_comment(data)
+            return {
+                "trigger": "pull_request_review_comment_created",
+                "issue_number": int(pr["number"]),
+                "is_pr": True,
+                "branch": _head_ref(pr),
+                "comment_id": comment.get("id"),
+                "body": comment.get("body"),
+            }
+        # issue_comment (canonical) and pull_request_target + comment-shaped both
+        # surface as ``issue_comment_created`` so downstream dispatch treats them
+        # identically.
+        issue = data.get("issue")
+        if isinstance(issue, dict) and issue.get("number") is not None:
+            comment = _extract_comment(data)
+            return {
+                "trigger": "issue_comment_created",
+                "issue_number": int(issue["number"]),
+                "is_pr": issue.get("pull_request") is not None,
+                "title": issue.get("title"),
+                "comment_id": comment.get("id"),
+                "body": comment.get("body"),
+            }
+        return None
 
     if event_name in {"pull_request", "pull_request_target"}:
         pr = data.get("pull_request")
@@ -226,8 +355,7 @@ def resolve_native_event() -> dict[str, Any] | None:
         pr = data.get("pull_request")
         if not isinstance(pr, dict) or pr.get("number") is None:
             return None
-        comment = data.get("comment")
-        comment = comment if isinstance(comment, dict) else {}
+        comment = _extract_comment(data)
         return {
             "trigger": "pull_request_review_comment_created",
             "issue_number": int(pr["number"]),
@@ -241,8 +369,7 @@ def resolve_native_event() -> dict[str, Any] | None:
         issue = data.get("issue")
         if not isinstance(issue, dict) or issue.get("number") is None:
             return None
-        comment = data.get("comment")
-        comment = comment if isinstance(comment, dict) else {}
+        comment = _extract_comment(data)
         return {
             "trigger": "issue_comment_created",
             "issue_number": int(issue["number"]),
@@ -395,7 +522,8 @@ def resolve_payload(
     raw_event = json_payload.event if json_payload else None
     if not is_payload_event(raw_event):
         # No explicit ~mergecraft event — derive it from the native GH Actions event.
-        raw_event = resolve_native_event()
+        allowlist = _parse_allowlist(settings.comment_invocation_allowlist)
+        raw_event = resolve_native_event(allowlist=allowlist)
     event = (
         PayloadEvent.model_validate(raw_event)
         if is_payload_event(raw_event)
@@ -467,6 +595,7 @@ def resolve_output_schema(raw: str | None = None) -> dict[str, Any] | None:
 
 __all__ = [
     "TIMEOUT_DISABLED",
+    "TRUSTED_AUTHOR_ASSOCIATIONS",
     "ActionInputs",
     "AuthorPermission",
     "JsonPayload",

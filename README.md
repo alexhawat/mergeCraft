@@ -37,7 +37,9 @@ Claude subscription, API key, or other provider credential.**
 
    Either command saves the credential as a GitHub Actions secret in the current repo via `gh secret set`. No API key required.
 
-3. **Commit and push** the scaffolded workflow, then trigger it by opening a PR, commenting `@mergecraft ...`, or running it manually from the Actions tab.
+3. **Commit and push** the scaffolded workflow, then trigger it by opening a PR or running it manually from the Actions tab.
+
+> **Comment-driven invocation is authorized.** A comment on an issue or PR will start a run only when (a) its author has one of `OWNER` / `MEMBER` / `COLLABORATOR` association with the target repo, **and** (b) the workflow is not running under `pull_request_target` (the default refuses comment invocation in that event — opt in with `with: allow_pr_target_comments: 'true'` only on workflows whose `if:` already gates comment triggers to trusted authors). The authorization decision reads `comment.author_association` from the payload, **never** the comment body — so an attacker cannot elevate themselves by writing `author_association: OWNER` into a comment. Strangers, first-time contributors, and `NONE`-association commenters cannot start a run. See [issue #72](https://github.com/alexhawat/mergeCraft/issues/72).
 
 That's it — no server, dashboard, or account to sign up for.
 
@@ -167,7 +169,8 @@ jobs:
 Ready-made workflow files live under [`examples/workflows/`](examples/workflows/):
 
 - [`mergecraft.yml`](examples/workflows/mergecraft.yml) — minimal getting-started
-  example (`pull_request`, comment triggers).
+  example (`pull_request` + `workflow_dispatch`; comment triggers omitted — see
+  issue #72).
 - [`mergecraft-hardened.yml`](examples/workflows/mergecraft-hardened.yml) — use
   this one when the review is a **required check** (`pull_request_target`,
   wait-for-CI, approval enforcement).

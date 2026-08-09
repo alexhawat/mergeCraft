@@ -5,11 +5,10 @@ on:
   # GITHUB_EVENT_PATH, so no ~mergecraft JSON payload is needed — just a prompt.
   pull_request:
     types: [opened, ready_for_review, synchronize]
-  # On-demand agent runs via `@mergecraft ...` comments.
-  issue_comment:
-    types: [created]
-  pull_request_review_comment:
-    types: [created]
+  # On-demand runs without a comment trigger. To drive mergeCraft interactively,
+  # use `workflow_dispatch` (below) or trigger a `pull_request` push — comment
+  # triggers are intentionally omitted because any commenter can otherwise steer
+  # the agent (issue #72 / D5). See README for the authorization model.
   workflow_dispatch:
     inputs:
       prompt:
@@ -29,8 +28,7 @@ jobs:
   mergecraft:
     if: >
       github.event_name == 'pull_request' ||
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.comment.body, '@mergecraft')
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +47,7 @@ jobs:
           prompt: >
             ${{ github.event_name == 'pull_request'
                 && 'Review this pull request.'
-                || (github.event.inputs.prompt || github.event.comment.body) }}
+                || github.event.inputs.prompt }}
           model: anthropic/claude-sonnet
           # Post mergecraft / mergecraft-approval commit-status checks (gate on approval).
           status_checks: enabled
