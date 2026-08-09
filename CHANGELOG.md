@@ -19,6 +19,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declarative rule set with additive per-category overrides. The pure classifier
   covers migrations, sensitive code and config, generated files, public APIs,
   dependencies, untested source, and irreversible infrastructure (#48, W6).
+- File-backed Failure Memory and Eval Bank (#51, W11): a local, file-backed
+  case store under `evals/cases/` (D13) with `mergecraft eval add | list | replay`
+  CLI subcommands. The `Case` model is validated against the merged evidence
+  packet's verdict vocabulary (`auto_merge`, `block`, `request_changes`,
+  `require_human_review`, `unavailable`, `neutral`) and **embeds**
+  `mergecraft.utils.learnings.LearningProvenance` as its provenance record
+  (D5, cross-file contract from `docs/test-plans/cross-file-deps.md`). The
+  pure core lives at `src/mergecraft/evals/store.py` (parse / render /
+  list / replay / diff — no I/O at import time, no `os.environ` reads); the
+  thin I/O shell wraps it at `src/mergecraft/cli/eval_cmd.py`. Replay is
+  deterministic: `replay_case(case, current_decision)` returns a
+  `ReplayDiff` with `passed` / `regression` / `blocked` status; the CLI
+  exits `2` on a regression so a CI loop can latch on drift. The CLI is
+  non-interactive (all flags). The bank is local — no database, no hosted
+  service — and tests use the `synthetic` ID prefix so the committed
+  corpus never looks like a real historical failure. User-facing manual
+  at `docs/eval-bank.md`. The bank is for *reviewer learning*; it does not
+  enable auto-merge (D11).
 - Merge Evidence Packet: every run emits a versioned, structured
   `MergeEvidencePacket` (`src/mergecraft/evidence/packet.py`) that composes
   the existing `Finding` model and derives its JSON Schema from the Pydantic
