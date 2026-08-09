@@ -86,6 +86,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Migration:** repos not ready for the analyzer catalog should set
   ``analyzers.enabled: false`` in ``.mergecraft/config.yaml`` or ``INPUT_ANALYZERS: off`` in
   the GitHub Action until they opt in.
+- Gate comment-driven invocation on the GitHub `author_association` of the
+  commenter: only `OWNER` / `MEMBER` / `COLLABORATOR` authors may start a run
+  via `issue_comment` or `pull_request_review_comment`. Authorization is read
+  from `comment.author_association` in the payload, never from the comment
+  body. A missing field fails closed. ([#72](https://github.com/alexhawat/mergeCraft/issues/72))
+- **BREAKING:** Comment-driven invocation under `pull_request_target` is now
+  refused by default. Workflows that previously relied on `@mergecraft`
+  comments under a `pull_request_target` workflow must opt in explicitly with
+  `with: allow_pr_target_comments: 'true'` on the action step. The opt-in
+  surfaces as `INPUT_ALLOW_PR_TARGET_COMMENTS` in the action contract and
+  ships silently refused otherwise — no reply is posted to the thread, only a
+  `logger.warning` line that records the event name and association. (D6)
+- The `mergecraft.yml` example workflow no longer carries `issue_comment` or
+  `pull_request_review_comment` triggers; on-demand runs go through
+  `workflow_dispatch`. The hardened example already omitted comment triggers
+  and is unchanged. ([#72](https://github.com/alexhawat/mergeCraft/issues/72))
 
 ### Added
 

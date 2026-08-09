@@ -31,6 +31,10 @@ inputs:
     description: "Analyzer execution tier: off (disabled), auto (detect + provision), or full (baked image tools). Default: auto"
     required: false
     default: auto
+  allow_pr_target_comments:
+    description: "Opt-in to comment-driven invocation under `pull_request_target`. Default: false (refused). When set to `true`, comments from authors in {OWNER, MEMBER, COLLABORATOR} dispatch the agent even under `pull_request_target`. Set this only on workflows whose `if:` already gates comment triggers to trusted authors; leave it off everywhere else. See issue #72 / D6."
+    required: false
+    default: "false"
   output_schema:
     description: "JSON Schema (draft-07) for structured output validation."
     required: false
@@ -61,6 +65,7 @@ runs:
     INPUT_STATUS_CHECKS: ${{ inputs.status_checks }}
     INPUT_ANALYZERS: ${{ inputs.analyzers }}
     INPUT_OUTPUT_SCHEMA: ${{ inputs.output_schema }}
+    INPUT_ALLOW_PR_TARGET_COMMENTS: ${{ inputs.allow_pr_target_comments }}
     INPUT_TOKEN: ${{ inputs.token }}
 
 branding:

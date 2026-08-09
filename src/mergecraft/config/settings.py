@@ -107,6 +107,13 @@ class RepoSettings(BaseModel):
         default_factory=list, alias="learningsHeadings"
     )
     env_allowlist: str | None = Field(default=None, alias="envAllowlist")
+    # Extra GitHub logins (comma-separated) permitted to invoke mergeCraft by
+    # comment even when ``comment.author_association`` is outside the trusted
+    # set (D5 / W2.3). Default is empty = association gate only. Names are
+    # matched case-insensitively against ``comment.user.login``.
+    comment_invocation_allowlist: str | None = Field(
+        default=None, alias="commentInvocationAllowlist"
+    )
     xrepo_brief: str | None = Field(default=None, alias="xrepoBrief")
     xrepo_learnings: str | None = Field(default=None, alias="xrepoLearnings")
     xrepo_learnings_headings: list[LearningsHeading] = Field(
