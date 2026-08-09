@@ -882,8 +882,6 @@ discovered by pytest via the standard collection rules — no separate
 
 from __future__ import annotations
 
-import json
-
 from mergecraft.evals.store import Case, replay_case
 
 
