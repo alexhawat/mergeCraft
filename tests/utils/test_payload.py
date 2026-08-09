@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from mergecraft.config.settings import default_settings
+from mergecraft.config.settings import RepoSettings, default_settings
 from mergecraft.utils.payload import (
+    TRUSTED_AUTHOR_ASSOCIATIONS,
     JsonPayload,
     resolve_native_event,
     resolve_output_schema,
@@ -498,3 +499,184 @@ def test_pull_request_review_comment_from_non_collaborator_does_not_dispatch(
     )
     payload = resolve_payload()
     assert payload["event"]["trigger"] != "pull_request_review_comment_created"
+
+
+# ----------------------------------------------------------------------------
+# W2.3 / W2.4 — escape hatch and opt-in boundaries.
+#
+# The association gate ships with two deliberate widening knobs: the repo-level
+# `commentInvocationAllowlist` (extra logins) and the workflow-level
+# `allow_pr_target_comments` input. Both are security-relevant, so each one's
+# reach is pinned here — in particular that neither knob widens further than the
+# single axis it names.
+# ----------------------------------------------------------------------------
+
+
+def _comment_event_with_login(*, author_association: str | None, login: str) -> dict[str, object]:
+    """`issue_comment` fixture carrying a `comment.user.login`."""
+    event = _comment_event(author_association=author_association)
+    comment = event["comment"]
+    assert isinstance(comment, dict)
+    comment["user"] = {"login": login}
+    return event
+
+
+def test_comment_invocation_allowlist_admits_an_untrusted_association(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A login on `commentInvocationAllowlist` dispatches despite a `NONE` association (W2.3)."""
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    _write_event(
+        tmp_path,
+        monkeypatch,
+        "issue_comment",
+        _comment_event_with_login(author_association="NONE", login="release-bot"),
+    )
+    settings = RepoSettings.model_validate({"commentInvocationAllowlist": "release-bot, other-bot"})
+    payload = resolve_payload(repo_settings=settings)
+    assert payload["event"]["trigger"] == "issue_comment_created"
+
+
+def test_comment_invocation_allowlist_matches_login_case_insensitively(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GitHub logins are case-insensitive; the allowlist match must be too."""
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    _write_event(
+        tmp_path,
+        monkeypatch,
+        "issue_comment",
+        _comment_event_with_login(author_association="CONTRIBUTOR", login="Release-Bot"),
+    )
+    settings = RepoSettings.model_validate({"commentInvocationAllowlist": "release-bot"})
+    payload = resolve_payload(repo_settings=settings)
+    assert payload["event"]["trigger"] == "issue_comment_created"
+
+
+def test_comment_invocation_allowlist_does_not_admit_unlisted_login(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-empty allowlist admits only the logins it names."""
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    _write_event(
+        tmp_path,
+        monkeypatch,
+        "issue_comment",
+        _comment_event_with_login(author_association="NONE", login="stranger"),
+    )
+    settings = RepoSettings.model_validate({"commentInvocationAllowlist": "release-bot"})
+    payload = resolve_payload(repo_settings=settings)
+    assert payload["event"]["trigger"] != "issue_comment_created"
+
+
+def test_comment_invocation_allowlist_does_not_bypass_missing_association(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The allowlist widens the association set — it does not disable the fail-closed default.
+
+    A payload with no `comment.author_association` at all is malformed for this
+    decision point, so convention 5 (fail closed) wins over the escape hatch.
+    """
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    _write_event(
+        tmp_path,
+        monkeypatch,
+        "issue_comment",
+        _comment_event_with_login(author_association=None, login="release-bot"),
+    )
+    settings = RepoSettings.model_validate({"commentInvocationAllowlist": "release-bot"})
+    payload = resolve_payload(repo_settings=settings)
+    assert payload["event"]["trigger"] != "issue_comment_created"
+
+
+def test_comment_invocation_allowlist_does_not_bypass_pull_request_target_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The repo-level allowlist cannot re-open the `pull_request_target` path (D6).
+
+    The two knobs are orthogonal: only the workflow-level opt-in unlocks
+    comment invocation under `pull_request_target`.
+    """
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    monkeypatch.delenv("INPUT_ALLOW_PR_TARGET_COMMENTS", raising=False)
+    _write_event(
+        tmp_path,
+        monkeypatch,
+        "pull_request_target",
+        _comment_event_with_login(author_association="OWNER", login="release-bot"),
+    )
+    settings = RepoSettings.model_validate({"commentInvocationAllowlist": "release-bot"})
+    payload = resolve_payload(repo_settings=settings)
+    assert payload["event"]["trigger"] != "issue_comment_created"
+
+
+def test_pull_request_target_optin_still_enforces_the_association_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`allow_pr_target_comments` unlocks the event, not the author (D5 survives D6's opt-in)."""
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    monkeypatch.setenv("INPUT_ALLOW_PR_TARGET_COMMENTS", "true")
+    _write_event(
+        tmp_path,
+        monkeypatch,
+        "pull_request_target",
+        _comment_event(author_association="NONE"),
+    )
+    assert resolve_native_event() is None
+
+
+@pytest.mark.parametrize("raw", ["", "false", "no", "0", "off", "maybe", " TRUE-ish "])
+def test_pull_request_target_optin_only_accepts_affirmative_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    """Anything that is not an explicit affirmative leaves the refusal in place (D6)."""
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    monkeypatch.setenv("INPUT_ALLOW_PR_TARGET_COMMENTS", raw)
+    _write_event(
+        tmp_path,
+        monkeypatch,
+        "pull_request_target",
+        _comment_event(author_association="OWNER"),
+    )
+    assert resolve_native_event() is None, f"opt-in value {raw!r} must not unlock the path"
+
+
+@pytest.mark.parametrize("raw", ["true", "TRUE", " True ", "1", "yes", "on"])
+def test_pull_request_target_optin_accepts_the_documented_affirmatives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    """The affirmative vocabulary is pinned so `action.yml` docs cannot drift from the code."""
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    monkeypatch.setenv("INPUT_ALLOW_PR_TARGET_COMMENTS", raw)
+    _write_event(
+        tmp_path,
+        monkeypatch,
+        "pull_request_target",
+        _comment_event(author_association="OWNER"),
+    )
+    native = resolve_native_event()
+    assert native is not None
+    assert native["trigger"] == "issue_comment_created"
+
+
+def test_trusted_author_associations_is_the_single_definition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W2.2: exactly one definition of "trusted comment author" exists in the module."""
+    assert sorted(TRUSTED_AUTHOR_ASSOCIATIONS) == ["COLLABORATOR", "MEMBER", "OWNER"]
+    for association in sorted(TRUSTED_AUTHOR_ASSOCIATIONS):
+        _write_event(
+            tmp_path,
+            monkeypatch,
+            "issue_comment",
+            _comment_event(author_association=association),
+        )
+        assert resolve_native_event() is not None, association

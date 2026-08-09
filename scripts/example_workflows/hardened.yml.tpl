@@ -56,6 +56,14 @@
 name: mergeCraft
 
 on:
+  # NOTE: no `issue_comment` / `pull_request_review_comment` triggers here, by
+  # design. This job runs under `pull_request_target` with repository secrets in
+  # scope, and a comment trigger would let any commenter hand the agent a prompt
+  # inside that context (issue #72 / D6). mergeCraft refuses comment-driven
+  # invocation under `pull_request_target` at runtime regardless — the
+  # `allow_pr_target_comments: 'true'` input exists only for workflows whose
+  # `if:` condition already restricts comment triggers to trusted authors. Use
+  # `workflow_dispatch` below for on-demand runs.
   pull_request_target:
     # Add every base branch that should be auto-reviewed. Globs work:
     # branches: [main, develop, "release-*"]
