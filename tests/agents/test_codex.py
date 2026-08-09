@@ -256,3 +256,113 @@ def test_codex_home_relocates_off_tmp(
     home = codex_module._codex_home(ctx)
     assert str(home).startswith(str(safe))
     assert home.name == ".codex"
+
+
+# ── nested-sandbox failure and the operator opt-in (#70) ────────────────
+
+
+def test_user_namespace_failure_is_recognised() -> None:
+    """The bwrap signature must be told apart from an ordinary reviewer error."""
+    codex_module = _load_codex_module()
+    bwrap_stderr = (
+        "bwrap: No permissions to create a new namespace, likely because the kernel "
+        "does not allow non-privileged user namespaces."
+    )
+
+    assert codex_module.is_user_namespace_failure(bwrap_stderr) is True
+    assert codex_module.is_user_namespace_failure("TypeError: nope") is False
+
+
+def test_sandbox_stays_on_by_default(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    """mergeCraft must never relax Codex's sandbox on its own (#70)."""
+    codex_module = _load_codex_module()
+    monkeypatch.delenv(codex_module.CODEX_SANDBOX_ENV, raising=False)
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+
+    assert codex_module._sandbox_mode(ctx) == "read-only"
+
+
+def test_operator_can_opt_out_of_the_nested_sandbox(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    codex_module = _load_codex_module()
+    monkeypatch.setenv(codex_module.CODEX_SANDBOX_ENV, codex_module.CODEX_SANDBOX_UNSANDBOXED)
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+
+    assert codex_module._sandbox_mode(ctx) == codex_module.CODEX_SANDBOX_UNSANDBOXED
+    # The legacy --sandbox path owns policy here, so the flag reaches the CLI
+    # instead of a read-only permission profile.
+    assert codex_module._codex_use_permission_profiles(ctx) is False
+
+
+def test_unrecognised_sandbox_value_is_ignored_not_forwarded(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """A typo must not silently change the sandbox in either direction."""
+    codex_module = _load_codex_module()
+    monkeypatch.setenv(codex_module.CODEX_SANDBOX_ENV, "danger-ful-access")
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+
+    assert codex_module._sandbox_mode(ctx) == "read-only"
+
+
+def test_opt_in_is_written_into_codex_config(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    codex_module = _load_codex_module()
+    monkeypatch.setenv(codex_module.CODEX_SANDBOX_ENV, codex_module.CODEX_SANDBOX_UNSANDBOXED)
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+
+    config = Path(codex_module.write_mcp_config(ctx)).read_text(encoding="utf-8")
+
+    assert f'sandbox_mode = "{codex_module.CODEX_SANDBOX_UNSANDBOXED}"' in config
+
+
+def test_bwrap_failure_returns_an_actionable_error(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """A silent continue-on-error swallow is the bug; the remedy must be in the error."""
+    codex_module = _load_codex_module()
+    monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.delenv(codex_module.CODEX_SANDBOX_ENV, raising=False)
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del cmd, kwargs
+        return subprocess.CompletedProcess(
+            args=["codex"],
+            returncode=1,
+            stdout="",
+            stderr="bwrap: No permissions to create a new namespace, likely because",
+        )
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+
+    result = codex_module._run_codex_once(cli="codex", prompt="p", ctx=ctx, mcp_config="")
+
+    assert result.success is False
+    assert result.error is not None
+    assert codex_module.CODEX_SANDBOX_ENV in result.error
+    assert "No review ran" in result.error or "no review ran" in result.error.lower()
+
+
+def test_ordinary_failures_do_not_get_the_sandbox_hint(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    codex_module = _load_codex_module()
+    monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
+    monkeypatch.setenv("CI", "true")
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del cmd, kwargs
+        return subprocess.CompletedProcess(
+            args=["codex"], returncode=1, stdout="", stderr="model overloaded"
+        )
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+
+    result = codex_module._run_codex_once(cli="codex", prompt="p", ctx=ctx, mcp_config="")
+
+    assert result.success is False
+    assert result.error is not None
+    assert codex_module.CODEX_SANDBOX_ENV not in result.error

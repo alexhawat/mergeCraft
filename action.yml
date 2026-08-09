@@ -35,6 +35,9 @@ inputs:
     description: "Opt-in to comment-driven invocation under `pull_request_target`. Default: false (refused). When set to `true`, comments from authors in {OWNER, MEMBER, COLLABORATOR} dispatch the agent even under `pull_request_target`. Set this only on workflows whose `if:` already gates comment triggers to trusted authors; leave it off everywhere else. See issue #72 / D6."
     required: false
     default: "false"
+  codex_sandbox:
+    description: "Codex platform-sandbox policy. Leave unset (default) to keep Codex's own bubblewrap/Landlock sandbox. Set to `danger-full-access` ONLY when the runner is already an ephemeral, isolated container — inside a Docker container action, bubblewrap cannot create a nested user namespace and every Codex call fails before doing work. mergeCraft's own shell/push controls are unaffected either way. See issue #70."
+    required: false
   output_schema:
     description: "JSON Schema (draft-07) for structured output validation."
     required: false
@@ -84,6 +87,7 @@ runs:
     INPUT_ANALYZERS: ${{ inputs.analyzers }}
     INPUT_OUTPUT_SCHEMA: ${{ inputs.output_schema }}
     INPUT_ALLOW_PR_TARGET_COMMENTS: ${{ inputs.allow_pr_target_comments }}
+    MERGECRAFT_CODEX_SANDBOX: ${{ inputs.codex_sandbox }}
     INPUT_TOKEN: ${{ inputs.token }}
     INPUT_SUGGEST_EVAL_ADD: ${{ inputs.suggest_eval_add }}
 
