@@ -201,7 +201,7 @@ A flagged row here is fixed by editing the PR's title, body, or issue links — 
 Checks on the review process itself, so a review can't quietly skip half the PR:
 
 - The complete raw diff is read end-to-end, using the diff's table of contents as a coverage checklist.
-- Change-impact extraction (`impactPath`) is treated as an explicitly incomplete set of leads — never a substitute for reading the diff.
+- On a re-review, an incremental patch covering only the commits since mergeCraft's last review scopes what is new — the full diff still establishes coverage.
 - A first submission that missed regions gets a one-time nudge listing the unread ranges.
 - Understanding is never delegated: subagents supply lens investigations, but the primary reviewer synthesizes and re-verifies every finding.
 - **Trivially skippable** — a single-word doc typo, whitespace-only changes, comment-only changes, lockfile or generated-code regeneration, a mechanical rename, a low-risk dependency patch bump.

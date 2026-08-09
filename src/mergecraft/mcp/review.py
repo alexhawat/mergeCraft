@@ -8,9 +8,12 @@ import httpx
 from loguru import logger
 
 from mergecraft.mcp.comment import add_footer
+from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
+from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
 from mergecraft.review_taxonomy import stamp_finding_fingerprint
+from mergecraft.types import INCREMENTAL_REVIEW_MODE
 from mergecraft.utils.learnings import (
     ensure_learnings_review_delta,
     merge_learnings_delta_into_review_body,
@@ -105,6 +108,51 @@ def _maybe_suggest_eval_add(ctx: ToolContext) -> None:
         "consider capturing this run as a case via `mergecraft eval add` "
         "(never auto-added; #44, W12.4)",
     )
+
+
+async def _resolve_fixed_finding_threads(
+    ctx: ToolContext, *, pull_number: int, posted_bodies: list[str]
+) -> int:
+    """Close threads for findings the new commits fixed (C4).
+
+    Runs only on a re-review that knows which paths moved since the last reviewed
+    commit. A thread is closed when mergeCraft raised it, nobody else replied, its
+    file was touched by the new commits, and the review just posted did not raise
+    it again — i.e. the code the finding pointed at changed and the finding is
+    gone. Everything here is advisory: a failure logs and the review still stands.
+    """
+    if ctx.tool_state.selected_mode != INCREMENTAL_REVIEW_MODE:
+        return 0
+    primary = primary_repo_state(ctx.tool_state)
+    changed_paths = set(primary.incremental_changed_paths or ())
+    if not changed_paths:
+        return 0
+    current: set[str] = set()
+    for body in posted_bodies:
+        current |= finding_fingerprints_in(body)
+    try:
+        threads = await fetch_review_threads(ctx, pull_number)
+    except Exception as err:  # advisory cleanup; never fails a posted review
+        logger.info("finding resolution: listing review threads soft-failed: {}", err)
+        return 0
+    targets = resolvable_thread_ids(
+        threads, current_fingerprints=frozenset(current), changed_paths=changed_paths
+    )
+    resolved = 0
+    for thread_id in targets:
+        try:
+            await resolve_review_thread(ctx, thread_id)
+        except Exception as err:  # one bad thread must not stop the rest
+            logger.info("finding resolution: resolving thread {} soft-failed: {}", thread_id, err)
+            continue
+        resolved += 1
+    if resolved:
+        logger.info(
+            "resolved {} review thread(s) on PR #{} whose findings are gone from the new commits",
+            resolved,
+            pull_number,
+        )
+    return resolved
 
 
 def create_pull_request_review_tool(ctx: ToolContext):
@@ -239,6 +287,13 @@ def create_pull_request_review_tool(ctx: ToolContext):
         if approve_fallback:
             response["approveFallbackDueTo422"] = True
             response["requestedReviewState"] = "APPROVE"
+        resolved = await _resolve_fixed_finding_threads(
+            ctx,
+            pull_number=pull_number,
+            posted_bodies=[str(item.get("body") or "") for item in inline],
+        )
+        if resolved:
+            response["resolvedThreads"] = resolved
         return response
 
     return tool(

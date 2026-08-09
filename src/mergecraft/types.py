@@ -15,6 +15,8 @@ MERGECRAFT_MCP_NAME = "mergecraft"
 # Subagent name used in mode prompts (agents/reviewer.ts).
 REVIEWER_AGENT_NAME = "mergecraft-reviewer"
 VERIFIER_AGENT_NAME = "mergecraft-verifier"
+# Mode name checked outside modes.py (incremental-scope artifacts, C4).
+INCREMENTAL_REVIEW_MODE = "IncrementalReview"
 
 
 def format_mcp_tool_ref(agent_id: AgentId, tool_name: str) -> str:
