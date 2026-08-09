@@ -39,7 +39,7 @@ Claude subscription, API key, or other provider credential.**
 
 3. **Commit and push** the scaffolded workflow, then trigger it by opening a PR or running it manually from the Actions tab.
 
-> **Comment-driven invocation is authorized.** A comment on an issue or PR will start a run only when (a) its author has one of `OWNER` / `MEMBER` / `COLLABORATOR` association with the target repo, **and** (b) the workflow is not running under `pull_request_target` (the default refuses comment invocation in that event — opt in with `with: allow_pr_target_comments: 'true'` only on workflows whose `if:` already gates comment triggers to trusted authors). The authorization decision reads `comment.author_association` from the payload, **never** the comment body — so an attacker cannot elevate themselves by writing `author_association: OWNER` into a comment. Strangers, first-time contributors, and `NONE`-association commenters cannot start a run. See [issue #72](https://github.com/alexhawat/mergeCraft/issues/72).
+> **Comment-driven invocation is authorized.** A comment on an issue or PR will start a run only when (a) its author has one of `OWNER` / `MEMBER` / `COLLABORATOR` association with the target repo, **and** (b) the workflow is not running under `pull_request_target` (the default refuses comment invocation in that event — opt in with `with: allow_pr_target_comments: 'true'` only on workflows whose `if:` already gates comment triggers to trusted authors). The authorization decision reads `comment.author_association` from the payload, **never** the comment body — so an attacker cannot elevate themselves by writing `author_association: OWNER` into a comment. Strangers, first-time contributors, and `NONE`-association commenters cannot start a run. Full rules and the two opt-in knobs: [Comment-trigger authorization](#comment-trigger-authorization) · [issue #72](https://github.com/alexhawat/mergeCraft/issues/72).
 
 That's it — no server, dashboard, or account to sign up for.
 
@@ -355,7 +355,9 @@ create the JSON file.
 ## Action inputs
 
 Same contract as upstream mergecraft: `prompt`, `prompt_file`, `timeout`, `model`,
-`cwd`, `push`, `shell`, `status_checks`, `output_schema`, `token` → output `result`.
+`cwd`, `push`, `shell`, `status_checks`, `output_schema`, `token` → output `result`,
+plus `allow_pr_target_comments` (default `false`) — see
+[Comment-trigger authorization](#comment-trigger-authorization).
 
 ### Native event triggers
 
@@ -363,7 +365,8 @@ The Action reads the native `GITHUB_EVENT_PATH` / `GITHUB_EVENT_NAME`, so
 workflows can trigger on `pull_request` (e.g. auto-review on open/sync),
 `issue_comment`, or `pull_request_review_comment` events and the agent gets PR
 context (number, branch, `is_pr`) automatically — no hand-built `~mergecraft` JSON
-payload required. With `status_checks: enabled`, PR runs always post the `mergecraft`
+payload required. Comment events are subject to the authorization gate below.
+With `status_checks: enabled`, PR runs always post the `mergecraft`
 and `mergecraft-approval` commit-status checks.
 
 The approval check is **structural**: its conclusion is a pure function of the
@@ -387,6 +390,36 @@ not just a missing check. The pre-W8 "neutral is non-blocking" framing is
 removed: a crashed / injected / fork-suppressed review must not pass the gate
 silently. An explicit `~mergecraft` payload event still takes precedence when
 provided.
+
+### Comment-trigger authorization
+
+A comment never carries its own authority. Before an `issue_comment` or
+`pull_request_review_comment` event can start a run, mergeCraft reads
+`comment.author_association` from `GITHUB_EVENT_PATH` and requires one of
+`OWNER`, `MEMBER`, or `COLLABORATOR`. Everything else — `CONTRIBUTOR`,
+`FIRST_TIME_CONTRIBUTOR`, `NONE`, or a payload with the field missing entirely —
+is refused: the run resolves to the `unknown` trigger, no agent is dispatched,
+and a single `logger.warning` records the event name and association. The comment
+body is never logged and never consulted, so writing `author_association: OWNER`
+into a comment changes nothing.
+
+Two knobs widen this, each on exactly one axis:
+
+| Knob | Where | Default | What it widens |
+|------|-------|---------|----------------|
+| `allow_pr_target_comments` | action input (`with:`) | `false` | Permits comment-driven invocation when `GITHUB_EVENT_NAME` is `pull_request_target`. The association gate still applies. |
+| `commentInvocationAllowlist` | `.mergecraft/config.yaml` | empty | Comma-separated extra logins (matched case-insensitively against `comment.user.login`) that may invoke despite their association. Does not affect the `pull_request_target` refusal, and does not override the missing-field fail-closed default. |
+
+`pull_request_target` runs hold repository secrets, which is why comment
+invocation there is off by default. Enable it only on a workflow whose `if:`
+condition already restricts comment triggers to trusted authors.
+
+Both shipped examples — [`examples/workflows/mergecraft.yml`](examples/workflows/mergecraft.yml)
+and [`examples/workflows/mergecraft-hardened.yml`](examples/workflows/mergecraft-hardened.yml)
+— deliberately declare no `issue_comment` / `pull_request_review_comment`
+triggers and drive on-demand runs from `workflow_dispatch` instead.
+[`examples/config.yaml`](examples/config.yaml) shows the
+`commentInvocationAllowlist` shape.
 
 ## Development
 

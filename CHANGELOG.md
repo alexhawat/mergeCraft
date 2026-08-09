@@ -70,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configured `staticChecks` now report a `declared-but-cannot-run` row when the gate
   cannot execute in this environment (for example `shell: disabled`), instead of
   disappearing silently (#8)
+- `.mergecraft/config.yaml` accepts `commentInvocationAllowlist`, a comma-separated
+  list of extra GitHub logins (release bots, automation) allowed to invoke by comment
+  despite an `author_association` outside `OWNER`/`MEMBER`/`COLLABORATOR`. It does not
+  re-open comment invocation under `pull_request_target` and does not override the
+  fail-closed default when the association field is missing (#72)
 - Per-run nonce fence (`mergecraft.utils.fence`) wraps every untrusted PR prose field
   — PR title, PR body, `eventInstructions`, `previousRunsNote`, review/issue comment
   bodies, commit messages, patch headers — with a closing delimiter bound to a CSPRNG
@@ -125,6 +130,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rewrite README with a 3-step quickstart and a dedicated Authentication section
   documenting Claude/Codex subscription auth (`mergecraft auth claude` /
   `auth codex`, `CLAUDE_CODE_OAUTH_TOKEN` / `CODEX_AUTH_JSON`) alongside API keys.
+- New README section "Comment-trigger authorization" spells out who may start a run by
+  comment, what a refusal looks like (no reply posted, one warning line, `unknown`
+  trigger), and the reach of each opt-in knob — `allow_pr_target_comments` (action
+  input) and `commentInvocationAllowlist` (repo config). `examples/config.yaml` now
+  carries a commented `commentInvocationAllowlist` example, and the hardened example
+  workflow explains why it declares no comment triggers under `pull_request_target` (#72)
 - Add OSS governance files for parity with sevn-bot/sevn: `SECURITY.md`,
   `CODE_OF_CONDUCT.md`, `.github/CODEOWNERS`, `.github/PULL_REQUEST_TEMPLATE.md`,
   and `.github/ISSUE_TEMPLATE/` (bug report, feature request, security contact link).

@@ -10,6 +10,12 @@ autoMergeEnabled: false
 # postCheckoutScript: |
 #   echo ready
 # envAllowlist: NODE_ENV,CI
+# Extra GitHub logins allowed to invoke mergeCraft by comment even though their
+# `author_association` is outside {OWNER, MEMBER, COLLABORATOR}. Empty (the
+# default) means the association gate alone decides. Matched case-insensitively
+# against `comment.user.login`; does not re-open comment invocation under
+# `pull_request_target` (that needs the `allow_pr_target_comments` action input).
+# commentInvocationAllowlist: release-bot,dependabot[bot]
 # modeInstructions:
 #   Build: Prefer minimal diffs.
 # Mechanical gates the reviewer runs over changed files (see REVIEW-CHECKS.md).
