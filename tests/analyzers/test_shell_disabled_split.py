@@ -64,11 +64,6 @@ def _allow_repo_provided_binaries(*, shell: str) -> Any:
     return trust.allow_repo_provided_binaries(shell=shell)
 
 
-# W1.8 — RED until W2 lands the split. `strict=False` because the regression
-# guards in this module (W1.4/W1.5/W1.6 and the `resolve_analyzer` seam
-# characterisation) already hold today and report XPASS.
-pytestmark = pytest.mark.xfail(reason="green after W2 (#35)", strict=False)
-
 # Real PR triggers — everything that is not the operator-owned offline path.
 PR_TRIGGERS: tuple[str, ...] = ("pull_request", "pull_request_target", "issue_comment")
 
@@ -315,7 +310,12 @@ def test_pipeline_forwards_the_shell_to_the_adapter(
 def test_pipeline_skips_repo_native_manifests_under_shell_disabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The named skip reaches the operator-visible status rows (D9)."""
+    """The named skip reaches the operator-visible status rows (D9).
+
+    Tier is ``trusted`` here — a same-repo PR that still hardens with
+    ``shell: disabled`` — so the shell axis is the one under test rather than
+    the pre-existing tier axis.
+    """
     from mergecraft.analyzers import adapters, pipeline
 
     def _unexpected(**_: Any) -> adapters.AdapterRunResult:
@@ -328,12 +328,36 @@ def test_pipeline_skips_repo_native_manifests_under_shell_disabled(
     state = pipeline.run_analyzer_pipeline(
         repo_root=tmp_path,
         changed_files=["a.py"],
-        tier="untrusted",
+        tier="trusted",
         shell="disabled",
     )
     rows = {row.id: row for row in state.analyzers}
     assert rows["ruff"].status == "unavailable"
     assert "shell: disabled" in (rows["ruff"].reason or "")
+    assert "repo-native" in (rows["ruff"].reason or "")
+
+
+def test_tier_skip_wins_when_both_axes_apply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two axes, one row: the tier reason is reported when both would skip."""
+    from mergecraft.analyzers import adapters, pipeline
+
+    monkeypatch.setattr(
+        adapters,
+        "run_adapter",
+        lambda **_: adapters.AdapterRunResult(findings=[], skipped=True, skip_reason="unused"),
+    )
+    monkeypatch.setattr(pipeline, "detect_enabled", lambda **_: [_manifest("ruff")])
+
+    state = pipeline.run_analyzer_pipeline(
+        repo_root=tmp_path,
+        changed_files=["a.py"],
+        tier="untrusted",
+        shell="disabled",
+    )
+    reason = state.analyzers[0].reason or ""
+    assert "requires trusted tier" in reason
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Hardening your workflow no longer costs you every mechanical check. A repo
+  running `pull_request_target` with `shell: disabled` previously got **no**
+  analyzer coverage at all: one boolean withheld mergeCraft's own pinned catalog
+  alongside the repo-declared `staticChecks` it was meant to withhold. Those are
+  now separate decisions. `managed` and `container` analyzers run — 33 of the 57
+  shipped manifests are eligible, whose argv comes verbatim from a manifest
+  mergeCraft ships — while `repo-native` manifests are withheld with a named
+  reason each, since they exist to run *your* tool against *your* config. On that
+  path a binary the repo provides can no longer stand in for the pinned managed
+  one, closing a way a PR could have steered an otherwise-safe analyzer by
+  committing `.venv/bin/<tool>`. `run_static_checks` stays withheld
+  unconditionally and its gates still report `declared-but-cannot-run`; fork,
+  untrusted-tier, and offline `diff-review` behaviour is unchanged. The full
+  runtime × shell × trust matrix is generated into `docs/ANALYZERS.md` (#35)
 - Codex reviews inside a container runner now fail loudly instead of silently.
   Codex CLI runs its own bubblewrap sandbox; inside a Docker container action
   that is already namespaced it cannot create a nested namespace, so every call

@@ -196,11 +196,17 @@ def _run_osv_scan(
     repo_root: Path,
     lockfiles: list[str],
     tier: TrustTier,
+    allow_repo_binaries: bool = True,
 ) -> tuple[list[Finding], str | None]:
     from mergecraft.analyzers.parsers.osv_json import parse_osv_json
     from mergecraft.analyzers.resolve import resolve_analyzer
 
-    plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
+    plan = resolve_analyzer(
+        manifest=manifest,
+        repo_root=repo_root,
+        managed_available=True,
+        allow_repo_binaries=allow_repo_binaries,
+    )
     provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
         return [], plan.reason or f"skipped {manifest.id}: provisioning failed"
@@ -285,10 +291,16 @@ def _run_trivy_fs(
     repo_root: Path,
     files: list[str],
     tier: TrustTier,
+    allow_repo_binaries: bool = True,
 ) -> tuple[list[Finding], str | None]:
     from mergecraft.analyzers.resolve import resolve_analyzer
 
-    plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
+    plan = resolve_analyzer(
+        manifest=manifest,
+        repo_root=repo_root,
+        managed_available=True,
+        allow_repo_binaries=allow_repo_binaries,
+    )
     provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
         return [], plan.reason or f"skipped {manifest.id}: provisioning failed"
@@ -357,13 +369,19 @@ def _run_trivy_config(
     repo_root: Path,
     iac_files: list[str],
     tier: TrustTier,
+    allow_repo_binaries: bool = True,
 ) -> tuple[list[Finding], str | None]:
     if not iac_files:
         return [], None
 
     from mergecraft.analyzers.resolve import resolve_analyzer
 
-    plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
+    plan = resolve_analyzer(
+        manifest=manifest,
+        repo_root=repo_root,
+        managed_available=True,
+        allow_repo_binaries=allow_repo_binaries,
+    )
     provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
         return [], plan.reason
@@ -411,6 +429,7 @@ def _scan_side(
     repo_root: Path,
     files: list[str],
     tier: TrustTier,
+    allow_repo_binaries: bool = True,
 ) -> tuple[list[Finding], str | None]:
     snapshot = _snapshot_dir(repo_root, files)
     try:
@@ -420,6 +439,7 @@ def _scan_side(
                 repo_root=snapshot,
                 lockfiles=files,
                 tier=tier,
+                allow_repo_binaries=allow_repo_binaries,
             )
         if tool_id == "trivy":
             fs_findings, err = _run_trivy_fs(
@@ -427,6 +447,7 @@ def _scan_side(
                 repo_root=snapshot,
                 files=files,
                 tier=tier,
+                allow_repo_binaries=allow_repo_binaries,
             )
             if err and not fs_findings:
                 return [], err
@@ -435,6 +456,7 @@ def _scan_side(
                 repo_root=snapshot,
                 iac_files=_iac_files(files),
                 tier=tier,
+                allow_repo_binaries=allow_repo_binaries,
             )
             return fs_findings + config_findings, None
         msg = f"unsupported differential tool: {tool_id}"
@@ -450,6 +472,7 @@ def run_differential_scan(
     head_files: list[str],
     base_files: list[str],
     tier: TrustTier = "trusted",
+    allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
     """Run base and head supply-chain scans; publish only the CVE delta (C2.1/C2.2)."""
     repo_root = repo_root.resolve()
@@ -468,6 +491,7 @@ def run_differential_scan(
         repo_root=repo_root,
         files=head_files,
         tier=tier,
+        allow_repo_binaries=allow_repo_binaries,
     )
     if head_err and not head_findings:
         logger.info("{}", head_err)
@@ -479,6 +503,7 @@ def run_differential_scan(
         repo_root=repo_root,
         files=base_files,
         tier=tier,
+        allow_repo_binaries=allow_repo_binaries,
     )
     if base_err and not base_findings and not head_findings:
         return AdapterRunResult(findings=[], skipped=True, skip_reason=base_err)
@@ -493,6 +518,7 @@ def run_supply_chain_adapter(
     changed_files: list[str],
     base_ref: str | None,
     tier: TrustTier = "trusted",
+    allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
     """Run differential supply-chain adapters through the production adapter path (C2)."""
     from mergecraft.analyzers.registry import filter_changed_files_for_manifest
@@ -521,6 +547,7 @@ def run_supply_chain_adapter(
         head_files=scoped,
         base_files=base_files,
         tier=tier,
+        allow_repo_binaries=allow_repo_binaries,
     )
 
 

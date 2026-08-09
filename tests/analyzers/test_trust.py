@@ -57,7 +57,14 @@ def test_trusted_only_manifest_skipped_on_untrusted_tier(fork_pr_event: dict[str
     assert decision.reason
 
 
-def test_shell_disabled_disables_analyzer_surface(tmp_path: Path) -> None:
+def test_shell_disabled_keeps_the_analyzer_surface(tmp_path: Path) -> None:
+    """#35 — `shell: disabled` no longer withholds mergeCraft's own catalog.
+
+    It used to return ``False`` here, which is the whole defect: the withhold
+    was aimed at repo-declared ``staticChecks`` and took the pinned catalog
+    with it. Per-manifest eligibility now lives in
+    ``evaluate_manifest_for_shell`` (see ``test_shell_disabled_split.py``).
+    """
     trust = import_module("mergecraft.analyzers.trust")
     ctx = ToolContext(
         agent_id="claude",
@@ -78,7 +85,7 @@ def test_shell_disabled_disables_analyzer_surface(tmp_path: Path) -> None:
         analyzers_mode="auto",
         analyzers_settings_enabled=True,
     )
-    assert trust.analyzers_enabled(ctx) is False
+    assert trust.analyzers_enabled(ctx) is True
 
 
 def test_w0_probe_event_shape_matches_trusted(same_repo_event: dict[str, object]) -> None:

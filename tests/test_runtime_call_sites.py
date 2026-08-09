@@ -71,6 +71,22 @@ _CONTRACTS: Final[tuple[_Contract, ...]] = (
         defined_in="agents/verifier.py",
         why="no reachable caller means a `drop` verdict never becomes a withdrawn finding (C6)",
     ),
+    _Contract(
+        symbol="evaluate_manifest_for_shell",
+        defined_in="analyzers/trust.py",
+        why=(
+            "no reachable caller means `shell: disabled` stops filtering manifests at all, so "
+            "repo-native analyzers run against a PR-authored tree (#35)"
+        ),
+    ),
+    _Contract(
+        symbol="allow_repo_provided_binaries",
+        defined_in="analyzers/trust.py",
+        why=(
+            "no reachable caller means a repo-committed .venv/bin binary is preferred over the "
+            "pinned managed one even under `shell: disabled` (#35)"
+        ),
+    ),
 )
 
 
