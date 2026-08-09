@@ -29,6 +29,13 @@ import typer
 from pydantic import ValidationError
 from rich.console import Console
 
+from mergecraft.evals.scoring import (
+    DEFAULT_LINE_SLACK,
+    format_report,
+    load_baseline_issues,
+    load_reported_findings,
+    score_findings,
+)
 from mergecraft.evals.store import (
     CASE_FILE_SUFFIX,
     CATEGORY_REJECTED,
@@ -427,6 +434,214 @@ def promote(
     except OSError as exc:
         _bail(f"could not write permanent test to {out_dir}: {exc}")
     console.print(f"[green]promoted case {case_id}[/green] → {target}")
+
+
+def _read_json_or_jsonl(path: Path) -> Any:
+    """Decode a corpus file that may be JSON or JSON Lines.
+
+    Benchmark corpora ship both shapes — a ``findings`` envelope for Harbor task
+    fixtures, and one-object-per-line ``baseline.jsonl`` for promoted baselines —
+    so the reader accepts either rather than making the caller know which.
+    """
+    text = path.read_text(encoding="utf-8")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        rows = [
+            json.loads(line)
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("//")
+        ]
+        if not rows:
+            raise
+        return rows
+
+
+# ── gate ───────────────────────────────────────────────────────────────
+
+
+@app.command("gate")
+def gate(
+    bank: Path | None = typer.Option(
+        None,
+        "--bank",
+        help="Bank directory (default: evals/cases/).",
+    ),
+    require_promoted: bool = typer.Option(
+        False,
+        "--require-promoted",
+        help="Also fail when a case has no permanent test (default: warn only).",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the result as JSON.",
+    ),
+) -> None:
+    """Check the eval bank's integrity — the CI-safe half of the eval loop.
+
+    This gate is **structural, not behavioural**. It proves every durable case
+    still parses against the current schema and provenance model, that ids are
+    unique, and (optionally) that each case has been promoted into a permanent
+    test. It deliberately does **not** replay verdicts: ``replay_case()`` is a
+    pure function that takes the current decision as an *input*, so replaying in
+    CI would require a live agent run per case — non-deterministic, key-bearing,
+    and far too slow for a per-PR gate.
+
+    The behavioural regression signal is ``mergecraft eval promote``: a promoted
+    case becomes a permanent pytest that ``make test`` already runs. This gate's
+    job is to stop the bank itself from silently rotting in the meantime.
+
+    An empty bank passes with a notice, so the target can be wired into CI now
+    and grow teeth as cases accumulate.
+    """
+    bank_dir = _bank_dir(bank)
+    permanent_dir = _default_permanent_dir()
+
+    if not bank_dir.is_dir():
+        if json_output:
+            typer.echo(json.dumps({"status": "empty", "bank": str(bank_dir), "cases": 0}, indent=2))
+        else:
+            console.print(f"[yellow]eval bank {bank_dir} does not exist yet[/yellow]")
+        return
+
+    paths = sorted(bank_dir.glob(f"*{CASE_FILE_SUFFIX}"))
+    broken: list[dict[str, str]] = []
+    seen: dict[str, str] = {}
+    duplicates: list[dict[str, str]] = []
+    unpromoted: list[str] = []
+
+    for path in paths:
+        try:
+            case = load_case(path)
+        except Exception as exc:  # any parse failure is itself the finding
+            broken.append({"path": str(path), "error": str(exc)})
+            continue
+        if case.id in seen:
+            duplicates.append({"id": case.id, "path": str(path), "first": seen[case.id]})
+        else:
+            seen[case.id] = str(path)
+        if not (permanent_dir / f"test_{case.id.replace('-', '_')}.py").is_file():
+            unpromoted.append(case.id)
+
+    failures = len(broken) + len(duplicates)
+    if require_promoted:
+        failures += len(unpromoted)
+
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "status": "fail" if failures else "pass",
+                    "bank": str(bank_dir),
+                    "cases": len(paths),
+                    "loaded": len(seen),
+                    "broken": broken,
+                    "duplicates": duplicates,
+                    "unpromoted": unpromoted,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        console.print(f"eval bank: {bank_dir}")
+        console.print(f"  cases    : {len(paths)}")
+        console.print(f"  loaded   : {len(seen)}")
+        for row in broken:
+            console.print(f"  [red]unparsable[/red]: {row['path']} — {row['error']}")
+        for row in duplicates:
+            console.print(
+                f"  [red]duplicate id[/red]: {row['id']} in {row['path']} "
+                f"(first seen {row['first']})"
+            )
+        if unpromoted:
+            colour = "red" if require_promoted else "yellow"
+            console.print(f"  [{colour}]not promoted[/{colour}]: {', '.join(unpromoted)}")
+        if not paths:
+            console.print(
+                "  [yellow]bank is empty — the gate passes, but it is not yet "
+                "measuring anything[/yellow]"
+            )
+        elif failures == 0:
+            console.print("  [green]bank is healthy[/green]")
+
+    if failures:
+        raise typer.Exit(code=1)
+
+
+# ── score ──────────────────────────────────────────────────────────────
+
+
+@app.command("score")
+def score(
+    actual: Path = typer.Argument(..., help="JSON findings a review run produced."),
+    expected: Path = typer.Argument(..., help="JSON baseline issues to score against."),
+    min_recall: float = typer.Option(
+        0.0,
+        "--min-recall",
+        help="Exit non-zero when recall falls below this fraction (0.0-1.0).",
+    ),
+    slack: int = typer.Option(
+        DEFAULT_LINE_SLACK,
+        "--slack",
+        help="Line distance still counted as locating a baseline issue.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the score report as JSON.",
+    ),
+) -> None:
+    """Score review findings against a frozen benchmark baseline.
+
+    A baseline issue counts as located when a reported finding overlaps its line
+    range in the same file — **not** when the two rows are equal. Equality
+    scoring fails a run for paraphrasing a finding it genuinely found, and it
+    cannot pass at all against a corpus whose rows carry their own ``rule_id``
+    and ``fingerprint``.
+
+    Severity and category agreement are reported alongside each match, never as
+    conditions for it.
+    """
+    for path in (actual, expected):
+        if not path.is_file():
+            _bail(f"{path} is not a file")
+    try:
+        actual_payload = _read_json_or_jsonl(actual)
+        expected_payload = _read_json_or_jsonl(expected)
+    except (OSError, json.JSONDecodeError) as exc:
+        _bail(f"could not read scoring inputs: {exc}")
+
+    issues = load_baseline_issues(expected_payload)
+    findings = load_reported_findings(actual_payload)
+    report = score_findings(issues, findings, slack=slack)
+
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "total_issues": report.total_issues,
+                    "total_reported": report.total_reported,
+                    "found": report.found,
+                    "recall": report.recall,
+                    "precision": report.precision,
+                    "severity_agreement": report.severity_agreement,
+                    "missed_issue_ids": report.missed_issue_ids,
+                    "matches": [m.model_dump() for m in report.matches],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        console.print(format_report(report, corpus=expected))
+
+    if report.recall < min_recall:
+        console.print(
+            f"[red]recall {report.recall:.2%} is below the required {min_recall:.2%}[/red]"
+        )
+        raise typer.Exit(code=1)
 
 
 __all__ = ["CATEGORY_REJECTED", "CATEGORY_REVERTED", "FAILURE_CATEGORIES", "app"]
