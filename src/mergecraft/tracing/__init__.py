@@ -19,6 +19,15 @@ from mergecraft.tracing.sinks import (
     read_jsonl_events,
     sink_factory,
 )
+from mergecraft.tracing.tracer import (
+    NullSpan,
+    NullTracer,
+    Span,
+    Tracer,
+    get_tracer_from_settings,
+    resolve_correlation_from_env,
+    resolve_session_id,
+)
 
 __all__ = [
     "DENY_KEYS",
@@ -27,11 +36,18 @@ __all__ = [
     "MemorySink",
     "MultiSink",
     "NullSink",
+    "NullSpan",
+    "NullTracer",
     "RedactingSink",
+    "Span",
     "TraceEvent",
+    "Tracer",
     "cap_event_attrs",
+    "get_tracer_from_settings",
     "read_jsonl_events",
     "redact_attrs",
     "redact_event",
+    "resolve_correlation_from_env",
+    "resolve_session_id",
     "sink_factory",
 ]

@@ -118,7 +118,13 @@ def test_correlation_attributes_present(
     async def run_once(slug: str) -> Any:
         return make_agent_result(success=True, usage=make_agent_usage())
 
-    asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
+    asyncio.run(
+        run_with_model_chain(
+            settings=settings,
+            run_once=run_once,
+            correlation=correlation_fields,
+        )
+    )
 
     captured_sink.record()
     roots = [event for event in captured_sink.events if event.parent_span_id is None]

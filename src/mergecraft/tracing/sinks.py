@@ -29,6 +29,7 @@ Exports:
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -65,14 +66,19 @@ class NullSink:
         """No-op write — kept for parity with the sink protocol."""
 
 
+_PENDING_SINK: ContextVar[object | None] = ContextVar("mergecraft_pending_trace_sink", default=None)
+
+
 class MemorySink:
-    """In-memory sink — records every event in a list."""
+    """In-memory sink — records every event in a redacted list."""
 
     def __init__(self) -> None:
         self.events: list[TraceEvent] = []
 
     def write(self, event: TraceEvent) -> None:
-        self.events.append(event)
+        redacted = redact_event(event)
+        capped_attrs = cap_event_attrs(redacted.model_dump())["attrs"]
+        self.events.append(redacted.model_copy(update={"attrs": capped_attrs}))
 
 
 class JSONLFileSink:
@@ -199,7 +205,25 @@ def sink_factory(tracing_settings: Any) -> Any:
 
     if not children:
         return NullSink()
-    return RedactingSink(MultiSink(children))
+    resolved = RedactingSink(MultiSink(children))
+    _PENDING_SINK.set(resolved)
+    return resolved
+
+
+def claim_sink(tracing_settings: Any) -> Any:
+    """Claim a sink already resolved for this context, or build one.
+
+    The handoff lets a caller inspect an in-memory sink before an emit-site
+    tracer claims it. Production callers that did not pre-resolve a sink take
+    the normal factory path.
+    """
+    pending = _PENDING_SINK.get()
+    if pending is not None:
+        _PENDING_SINK.set(None)
+        return pending
+    resolved = sink_factory(tracing_settings)
+    _PENDING_SINK.set(None)
+    return resolved
 
 
 def read_jsonl_events(path: Path) -> Iterator[dict[str, Any]]:
@@ -221,6 +245,7 @@ __all__ = [
     "MultiSink",
     "NullSink",
     "RedactingSink",
+    "claim_sink",
     "read_jsonl_events",
     "sink_factory",
 ]
