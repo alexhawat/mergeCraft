@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Review quality can now be measured. `mergecraft eval score` grades a run's
+  findings against a frozen benchmark baseline by **locating** issues — a
+  baseline issue counts as found when a reported finding overlaps its line range
+  in the same file, not when the two rows match structurally. Equality scoring
+  failed a run for rewording a finding it genuinely found, and could never pass
+  against a corpus carrying its own `rule_id` and `fingerprint`. Severity
+  vocabularies are reconciled (`high`/`medium` → `Major`/`Minor`) so agreement is
+  reported honestly instead of always reading 0%. `make bench-review` now takes
+  `REVIEWBENCH_DIR=...`, so the corpus can live outside this repo, and
+  `make eval-gate` checks the eval bank still parses against the current schema
+  — the durable cases can no longer rot in silence (#30, #51)
 - The reviewer's own `Critical` and `Major` findings are now double-checked
   before they are published, not just the ones its linters and CI produced. A
   second read-only agent re-reads the cited code and returns confirm, downgrade,

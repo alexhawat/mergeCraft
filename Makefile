@@ -13,7 +13,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
-	examples example-workflows-check bench-review
+	examples example-workflows-check bench-review eval-gate
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -106,13 +106,20 @@ ci-reset: ## Clear the ci-resume checkpoint (start the gate over)
 ci: ci-static security test ## Full gate
 	@echo "ci OK"
 
-bench-review: ## Run ReviewBench via Harbor (requires evals/reviewbench corpus)
-	@if [ ! -d evals/reviewbench ]; then \
-	  echo "ReviewBench corpus not present — frozen tasks live in sevn-bot/tripll#64"; \
+REVIEWBENCH_DIR ?= evals/reviewbench
+
+bench-review: ## Run ReviewBench via Harbor (set REVIEWBENCH_DIR to an external corpus)
+	@if [ ! -d "$(REVIEWBENCH_DIR)" ]; then \
+	  echo "ReviewBench corpus not present at '$(REVIEWBENCH_DIR)'."; \
+	  echo "The frozen corpus lives in sevn-bot/tripll (bench/review/) — point at it with:"; \
+	  echo "  make bench-review REVIEWBENCH_DIR=../tripll/bench/review"; \
 	  echo "See evals/README.md"; \
 	  exit 2; \
 	fi
-	$(UV) run --extra harbor harbor run -d evals/reviewbench --agent mergecraft.harbor.agent:MergecraftReviewAgent
+	$(UV) run --extra harbor harbor run -d "$(REVIEWBENCH_DIR)" --agent mergecraft.harbor.agent:MergecraftReviewAgent
+
+eval-gate: ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
+	$(UV) run mergecraft eval gate
 
 docker-build: ## Build action Docker image
 	docker build -t mergeCraft:local -f Dockerfile .
