@@ -156,6 +156,54 @@ or a CI provider mergeCraft cannot reach — all surface explicitly. The
 "green" in a check-run summary is the verdict's input; "no signal" is a
 verdict's input that says *the review has nothing to attest to*.
 
+## Rejected: numeric confidence and a flattened finding schema (C12, C22)
+
+Both of these have been proposed, evaluated, and **rejected**. They are
+recorded here because they are the kind of proposal that returns — each
+looks like a simplification and each would remove a load-bearing
+mechanism.
+
+### Confidence stays categorical
+
+`FINDING_CONFIDENCES` is `certain` / `likely` / `possible`
+(`review_taxonomy.py`), and it stays that way. A numeric
+`confidence: 0.94` is an **uncalibrated model self-report**: nothing
+measures it, nothing validates it, and no two runs mean the same thing by
+it. Its real cost is what it invites — a `min_confidence: 0.8` filter,
+which is a threshold on a meaningless number, presented to operators as
+if it were a dial with units.
+
+This is the same principle as *Green is evidence, not proof* above,
+applied one level down: the merge decision does not consume an agent's
+self-report, and neither should finding triage. Depth comes from
+**evidence** — the cited code, the verifier's verdict, the deterministic
+checks that ran — not from a number the model chose.
+
+Consequently, `review.min_confidence` will not be added to `RepoSettings`
+even if the rest of a noise-control block is (C17).
+
+### The `Finding` schema is extended, never flattened
+
+A flatter finding shape has been proposed:
+`path`→`file`, `message`→`title`, `remediation`→`suggestion`,
+`autofix`→`patch`, dropping `fingerprint`, `introduced_by_pr`,
+`cluster_id`, `tool`, and `rule_id`.
+
+Every dropped field is load-bearing, and dropping them breaks features
+the same proposal asks for elsewhere:
+
+| Field | What depends on it |
+|---|---|
+| `fingerprint` | Incremental re-review dedup, the withdrawn-findings memory, thread resolution |
+| `introduced_by_pr` | Scope filtering (`analyzers/scope.py`) — the difference between "this PR broke it" and "it was already broken" |
+| `cluster_id` | CI log clustering |
+| `tool` / `rule_id` | Analyzer provenance and trust tiering |
+
+Renames are pure churn: they change every parser, fixture, and adapter to
+buy nothing. **Additive** extension is fine and is the supported path —
+add a field, keep the model strict (`extra="forbid"`), and version it if
+the shape changes.
+
 ## Trust tiers and contributor weight
 
 `analyzers/trust.py::derive_trust_tier()` collapses an event's metadata into one of
