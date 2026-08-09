@@ -216,6 +216,15 @@ Checks on the review process itself, so a review can't quietly skip half the PR:
   - a "typo fix" in user-facing copy that changes meaning ("approved" → "denied")
   - a semantic one-liner buried in a formatting-only diff
 
+### Blast-radius merge lanes
+
+The packet's blast-radius classification is an evidence-weighted policy signal,
+not an instruction to merge. `low` means the change is eligible for the
+auto-merge lane after required checks pass, `medium` means assisted review, and
+`high` means automatic merge is forbidden. These semantics do not enable or
+disable auto-merge; `autoMergeEnabled` remains `false`, and Batch D (#46) owns
+the separate mapping from evidence outcomes to workflow actions.
+
 ## 5. Finding grading
 
 Every surviving finding is graded on three independent axes before it is placed. The grade decides placement, so it isn't decoration.

@@ -109,22 +109,39 @@ def test_classifier_detects_each_named_category(
 
 def test_rule_set_is_overridable_per_repo(classifier_api: Any) -> None:
     """D9: a repository override changes classification without changing code."""
+    from mergecraft.config import RepoSettings
+
     change = _change("src/mergecraft/utils/time.py", files_changed=1)
     default = classifier_api.classify_blast_radius(change)
-    override: dict[str, dict[str, str]] = {"source_without_tests": {"lane": "high"}}
-    overridden = classifier_api.classify_blast_radius(change, rule_set=override)
+    settings = RepoSettings.model_validate(
+        {"blastRadiusOverride": {"source_without_tests": {"lane": "high"}}}
+    )
+    overridden = classifier_api.classify_blast_radius(
+        change, rule_set=settings.blast_radius_override
+    )
     assert default.lane != overridden.lane
     assert overridden.lane == "high"
 
 
-@pytest.mark.xfail(reason="W5 owns lane-policy and packet wiring", run=False)
 def test_decision_output_names_lane_reason_and_next_action(classifier_api: Any) -> None:
     """#42 requires a user-facing lane, reason, and next action."""
     result = classifier_api.classify_blast_radius(_change("docs/guide.md"))
-    assert isinstance(result.lane, str)
-    assert result.reason
-    assert result.next_action
-    assert result.auto_merge_lane == "eligible"
+    from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION, MergeEvidencePacket
+
+    packet = MergeEvidencePacket(
+        schema_version=PACKET_SCHEMA_VERSION,
+        change_id="alexhawat/mergeCraft#42",
+        agent={"id": "test", "version": "1", "model": "test"},
+        files_changed=["docs/guide.md"],
+        findings=[],
+        deterministic_checks=[],
+        blast_radius=result,
+    )
+    assert packet.blast_radius is not None
+    assert isinstance(packet.blast_radius.lane, str)
+    assert packet.blast_radius.reason
+    assert packet.blast_radius.next_action
+    assert packet.blast_radius.auto_merge_lane == "eligible"
 
 
 def test_classifier_is_pure(classifier_api: Any, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -11,6 +11,7 @@ import yaml
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from mergecraft.classify import RuleSet
 from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 
 AccountPlan = Literal["none", "payg"]
@@ -98,6 +99,7 @@ class RepoSettings(BaseModel):
     shell: ShellPermission = "restricted"
     pr_approve_enabled: bool = Field(default=False, alias="prApproveEnabled")
     auto_merge_enabled: bool = Field(default=False, alias="autoMergeEnabled")
+    blast_radius_override: RuleSet = Field(default_factory=RuleSet, alias="blastRadiusOverride")
     signed_commits: bool = Field(default=False, alias="signedCommits")
     mode_instructions: dict[str, str] = Field(default_factory=dict, alias="modeInstructions")
     static_checks: list[StaticCheckDefinition] = Field(default_factory=list, alias="staticChecks")
@@ -182,6 +184,7 @@ def default_settings() -> RepoSettings:
             "shell": "restricted",
             "pr_approve_enabled": False,
             "auto_merge_enabled": False,
+            "blast_radius_override": {},
             "signed_commits": False,
             "mode_instructions": {},
             "static_checks": [],

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Merge-lane policy maps blast radius to a typed packet signal: low changes are
+  `eligible`, medium changes are `assisted`, and high changes are `forbidden`.
+  `MergeEvidencePacket.blast_radius` now validates `BlastRadiusClassification`,
+  with `PACKET_SCHEMA_VERSION` bumped to `1.2.0`; repository overrides remain
+  additive per category and `autoMergeEnabled` remains disabled (#42, W5).
 - Blast-radius classifier: `classify_blast_radius()` maps changed paths and
   optional diff text to typed low, medium, or high merge lanes using a shipped
   declarative rule set with additive per-category overrides. The pure classifier

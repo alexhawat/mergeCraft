@@ -10,7 +10,7 @@ result to a run-local path and stamps it as a CI artifact (convention 5).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -23,6 +23,9 @@ from mergecraft.evidence.packet import (
     MergeEvidencePacket,
     SelfAssessment,
 )
+
+if TYPE_CHECKING:
+    from mergecraft.classify import BlastRadiusClassification
 
 
 def _coerce_findings(raw: list[dict[str, Any]] | list[Finding] | None) -> list[Finding]:
@@ -111,6 +114,7 @@ def build_packet(
     deterministic_checks: list[dict[str, Any]] | list[DeterministicCheck] | None,
     self_assessment: dict[str, Any] | SelfAssessment | None = None,
     decision: Decision | None = None,
+    blast_radius: BlastRadiusClassification | None = None,
     ci_check_runs: dict[str, Any] | None = None,
     ci_intelligence: dict[str, Any] | None = None,
     usage_entries: Any = None,
@@ -132,9 +136,9 @@ def build_packet(
     :func:`mergecraft.agents.gates.decide_approval` and ``tests/evidence/
     test_self_assessment.py``.
 
-    Nullable-until-later sections (``blast_radius``, ``trajectory``,
-    ``evals``) are intentionally left as ``None`` here; Batches B / C / E
-    extend the packet with their own ``build_packet`` overlays.
+    ``blast_radius`` and ``evals``) remain optional. Batch B populates
+    ``blast_radius`` with a typed ``BlastRadiusClassification``; Batches C / E
+    extend their sections.
     """
     coerced_findings = _coerce_findings(findings)
     coerced_checks = _coerce_deterministic_checks(deterministic_checks)
@@ -175,6 +179,7 @@ def build_packet(
         deterministic_checks=coerced_checks,
         self_assessment=coerced_self_assessment,
         decision=decision,
+        blast_radius=blast_radius,
     )
 
     # Trajectory / usage_entries / ci_check_runs / ci_intelligence are still

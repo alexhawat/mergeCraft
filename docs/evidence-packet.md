@@ -40,7 +40,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.1.0`.
+The current version is `1.2.0`.
 
 ### Version history
 
@@ -53,6 +53,12 @@ The current version is `1.1.0`.
   before. The legacy `ApprovalRecord.would_approve` surface stays for
   backward compatibility; the packet's `self_assessment` row is the
   explicit "what the agent *said*" record.
+
+- `1.2.0` — W5 (#42). Replaces the nullable untyped `blast_radius`
+  placeholder with `BlastRadiusClassification | None`. Populated packets now
+  validate the lane, lane policy, reason, next action, and detected categories.
+  The field remains optional, but its existing type changed, so D7 requires a
+  minor bump.
 
 ## Top-level fields
 

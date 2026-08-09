@@ -46,6 +46,13 @@ def test_packet_contains_nullable_until_later_sections() -> None:
         )
 
 
+def test_packet_blast_radius_uses_classification_model() -> None:
+    """Batch B replaces the untyped placeholder with the classifier result."""
+    packet_mod = import_module("mergecraft.evidence.packet")
+    annotation = packet_mod.MergeEvidencePacket.model_fields["blast_radius"].annotation
+    assert "BlastRadiusClassification" in str(annotation)
+
+
 def test_packet_agent_section_carries_id_version_and_model() -> None:
     """The ``agent`` section must record id, version, and model."""
     packet_mod = import_module("mergecraft.evidence.packet")

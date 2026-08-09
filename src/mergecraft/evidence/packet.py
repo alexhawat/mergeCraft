@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.fields import FieldInfo
 
 from mergecraft.analyzers.finding import Finding
+from mergecraft.classify import BlastRadiusClassification  # noqa: TC001
 
 # D7 — the packet is versioned from day one. Any field-level change (additive
 # or otherwise) that is not accompanied by a bump of this literal must fail
@@ -35,7 +36,10 @@ from mergecraft.analyzers.finding import Finding
 # - 1.1.0 — W2 (#41) adds the ``self_assessment`` section as a sibling of
 #   ``decision``. Additive (minor bump); the verdict function reads the
 #   ``self_assessment`` field but the wire shape is backwards-compatible.
-PACKET_SCHEMA_VERSION = "1.1.0"
+# - 1.2.0 — W5 (#42) replaces the untyped ``blast_radius`` placeholder with
+#   ``BlastRadiusClassification``. The section remains optional, but populated
+#   packets now carry a validated lane, reason, next action, and lane policy.
+PACKET_SCHEMA_VERSION = "1.2.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]
@@ -150,7 +154,7 @@ class MergeEvidencePacket(BaseModel):
     deterministic_checks: list[DeterministicCheck]
     self_assessment: SelfAssessment | None = None
     decision: Decision | None = None
-    blast_radius: dict[str, Any] | None = None
+    blast_radius: BlastRadiusClassification | None = None
     trajectory: dict[str, Any] | None = None
     evals: dict[str, Any] | None = None
 
