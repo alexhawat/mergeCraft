@@ -259,6 +259,13 @@ def test_no_second_finding_model_introduced() -> None:
     Asserted by inspecting the module W8 added the decision function
     to (``src/mergecraft/agents/gates.py``) and the ``analyzers``
     package for parallel models.
+
+    W2 of the merge-evidence plan (#41) extended the first positional
+    parameter to also accept ``MergeEvidencePacket`` (in addition to the
+    legacy ``list[Finding]``). The annotation is therefore a ``Union``;
+    the W7 literal check is relaxed here to assert the canonical
+    ``Finding`` is referenced, which preserves D12's intent (no parallel
+    model defined in ``gates.py``).
     """
     import mergecraft.agents.gates as gates
     from mergecraft.analyzers import finding as finding_mod
@@ -269,12 +276,19 @@ def test_no_second_finding_model_introduced() -> None:
     )
 
     # The approval path's Finding is the canonical one from finding.py.
-    decision_finding = gates.decide_approval.__annotations__["findings"]
-    # The annotation must be ``list[Finding]`` (or equivalent) — not a
-    # parallel model defined in gates.py.
-    assert str(decision_finding) == "list[Finding]", (
-        "decide_approval's findings argument must be annotated as "
-        "list[Finding] — D12 forbids a parallel model"
+    # The annotation is allowed to wrap ``list[Finding]`` in a Union
+    # (W2/#41 extended the first arg to also accept ``MergeEvidencePacket``);
+    # what D12 forbids is a parallel Finding model — i.e. a *different*
+    # class named after ``Finding``. The canonical class must still be the
+    # one referenced here.
+    annotation = gates.decide_approval.__annotations__["findings"]
+    annotation_str = str(annotation)
+    assert "Finding" in annotation_str, (
+        "decide_approval's findings argument must reference the canonical "
+        "Finding class — D12 forbids a parallel model"
+    )
+    assert finding_mod.Finding is Finding, (
+        "the canonical Finding class must remain the one in analyzers.finding"
     )
 
     # No parallel finding class in the gates module.

@@ -1,11 +1,16 @@
-"""Subagent mutates deny + native FS denies (ported from subagentToolGates / nativeFsDenies)."""
+"""Subagent mutates deny + native FS denies + structural approval gate (ported from
+subagentToolGates / nativeFsDenies and extended by the security-trust-boundary plan
+Batch D and the merge-evidence plan Batch A - W2).
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Union, overload
 
 from loguru import logger
 
+from mergecraft.evidence.packet import Decision as PacketDecision
+from mergecraft.evidence.packet import MergeEvidencePacket
 from mergecraft.mcp.server import build_orchestrator_tools
 
 if TYPE_CHECKING:
@@ -83,20 +88,53 @@ def _has_blocker(findings: list[Finding]) -> bool:
     return any(f.severity in BLOCKING_SEVERITIES for f in findings)
 
 
+@overload
 def decide_approval(
     findings: list[Finding],
     *,
     run_succeeded: bool,
     tier: TrustTier,
-) -> Conclusion:
-    """Pure structural approval conclusion (D12, D13, D14).
+) -> Conclusion: ...
 
-    The approval gate's wire-shape (``success`` / ``failure`` / ``neutral``) is a
-    pure function of the typed finding list, the run's completion state, and the
-    trust tier. Narrative (``ApprovalRecord.would_approve``, ``result.output``,
-    any model prose) is never an input — the agent's ``approved`` boolean is
-    recorded separately (W8.3) and consumed by the trajectory/evidence work in
-    the merge-evidence plan (#41) after the fact.
+
+@overload
+def decide_approval(
+    findings: MergeEvidencePacket,
+    *,
+    run_succeeded: bool,
+    tier: TrustTier,
+) -> PacketDecision: ...
+
+
+def decide_approval(
+    findings: Union[list[Finding], MergeEvidencePacket],  # noqa: UP007
+    *,
+    run_succeeded: bool,
+    tier: TrustTier,
+) -> Union[Conclusion, PacketDecision]:  # noqa: UP007
+    """Pure structural approval verdict - finding list or merge-evidence packet (D5, D12-D14, #41).
+
+    The approval gate's wire-shape is a pure function of typed findings, the run's
+    completion state, and the trust tier. Narrative (``ApprovalRecord.would_approve``,
+    ``result.output``, any model prose) is never an input — the agent's
+    ``approved`` boolean is recorded separately as ``SelfAssessment`` on the
+    packet (W2.1 / #41) and consulted by the trajectory / merge-evidence work,
+    not by this gate.
+
+    Two overloads (D5):
+
+    - **Legacy / security-plan Batch D call sites** (positional ``list[Finding]``):
+      returns a ``Conclusion`` literal (``"success"`` / ``"failure"`` /
+      ``"neutral"``). ``report_status_checks`` consumes this for the
+      ``mergecraft-approval`` check-run.
+    - **Merge-evidence packet call sites** (positional ``MergeEvidencePacket``):
+      returns a :class:`mergecraft.evidence.packet.Decision` row with
+      ``verdict`` / ``reason`` / ``decided_by``. The packet's existing
+      ``self_assessment`` row is **advisory only**; if the packet carries an
+      explicit ``Decision``, that decision is returned verbatim (#41 hard rule —
+      the structural verdict is authoritative). Otherwise the same monotone
+      blocker logic runs against ``packet.findings`` and the result is wrapped
+      in a :class:`Decision`.
 
     The decision is monotone in blockers:
 
@@ -114,10 +152,30 @@ def decide_approval(
       (attested structural evidence the review ran), ``"neutral"`` when the
       list is empty (the run completed without findings to attest to).
 
+    #41 hard rule, enforced here: when the recorded self-assessment is the only
+    positive signal, the verdict is **not** ``auto_merge``. With no findings,
+    no passing deterministic checks, ``run_succeeded=True``, and ``tier="trusted"``
+    the legacy path yields ``"neutral"``; the packet overload maps that to a
+    ``Decision`` whose ``verdict`` is ``"neutral"``. A caller that needs the
+    W9 closed-action vocabulary can then derive ``auto_merge`` only after
+    further positive evidence (blast-radius lane, trajectory clean, …).
+
     The function is pure: no I/O, no logging, no module state. The merge-evidence
-    plan's W2 (D12) and W9 (#46) call this function without re-shaping; the
+    plan's W2 (#41) and W9 (#46) call this function without re-shaping; the
     signature is the contract.
     """
+    if isinstance(findings, MergeEvidencePacket):
+        return _decide_approval_from_packet(findings, run_succeeded=run_succeeded, tier=tier)
+    return _decide_approval_from_findings(findings, run_succeeded=run_succeeded, tier=tier)
+
+
+def _decide_approval_from_findings(
+    findings: list[Finding],
+    *,
+    run_succeeded: bool,
+    tier: TrustTier,
+) -> Conclusion:
+    """Legacy structural approval conclusion — typed findings input (D12, D13, D14)."""
     if _has_blocker(findings):
         return "failure"
     if not run_succeeded:
@@ -127,6 +185,67 @@ def decide_approval(
     if not findings:
         return "neutral"
     return "success"
+
+
+def _decide_approval_from_packet(
+    packet: MergeEvidencePacket,
+    *,
+    run_succeeded: bool,
+    tier: TrustTier,
+) -> PacketDecision:
+    """Packet-aware structural approval decision (#41, W2.2, W2.3).
+
+    Returns a :class:`mergecraft.evidence.packet.Decision` row. When the packet
+    carries an explicit ``decision`` row, that row is returned verbatim — the
+    structural verdict is authoritative over the agent's recorded
+    ``self_assessment``. When the packet does not carry an explicit verdict,
+    the legacy blocker logic runs against ``packet.findings`` and the
+    ``Conclusion`` literal is wrapped in a ``Decision`` with a stable
+    ``decided_by`` and a reason that names the signal the verdict came from.
+
+    The function is pure: no I/O, no logging, no module state.
+    """
+    from mergecraft.evidence.packet import Decision as PacketDecision
+
+    # #41 hard rule — if the packet already carries an explicit decision
+    # (set by an upstream layer, e.g. a W9 thermostat overlay), honour it
+    # verbatim. The agent's recorded ``self_assessment`` cannot override
+    # the structural verdict.
+    if packet.decision is not None:
+        return packet.decision
+
+    conclusion = _decide_approval_from_findings(
+        packet.findings, run_succeeded=run_succeeded, tier=tier
+    )
+    return PacketDecision(
+        verdict=conclusion,
+        reason=_packet_decision_reason(conclusion, packet),
+        decided_by="mergecraft.agents.gates.decide_approval",
+    )
+
+
+def _packet_decision_reason(
+    conclusion: Conclusion,
+    packet: MergeEvidencePacket,
+) -> str:
+    """Render a short, evidence-attributed reason for a packet verdict (#41).
+
+    Keeps the reason deterministic and grounded in what the packet actually
+    carries, never in the agent's prose. The string is short — the full
+    evidence lives in the packet itself and downstream consumers should
+    read it from there.
+    """
+    if packet.self_assessment is not None and packet.self_assessment.approved:
+        # The agent said approved; the structural verdict is whatever the
+        # evidence proved. Surface both so a human reader can see the
+        # disagreement explicitly.
+        return (
+            f"{conclusion}: structural evidence — agent's self_assessment.approved=true "
+            "is advisory only and did not override the verdict"
+        )
+    if not packet.findings:
+        return f"{conclusion}: no typed findings to attest to the review"
+    return f"{conclusion}: derived from typed findings and run state"
 
 
 def approval_decision_inputs(

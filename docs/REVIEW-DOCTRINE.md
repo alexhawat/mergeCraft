@@ -58,6 +58,58 @@ config names; on a pull request those are commands the PR author controls. Offli
 Harvested from pullfrog-py `origin/main` commits `bff76e7` (feat/review-triage-and-mechanical-gates)
 and `31441ce` (fix/static-check-availability-and-shell-gate), PR #20.
 
+## Green is evidence, not proof (#41, W2)
+
+A passing check-run is **evidence**, never a **proof**. The merge decision
+is a function of durable, structured evidence — never of an agent's
+self-report. Two consequences follow:
+
+- **The agent's `approved` boolean is recorded but never sufficient.** It
+  lives on the merge-evidence packet as `self_assessment` (with the
+  reviewed `sha`) — a sibling of `decision`, not a substitute. When the
+  agent's `self_assessment.approved == True` is the *only* positive
+  signal, the verdict is `neutral` (or the packet's explicit `decision`
+  if set upstream), not `auto_merge`. That is the #41 hard rule; it is
+  pinned by `tests/evidence/test_self_assessment.py::test_self_assessment_alone_blocks_auto_merge`.
+- **The decision is monotone in blockers.** Any `Critical` or `Major`
+  finding yields `failure` regardless of the agent's `approved` value;
+  `run_succeeded == False` yields `neutral`; `tier == "untrusted"`
+  yields `neutral`. A "green" check-run never outvotes a blocker; an
+  agent's `approved=True` never outvotes a blocker. See
+  `mergecraft.agents.gates.decide_approval` (the security-trust-boundary
+  plan's Batch D contract, D5) and `tests/status_checks/test_decide_approval.py`.
+
+### Evidence weighting
+
+What the merge-evidence packet carries, and how each signal weights:
+
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| `findings: list[Finding]` (typed, taxonomy-validated, `extra="forbid"`) | **structural** | One `Critical` or `Major` finding blocks. Source/severity/confidence preserved verbatim. |
+| `deterministic_checks: list[DeterministicCheck]` (name, status, command) | **mechanical** | Only `passed` / `failed` count as positive / negative evidence; `unavailable` / `declared-but-cannot-run` / `timed_out` are honest skips — not silent passes (PR #17 vocabulary, see `REVIEW-CHECKS.md`). |
+| `ci_check_runs` / `ci_intelligence.annotations` | **mechanical** | Per-ref check-suite outcome + log-cluster signatures, flaky vs stable, blame-attributed. |
+| `self_assessment.approved: bool` + `self_assessment.sha` | **advisory only** | Recorded; never the sole positive input. The packet's `decision` row is authoritative. |
+| `decision: { verdict, reason, decided_by }` | **authoritative** | Populated by `decide_approval`. When present on the packet, it wins over every other signal. |
+
+What is **never** an input to the verdict: the agent's prose narrative,
+the PR title / body / comment text (fenced), `result.output`, the model
+slag in tool output, or any other string that was not produced by a
+deterministic check on the diff. The merge-evidence packet is the
+single artifact a human or a later tool reads to reconstruct why a PR
+was auto-merged, blocked, or escalated; it is durable, versioned, and
+the schema is derived from the Pydantic models (`mergecraft.evidence.
+packet.PACKET_SCHEMA_VERSION`, D7).
+
+### Honesty about unavailable signals (W2.4)
+
+Where a signal source is unreachable, the packet records it as
+`unavailable` with a reason — never silently as "passing". This is the
+same honesty rule PR #17 landed for `staticChecks`: an environment
+without `make`, a missing linter binary, an unreachable check-suite API,
+or a CI provider mergeCraft cannot reach — all surface explicitly. The
+"green" in a check-run summary is the verdict's input; "no signal" is a
+verdict's input that says *the review has nothing to attest to*.
+
 ## Trust tiers and contributor weight
 
 `analyzers/trust.py::derive_trust_tier()` collapses an event's metadata into one of

@@ -26,6 +26,50 @@ A quick orientation before the lists:
 
 ---
 
+## Mechanical evidence — what counts (#41, W2.5)
+
+Mechanical evidence is what the merge-evidence packet calls **structural**
+— typed `Finding`s, deterministic gate outcomes, and CI check-suite
+results. It is the *only* category of evidence that can move the merge
+verdict; everything else is advisory. Concretely:
+
+- **Typed `Finding`s** — emitted by the analyzer catalog (`Finding` from
+  `mergecraft.analyzers.finding`, `extra="forbid"`). Each finding carries
+  `tool`, `rule_id`, `category`, `severity`, `confidence`, `path`,
+  `start_line`/`end_line`, `fingerprint`, `evidence: list[str]`,
+  `introduced_by_pr`, `source`, `cluster_id`. Findings are the
+  authoritative structural input to `decide_approval()`.
+- **`DeterministicCheck` rows** — one per declared `staticChecks` or
+  discovered Makefile target. Status is one of five: `passed`, `failed`,
+  `timed_out`, `unavailable`, `declared-but-cannot-run`. **Only
+  `failed`** is a negative finding; **only `passed`** is a positive
+  signal. The other three are honest skips, never silent passes.
+- **CI check-runs** — raw `check_suite` data from `mcp/check_runs.py`
+  plus the cluster/blame/flaky annotations from `src/mergecraft/ci/`.
+- **The agent's `approved` boolean** — **NOT** mechanical evidence. It
+  is recorded on the packet as `self_assessment` and is advisory only;
+  a self-assessment-only run cannot reach `auto_merge` (the #41 hard
+  rule, pinned by `tests/evidence/test_self_assessment.py`).
+
+What does *not* count as mechanical evidence, even when it appears in a
+check-run summary or in the agent's prose:
+
+- The agent's review narrative — `ApprovalRecord.would_approve`,
+  `result.output`, anything the model wrote.
+- PR title / body / comment text (even when fenced and unfenced by
+  trust tier) — see the `Trust tiers and contributor weight` section in
+  `docs/REVIEW-DOCTRINE.md`.
+- A "green" status with no underlying typed finding — `unavailable` /
+  `declared-but-cannot-run` / `timed_out` are explicit and visible; the
+  absence of evidence is itself evidence the verdict must surface.
+
+The merge-evidence packet's `decision` row is computed by
+`mergecraft.agents.gates.decide_approval(findings, *, run_succeeded,
+tier)` from these structural inputs. When the packet is given directly
+to `decide_approval(packet, …)`, the explicit `Decision` row on the
+packet wins over every other signal — including the recorded
+`self_assessment`.
+
 ## 1. Code correctness and risk
 
 The reviewer reads the whole diff itself, then picks the **lenses** the PR actually warrants and investigates each as a falsifiable question — optionally dispatching a `mergecraft-reviewer` subagent per lens so they run in parallel. Nothing here is a fixed pass; a docs-only diff gets none of it.
@@ -171,6 +215,15 @@ Checks on the review process itself, so a review can't quietly skip half the PR:
   - adding a new direct dependency
   - a "typo fix" in user-facing copy that changes meaning ("approved" → "denied")
   - a semantic one-liner buried in a formatting-only diff
+
+### Blast-radius merge lanes
+
+The packet's blast-radius classification is an evidence-weighted policy signal,
+not an instruction to merge. `low` means the change is eligible for the
+auto-merge lane after required checks pass, `medium` means assisted review, and
+`high` means automatic merge is forbidden. These semantics do not enable or
+disable auto-merge; `autoMergeEnabled` remains `false`, and Batch D (#46) owns
+the separate mapping from evidence outcomes to workflow actions.
 
 ## 5. Finding grading
 
