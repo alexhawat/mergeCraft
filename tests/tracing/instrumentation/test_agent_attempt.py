@@ -56,7 +56,6 @@ def _drive_chain(settings: Any, results: list[Any]) -> Any:
     return asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
 
 
-@pytest.mark.xfail(reason="green after W4: agent.attempt per fallback entry", strict=False)
 def test_one_agent_attempt_span_per_fallback_entry(captured_sink: Any) -> None:
     """W3.2 (happy path) — 3-entry chain, all succeed on first try.
 

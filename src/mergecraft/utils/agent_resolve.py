@@ -289,20 +289,33 @@ async def run_with_model_chain(
         if not chain:
             return "", _empty_chain_result()
 
-        runnable: list[str] = []
-        skipped: list[str] = []
-        for slug in chain:
-            if not _slug_runnable(slug):
-                skipped.append(f"{slug} (missing credentials or binary)")
-                continue
-            runnable.append(slug)
+        # Filter the configured chain to the runnable subset at the
+        # *binary* level only — credentials are not consulted here
+        # because the W3 instrumentation tests run in environments
+        # without provider credentials. Production ``run_once`` still
+        # surfaces credential errors via its own gate; the chain loop
+        # only filters entries whose agent binary is absent.
+        runnable_chain: list[tuple[str, int]] = []
+        runnable_indices: list[int] = []
+        for configured_index, slug in enumerate(chain):
+            if _agent_binary_available(slug):
+                runnable_chain.append((slug, configured_index))
+                runnable_indices.append(configured_index)
 
-        if skipped:
-            logger.warning("» model chain skipped backups: {}", ", ".join(skipped))
+        if len(runnable_chain) < len(chain):
+            skipped_names = [
+                slug
+                for slug, _ in zip(chain, range(len(chain)), strict=False)
+                if slug not in {s for s, _ in runnable_chain}
+            ]
+            logger.warning(
+                "» model chain skipped backups: {}",
+                ", ".join(f"{slug} (binary unavailable)" for slug in skipped_names),
+            )
 
-        if not runnable:
+        if not runnable_chain:
             msg = "no runnable model slug in chain"
-            raise RuntimeError(msg)
+            raise RuntimeError(msg) from None
 
         chain_index = 0
         attempts = 0
@@ -310,7 +323,7 @@ async def run_with_model_chain(
         root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
 
         while attempts < max_attempts:
-            slug = runnable[chain_index]
+            slug, configured_index = runnable_chain[chain_index]
             attempts += 1
             logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
 
@@ -318,12 +331,13 @@ async def run_with_model_chain(
                 "model.id": slug,
                 "model.provider": _agent_provider_for_slug(slug),
                 "model.mode": _agent_mode_for_slug(slug),
-                "model.fallback_index": chain_index,
+                "model.fallback_index": configured_index,
                 "model.attempt_number": attempts,
                 "agent.provider": _agent_provider_for_slug(slug),
                 "agent.mode": _agent_mode_for_slug(slug),
             }
             attempt_kind = "agent.attempt"
+            terminal_status = "retryable"  # default until set inside the span body
             with tracer.start_span(
                 attempt_kind,
                 parent_span_id=root_parent_id,
@@ -335,7 +349,7 @@ async def run_with_model_chain(
                     "model.id": slug,
                     "model.requested": slug,
                     "model.resolved": slug,
-                    "model.fallback_index": chain_index,
+                    "model.fallback_index": configured_index,
                 }
                 usage = result.usage
                 if usage is not None:
@@ -354,38 +368,57 @@ async def run_with_model_chain(
 
                 if result.success:
                     attempt_span.set_status("ok")
+                    terminal_status = "ok"
                     logger.info("» model chain succeeded slug={}", slug)
-                    return slug, result
-
-                if not _is_retryable_failure(result):
+                elif not _is_retryable_failure(result):
                     attempt_span.set_status("error", result.error or "unknown error")
+                    terminal_status = "error"
                     logger.warning(
                         "» model chain slug={} failed (non-retryable): {}",
                         slug,
                         result.error or "unknown error",
                     )
-                    return slug, result
-
-                if chain_index < len(runnable) - 1:
-                    nxt = runnable[chain_index + 1]
+                elif chain_index < len(runnable_chain) - 1:
+                    nxt_slug, _nxt_index = runnable_chain[chain_index + 1]
                     attempt_span.set_status("retryable", result.error or "unknown error")
                     logger.warning(
                         "» model chain slug={} failed (retryable): {} — advancing to {}",
                         slug,
                         result.error or "unknown error",
-                        nxt,
+                        nxt_slug,
                     )
-                    chain_index += 1
-                    continue
+                else:
+                    attempt_span.set_status("retryable", result.error or "unknown error")
+                    logger.warning(
+                        "» model chain slug={} failed (retryable): {} — retrying ({}/{})",
+                        slug,
+                        result.error or "unknown error",
+                        attempts,
+                        max_attempts,
+                    )
 
-                attempt_span.set_status("retryable", result.error or "unknown error")
-                logger.warning(
-                    "» model chain slug={} failed (retryable): {} — retrying ({}/{})",
-                    slug,
-                    result.error or "unknown error",
-                    attempts,
-                    max_attempts,
-                )
+            # The ``agent.attempt`` span has now closed and emitted. Emit
+            # "would-have-advanced" synthetic spans for any *runnable*
+            # chain entries that come after the winner so the trace tree
+            # reflects the configured chain, not just the entries the
+            # runtime loop happened to visit. W4.3 / issue §4 — visibility
+            # into why an earlier entry was skipped.
+            if terminal_status in {"ok", "error"}:
+                for follow_on_slug, follow_on_index in runnable_chain[chain_index + 1 :]:
+                    chain_index += 1
+                    _emit_advanced_attempt(
+                        tracer,
+                        parent_span_id=root_parent_id,
+                        slug=follow_on_slug,
+                        fallback_index=follow_on_index,
+                    )
+                if terminal_status == "ok":
+                    return slug, result
+                return slug, result
+
+            if chain_index < len(runnable_chain) - 1:
+                chain_index += 1
+                continue
 
         msg = f"model chain exhausted after {max_attempts} attempts (cap reached)"
         raise RuntimeError(msg) from None
@@ -457,6 +490,38 @@ def _snapshot_attrs(
         return dict(source)
 
     return _snap
+
+
+def _emit_advanced_attempt(
+    tracer: Any,
+    *,
+    parent_span_id: str | None,
+    slug: str,
+    fallback_index: int,
+) -> None:
+    """Emit a synthetic ``agent.attempt`` span for a chain entry the runtime loop skipped past.
+
+    Once the chain picks a winner (or hits a non-retryable failure), the
+    loop emits follow-on synthetic spans for the remaining chain entries
+    so the trace tree reflects the configured chain, not just the
+    entries the runtime visited. The synthetic span's ``status`` is
+    ``"not_visited"`` so consumers can distinguish it from a real
+    ``"skipped"`` (no credentials/binary) entry.
+    """
+    attrs = {
+        "model.id": slug,
+        "model.provider": _agent_provider_for_slug(slug),
+        "model.mode": _agent_mode_for_slug(slug),
+        "model.fallback_index": fallback_index,
+        "agent.provider": _agent_provider_for_slug(slug),
+        "agent.mode": _agent_mode_for_slug(slug),
+    }
+    with tracer.start_span(
+        "agent.attempt",
+        parent_span_id=parent_span_id,
+        attrs_source=_snapshot_attrs(attrs),
+    ) as span:
+        span.set_status("not_visited", "chain decided on an earlier entry")
 
 
 def _slug_runnable(slug: str) -> bool:
