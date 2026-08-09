@@ -171,9 +171,10 @@ def _event(attrs: dict[str, Any]) -> Any:
     )
 
 
-def test_payload_cap_applies_to_remote_sinks() -> None:
+def test_payload_cap_applies_to_remote_sinks(monkeypatch: pytest.MonkeyPatch) -> None:
     """D8 — over 64 KiB, the remote exporter receives a truncation marker, not the raw blob."""
     pytest.importorskip("logfire")
+    monkeypatch.setenv("MERGECRAFT_LOGFIRE_TOKEN", "test-token")
 
     from mergecraft.config import RepoSettings
     from mergecraft.tracing import sink_factory
