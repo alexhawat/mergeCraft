@@ -87,6 +87,22 @@ _CONTRACTS: Final[tuple[_Contract, ...]] = (
             "pinned managed one even under `shell: disabled` (#35)"
         ),
     ),
+    _Contract(
+        symbol="substitute_declared_gates",
+        defined_in="ci/evidence.py",
+        why="no reachable caller means a gate the consumer's CI proved still reports "
+        "`unavailable` (#36)",
+    ),
+    _Contract(
+        symbol="record_ci_findings",
+        defined_in="ci/evidence.py",
+        why="no reachable caller means a CI outcome never becomes a Finding (#36)",
+    ),
+    _Contract(
+        symbol="ci_evidence_findings",
+        defined_in="ci/evidence.py",
+        why="no reachable caller means recorded CI evidence never reaches the packet (#36)",
+    ),
 )
 
 
@@ -268,6 +284,32 @@ def test_agent_finding_verification_is_offered_on_every_run() -> None:
             f"mcp/server.py no longer registers {factory}() — the reviewing agent has no "
             "way to send its own findings to the verifier (C6)"
         )
+
+
+def test_ci_evidence_is_wired_into_the_tools_a_review_actually_calls() -> None:
+    """Reachability is not enough — the door has to be one the reviewer opens.
+
+    Both CI-evidence seams hang off MCP tools the review prompt names in its
+    checklist. Pinning the call sites by module means a refactor that moves the
+    substitution somewhere the reviewing agent never reaches fails here rather
+    than silently reverting #36 to "library code, no consumer" (#96).
+    """
+    static_checks = _invoked_names(_parsed((_SRC_DIR / "mcp" / "static_checks.py").resolve()))
+    assert "substitute_declared_gates" in static_checks, (
+        "run_static_checks no longer applies declared CI gate substitution — a gate the "
+        "consumer's CI already proved is back to reporting `unavailable` (#36)"
+    )
+
+    intelligence = _invoked_names(_parsed((_SRC_DIR / "ci" / "intelligence.py").resolve()))
+    assert "record_ci_findings" in intelligence, (
+        "analyze_ci_failures no longer records its clustered findings — CI failures never "
+        "reach the merge evidence packet (#36)"
+    )
+
+    packet = _invoked_names(_parsed((_SRC_DIR / "evidence" / "run_packet.py").resolve()))
+    assert "ci_evidence_findings" in packet, (
+        "the evidence packet no longer reads recorded CI evidence (#36)"
+    )
 
 
 def test_review_prompts_tell_the_agent_to_verify_its_own_findings() -> None:

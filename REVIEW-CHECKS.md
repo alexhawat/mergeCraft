@@ -113,7 +113,7 @@ Your repo's own gate — unchanged from prior mergeCraft behavior:
 - **Discovered gates** — with nothing declared, mergecraft looks for `lint`, `format-check`, `typecheck`, and `ci-static` Makefile targets. Skipped when `make` is not installed.
 - **Nothing found** → skipped. mergecraft will **not** substitute a linter of its own (`except A, B:` is legal on Python 3.14 and a syntax error on 3.13 — version mismatch manufactures false positives).
 
-Each gate returns one of five statuses; only **`failed`** is a finding:
+Each gate returns one of six statuses; only **`failed`** is a finding:
 
 | Status | Meaning |
 |---|---|
@@ -122,8 +122,24 @@ Each gate returns one of five statuses; only **`failed`** is a finding:
 | `timed_out` | exceeded the per-gate timeout |
 | `unavailable` | executable not installed — judged nothing |
 | `declared-but-cannot-run` | gate is declared in config but this environment cannot execute it (for example `shell: disabled` on a pull-request event) — judged nothing, but the gate is visible instead of silently omitted |
+| `satisfied-by-ci` | the gate did not run here, but a check run your repo **declared** as proof of it passed on this commit — green, with the check run named |
 
 When `staticChecks` are configured but every gate is `unavailable` or `declared-but-cannot-run`, `run_static_checks` returns `ran: false` with an explicit reason and one row per configured gate so the **Mechanical gates** pre-merge row can report skipped instead of implying the repo has no gates.
+
+#### Reusing your CI as gate evidence (`ciEvidence`, #36)
+
+The Action image usually has no `make`, no repo venv, and none of your pinned toolchains — so a gate reports `unavailable` even when your own CI just proved it on the same commit. Declare the mapping and that finished CI stands in:
+
+```yaml
+ciEvidence:
+  gates:
+    lint: Verify (drift gates)   # <gate name>: <exact GitHub check-run name>
+```
+
+- **Declared only.** A check run merely *named* like a gate proves nothing — a pull request can add a workflow with any name it likes. With no `ciEvidence` block mergeCraft never reads your check runs at all.
+- **Only green substitutes.** A declared check run that passed rewrites that gate's row to `satisfied-by-ci`, replacing the `unavailable` row rather than adding a second one. A declared check run that **failed** leaves the honest row in place and is reported as a CI finding — the report never claims a green gate on red evidence.
+- **A gate that actually ran here always wins.** CI cannot overwrite a verdict mergeCraft produced against this diff.
+- **Best effort.** No head SHA, no declared mapping, or a GitHub API error → the gate report is exactly what it would have been without the feature.
 
 ### Catalog analyzers (`run_analyzers`)
 
@@ -181,6 +197,10 @@ To discover a `check_suite_id` for a commit, call `list_check_runs` with the PR 
 - Flaky failures are named flaky rather than treated as the author's defect
 
 The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit; pushing a fix commit stays behind the existing `push` permission.
+
+**Recorded as evidence (#36).** Each clustered CI failure is also recorded as a `source: ci` finding on the run and carried into the [merge evidence packet](docs/REVIEW-DOCTRINE.md), keeping the blame verdict it was given: a failure attributed to this PR is `Major` / `introduced_by_pr: true`, while a flaky or pre-existing one is `Minor` / `introduced_by_pr: false`. Since every gate that consumes findings is monotone in blockers, that annotation is what makes "reported, not blamed" mechanical rather than a matter of wording — a flaky pipeline cannot block a clean pull request.
+
+**SARIF your CI already produced.** Naming artifacts under `ciEvidence.sarifArtifacts` lets the reviewer ingest their SARIF as CI findings through the same parser the analyzer catalog uses. Default is empty, in which case no artifact API call is made. Ingested results are reported at a non-blocking severity with `introduced_by_pr: unknown` — SARIF from another pipeline describes the tree, not this diff.
 
 Implementation: [`src/mergecraft/ci/intelligence.py`](src/mergecraft/ci/intelligence.py), [`src/mergecraft/ci/review.py`](src/mergecraft/ci/review.py), [`src/mergecraft/ci/cluster.py`](src/mergecraft/ci/cluster.py), [`src/mergecraft/mcp/ci_intelligence.py`](src/mergecraft/mcp/ci_intelligence.py), [`src/mergecraft/mcp/check_suite.py`](src/mergecraft/mcp/check_suite.py), [`src/mergecraft/mcp/check_runs.py`](src/mergecraft/mcp/check_runs.py).
 

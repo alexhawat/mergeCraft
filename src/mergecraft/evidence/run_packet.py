@@ -205,14 +205,23 @@ def _structural_findings(
     deduplicated on ``Finding.fingerprint`` — the model's own stable content
     hash — because an analyzer finding the agent also reported must not be
     counted twice by a gate that is monotone in blockers.
+
+    CI evidence (#36) joins here rather than in ``_load_structural_findings``
+    on purpose. The packet is evidence *for this merge*, so a failure the
+    consumer's CI already proved belongs in it; the ``mergecraft-approval``
+    check-run keeps its existing, narrower input set. Flaky and pre-existing
+    CI failures arrive annotated ``Minor`` / ``introduced_by_pr="false"``, so
+    they are recorded without ever reaching the packet's blocker set (D11).
     """
+    from mergecraft.ci.evidence import ci_evidence_findings
     from mergecraft.utils.status_checks import _load_structural_findings
 
     merged: list[Finding] = list(_load_structural_findings(ctx))
-    if not extra:
+    incoming = [*ci_evidence_findings(ctx.tool_state), *(extra or [])]
+    if not incoming:
         return merged
     seen = {item.fingerprint for item in merged}
-    for item in extra:
+    for item in incoming:
         if item.fingerprint in seen:
             continue
         seen.add(item.fingerprint)

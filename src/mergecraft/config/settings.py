@@ -61,6 +61,28 @@ class StaticCheckDefinition(BaseModel):
     suffixes: list[str] = Field(default_factory=list)
 
 
+class CiEvidenceSettings(BaseModel):
+    """Which of the repo's *own* CI results mergeCraft may treat as evidence (#36).
+
+    Both fields default empty, so a repo that declares no ``ciEvidence`` block
+    sees identical behaviour and makes zero extra API calls (convention 9).
+
+    ``gates`` maps a mergeCraft gate name — a ``staticChecks`` entry's ``name``,
+    or a discovered Makefile target — to the exact GitHub check-run name that
+    proves it. The mapping is explicit on purpose (D10): mergeCraft never infers
+    that a check run *called* ``lint`` proves the ``lint`` gate, because a PR
+    could add a workflow with any name it likes.
+
+    ``sarifArtifacts`` lists workflow artifact names whose SARIF the reviewer may
+    ingest as CI findings.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    gates: dict[str, str] = Field(default_factory=dict)
+    sarif_artifacts: list[str] = Field(default_factory=list, alias="sarifArtifacts")
+
+
 class AnalyzerOverride(BaseModel):
     """Per-analyzer config override."""
 
@@ -207,6 +229,9 @@ class RepoSettings(BaseModel):
     signed_commits: bool = Field(default=False, alias="signedCommits")
     mode_instructions: dict[str, str] = Field(default_factory=dict, alias="modeInstructions")
     static_checks: list[StaticCheckDefinition] = Field(default_factory=list, alias="staticChecks")
+    # #36 / D10 — declared-only reuse of the repo's finished CI. Default empty:
+    # no declaration, no substitution, no extra API call.
+    ci_evidence: CiEvidenceSettings = Field(default_factory=CiEvidenceSettings, alias="ciEvidence")
     analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
     learnings: str | None = None
     learnings_headings: list[LearningsHeading] = Field(

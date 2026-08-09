@@ -155,6 +155,25 @@ class AnalyzerRunState:
 
 
 @dataclass(slots=True)
+class CiEvidenceState:
+    """Evidence normalised from the consumer's *already-finished* CI (#36).
+
+    Kept separate from ``AnalyzerRunState`` on purpose: ``run_analyzers``
+    replaces its run state wholesale on every call, so anything merged into it
+    would silently vanish if the reviewing agent re-ran the analyzers after
+    reading CI. CI evidence outlives that.
+
+    ``findings`` holds ``Finding.model_dump()`` rows — the same dict shape
+    ``AnalyzerRunState.findings`` uses, so the packet's loader reads one shape.
+    ``substitutions`` records every gate outcome a declared CI check run
+    changed, so a reader can audit *why* a gate stopped saying ``unavailable``.
+    """
+
+    findings: list[dict[str, Any]] = field(default_factory=list)
+    substitutions: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ToolState:
     repos: dict[str, RepoToolState]
     primary_repo_key: str
@@ -211,6 +230,10 @@ class ToolState:
     agent_diagnostic: Any = None
     browser_daemon: Any = None
     analyzer_run: AnalyzerRunState | None = None
+    # Evidence normalised from the consumer's finished CI (#36). ``None`` until
+    # a CI source is actually read, so a run that consulted no CI records
+    # nothing rather than an empty section.
+    ci_evidence: CiEvidenceState | None = None
     # True once ``run_static_checks`` has been called this session. Read by the
     # verification tools (D14): an LLM judge may not evaluate a finding before
     # the deterministic checks it is meant to supplement have had their turn.

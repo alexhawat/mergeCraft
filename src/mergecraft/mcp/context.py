@@ -81,6 +81,12 @@ class ToolContext:
     # `diff-review` path sets this True regardless, because there the config and
     # the working tree both belong to the operator who started the run.
     static_checks_enabled: bool = False
+    # #36 / D10 — repo-declared mapping from a mergeCraft gate name to the CI
+    # check-run name that proves it, and the workflow artifacts whose SARIF may
+    # be ingested. Both empty by default: with no declaration mergeCraft never
+    # reads the consumer's CI and never substitutes a gate outcome.
+    ci_gate_checks: dict[str, str] = field(default_factory=dict)
+    ci_sarif_artifacts: list[str] = field(default_factory=list)
     analyzers_mode: Literal["off", "auto", "full"] = "auto"
     trust_tier: Literal["trusted", "untrusted"] = "trusted"
     analyzers_settings_enabled: bool = True
