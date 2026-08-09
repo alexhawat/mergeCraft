@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Reviews now actually emit a Merge Evidence Packet. Every run that reviews a
+  pull request writes one versioned JSON record of the findings, the analyzer
+  checks that ran, the blast-radius lane, the agent's self-assessment, and the
+  structural decision — the auditable answer to "why was this blocked?". The
+  packet lands under `RUNNER_TEMP` (override with `MERGECRAFT_EVIDENCE_DIR`),
+  outside the checkout so it can never be swept into a commit, and the Action
+  exposes its path as the new **`evidence_packet`** output for
+  `actions/upload-artifact`. `mergecraft diff-review` emits one too, with
+  `--evidence-packet PATH` to place it. `PACKET_SCHEMA_VERSION` is unchanged at
+  `1.3.0` — wiring a consumer is not a shape change (D7). Auto-merge stays
+  disabled; the packet reports a lane, it does not act on one (D11) (#96, #47)
+
 - Re-reviews now read only what changed since the last mergeCraft review. A
   re-review gets a second patch covering the commits pushed since the review it
   last posted, so a push to a large PR no longer pays for a full re-read. The
@@ -149,9 +161,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Batch B (blast radius) is PR-ready: `MergeEvidencePacket.blast_radius` is
-  populated end-to-end by `classify_blast_radius()` via the packet overload
-  of `decide_approval()`. The lane policy is advisory — `autoMergeEnabled`
+- Batch B (blast radius) is PR-ready: `MergeEvidencePacket.blast_radius` accepts
+  a typed `BlastRadiusClassification` from `classify_blast_radius()`, and the
+  packet overload of `decide_approval()` reads it. (This entry previously read
+  "populated end-to-end"; that was inaccurate until #96 supplied the runtime
+  caller.) The lane policy is advisory — `autoMergeEnabled`
   remains `False` (D11) and the Batch D thermostat in
   `.ignorelocal/waves/issues-merge-evidence-gating-wave-plan.md` owns the
   gate outcome → action map. `make ci` is green on `wave/evi-b-blast`
@@ -165,6 +179,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release ever produced that file, so the instruction only spent tokens and
   invited the reviewer to claim it had consulted an artifact that did not exist.
   Change-impact extraction is tracked as its own piece of work (#94)
+
+### Fixed
+
+- The merge evidence packet was never produced. `build_packet()`,
+  `write_packet()` and `classify_blast_radius()` shipped across two merged wave
+  batches with unit tests but no caller anywhere in `action/`, `cli/` or
+  `agents/`, so no run wrote a packet and `blast_radius` could only ever be
+  `None`. They are now called from a real run. A regression test walks the
+  import graph out from `main.py` and `cli/app.py` and fails if any of the three
+  loses its reachable call site — "called somewhere" was not enough, because at
+  the broken revision `evidence/emit.py` did call `build_packet()`; nothing
+  called `emit.py` (#96)
+- `docs/evidence-packet.md` opened by claiming "Every mergeCraft run emits one
+  versioned, structured packet" while zero runs emitted one, and stated a
+  current version of `1.2.0` against a shipped `PACKET_SCHEMA_VERSION` of
+  `1.3.0`. Both corrected, and the document now says where the packet lands and
+  how to attach it to a workflow (#96)
+- Offline `diff-review` never carried its resolved model onto the tool context,
+  so evidence packets from a local review could not attribute findings to a
+  model even when one was explicitly selected. A configured or `--model` slug
+  now reaches the packet; a run that lets the provider self-select still records
+  `(unresolved)`, since mergeCraft has no slug to report (#96)
 
 ### Docs
 

@@ -19,6 +19,7 @@ from mergecraft.analyzers.trust import (
     derive_trust_tier,
     resolve_analyzers_mode,
 )
+from mergecraft.evidence.run_packet import emit_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
@@ -64,6 +65,10 @@ class MainResult:
     output: str | None = None
     error: str | None = None
     result: str | None = None
+    # On-disk path of this run's merge evidence packet (#47 / #96), or None
+    # when the run had no pull request to attest to. Surfaced as the action's
+    # ``evidence_packet`` output by ``action/entry.py``.
+    evidence_packet_path: str | None = None
 
 
 def _payload_to_ctx(payload: dict[str, Any]) -> ResolvedPayload:
@@ -424,6 +429,7 @@ async def main() -> MainResult:
         except Exception as exc:
             logger.debug("post-run finalize skipped: {}", exc)
 
+        packet_path: str | None = None
         if tool_context:
             await persist_learnings(tool_context)
             await report_status_checks(
@@ -431,12 +437,28 @@ async def main() -> MainResult:
                 run_succeeded=result.success,
                 failure_reason=result.error if not result.success else None,
             )
+            # Emit the merge evidence packet last, so it records the run's
+            # final state. A blocked or failed run is exactly when the
+            # evidence matters most, so this runs on both branches below.
+            written = await asyncio.to_thread(
+                emit_run_packet, tool_context, run_succeeded=result.success
+            )
+            packet_path = str(written) if written else None
 
         if not result.success:
-            return MainResult(success=False, error=result.error or "agent execution failed")
+            return MainResult(
+                success=False,
+                error=result.error or "agent execution failed",
+                evidence_packet_path=packet_path,
+            )
 
         output = tool_state.output or result.output
-        return MainResult(success=True, output=output, result=output)
+        return MainResult(
+            success=True,
+            output=output,
+            result=output,
+            evidence_packet_path=packet_path,
+        )
 
     except Exception as error:
         error_message = str(error) if error else "unknown error occurred"

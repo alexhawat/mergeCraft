@@ -59,6 +59,14 @@ def run(
         "--json",
         help="Write structured findings JSON to this file.",
     ),
+    evidence_packet: Path | None = typer.Option(
+        None,
+        "--evidence-packet",
+        help=(
+            "Write the Merge Evidence Packet JSON to this file. "
+            "Defaults to the run's temp directory (the path is logged either way)."
+        ),
+    ),
     prompt: str | None = typer.Option(
         None,
         "--prompt",
@@ -91,11 +99,15 @@ def run(
             prompt_extra=prompt,
             dry_run=dry_run,
             json_path=json_output,
+            evidence_packet_path=evidence_packet,
         )
     )
 
     if result.diff_path:
         logger.info("» diff path: {}", result.diff_path)
+
+    if result.evidence_packet_path:
+        logger.info("» evidence packet: {}", result.evidence_packet_path)
 
     if not result.success:
         if result.output:
