@@ -1,6 +1,6 @@
 """Agent-finding verification tools: reachability, budget, withdrawn skip, verdicts.
 
-These are the runtime tests for C6. The unit tests in
+These are the runtime tests for C6 and #45. The unit tests in
 ``tests/agents/test_verifier.py`` pin the pure gate; these drive the seam the
 reviewing agent actually calls, because a verification path that exists but is
 not registered on the MCP server verifies nothing (#96).
@@ -20,7 +20,7 @@ from mergecraft.mcp.context import (
     ToolContext,
 )
 from mergecraft.mcp.server import build_common_tools
-from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state
 from mergecraft.mcp.verification import (
     record_finding_verdict_tool,
     verify_agent_findings_tool,
@@ -33,9 +33,21 @@ from mergecraft.utils.learnings import learnings_file_path
 if TYPE_CHECKING:
     from pathlib import Path
 
+# A migration path puts the run on the `high` blast-radius lane; everything
+# else here stays on a lane where one judge may retire a finding.
+_HIGH_LANE_DIFF = """diff --git a/migrations/001_add_column.sql b/migrations/001_add_column.sql
+--- a/migrations/001_add_column.sql
++++ b/migrations/001_add_column.sql
+@@ -1,2 +1,3 @@
+ select 1;
++alter table users add column email text;
+"""
 
-def _ctx(tmp_path: Path) -> ToolContext:
+
+def _ctx(tmp_path: Path, *, analyzers_ran: bool = True) -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    if analyzers_ran:
+        state.analyzer_run = AnalyzerRunState(ran=True)
     return ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
@@ -154,7 +166,7 @@ async def test_already_withdrawn_finding_is_never_re_verified(tmp_path: Path) ->
     assert payload["skippedWithdrawn"] == [fingerprint]
 
 
-# ── verdicts (C6) ─────────────────────────────────────────────────────────────
+# ── verdicts (C6 + D14) ───────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -203,3 +215,66 @@ async def test_confirm_verdict_publishes_and_writes_nothing(tmp_path: Path) -> N
     assert payload["publishable"] is True
     assert payload["recordedWithdrawn"] is False
     assert not (tmp_path / "mergecraft-learnings.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_verdict_records_judge_model_provider_and_rubric_version(tmp_path: Path) -> None:
+    """#45's first acceptance criterion, at the seam that produces verdicts."""
+    payload = await _verdict(
+        _ctx(tmp_path),
+        fingerprint="b" * 24,
+        verdict="confirm",
+        reason="Confirmed.",
+    )
+    assert payload["judgeProvider"] == "claude"
+    assert payload["judgeModel"] == "claude-sonnet-5"
+    assert payload["judgeModelPinned"] is True
+    assert payload["judgeVersion"]
+    assert payload["rubricVersion"]
+
+
+@pytest.mark.asyncio
+async def test_high_stakes_lane_drop_is_escalated_not_withdrawn(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    diff = tmp_path / "pr.diff"
+    diff.write_text(_HIGH_LANE_DIFF, encoding="utf-8")
+    ctx.tool_state.repos[ctx.tool_state.primary_repo_key].diff_path = str(diff)
+
+    payload = await _verdict(
+        ctx,
+        fingerprint="c" * 24,
+        verdict="drop",
+        reason="I could not reproduce it.",
+    )
+    assert payload["escalatedToHuman"] is True
+    assert payload["recordedWithdrawn"] is False
+    assert payload["publishable"] is True
+    assert not (tmp_path / "mergecraft-learnings.md").exists()
+
+
+# ── deterministic checks come first (D14 / W13.3) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_no_dispatch_before_a_deterministic_check_has_run(tmp_path: Path) -> None:
+    payload = await _plan(_ctx(tmp_path, analyzers_ran=False), [_finding("boom")])
+    assert payload["ready"] is False
+    assert payload["dispatch"] == []
+    assert "secondary evaluators" in payload["reason"]
+
+
+@pytest.mark.asyncio
+async def test_no_verdict_before_a_deterministic_check_has_run(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, analyzers_ran=False)
+    payload = await _verdict(ctx, fingerprint="d" * 24, verdict="drop", reason="nope")
+    assert payload["recorded"] is False
+    assert not (tmp_path / "mergecraft-learnings.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_static_checks_alone_satisfy_the_ordering_gate(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, analyzers_ran=False)
+    ctx.tool_state.static_checks_ran = True
+    payload = await _plan(ctx, [_finding("boom")])
+    assert payload["ready"] is True
+    assert payload["deterministicChecks"] == ["run_static_checks"]

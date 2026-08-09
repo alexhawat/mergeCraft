@@ -19,7 +19,12 @@ from mergecraft.agents.shared import (
     agent,
     log_token_table,
 )
-from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.agents.verifier import (
+    VERIFIER_AGENT_NAME,
+    VERIFIER_RUBRIC_VERSION,
+    VERIFIER_SYSTEM_PROMPT,
+    pinned_judge_model,
+)
 from mergecraft.types import MERGECRAFT_MCP_NAME
 
 CLAUDE_EXEC_TOOLS = ("Bash", "Monitor", "REPL", "Workflow")
@@ -64,11 +69,16 @@ def build_agents_json() -> str:
         },
         VERIFIER_AGENT_NAME: {
             "description": (
-                "Read-only verification subagent for Critical/Major analyzer findings. "
-                "Confirms, downgrades, or drops before publication."
+                "Read-only verification subagent for Critical/Major analyzer, CI and "
+                "agent-authored findings. Confirms, downgrades, or drops before "
+                f"publication against rubric v{VERIFIER_RUBRIC_VERSION}."
             ),
             "prompt": VERIFIER_SYSTEM_PROMPT,
-            "model": "claude-sonnet-5",
+            # Pinned in agents/verifier.py so the judge model recorded with a
+            # verdict and the judge model actually dispatched cannot diverge
+            # (#45). Sonnet is deliberately a different tier from the
+            # orchestrator that wrote the finding.
+            "model": pinned_judge_model("claude") or "claude-sonnet-5",
         },
     }
     return json.dumps(agents)

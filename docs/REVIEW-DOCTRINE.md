@@ -68,6 +68,31 @@ the finding's own fingerprint, so the same claim is skipped before verification 
 run — the same section, parser and identity analyzer suppression already uses. Verifying a
 finding the author refuted last month is the failure this prevents.
 
+## LLM judges are secondary evaluators (D14, #45)
+
+**The verifier is an LLM judging an LLM, so it is pinned, logged, ordered last, and never
+decisive alone.**
+
+- **Ordered last.** `verify_agent_findings` returns `ready:false` and `record_finding_verdict`
+  refuses a verdict until `run_analyzers` or `run_static_checks` has run. Deterministically
+  checkable facts are settled by tools; the judge only rules on what tools cannot decide.
+- **Pinned.** `PINNED_JUDGE_MODELS` fixes the judge model per provider (`claude` →
+  `claude-sonnet-5`) and `agents/claude.py` dispatches from that same constant, so the model
+  recorded and the model run cannot diverge. A provider without a pin still records a complete
+  identity, marked `model_pinned=false`.
+- **Logged.** Every verdict carries judge provider, model, whether the model was pinned,
+  `VERIFIER_JUDGE_VERSION` and `VERIFIER_RUBRIC_VERSION`. A rubric edit bumps the version rather
+  than silently reinterpreting archived verdicts.
+- **Outcome-based.** The rubric is five binary questions about the code (`cited-code-exists`,
+  `mechanism-holds`, `reachable`, `introduced-here`, `not-already-refuted`). Nothing in it scores
+  quality, style, tone, or length — a judge that grades prose grades noise.
+- **Not decisive on high-stakes lanes.** On the `high` blast-radius lane a `drop` is escalated for
+  a second judge or a human instead of being written to the withdrawn section. Retracting a real
+  finding on a migration or an auth change is the expensive direction to be wrong in.
+
+**Cost:** a run whose reviewer never calls the deterministic tools gets no verification at all.
+That is deliberate — a judge with nothing to be secondary to is the failure mode #45 names.
+
 ## Shell permission and static checks
 
 **`run_static_checks` is withheld under `shell: disabled`.** Gates execute commands the repo

@@ -1,4 +1,4 @@
-"""Verification MCP tools — route agent-authored findings to the verifier (C6).
+"""Verification MCP tools — route agent-authored findings to the judge (C6, D14).
 
 Verification used to be reachable only for analyzer and CI findings: the
 severity gate in ``agents/verifier.py`` had no source condition, but both call
@@ -7,14 +7,15 @@ tool output. The findings the reviewing model wrote itself — the ones most
 likely to be wrong — went straight to publication.
 
 These two tools are the missing seam. ``verify_agent_findings`` takes the
-reviewer's drafted findings *before* it calls ``create_pull_request_review`` and
-returns a budgeted dispatch queue for ``mergecraft-verifier``.
-``record_finding_verdict`` takes the verdict back and routes a ``drop`` into the
-same withdrawn-findings memory analyzer suppression already reads, so a refuted
-finding stays refuted.
+reviewer's drafted findings *before* it calls ``create_pull_request_review``,
+returns a budgeted dispatch queue for ``mergecraft-verifier``, and refuses to
+plan anything until a deterministic check has run (D14 — an LLM judge is a
+secondary signal). ``record_finding_verdict`` takes the verdict back, logs the
+pinned judge identity with it (#45), and routes a ``drop`` into the same
+withdrawn-findings memory analyzer suppression already reads.
 
 Exports:
-    record_finding_verdict_tool: Record one verifier verdict for a finding.
+    record_finding_verdict_tool: Record one judge verdict for a finding.
     verify_agent_findings_tool: Plan verification dispatches for agent findings.
 """
 
@@ -32,6 +33,28 @@ from mergecraft.utils.learnings import learnings_file_path
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
+_NOT_READY_REASON = (
+    "no deterministic check has run yet. LLM judges are secondary evaluators — call "
+    "run_analyzers (and run_static_checks when available) first so mechanically "
+    "checkable facts are settled before any judge sees the finding (D14, #45)."
+)
+
+
+def _deterministic_checks_ran(ctx: ToolContext) -> list[str]:
+    """Return the deterministic checks this run has completed, newest first.
+
+    Only checks that actually executed count. ``run_analyzers`` returning
+    ``ran:false`` still counts as a completed pass — the repo simply had no
+    analyzer to match — but a run that never called it at all does not, which
+    is the ordering D14 asks for.
+    """
+    completed: list[str] = []
+    if ctx.tool_state.analyzer_run is not None:
+        completed.append("run_analyzers")
+    if ctx.tool_state.static_checks_ran:
+        completed.append("run_static_checks")
+    return completed
+
 
 def _learnings_text(ctx: ToolContext) -> str:
     path = ctx.tool_state.learnings_file_path or learnings_file_path(ctx.tmpdir)
@@ -41,14 +64,41 @@ def _learnings_text(ctx: ToolContext) -> str:
     return candidate.read_text(encoding="utf-8")
 
 
+def _run_lane(ctx: ToolContext) -> str | None:
+    """Classify the run's blast-radius lane, or ``None`` when unknowable.
+
+    Reuses the packet's classifier rather than a second rule set, so the lane
+    a judge is held to is the same lane the merge evidence packet reports.
+    """
+    from mergecraft.evidence.run_packet import classify_run_blast_radius
+
+    state = primary_repo_state(ctx.tool_state)
+    for attr in ("diff_path", "incremental_diff_path"):
+        raw = getattr(state, attr, None)
+        if not raw:
+            continue
+        path = Path(raw)
+        if not path.is_file():
+            continue
+        classification = classify_run_blast_radius(path.read_text(encoding="utf-8"))
+        if classification is not None:
+            return classification.lane
+    return None
+
+
 def verify_agent_findings_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         from mergecraft.agents.verifier import (
             VERIFIER_AGENT_NAME,
+            VERIFIER_RUBRIC_VERSION,
             AgentFinding,
             plan_agent_verifications,
         )
         from mergecraft.config import load_repo_settings
+
+        completed = _deterministic_checks_ran(ctx)
+        if not completed:
+            return {"ready": False, "reason": _NOT_READY_REASON, "dispatch": []}
 
         state = primary_repo_state(ctx.tool_state)
         repo_root = Path(state.dir)
@@ -72,16 +122,20 @@ def verify_agent_findings_tool(ctx: ToolContext):
         )
         logger.info(
             "agent-finding verification: {} queued, {} already withdrawn, {} over budget "
-            "(budget={})",
+            "(budget={}, deterministic_checks={})",
             len(plan.dispatch),
             len(plan.skipped_withdrawn),
             len(plan.skipped_over_budget),
             plan.budget,
+            ",".join(completed),
         )
         return {
             "ready": True,
             "subagent": VERIFIER_AGENT_NAME,
+            "rubricVersion": VERIFIER_RUBRIC_VERSION,
+            "deterministicChecks": completed,
             "budget": plan.budget,
+            "lane": _run_lane(ctx),
             "dispatch": [
                 {
                     "fingerprint": item.fingerprint,
@@ -105,7 +159,9 @@ def verify_agent_findings_tool(ctx: ToolContext):
             "mergecraft-verifier subagent, before you publish them. Returns one dispatch "
             "prompt per finding — already carrying the finding, its cited file and the "
             "withdrawn-findings section — capped at the repo's inline budget, with "
-            "findings the author already refuted skipped."
+            "findings the author already refuted skipped. Returns ready:false until a "
+            "deterministic check has run: the judge is a secondary signal, not a "
+            "substitute for analyzers or static gates."
         ),
         input_schema={
             "type": "object",
@@ -139,13 +195,21 @@ def verify_agent_findings_tool(ctx: ToolContext):
 
 def record_finding_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        from mergecraft.agents.verifier import JudgeVerdict, record_verifier_verdict
+        from mergecraft.agents.verifier import JudgeVerdict, judge_pin, record_verifier_verdict
 
+        completed = _deterministic_checks_ran(ctx)
+        if not completed:
+            return {"recorded": False, "reason": _NOT_READY_REASON}
+
+        pin = judge_pin(provider=ctx.agent_id, resolved_model=ctx.resolved_model)
         verdict = JudgeVerdict(
             fingerprint=str(params["fingerprint"]),
             verdict=params["verdict"],
             reason=str(params.get("reason") or ""),
+            pin=pin,
+            deterministic_checks=completed,
             new_severity=(str(params["new_severity"]) if params.get("new_severity") else None),
+            lane=_run_lane(ctx),
         )
         path = ctx.tool_state.learnings_file_path or learnings_file_path(ctx.tmpdir)
         outcome = record_verifier_verdict(verdict, learnings_path=Path(path))
@@ -157,7 +221,13 @@ def record_finding_verdict_tool(ctx: ToolContext):
             "verdict": outcome.verdict,
             "publishable": outcome.publishable,
             "recordedWithdrawn": outcome.recorded_withdrawn,
+            "escalatedToHuman": outcome.escalated_to_human,
             "reason": outcome.reason,
+            "judgeModel": pin.model,
+            "judgeProvider": pin.provider,
+            "judgeModelPinned": pin.model_pinned,
+            "judgeVersion": pin.judge_version,
+            "rubricVersion": pin.rubric_version,
         }
 
     return tool(
@@ -166,7 +236,10 @@ def record_finding_verdict_tool(ctx: ToolContext):
         description=(
             "Record one mergecraft-verifier verdict for a finding. confirm and downgrade "
             "return publishable:true; drop writes the reason under the withdrawn-findings "
-            "heading so the finding stays refuted on later runs."
+            "heading so the finding stays refuted on later runs — except on a high-stakes "
+            "blast-radius lane, where one judge cannot retire a finding and the drop is "
+            "escalated instead. The judge's model, provider, judge version and rubric "
+            "version are logged with the verdict."
         ),
         input_schema={
             "type": "object",

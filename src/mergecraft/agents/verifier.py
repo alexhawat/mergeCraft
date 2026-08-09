@@ -1,26 +1,33 @@
-"""Read-only verification subagent for review findings (D11, C6).
+"""Read-only verification subagent for review findings (D11, D14).
 
-The gate decides which findings earn a second opinion and builds the brief the
-``mergecraft-verifier`` subagent receives. Analyzer and CI findings have been
-routed through it since D11 — but the findings the reviewing model wrote itself
-never were, and those are the ones most likely to be wrong: ``should_verify()``
-was always severity-only, and the source condition lived in its two call sites
-(``analyzers/review_gate.py``, ``ci/verification.py``), both of which only ever
-fed it tool output.
+Two contracts live here.
 
-``plan_agent_verifications`` closes that gap on the same terms as the analyzer
-path: it queues agent-authored ``Critical``/``Major`` findings, skips any whose
-fingerprint is already refuted under ``WITHDRAWN_FINDINGS_HEADING``, and caps
-dispatches at the run's inline budget so verification cannot cost more than
-publication. ``record_verifier_verdict`` routes a ``drop`` back into that same
-withdrawn memory, so a refuted finding stays refuted.
+**The gate (D11, C6)** decides which findings earn a second opinion and
+builds the brief the ``mergecraft-verifier`` subagent receives. Analyzer and
+CI findings have been routed through it since D11 — but the findings the
+reviewing model wrote itself never were, and those are the ones most likely
+to be wrong. ``plan_agent_verifications`` closes that gap: it queues
+agent-authored ``Critical``/``Major`` findings, skips any whose fingerprint
+is already refuted under ``WITHDRAWN_FINDINGS_HEADING``, and caps dispatches
+at the run's inline budget so verification cannot cost more than publication.
+
+**The judge contract (D14, #45)** treats the verifier as what it is — an LLM
+judge, and therefore a *secondary* signal. Its model, provider, judge version
+and rubric version are pinned and recorded with every verdict; its rubric is
+a list of binary observable outcomes rather than a "quality" score; it never
+runs before the deterministic checks it supplements; and on a high-stakes
+lane a single judge may not retire a finding on its own.
 
 Exports:
     AgentFinding: One agent-authored finding as the reviewer drafted it.
-    JudgeVerdict: One verifier verdict about a finding.
+    HIGH_STAKES_LANES: Lanes where one judge cannot dispose of a finding.
+    JudgePin: The pinned identity of the judge that produced a verdict.
+    JudgeVerdict: One recorded verdict, pin and deterministic evidence included.
+    VERIFIER_RUBRIC: The outcome-based criteria the judge answers.
     VerdictOutcome: What recording a verdict did.
     VerificationDispatch / VerificationPlan: The budgeted dispatch queue.
-    build_verifier_brief: Compose one dispatch prompt.
+    judge_pin: Resolve the pinned judge identity for a provider.
+    log_judge_verdict: Emit the judge-verdict log line (#45).
     plan_agent_verifications: Queue agent findings for verification (C6).
     record_verifier_verdict: Route a verdict, withdrawing dropped findings.
     record_withdrawn_finding: Append a refutation to the learnings file.
@@ -52,15 +59,22 @@ if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
 __all__ = [
+    "HIGH_STAKES_LANES",
     "VERIFIER_AGENT_NAME",
+    "VERIFIER_JUDGE_VERSION",
+    "VERIFIER_RUBRIC",
+    "VERIFIER_RUBRIC_VERSION",
     "VERIFIER_SEVERITIES",
     "VERIFIER_SYSTEM_PROMPT",
     "AgentFinding",
+    "JudgePin",
     "JudgeVerdict",
     "VerdictOutcome",
     "VerificationDispatch",
     "VerificationPlan",
-    "build_verifier_brief",
+    "judge_pin",
+    "log_judge_verdict",
+    "pinned_judge_model",
     "plan_agent_verifications",
     "record_verifier_verdict",
     "record_withdrawn_finding",
@@ -68,12 +82,51 @@ __all__ = [
     "verifier_denied_tool_names",
 ]
 
+# ── judge pin (D14 / #45) ─────────────────────────────────────────────────────
+
+# Bumped when the verifier's system prompt or dispatch brief changes shape, so
+# an archived verdict can be read against the contract that produced it.
+VERIFIER_JUDGE_VERSION: Final[str] = "1.0.0"
+
+# Bumped whenever VERIFIER_RUBRIC changes. Verdicts carry it so a rubric edit
+# never silently reinterprets old judgements.
+VERIFIER_RUBRIC_VERSION: Final[str] = "1.0.0"
+
+# Each criterion is a binary, observable outcome about the code — never a
+# score for "quality", style, or how much the diff says. A judge that cannot
+# answer one of these from the code it read must not confirm the finding.
+VERIFIER_RUBRIC: Final[tuple[tuple[str, str], ...]] = (
+    ("cited-code-exists", "The cited file, symbol and line range exist at the reviewed commit."),
+    ("mechanism-holds", "A concrete input or call sequence makes the described failure happen."),
+    ("reachable", "That sequence is reachable from a caller in this repository."),
+    ("introduced-here", "Lines this pull request added or modified introduce or amplify it."),
+    ("not-already-refuted", "No withdrawn-findings entry already refutes this finding."),
+)
+
+# Judges are pinned per provider so a model default drifting under the Action
+# cannot silently change what gets published. ``claude`` pins Sonnet — a
+# different family from the Opus-class orchestrator, per #45. Providers absent
+# here run the judge on the run's own model; the verdict records that the model
+# was not pinned rather than pretending otherwise.
+PINNED_JUDGE_MODELS: Final[dict[str, str]] = {"claude": "claude-sonnet-5"}
+
+# Lanes where one LLM judge is not enough to retire a finding (D14). A ``drop``
+# here is recorded and escalated, never written to the withdrawn section — the
+# blast radius is exactly where a wrong retraction costs the most.
+HIGH_STAKES_LANES: Final[frozenset[str]] = frozenset({"high"})
+
+# ── verification gate (D11 / C6) ──────────────────────────────────────────────
+
 VERIFIER_SEVERITIES: Final[frozenset[str]] = frozenset({"Critical", "Major"})
 
 VERIFIER_SYSTEM_PROMPT = (
     "You are a read-only verification subagent. Your role is to evaluate one "
     "finding — analyzer-sourced, CI-sourced, or written by the reviewing agent "
     "itself — before it is published in a pull request review.\n\n"
+    "You are a SECONDARY signal. Deterministic checks (analyzers, static gates, "
+    "tests) have already run and settled every mechanically checkable fact; do "
+    "not re-litigate their output, and never overrule a tool result with an "
+    "opinion.\n\n"
     "HARD CONSTRAINTS (non-negotiable):\n"
     "- Read-only tools only. Do NOT write or edit files, commit, push, or call any "
     "state-changing MCP tool.\n"
@@ -83,7 +136,13 @@ VERIFIER_SYSTEM_PROMPT = (
     "- Return exactly one of: **confirm** (with a one-paragraph explanation), "
     "**downgrade** (with new severity and reason), or **drop** (with a reason the "
     "orchestrator can record as a withdrawn finding).\n"
-    "- Treat the finding as a hypothesis until you have read the code.\n"
+    "- Treat the finding as a hypothesis until you have read the code.\n\n"
+    f"RUBRIC v{VERIFIER_RUBRIC_VERSION} — answer each with yes/no and cite the code "
+    "you read. Do not score style, tone, or verbosity:\n"
+    + "".join(f"- **{key}** — {text}\n" for key, text in VERIFIER_RUBRIC)
+    + "\nAll five yes → confirm. `cited-code-exists`, `mechanism-holds` or "
+    "`reachable` no → drop. `introduced-here` no → downgrade (pre-existing, not "
+    "this pull request's). `not-already-refuted` no → drop, citing the entry.\n"
 )
 
 
@@ -194,7 +253,7 @@ def build_verifier_brief(
         "",
         withdrawn_section or "No findings have been withdrawn on this repository yet.",
         "",
-        "Cite the code you read, then return exactly one of confirm / downgrade / drop.",
+        "Answer every rubric criterion, then return exactly one of confirm / downgrade / drop.",
     ]
     return "\n".join(parts)
 
@@ -271,20 +330,37 @@ def plan_agent_verifications(
     )
 
 
-# ── verdicts (D11) ────────────────────────────────────────────────────────────
+# ── verdicts (D11 / D14) ──────────────────────────────────────────────────────
 
 JudgeVerdictName = Literal["confirm", "downgrade", "drop"]
 
 
+class JudgePin(BaseModel):
+    """The pinned identity of the judge that produced a verdict (#45)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    model: str
+    model_pinned: bool
+    judge_version: str = VERIFIER_JUDGE_VERSION
+    rubric_version: str = VERIFIER_RUBRIC_VERSION
+
+
 class JudgeVerdict(BaseModel):
-    """One verifier verdict about a finding."""
+    """One verdict, recorded with the pin and the evidence that preceded it."""
 
     model_config = ConfigDict(extra="forbid")
 
     fingerprint: str
     verdict: JudgeVerdictName
     reason: str
+    pin: JudgePin
+    # Names of the deterministic checks that ran before this judge did. Empty
+    # is a contract violation, not a default — see ``record_verifier_verdict``.
+    deterministic_checks: list[str] = []
     new_severity: str | None = None
+    lane: str | None = None
 
 
 class VerdictOutcome(BaseModel):
@@ -296,7 +372,45 @@ class VerdictOutcome(BaseModel):
     verdict: JudgeVerdictName
     recorded_withdrawn: bool
     publishable: bool
+    escalated_to_human: bool
     reason: str
+
+
+def pinned_judge_model(provider: str) -> str | None:
+    """Return the pinned judge model for ``provider``, or ``None`` if unpinned."""
+    return PINNED_JUDGE_MODELS.get(provider)
+
+
+def judge_pin(*, provider: str, resolved_model: str | None = None) -> JudgePin:
+    """Resolve the judge identity to record with a verdict (#45).
+
+    A provider without a pin still yields a complete pin record — with
+    ``model_pinned=False`` and the run's own model — because an unpinned judge
+    is a fact worth logging, not a reason to log nothing.
+    """
+    pinned = pinned_judge_model(provider)
+    return JudgePin(
+        provider=provider,
+        model=pinned or (resolved_model or "unknown"),
+        model_pinned=pinned is not None,
+    )
+
+
+def log_judge_verdict(verdict: JudgeVerdict) -> None:
+    """Log judge model, provider, judge version and rubric version (#45)."""
+    logger.info(
+        "judge verdict: {} on {} | provider={} model={} pinned={} "
+        "judge_version={} rubric_version={} lane={} deterministic_checks={}",
+        verdict.verdict,
+        verdict.fingerprint,
+        verdict.pin.provider,
+        verdict.pin.model,
+        verdict.pin.model_pinned,
+        verdict.pin.judge_version,
+        verdict.pin.rubric_version,
+        verdict.lane or "unknown",
+        ",".join(verdict.deterministic_checks) or "none",
+    )
 
 
 def record_withdrawn_finding(
@@ -325,17 +439,31 @@ def record_verifier_verdict(
     *,
     learnings_path: Path,
 ) -> VerdictOutcome:
-    """Route a verdict, writing a ``drop`` into the withdrawn memory (C6).
+    """Log a verdict and route a ``drop`` into the withdrawn memory (C6, D14).
 
     Args:
-        verdict: The verifier's verdict about one finding.
+        verdict: The judge's verdict, carrying its pin and the deterministic
+            checks that preceded it.
         learnings_path: The run's learnings file, where refutations accumulate.
 
     Returns:
         A ``VerdictOutcome`` saying whether the finding may still be published
         and whether the refutation was durably recorded.
+
+    Raises:
+        ValueError: If no deterministic check ran before the judge (D14) — an
+            LLM judge is a secondary signal, so a verdict with nothing to be
+            secondary to is refused rather than quietly accepted.
     """
-    logger.info("verifier verdict: {} on {}", verdict.verdict, verdict.fingerprint)
+    if not verdict.deterministic_checks:
+        msg = (
+            "judge verdict rejected: no deterministic check ran before it. LLM judges "
+            "are secondary evaluators — run the repo's analyzers or static gates first "
+            "(D14, #45)."
+        )
+        raise ValueError(msg)
+
+    log_judge_verdict(verdict)
 
     if verdict.verdict != "drop":
         return VerdictOutcome(
@@ -343,7 +471,28 @@ def record_verifier_verdict(
             verdict=verdict.verdict,
             recorded_withdrawn=False,
             publishable=True,
+            escalated_to_human=False,
             reason=verdict.reason,
+        )
+
+    if (verdict.lane or "") in HIGH_STAKES_LANES:
+        logger.warning(
+            "judge drop on high-stakes lane {} not auto-withdrawn — finding {} needs a "
+            "second judge or human review (D14)",
+            verdict.lane,
+            verdict.fingerprint,
+        )
+        return VerdictOutcome(
+            fingerprint=verdict.fingerprint,
+            verdict=verdict.verdict,
+            recorded_withdrawn=False,
+            publishable=True,
+            escalated_to_human=True,
+            reason=(
+                f"drop withheld on high-stakes lane `{verdict.lane}` — one judge cannot "
+                f"retire a finding here; escalate to a second judge or a human. "
+                f"Judge reason: {verdict.reason}"
+            ),
         )
 
     record_withdrawn_finding(
@@ -356,6 +505,7 @@ def record_verifier_verdict(
         verdict=verdict.verdict,
         recorded_withdrawn=True,
         publishable=False,
+        escalated_to_human=False,
         reason=verdict.reason,
     )
 

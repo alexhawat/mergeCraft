@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks per run is capped at the repo's existing `analyzers.inlineBudget` —
   `Critical` findings are checked before `Major` ones, and there is no new knob
   to configure. Beyond that cap the extra findings publish unchecked
+- The verifying agent is now pinned and auditable. Its model, provider, judge
+  version, and rubric version are recorded with every verdict, its model is
+  fixed per provider so a changed default cannot silently change what gets
+  published, and it grades against five yes/no questions about the code rather
+  than a "quality" score. It refuses to run before your analyzers and repo gates
+  have — it is a second opinion on top of the deterministic checks, never a
+  replacement for them — and on a high blast-radius change (migrations, auth,
+  secrets, irreversible infra) it cannot retire a finding on its own (#45)
+
 - Reviews now actually emit a Merge Evidence Packet. Every run that reviews a
   pull request writes one versioned JSON record of the findings, the analyzer
   checks that ran, the blast-radius lane, the agent's self-assessment, and the

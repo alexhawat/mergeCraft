@@ -264,6 +264,17 @@ Each verdict goes back through `record_finding_verdict`: **confirm** publishes a
 **downgrade** re-grades, and **drop** writes the verifier's reason under
 `## Withdrawn review findings` so the finding stays refuted on every later run.
 
+**The verifier is an LLM judge, and therefore a secondary signal.** It runs *after* the
+deterministic checks — the tools refuse to plan a dispatch or accept a verdict until analyzers or
+repo gates have had their turn — and it never overrules a tool result. Its model is pinned per
+provider (Claude runs the judge on Sonnet, a different tier from the orchestrator that wrote the
+finding), and its model, provider, judge version and rubric version are logged with every verdict.
+The rubric is five binary questions about the code (does the cited code exist, does the mechanism
+hold, is it reachable, did this PR introduce it, is it already refuted) — never a score for
+quality, style, or verbosity. On the `high` blast-radius lane, one judge cannot retire a finding
+on its own: a `drop` there is escalated for a second judge or a human rather than written to the
+withdrawn section.
+
 ## 6. Findings that get dropped
 
 What mergecraft deliberately does **not** report — this is most of what keeps a review readable:
