@@ -79,6 +79,23 @@ class ReviewRecord:
 
 @dataclass(slots=True)
 class ApprovalRecord:
+    """Advisory record of what the agent asked ``create_pull_request_review``
+    to do.
+
+    ``would_approve`` is the agent's *self-assessment*, captured as a side
+    effect of the ``create_pull_request_review`` tool call. It is **never the
+    sole positive input** to the approval gate — that gate is computed
+    structurally by ``mergecraft.agents.gates.decide_approval`` from the typed
+    ``Finding`` list, the run's completion state, and the trust tier (D12).
+
+    The field exists for the trajectory / merge-evidence plan (#41) so the
+    recorded "self-assessment" can be compared against the structural
+    conclusion after the fact. It is not consulted by ``report_status_checks``
+    or ``create_pull_request_review``'s wire-call layer — both are pinned to
+    structural inputs by W7.3 / W7.4 / W7.5 of the security-trust-boundary
+    plan (#75).
+    """
+
     would_approve: bool
     sha: str | None
 

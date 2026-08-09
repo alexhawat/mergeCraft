@@ -1,4 +1,14 @@
-"""Regression tests for opt-in commit status checks (issues #5, #6)."""
+"""Regression tests for opt-in commit status checks (issues #5, #6, #75).
+
+The approval check conclusion is computed structurally by ``decide_approval``
+(``mergecraft.agents.gates``) from the typed ``Finding`` list, the run's
+completion state, and the trust tier (D12). Narrative (``ApprovalRecord``) is
+never the sole positive input. The pre-W8 "preserve approval when run fails
+later" expectation is replaced by the W8 #75 structural contract: a crashed
+run yields ``neutral`` (the wire-shape the hardened enforce step blocks on —
+D13), regardless of any recorded ``ApprovalRecord.would_approve``. The new
+tests below pin that contract.
+"""
 
 from __future__ import annotations
 
@@ -96,10 +106,20 @@ async def test_report_status_checks_posts_neutral_approval_when_review_incomplet
 
 
 @pytest.mark.asyncio
-async def test_report_status_checks_preserves_approval_when_run_fails_later(
+async def test_report_status_checks_neutral_for_crashed_run_with_recorded_approval(
     tmp_path: Path,
 ) -> None:
-    """Approval recorded before a later run failure must not be masked as neutral."""
+    """A recorded ``ApprovalRecord(would_approve=...)`` must not flip a crashed
+    run to ``success`` or ``failure`` — D13 fail-closed.
+
+    Replaces the pre-W8 "preserve approval when run fails later" expectation:
+    the structural approval gate consults ``decide_approval(findings,
+    run_succeeded=False, tier)`` and yields ``"neutral"`` regardless of what
+    the agent's boolean recorded. The ``ApprovalRecord`` survives in
+    ``tool_state.approval`` as an advisory input for the trajectory / merge-
+    evidence work (#41); the reviewed commit SHA is included in the summary
+    so operators can audit the run.
+    """
     github = _RecordingGitHub()
     ctx = _ctx(
         tmp_path,
@@ -112,12 +132,13 @@ async def test_report_status_checks_preserves_approval_when_run_fails_later(
     approval_checks = _approval_checks(github)
     assert len(approval_checks) == 1
     check = approval_checks[0]
-    assert check["conclusion"] == "failure"
-    summary = check["output"]["summary"]
-    assert (
-        "would not approve" in check["output"]["title"].lower() or "not approve" in summary.lower()
+    assert check["conclusion"] == "neutral", (
+        "W8 / D13 — a crashed run must surface 'neutral' regardless of any "
+        "recorded ApprovalRecord; the hardened enforce step blocks on 'neutral'"
     )
-    assert REVIEWED_SHA in summary or REVIEWED_SHA[:7] in summary
+    assert (
+        REVIEWED_SHA in check["output"]["summary"] or REVIEWED_SHA[:7] in check["output"]["summary"]
+    )
 
 
 @pytest.mark.asyncio

@@ -66,6 +66,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add OSS governance files for parity with sevn-bot/sevn: `SECURITY.md`,
   `CODE_OF_CONDUCT.md`, `.github/CODEOWNERS`, `.github/PULL_REQUEST_TEMPLATE.md`,
   and `.github/ISSUE_TEMPLATE/` (bug report, feature request, security contact link).
+- Document the structural approval gate next to `status_checks: enabled`: the
+  `mergecraft-approval` conclusion is now a pure function of the typed `Finding`
+  list, the run's completion state, and the trust tier — narrative
+  (`ApprovalRecord.would_approve`) is recorded as an advisory input only, never
+  the sole positive input. The pre-W8 "neutral is non-blocking" framing is
+  removed; the hardened example workflow ships a `neutral` ⇒ blocking enforce
+  step (#75).
+
+### Changed (BREAKING)
+
+- **`mergecraft-approval` is now structural (D13 — fail closed on incomplete
+  runs).** A crashed / timed-out / no-findings run posts `neutral` regardless of
+  any recorded `ApprovalRecord.would_approve`. The hardened example workflow's
+  enforce step treats `neutral` as blocking; GitHub branch protection must wire
+  that step into the merge rule if it relied on the previous "neutral is
+  non-blocking" behaviour. `report_status_checks()` consults
+  `mergecraft.agents.gates.decide_approval(findings, run_succeeded, tier)`
+  instead of `approval.would_approve` (#75).
+- **`prApproveEnabled` is inert for `untrusted` tier runs (D14 — no self-
+  approval on fork PRs).** `create_pull_request_review` does not send
+  `event="APPROVE"` to GitHub when `ctx.trust_tier == "untrusted"` even with
+  `pr_approve_enabled=true` and the agent's `approved=true` argument. The
+  advisory `ApprovalRecord(would_approve=True, sha=...)` is still recorded so
+  the trajectory / merge-evidence work (#41) reads it after the fact. Trusted
+  in-repo PRs are unchanged (#75).
 
 ### Fixed
 

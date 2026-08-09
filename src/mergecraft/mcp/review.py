@@ -75,7 +75,12 @@ def create_pull_request_review_tool(ctx: ToolContext):
                 }
 
         event = "COMMENT"
-        if approved and ctx.pr_approve_enabled:
+        if approved and ctx.pr_approve_enabled and ctx.trust_tier == "trusted":
+            # D14 — prApproveEnabled is inert for untrusted runs (fork PR /
+            # pull_request_target). One config knob, one inert path. The
+            # advisory ApprovalRecord is still written below (W8.3), so the
+            # trajectory/evidence work in the merge-evidence plan (#41) reads
+            # the agent's stored boolean after the fact.
             event = "APPROVE"
         elif request_changes:
             event = "REQUEST_CHANGES"
