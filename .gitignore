@@ -43,3 +43,6 @@ graphify-out/
 
 # Analyzer adapter test artifacts
 tests/analyzers/fixtures/repo/.mergecraft/
+/.claude
+/.cursor
+CLAUDE.md
