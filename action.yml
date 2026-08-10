@@ -28,7 +28,13 @@ inputs:
     description: "Post mergecraft and mergecraft-approval commit-status checks: disabled (default) or enabled."
     required: false
   analyzers:
-    description: "Analyzer execution tier: off (disabled), auto (detect + provision), or full (baked image tools). Default: auto"
+    description: >-
+      Analyzer execution tier: off (disabled), auto (detect + provision), full (baked image tools),
+      or untrusted-only (trust-aware: run only analyzers that need no secrets, no network and no
+      PR-authored command construction — trusted-tier and repo-native manifests are skipped with a
+      named reason rather than failing). Under `pull_request_target` and fork-head pull requests,
+      `auto` resolves to `untrusted-only`. An unrecognised value also resolves to `untrusted-only`,
+      with a warning. Default: auto
     required: false
     default: auto
   allow_pr_target_comments:

@@ -56,6 +56,10 @@ def run_analyzers_tool(ctx: ToolContext):
             # #35 — the surface now registers under `shell: disabled`, so the
             # shell has to reach manifest selection or the withhold is lost.
             shell=str(ctx.payload.shell),
+            # #38 — likewise the mode: `untrusted-only` (and the `auto` that
+            # resolves to it on untrusted runs) only narrows selection if it
+            # actually reaches the pipeline.
+            mode=ctx.analyzers_mode,
         )
         _store_run_state(ctx, run_state)
 

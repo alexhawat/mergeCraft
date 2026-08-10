@@ -62,15 +62,19 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `yamllint` | lint | yaml | disabled | managed | untrusted | — | — |
 | `zizmor` | ci | — | auto | managed | untrusted | — | — |
 
-## Runtime x shell x trust
+## Runtime x shell x trust x mode
 
-Which analyzers run is decided on two independent axes, each of which can
-skip a manifest with a named reason — a skip is an outcome, never a failure.
+Which analyzers run is decided on three independent axes. Each can skip a
+manifest with a named reason — a skip is an outcome, never a failure, and it
+appears as an `unavailable` row in the Analyzers pre-merge summary.
 
 - **shell** (`shell:` in the workflow) — may mergeCraft execute anything the
   PR could have written? Enforced by `evaluate_manifest_for_shell()`.
 - **trust** (derived from the event) — `pull_request_target` and fork-head PRs
   are `untrusted`. Enforced by `evaluate_manifest_for_tier()`.
+- **mode** (`analyzers:` in the workflow) — `off | auto | full |
+  untrusted-only`. Enforced by `evaluate_manifest_for_mode()` plus
+  `resolve_selection_tier()`.
 
 Under `shell: disabled`, eligible runtimes are `managed` and `container`.
 Their argv is copied verbatim out of a manifest mergeCraft ships, and a binary
@@ -86,7 +90,37 @@ to run the *repo's* tool against the *repo's* config.
 | `managed` (17) | `untrusted` | **runs** (pinned binary only) | runs |
 | `container` (4) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
 
-Passing the shell axis is necessary, not sufficient: a `container` manifest
+One documented exception to the runtime row: `agentsec`. It declares
+`runtime: repo-native` but `resolve_analyzer()` special-cases it before the
+repo-binary preference is consulted and `run_adapter()` executes it
+in-process — no subprocess, no argv, nothing the PR authored is run. The
+runtime axis asks whether PR content could steer what executes; for these
+the answer is no, so they stay eligible (#38).
+
+### The `analyzers:` mode axis
+
+`untrusted-only` runs only analyzers that need no secrets, no network and no
+PR-authored command construction: manifest selection is evaluated at the
+`untrusted` tier *and* the repo-tooling gate applies whatever the shell is.
+On `pull_request_target` and fork-head pull requests, `auto` resolves to it
+— a narrowing default, so a hardened workflow gets mechanical signal without
+loosening `shell:`. An unrecognised `analyzers:` value resolves there too,
+with a warning, rather than silently widening to `auto`.
+
+`full` requests more provisioning; it is never a trust override, and cannot
+re-admit a manifest the tier axis skipped.
+
+Counts below are analyzers passing selection, out of 57 shipped, with
+`shell: restricted` (the shell axis inert) so the mode axis is isolated.
+
+| mode | trusted event | untrusted event (`pull_request_target`, fork) |
+|------|---------------|-----------------------------------------------|
+| **`off`** | surface not registered | surface not registered |
+| **`auto`** | 57 of 57 | 18 of 57 — `auto` ⇒ `untrusted-only` |
+| **`full`** | 57 of 57 | 18 of 57 |
+| **`untrusted-only`** | 18 of 57 | 18 of 57 |
+
+Passing these axes is necessary, not sufficient: a `container` manifest
 is eligible but still reports `unavailable` wherever no container runtime is
 present, and the seven `declared_unavailable` manifests keep their own skip
 reason. In the shipped Action image that leaves the `managed` rows as the
@@ -95,10 +129,7 @@ analyzers a `shell: disabled` run actually executes.
 Repo-declared `staticChecks` are a third thing and are **always** withheld
 under `shell: disabled`, on every event: they run command strings the PR
 author controls. They report `declared-but-cannot-run` rather than vanishing.
-
-`agentsec` declares `runtime: repo-native` and is therefore withheld under
-`shell: disabled`, even though it runs in-process with no repo binary. That
-is deliberate: eligibility is read off the declared runtime and nothing else.
+No `analyzers:` value re-enables them.
 
 ## Overrides
 

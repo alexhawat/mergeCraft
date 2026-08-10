@@ -87,7 +87,7 @@ class ToolContext:
     # reads the consumer's CI and never substitutes a gate outcome.
     ci_gate_checks: dict[str, str] = field(default_factory=dict)
     ci_sarif_artifacts: list[str] = field(default_factory=list)
-    analyzers_mode: Literal["off", "auto", "full"] = "auto"
+    analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto"
     trust_tier: Literal["trusted", "untrusted"] = "trusted"
     analyzers_settings_enabled: bool = True
     run_id: int | None = None

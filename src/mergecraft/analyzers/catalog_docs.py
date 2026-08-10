@@ -134,29 +134,61 @@ def _default_enabled_label(value: bool | str) -> str:
 
 
 def _shell_trust_matrix_lines() -> list[str]:
-    """Render the runtime x shell x trust matrix from the live predicates (#35, D5).
+    """Render the runtime x shell x trust x mode matrix from the live predicates.
 
-    Derived from ``SHELL_DISABLED_ELIGIBLE_RUNTIMES`` and the catalog itself so
-    the published matrix cannot drift away from the code that enforces it.
+    Every cell is computed by calling the predicates the pipeline itself calls
+    (`evaluate_manifest_for_shell`, `evaluate_manifest_for_tier`,
+    `evaluate_manifest_for_mode`) over the real catalog, so the published matrix
+    cannot drift away from the code that enforces it (#35 D5, #38 D8/D9).
     """
-    from mergecraft.analyzers.trust import SHELL_DISABLED_ELIGIBLE_RUNTIMES
+    from mergecraft.analyzers.trust import (
+        IN_PROCESS_ANALYZER_IDS,
+        SHELL_DISABLED_ELIGIBLE_RUNTIMES,
+        evaluate_manifest_for_mode,
+        evaluate_manifest_for_shell,
+        evaluate_manifest_for_tier,
+        resolve_effective_analyzers_mode,
+        resolve_selection_tier,
+    )
 
+    manifests = sorted(load_catalog(), key=lambda m: m.id)
+
+    def _selected(*, tier: str, mode: str, shell: str) -> list[str]:
+        """Replay the pipeline's own skip chain for one cell."""
+        effective = resolve_effective_analyzers_mode(mode=mode, tier=tier)  # type: ignore[arg-type]
+        selection_tier = resolve_selection_tier(mode=effective, tier=tier)  # type: ignore[arg-type]
+        chosen: list[str] = []
+        for manifest in manifests:
+            if evaluate_manifest_for_tier(manifest=manifest, tier=selection_tier).skipped:
+                continue
+            if evaluate_manifest_for_shell(manifest=manifest, shell=shell).skipped:
+                continue
+            if evaluate_manifest_for_mode(manifest=manifest, mode=effective).skipped:
+                continue
+            chosen.append(manifest.id)
+        return chosen
+
+    total = len(manifests)
     counts: dict[tuple[str, str], int] = {}
-    for manifest in load_catalog():
+    for manifest in manifests:
         key = (manifest.runtime, manifest.trust)
         counts[key] = counts.get(key, 0) + 1
 
     lines = [
         "",
-        "## Runtime x shell x trust",
+        "## Runtime x shell x trust x mode",
         "",
-        "Which analyzers run is decided on two independent axes, each of which can",
-        "skip a manifest with a named reason — a skip is an outcome, never a failure.",
+        "Which analyzers run is decided on three independent axes. Each can skip a",
+        "manifest with a named reason — a skip is an outcome, never a failure, and it",
+        "appears as an `unavailable` row in the Analyzers pre-merge summary.",
         "",
         "- **shell** (`shell:` in the workflow) — may mergeCraft execute anything the",
         "  PR could have written? Enforced by `evaluate_manifest_for_shell()`.",
         "- **trust** (derived from the event) — `pull_request_target` and fork-head PRs",
         "  are `untrusted`. Enforced by `evaluate_manifest_for_tier()`.",
+        "- **mode** (`analyzers:` in the workflow) — `off | auto | full |",
+        "  untrusted-only`. Enforced by `evaluate_manifest_for_mode()` plus",
+        "  `resolve_selection_tier()`.",
         "",
         "Under `shell: disabled`, eligible runtimes are "
         + " and ".join(
@@ -188,10 +220,62 @@ def _shell_trust_matrix_lines() -> list[str]:
             )
             lines.append(f"| `{runtime}` ({count}) | `{trust}` | {disabled_cell} | {other_cell} |")
 
+    if IN_PROCESS_ANALYZER_IDS:
+        exception_ids = ", ".join(f"`{value}`" for value in sorted(IN_PROCESS_ANALYZER_IDS))
+        lines.extend(
+            [
+                "",
+                f"One documented exception to the runtime row: {exception_ids}. It declares",
+                "`runtime: repo-native` but `resolve_analyzer()` special-cases it before the",
+                "repo-binary preference is consulted and `run_adapter()` executes it",
+                "in-process — no subprocess, no argv, nothing the PR authored is run. The",
+                "runtime axis asks whether PR content could steer what executes; for these",
+                "the answer is no, so they stay eligible (#38).",
+            ]
+        )
+
     lines.extend(
         [
             "",
-            "Passing the shell axis is necessary, not sufficient: a `container` manifest",
+            "### The `analyzers:` mode axis",
+            "",
+            "`untrusted-only` runs only analyzers that need no secrets, no network and no",
+            "PR-authored command construction: manifest selection is evaluated at the",
+            "`untrusted` tier *and* the repo-tooling gate applies whatever the shell is.",
+            "On `pull_request_target` and fork-head pull requests, `auto` resolves to it",
+            "— a narrowing default, so a hardened workflow gets mechanical signal without",
+            "loosening `shell:`. An unrecognised `analyzers:` value resolves there too,",
+            "with a warning, rather than silently widening to `auto`.",
+            "",
+            "`full` requests more provisioning; it is never a trust override, and cannot",
+            "re-admit a manifest the tier axis skipped.",
+            "",
+            f"Counts below are analyzers passing selection, out of {total} shipped, with",
+            "`shell: restricted` (the shell axis inert) so the mode axis is isolated.",
+            "",
+            "| mode | trusted event | untrusted event (`pull_request_target`, fork) |",
+            "|------|---------------|-----------------------------------------------|",
+        ]
+    )
+    for mode in ("off", "auto", "full", "untrusted-only"):
+        cells: list[str] = []
+        for tier in ("trusted", "untrusted"):
+            if mode == "off":
+                cells.append("surface not registered")
+                continue
+            selected = _selected(tier=tier, mode=mode, shell="restricted")
+            note = ""
+            if mode == "auto" and tier == "untrusted":
+                note = " — `auto` ⇒ `untrusted-only`"
+            cells.append(f"{len(selected)} of {total}{note}")
+        # Bolded so `parse_analyzers_doc()` does not read a mode name as an
+        # analyzer id — it scrapes rows whose first cell is a bare code span.
+        lines.append(f"| **`{mode}`** | {cells[0]} | {cells[1]} |")
+
+    lines.extend(
+        [
+            "",
+            "Passing these axes is necessary, not sufficient: a `container` manifest",
             "is eligible but still reports `unavailable` wherever no container runtime is",
             "present, and the seven `declared_unavailable` manifests keep their own skip",
             "reason. In the shipped Action image that leaves the `managed` rows as the",
@@ -200,10 +284,7 @@ def _shell_trust_matrix_lines() -> list[str]:
             "Repo-declared `staticChecks` are a third thing and are **always** withheld",
             "under `shell: disabled`, on every event: they run command strings the PR",
             "author controls. They report `declared-but-cannot-run` rather than vanishing.",
-            "",
-            "`agentsec` declares `runtime: repo-native` and is therefore withheld under",
-            "`shell: disabled`, even though it runs in-process with no repo binary. That",
-            "is deliberate: eligibility is read off the declared runtime and nothing else.",
+            "No `analyzers:` value re-enables them.",
         ]
     )
     return lines

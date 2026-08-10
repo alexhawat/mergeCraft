@@ -88,6 +88,30 @@ _CONTRACTS: Final[tuple[_Contract, ...]] = (
         ),
     ),
     _Contract(
+        symbol="evaluate_manifest_for_mode",
+        defined_in="analyzers/trust.py",
+        why=(
+            "no reachable caller means `analyzers: untrusted-only` stops withholding "
+            "repo-native manifests, so the mode is accepted and does nothing (#38)"
+        ),
+    ),
+    _Contract(
+        symbol="resolve_effective_analyzers_mode",
+        defined_in="analyzers/trust.py",
+        why=(
+            "no reachable caller means `auto` never resolves to trust-aware selection on "
+            "pull_request_target, silently reverting D8 (#38)"
+        ),
+    ),
+    _Contract(
+        symbol="resolve_selection_tier",
+        defined_in="analyzers/trust.py",
+        why=(
+            "no reachable caller means `untrusted-only` never forces an untrusted manifest "
+            "selection, so trusted-tier analyzers still run (#38)"
+        ),
+    ),
+    _Contract(
         symbol="substitute_declared_gates",
         defined_in="ci/evidence.py",
         why="no reachable caller means a gate the consumer's CI proved still reports "

@@ -21,8 +21,11 @@ from mergecraft.analyzers.scope import (
 )
 from mergecraft.analyzers.trust import (
     allow_repo_provided_binaries,
+    evaluate_manifest_for_mode,
     evaluate_manifest_for_shell,
     evaluate_manifest_for_tier,
+    resolve_effective_analyzers_mode,
+    resolve_selection_tier,
 )
 from mergecraft.config import load_repo_settings
 from mergecraft.mcp.review import format_analyzer_inline_body
@@ -35,6 +38,7 @@ if TYPE_CHECKING:
     from mergecraft.config.settings import AnalyzersSettings
 
 TrustTier = Literal["trusted", "untrusted"]
+AnalyzersMode = Literal["off", "auto", "full", "untrusted-only"]
 
 
 def _serialize_finding(finding: Finding) -> dict[str, Any]:
@@ -103,12 +107,19 @@ def run_analyzer_pipeline(
     offline: bool = False,
     base_ref: str | None = None,
     shell: str = "restricted",
+    mode: AnalyzersMode = "auto",
 ) -> AnalyzerRunState:
     """Run enabled analyzers end-to-end and return scoped, budgeted findings.
 
     ``shell`` is the run's shell policy (``ctx.payload.shell``). Under
     ``"disabled"`` only manifests whose argv mergeCraft ships are selected, and
     repo-provided binaries may not stand in for the pinned ones (#35, D5).
+
+    ``mode`` is the ``analyzers:`` input (``ctx.analyzers_mode``). It narrows
+    *selection* only: ``untrusted-only`` — which ``auto`` resolves to on an
+    untrusted run (D8) — evaluates manifests at the untrusted tier and
+    withholds those needing repo-provided tooling. Execution still uses the
+    derived ``tier``, so a mode can never widen what a run may see (#38).
     """
     from mergecraft.tracing.tracer import get_tracer_from_settings
 
@@ -139,12 +150,22 @@ def run_analyzer_pipeline(
         )
 
     repo_binaries_allowed = allow_repo_provided_binaries(shell=shell)
+    effective_mode = resolve_effective_analyzers_mode(mode=mode, tier=tier)
+    selection_tier = resolve_selection_tier(mode=effective_mode, tier=tier)
+    tier_skip_cause = (
+        "analyzers: untrusted-only"
+        if selection_tier == "untrusted" and tier == "trusted"
+        else "fork PR / pull_request_target"
+    )
 
     with tracer.start_span(
         "mergecraft.analyzers.pipeline",
         attrs_source=lambda: {
             "tier": tier,
             "shell": shell,
+            "analyzers.mode": mode,
+            "analyzers.effective_mode": effective_mode,
+            "analyzers.selection_tier": selection_tier,
             "changed_file_count": len(changed_files),
         },
     ) as parent_span:
@@ -154,9 +175,13 @@ def run_analyzer_pipeline(
         from mergecraft.analyzers.adapters import run_adapter
 
         for manifest in manifests:
-            decision = evaluate_manifest_for_tier(manifest=manifest, tier=tier)
+            decision = evaluate_manifest_for_tier(
+                manifest=manifest, tier=selection_tier, cause=tier_skip_cause
+            )
             if not decision.skipped:
                 decision = evaluate_manifest_for_shell(manifest=manifest, shell=shell)
+            if not decision.skipped:
+                decision = evaluate_manifest_for_mode(manifest=manifest, mode=effective_mode)
             if decision.skipped:
                 rows.append(
                     AnalyzerStatusRow(

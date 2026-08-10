@@ -306,6 +306,13 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
+          # Trust-aware analyzer selection (#38). `auto` already resolves to this
+          # under `pull_request_target`, but stating it keeps the workflow honest
+          # about what it expects and survives any future change to `auto`.
+          # Only analyzers needing no secrets, no network and no PR-authored
+          # command construction run; the rest are skipped with a named reason in
+          # the Analyzers pre-merge row, never reported as failures.
+          analyzers: untrusted-only
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -84,8 +84,20 @@ def _ids_by_runtime(runtime: str) -> list[str]:
     return sorted(m.id for m in _catalog_manifests() if m.runtime == runtime)
 
 
-REPO_NATIVE_IDS: list[str] = _ids_by_runtime("repo-native")
-ELIGIBLE_IDS: list[str] = _ids_by_runtime("managed") + _ids_by_runtime("container")
+# `agentsec` declares `repo-native` but runs in-process with no subprocess and no
+# repo-provided binary, so the "needs repo tooling" premise this axis rests on is
+# false for it. Batch A withheld it anyway and flagged it; #38 admits it
+# deliberately — see `IN_PROCESS_ANALYZER_IDS` in `analyzers/trust.py`.
+IN_PROCESS_IDS: frozenset[str] = frozenset({"agentsec"})
+
+REPO_NATIVE_IDS: list[str] = [
+    analyzer_id
+    for analyzer_id in _ids_by_runtime("repo-native")
+    if analyzer_id not in IN_PROCESS_IDS
+]
+ELIGIBLE_IDS: list[str] = sorted(
+    _ids_by_runtime("managed") + _ids_by_runtime("container") + sorted(IN_PROCESS_IDS)
+)
 
 
 def _ctx(
