@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Reviews now check *how* a change was produced, not only the diff. Eight named
+  trajectory checks read the tool calls mergeCraft mediated and report a file
+  modified but never read, a tool error that was never retried, edits with no
+  verification after them, an identical retry after a failure with nothing read
+  in between, a command that failed and never passed, a repeated call loop, an
+  unusually broad edit, and a run that did work and never signalled completion.
+  Each carries a severity and a recommended action, and lands in the merge
+  evidence packet's finding list — so `decide_approval()` weighs them like any
+  other evidence rather than through a second gate. Checks stay **silent when
+  the evidence is absent**: mergeCraft only sees the calls it mediates, so a
+  driver whose reads never cross MCP yields "unknown", not "unread". Inline
+  slots go to code findings first. `PACKET_SCHEMA_VERSION` moves to `1.4.0` for
+  the new `trajectory` section (#43, #49)
+
 ### Changed
 
 - **BREAKING** — an unrecognised `analyzers:` Action input value now resolves to

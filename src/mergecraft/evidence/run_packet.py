@@ -251,16 +251,27 @@ def build_run_packet(
     diff_text = _read_diff_text(repo_state)
     blast_radius = classify_run_blast_radius(diff_text)
 
+    from mergecraft.evidence.trajectory import build_trajectory_record
+    from mergecraft.evidence.trajectory_audit import audit_trajectory
+
+    changed_paths = changed_paths_from_diff(diff_text)
+    # #43/#49: the record is built from the tool calls mergeCraft mediated, and
+    # its findings join the ordinary finding list rather than a parallel gate —
+    # so `decide_approval` below weighs them exactly like any other evidence.
+    trajectory = build_trajectory_record(state, files_modified=changed_paths)
+    trajectory_findings = audit_trajectory(trajectory)
+
     packet = build_packet(
         change_id=change_id,
         agent_id=ctx.agent_id,
         agent_version=_agent_version(),
         model=ctx.resolved_model or state.model or "(unresolved)",
-        files_changed=changed_paths_from_diff(diff_text),
-        findings=_structural_findings(ctx, extra_findings),
+        files_changed=changed_paths,
+        findings=[*_structural_findings(ctx, extra_findings), *trajectory_findings],
         deterministic_checks=_deterministic_checks(state),
         self_assessment=_self_assessment(state),
         blast_radius=blast_radius,
+        trajectory=trajectory.model_dump(mode="json"),
     )
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
     return packet.model_copy(update={"decision": decision})

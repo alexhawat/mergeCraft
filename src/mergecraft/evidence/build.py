@@ -115,6 +115,7 @@ def build_packet(
     self_assessment: dict[str, Any] | SelfAssessment | None = None,
     decision: Decision | None = None,
     blast_radius: BlastRadiusClassification | None = None,
+    trajectory: dict[str, Any] | None = None,
     ci_check_runs: dict[str, Any] | None = None,
     ci_intelligence: dict[str, Any] | None = None,
     usage_entries: Any = None,
@@ -180,14 +181,12 @@ def build_packet(
         self_assessment=coerced_self_assessment,
         decision=decision,
         blast_radius=blast_radius,
+        trajectory=trajectory,
     )
 
-    # Trajectory / usage_entries / ci_check_runs / ci_intelligence are still
-    # deferred (Batch C for trajectory; W9+ for the rest). They are logged at
-    # debug level above for diagnostics and intentionally *not* attached to
-    # the packet here — Batch C owns ``trajectory`` as a sibling field
-    # rather than a nested dict, so updating the model is a strict version
-    # bump (D7).
+    # ``trajectory`` now lands as a sibling field (Batch C, #43). The rest --
+    # usage_entries / ci_check_runs / ci_intelligence -- remain deferred to W9+
+    # and are logged at debug level above rather than attached here.
     _ = (ci_check_runs, ci_intelligence, usage_entries)
     return packet
 

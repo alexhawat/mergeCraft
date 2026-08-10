@@ -50,7 +50,7 @@ from mergecraft.evals.store import EvalMetadata
 #   packet that previously set it to a dict is no longer wire-compatible
 #   — no live consumer reads the legacy dict shape today, so the bump is
 #   safe.
-PACKET_SCHEMA_VERSION = "1.3.0"
+PACKET_SCHEMA_VERSION = "1.4.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]

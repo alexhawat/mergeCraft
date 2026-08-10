@@ -236,7 +236,10 @@ def test_extra_findings_merge_without_duplicating(tmp_path: Path) -> None:
 
     assert written is not None
     findings = json.loads(written.read_text(encoding="utf-8"))["findings"]
-    assert len(findings) == 1, "the same finding from two sources must not double-count"
+    # Assert the dedup property itself rather than the packet's total, which
+    # also carries trajectory findings since Batch C (#43).
+    matches = [f for f in findings if f["fingerprint"] == duplicate.fingerprint]
+    assert len(matches) == 1, "the same finding from two sources must not double-count"
 
 
 def _sample_finding_kwargs() -> dict[str, Any]:

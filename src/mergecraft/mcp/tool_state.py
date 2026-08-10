@@ -219,7 +219,17 @@ class ToolState:
     xrepo_learnings_seed: str | None = None
     xrepo_learnings_persist_attempted: bool = False
     output: str | None = None
+    # Per-attempt ``AgentUsage`` token counts, appended once per run by
+    # ``main.py``. Despite what the merge-evidence plan assumed, this is *not*
+    # a tool-call log — the trajectory record (#43) keeps its own field below.
     usage_entries: list[Any] = field(default_factory=list)
+    # Every MCP tool call this run made, in order (#43, D8). Appended by
+    # ``mcp/server.py``'s ``tools/call`` handler — the single door every agent
+    # tool call goes through — and read at end of run by
+    # ``evidence/trajectory.py::build_trajectory_record``. Typed ``list[Any]``
+    # rather than ``list[ToolCallRecord]`` only to keep this module free of an
+    # import cycle back into ``evidence``.
+    tool_calls: list[Any] = field(default_factory=list)
     model: str | None = None
     model_fallback: dict[str, str] | None = None
     unselected_proxy_default: bool | None = None
