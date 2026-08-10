@@ -40,6 +40,9 @@ graphify-out/
 
 # Local operator
 .ignorelocal/
+/.claude/
+/.cursor/
+CLAUDE.md
 
 # Sanitizing fetcher quarantine (github-issue-triage fetch_issue_safe.py).
 # Do NOT remove — fetch_issue_safe.py writes raw blocked payloads here, and the
@@ -48,6 +51,3 @@ graphify-out/
 
 # Analyzer adapter test artifacts
 tests/analyzers/fixtures/repo/.mergecraft/
-/.claude
-/.cursor
-CLAUDE.md
