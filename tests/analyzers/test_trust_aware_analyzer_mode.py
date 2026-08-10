@@ -60,9 +60,6 @@ from tests.analyzers.support import import_module
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
-# W3.8 — RED until W4 lands the mode. Removed in the W4 commit.
-pytestmark = pytest.mark.xfail(reason="green after W4 (#38)", strict=False)
-
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # The mode axis under test. `off` short-circuits before the pipeline; the other

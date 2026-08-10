@@ -315,6 +315,17 @@ The Action image has no `make`, no repo venv, and none of your pinned toolchains
 
 **Analyzers** (actionlint, zizmor, ShellCheck, Hadolint in this release) run deterministically from YAML manifests when paths match — the reviewer calls `run_analyzers` early and places verified hits inline or in `### 🔧 Mechanical findings`. You can override enablement in `analyzers:`; editing the catalog remains possible but is not the headline workflow (D19).
 
+The Action's `analyzers:` input picks how much of the catalog is eligible:
+
+| value | meaning |
+|-------|---------|
+| `off` | the analyzer tools are not registered at all |
+| `auto` *(default)* | detect from changed paths and provision what is needed |
+| `full` | same selection as `auto`, with the baked image tools provisioned up front |
+| `untrusted-only` | trust-aware: only analyzers needing no secrets, no network, and no PR-authored command construction |
+
+Under `pull_request_target` and fork-head pull requests the trust tier is `untrusted`, and `auto` resolves to `untrusted-only` there — so a hardened workflow gets mechanical signal without loosening `shell:`. Anything the mode excludes is reported as a skipped row with a named reason, never as a failure. An unrecognised value also resolves to `untrusted-only`, with a warning, rather than silently widening to `auto`. `full` is a request to provision more tooling; it is never a trust override and cannot re-admit an analyzer the trust tier excluded. The generated matrix in [`docs/ANALYZERS.md`](docs/ANALYZERS.md) shows what each combination selects.
+
 ## Learnings — staging and promotion
 
 `.mergecraft/learnings.md` holds durable cross-run context (test commands, conventions, gotchas, architecture notes) seeded into every review. Since this file is **attacker-controllable input** in any non-maintainer context (a fork PR body, a contributor comment, an agent-written entry from prior untrusted text), entries are now provenance-gated (D10, #74):

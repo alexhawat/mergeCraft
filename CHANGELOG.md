@@ -7,8 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING** — an unrecognised `analyzers:` Action input value now resolves to
+  `untrusted-only` instead of `auto`, and says so at `warning` level. Previously
+  any typo was silently rewritten to `auto`, which on a trusted event selects the
+  whole catalog: the input that looked strictest was the one that did nothing. A
+  misspelled value now narrows selection (57 shipped manifests → 18 on a trusted
+  event) rather than widening it, so the failure mode is missing coverage you can
+  see in the skip rows instead of coverage you only thought you had. Spelling a
+  valid value — `off`, `auto`, `full`, `untrusted-only` — is unaffected, and an
+  absent input still means `auto` (#38)
+- **BREAKING** — `analyzers: auto` under `pull_request_target` and fork-head pull
+  requests now *means* trust-aware selection, resolving to `untrusted-only`
+  rather than being trust-blind. On the catalog as shipped today this changes
+  which analyzers run **not at all**: the untrusted trust tier already excluded
+  every `trust: trusted` manifest on those events, and the one remaining
+  `repo-native` manifest is exempt (see below). What changes is the contract —
+  any future `repo-native` analyzer that declares `trust: untrusted` will be
+  withheld on those events instead of resolved against a PR-authored working
+  tree. It is recorded as breaking because the meaning of an existing input
+  value changed, not because current behaviour did (#38, D8)
+
 ### Added
 
+- Hardened workflows can now ask for trust-aware analyzer selection explicitly:
+  `analyzers: untrusted-only` runs only analyzers that need no secrets, no
+  network, and no PR-authored command construction. It applies two gates at
+  once — manifest selection is evaluated at the `untrusted` trust tier, *and*
+  analyzers needing repo-provided tooling are withheld whatever `shell:` is set
+  to, which the trust tier alone does not do. On a trusted event that narrows
+  the catalog from 57 shipped manifests to 18. Everything excluded is a skipped
+  row with a named reason naming the axis that caused it, never a failure, and
+  `run_static_checks` remains withheld under `shell: disabled` regardless of the
+  mode. The shipped `mergecraft-hardened.yml` example now sets it explicitly, and
+  `docs/ANALYZERS.md` gains a generated mode axis computed from the live
+  predicates (#38)
+- `agentsec` now runs under `shell: disabled` and under `analyzers:
+  untrusted-only`, where it was previously withheld. It declares
+  `runtime: repo-native` — the marker for "resolves against tooling the repo
+  supplies" — but it is mergeCraft's own agent-security policy engine: it is
+  special-cased before the repo-binary preference is ever consulted and executes
+  in-process, with no subprocess and no argv, so no PR-authored command can run
+  through it. Withholding it bought no safety and cost hardened consumers the
+  one analyzer most relevant to `pull_request_target`: the one that reads
+  `.mcp.json`, `CLAUDE.md`, `AGENTS.md` and skill files as data. It is a named
+  exception in `IN_PROCESS_ANALYZER_IDS` with a test asserting it really does
+  resolve without repo-provided tooling, not a widening of the runtime rule
+  (#38, follow-up to #35)
 - Hardening your workflow no longer costs you every mechanical check. A repo
   running `pull_request_target` with `shell: disabled` previously got **no**
   analyzer coverage at all: one boolean withheld mergeCraft's own pinned catalog
