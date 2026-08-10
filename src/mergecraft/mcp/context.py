@@ -90,6 +90,11 @@ class ToolContext:
     analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto"
     trust_tier: Literal["trusted", "untrusted"] = "trusted"
     analyzers_settings_enabled: bool = True
+    # #39 / D13 — whether this run may upload analyzer findings to GitHub code
+    # scanning. Default False: with it unset nothing is built, nothing is
+    # posted, and the run makes no extra API call. Resolved once in `main.py`
+    # from the `sarif_upload` action input and `analyzers.sarifUpload`.
+    sarif_upload_enabled: bool = False
     run_id: int | None = None
     job_id: str | None = None
     oss: bool = False

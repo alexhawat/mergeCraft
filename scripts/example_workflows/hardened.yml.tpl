@@ -84,6 +84,11 @@ permissions:
   # Post the mergecraft / mergecraft-approval check-runs.
   checks: write
   statuses: write
+  # Uncomment TOGETHER WITH `sarif_upload: enabled` below to publish analyzer
+  # findings as code-scanning alerts (#39). Left off here so copying this
+  # template changes nothing until you decide to opt in; without the permission
+  # GitHub answers 403 and mergeCraft logs a warning rather than failing.
+  # security-events: write
   # Only needed if mergeCraft mints short-lived tokens via OIDC.
   id-token: write
 
@@ -313,6 +318,15 @@ jobs:
           # command construction run; the rest are skipped with a named reason in
           # the Analyzers pre-merge row, never reported as failures.
           analyzers: untrusted-only
+          # Optional (#39): publish the analyzer findings above as GitHub
+          # code-scanning alerts, so mechanical signal stays readable when the
+          # review narrative is thin or findings overflow the inline comment
+          # budget. Off by default. Uncomment this AND `security-events: write`
+          # in the `permissions:` block. Only findings from analyzers this run's
+          # trust tier admitted are uploaded, after secret redaction; CI log
+          # excerpts and agent narrative are never uploaded, and a rejected
+          # upload is logged rather than failing the review.
+          # sarif_upload: enabled
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

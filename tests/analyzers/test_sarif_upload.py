@@ -46,6 +46,11 @@ import httpx
 import pytest
 import yaml
 from loguru import logger
+
+from mergecraft.analyzers.budget import place_findings
+from mergecraft.analyzers.cluster import cluster_findings
+from mergecraft.analyzers.finding import Finding, make_finding
+from mergecraft.analyzers.redact import assert_no_canary
 from mergecraft.analyzers.sarif_upload import (
     build_upload_document,
     encode_sarif_payload,
@@ -53,25 +58,15 @@ from mergecraft.analyzers.sarif_upload import (
     resolve_sarif_upload_enabled,
     select_uploadable_findings,
 )
-from mergecraft.utils.code_scanning import report_sarif_upload
-
-from mergecraft.analyzers.budget import place_findings
-from mergecraft.analyzers.cluster import cluster_findings
-from mergecraft.analyzers.finding import Finding, make_finding
-from mergecraft.analyzers.redact import assert_no_canary
 from mergecraft.config.settings import AnalyzersSettings
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow, init_tool_state
 from mergecraft.modes import compute_modes
+from mergecraft.utils.code_scanning import report_sarif_upload
 from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-pytestmark = pytest.mark.xfail(
-    reason="RED suite for #39 — green after W8 wires the upload path",
-    strict=False,
-)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PR_HEAD_SHA = "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00"
@@ -368,6 +363,14 @@ async def test_upload_is_redacted(tmp_path: Path, carrier: str) -> None:
     Code-scanning alerts are permanent and externally visible, so this is the
     assertion whose silent failure is unrecoverable — the secret is published
     before anyone reads the log.
+
+    Note what each carrier actually proves. `message` is serialized into SARIF,
+    so that case fails the moment redaction stops running. `evidence` is *not*
+    serialized by `export_sarif()` today, so that case is a forward guard
+    against an exporter that starts emitting it — the case that pins evidence
+    redaction itself is
+    `test_redaction_happens_before_serialization_not_after`, which asserts on
+    the typed set.
     """
     if carrier == "message":
         finding = _finding(message=f"leaked credential {TOKEN_CANARY} in header")
@@ -574,6 +577,13 @@ async def test_no_raw_logs_uploaded(tmp_path: Path) -> None:
     wholesale, and #39 scopes the surface to catalog analyzers. So a `source`
     of `ci` or `agent` is excluded outright, and `evidence` is not serialized
     on any finding.
+
+    The CI rows deliberately use a **catalog** `tool` id (`semgrep`). Batch C
+    namespaces its own CI findings `ci:<artifact>`, which the upload gate would
+    drop anyway as an unknown analyzer — so a fixture using that shape would
+    pass even with the source filter deleted, and would prove nothing about the
+    filter this case exists to pin. `tool` is a free string on `Finding`;
+    isolating the `source` check is the point.
     """
     log_excerpt = [
         f"2026-08-10T09:14:02Z build#941 export GH_TOKEN={TOKEN_CANARY}",
@@ -581,8 +591,14 @@ async def test_no_raw_logs_uploaded(tmp_path: Path) -> None:
     ]
     findings = [
         _finding(tool="semgrep", message="clean analyzer finding"),
-        _finding(tool="ci", rule_id="ci:build", source="ci", evidence=log_excerpt),
-        _finding(tool="agent", rule_id="agent:review", source="agent", message="narrative"),
+        _finding(
+            tool="semgrep",
+            rule_id="semgrep:from-ci",
+            source="ci",
+            message="reported by the consumer's own pipeline",
+            evidence=log_excerpt,
+        ),
+        _finding(tool="semgrep", rule_id="agent:review", source="agent", message="narrative"),
     ]
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github, findings=findings)
@@ -599,7 +615,11 @@ async def test_no_raw_logs_uploaded(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("source", ["ci", "agent"])
 def test_only_analyzer_sourced_findings_are_uploadable(source: str) -> None:
-    """#39 scopes the surface to catalog analyzers; other sources drop."""
+    """#39 scopes the surface to catalog analyzers; other sources drop.
+
+    `tool` is a real catalog id here so the assertion turns on `source` alone —
+    an unknown-tool fixture would be dropped by a different guard entirely.
+    """
     selected = select_uploadable_findings(
         [_finding(tool="semgrep", source=source)],
         tier="trusted",

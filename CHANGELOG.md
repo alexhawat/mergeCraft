@@ -31,6 +31,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Analyzer findings can now be published as GitHub code-scanning alerts, so
+  mechanical signal stays readable when the review narrative is thin or when
+  findings overflowed the inline comment budget. Opt in with
+  `sarif_upload: enabled` (or `analyzers.sarifUpload: true` in
+  `.mergecraft/config.yaml`) plus `security-events: write` on the job; with the
+  flag unset the run makes no extra API call at all. mergeCraft has exported
+  SARIF since the catalog shipped, but the only caller was the offline
+  `mergecraft analyzers export --sarif` command, so no Action run ever produced
+  a document. Uploads carry only findings from catalog analyzers this run's
+  trust tier, `shell:` policy and `analyzers:` mode actually admitted —
+  re-checked at upload time against the same predicates the pipeline uses — and
+  every message, evidence line, remediation and autofix is redacted while still
+  a typed `Finding`, before SARIF is built. CI-sourced findings (which carry
+  truncated pipeline log excerpts) and agent narrative are never uploaded. The
+  set is the clustered, placed one, so cross-tool duplicates arrive as one
+  alert; it is deliberately *not* truncated at the inline comment budget,
+  because the overflow is what this surface exists to show. A rejected upload —
+  missing permission, no code scanning on the repository, transport error — is
+  logged at `warning` and the review still completes: SARIF is complementary
+  evidence, never a gate (#39, D13/D14)
 - Hardened workflows can now ask for trust-aware analyzer selection explicitly:
   `analyzers: untrusted-only` runs only analyzers that need no secrets, no
   network, and no PR-authored command construction. It applies two gates at
