@@ -171,6 +171,30 @@ _CONTRACTS: Final[tuple[_Contract, ...]] = (
             "always on or always off regardless of what the consumer asked for (#39, D13)"
         ),
     ),
+    _Contract(
+        symbol="build_trajectory_record",
+        defined_in="evidence/trajectory.py",
+        why=(
+            "no reachable caller means the packet's trajectory section stays None on every "
+            "run and a merely-constructible record proves nothing (#43, the #96 failure mode)"
+        ),
+    ),
+    _Contract(
+        symbol="audit_trajectory",
+        defined_in="evidence/trajectory_audit.py",
+        why=(
+            "no reachable caller means the eight checks never run, so a change produced by a "
+            "bad process is indistinguishable from one produced by a good one (#49)"
+        ),
+    ),
+    _Contract(
+        symbol="record_tool_call",
+        defined_in="evidence/trajectory.py",
+        why=(
+            "no reachable caller means no tool call is ever recorded, so every trajectory "
+            "record is empty and every check stays silent (#43, D8)"
+        ),
+    ),
 )
 
 

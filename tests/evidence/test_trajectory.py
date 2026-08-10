@@ -27,8 +27,6 @@ import pytest
 if TYPE_CHECKING:
     from mergecraft.evidence.trajectory import ToolCallRecord, TrajectoryRecord
 
-pytestmark = pytest.mark.xfail(reason="green after W7/W8", strict=False)
-
 
 # ── record construction helpers ───────────────────────────────────────────────
 
@@ -442,7 +440,6 @@ def test_trajectory_findings_reach_the_packet_from_a_real_run(tmp_path: Any) -> 
 def test_trajectory_record_is_populated_without_external_trace() -> None:
     """D8: the record is built from MCP tool-call state alone."""
     from mergecraft.evidence.trajectory import build_trajectory_record, record_tool_call
-
     from mergecraft.mcp.tool_state import init_tool_state
 
     state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
@@ -487,6 +484,7 @@ def test_external_trace_is_optional_enrichment() -> None:
 def test_record_forbids_unknown_fields() -> None:
     """W7.1: `extra="forbid"` on the record."""
     import pydantic
+
     from mergecraft.evidence.trajectory import TrajectoryRecord
 
     payload = _record().model_dump()
@@ -544,9 +542,8 @@ def test_audit_is_deterministic() -> None:
 
 def test_trajectory_findings_never_crowd_out_code_findings() -> None:
     """W8.3: trajectory findings may only take inline slots code findings left."""
-    from mergecraft.evidence.trajectory_audit import place_trajectory_findings
-
     from mergecraft.analyzers.finding import make_finding
+    from mergecraft.evidence.trajectory_audit import place_trajectory_findings
 
     code = [
         make_finding(

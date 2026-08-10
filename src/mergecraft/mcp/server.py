@@ -202,7 +202,47 @@ def _is_notification(message: Any) -> bool:
     return isinstance(message, dict) and "id" not in message
 
 
-def create_mcp_app(tools: list[ToolSpec]) -> FastAPI:
+def _record_trajectory(
+    ctx: ToolContext | None,
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    ok: bool,
+    result: Any = None,
+    error: str | None = None,
+) -> None:
+    """Record one mediated tool call on the run's trajectory (#43, D8).
+
+    This handler is the only door every agent tool call goes through, which is
+    what makes the trajectory record self-contained — no tracing sinks, no
+    #56. Recording is strictly best-effort: an audit trail must never be able
+    to turn a working tool call into a failed one, so every error is swallowed.
+    """
+    if ctx is None:
+        return
+    try:
+        from mergecraft.evidence.trajectory import outcome_ok_from_result, record_tool_call
+
+        record_tool_call(
+            ctx.tool_state,
+            tool=name,
+            arguments=arguments,
+            ok=ok,
+            outcome_ok=outcome_ok_from_result(result) if ok else None,
+            error=error,
+        )
+    except Exception as exc:  # an audit trail never breaks a tool call
+        logger.debug("trajectory: failed to record {} — {}", name, exc)
+
+
+def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> FastAPI:
+    """Build the MCP app.
+
+    ``ctx`` is optional so a test can stand the app up with bare tool specs;
+    when it is supplied — which is what ``start_mcp_http_server`` does on every
+    real run — each ``tools/call`` is appended to the run's trajectory record.
+    """
+    tool_ctx = ctx
     by_name = {t.name: t for t in tools}
     app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.0.1")
 
@@ -261,7 +301,9 @@ def create_mcp_app(tools: list[ToolSpec]) -> FastAPI:
                     result = await tool.execute(arguments)
                 except Exception as exc:
                     _span.set_status("error", str(exc))
+                    _record_trajectory(tool_ctx, name, arguments, ok=False, error=str(exc))
                     raise
+                _record_trajectory(tool_ctx, name, arguments, ok=True, result=result)
                 return {
                     "jsonrpc": "2.0",
                     "id": req_id,

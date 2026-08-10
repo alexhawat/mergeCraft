@@ -334,6 +334,40 @@ Formatting rules that are enforced by the prompt:
 - Severity emoji on every section heading, no two consecutive prose paragraphs, backticks around every identifier, no repeated diff content, no line-count stats.
 - The opening callout tier (`[!CAUTION]`, `[!IMPORTANT]`, informational, or ✅) must match the author's actual next action — wrapping mergeable feedback in `[!IMPORTANT]` trains people to ignore it.
 
+## 10. Trajectory checks (#43, #49)
+
+Everything above reads the **diff**. These eight checks read *how the run
+produced it* — the tool calls mergeCraft mediated. A diff can look clean while
+the process that produced it was not, and that is invisible to a diff review.
+
+| Check | Fires when | Severity |
+|---|---|---|
+| `changed-unread-file` | A file was modified that the run never read | Major |
+| `ignored-tool-error` | A tool call errored and that tool was never called again | Major |
+| `no-post-edit-verification` | Files were modified and nothing verifying ran *afterwards* | Major |
+| `repeated-tool-loop` | The same call, with identical arguments, three or more times | Minor |
+| `unresolved-failure` | A command reported failure and no later run of it passed | Critical |
+| `suspicious-broad-edit` | One run modified 25+ files | Minor |
+| `stale-assumption-after-failure` | A failed call was retried byte-identically with nothing read in between | Major |
+| `missing-completion-signal` | The run did work and never signalled completion | Minor |
+
+Each finding carries the severity above and a recommended action.
+
+**Silence on absent evidence.** mergeCraft only sees the calls it mediates, so a
+driver whose file reads never cross MCP produces a record with no reads — which
+is *unknown*, not *unread*. Every check that could fire on missing signal is
+gated on the record carrying that signal at all: `changed-unread-file` needs
+`read_coverage`, `missing-completion-signal` needs at least one recorded call. A
+check that fires on every run is noise, not a gate.
+
+**No second gate.** These are ordinary findings in the packet's finding list, so
+`decide_approval()` weighs them exactly like any other evidence — a `Critical`
+`unresolved-failure` blocks for the same reason a `Critical` analyzer finding
+does. There is no separate trajectory verdict.
+
+**They never crowd out code findings.** Inline slots go to code findings first;
+trajectory findings take only what is left and otherwise report in the body.
+
 ## 9. Address-reviews checks
 
 When mergecraft is on the receiving end of review comments (`AddressReviews` mode), each thread is checked for:
