@@ -127,6 +127,50 @@ _CONTRACTS: Final[tuple[_Contract, ...]] = (
         defined_in="ci/evidence.py",
         why="no reachable caller means recorded CI evidence never reaches the packet (#36)",
     ),
+    # #39 — `export_sarif()` was implemented, exported and unit-tested for two
+    # releases while its only caller was an offline CLI command, so no Action
+    # run ever produced a SARIF document. That is the #96 shape exactly, and
+    # re-wiring it is the whole of Batch D. Pin every link of the new chain.
+    _Contract(
+        symbol="report_sarif_upload",
+        defined_in="utils/code_scanning.py",
+        why=(
+            "no reachable caller means no Action run uploads SARIF, so `sarif_upload: enabled` "
+            "is accepted and does nothing (#39)"
+        ),
+    ),
+    _Contract(
+        symbol="select_uploadable_findings",
+        defined_in="analyzers/sarif_upload.py",
+        why=(
+            "no reachable caller means the trust gate is skipped and findings from analyzers "
+            "the run's tier never admitted are published to code scanning (#39, D13)"
+        ),
+    ),
+    _Contract(
+        symbol="redact_findings_for_upload",
+        defined_in="analyzers/sarif_upload.py",
+        why=(
+            "no reachable caller means unredacted findings are serialized into a permanent, "
+            "externally-visible code-scanning alert (#39, convention 8)"
+        ),
+    ),
+    _Contract(
+        symbol="build_upload_document",
+        defined_in="analyzers/sarif_upload.py",
+        why=(
+            "no reachable caller means nothing validates the SARIF document before it is "
+            "uploaded (#39)"
+        ),
+    ),
+    _Contract(
+        symbol="resolve_sarif_upload_enabled",
+        defined_in="analyzers/sarif_upload.py",
+        why=(
+            "no reachable caller means the opt-in flag is never read, so upload is either "
+            "always on or always off regardless of what the consumer asked for (#39, D13)"
+        ),
+    ),
 )
 
 
@@ -291,6 +335,19 @@ def test_packet_emission_is_wired_into_the_action_orchestrator() -> None:
     invoked = _invoked_names(_parsed((_SRC_DIR / "main.py").resolve()))
     assert "emit_run_packet" in invoked, (
         "main.py no longer invokes emit_run_packet() — no Action run emits an evidence packet"
+    )
+
+
+def test_sarif_upload_is_wired_into_the_action_orchestrator() -> None:
+    """The SARIF seam is pinned to `main()`, beside the other publish steps.
+
+    Reachability alone would be satisfied by a call from some CLI-only branch —
+    which is exactly the state #39 found `export_sarif()` in. Name the call
+    site an Action run actually enters.
+    """
+    invoked = _invoked_names(_parsed((_SRC_DIR / "main.py").resolve()))
+    assert "report_sarif_upload" in invoked, (
+        "main.py no longer invokes report_sarif_upload() — no Action run uploads SARIF (#39)"
     )
 
 

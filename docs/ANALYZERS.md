@@ -170,3 +170,41 @@ ciEvidence:
 - **Green only substitutes.** A declared check run that passed rewrites the gate row to `satisfied-by-ci`. A declared check run that *failed* leaves the row alone and is reported as a `source: ci` finding instead.
 - **Reported, not blamed.** Findings derived from CI start non-blocking with `introduced_by_pr: unknown`; only the CI-intelligence blame layer (`ci/blame.py`, `ci/flaky.py`) may attribute one to this PR.
 - **Redacted.** Log excerpts are truncated and passed through `analyzers/redact.py` before they enter a finding.
+
+## SARIF upload to code scanning (#39)
+
+Opt-in, off by default. When enabled, mergeCraft exports the analyzer findings of a pull-request run as SARIF 2.1.0 and uploads them to GitHub code scanning, so mechanical findings stay readable when the review narrative is thin or when findings overflowed the inline comment budget.
+
+```yaml
+# .github/workflows/mergecraft.yml
+permissions:
+  contents: read
+  pull-requests: write
+  # Required for the upload. Without it GitHub answers 403 and mergeCraft
+  # logs a warning — the review still completes.
+  security-events: write
+
+jobs:
+  review:
+    steps:
+      - uses: alexhawat/mergeCraft@<sha>
+        with:
+          sarif_upload: enabled
+```
+
+Or in `.mergecraft/config.yaml` (the action input wins when it is set):
+
+```yaml
+analyzers:
+  sarifUpload: true
+```
+
+What is and is not uploaded:
+
+- **Catalog analyzers only.** Only `source: analyzer` findings are eligible. `source: ci` findings carry truncated pipeline log excerpts and `source: agent` findings carry narrative; neither is uploaded, and raw logs never leave the process (D13).
+- **The clustered, placed set.** The upload reuses the findings the pipeline already clustered and placed, not the raw analyzer output, so cross-tool duplicates arrive as one alert (D14). It is *not* truncated at the inline comment budget — the overflow is exactly what this surface exists to show.
+- **Trust-gated.** Each finding's analyzer must still pass this run's `trust` x `shell` x `analyzers:` selection chain — the same predicates the pipeline calls, re-evaluated at upload time. A finding from a tool with no catalog manifest cannot be gated, so it is refused.
+- **Redacted before serialization.** `message`, `evidence`, `remediation` and `autofix` pass through `analyzers/redact.py` while still typed `Finding`s, before SARIF is built. `path` is left intact: it becomes `artifactLocation.uri`, and mangling it would detach the alert from its file.
+- **Never a gate.** A rejected upload — missing permission, code scanning unavailable, transport error — is logged at `warning` and the run continues.
+
+Check-run annotations are the documented alternative surface and are not implemented: they need `checks: write` instead, cap at 50 annotations per request, and largely repeat the inline review comments mergeCraft already posts.

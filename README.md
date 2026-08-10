@@ -326,6 +326,28 @@ The Action's `analyzers:` input picks how much of the catalog is eligible:
 
 Under `pull_request_target` and fork-head pull requests the trust tier is `untrusted`, and `auto` resolves to `untrusted-only` there — so a hardened workflow gets mechanical signal without loosening `shell:`. Anything the mode excludes is reported as a skipped row with a named reason, never as a failure. An unrecognised value also resolves to `untrusted-only`, with a warning, rather than silently widening to `auto`. `full` is a request to provision more tooling; it is never a trust override and cannot re-admit an analyzer the trust tier excluded. The generated matrix in [`docs/ANALYZERS.md`](docs/ANALYZERS.md) shows what each combination selects.
 
+### SARIF upload to code scanning (opt-in)
+
+Analyzer findings can also be published as GitHub code-scanning alerts, which keeps mechanical signal readable when the review narrative is thin or when findings overflowed the inline comment budget. It is **off by default** and requires `security-events: write`:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write   # required — without it GitHub answers 403
+
+jobs:
+  review:
+    steps:
+      - uses: alexhawat/mergeCraft@<sha>
+        with:
+          sarif_upload: enabled
+```
+
+`.mergecraft/config.yaml`'s `analyzers.sarifUpload: true` does the same; the `sarif_upload` action input wins in both directions when it is set, and an unrecognised value resolves to disabled with a warning.
+
+Only findings from catalog analyzers this run's trust tier, `shell:` policy and `analyzers:` mode actually admitted are uploaded, after secret redaction — CI-sourced findings (which carry pipeline log excerpts) and agent narrative are never uploaded. The upload is complementary evidence, never a gate: a missing permission, a repository without code scanning, or a transport error is logged at `warning` and the review still completes. Details in [`docs/ANALYZERS.md`](docs/ANALYZERS.md#sarif-upload-to-code-scanning-39).
+
 ## Learnings — staging and promotion
 
 `.mergecraft/learnings.md` holds durable cross-run context (test commands, conventions, gotchas, architecture notes) seeded into every review. Since this file is **attacker-controllable input** in any non-maintainer context (a fork PR body, a contributor comment, an agent-written entry from prior untrusted text), entries are now provenance-gated (D10, #74):
@@ -465,7 +487,9 @@ uv run mergecraft traces <run-id>    # read back local spans
 Same contract as upstream mergecraft: `prompt`, `prompt_file`, `timeout`, `model`,
 `cwd`, `push`, `shell`, `status_checks`, `output_schema`, `token` → output `result`,
 plus `allow_pr_target_comments` (default `false`) — see
-[Comment-trigger authorization](#comment-trigger-authorization).
+[Comment-trigger authorization](#comment-trigger-authorization) — and
+`sarif_upload` (default `disabled`, needs `security-events: write`) — see
+[SARIF upload to code scanning](#sarif-upload-to-code-scanning-opt-in).
 
 Tracing inputs (`tracing`, `tracing-to`, `logfire-token`, `otel-endpoint`) — see
 [Tracing](#tracing).

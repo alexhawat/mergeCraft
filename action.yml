@@ -37,6 +37,21 @@ inputs:
       with a warning. Default: auto
     required: false
     default: auto
+  sarif_upload:
+    description: >-
+      Upload catalog-analyzer findings to GitHub code scanning as SARIF 2.1.0:
+      disabled (default) or enabled. Complementary evidence for when the review
+      narrative is thin or findings overflow the inline comment budget — never a
+      gate: an upload failure is logged and the run still completes. Requires
+      `security-events: write` on the job, and code scanning to be available on
+      the repository. Only findings from catalog analyzers that this run's trust
+      tier, shell policy and `analyzers:` mode actually admitted are uploaded,
+      after secret redaction. CI-sourced and agent-sourced findings are never
+      uploaded. An unrecognised value resolves to disabled, with a warning. When
+      unset, `.mergecraft/config.yaml`'s `analyzers.sarifUpload` decides
+      (default false). See issue #39.
+    required: false
+    default: disabled
   allow_pr_target_comments:
     description: "Opt-in to comment-driven invocation under `pull_request_target`. Default: false (refused). When set to `true`, comments from authors in {OWNER, MEMBER, COLLABORATOR} dispatch the agent even under `pull_request_target`. Set this only on workflows whose `if:` already gates comment triggers to trusted authors; leave it off everywhere else. See issue #72 / D6."
     required: false
@@ -120,6 +135,7 @@ runs:
     INPUT_SHELL: ${{ inputs.shell }}
     INPUT_STATUS_CHECKS: ${{ inputs.status_checks }}
     INPUT_ANALYZERS: ${{ inputs.analyzers }}
+    INPUT_SARIF_UPLOAD: ${{ inputs.sarif_upload }}
     INPUT_OUTPUT_SCHEMA: ${{ inputs.output_schema }}
     INPUT_ALLOW_PR_TARGET_COMMENTS: ${{ inputs.allow_pr_target_comments }}
     MERGECRAFT_CODEX_SANDBOX: ${{ inputs.codex_sandbox }}

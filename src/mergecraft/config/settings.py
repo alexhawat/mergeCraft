@@ -109,6 +109,12 @@ class AnalyzersSettings(BaseModel):
     base_comparison: str = Field(default="diff", alias="baseComparison")
     overrides: dict[str, AnalyzerOverride] = Field(default_factory=dict)
     pattern: AnalyzerPatternSettings = Field(default_factory=AnalyzerPatternSettings)
+    # #39 / D13 — opt-in upload of analyzer findings to GitHub code scanning.
+    # Off by default: a code-scanning alert is permanent and externally
+    # visible, and the workflow also has to grant `security-events: write`
+    # before the upload can succeed. The `sarif_upload` action input overrides
+    # this in both directions when it is set (`resolve_sarif_upload_enabled`).
+    sarif_upload: bool = Field(default=False, alias="sarifUpload")
 
 
 # D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.

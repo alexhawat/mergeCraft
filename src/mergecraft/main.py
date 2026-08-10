@@ -14,6 +14,7 @@ from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult, AgentRunContext
 from mergecraft.analyzers.redact import install_loguru_redaction_filter
+from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
 from mergecraft.analyzers.trust import (
     allow_repo_command_overrides,
     derive_trust_tier,
@@ -33,6 +34,7 @@ from mergecraft.utils.agent_resolve import (
     run_with_model_chain,
     select_runnable_model_slug,
 )
+from mergecraft.utils.code_scanning import report_sarif_upload
 from mergecraft.utils.git_setup import create_temp_directory, setup_git, wipe_runner_leak_surface
 from mergecraft.utils.github import GitHubClient, resolve_run_context_data
 from mergecraft.utils.instructions import resolve_instructions
@@ -212,6 +214,10 @@ async def main() -> MainResult:
 
         ctx_payload = _payload_to_ctx(payload)
         analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
+        sarif_upload_enabled = resolve_sarif_upload_enabled(
+            action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
+            repo_setting=settings.analyzers.sarif_upload,
+        )
         github_event = read_github_event()
         trust_tier = derive_trust_tier(
             event=github_event,
@@ -254,6 +260,7 @@ async def main() -> MainResult:
             analyzers_mode=analyzers_mode,
             trust_tier=trust_tier,
             analyzers_settings_enabled=settings.analyzers.enabled,
+            sarif_upload_enabled=sarif_upload_enabled,
             run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
             job_id=os.environ.get("GITHUB_JOB"),
             oss=run_context.oss,
@@ -446,6 +453,9 @@ async def main() -> MainResult:
                     run_succeeded=result.success,
                     failure_reason=result.error if not result.success else None,
                 )
+                # #39 — opt-in, off by default, and never a gate: with
+                # `sarif_upload` unset this returns before making any request.
+                await report_sarif_upload(tool_context)
                 # Emit the merge evidence packet last, so it records the run's
                 # final state. A blocked or failed run is exactly when the
                 # evidence matters most, so this runs on both branches below.
