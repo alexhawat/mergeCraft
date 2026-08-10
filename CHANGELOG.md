@@ -45,6 +45,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `record_shadow_prediction` to modules the Action orchestrator reaches
   (#50)
 
+### Security
+
+- The `github-issue-triage` skill now reads issue bodies and comments only through the
+  new sanitizing fetcher (`scripts/fetch_issue_safe.py`, queue sweeps via
+  `fetch_open_issues.py`); each untrusted field is fenced with a nonce-delimited block
+  and best-effort scanned, while maintainer-authored fields (`OWNER`/`MEMBER`/`COLLABORATOR`)
+  pass through unfenced on a per-field basis
+- `scripts/post_issue_update.py` rejects plans that are off-allowlist before any
+  `gh` mutation runs: labels must match the live repo label set, assignees must come
+  from the pinned roster in `--skw-toml`, public comments must match one of the two
+  closed-set SKILL.md templates, and a `close: true` requires an attached decision
+  object with `should_close: true`
+- `.llmignore/blocked/` quarantines any untrusted field that the scanner flagged,
+  keeps raw bytes out of agent context, and is gitignored so it never reaches a PR
+
 ### Changed
 
 - **BREAKING** — an unrecognised `analyzers:` Action input value now resolves to
@@ -566,6 +581,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wire D7 sandbox planning into adapter execution; fail-closed trust tier when the GitHub
   event is missing; redact analyzer artifacts before persist; apply repo ``inlineBudget``;
   extract canonical ``analyzers/pipeline.py``; use baked binaries when ``MERGECRAFT_ANALYZERS=full``.
+- `github-issue-manager` and `github-issue-triage` agents now route body/comment
+  reads through the sanitizing fetcher; the SKILL.md `Configuration` section drops
+  the `spec-kit-wave/skills` lookup (kit not vendored) and documents the
+  `--skw-toml` override path
 
 ### Changed
 
