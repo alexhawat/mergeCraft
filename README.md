@@ -55,6 +55,8 @@ the provider you configure. You can authenticate either with a **subscription**
 | OpenAI Codex | `mergecraft auth codex` → saves `CODEX_AUTH_JSON` from `codex login --device-auth` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` secret |
 | Google Gemini | `mergecraft auth gemini` → saves `GEMINI_API_KEY` from a pasted AI Studio key | `GEMINI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY` secret |
 | Cursor Cloud | `mergecraft auth cursor` → saves `CURSOR_API_KEY` from a pasted Cursor API key | `CURSOR_API_KEY` secret |
+| Nous Portal | — (API key) | `mergecraft auth nous` → saves `NOUS_API_KEY` |
+| Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → saves `TOKENHUB_API_KEY` (Hy3 and any TokenHub model) |
 
 Using a subscription means the GitHub Action authenticates as *you* through the
 official `claude` / `codex` CLIs — the same credential your local coding agent
@@ -147,6 +149,39 @@ env:
   CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
 ```
 
+**Nous Portal example** — set `NOUS_API_KEY` and use a `nous/…` model (opencode
+harness; no `MERGECRAFT_CUSTOM_PROVIDER_*` required):
+
+```yaml
+# .mergecraft/config.yaml
+model: nous/deepseek/deepseek-v4-flash
+```
+
+```yaml
+env:
+  NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}
+```
+
+**TokenHub (Hy3 and any TokenHub model)** — set `TOKENHUB_API_KEY` and use
+`tokenhub/<model-id>` (e.g. `tokenhub/hy3`, `tokenhub/deepseek-v4-flash`):
+
+```yaml
+# .mergecraft/config.yaml
+model: tokenhub/hy3
+```
+
+```yaml
+env:
+  TOKENHUB_API_KEY: ${{ secrets.TOKENHUB_API_KEY }}
+  # optional override:
+  # TOKENHUB_BASE_URL: https://tokenhub-intl.tencentcloudmaas.com/v1
+```
+
+Operators can still set `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` +
+`MERGECRAFT_CUSTOM_PROVIDER_API_KEY` to point any `provider/model` prefix at a
+generic OpenAI-compatible endpoint; those env vars override the Nous/TokenHub
+presets when both are present.
+
 ### Consumer workflow
 
 ```yaml
@@ -184,6 +219,10 @@ jobs:
           # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}                 # + model: google/gemini-3.1-pro-preview
           # Cursor Cloud — API key (mergecraft auth cursor; local CLI deferred):
           # CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}                 # + model: cursor/cloud-agent
+          # Nous Portal — API key (mergecraft auth nous):
+          # NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}                     # + model: nous/deepseek/deepseek-v4-flash
+          # TokenHub — API key (mergecraft auth tokenhub; hy3 + any TokenHub model):
+          # TOKENHUB_API_KEY: ${{ secrets.TOKENHUB_API_KEY }}             # + model: tokenhub/hy3
 ```
 
 Ready-made workflow files live under [`examples/workflows/`](examples/workflows/):
@@ -390,6 +429,8 @@ Inspect what was seeded into a given run with `mergecraft learnings influence --
 | `mergecraft auth codex` | Save a ChatGPT subscription credential (`CODEX_AUTH_JSON`) via `gh secret set` |
 | `mergecraft auth gemini` | Save a Gemini API key (`GEMINI_API_KEY`) via `gh secret set` |
 | `mergecraft auth cursor` | Save a Cursor Cloud API key (`CURSOR_API_KEY`) via `gh secret set` |
+| `mergecraft auth nous` | Save a Nous Portal API key (`NOUS_API_KEY`) via `gh secret set` |
+| `mergecraft auth tokenhub` | Save a TokenHub API key (`TOKENHUB_API_KEY`) via `gh secret set` |
 | `mergecraft models list` | List curated model slugs and whether local credentials are detected |
 | `mergecraft models set <slug> [<slug>…]` | Write an ordered `models:` preference list to `.mergecraft/config.yaml` |
 | `mergecraft models show` | Show effective model order (config + `MERGECRAFT_MODEL`) and which slug would win now |

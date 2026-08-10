@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First-class **Nous Portal** and **Tencent TokenHub** providers in the CLI and
+  Action. `mergecraft auth nous` / `mergecraft auth tokenhub` store
+  `NOUS_API_KEY` / `TOKENHUB_API_KEY`; models `nous/…` and `tokenhub/…`
+  (including `tokenhub/hy3` and any TokenHub model id) auto-wire the opencode
+  OpenAI-compatible harness without requiring `MERGECRAFT_CUSTOM_PROVIDER_*`.
+  Explicit custom-provider env vars still override the named presets
+- `meat_python_plus/` — Python port of [boldsoftware/meat](https://github.com/boldsoftware/meat)
+  with OpenAI, Anthropic, Nous, and TokenHub (Hy3+) providers; CLI entry
+  points `meat-py` / `meat_python_plus`
+
 - Meat reading-diff harness prototype (#60 spike). `src/mergecraft/utils/meat_harness.py`
   ships `run_meat_harness(...)` — a typed, pure-boundary entry point that takes
   a unified diff, invokes `meat -json` as a subprocess with a bounded timeout,

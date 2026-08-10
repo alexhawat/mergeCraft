@@ -25,6 +25,10 @@ NOUS_MODEL = "nous/deepseek/deepseek-v4-flash"
 def _clear_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(CUSTOM_PROVIDER_BASE_URL_ENV, raising=False)
     monkeypatch.delenv(CUSTOM_PROVIDER_API_KEY_ENV, raising=False)
+    monkeypatch.delenv("NOUS_API_KEY", raising=False)
+    monkeypatch.delenv("NOUS_BASE_URL", raising=False)
+    monkeypatch.delenv("TOKENHUB_API_KEY", raising=False)
+    monkeypatch.delenv("TOKENHUB_BASE_URL", raising=False)
 
 
 def _config(tmp_path: Path, model: str | None) -> dict[str, object]:
@@ -79,3 +83,55 @@ def test_unconfigured_environment_leaves_config_unchanged(tmp_path: Path) -> Non
 
     assert "provider" not in config
     assert config["enabled_providers"] == ["nous"]
+
+
+def test_nous_api_key_alone_registers_preset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOUS_API_KEY", "nous-key")
+
+    config = _config(tmp_path, NOUS_MODEL)
+
+    assert config["provider"] == {
+        "nous": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "nous",
+            "options": {"baseURL": NOUS_BASE_URL, "apiKey": "nous-key"},
+            "models": {"deepseek/deepseek-v4-flash": {"name": "deepseek/deepseek-v4-flash"}},
+        }
+    }
+
+
+def test_tokenhub_api_key_registers_hy3(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TOKENHUB_API_KEY", "th-key")
+
+    config = _config(tmp_path, "tokenhub/hy3")
+
+    assert config["provider"] == {
+        "tokenhub": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "tokenhub",
+            "options": {
+                "baseURL": "https://tokenhub-intl.tencentcloudmaas.com/v1",
+                "apiKey": "th-key",
+            },
+            "models": {"hy3": {"name": "hy3"}},
+        }
+    }
+    assert config["enabled_providers"] == ["tokenhub"]
+    assert config["model"] == "tokenhub/hy3"
+
+
+def test_custom_provider_env_overrides_named_preset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOUS_API_KEY", "nous-key")
+    monkeypatch.setenv(CUSTOM_PROVIDER_BASE_URL_ENV, "https://example.test/v1")
+    monkeypatch.setenv(CUSTOM_PROVIDER_API_KEY_ENV, "custom-key")
+
+    config = _config(tmp_path, NOUS_MODEL)
+
+    assert config["provider"]["nous"]["options"] == {
+        "baseURL": "https://example.test/v1",
+        "apiKey": "custom-key",
+    }
