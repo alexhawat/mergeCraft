@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Meat reading-diff harness prototype (#60 spike). `src/mergecraft/utils/meat_harness.py`
+  ships `run_meat_harness(...)` — a typed, pure-boundary entry point that takes
+  a unified diff, invokes `meat -json` as a subprocess with a bounded timeout,
+  parses the pinned wire format (`smart_diff`, `summary`, `input_tokens`,
+  `output_tokens`, optional `elision`), and returns a `MeatHarnessResult` whose
+  `raw_diff` field is the input diff byte-for-byte on every code path. Trust
+  gate (D7), opt-in flag (convention 7), shell-disabled gate (D7), and
+  missing-binary skip (D13) are enforced inside the harness so every future
+  caller inherits them. The harness never reads, logs, or stores the credential
+  value (convention 8); the credential is referenced by env-var name only. Every
+  failure branch (non-zero exit, malformed JSON, timeout, missing binary, gate
+  tripped) degrades to the raw diff with a named `skip_reason` — a missing
+  optional tool never fails a review. `tests/utils/test_meat_harness.py` carries
+  the W1 contract suite (17 passing, 1 `@pytest.mark.integration` smoke test
+  skipped when `meat` is not on PATH). `docs/meat-spike.md` publishes the W2
+  measurements and the spike's qualified-conditional recommendation
+- Operator-runnable measurement script at `scripts/measure_meat_corpus.py` that
+  extracted the corpus diffs, time the harness subprocess boundary, and invoke
+  the real `meat -json` once per corpus diff. The script is the reproducible
+  artifact behind the spike report's tables; the four D10 measurements (token
+  delta, cold/warm latency, cost, fidelity) are blocked on the operator LLM
+  credential and the script is the path to producing them on rerun
 - Reviews now check *how* a change was produced, not only the diff. Eight named
   trajectory checks read the tool calls mergeCraft mediated and report a file
   modified but never read, a tool error that was never retried, edits with no
