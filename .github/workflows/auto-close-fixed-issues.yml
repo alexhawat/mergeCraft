@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: MIT
+# Closes issues referenced by closing keywords when a PR merges into a
+# non-default branch.
+#
+# GitHub only auto-closes issues from closing keywords when a PR merges into the
+# repository's *default* branch. mergeCraft develops on `pre-0.0.1`, so every
+# `Closes #N` in a PR body against that branch is silently inert and the wave
+# plans' `Fixed by #PR` step has to be done by hand — which is how #41, #42,
+# #45, #47, #48, #75 and #96 all stayed open after their fixes shipped.
+#
+# Safety: this workflow never checks out or executes PR code. It reads the PR
+# body through `actions/github-script`'s `context.payload` — never through a
+# `run:` interpolation — so an attacker-authored body cannot inject shell.
+# The authorization gate is the merge itself: a maintainer merging a fork PR is
+# the same trust decision GitHub applies natively on the default branch.
+name: Auto-close fixed issues
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: auto-close-fixed-issues-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  close-referenced-issues:
+    # Only merged PRs, and only where GitHub did not already close the issues
+    # natively (i.e. the base branch is not the default branch).
+    if: >-
+      github.event.pull_request.merged == true
+      && github.event.pull_request.base.ref != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close issues referenced by closing keywords
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || "";
+
+            // GitHub's own closing-keyword set, same-repo references only.
+            // Cross-repo (`owner/repo#N`) is deliberately unsupported: this
+            // token has no write scope on other repositories.
+            const pattern =
+              /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:#|GH-)(\d+)\b/gi;
+
+            const referenced = new Set();
+            for (const match of body.matchAll(pattern)) {
+              referenced.add(Number(match[1]));
+            }
+            referenced.delete(pr.number);
+
+            if (referenced.size === 0) {
+              core.info("No closing keywords in the PR body; nothing to do.");
+              return;
+            }
+
+            core.info(`Referenced issues: ${[...referenced].join(", ")}`);
+
+            for (const number of [...referenced].sort((a, b) => a - b)) {
+              let issue;
+              try {
+                const response = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: number,
+                });
+                issue = response.data;
+              } catch (error) {
+                core.warning(`#${number}: cannot read (${error.status}); skipping.`);
+                continue;
+              }
+
+              // A PR is an issue as far as this endpoint is concerned.
+              if (issue.pull_request) {
+                core.info(`#${number} is a pull request, not an issue; skipping.`);
+                continue;
+              }
+              if (issue.state === "closed") {
+                core.info(`#${number} is already closed; skipping.`);
+                continue;
+              }
+
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: number,
+                  body:
+                    `Fixed by #${pr.number}, merged into \`${pr.base.ref}\` ` +
+                    `at ${pr.merge_commit_sha}.`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: number,
+                  state: "closed",
+                  state_reason: "completed",
+                });
+                core.info(`#${number}: commented and closed.`);
+              } catch (error) {
+                // One unclosable issue must not strand the rest.
+                core.warning(`#${number}: could not close (${error.status}).`);
+              }
+            }
