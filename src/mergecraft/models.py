@@ -373,6 +373,18 @@ PROVIDERS: dict[str, ProviderConfig] = {
             },
         )
     ),
+    "nous": _provider(
+        ProviderConfig(
+            display_name="Nous Research",
+            env_vars=("NOUS_API_KEY", "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"),
+            models={
+                "deepseek/deepseek-v4-flash": ModelDef(
+                    display_name="DeepSeek V4 Flash (Nous Portal)",
+                    resolve="nous/deepseek/deepseek-v4-flash",
+                ),
+            },
+        )
+    ),
     "bedrock": _provider(
         ProviderConfig(
             display_name="Amazon Bedrock",

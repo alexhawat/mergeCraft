@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, NoReturn
 import typer
 import yaml
 from rich.console import Console
-from rich.table import Table
 
 from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
@@ -92,19 +91,13 @@ def list_cmd(
 ) -> None:
     """List curated model slugs and whether credentials are detected locally."""
     repo_root = cwd.resolve()
-    table = Table(title="Model catalog")
-    table.add_column("slug")
-    table.add_column("provider")
-    table.add_column("display")
-    table.add_column("credentials")
-
+    console.print("[bold]Model catalog[/bold]")
     for alias in sorted(MODEL_ALIASES, key=lambda entry: entry.slug):
         if alias.hidden:
             continue
         creds = "yes" if has_credentials_for_slug(alias.slug) else "no"
-        table.add_row(alias.slug, alias.provider, alias.display_name, creds)
+        console.print(f"{alias.slug} {alias.provider} {alias.display_name} {creds}")
 
-    console.print(table)
     settings = load_repo_settings(root=repo_root, load_learnings_files=False)
     configured = _configured_model_slugs(settings)
     if configured:

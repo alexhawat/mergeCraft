@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -47,10 +46,6 @@ def _clear_provider_env(monkeypatch: MonkeyPatch) -> None:
 # ── W1.9 — model list renders the nous row with credentials column ───────────
 
 
-@pytest.mark.xfail(
-    reason="green after W2: nous provider in PROVIDERS",
-    strict=False,
-)
 def test_mergecraft_models_list_renders_nous_row_without_credentials(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -63,10 +58,6 @@ def test_mergecraft_models_list_renders_nous_row_without_credentials(
     assert NOUS_SLUG in result.stdout
 
 
-@pytest.mark.xfail(
-    reason="green after W2: nous provider in PROVIDERS",
-    strict=False,
-)
 def test_mergecraft_models_list_renders_nous_row_with_credentials(
     monkeypatch: MonkeyPatch,
 ) -> None:

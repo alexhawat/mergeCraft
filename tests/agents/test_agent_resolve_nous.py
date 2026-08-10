@@ -74,10 +74,6 @@ def _import_chain_symbol(name: str) -> object:
 # ── W1.1 / W1.2 — catalog entry is present ───────────────────────────────────
 
 
-@pytest.mark.xfail(
-    reason="green after W2: nous provider + ModelDef added to PROVIDERS",
-    strict=False,
-)
 def test_nous_provider_in_providers_and_aliases() -> None:
     """``PROVIDERS["nous"]`` exists and ``nous/deepseek/deepseek-v4-flash`` is enumerated.
 
@@ -104,10 +100,6 @@ def test_get_model_provider_for_nous_slug() -> None:
 # ── W1.3 / W1.4 / W1.5 — credential detection honours D4 ─────────────────────
 
 
-@pytest.mark.xfail(
-    reason="green after W2: _has_nous_auth honours NOUS_API_KEY",
-    strict=False,
-)
 def test_has_credentials_for_slug_nous_with_nous_api_key(monkeypatch: MonkeyPatch) -> None:
     """``NOUS_API_KEY`` set, alias unset → ``has_credentials_for_slug`` is ``True`` (D4).
 
@@ -119,10 +111,6 @@ def test_has_credentials_for_slug_nous_with_nous_api_key(monkeypatch: MonkeyPatc
     assert has_credentials_for_slug(NOUS_SLUG) is True
 
 
-@pytest.mark.xfail(
-    reason="green after W2: _has_nous_auth honours MERGECRAFT_CUSTOM_PROVIDER_API_KEY alias",
-    strict=False,
-)
 def test_has_credentials_for_slug_nous_with_only_custom_provider_alias(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -148,10 +136,6 @@ def test_has_credentials_for_slug_nous_with_no_keys(monkeypatch: MonkeyPatch) ->
 # ── W1.6 / W1.7 — binary gate is short-circuited (D5) ────────────────────────
 
 
-@pytest.mark.xfail(
-    reason="green after W2: _agent_binary_available short-circuits for nous",
-    strict=False,
-)
 def test_is_runnable_model_slug_nous_with_credentials(monkeypatch: MonkeyPatch) -> None:
     """Both gates green: ``is_runnable_model_slug`` returns ``True`` for the nous slug.
 
