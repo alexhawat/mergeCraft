@@ -6,8 +6,9 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -23,6 +24,12 @@ from mergecraft.agents.shared import (
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.types import MERGECRAFT_MCP_NAME
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+    from mergecraft.tracing.tracer import Tracer
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
@@ -509,34 +516,118 @@ def _run_codex_once(
     cmd.append(prompt or ctx.instructions.user)
 
     logger.info("invoking codex CLI (model={})", model or "default")
+
+    # W6 migration: codex ``--json`` already emits NDJSON events. Switch
+    # from ``subprocess.run`` (capture_output=True) to ``subprocess.Popen``
+    # and feed the stdout stream through ``consume_stream`` so per-event
+    # ``tool.call`` / ``llm.call`` spans are emitted through the W4 tracer.
+    # Falls back to the legacy buffered read loop if the streaming Popen
+    # path is unavailable (FileNotFoundError — no codex binary on PATH).
+    return _run_codex_streaming(
+        cmd=cmd,
+        ctx=ctx,
+        model=model,
+    )
+
+
+def _run_codex_streaming(
+    *,
+    cmd: list[str],
+    ctx: AgentRunContext,
+    model: str | None,
+) -> AgentResult:
+    """Streaming read loop for ``codex exec --json`` (W6).
+
+    The CLI emits a sequence of NDJSON events: ``thread.started``,
+    ``item.started`` / ``item.completed`` (with tool calls and tool
+    results), ``message.completed`` (assistant text), and
+    ``turn.completed`` with the authoritative usage. Each event drives
+    a span emission through ``consume_stream``; the resulting
+    ``AgentUsage`` matches the legacy last-line parser.
+    """
+    from mergecraft.agents._stream_consumer import (
+        StreamSpanAccumulator,
+        consume_stream,
+    )
+    from mergecraft.tracing.sinks import claim_sink
+    from mergecraft.tracing.tracer import (
+        Tracer,
+        resolve_correlation_from_env,
+        resolve_session_id,
+    )
+
+    accumulator = StreamSpanAccumulator(agent_name="codex")
+    tracer: Tracer | None = None
     try:
-        completed = subprocess.run(
+        from mergecraft.config import RepoSettings
+
+        sink = claim_sink(RepoSettings().tracing)
+        if sink is not None:
+            correlation = resolve_correlation_from_env()
+            session_id = resolve_session_id()
+            run_id = str(correlation.get("run_id") or session_id)
+            tracer = Tracer(sink=sink, session_id=session_id, run_id=run_id)
+    except Exception as exc:
+        logger.debug("codex stream tracer resolution failed: {}", exc)
+
+    handler, close_all_open_spans = _codex_stream_event_handler(
+        tracer=tracer,
+        model_id=model or "default",
+    )
+
+    try:
+        process = subprocess.Popen(
             cmd,
             cwd=os.getcwd(),
             env=_build_env(ctx),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
-            check=False,
+            bufsize=1,
         )
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
-    except subprocess.TimeoutExpired:
-        return AgentResult(success=False, error="codex CLI timed out")
 
-    stdout = completed.stdout or ""
-    stderr = completed.stderr or ""
-    if stderr.strip():
-        for line in stderr.strip().splitlines()[-20:]:
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    stderr_text = ""
+    try:
+        try:
+            consume_stream(
+                raw_stream=process.stdout,
+                accumulator=accumulator,
+                handler=handler,
+            )
+            stderr_text = process.stderr.read() or ""
+            returncode = process.wait(
+                timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
+            )
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return AgentResult(success=False, error="codex CLI timed out")
+    finally:
+        try:
+            close_all_open_spans()
+        except Exception as exc:
+            logger.debug("codex stream handler cleanup failed: {}", exc)
+
+    if stderr_text.strip():
+        for line in stderr_text.strip().splitlines()[-20:]:
             logger.debug("[codex] {}", line)
 
-    output, usage = _parse_codex_stdout(stdout)
+    if accumulator.parsed_event_count > 0:
+        output = accumulator.final_output
+        usage = accumulator.to_usage()
+    else:
+        output = None
+        usage = None
 
-    if completed.returncode != 0:
-        error = stderr.strip() or f"codex exited {completed.returncode}"
+    if returncode != 0:
+        error = stderr_text.strip() or f"codex exited {returncode}"
         # bwrap fails on the very first exec, so this is the difference between
         # "the environment cannot run Codex" and "the reviewer errored" (#70).
-        if is_user_namespace_failure(f"{stderr}\n{stdout}"):
+        if is_user_namespace_failure(f"{stderr_text}\n{output or ''}"):
             logger.error(
                 "codex platform sandbox could not start; no review ran. Set {}={} "
                 "if this runner is already an isolated container.",
@@ -551,6 +642,162 @@ def _run_codex_once(
             usage=usage,
         )
     return AgentResult(success=True, output=output or None, usage=usage)
+
+
+def _codex_stream_event_handler(
+    *,
+    tracer: Tracer | None,
+    model_id: str,
+) -> tuple[
+    Callable[[StreamSpanAccumulator, dict[str, Any]], None],
+    Callable[[], None],
+]:
+    """Build a ``consume_stream`` handler for codex NDJSON events (W6).
+
+    Codex ``--json`` events:
+      - ``thread.started``: open a ``llm.call`` span for the thread.
+      - ``item.started`` with ``item.type == "tool_call"``: open a
+        ``tool.call`` span keyed on the tool call id.
+      - ``item.completed`` with ``item.type == "tool_call"``: stamp
+        the tool call's name + input on the open span.
+      - ``item.completed`` with ``item.type == "tool_result"``: close
+        the matching ``tool.call`` span.
+      - ``message.completed``: surface the assistant text as the
+        run's final output.
+      - ``turn.completed``: replace the accumulator's usage with the
+        authoritative final usage and close the thread's ``llm.call``
+        span.
+    """
+    open_tool_spans: dict[str, dict[str, Any]] = {}
+    open_llm_spans: dict[str, dict[str, Any]] = {}
+
+    def handler(
+        accumulator: StreamSpanAccumulator,
+        event: dict[str, Any],
+    ) -> None:
+        event_type = str(event.get("type") or "")
+
+        # Legacy single-blob shape — a final result JSON with no ``type``
+        # field (the W6 test suite still pins this contract from the
+        # pre-streaming parser). Surface it the same way the legacy
+        # ``_parse_codex_payload`` did: ``output`` is ``result`` /
+        # ``output`` / ``message``, ``usage`` flows through the accumulator.
+        if not event_type:
+            output, usage = _parse_codex_payload(event)
+            if output:
+                accumulator.set_output(output)
+            if usage is not None:
+                accumulator.replace_usage(
+                    {
+                        "input_tokens": usage.input_tokens,
+                        "output_tokens": usage.output_tokens,
+                        "total_cost_usd": usage.cost_usd,
+                    }
+                )
+            return
+
+        if event_type == "thread.started":
+            thread_id = str(event.get("thread_id") or "default")
+            if thread_id in open_llm_spans:
+                return
+            if tracer is not None:
+                span = tracer.start_span(
+                    "llm.call",
+                )
+                span.__enter__()
+                span.set_attribute("model.id", model_id)
+                span.set_attribute("model.event", "thread.started")
+                open_llm_spans[thread_id] = {
+                    "span": span,
+                    "tokens_in": 0,
+                    "tokens_out": 0,
+                }
+            return
+
+        if event_type == "item.started":
+            item = event.get("item") or {}
+            if not isinstance(item, dict) or item.get("type") != "tool_call":
+                return
+            tool_id = str(item.get("id") or "")
+            tool_name = str(item.get("name") or "unknown")
+            if not tool_id:
+                return
+            if tool_id in open_tool_spans:
+                return
+            if tracer is not None:
+                span = tracer.start_span("tool.call")
+                span.__enter__()
+                span.set_attribute("tool.name", tool_name)
+                span.set_attribute("tool.id", tool_id)
+                span.set_attribute("tool.server", "codex")
+                open_tool_spans[tool_id] = {"span": span, "name": tool_name}
+            return
+
+        if event_type == "item.completed":
+            item = event.get("item") or {}
+            if not isinstance(item, dict):
+                return
+            item_type = item.get("type")
+            if item_type == "tool_call":
+                tool_id = str(item.get("id") or "")
+                entry = open_tool_spans.pop(tool_id, None)
+                if entry is None:
+                    return
+                span_obj = entry.get("span")
+                if span_obj is not None:
+                    span_obj.set_attribute(
+                        "tool.name", str(item.get("name") or entry.get("name") or "unknown")
+                    )
+                    span_obj.set_attribute("tool.input", str(item.get("input") or ""))
+                    span_obj.ts_end_ns = time.time_ns()
+                    span_obj.__exit__(None, None, None)
+                return
+            if item_type == "tool_result":
+                # The matching tool.call span was closed on item.completed
+                # above (codex shape). The tool_result just records the
+                # output content; nothing to close here.
+                return
+            return
+
+        if event_type == "message.completed":
+            message = event.get("message") or {}
+            content = message.get("content") if isinstance(message, dict) else None
+            if isinstance(content, str) and content:
+                accumulator.set_output(content)
+            return
+
+        if event_type == "turn.completed":
+            usage = event.get("usage") if isinstance(event.get("usage"), dict) else None
+            if usage is not None:
+                accumulator.replace_usage(usage)
+            cost = event.get("total_cost_usd")
+            if isinstance(cost, (int, float)) and usage is not None:
+                accumulator.cost_usd = float(cost)
+            for entry in list(open_llm_spans.values()):
+                span_obj = entry.get("span")
+                if span_obj is not None:
+                    span_obj.set_attribute("cost.tokens_in", entry["tokens_in"])
+                    span_obj.set_attribute("cost.tokens_out", entry["tokens_out"])
+                    span_obj.ts_end_ns = time.time_ns()
+                    span_obj.__exit__(None, None, None)
+            open_llm_spans.clear()
+            return
+
+    def close_all() -> None:
+        for entry in list(open_tool_spans.values()):
+            span_obj = entry.get("span")
+            if span_obj is not None:
+                span_obj.ts_end_ns = time.time_ns()
+                span_obj.__exit__(None, None, None)
+        open_tool_spans.clear()
+        for entry in list(open_llm_spans.values()):
+            span_obj = entry.get("span")
+            if span_obj is not None:
+                span_obj.ts_end_ns = time.time_ns()
+                span_obj.__exit__(None, None, None)
+        open_llm_spans.clear()
+
+    return handler, close_all
 
 
 async def _run(ctx: AgentRunContext) -> AgentResult:

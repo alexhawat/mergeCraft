@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import importlib
 import json
-import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.agents.conftest import make_agent_run_context
@@ -22,6 +21,33 @@ def _load_codex_module():
         pytest.fail(f"mergecraft.agents.codex not implemented: {exc}")
 
 
+class _FakeCodexProcess:
+    """Minimal ``subprocess.Popen`` look-alike for the W6 codex read loop.
+
+    Delivers a recorded stdout/stderr stream in text mode (matching the
+    ``text=True, bufsize=1`` invocation), exposes a no-op ``wait`` that
+    returns the configured exit code, and lets the consumer iterate the
+    stream until EOF.
+    """
+
+    def __init__(self, *, stdout: str, stderr: str, returncode: int) -> None:
+        self._stdout_text = stdout
+        self._stderr_text = stderr
+        self.stdout: list[str] = stdout.splitlines(keepends=True) or [""]
+        self.stderr: Any = self
+        self.returncode = returncode
+
+    def read(self) -> str:
+        return self._stderr_text
+
+    def wait(self, timeout: float | None = None) -> int:
+        del timeout
+        return self.returncode
+
+    def __iter__(self) -> Any:
+        return iter(self.stdout)
+
+
 def test_codex_harness_invokes_cli_and_parses_agent_result(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -32,28 +58,23 @@ def test_codex_harness_invokes_cli_and_parses_agent_result(
     monkeypatch.setenv("CI", "true")
 
     captured: list[list[str]] = []
+    payload = {
+        "result": "review complete",
+        "usage": {
+            "input_tokens": 100,
+            "output_tokens": 50,
+        },
+        "total_cost_usd": 0.01,
+    }
 
-    def _fake_run(
+    def _fake_popen(
         cmd: list[str],
         **kwargs: object,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> object:
         captured.append(list(cmd))
-        payload = {
-            "result": "review complete",
-            "usage": {
-                "input_tokens": 100,
-                "output_tokens": 50,
-            },
-            "total_cost_usd": 0.01,
-        }
-        return subprocess.CompletedProcess(
-            args=cmd,
-            returncode=0,
-            stdout=json.dumps(payload),
-            stderr="",
-        )
+        return _FakeCodexProcess(stdout=json.dumps(payload), stderr="", returncode=0)
 
-    monkeypatch.setattr(codex_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(codex_module.subprocess, "Popen", _fake_popen)
 
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
     mcp_config = str(tmp_path / "mcp.json")
@@ -66,7 +87,7 @@ def test_codex_harness_invokes_cli_and_parses_agent_result(
         mcp_config=mcp_config,
     )
 
-    assert captured, "expected codex harness to invoke subprocess.run"
+    assert captured, "expected codex harness to invoke subprocess.Popen"
     cmd = captured[0]
     assert cmd[0] == "/usr/bin/codex"
     assert "review this diff" in cmd
@@ -201,19 +222,11 @@ def test_run_codex_once_omits_sandbox_flag_for_permission_profiles(
     monkeypatch.setenv("CI", "true")
     captured: list[list[str]] = []
 
-    def _fake_run(
-        cmd: list[str],
-        **kwargs: object,
-    ) -> subprocess.CompletedProcess[str]:
+    def _fake_popen(cmd: list[str], **kwargs: object) -> object:
         captured.append(list(cmd))
-        return subprocess.CompletedProcess(
-            args=cmd,
-            returncode=0,
-            stdout='{"result":"ok"}',
-            stderr="",
-        )
+        return _FakeCodexProcess(stdout='{"result":"ok"}', stderr="", returncode=0)
 
-    monkeypatch.setattr(codex_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(codex_module.subprocess, "Popen", _fake_popen)
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
     ctx.payload.shell = "disabled"
     codex_module.write_mcp_config(ctx)
@@ -325,16 +338,15 @@ def test_bwrap_failure_returns_an_actionable_error(
     monkeypatch.setenv("CI", "true")
     monkeypatch.delenv(codex_module.CODEX_SANDBOX_ENV, raising=False)
 
-    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _fake_popen(cmd: list[str], **kwargs: object) -> object:
         del cmd, kwargs
-        return subprocess.CompletedProcess(
-            args=["codex"],
-            returncode=1,
+        return _FakeCodexProcess(
             stdout="",
             stderr="bwrap: No permissions to create a new namespace, likely because",
+            returncode=1,
         )
 
-    monkeypatch.setattr(subprocess, "run", _fake_run)
+    monkeypatch.setattr(codex_module.subprocess, "Popen", _fake_popen)
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
 
     result = codex_module._run_codex_once(cli="codex", prompt="p", ctx=ctx, mcp_config="")
@@ -352,13 +364,11 @@ def test_ordinary_failures_do_not_get_the_sandbox_hint(
     monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
     monkeypatch.setenv("CI", "true")
 
-    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _fake_popen(cmd: list[str], **kwargs: object) -> object:
         del cmd, kwargs
-        return subprocess.CompletedProcess(
-            args=["codex"], returncode=1, stdout="", stderr="model overloaded"
-        )
+        return _FakeCodexProcess(stdout="", stderr="model overloaded", returncode=1)
 
-    monkeypatch.setattr(subprocess, "run", _fake_run)
+    monkeypatch.setattr(codex_module.subprocess, "Popen", _fake_popen)
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
 
     result = codex_module._run_codex_once(cli="codex", prompt="p", ctx=ctx, mcp_config="")
