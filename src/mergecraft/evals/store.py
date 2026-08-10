@@ -135,17 +135,21 @@ _CASE_FIELDS: tuple[str, ...] = (
 # only ``neutral`` was accepted here. A case could therefore never record the
 # verdict the code actually computes. Both vocabularies are accepted: the
 # check-run one because it is what ships, and the lane one because the
-# thermostat work (W9) is specified to introduce it.
+# thermostat work (W9) is specified to introduce it. W9 adds the four
+# extra action names from the closed vocabulary (#46, W9.1).
 _EXPECTED_VERDICT_VALUES: frozenset[str] = frozenset(
     {
         # Check-run conclusions — what `decide_approval()` emits today.
         "success",
         "failure",
-        # Lane verdicts — reserved for the W9 thermostat overlay.
+        # Lane verdicts — the W9 thermostat action vocabulary.
         "auto_merge",
         "block",
         "request_changes",
         "require_human_review",
+        "require_more_tests",
+        "quarantine",
+        "escalate",
         "unavailable",
         "neutral",
     }
