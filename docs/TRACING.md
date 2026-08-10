@@ -2,9 +2,10 @@
 
 > Status: **complete**. Batch A (W2) covers the config schema, canonical span
 > model, local JSONL sink, and redaction boundary; Batch B (W4) wires the
-> production span tree; Batch D (W8) ships remote exporters, the optional
-> extra, CLI / `action.yml` inputs, and complete documentation. Reference
-> issue: [#56][i56].
+> production span tree; Batch C (W6) ships the `stream-json` migration
+> for per-tool / per-LLM spans; Batch D (W8) ships remote exporters, the
+> optional extra, CLI / `action.yml` inputs, and complete documentation.
+> Reference issue: [#56][i56].
 
 [i56]: https://github.com/alexhawat/mergeCraft/issues/56
 
@@ -207,6 +208,33 @@ mergecraft.run                       (root; run_id, repo, pr_number,
   vars (`GITHUB_RUN_ID`, `GITHUB_REPOSITORY`, `GITHUB_PR_NUMBER`,
   `GITHUB_SHA`, `GITHUB_JOB`). Local dev runs that lack those vars get
   safe placeholders rather than `None`.
+
+## Per-driver streaming coverage (W6 — Batch C)
+
+The W6 read-loop migration replaces `subprocess.run(..., capture_output=True)`
+with `subprocess.Popen` + a line-buffered `consume_stream` consumer that
+emits a `tool.call` or `llm.call` span per event. The exact span surface
+depends on what the upstream CLI emits; this table pins the version the
+plan was authored against and the per-event coverage each driver
+delivers today.
+
+| Driver   | CLI version pinned (W0.5) | Streaming flag                                | Coverage                                                                                  |
+| -------- | ------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `claude` | Claude Code 2.1.226       | `--print --output-format stream-json`         | **Per-event**: one `llm.call` per `message_start`/`message_stop`; one `tool.call` per `content_block_start`/`stop`. Authoritative usage from the final `result` event. |
+| `codex`  | codex-cli 0.146.0         | `codex exec --json`                           | **Per-event**: one `llm.call` per `thread.started`; one `tool.call` per `item.started`/`item.completed`. Authoritative usage from the `turn.completed` event. |
+| `gemini` | gemini-cli 0.53.0         | `-p <prompt> --output-format stream-json`     | **Per-event**: one `llm.call` per `init`; one `tool.call` per `tool_use`/`tool_result`. Final usage from the `result` event. |
+| `opencode` | opencode 1.18.13        | `opencode run --format json` (HTTP via serve) | **Run-level only** — opencode's events are partial (W0.5), so the driver degrades to a `run`-level span per `agent.attempt`. The HTTP polling path emits no NDJSON stream to consume. |
+| `cursor` | (cloud)                   | n/a — Cursor Cloud HTTP polling               | **Run-level only** — no local streaming; the driver intentionally does not change its read path (W6.4). |
+
+Graceful degradation is the contract: a driver that cannot stream (or
+whose CLI's event shapes are not granular enough) emits run-level
+spans rather than failing. The `test_non_streaming_driver_degrades_to_run_level`
+and `test_cursor_degrades_to_run_level` regression pins in
+`tests/tracing/streaming/test_driver_degradation.py` enforce this.
+
+Malformed events are skipped and counted: the consumer never raises on
+a bad line. The counter is available via `StreamSpanAccumulator.malformed_event_count`
+and the line is logged at `warning` level.
 
 ## What's next
 

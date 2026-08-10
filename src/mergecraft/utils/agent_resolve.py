@@ -294,7 +294,9 @@ async def run_with_model_chain(
         attrs_source=lambda: dict(correlation_attrs),
     ) as _root:
         if not chain:
-            return "", _empty_chain_result()
+            _empty_result = _empty_chain_result()
+            _root.set_status("error", _empty_result.error or "empty model chain")
+            return "", _empty_result
 
         chain_index = 0
         attempts = 0
@@ -391,8 +393,19 @@ async def run_with_model_chain(
                         slug=follow_on_slug,
                         fallback_index=chain_index,
                     )
+                # Propagate the terminal status to the root span so the
+                # trace tree's top-level ``mergecraft.run`` span reflects
+                # whether the run succeeded or failed. Without this the
+                # root span stays in its default "ok" state and operators
+                # inspecting the trace lose the failure signal at a
+                # glance. W5.3 (failure-mode) pins this. W4's
+                # instrumentation emitted the root span but did not
+                # propagate the attempt-level status; this is the W6
+                # reconciliation.
                 if terminal_status == "ok":
+                    _root.set_status("ok")
                     return slug, result
+                _root.set_status("error", result.error or "unknown error")
                 return slug, result
 
             if chain_index < len(chain) - 1:

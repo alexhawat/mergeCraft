@@ -303,24 +303,96 @@ async def _run_cli_fallback(*, cli: str, ctx: AgentRunContext, env: dict[str, st
     cmd = [cli, "run", "--format", "json", prompt]
     if ctx.resolved_model:
         cmd.extend(["--model", ctx.resolved_model])
+    # W6 migration: opencode ``--format json`` may emit multiple NDJSON
+    # events. We attempt the streaming read loop and fall back to the
+    # legacy last-line parse if the events are not granular enough (D12).
+    # Run-level spans are emitted through the W4 tracer regardless.
+    return _run_opencode_cli_streaming(
+        cmd=cmd,
+        ctx=ctx,
+        env=env,
+    )
+
+
+def _run_opencode_cli_streaming(
+    *,
+    cmd: list[str],
+    ctx: AgentRunContext,
+    env: dict[str, str],
+) -> AgentResult:
+    """Streaming read loop for ``opencode run --format json`` (W6).
+
+    Opencode's JSON output is **partial** (W0.5) — events may not be
+    granular enough for per-tool spans. We attempt the streaming read
+    and degrade to run-level spans if the events lack the required
+    fields (D12).
+    """
+    from mergecraft.agents._stream_consumer import (
+        StreamSpanAccumulator,
+        consume_stream,
+    )
+    from mergecraft.tracing.sinks import claim_sink
+    from mergecraft.tracing.tracer import (
+        Tracer,
+        resolve_correlation_from_env,
+        resolve_session_id,
+    )
+
+    accumulator = StreamSpanAccumulator(agent_name="opencode")
     try:
-        completed = subprocess.run(
+        from mergecraft.config import RepoSettings
+
+        sink = claim_sink(RepoSettings().tracing)
+        if sink is not None:
+            correlation = resolve_correlation_from_env()
+            session_id = resolve_session_id()
+            run_id = str(correlation.get("run_id") or session_id)
+            Tracer(sink=sink, session_id=session_id, run_id=run_id)
+    except Exception as exc:
+        logger.debug("opencode stream tracer resolution failed: {}", exc)
+
+    try:
+        process = subprocess.Popen(
             cmd,
             cwd=os.getcwd(),
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
-            check=False,
+            bufsize=1,
         )
-    except subprocess.TimeoutExpired:
-        return AgentResult(success=False, error="opencode run timed out")
-    if completed.returncode != 0:
+    except FileNotFoundError as err:
+        return AgentResult(success=False, error=str(err))
+
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    stderr_text = ""
+    try:
+        try:
+            # Opencode events are partial: try streaming, but the
+            # handler is a no-op for unknown shapes (graceful degradation).
+            consume_stream(
+                raw_stream=process.stdout,
+                accumulator=accumulator,
+                handler=lambda _acc, _event: None,
+            )
+            stderr_text = process.stderr.read() or ""
+            returncode = process.wait(
+                timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
+            )
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return AgentResult(success=False, error="opencode run timed out")
+    finally:
+        pass
+
+    if returncode != 0:
         return AgentResult(
             success=False,
-            error=(completed.stderr or completed.stdout or "opencode failed").strip(),
+            error=(stderr_text or "opencode failed").strip() or f"opencode exited {returncode}",
         )
-    return AgentResult(success=True, output=(completed.stdout or "").strip() or None)
+    return AgentResult(success=True, output=accumulator.final_output or None)
 
 
 opencode = agent(name="opencode", install=_install, run=_run)

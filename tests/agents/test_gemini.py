@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
-import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.agents.conftest import make_agent_run_context
@@ -23,6 +22,27 @@ def _load_gemini_module():
         pytest.fail(f"mergecraft.agents.gemini not implemented: {exc}")
 
 
+class _FakeGeminiProcess:
+    """Minimal ``subprocess.Popen`` look-alike for the W6 gemini read loop."""
+
+    def __init__(self, *, stdout: str, stderr: str, returncode: int) -> None:
+        self._stdout_text = stdout
+        self._stderr_text = stderr
+        self.stdout: list[str] = stdout.splitlines(keepends=True) or [""]
+        self.stderr: Any = self
+        self.returncode = returncode
+
+    def read(self) -> str:
+        return self._stderr_text
+
+    def wait(self, timeout: float | None = None) -> int:
+        del timeout
+        return self.returncode
+
+    def __iter__(self) -> Any:
+        return iter(self.stdout)
+
+
 def test_gemini_harness_invokes_cli_and_parses_agent_result(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -33,27 +53,19 @@ def test_gemini_harness_invokes_cli_and_parses_agent_result(
     monkeypatch.setenv("CI", "true")
 
     captured: list[list[str]] = []
+    payload = {
+        "result": "gemini review complete",
+        "usage": {
+            "input_tokens": 80,
+            "output_tokens": 40,
+        },
+    }
 
-    def _fake_run(
-        cmd: list[str],
-        **kwargs: object,
-    ) -> subprocess.CompletedProcess[str]:
+    def _fake_popen(cmd: list[str], **kwargs: object) -> object:
         captured.append(list(cmd))
-        payload = {
-            "result": "gemini review complete",
-            "usage": {
-                "input_tokens": 80,
-                "output_tokens": 40,
-            },
-        }
-        return subprocess.CompletedProcess(
-            args=cmd,
-            returncode=0,
-            stdout=json.dumps(payload),
-            stderr="",
-        )
+        return _FakeGeminiProcess(stdout=json.dumps(payload), stderr="", returncode=0)
 
-    monkeypatch.setattr(gemini_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(gemini_module.subprocess, "Popen", _fake_popen)
 
     ctx = make_agent_run_context(tmp_path, resolved_model="google/gemini-3.1-pro-preview")
     mcp_config = str(tmp_path / "mcp.json")
@@ -66,7 +78,7 @@ def test_gemini_harness_invokes_cli_and_parses_agent_result(
         mcp_config=mcp_config,
     )
 
-    assert captured, "expected gemini harness to invoke subprocess.run"
+    assert captured, "expected gemini harness to invoke subprocess.Popen"
     cmd = captured[0]
     assert cmd[0] == "/usr/bin/gemini"
     prompt_arg = cmd[cmd.index("-p") + 1]
