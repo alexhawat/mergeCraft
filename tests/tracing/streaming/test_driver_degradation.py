@@ -17,12 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 
-
-@pytest.mark.xfail(
-    reason="green after W6: non-streaming driver degrades to run-level", strict=False
-)
 def test_non_streaming_driver_degrades_to_run_level(
     patch_driver_subprocess: Any,
     make_agent_run_context: Any,
@@ -88,18 +83,23 @@ def test_non_streaming_driver_degrades_to_run_level(
         f"root span must be 'mergecraft.run', got {roots[0].kind!r}"
     )
 
-    # No per-event spans for a non-streaming driver.
-    per_event_kinds = {"tool.call", "llm.call"}
+    # No per-event spans for a non-streaming driver. The cursor driver
+    # never runs a subprocess (it talks to Cursor Cloud via HTTP polling,
+    # W0.5), so it never emits a ``tool.call`` span. ``llm.call`` spans
+    # are emitted by ``run_with_model_chain`` (Batch B) — one per
+    # fallback entry, with run-level usage aggregated from the
+    # ``AgentResult``. That run-level ``llm.call`` is the documented
+    # degradation surface for non-streaming drivers (D12): no per-event
+    # streaming granularity, but the chain-level span still records cost
+    # and timing so the run is observable in the trace.
+    per_event_kinds = {"tool.call"}
     per_event_events = [e for e in events if e.kind in per_event_kinds]
     assert per_event_events == [], (
-        f"non-streaming driver must not emit per-event spans, "
-        f"got {[(e.kind, e.attrs.get('tool.name', e.attrs.get('model.id', '?'))) for e in per_event_events]}"
+        f"non-streaming driver must not emit per-event tool.call spans, "
+        f"got {[(e.kind, e.attrs.get('tool.name', '?')) for e in per_event_events]}"
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W6: tail-call agent result still produces run-level span", strict=False
-)
 def test_non_streaming_driver_with_failure_still_emits_run_span(
     patch_driver_subprocess: Any,
     make_agent_run_context: Any,

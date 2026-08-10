@@ -49,7 +49,6 @@ if TYPE_CHECKING:
 # ----------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W6: tool.call spans from stream-json", strict=False)
 def test_streaming_events_produce_tool_call_spans(
     patch_driver_subprocess: Any,
     make_agent_run_context: Any,
@@ -83,7 +82,8 @@ def test_streaming_events_produce_tool_call_spans(
     )
 
     assert result.success, f"driver failed: {result.error!r}"
-    assert recorded["cmd"], "driver did not invoke subprocess"
+    assert recorded, "driver did not invoke subprocess"
+    assert recorded[-1]["cmd"], "driver did not invoke subprocess"
 
     captured_streaming_sink.record()
     tool_spans = captured_streaming_sink.by_kind.get("tool.call", [])
@@ -113,7 +113,6 @@ def test_streaming_events_produce_tool_call_spans(
 # ----------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W6: llm.call spans with token attrs", strict=False)
 def test_streaming_events_produce_llm_call_spans(
     patch_driver_subprocess: Any,
     make_agent_run_context: Any,
@@ -177,7 +176,6 @@ def test_streaming_events_produce_llm_call_spans(
 # ----------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W6: malformed line is skipped, not fatal", strict=False)
 def test_malformed_stream_event_is_skipped_not_fatal(
     patch_driver_subprocess: Any,
     make_agent_run_context: Any,
@@ -232,7 +230,6 @@ def test_malformed_stream_event_is_skipped_not_fatal(
 # ----------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W6: streaming result matches blob result", strict=False)
 def test_streaming_result_parsing_matches_previous_final_result(
     patch_driver_subprocess: Any,
     make_agent_run_context: Any,

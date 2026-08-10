@@ -360,10 +360,11 @@ class _FakePopen:
 @pytest.fixture
 def patch_driver_subprocess(
     monkeypatch: pytest.MonkeyPatch,
-) -> Callable[..., dict[str, Any]]:
+) -> Callable[..., list[dict[str, Any]]]:
     """Return a callable that patches a driver module's subprocess to a fake.
 
-    Usage::
+    Returns the live ``invocations`` list so tests can assert on the recorded
+    argv / stdout after the driver runs::
 
         def test_xxx(patch_driver_subprocess):
             recorded = patch_driver_subprocess(
@@ -373,7 +374,7 @@ def patch_driver_subprocess(
                 returncode=0,
             )
             # ... driver invocation ...
-            assert recorded["cmd"]  # the argv it was invoked with
+            assert recorded[-1]["cmd"]  # the argv it was invoked with
     """
 
     invocations: list[dict[str, Any]] = []
@@ -384,7 +385,7 @@ def patch_driver_subprocess(
         stdout: str,
         stderr: str = "",
         returncode: int = 0,
-    ) -> dict[str, Any]:
+    ) -> list[dict[str, Any]]:
         stdout_blob = stdout.encode("utf-8")
         stderr_blob = stderr.encode("utf-8")
 
@@ -417,6 +418,6 @@ def patch_driver_subprocess(
         module = importlib.import_module(module_name)
         monkeypatch.setattr(module.subprocess, "run", _recording_run)
         monkeypatch.setattr(module.subprocess, "Popen", _recording_popen)
-        return invocations[-1] if invocations else {}
+        return invocations
 
     return _patch
