@@ -436,6 +436,59 @@ class GitHubClient:
     ) -> dict[str, Any]:
         return _as_dict(await self.get(f"/repos/{owner}/{repo}/check-suites/{check_suite_id}"))
 
+    async def list_check_runs_for_ref(
+        self,
+        owner: str,
+        repo: str,
+        ref: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """List individual check runs for a commit ref (#36 gate evidence).
+
+        ``list_check_suites_for_ref`` returns suites, whose conclusion is the
+        rollup of every job in them. Gate substitution needs the *named* run —
+        a repo declaring ``lint: "Verify (lint)"`` is pointing at one job, not
+        at whether the whole suite went green.
+        """
+        params = {"per_page": 100, **(kwargs.pop("params", None) or {})}
+        return _as_dict(
+            await self.get(
+                f"/repos/{owner}/{repo}/commits/{ref}/check-runs", params=params, **kwargs
+            )
+        )
+
+    async def list_workflow_run_artifacts(
+        self,
+        owner: str,
+        repo: str,
+        run_id: int,
+    ) -> list[dict[str, Any]]:
+        """List artifacts a workflow run uploaded."""
+        payload = await self.get(
+            f"/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
+            params={"per_page": 100},
+        )
+        if not isinstance(payload, dict):
+            return []
+        return _as_list(payload.get("artifacts"))
+
+    async def download_artifact_zip(
+        self,
+        owner: str,
+        repo: str,
+        artifact_id: int,
+    ) -> bytes:
+        """Download one artifact's zip archive, following GitHub's redirect."""
+        response = await self._client.get(
+            f"/repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip",
+            headers={"Accept": DEFAULT_ACCEPT},
+            follow_redirects=True,
+        )
+        if response.status_code >= 400:
+            msg = f"artifact download failed: {response.status_code}"
+            raise RuntimeError(msg)
+        return response.content
+
 
 async def resolve_run_context_data(
     client: GitHubClient,

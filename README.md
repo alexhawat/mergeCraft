@@ -296,6 +296,11 @@ signedCommits: false
 staticChecks:                 # mechanical gates the reviewer runs; optional
   - name: lint
     command: make lint
+# ciEvidence:                   # reuse CI you already ran (see REVIEW-CHECKS.md)
+#   gates:                      # <gate name>: <exact GitHub check-run name>
+#     lint: Verify (drift gates)
+#   sarifArtifacts:             # workflow artifacts whose SARIF to ingest
+#     - ruff-sarif
 # analyzers:                    # deterministic catalog tools (see REVIEW-CHECKS.md)
 #   enabled: true               # omit for auto-detect from changed paths
 #   inlineBudget: 8
@@ -305,6 +310,8 @@ staticChecks:                 # mechanical gates the reviewer runs; optional
 ```
 
 With no `staticChecks`, mergecraft discovers `lint` / `format-check` / `typecheck` / `ci-static` targets in your `Makefile` instead.
+
+The Action image has no `make`, no repo venv, and none of your pinned toolchains, so those gates often report `unavailable` even when your own CI just proved them. `ciEvidence.gates` maps a gate to the exact check-run name that proves it, and a **passing** declared run reports the gate as `satisfied-by-ci` instead. Declaration is required — a check run merely *named* like a gate proves nothing — and with no `ciEvidence` block mergecraft never reads your check runs at all.
 
 **Analyzers** (actionlint, zizmor, ShellCheck, Hadolint in this release) run deterministically from YAML manifests when paths match — the reviewer calls `run_analyzers` early and places verified hits inline or in `### 🔧 Mechanical findings`. You can override enablement in `analyzers:`; editing the catalog remains possible but is not the headline workflow (D19).
 

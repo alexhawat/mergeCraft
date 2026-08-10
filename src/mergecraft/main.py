@@ -249,6 +249,8 @@ async def main() -> MainResult:
             static_checks_enabled=(
                 ctx_payload.shell != "disabled" and allow_repo_command_overrides(trust_tier)
             ),
+            ci_gate_checks=dict(settings.ci_evidence.gates),
+            ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
             analyzers_mode=analyzers_mode,
             trust_tier=trust_tier,
             analyzers_settings_enabled=settings.analyzers.enabled,

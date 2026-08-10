@@ -23,6 +23,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unconditionally and its gates still report `declared-but-cannot-run`; fork,
   untrusted-tier, and offline `diff-review` behaviour is unchanged. The full
   runtime × shell × trust matrix is generated into `docs/ANALYZERS.md` (#35)
+- A gate your own CI already proved no longer reports `unavailable`. The Action
+  image has no `make`, no repo venv, and none of your pinned toolchains, so a
+  repo-native gate could only report that it judged nothing — even when a
+  `Verify (…)` job had just run the identical command on the same commit.
+  Declaring `ciEvidence.gates` in `.mergecraft/config.yaml` (a gate name mapped
+  to the exact GitHub check-run name that proves it) rewrites that row to a new
+  `satisfied-by-ci` status naming the check run and its URL. Nothing is inferred:
+  a check run merely *named* like a gate proves nothing, because a pull request
+  can add a workflow with any name it likes, and with no `ciEvidence` block
+  mergeCraft never reads your check runs at all. Only a passing declared run may
+  substitute — a declared run that failed leaves the honest row in place and is
+  reported as a finding instead — and a gate that actually ran in the review
+  always outranks any CI claim about it (#36)
+- CI outcomes are now recorded as structured findings, not just narrated. Each
+  clustered failure from `analyze_ci_failures`, plus any failing check run
+  mapped to a declared gate, becomes a `source: ci` finding on the run and is
+  carried into the merge evidence packet. The blame verdict travels with it:
+  a failure attributed to the diff is `Major` / `introduced_by_pr: true`, while
+  a flaky or pre-existing one is `Minor` / `introduced_by_pr: false`. Since every
+  consumer of findings is monotone in blocking severities, that is what makes
+  "reported, not blamed" mechanical rather than a matter of wording — a flaky
+  pipeline cannot block a clean pull request (#36)
+- SARIF your CI already produced can be read back as review evidence. Naming
+  workflow artifacts under `ciEvidence.sarifArtifacts` ingests their SARIF
+  through the same parser the analyzer catalog uses. Default is empty, in which
+  case no artifact API call is made; ingested results are reported at a
+  non-blocking severity with `introduced_by_pr: unknown`, since SARIF from
+  another pipeline describes the tree rather than this diff (#36)
 - Codex reviews inside a container runner now fail loudly instead of silently.
   Codex CLI runs its own bubblewrap sandbox; inside a Docker container action
   that is already namespaced it cannot create a nested namespace, so every call

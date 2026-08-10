@@ -259,6 +259,46 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             "```",
             "",
             "See [CONTRIBUTING-ANALYZERS.md](CONTRIBUTING-ANALYZERS.md) to add a tool.",
+            "",
+            "## Execution preference",
+            "",
+            "For any given gate, in order — the first that can produce a verdict wins:",
+            "",
+            "1. **`repo-native`** — the repo's own pinned toolchain, when this "
+            "environment can run it.",
+            "2. **An existing CI result** — a check run the repo *declared* as proof of "
+            "that gate (#36).",
+            "3. **A managed pinned binary**, then **a container**.",
+            "4. **Skip, with a named reason.** A skip is never a finding.",
+            "",
+            "## CI evidence (#36)",
+            "",
+            "The Action image usually lacks `make`, the repo's venv, and its pinned "
+            "toolchains, so a repo-native gate reports `unavailable` even when the "
+            "consumer's own CI just proved the same thing. Declaring the mapping lets "
+            "that finished CI stand in:",
+            "",
+            "```yaml",
+            "ciEvidence:",
+            "  gates:",
+            "    # <mergeCraft gate name>: <exact GitHub check-run name>",
+            "    lint: Verify (drift gates)",
+            "  sarifArtifacts:",
+            "    - ruff-sarif",
+            "```",
+            "",
+            "- **Declared only.** mergeCraft never infers that a check run *named* "
+            "`lint` proves the `lint` gate — a pull request can add a workflow with "
+            "any name it likes. With no `ciEvidence` block nothing is read and no "
+            "extra API call is made.",
+            "- **Green only substitutes.** A declared check run that passed rewrites "
+            "the gate row to `satisfied-by-ci`. A declared check run that *failed* "
+            "leaves the row alone and is reported as a `source: ci` finding instead.",
+            "- **Reported, not blamed.** Findings derived from CI start non-blocking "
+            "with `introduced_by_pr: unknown`; only the CI-intelligence blame layer "
+            "(`ci/blame.py`, `ci/flaky.py`) may attribute one to this PR.",
+            "- **Redacted.** Log excerpts are truncated and passed through "
+            "`analyzers/redact.py` before they enter a finding.",
         ]
     )
     return "\n".join(lines) + "\n"

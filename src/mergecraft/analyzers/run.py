@@ -22,7 +22,20 @@ if TYPE_CHECKING:
 CHECK_TIMEOUT_S = 300
 MAX_OUTPUT_CHARS = 8_000
 
-CheckStatus = Literal["passed", "failed", "timed_out", "unavailable", "declared-but-cannot-run"]
+CheckStatus = Literal[
+    "passed",
+    "failed",
+    "timed_out",
+    "unavailable",
+    "declared-but-cannot-run",
+    # #36: the gate did not run *here*, but the consumer's CI ran an
+    # equivalent one and it passed. Only reachable through an explicitly
+    # declared gate → check-run mapping (D10); never inferred from a name.
+    "satisfied-by-ci",
+]
+
+# Statuses that mean "this environment produced no verdict about the diff".
+_NO_VERDICT: frozenset[str] = frozenset({"unavailable", "declared-but-cannot-run"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +51,12 @@ class AnalyzerOutcome:
 
     @property
     def passed(self) -> bool:
-        return self.status == "passed"
+        """True when the gate is proved green — here, or by declared CI evidence."""
+        return self.status in {"passed", "satisfied-by-ci"}
 
     @property
     def ran(self) -> bool:
-        return self.status not in {"unavailable", "declared-but-cannot-run"}
+        return self.status not in _NO_VERDICT
 
 
 def _run_tmpdir(plan: AnalyzerPlan) -> Path:
