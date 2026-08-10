@@ -74,6 +74,7 @@ Examples:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -101,11 +102,48 @@ _MEAT_REQUIRED_KEYS: frozenset[str] = frozenset({"smart_diff", "summary"})
 #: ``os.environ.get(name)`` them directly.
 MEAT_CREDENTIAL_ENV_VARS: frozenset[str] = frozenset({"OPENAI_API_KEY", "ANTHROPIC_API_KEY"})
 
+#: Env-var names whose **values** are stripped from subprocess stderr tails
+#: before they are surfaced in a log record, stored on
+#: :attr:`MeatHarnessResult.skip_reason`, or printed by an operator tool.
+#: The harness does not read these vars itself; the redaction is a
+#: defence-in-depth against a misconfigured upstream that reflects a
+#: credential value in an error message.
+_MEAT_REDACT_ENVVARS: tuple[str, ...] = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "MEAT_MODEL",
+)
+
 #: Shell values that the harness treats as "shell disabled" (D7).
 #: ``disabled`` is the explicit kill-switch; anything else (``restricted``,
 #: ``enabled``, ``repo-native``, ...) is left to the caller's policy
 #: layer. The integration point in W4 narrows this further.
 SHELL_DISABLED_VALUES: frozenset[str] = frozenset({"disabled"})
+
+
+def _redact_env_values(text: str) -> str:
+    """Strip the values of ``_MEAT_REDACT_ENVVARS`` from ``text`` (convention 8).
+
+    Subprocess stderr is third-party-controlled. If a misconfigured
+    upstream (or a future version of Meat) ever reflects a credential
+    value in an error message, that value must not land in a log record,
+    on :attr:`MeatHarnessResult.skip_reason`, or in any operator-printed
+    output. The harness does not have access to the actual values — the
+    caller passes the diff and binary path; the env reaches the
+    subprocess via process inheritance. When the value is not visible to
+    the harness, ``os.environ.get`` is the natural source — that is what
+    a misconfigured upstream error would also reach.
+
+    Returns ``text`` unchanged when no credential env-var is set in the
+    process. When one is set, the literal value is replaced with
+    ``<REDACTED:NAME>`` so the diagnostic context is preserved.
+    """
+    out = text
+    for name in _MEAT_REDACT_ENVVARS:
+        value = os.environ.get(name)
+        if value:
+            out = out.replace(value, f"<REDACTED:{name}>")
+    return out
 
 
 @dataclass(slots=True, frozen=True)
@@ -312,26 +350,32 @@ def run_meat_harness(
     if completed.returncode != 0:
         stderr_tail = (completed.stderr or "").strip().splitlines()
         tail = stderr_tail[-1] if stderr_tail else ""
+        tail_redacted = _redact_env_values(tail or "no stderr")
         logger.warning(
             "meat -json exited non-zero ({}): {}; skipping reading-diff lens.",
             completed.returncode,
-            tail or "no stderr",
+            tail_redacted,
         )
         return _skip_result(
             raw_diff,
-            f"skip: meat exited {completed.returncode}: {tail or 'no stderr'}",
+            f"skip: meat exited {completed.returncode}: {tail_redacted}",
             executed=True,
         )
 
     try:
         return _parse_meat_json(completed.stdout, raw_diff)
     except ValueError as exc:
+        # The exception message originates inside the harness's own
+        # parser; it does not carry subprocess stderr, but we still pass
+        # it through the redactor so a future parser change that surfaces
+        # subprocess text does not silently introduce a leak.
+        msg_redacted = _redact_env_values(str(exc))
         logger.warning(
             "meat -json output was malformed ({}); skipping reading-diff lens.",
-            exc,
+            msg_redacted,
         )
         return _skip_result(
             raw_diff,
-            f"skip: meat -json output malformed: {exc}",
+            f"skip: meat -json output malformed: {msg_redacted}",
             executed=True,
         )

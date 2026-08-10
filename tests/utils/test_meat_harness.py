@@ -248,7 +248,14 @@ def test_meat_is_inert_on_untrusted_tier(tmp_path: Path) -> None:
 
 
 def test_meat_is_inert_when_opt_in_flag_unset(tmp_path: Path) -> None:
-    """Opt-in default-off: a missing flag must skip without invoking meat."""
+    """Opt-in default-off: a missing flag must skip without invoking meat.
+
+    Stronger than the W1 contract: in addition to ``abridged_diff is None``,
+    we assert the subprocess was **not** executed (``executed is False``)
+    and the skip reason names the opt-in gate. Without these, a regression
+    that removed the gate would still pass — the fake's malformed JSON
+    would just be caught downstream and the assertions above would hold.
+    """
     fake = _write_fake_meat(tmp_path, stdout="SHOULD-NOT-APPEAR")
     result = run_meat_harness(
         raw_diff=_RAW_DIFF_SAMPLE,
@@ -259,11 +266,20 @@ def test_meat_is_inert_when_opt_in_flag_unset(tmp_path: Path) -> None:
         timeout_seconds=1.0,
     )
     assert result.abridged_diff is None
+    assert result.executed is False, "subprocess must not run when opt-in is unset"
     assert result.skip_reason is not None
+    assert "opt-in" in result.skip_reason.lower(), (
+        f"skip reason must name the opt-in gate; got {result.skip_reason!r}"
+    )
 
 
 def test_meat_is_inert_when_shell_disabled(tmp_path: Path) -> None:
-    """``shell: disabled`` → harness must skip. New shell execution is gated off."""
+    """``shell: disabled`` → harness must skip. New shell execution is gated off.
+
+    Stronger than the W1 contract: in addition to ``abridged_diff is None``,
+    we assert the subprocess was **not** executed (``executed is False``)
+    and the skip reason names the shell-disabled gate.
+    """
     fake = _write_fake_meat(tmp_path, stdout="SHOULD-NOT-APPEAR")
     result = run_meat_harness(
         raw_diff=_RAW_DIFF_SAMPLE,
@@ -274,7 +290,11 @@ def test_meat_is_inert_when_shell_disabled(tmp_path: Path) -> None:
         timeout_seconds=1.0,
     )
     assert result.abridged_diff is None
+    assert result.executed is False, "subprocess must not run when shell is disabled"
     assert result.skip_reason is not None
+    assert "shell" in result.skip_reason.lower(), (
+        f"skip reason must name the shell gate; got {result.skip_reason!r}"
+    )
 
 
 # ── W1.2 — missing binary is a skip, not a failure (D13) ──────────────────
@@ -556,6 +576,63 @@ def test_no_credential_value_for_any_meat_env_var(
 
     logged = "\n".join(captured)
     assert _CANARY_VALUE not in logged, f"credential value for {credential_env} leaked into logs"
+
+
+def test_subprocess_stderr_credential_reflection_is_redacted(
+    raw_diff_sample: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Stderr path is also covered — convention 8 defence-in-depth.
+
+    A misconfigured upstream could reflect a credential value in a
+    diagnostic on the failure path (the harness captures that line into
+    both a log record and :attr:`MeatHarnessResult.skip_reason`). The
+    harness redacts the env-var values out before either surface sees
+    them. This test pins that redaction.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", _CANARY_VALUE)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("MEAT_MODEL", raising=False)
+
+    # Fake echoes the OPENAI_API_KEY value on stderr and exits non-zero.
+    fake = tmp_path / "meat"
+    fake.write_text(
+        "#!/bin/sh\nprintf 'auth failed: %s\\n' \"$OPENAI_API_KEY\" >&2\nexit 1\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+
+    captured, sink_id = _capture_loguru()
+    try:
+        result = run_meat_harness(
+            raw_diff=raw_diff_sample,
+            meat_binary=fake,
+            trust_tier="trusted",
+            opt_in=True,
+            shell="restricted",
+            timeout_seconds=1.0,
+        )
+    finally:
+        from loguru import logger as _loguru
+
+        _loguru.remove(sink_id)
+
+    logged = "\n".join(captured)
+    assert _CANARY_VALUE not in logged, (
+        "credential value reflected on subprocess stderr leaked into a log record"
+    )
+    assert "<REDACTED:OPENAI_API_KEY>" in logged, (
+        f"redaction marker should appear in logs; got {logged!r}"
+    )
+
+    assert result.skip_reason is not None
+    assert _CANARY_VALUE not in result.skip_reason, (
+        "credential value reflected on subprocess stderr leaked into skip_reason"
+    )
+    assert "<REDACTED:OPENAI_API_KEY>" in result.skip_reason, (
+        f"redaction marker should appear in skip_reason; got {result.skip_reason!r}"
+    )
 
 
 # ── W1.8 — no network call in unit tests (convention 5, structural) ────────
