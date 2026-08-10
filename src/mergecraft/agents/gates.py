@@ -1,6 +1,6 @@
 """Subagent mutates deny + native FS denies + structural approval gate (ported from
 subagentToolGates / nativeFsDenies and extended by the security-trust-boundary plan
-Batch D and the merge-evidence plan Batch A - W2).
+Batch D and the merge-evidence plan Batch A - W2, Batches C - W7/W8, Batch D - W9).
 """
 
 from __future__ import annotations
@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Final, Union, overload
 
 from loguru import logger
 
+from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES, GateAction
+from mergecraft.evidence.gate_policy import GateActionPolicy as GateActionPolicy
 from mergecraft.evidence.packet import Decision as PacketDecision
 from mergecraft.evidence.packet import MergeEvidencePacket
 from mergecraft.mcp.server import build_orchestrator_tools
@@ -312,13 +314,175 @@ def log_decision(
     )
 
 
+# ── gate-action map (W9.1, #46) ──────────────────────────────────────────────
+#
+# The thermostat replaces "verdict was typed, now what?" with a closed
+# action vocabulary. ``decide_action`` consumes a packet — never re-derives
+# evidence — and returns a named action from the seven-value vocabulary.
+# It is pure: no I/O, no logging, no module state. The function is the
+# single decision point for #46; the run_packet I/O shell is the only
+# caller that *applies* the action (enforce mode), and the shadow
+# recorder is the only caller that *records* it (shadow mode).
+
+
+# Maps an evidence signal to the rule key the policy engine looks up.
+# Each rule is a tuple ``(predicate, rule_id)``; the first match wins.
+# The list is lookup order, so anything more specific must appear before
+# anything more general (a high-risk migration is checked before the
+# generic low-risk pass).
+_RULE_PREDICATES: Final[tuple[tuple[str, str], ...]] = (
+    ("high_risk_migration", "high_risk_migration"),
+    ("low_risk_passing", "low_risk_passing"),
+    ("changed_unread_file", "changed-unread-file"),
+    ("tool_loop", "tool_loop"),
+    ("schema_failure", "schema_failure"),
+)
+
+
+def _has_changed_unread_file(packet: MergeEvidencePacket) -> bool:
+    """A trajectory finding flagged a file modified but never read."""
+    return any(finding.rule_id == "changed-unread-file" for finding in packet.findings)
+
+
+def _has_tool_loop(packet: MergeEvidencePacket) -> bool:
+    """A trajectory finding flagged a repeated call loop."""
+    return any(finding.rule_id == "repeated-tool-loop" for finding in packet.findings)
+
+
+def _is_high_risk_migration(packet: MergeEvidencePacket) -> bool:
+    """A packet whose blast radius lane is ``high`` and is migration-driven."""
+    lane = packet.blast_radius.lane if packet.blast_radius else None
+    categories = list(packet.blast_radius.categories) if packet.blast_radius else []
+    # The plan's example policy is "high-risk migration" — a high-blast
+    # radius *with* a migration category. A high-blast radius that is
+    # only auth/security/payment would not be a "migration" per the
+    # example text, even though it is still "forbidden" by the lane.
+    return lane == "high" and "migrations" in categories
+
+
+def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
+    """A clean low-risk PR: no findings, low blast radius, run succeeded."""
+    if packet.findings:
+        return False
+    if not packet.blast_radius:
+        return False
+    if packet.blast_radius.lane != "low":
+        return False
+    # The legacy approval verdict is the gate's own input; refusing
+    # ``auto_merge`` from the structural side is #41's hard rule.
+    return packet.decision is None or packet.decision.verdict != "failure"
+
+
+def _is_schema_failure(packet: MergeEvidencePacket) -> bool:
+    """A packet whose evidence is structurally missing — schema failure."""
+    # A packet with no findings, no blast radius, no decision, and an
+    # explicit self-assessment is the canonical "looks approved but
+    # nothing else" shape. The verdict function already guards against
+    # this, but the rule is independently meaningful for the gate.
+    if packet.findings:
+        return False
+    if packet.blast_radius is not None:
+        return False
+    if packet.decision is not None:
+        return False
+    if packet.self_assessment is None:
+        return False
+    return packet.self_assessment.approved is True
+
+
+def select_rule_id(packet: MergeEvidencePacket) -> str:
+    """Pick the rule key the policy engine should consult for ``packet``.
+
+    Pure: returns the rule id that matches the most specific signal on
+    the packet. ``"schema_failure"`` is the catch-all — it matches a
+    packet whose evidence is structurally absent.
+    """
+    if _is_high_risk_migration(packet):
+        return "high_risk_migration"
+    if _is_low_risk_passing(packet):
+        return "low_risk_passing"
+    if _has_changed_unread_file(packet):
+        return "changed-unread-file"
+    if _has_tool_loop(packet):
+        return "tool_loop"
+    if _is_schema_failure(packet):
+        return "schema_failure"
+    # Default: no rule matched; the policy lookup falls through to the
+    # schema-failure key, which is the conservative mapping.
+    return "schema_failure"
+
+
+def _validate_policy(policy: GateActionPolicy) -> None:
+    """Reject policies whose values are outside the closed action vocabulary.
+
+    A mis-spelled override (``"BANHAMMER"``) must not silently widen the
+    gate. The validator runs once per ``decide_action`` call; the cost
+    is small and the safety is the whole point of the closed vocabulary.
+    """
+    for rule_id, action in policy.items():
+        if not isinstance(action, GateAction):
+            msg = (
+                f"gate policy {rule_id!r} maps to {action!r}, which is outside the closed "
+                f"action vocabulary {sorted(a.value for a in GateAction)}"
+            )
+            raise ValueError(msg)
+
+
+def decide_action(
+    packet: MergeEvidencePacket,
+    *,
+    policy: GateActionPolicy | None = None,
+    mode: str = "shadow",
+) -> GateAction:
+    """Map a packet to one named action from the closed vocabulary (#46, W9.1).
+
+    Pure. The function consumes the packet's evidence — never re-derives
+    it — and returns a :class:`GateAction` from the seven-value
+    vocabulary. The first step is consulting the policy map; the second
+    is selecting the rule key the packet matches. Both are deterministic.
+
+    The five named policies ``DEFAULT_GATE_POLICIES`` ships are the
+    example set #46 names literally: a schema failure blocks, a
+    changed-unread-file asks for changes, a low-risk passing change
+    merges, a tool-loop asks for more tests, and a high-risk migration
+    asks for human review. Repositories override the mapping at the
+    call site: the override is merged on top of the defaults and any
+    value outside the closed vocabulary is rejected.
+
+    ``mode`` is not consulted by this function — it is recorded on
+    the resulting ``Decision`` row by the I/O shell. The gate's
+    behaviour is the same in both modes; the *application* of the
+    decision is what ``shadow`` / ``enforce`` controls.
+    """
+    chosen = policy if policy is not None else DEFAULT_GATE_POLICIES
+    _validate_policy(chosen)
+    rule_id = select_rule_id(packet)
+    action = chosen.get(rule_id)
+    if action is None:
+        # Surface the gap explicitly rather than fall back to a default
+        # — a policy that omits a rule the runner may reach is a policy
+        # bug, not a runtime decision.
+        msg = f"gate policy is missing the rule {rule_id!r} for this packet"
+        raise KeyError(msg)
+    # ``mode`` is consulted for shape only; the function's behaviour is
+    # the same in both modes. The unused-variable guard here keeps the
+    # typed signature honest.
+    if mode not in {"shadow", "enforce"}:
+        msg = f"unknown gate mode {mode!r} (expected 'shadow' or 'enforce')"
+        raise ValueError(msg)
+    return action
+
+
 __all__ = [
     "BLOCKING_SEVERITIES",
+    "GateAction",
     "approval_decision_inputs",
     "build_claude_native_fs_denies",
     "build_opencode_native_fs_permission",
+    "decide_action",
     "decide_approval",
     "decision_summary_lines",
     "log_decision",
+    "select_rule_id",
     "subagent_denied_tool_names",
 ]

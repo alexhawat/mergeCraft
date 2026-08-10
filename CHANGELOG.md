@@ -22,6 +22,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   driver whose reads never cross MCP yields "unknown", not "unread". Inline
   slots go to code findings first. `PACKET_SCHEMA_VERSION` moves to `1.4.0` for
   the new `trajectory` section (#43, #49)
+- Gate outcomes now resolve to a closed action vocabulary — `auto_merge`,
+  `block`, `request_changes`, `require_human_review`, `require_more_tests`,
+  `quarantine`, `escalate` — instead of a free-form verdict. The five example
+  policies from #46 ship as defaults: a schema failure blocks, a
+  changed-unread-file asks for changes, a low-risk passing change merges, a
+  tool-loop asks for more tests, and a high-risk migration asks for human
+  review. `decide_action(packet)` consumes the typed packet — never re-derives
+  evidence — and the call site that wires it into `build_run_packet` is the
+  only place the action reaches the run. `autoMergeEnabled` remains `False`
+  (D11); `auto_merge` is an action name, never an enabled gate. Every new
+  gate defaults to `shadow` (D12); a typo'd value widens to `shadow`, never
+  to `enforce`. `PACKET_SCHEMA_VERSION` moves to `1.5.0` for the typed
+  `Decision.action` / `decided_by_action` / `mode` fields (#46)
+- Shadow mode records the predicted action as a JSON-Lines breadcrumb beside
+  the packet (`merge-evidence-shadow.jsonl`) without enforcing it. The
+  `disagree_with_outcome` reporter groups predicted vs. actual outcomes by
+  blast-radius lane and rule id; rows are key/value-shaped so a CLI can
+  aggregate them once outcomes are pulled from PR events. A recorder with no
+  reachable caller is the #96 failure mode, so the runtime call-site test
+  (`tests/test_runtime_call_sites.py`) pins both `decide_action` and
+  `record_shadow_prediction` to modules the Action orchestrator reaches
+  (#50)
 
 ### Changed
 

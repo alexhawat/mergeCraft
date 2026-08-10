@@ -243,7 +243,7 @@ def build_run_packet(
     the returned verdict. That keeps the verdict a pure function of the
     evidence actually recorded, rather than of a parallel set of inputs.
     """
-    from mergecraft.agents.gates import decide_approval
+    from mergecraft.agents.gates import decide_action, decide_approval
     from mergecraft.mcp.tool_state import primary_repo_state
 
     state = ctx.tool_state
@@ -274,13 +274,63 @@ def build_run_packet(
         trajectory=trajectory.model_dump(mode="json"),
     )
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
-    return packet.model_copy(update={"decision": decision})
+    # W9 (#46): the decision row carries the closed action vocabulary and
+    # the mode the gate rendered it in. The action is computed from the
+    # packet's evidence — never re-derived from prose or a numeric score.
+    # ``mode`` is read from the typed settings and defaults to ``shadow``
+    # (D12); the I/O shell applies the action when ``mode == "enforce"``,
+    # and the shadow recorder captures it otherwise.
+    gate_mode = _resolve_gate_mode(ctx)
+    action = decide_action(packet, mode=gate_mode)
+    return packet.model_copy(
+        update={
+            "decision": decision.model_copy(
+                update={
+                    "action": action.value,
+                    "decided_by_action": "mergecraft.agents.gates.decide_action",
+                    "mode": gate_mode,
+                }
+            )
+        }
+    )
 
 
 def _agent_version() -> str:
     from mergecraft import __version__
 
     return __version__
+
+
+def _resolve_gate_mode(ctx: ToolContext) -> str:
+    """Return the gate mode (``shadow`` / ``enforce``) for this run.
+
+    D12: every new gate defaults to ``shadow``. The typed settings carry
+    a per-gate override (``gates.gate_action`` / ``gates.thermostat``);
+    both default to ``shadow``. Resolving the mode here — rather than
+    reading ``os.environ`` ad hoc — keeps the contract Pydantic-validated
+    and ensures a typo'd value widens to ``shadow``, never to
+    ``enforce``.
+    """
+    from mergecraft.config import default_settings
+
+    return default_settings().gates.gate_action
+
+
+def _shadow_run_id(ctx: ToolContext) -> str:
+    """Return a stable per-run identifier for the shadow record.
+
+    The shadow record carries the run id so the disagreement report can
+    join the audit row back to the run that produced it. ``GITHUB_RUN_ID``
+    is the canonical GitHub Actions identifier; falls back to the
+    payload delivery id, then ``"local"`` so offline runs still emit a row.
+    """
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if run_id:
+        return run_id
+    delivery_id = getattr(getattr(ctx, "payload", None), "delivery_id", None)
+    if isinstance(delivery_id, str) and delivery_id:
+        return delivery_id
+    return "local"
 
 
 def _change_id(ctx: ToolContext) -> str | None:
@@ -332,17 +382,44 @@ def emit_run_packet(
             tmpdir=ctx.tmpdir, change_slug=_slugify(resolved_change_id)
         )
         written = write_packet(packet, output_path=path)
+        # W10.2 (#50): in shadow mode the predicted action is recorded as
+        # an audit breadcrumb beside the packet. The record is the row
+        # the disagreement report reads; the gate itself is never
+        # applied (D11, D12). The shadow recorder is a no-op in enforce
+        # mode — applying the action is the gate's job, not a side
+        # effect of emit.
+        if packet.decision is not None and packet.decision.mode == "shadow":
+            from mergecraft.evidence.shadow import record_shadow_prediction
+
+            shadow_path = path.with_name("merge-evidence-shadow.jsonl")
+            try:
+                record_shadow_prediction(
+                    packet,
+                    change_id=resolved_change_id,
+                    run_id=_shadow_run_id(ctx),
+                    policy_id="default",
+                    output_path=shadow_path,
+                )
+            except Exception as shadow_err:  # a shadow record never fails the run
+                logger.warning("shadow record: emission failed — {}", shadow_err)
     except Exception as err:  # an audit artifact never fails the run
         logger.warning("evidence packet: emission failed — {}", err)
         return None
     lane = packet.blast_radius.lane if packet.blast_radius else "(unclassified)"
     verdict = packet.decision.verdict if packet.decision else "(none)"
+    action = packet.decision.action if packet.decision else "(none)"
+    mode = packet.decision.mode if packet.decision else "(none)"
+    # W9.3 — the action is the next required action: the only thing the
+    # operator or downstream gate needs to act on. The numeric score
+    # never appears; verdict + action + lane + mode is the full wire.
     logger.info(
-        "» merge evidence packet: {} (change={}, lane={}, verdict={})",
+        "» merge evidence packet: {} (change={}, lane={}, verdict={}, action={}, mode={})",
         written,
         resolved_change_id,
         lane,
         verdict,
+        action,
+        mode,
     )
     return written
 

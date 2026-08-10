@@ -23,6 +23,7 @@ from mergecraft.evidence.packet import (
     MergeEvidencePacket,
     SelfAssessment,
 )
+from mergecraft.evidence.trajectory import TrajectoryRecord
 
 if TYPE_CHECKING:
     from mergecraft.classify import BlastRadiusClassification
@@ -90,6 +91,26 @@ def _coerce_self_assessment(
     raise TypeError(msg)
 
 
+def _coerce_trajectory(raw: TrajectoryRecord | dict[str, Any] | None) -> TrajectoryRecord | None:
+    """Validate the trajectory section into the typed ``TrajectoryRecord`` (#43, W9).
+
+    Batch C (#43) shipped ``TrajectoryRecord`` as the typed shape the
+    packet now carries. ``build_packet`` accepts both an already-typed
+    record (the I/O shell's call site) and the dict form a unit test or
+    legacy caller hands in. Validation is fail-loud — a malformed
+    trajectory record is its own evidence defect and must not be silently
+    coerced into a record of garbage.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, TrajectoryRecord):
+        return raw
+    if isinstance(raw, dict):
+        return TrajectoryRecord.model_validate(raw)
+    msg = f"trajectory must be a dict or TrajectoryRecord, got {type(raw).__name__}"
+    raise TypeError(msg)
+
+
 def _agent_metadata(
     *,
     agent_id: str,
@@ -115,7 +136,7 @@ def build_packet(
     self_assessment: dict[str, Any] | SelfAssessment | None = None,
     decision: Decision | None = None,
     blast_radius: BlastRadiusClassification | None = None,
-    trajectory: dict[str, Any] | None = None,
+    trajectory: TrajectoryRecord | dict[str, Any] | None = None,
     ci_check_runs: dict[str, Any] | None = None,
     ci_intelligence: dict[str, Any] | None = None,
     usage_entries: Any = None,
@@ -181,7 +202,7 @@ def build_packet(
         self_assessment=coerced_self_assessment,
         decision=decision,
         blast_radius=blast_radius,
-        trajectory=trajectory,
+        trajectory=_coerce_trajectory(trajectory),
     )
 
     # ``trajectory`` now lands as a sibling field (Batch C, #43). The rest --

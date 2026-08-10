@@ -17,7 +17,8 @@ a list of :class:`mergecraft.evals.store.EvalMetadata` rows (lightweight
 summaries; the full case lives under ``evals/cases/``).
 
 Batches B / C extend the nullable-until-later sections (blast radius,
-trajectory).
+trajectory). W9 (#46) fills the thermostat's action vocabulary on the
+``decision`` row.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from pydantic.fields import FieldInfo
 from mergecraft.analyzers.finding import Finding
 from mergecraft.classify import BlastRadiusClassification  # noqa: TC001
 from mergecraft.evals.store import EvalMetadata
+from mergecraft.evidence.trajectory import TrajectoryRecord
 
 # D7 — the packet is versioned from day one. Any field-level change (additive
 # or otherwise) that is not accompanied by a bump of this literal must fail
@@ -50,7 +52,17 @@ from mergecraft.evals.store import EvalMetadata
 #   packet that previously set it to a dict is no longer wire-compatible
 #   — no live consumer reads the legacy dict shape today, so the bump is
 #   safe.
-PACKET_SCHEMA_VERSION = "1.4.0"
+# - 1.4.0 — W7 (#43) fills the ``trajectory`` section. The shape is still
+#   optional; the previous version permitted a dict of any shape, this
+#   version asserts the typed ``TrajectoryRecord`` schema. The on-the-wire
+#   JSON is unchanged because ``TrajectoryRecord`` was the implicit shape
+#   the Batch C code already serialised; the field type is what moves.
+# - 1.5.0 — W9 (#46) extends the ``decision`` row with a typed
+#   ``action`` field (closed action vocabulary) and a ``decided_by_action``
+#   attribution. The optional ``numeric_score`` field is intentionally
+#   **absent** — a numeric score must never appear without findings and a
+#   decision beside it (#46 "not a dashboard" criterion).
+PACKET_SCHEMA_VERSION = "1.5.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]
@@ -105,16 +117,25 @@ class Decision(BaseModel):
     """The evidence verdict (W2 surface; nullable in W1).
 
     W1 ships the shape so the packet round-trips end-to-end. W2 populates this
-    from ``decide_approval()`` (D5). ``verdict`` is a string until W9 closes
-    the action vocabulary; today, expected values are ``"auto_merge"`` /
-    ``"block"`` / ``"request_changes"`` / ``"require_human_review"`` /
-    ``"unavailable"`` / ``"neutral"``.
+    from ``decide_approval()`` (D5). W9 (#46) fills ``action`` with the
+    closed action vocabulary: ``auto_merge`` / ``block`` / ``request_changes``
+    / ``require_human_review`` / ``require_more_tests`` / ``quarantine`` /
+    ``escalate``. ``action`` is the structural successor to the legacy
+    ``verdict`` string — every outcome now maps to a *named* action, never
+    to a number.
 
     The Decision row is the *authoritative* verdict: when ``decide_approval()``
     is asked to consume a packet, an explicit ``Decision.verdict`` wins over
     every other signal — including the agent's recorded self-assessment. That
     is the #41 hard rule: the agent's prose cannot outvote the structural
     evidence verdict.
+
+    ``action`` is a sibling of ``verdict`` and never derived from it. A
+    packet produced before W9 carries a ``Decision`` without ``action``; the
+    typed schema accepts both, and a downstream reader can read whichever
+    field is populated. ``mode`` is the mode (``shadow`` / ``enforce``) the
+    decision was rendered in. ``shadow`` records the prediction; ``enforce``
+    applies the action as a gate.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -122,6 +143,9 @@ class Decision(BaseModel):
     verdict: str
     reason: str
     decided_by: str
+    action: str | None = None
+    decided_by_action: str | None = None
+    mode: str | None = None
 
 
 class SelfAssessment(BaseModel):
@@ -170,7 +194,7 @@ class MergeEvidencePacket(BaseModel):
     self_assessment: SelfAssessment | None = None
     decision: Decision | None = None
     blast_radius: BlastRadiusClassification | None = None
-    trajectory: dict[str, Any] | None = None
+    trajectory: TrajectoryRecord | None = None
     evals: list[EvalMetadata] | None = None
 
 
@@ -199,6 +223,10 @@ def packet_output_schema() -> dict[str, Any]:
         items = evals.get("items")
         if isinstance(items, dict) and "$ref" in items:
             evals["items"] = EvalMetadata.model_json_schema()
+    trajectory = schema.get("properties", {}).get("trajectory")
+    if isinstance(trajectory, dict) and "$ref" in trajectory:
+        trajectory.clear()
+        trajectory.update(TrajectoryRecord.model_json_schema())
     return schema
 
 

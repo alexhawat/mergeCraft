@@ -195,6 +195,31 @@ _CONTRACTS: Final[tuple[_Contract, ...]] = (
             "record is empty and every check stays silent (#43, D8)"
         ),
     ),
+    # #46 — the thermostat's `decide_action` is the closed-vocabulary action
+    # map. A library implementation with no reachable caller would be exactly
+    # the #96 failure mode again: a unit-tested dead function never lights up
+    # the gate that #46 closes.
+    _Contract(
+        symbol="decide_action",
+        defined_in="agents/gates.py",
+        why=(
+            "no reachable caller means every packet's `decision.action` is None, so the "
+            "thermostat is wired but inert and W9 (#46) never lands in the packet (#96)"
+        ),
+    ),
+    # #50 — `record_shadow_prediction` is the on-disk recorder and the
+    # only call site that uses `predict_action`. Without a reachable
+    # caller the JSON-Lines log is never written, and the disagreement
+    # report has nothing to read. Pinning the recorder transitively
+    # pins the prediction reader.
+    _Contract(
+        symbol="record_shadow_prediction",
+        defined_in="evidence/shadow.py",
+        why=(
+            "no reachable caller means no shadow record is ever written, so the disagreement "
+            "report has no data and W10.4 cannot render anything (#50)"
+        ),
+    ),
 )
 
 

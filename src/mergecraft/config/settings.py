@@ -91,6 +91,38 @@ class AnalyzerOverride(BaseModel):
     enabled: bool | None = None
 
 
+# W10.1 — every gate this plan introduces defaults to ``shadow`` (D12).
+# The two-mode vocabulary is closed: ``shadow`` records the prediction
+# without enforcing; ``enforce`` applies the action as a gate. D12
+# exists to prevent a brand-new gate from blocking on day one; the
+# default mode is the single switch that prevents it.
+GateMode = Literal["shadow", "enforce"]
+"""Whether a gate this plan introduced runs in shadow (predict+record)
+or enforce (apply the action as a gate). Every gate introduced by this
+plan defaults to ``shadow`` (D12)."""
+
+
+class GatesSettings(BaseModel):
+    """Per-gate mode + override config (#46, #50, D12).
+
+    The block is opt-in: a repo that does not declare one sees
+    identical behaviour, and every gate runs in ``shadow`` by default.
+    Enforcement is gated behind an explicit flip.
+
+    The override is a rule-key -> action mapping that is layered on top
+    of ``DEFAULT_GATE_POLICIES`` at the gate. The closed action
+    vocabulary is enforced at the gate itself, so a mis-spelled value
+    here is rejected by ``decide_action`` rather than silently widening
+    the gate (W9.2).
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    gate_action: GateMode = "shadow"
+    thermostat: GateMode = "shadow"
+    override: dict[str, str] = Field(default_factory=dict)
+
+
 class AnalyzerPatternSettings(BaseModel):
     """Pattern backend selection for analyzer detection."""
 
@@ -249,6 +281,10 @@ class RepoSettings(BaseModel):
     # this to ``True`` restores the legacy auto-promote behaviour for
     # trusted maintainer authors. See ``utils/learnings.py`` and #74.
     autopromote_learnings: bool = Field(default=False, alias="autopromoteLearnings")
+    # W10.1 — gate-mode block. Every gate this plan introduces defaults
+    # to ``shadow`` (D12). The override is layered on top of the default
+    # policy at the gate; a mis-spelled value is rejected there.
+    gates: GatesSettings = Field(default_factory=GatesSettings, alias="gates")
     env_allowlist: str | None = Field(default=None, alias="envAllowlist")
     # Extra GitHub logins (comma-separated) permitted to invoke mergeCraft by
     # comment even when ``comment.author_association`` is outside the trusted
