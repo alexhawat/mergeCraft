@@ -152,3 +152,26 @@ def test_score_fails_below_the_required_recall(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "below the required" in result.output
+
+
+def test_a_promoted_case_is_not_reported_as_unpromoted(tmp_path: Path) -> None:
+    """The gate must ask the store for the path, not rebuild the filename."""
+    from mergecraft.evals.store import permanent_test_path
+
+    bank = tmp_path / "cases"
+    _write_case(bank, "synthetic-001")
+    permanent = tmp_path / "permanent"
+    permanent.mkdir()
+    permanent_test_path(permanent, "synthetic-001").write_text("# promoted\n", encoding="utf-8")
+
+    import mergecraft.cli.eval_cmd as eval_cmd
+
+    original = eval_cmd._default_permanent_dir
+    eval_cmd._default_permanent_dir = lambda: permanent  # type: ignore[assignment]
+    try:
+        result = runner.invoke(app, ["gate", "--bank", str(bank), "--require-promoted", "--json"])
+    finally:
+        eval_cmd._default_permanent_dir = original  # type: ignore[assignment]
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["unpromoted"] == []

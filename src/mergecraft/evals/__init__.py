@@ -46,6 +46,7 @@ from mergecraft.evals.store import (
     list_cases,
     load_case,
     parse_case_text,
+    recompute_decision,
     render_case_text,
     replay_case,
 )
@@ -72,6 +73,7 @@ __all__ = [
     "load_case",
     "load_reported_findings",
     "parse_case_text",
+    "recompute_decision",
     "render_case_text",
     "replay_case",
     "score_findings",
