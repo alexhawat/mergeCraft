@@ -41,11 +41,13 @@ if TYPE_CHECKING:
 def _packet(**overrides: Any) -> MergeEvidencePacket:
     """Build a minimal packet. Per-test overrides keep the triggers distinct."""
     from mergecraft.evidence.packet import (
+        PACKET_SCHEMA_VERSION,
         AgentMetadata,
         MergeEvidencePacket,
     )
 
     base: dict[str, Any] = {
+        "schema_version": PACKET_SCHEMA_VERSION,
         "change_id": "acme/demo#42",
         "agent": AgentMetadata(id="claude", version="0.0.0", model="claude-sonnet-4-5"),
         "files_changed": [],
@@ -150,9 +152,8 @@ def _find_action(predicted: Any) -> str:
 
 def test_policy_schema_failure_maps_to_block() -> None:
     """A packet with no evidence routes to ``block`` (#46 example)."""
-    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
-
     from mergecraft.agents.gates import decide_action
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 
     action = decide_action(_schema_failure_packet(), policy=DEFAULT_GATE_POLICIES)
     assert _find_action(action) == "block"
@@ -160,9 +161,8 @@ def test_policy_schema_failure_maps_to_block() -> None:
 
 def test_policy_changed_unread_file_maps_to_request_changes() -> None:
     """A trajectory finding of changed-unread-file routes to ``request_changes``."""
-    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
-
     from mergecraft.agents.gates import decide_action
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 
     action = decide_action(_changed_unread_packet(), policy=DEFAULT_GATE_POLICIES)
     assert _find_action(action) == "request_changes"
@@ -170,9 +170,8 @@ def test_policy_changed_unread_file_maps_to_request_changes() -> None:
 
 def test_policy_low_risk_passing_maps_to_auto_merge() -> None:
     """A clean low-risk PR routes to ``auto_merge`` (#46 acceptance)."""
-    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
-
     from mergecraft.agents.gates import decide_action
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 
     action = decide_action(_low_risk_passing_packet(), policy=DEFAULT_GATE_POLICIES)
     assert _find_action(action) == "auto_merge"
@@ -180,9 +179,8 @@ def test_policy_low_risk_passing_maps_to_auto_merge() -> None:
 
 def test_policy_tool_loop_maps_to_require_more_tests() -> None:
     """A repeated-tool-loop trajectory finding routes to ``require_more_tests``."""
-    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
-
     from mergecraft.agents.gates import decide_action
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 
     action = decide_action(_tool_loop_packet(), policy=DEFAULT_GATE_POLICIES)
     assert _find_action(action) == "require_more_tests"
@@ -190,9 +188,8 @@ def test_policy_tool_loop_maps_to_require_more_tests() -> None:
 
 def test_policy_high_risk_migration_maps_to_require_human_review() -> None:
     """A high blast radius routes to ``require_human_review`` (#46 acceptance)."""
-    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
-
     from mergecraft.agents.gates import decide_action
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 
     action = decide_action(_high_risk_migration_packet(), policy=DEFAULT_GATE_POLICIES)
     assert _find_action(action) == "require_human_review"
@@ -211,6 +208,7 @@ def test_every_outcome_maps_to_a_named_action() -> None:
     ``escalate``.
     """
     from mergecraft.agents.gates import GateAction, decide_action
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 
     expected: frozenset[str] = frozenset(
         {
@@ -223,26 +221,21 @@ def test_every_outcome_maps_to_a_named_action() -> None:
             "escalate",
         }
     )
-    assert expected == frozenset(GateAction.__members__)
+    actual = frozenset(action.value for action in GateAction)
+    assert expected == actual
 
     # The five named policies land on five of the seven; the other two
     # (quarantine, escalate) are reachable when the policy set is
     # extended or when a finding carries a recommended action that does
     # not fit the named rules.
-    action = decide_action(
-        _low_risk_passing_packet(),
-        policy=__import__(
-            "mergecraft.evidence.gate_policy", fromlist=["DEFAULT_GATE_POLICIES"]
-        ).DEFAULT_GATE_POLICIES,
-    )
+    action = decide_action(_low_risk_passing_packet(), policy=DEFAULT_GATE_POLICIES)
     assert _find_action(action) in expected
 
 
 def test_unknown_action_in_policy_is_rejected() -> None:
     """A policy that emits a non-vocabulary action is a fail-loud bug."""
-    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
-
     from mergecraft.agents.gates import decide_action
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 
     bogus = dict(DEFAULT_GATE_POLICIES)
     bogus["schema_failure"] = ("banana", "this is not a real action")
@@ -291,10 +284,9 @@ def test_shadow_mode_records_prediction_without_blocking() -> None:
     on the run. The runner is what records the prediction; the
     prediction itself is never a gate.
     """
+    from mergecraft.agents.gates import decide_action
     from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
     from mergecraft.evidence.shadow import predict_action
-
-    from mergecraft.agents.gates import decide_action
 
     # Pure predict: the same packet returns the same action.
     packet = _low_risk_passing_packet()
@@ -399,15 +391,17 @@ def test_new_gates_default_to_shadow() -> None:
     off the typed settings; a typo'd value should also fall back to
     shadow, never widen.
     """
-    from mergecraft.config.settings import GateMode, default_settings
+    from mergecraft.config.settings import default_settings
 
     settings = default_settings()
     gates = settings.gates
     # Every gate introduced by this plan defaults to ``shadow``.
-    for gate in ("gate_action", "thermostat"):
-        assert gates[gate] == GateMode.SHADOW, (
-            f"gate {gate!r} defaults to {gates[gate]!r} — D12 mandates shadow"
-        )
+    assert gates.gate_action == "shadow", (
+        f"gate 'gate_action' defaults to {gates.gate_action!r} — D12 mandates shadow"
+    )
+    assert gates.thermostat == "shadow", (
+        f"gate 'thermostat' defaults to {gates.thermostat!r} — D12 mandates shadow"
+    )
 
 
 def test_unrecognised_gate_mode_falls_back_to_shadow() -> None:
@@ -417,14 +411,17 @@ def test_unrecognised_gate_mode_falls_back_to_shadow() -> None:
     enable enforcement. The settings validator is the gate against the
     gate going live without review.
     """
-    from mergecraft.config.settings import GateMode, RepoSettings
+    from mergecraft.config.settings import RepoSettings
 
-    # A bona fide unknown value is rejected by the typed model.
+    # A bona fide unknown value is rejected by the typed model — the
+    # Literal["shadow", "enforce"] is the contract.
     with pytest.raises((ValueError, TypeError)):
         RepoSettings.model_validate({"gates": {"gate_action": "ENFORCE"}})
-    # The two valid modes are shadows and enforce.
-    assert GateMode.SHADOW.value == "shadow"
-    assert GateMode.ENFORCE.value == "enforce"
+    # The two valid modes are shadow and enforce.
+    valid = RepoSettings.model_validate({}).gates
+    assert valid.gate_action == "shadow"
+    enforced = RepoSettings.model_validate({"gates": {"gate_action": "enforce"}}).gates
+    assert enforced.gate_action == "enforce"
 
 
 # ── module-level xfail markers ────────────────────────────────────────────────
