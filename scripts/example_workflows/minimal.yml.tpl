@@ -57,3 +57,5 @@ jobs:
           # CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}           # + model: nous/deepseek/deepseek-v4-flash
+          # TOKENHUB_API_KEY: ${{ secrets.TOKENHUB_API_KEY }}   # + model: tokenhub/hy3

@@ -71,6 +71,12 @@ def _has_cursor_auth() -> bool:
     return _has_env("CURSOR_API_KEY")
 
 
+def _has_gateway_auth(provider: str) -> bool:
+    from mergecraft.agents.openai_compatible_gateways import has_gateway_credentials
+
+    return has_gateway_credentials(provider)
+
+
 def has_credentials_for_slug(slug: str) -> bool:
     """Return whether the current environment has credentials for ``slug``."""
     try:
@@ -90,6 +96,8 @@ def has_credentials_for_slug(slug: str) -> bool:
         return _has_bedrock_auth() and bool(os.environ.get(BEDROCK_MODEL_ID_ENV, "").strip())
     if provider == "vertex":
         return _has_vertex_auth() and bool(os.environ.get(VERTEX_MODEL_ID_ENV, "").strip())
+    if provider in {"nous", "tokenhub"}:
+        return _has_gateway_auth(provider)
     return False
 
 
@@ -646,6 +654,22 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
 
         if provider == "anthropic" and _has_claude_code_auth():
             return agents["claude"]
+
+        if provider in {"nous", "tokenhub"}:
+            if _has_gateway_auth(provider):
+                return agents["opencode"]
+            hints = (
+                ("NOUS_API_KEY", "mergecraft auth nous")
+                if provider == "nous"
+                else ("TOKENHUB_API_KEY", "mergecraft auth tokenhub")
+            )
+            msg = (
+                f"{provider} model {model!r} selected but no credential is configured. "
+                f"Set {hints[0]} (via `{hints[1]}` or a GitHub Actions secret), "
+                "or set MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + "
+                "MERGECRAFT_CUSTOM_PROVIDER_API_KEY, or choose a different model."
+            )
+            raise ValueError(msg)
 
     return agents["opencode"]
 

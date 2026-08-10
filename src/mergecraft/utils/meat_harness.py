@@ -100,7 +100,15 @@ _MEAT_REQUIRED_KEYS: frozenset[str] = frozenset({"smart_diff", "summary"})
 #: Env-var names the harness promises it never reads or logs (convention 8).
 #: They are present so a static check can assert the harness does not
 #: ``os.environ.get(name)`` them directly.
-MEAT_CREDENTIAL_ENV_VARS: frozenset[str] = frozenset({"OPENAI_API_KEY", "ANTHROPIC_API_KEY"})
+MEAT_CREDENTIAL_ENV_VARS: frozenset[str] = frozenset(
+    {
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "NOUS_API_KEY",
+        "TOKENHUB_API_KEY",
+        "MEAT_API_KEY",
+    }
+)
 
 #: Env-var names whose **values** are stripped from subprocess stderr tails
 #: before they are surfaced in a log record, stored on
@@ -111,6 +119,9 @@ MEAT_CREDENTIAL_ENV_VARS: frozenset[str] = frozenset({"OPENAI_API_KEY", "ANTHROP
 _MEAT_REDACT_ENVVARS: tuple[str, ...] = (
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
+    "NOUS_API_KEY",
+    "TOKENHUB_API_KEY",
+    "MEAT_API_KEY",
     "MEAT_MODEL",
 )
 
@@ -305,12 +316,14 @@ def run_meat_harness(
     if not meat_binary.exists():
         logger.warning(
             "meat binary not found at {}; skipping reading-diff lens "
-            "(install via `go install meat.dev/cmd/meat@latest`).",
+            "(install meat_python_plus for `meat-py`, or "
+            "`go install meat.dev/cmd/meat@latest`).",
             meat_binary,
         )
         return _skip_result(
             raw_diff,
-            "skip: meat binary not found; install via `go install meat.dev/cmd/meat@latest`",
+            "skip: meat binary not found; install meat_python_plus (`meat-py`) "
+            "or `go install meat.dev/cmd/meat@latest`",
         )
 
     # The subprocess inherits the *process* env unchanged. The harness
