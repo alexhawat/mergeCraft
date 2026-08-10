@@ -94,6 +94,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `record_shadow_prediction` to modules the Action orchestrator reaches
   (#50)
 
+### Documentation
+
+- Document the Nous Research provider in `README.md` (Authentication table
+  row for `nous` / `deepseek/deepseek-v4-flash`, a worked `.mergecraft/config.yaml`
+  example block, and a `mergecraft auth nous` CLI row) and add a
+  cross-reference note in `docs/ANALYZERS.md` pointing at the README's
+  Authentication section so the analyzer-catalog page stops looking like the
+  surface for provider configuration. `Dockerfile`, `action.yml`, and
+  `.github/workflows/mergecraft.yml` are deliberately unchanged (PR #120
+  already mirrors the sevn cascade correctly). (#57)
+
 ### Security
 
 - The `github-issue-triage` skill now reads issue bodies and comments only through the

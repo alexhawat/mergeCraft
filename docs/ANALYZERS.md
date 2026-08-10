@@ -2,6 +2,9 @@
 
 Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run ``uv run python -m mergecraft.analyzers.catalog_docs`` to refresh.
 
+
+> **Provider configuration (catalog slugs, credential detection, `mergecraft auth <provider>`) is documented in [the README → Authentication](../README.md#authentication).** This page is the *analyzer* catalog — the rows below are deterministic, manifest-driven tools (`actionlint`, `zizmor`, `ShellCheck`, `Hadolint`, …) the reviewer runs mechanically. The Nous Research / DeepSeek V4 Flash path (provider id `nous`, catalog slug `nous/deepseek/deepseek-v4-flash`) is a *provider*, not an analyzer, and lives in the README's [Authentication table](../README.md#authentication) alongside Anthropic, OpenAI, Google, and Cursor. Set up its secret with [`mergecraft auth nous`](../README.md#authentication); see [issue #57](https://github.com/alexhawat/mergeCraft/issues/57) for the rationale.
+
 | id | category | languages | default | runtime | trust | exclusive group | notes |
 |----|----------|-----------|---------|---------|-------|-----------------|-------|
 | `actionlint` | ci | — | auto | managed | untrusted | — | — |

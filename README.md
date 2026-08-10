@@ -54,6 +54,7 @@ the provider you configure. You can authenticate either with a **subscription**
 | Anthropic Claude | `mergecraft auth claude` → saves `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Claude Pro/Max) | `ANTHROPIC_API_KEY` secret |
 | OpenAI Codex | `mergecraft auth codex` → saves `CODEX_AUTH_JSON` from `codex login --device-auth` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` secret |
 | Google Gemini | `mergecraft auth gemini` → saves `GEMINI_API_KEY` from a pasted AI Studio key | `GEMINI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY` secret |
+| Nous Research (DeepSeek V4 Flash) | `mergecraft auth nous` → saves `NOUS_API_KEY` from a pasted Portal key | `NOUS_API_KEY` secret (or `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` alias — see [issue #57](https://github.com/alexhawat/mergeCraft/issues/57)) |
 | Cursor Cloud | `mergecraft auth cursor` → saves `CURSOR_API_KEY` from a pasted Cursor API key | `CURSOR_API_KEY` secret |
 | Nous Portal | — (API key) | `mergecraft auth nous` → saves `NOUS_API_KEY` |
 | Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → saves `TOKENHUB_API_KEY` (Hy3 and any TokenHub model) |
@@ -134,6 +135,28 @@ model: google/gemini-3.1-pro-preview
 env:
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 ```
+
+**Nous Portal example** — set `NOUS_API_KEY` and point the repo at the
+`nous/deepseek/deepseek-v4-flash` catalog slug. The opencode harness consumes
+the env var under its `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` contract (PR #79),
+so the canonical wire re-passes the secret:
+
+```yaml
+# .mergecraft/config.yaml
+model: nous/deepseek/deepseek-v4-flash
+```
+
+```yaml
+# workflow env (API key path)
+env:
+  NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}
+  MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
+  MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
+```
+
+`mergecraft auth nous` writes `NOUS_API_KEY`; setting the two harness env vars
+explicitly on the step is the same contract `.github/workflows/mergecraft.yml`
+uses. See [issue #57](https://github.com/alexhawat/mergeCraft/issues/57).
 
 **Cursor Cloud example** — set `CURSOR_API_KEY` and point the repo at
 `cursor/cloud-agent` (remote cloud agent; local Cursor CLI deferred):
@@ -428,6 +451,7 @@ Inspect what was seeded into a given run with `mergecraft learnings influence --
 | `mergecraft auth claude` | Save a Claude Pro/Max subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) via `gh secret set` |
 | `mergecraft auth codex` | Save a ChatGPT subscription credential (`CODEX_AUTH_JSON`) via `gh secret set` |
 | `mergecraft auth gemini` | Save a Gemini API key (`GEMINI_API_KEY`) via `gh secret set` |
+| `mergecraft auth nous` | Save a Nous Portal API key (`NOUS_API_KEY`) via `gh secret set` |
 | `mergecraft auth cursor` | Save a Cursor Cloud API key (`CURSOR_API_KEY`) via `gh secret set` |
 | `mergecraft auth nous` | Save a Nous Portal API key (`NOUS_API_KEY`) via `gh secret set` |
 | `mergecraft auth tokenhub` | Save a TokenHub API key (`TOKENHUB_API_KEY`) via `gh secret set` |
