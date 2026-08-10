@@ -119,6 +119,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference lives in `docs/TRACING.md` and the D14
   `actions/upload-artifact@v4` snippet with `if: always()` is documented
   in both `README.md` and `docs/TRACING.md` (#56, W8).
+- Per-tool / per-LLM spans now stream in from the agent drivers. The
+  Claude, Codex, and Gemini drivers switched from
+  `subprocess.run(..., capture_output=True)` to `subprocess.Popen` with
+  line-buffered reads through a shared NDJSON consumer
+  (`src/mergecraft/agents/_stream_consumer.py`) so each parsed event
+  drives a `tool.call` or `llm.call` span via the W4 tracer. Opencode
+  streams its CLI fallback path but degrades to run-level spans because
+  its event shapes are partial (W0.5); Cursor stays on its HTTP-polling
+  read path (W6.4). Failure diagnosis (D13, PR #16's
+  `_build_claude_failure_error` and the user-namespace bwrap hint) is
+  unchanged, idle detection (`utils/activity.py`) is unaffected
+  because `consume_stream` echoes lines back to stdout, and malformed
+  events are skipped and counted rather than raised against. `docs/TRACING.md`
+  gains a per-driver table pinning the version each driver was tested
+  against and the resulting coverage. (#56, W6)
 
 - Reviews now actually emit a Merge Evidence Packet. Every run that reviews a
   pull request writes one versioned JSON record of the findings, the analyzer
