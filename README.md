@@ -59,7 +59,7 @@ Inspired by [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 | 🔍 **Deep PR review** | Correctness, risk, blast-radius and hygiene lenses; inline findings + a short narrative verdict |
 | 🧰 **Deterministic analyzers** | actionlint, zizmor, ShellCheck, Hadolint and more, auto-detected from changed paths — verified hits only, never guessed |
 | ✅ **Structural approval gate** | `mergecraft-approval` commit status is a pure function of typed findings — the agent's own "approved" can never outvote a blocker |
-| 🔁 **Model fallback chains** | Ordered `models:` list with per-slug `modelFallbacks:`; skips uncredentialed providers and retries past transient failures |
+| 🔁 **Model fallback chains** | Ordered `models:` list with per-slug `modelFallbacks:`; skips uncredentialed providers and retries past transient failures — `with: model:` becomes the chain head, not a kill-switch (see [Chain semantics](#chain-semantics--model)) |
 | 🧠 **Provenance-gated memory** | `.mergecraft/learnings.md` persists cross-run knowledge; fork-authored entries are quarantined in `## Staging` until a maintainer promotes them |
 | 🛡️ **Trust tiers** | Fork PRs and `pull_request_target` runs resolve to an untrusted tier: no secrets, no network, read-only analyzers |
 | 📡 **SARIF upload (opt-in)** | Publish analyzer findings to GitHub code scanning with one flag |
@@ -191,6 +191,11 @@ staticChecks:
   - name: lint
     command: make lint
 ```
+
+Add `model: <slug>` to the workflow `with:` block to pick the **head** of
+the chain (default chain head is the first `models:` entry); the configured
+fallbacks are walked on credential miss or retryable failure. See
+[Chain semantics](#chain-semantics--model-37--w4) for the contract.
 
 ### Example 5 — SARIF upload to code scanning (opt-in)
 
@@ -355,6 +360,67 @@ models route to the OpenCode harness (no first-party Codex provider);
 > surface, and the env-var multi-provider extension all land together in
 > this release — see issue
 > [#71](https://github.com/alexhawat/mergeCraft/issues/71).
+
+### Chain semantics — `model:` (#37 / W4)
+
+The `with: model:` input is the **chain head**, not a chain kill-switch.
+The configured `models:` / `modelFallbacks:` tail is preserved and walked
+on credential miss or retryable failure. Issue
+[#37](https://github.com/alexhawat/mergeCraft/issues/37) closes on this.
+
+```yaml
+# .mergecraft/config.yaml — the configured chain
+models:
+  - anthropic/claude-sonnet
+  - openai/gpt-5.3-codex
+  - google/gemini-3.1-pro-preview
+modelFallbacks:
+  anthropic/claude-sonnet:
+    - anthropic/claude-opus
+```
+
+```yaml
+# .github/workflows/mergecraft.yml — a single ``uses:`` step walks the
+# chain. ``model:`` is the head; the configured tail follows.
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    model: anthropic/claude-sonnet        # ← chain head (your pick)
+    # model_pin: enabled                 # ← uncomment to collapse to one model
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+```
+
+Effective chain in the example above (with the operator-named head
+preserved as the first entry):
+
+```text
+[anthropic/claude-sonnet, anthropic/claude-opus,
+ openai/gpt-5.3-codex, google/gemini-3.1-pro-preview]
+```
+
+`MERGECRAFT_MODEL` (env var) follows the same rule: it joins as the head.
+
+#### Escape hatch — `model_pin: enabled`
+
+To restore the legacy "use exactly this model, suppress fallbacks"
+semantics, set `model_pin: enabled` on the `with:` block, or
+`modelPin: true` in `.mergecraft/config.yaml` (the action input wins):
+
+```yaml
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    model: anthropic/claude-sonnet
+    model_pin: enabled                 # ← chain collapses to [claude-sonnet]
+```
+
+#### Action parity with `models:`
+
+`models:` is the chain, `model:` is the head. `models:` alone (without
+`with: model:`) is supported and unchanged — the chain runs as configured.
+A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
+`if: HAS_OPENAI` → another) collapses to a single step.
 
 ## 🧰 CLI
 

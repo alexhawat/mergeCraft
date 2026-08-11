@@ -48,7 +48,13 @@ jobs:
             ${{ github.event_name == 'pull_request'
                 && 'Review this pull request.'
                 || github.event.inputs.prompt }}
+          # #37 / W4 — a single ``uses:`` step walks the configured chain.
+          # The ``model:`` input is the chain head; configure the tail via
+          # ``models:`` in `.mergecraft/config.yaml`. Uncredentialed entries
+          # are skipped with a warning; retryable failures advance. Set
+          # ``model_pin: enabled`` ONLY if you want to suppress fallbacks.
           model: anthropic/claude-sonnet
+          # model_pin: enabled   # uncomment to suppress fallbacks (legacy semantics)
           # Post mergecraft / mergecraft-approval commit-status checks (gate on approval).
           status_checks: enabled
           # token: ${{ steps.token.outputs.token }}
@@ -59,3 +65,4 @@ jobs:
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           # NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}           # + model: nous/deepseek/deepseek-v4-flash
           # TOKENHUB_API_KEY: ${{ secrets.TOKENHUB_API_KEY }}   # + model: tokenhub/hy3
+          # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}       # + model: google/gemini-*

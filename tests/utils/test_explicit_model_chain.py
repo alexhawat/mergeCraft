@@ -1,47 +1,35 @@
-"""RED tests for the #37 chain-semantics fix (W4 / W1.6, W1.7, W1.8).
+"""Tests for the #37 chain-semantics fix (W4 / W1.6, W1.7, W1.8).
 
 Wave plan: ``.ignorelocal/waves/issues-provider-routing-wave-plan.md``
-(Batch B / W1).
+(Batch B / W1 → W4).
 
-The current behaviour:
-
-- ``utils/payload.py:559-560`` sets ``modelExplicit`` whenever
-  ``inputs.model`` is truthy.
-- ``main.py:164-165`` reads ``use_model_chain = bool(effective_model_chain(...))
-  and not model_explicit``, so a workflow passing ``with: model:`` silently
-  disables the configured chain. That is the bug #37 names.
+Before W4: ``utils/payload.py`` set ``modelExplicit`` whenever ``inputs.model``
+was truthy, and ``main.py`` read ``use_model_chain = bool(effective_model_chain(...))
+and not model_explicit`` — so a workflow passing ``with: model:`` silently
+disabled the configured chain. That is the bug #37 names.
 
 W4 changes the semantics so that:
 
 - A supplied ``model:`` input becomes the **head** of the effective chain
   (the rest of the configured chain is preserved), unless the operator
-  explicitly opts into "pin to a single model" via a new sentinel
-  (``pin:`` input, ``models_pin:`` config key, or some other explicit
-  signal — W4 owns the surface).
+  explicitly opts into "pin to a single model" via ``model_pin: enabled``
+  (action input / ``modelPin: true`` repo setting).
 - The escape hatch keeps working: an operator who wants to suppress the
   chain can still do so.
 
 These tests pin that contract from three angles:
 
-- **W1.6** (unit): ``effective_model_chain`` (or whatever W4 settles as
-  the entry point) returns ``[d, a, b, c]`` when ``models=[a,b,c]`` and
-  ``model=d`` are both supplied. Today the function reads only
-  ``settings.models`` / ``settings.model_fallbacks``; the action input is
-  injected via the ``model_explicit`` signal, which the chain does not
-  consume. W4's fix wires the action input as the chain head.
+- **W1.6** (unit): ``effective_model_chain`` returns ``[d, a, b, c]``
+  when ``models=[a,b,c]`` and ``head=d`` are both supplied.
 
-- **W1.7** (unit): the explicit-pin escape hatch (``models: [d]`` or
-  ``model: d`` with a ``pin`` opt-in, whichever W4 lands) still yields a
-  single-entry chain.
+- **W1.7** (unit): the explicit-pin escape hatch (``head=d`` with
+  ``pin=True``) still yields a single-entry chain.
 
 - **W1.8** (integration / GHA payload path): drives the resolution through
   ``resolve_payload`` + ``main.py`` (mocked at the agent boundary) so the
   acceptance test proves the chain walk happens at the Action boundary
   (D9). Asserts (a) a credential-missing first entry advances, (b) a
   retryable failure advances.
-
-All cross-wave markers use ``strict=False`` so an early-passing xfail is an
-XFAIL -> XPASS upgrade, not a hard failure.
 """
 
 from __future__ import annotations
@@ -84,11 +72,6 @@ def _import_chain_symbol(name: str) -> object:
 # -- W1.6: explicit model input becomes the chain head --------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W4: model_explicit no longer short-circuits; supplied model: "
-    "becomes the chain head",
-    strict=False,
-)
 def test_explicit_model_input_preserves_configured_chain_tail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -136,10 +119,6 @@ def test_explicit_model_input_preserves_configured_chain_tail(
 # -- W1.7: explicit-pin escape hatch keeps working -------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W4: explicit-pin opt-in still yields a single-entry chain",
-    strict=False,
-)
 def test_explicit_pin_opt_in_still_yields_single_entry_chain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -187,11 +166,6 @@ def test_explicit_pin_opt_in_still_yields_single_entry_chain(
 # -- W1.8: GHA payload path walks the chain across providers ---------------
 
 
-@pytest.mark.xfail(
-    reason="green after W4: the GHA payload path walks the chain across providers "
-    "(credential-missing first entry advances; retryable failure advances)",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_gha_payload_path_walks_the_chain_credential_skip(
     monkeypatch: pytest.MonkeyPatch,
@@ -249,10 +223,6 @@ async def test_gha_payload_path_walks_the_chain_credential_skip(
     assert result.success is True
 
 
-@pytest.mark.xfail(
-    reason="green after W4: the GHA payload path advances past a retryable first-entry failure",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_gha_payload_path_walks_the_chain_retryable_failure(
     monkeypatch: pytest.MonkeyPatch,

@@ -89,6 +89,10 @@ class JsonPayload(BaseModel):
     prompt: str
     model: str | None = None
     model_explicit: bool | None = Field(default=None, alias="modelExplicit")
+    # #37 / W4 / D8 — explicit-pin opt-in on the JSON payload surface.
+    # ``modelPin: true`` collapses the chain to ``[model]`` (preserves the
+    # legacy "use exactly this" semantics). Default absent ⇒ chain-preserving.
+    model_pin: bool | None = Field(default=None, alias="modelPin")
     triggerer: str | None = None
     base_instructions: str | None = Field(default=None, alias="baseInstructions")
     event_instructions: str | None = Field(default=None, alias="eventInstructions")
@@ -108,6 +112,7 @@ class ActionInputs(BaseModel):
     prompt: str | None = None
     prompt_file: str | None = None
     model: str | None = None
+    model_pin: StatusChecksInput | None = None
     timeout: str | None = None
     push: PushPermission | None = None
     shell: ShellPermission | None = None
@@ -118,7 +123,13 @@ class ActionInputs(BaseModel):
     suggest_eval_add: SuggestEvalAddInput | None = None
 
     @field_validator(
-        "push", "shell", "status_checks", "analyzers", "suggest_eval_add", mode="before"
+        "push",
+        "shell",
+        "status_checks",
+        "analyzers",
+        "suggest_eval_add",
+        "model_pin",
+        mode="before",
     )
     @classmethod
     def _empty_to_none(cls, value: object) -> object:
@@ -479,6 +490,7 @@ def resolve_non_prompt_inputs() -> ActionInputs:
     return ActionInputs.model_validate(
         {
             "model": get_action_input("model") or None,
+            "model_pin": get_action_input("model_pin") or None,
             "timeout": get_action_input("timeout") or None,
             "cwd": get_action_input("cwd") or None,
             "push": get_action_input("push") or None,
@@ -596,8 +608,25 @@ def resolve_payload(
         "~mergecraft": True,
         "version": (json_payload.version if json_payload else None) or _package_version(),
         "model": model,
+        # #37 / W4 / D8 — a supplied ``model:`` input no longer means "suppress the
+        # chain". The supplied slug is the chain head; the configured tail follows
+        # unless the operator opts into pinning via ``model_pin: enabled`` (or
+        # ``.mergecraft/config.yaml``'s ``modelPin: true``).
+        #
+        # ``modelExplicit`` is kept for downstream consumers that still branch on
+        # it — it now reflects the explicit-pin opt-in only, not the bare
+        # presence of a ``model:`` input. ``modelHead`` is the new head-slug
+        # signal.
+        "modelHead": (json_payload.model if json_payload else None) or inputs.model or None,
         "modelExplicit": bool(
-            (json_payload.model_explicit if json_payload else None) or inputs.model
+            (json_payload.model_explicit if json_payload else None)
+            or (inputs.model and inputs.model_pin == "enabled")
+            or (settings.model and settings.model_pin)
+        ),
+        "modelPin": (
+            inputs.model_pin == "enabled"
+            or bool(json_payload.model_explicit if json_payload else None)
+            or settings.model_pin
         ),
         "prompt": prompt,
         "triggerer": triggerer,

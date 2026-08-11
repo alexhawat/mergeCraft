@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING** — `with: model:` no longer means "suppress the configured
+  model chain" (#37 / W4 / D8). It now becomes the **head** of the effective
+  chain; the configured `models:` / `modelFallbacks:` tail is preserved and
+  walked on credential miss or retryable failure. A single `uses:
+  alexhawat/mergeCraft@…` step now walks the configured chain across
+  providers without the consumer reimplementing dual Claude → Codex steps.
+  To restore the legacy "use exactly this model" semantics, set the new
+  `model_pin: enabled` action input (or `modelPin: true` in
+  `.mergecraft/config.yaml`). Workflows that relied on `model:` to disable
+  the chain see new fallback behaviour — set `model_pin: enabled` to opt
+  back into the old contract. The pinned chain order is the supplied
+  `model:` head followed by the configured tail (`effective_model_chain()`,
+  `utils/agent_resolve.py`). The `modelExplicit` payload field is retained
+  as a back-compat alias for the explicit-pin signal — any consumer that
+  branched on it sees the same answer; the new `modelHead` field carries
+  the chain head.
+
 ### Added
 
 - Codex CLI custom OpenAI-compatible provider passthrough + multi-provider surface

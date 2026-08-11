@@ -18,7 +18,24 @@ inputs:
       nous/deepseek/deepseek-v4-flash) or a raw models.dev specifier. Overrides
       repo settings. OpenAI-compatible gateways: set NOUS_API_KEY or
       TOKENHUB_API_KEY (or MERGECRAFT_CUSTOM_PROVIDER_*).
+
+      Default behaviour (#37 / W4): the supplied `model:` becomes the **head**
+      of the configured chain — the repo's `models:` list (and any
+      `modelFallbacks:`) is retained as the tail and walked on credential
+      miss or retryable failure. To restore the legacy "use exactly this
+      model, suppress the chain" semantics, set `model_pin: enabled`.
     required: false
+  model_pin:
+    description: >-
+      #37 / W4 / D8 — opt into the legacy "use exactly this model" semantics
+      for the `model:` input. Default `disabled`: `model:` becomes the chain
+      head; the configured `models:` / `modelFallbacks:` tail is walked on
+      credential miss or retryable failure. Set to `enabled` to collapse the
+      chain to `[model]` (suppress fallbacks). Wire this through `.mergecraft/
+      config.yaml`'s `modelPin: true` for repo-wide default; the action input
+      wins.
+    required: false
+    default: "disabled"
   cwd:
     description: "Working directory for the agent (defaults to GITHUB_WORKSPACE)"
     required: false
@@ -155,6 +172,7 @@ runs:
     INPUT_PROMPT_FILE: ${{ inputs.prompt_file }}
     INPUT_TIMEOUT: ${{ inputs.timeout }}
     INPUT_MODEL: ${{ inputs.model }}
+    INPUT_MODEL_PIN: ${{ inputs.model_pin }}
     INPUT_CWD: ${{ inputs.cwd }}
     INPUT_PUSH: ${{ inputs.push }}
     INPUT_SHELL: ${{ inputs.shell }}
