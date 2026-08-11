@@ -611,8 +611,10 @@ def auth_logfire(
                 f"{LOGFIRE_PROJECT_ENV} to {env_path}"
             )
         else:
+            # Bandit's B608 fires on the interpolated `env_path`; this is a
+            # console warning, not a SQL statement (no DB engine involved).
             console.print(
-                f"[yellow]warning:[/yellow] could not update {env_path} "
+                f"[yellow]warning:[/yellow] could not update {env_path} "  # nosec B608
                 f"— set {LOGFIRE_RUNTIME_TOKEN_ENV} and "
                 f"{LOGFIRE_PROJECT_ENV} manually or check file permissions."
             )
