@@ -427,14 +427,10 @@ def test_gemini_tool_call_span_has_request_response_attrs(
 
 # ---------------------------------------------------------------------------
 # Test 6 — known-verb tool ``browser`` emits a ``tool.browse`` child span.
-# This is the GREEN-only T1.2 surface; xfail until the impl wave ships.
+# T1.2 made this deterministic; xfail marker removed post-merge.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after T1.2: tool.complete / tool.browse child-span emission",
-    strict=False,
-)
 def test_known_verb_tool_emits_verb_sub_event(recording_sink: Any) -> None:
     """``tool.name == "browser"`` → child ``tool.complete`` span with ``kind="tool.browse"``.
 
