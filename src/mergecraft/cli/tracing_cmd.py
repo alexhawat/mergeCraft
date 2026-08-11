@@ -65,6 +65,32 @@ config_app = typer.Typer(
 )
 
 
+def _print_tracing_next_steps(console: Console) -> None:
+    """Print the disabled-state remediation hints (sevn: ``show_tracing_config``).
+
+    sevn hard-codes this block in its ``show_tracing_config`` command so the
+    operator is never left with a bare ``disabled`` status and no remedy. We
+    mirror it: list the two symmetric commands (``mergecraft tracing logfire
+    enable`` for the remote Logfire sink, and the local/env path) so the
+    operator knows exactly how to turn tracing on.
+    """
+    console.print(
+        "\n[bold]next steps[/bold]\n"
+        "  - enable the Logfire sink interactively:\n"
+        "      [cyan]mergecraft tracing logfire enable[/cyan]\n"
+        "  - or set it up non-interactively (token + project):\n"
+        "      [cyan]mergecraft tracing logfire enable --token X --project Y[/cyan]\n"
+        "  - or disable remote tracing and keep a local JSONL file sink:\n"
+        "      [cyan]export MERGECRAFT_TRACING=true[/cyan]\n"
+        "      [cyan]export MERGECRAFT_TRACING_TO=local_files[/cyan]\n"
+        "      [cyan]export MERGECRAFT_TRACE_DIR=.mergecraft/traces/[/cyan]\n"
+        "  - to push spans to any OTLP endpoint instead:\n"
+        "      [cyan]export MERGECRAFT_TRACING_TO=otel[/cyan]\n"
+        "      [cyan]export MERGECRAFT_OTEL_ENDPOINT=http://127.0.0.1:4318/v1/traces[/cyan]\n"
+        "  - verify after enabling: [cyan]mergecraft config tracing[/cyan]"
+    )
+
+
 @config_app.command("tracing")
 def config_tracing(
     config: Path | None = typer.Option(
@@ -112,12 +138,46 @@ def config_tracing(
         # The reference was set but resolved to None — still show the env var name.
         table.add_row("logfire_token", "[dim]unset[/dim]")
 
+    # Local sinks — sevn's ``show_tracing_config`` prints this even when disabled
+    # so the operator can see at a glance whether a local JSONL file sink is on.
+    # When tracing is off, no sink (local or remote) is attached, so the row is
+    # ``none``. When on and a local dir is configured, it echoes the trace_dir.
+    if enabled and resolved.get("trace_dir"):
+        table.add_row("local sinks", resolved["trace_dir"])
+    else:
+        table.add_row("local sinks", "[dim]none[/dim]")
+
+    # Trace env — the env var names that drive tracing. Surfaced so an operator
+    # reading ``config tracing`` while disabled can see exactly which keys to
+    # set (or which are currently present in the environment). sevn's
+    # ``show_tracing_config`` lists the equivalent ``sevn.json`` fields; here
+    # the canonical knobs are the ``MERGECRAFT_*`` env vars.
+    _TRACE_ENV_VARS = (
+        "MERGECRAFT_TRACING",
+        "MERGECRAFT_TRACING_TO",
+        "MERGECRAFT_LOGFIRE_TOKEN",
+        "MERGECRAFT_TRACING_PROJECT",
+        "MERGECRAFT_OTEL_ENDPOINT",
+        "MERGECRAFT_TRACE_DIR",
+    )
+    present = [v for v in _TRACE_ENV_VARS if v in os.environ]
+    table.add_row(
+        "trace env",
+        ", ".join(present) if present else "[dim](none set)[/dim]",
+    )
+
     if not enabled:
         table.add_row("status", "[yellow]disabled[/yellow]")
     else:
         table.add_row("status", "[green]enabled[/green]")
 
     console.print(table)
+
+    # Next-step hints — sevn hard-codes these in ``show_tracing_config`` so the
+    # operator is never left staring at "disabled" with no remedy. Print the
+    # block only when tracing is off; when on, the table is self-explanatory.
+    if not enabled:
+        _print_tracing_next_steps(console)
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +282,28 @@ def render_resolved(resolved: dict[str, Any]) -> str:
             parts.append("  logfire_token: *** (redacted)")
         else:
             parts.append(f"  logfire_token: {token}")
+    # Mirror ``config_tracing``: always surface the local-sink state and the
+    # trace env vars, and append next-step hints when tracing is disabled.
+    if resolved.get("enabled") and resolved.get("trace_dir"):
+        parts.append(f"  local sinks: {resolved['trace_dir']}")
+    else:
+        parts.append("  local sinks: none")
+    _TRACE_ENV_VARS = (
+        "MERGECRAFT_TRACING",
+        "MERGECRAFT_TRACING_TO",
+        "MERGECRAFT_LOGFIRE_TOKEN",
+        "MERGECRAFT_TRACING_PROJECT",
+        "MERGECRAFT_OTEL_ENDPOINT",
+        "MERGECRAFT_TRACE_DIR",
+    )
+    present = [v for v in _TRACE_ENV_VARS if os.environ.get(v)]
+    parts.append("  trace env: " + (", ".join(present) if present else "(none set)"))
+    if not resolved.get("enabled"):
+        parts.append(
+            "  next steps: mergecraft tracing logfire enable "
+            "[--token X --project Y] | or set MERGECRAFT_TRACING=true "
+            "MERGECRAFT_TRACING_TO=local_files"
+        )
     return "\n".join(parts)
 
 
