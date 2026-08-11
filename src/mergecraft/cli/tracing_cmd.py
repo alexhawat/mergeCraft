@@ -28,6 +28,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.tracing.redaction import redact_attrs
 from mergecraft.tracing.sinks import read_jsonl_events
@@ -176,6 +177,20 @@ def config_tracing(
     else:
         table.add_row("status", "[green]enabled[/green]")
 
+    # GitHub Action tracing visibility — a local ``.env`` cannot see the
+    # Action's runtime env, but the workflow file tells the operator whether
+    # tracing is enabled *for the GitHub Action*. Only shown when a workflow
+    # file was found (don't noise the local-only case).
+    gh = detect_github_action_tracing()
+    if gh.get("source") != "not found":
+        gh_value = (
+            "[green]enabled[/green]"
+            if gh.get("github_action_tracing")
+            else "[dim]not configured[/dim]"
+        )
+        gh_detail = f" [dim]({gh.get('detail', '')})[/dim]"
+        table.add_row("github action", gh_value + gh_detail)
+
     console.print(table)
 
     # Next-step hints — sevn hard-codes these in ``show_tracing_config`` so the
@@ -312,6 +327,12 @@ def render_resolved(resolved: dict[str, Any]) -> str:
             "[--token X --project Y] | or set MERGECRAFT_TRACING=true "
             "MERGECRAFT_TRACING_TO=local_files"
         )
+    # GitHub Action tracing visibility — surfaced even though a local render
+    # cannot see the Action's runtime env. Skipped when no workflow was found.
+    gh = detect_github_action_tracing()
+    if gh.get("source") != "not found":
+        gh_line = "enabled" if gh.get("github_action_tracing") else "not configured"
+        parts.append(f"  github action: {gh_line}")
     return "\n".join(parts)
 
 
