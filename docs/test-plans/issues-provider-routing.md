@@ -1,4 +1,168 @@
-# #71 / #37 — Provider routing & chain semantics — W1 RED test plan
+# #71 / #37 / #34 / #57 — Provider routing, chain semantics & MiniMax catalog — RED test plan
+
+Wave plan: `.ignorelocal/waves/issues-provider-routing-wave-plan.md`
+Worktree: `mergecraft-prov-b-routing` (Batch B) → `mergecraft-prov-c-catalog` (Batch C, this wave)
+Batch: B (W1, completed 2026-08-11 on PR #123) and C (W5, this wave)
+
+This file maps every contract W1.1–W1.10 (Batch B, completed) plus
+W5.1–W5.7 (Batch C, this wave) pins to the test that covers it, across
+the smart-coverage matrix (unit / integration / functional; happy / edge /
+error). The test-author wave owns the **RED** half of the tests-first pair:
+the suite must collect with zero errors and pass `make lint` + `make
+typecheck`, with the cross-wave contract assertions xfailed (`strict=False`)
+until W3/W4 (Batch B) or W6/W7 (Batch C) land.
+
+## Batch C — MiniMax (this wave)
+
+Batch C is gated on Batch B's merge (D4); with PR #123 merged into
+`origin/pre-0.0.1` @ `00c5d71` the Batch C worktree exists at
+`../mergecraft-prov-c-catalog` on branch `wave/prov-c-catalog`. W5 owns
+the RED suite for #34 (MiniMax) and #57 (Nous/DeepSeek V4 Flash — but
+#57 was already shipped via PR #122 / `wave/issue-57-nous` so W5.3 is
+**N/A** — see the "W5.3 N/A" section below).
+
+### MiniMax contract locked at W5
+
+MiniMax publishes an OpenAI-compatible endpoint at
+[`https://api.minimax.io/v1`](https://platform.minimax.io/docs/api-reference/text-openai-api.md)
+(verified 2026-08-11). The operator has confirmed D10 / option (ii): MiniMax
+routes through the existing custom-provider helper, **not** a bespoke
+`mmx-cli` harness. The locked model id is `MiniMax-M3` (latest M-series,
+1,000,000-token context, OpenAI-compatible Chat Completions).
+
+- Base URL: `https://api.minimax.io/v1`
+- Slug: `minimax/MiniMax-M3`
+- Env-var convention: inherits the W3 indexed pair (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`,
+  N ≥ 1, provider id `provider_<N>`) **and** the singleton alias
+  (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}` → provider id `default`).
+  Operator picks either surface; W6 owns the W3 helper extension so the
+  slug prefix `minimax/` resolves to either block.
+- W6 must not invent a third env-var family. The D7 contract is binding.
+
+### W5.3 N/A — Nous/DeepSeek V4 Flash already shipped
+
+Issue #57 was closed 2026-08-11T06:06:32Z by
+[PR #122](https://github.com/alexhawat/mergeCraft/pull/122) (`wave/issue-57-nous`,
+merge commit `26bfab9`, with `11035c0 feat(models): first-class Nous Research
+support (#57)`). The Nous catalog entry (`models.py:407` — provider `nous`,
+model `deepseek/deepseek-v4-flash` plus tokenhub variants), credential
+detection, README row, `mergecraft auth nous`, and `--validate` smoke test
+are all on `pre-0.0.1`. **W7's RED suite (W5.3) is already done — Batch C
+does not need to author it.** Batch C's remaining scope is #34 (MiniMax)
+plus any post-#57 cleanup.
+
+The previously authored W1.3 (`test_nous_provider_in_providers_and_aliases`,
+`test_models_list_renders_nous_row_*`) and W1.10 (`test_auth_nous_*`) tests
+live in the `wave/issue-57-nous` worktree and are part of `pre-0.0.1`
+today — they are not re-authored here.
+
+### Batch C xfail schedule
+
+| Wave | Test file | Marker reason prefix |
+|------|-----------|----------------------|
+| **W6** | `tests/agents/test_minimax_routing.py` | `green after W6:` for MiniMax helper routing + Codex config.toml emission + raw pass-through |
+| **W6** | `tests/cli/test_models_list_minimax.py` | `green after W6:` for `mergecraft models list` rendering the `minimax/MiniMax-M3` row |
+| **W6** | `tests/agents/test_minimax_routing.py::test_existing_curated_slug_resolution_is_unchanged` | `green after W6:` for D12 additive invariant (already XPASS vacuously today — assertion guards future catalog mutations) |
+
+All cross-wave markers use `strict=False` so an early-passing xfail is an
+XFAIL → XPASS upgrade, not a hard failure. W6 reconciles by deleting
+markers on tests the implementation now satisfies.
+
+### Batch C — Contract → test matrix (this wave)
+
+| #       | Decision / convention                                  | Test (this wave)                                                    | Scenario class                |
+|---------|--------------------------------------------------------|---------------------------------------------------------------------|-------------------------------|
+| W5.1a   | MiniMax slug routes via opencode + singleton env       | `test_minimax_routes_via_opencode_with_singleton_env`               | happy path (D10 / option ii)  |
+| W5.1b   | MiniMax slug routes via codex config.toml              | `test_minimax_routes_via_codex_with_singleton_env`                  | happy path (D10 / option ii)  |
+| W5.1c   | Indexed pair (provider_1) also works for MiniMax       | `test_minimax_routes_via_indexed_provider_pair`                     | happy path (indexed)          |
+| W5.1d   | Locked base URL matches published docs                 | `test_minimax_base_url_constant_matches_published_docs`             | structural                    |
+| W5.1e   | Locked URL never leaks into a live-call fixture        | `test_minimax_published_docs_url_is_only_referenced_in_documentation` | structural (convention 7)   |
+| W5.2a   | Missing MiniMax credential raises (parametrised)       | `test_minimax_missing_credential_fails_loud[minimax-minimax-m3]`    | error handling (convention 5) |
+| W5.2b   | Missing credential — unknown MiniMax model id          | `test_minimax_missing_credential_fails_loud[minimax-unknown-model]` | error handling (convention 5) |
+| W5.4a   | `models list` enumerates the MiniMax row (no creds)    | `test_mergecraft_models_list_renders_minimax_row_without_credentials` | happy path (CLI surface)    |
+| W5.4b   | `models list` flips credentials column `no` → `yes`    | `test_mergecraft_models_list_renders_minimax_row_with_credentials`  | happy path (CLI surface)      |
+| W5.4c   | `models list` does not leak the api key value          | `test_mergecraft_models_list_minimax_row_does_not_leak_api_key`     | error handling (convention 7) |
+| W5.5    | `resolve_model()` passes un-curated slugs through      | `test_minimax_raw_passthrough_slug_resolves`                        | regression pin (D12)          |
+| W5.6    | New catalog entries do not change existing resolution  | `test_existing_curated_slug_resolution_is_unchanged[slug]` (×72)   | regression pin (D12 additive) |
+| W5.4smoke| `mergecraft models --help` enumerates the subcommand   | `test_models_list_help`                                             | structural (collection smoke) |
+
+### Per-contract rationale (Batch C)
+
+#### D10 — MiniMax routing decision (operator-locked)
+
+The MiniMax base URL and model slug were locked at W5 by reading the
+[published OpenAI SDK integration guide](https://platform.minimax.io/docs/api-reference/text-openai-api.md)
+on 2026-08-11. The decision (route through the W3 custom-provider helper,
+**not** a bespoke `mmx-cli` harness) is operator-confirmed; the tests pin
+the **observable** contract — a `minimax/MiniMax-M3` slug with the
+singleton or indexed env-var pair set results in a provider block in
+both harnesses whose `baseURL` (or `base_url`) matches the published
+endpoint URL. The exact helper surface (whether W6 adds a `minimax`
+preset to `openai_compatible_gateways.GATEWAY_PRESETS` or extends
+`_custom_provider_ids` to honour the active model's prefix even when
+not in the resolver dict) is W6's call — the tests pin the behaviour,
+not the signature.
+
+#### D12 — Additive catalog invariants
+
+The W5.6 parametrized regression pin (`test_existing_curated_slug_resolution_is_unchanged`)
+captures every curated slug's `resolve_cli_model()` value today and
+re-asserts it after W6 lands. The test XPASSes vacuously today (the
+catalog hasn't changed) — the xfail marker is the regression pin
+that says "if W6 mutates any of these resolutions, this test goes
+RED and the W6 wave fails the merge". The 72 parametrized slugs cover
+every provider in `PROVIDERS`: anthropic, openai, google, xai, deepseek,
+moonshotai, opencode, opencode-go, bedrock, vertex, nous, tokenhub,
+openrouter.
+
+#### Convention 5 — Fail-loud, never silent fall-through
+
+W5.2 parametrises two MiniMax slugs (`minimax/MiniMax-M3` and
+`minimax/some-other-model`) and asserts `resolve_runtime_agent()` raises
+with a message that names MiniMax and the env-var names the operator can
+set. The test pins against the failure mode the wave plan flags: a
+provider's model selected without its credential must not silently fall
+through to the opencode harness (whose binary is absent). The test
+explicitly asserts `opencode` does NOT appear in the error message.
+
+#### Convention 7 — No API key in logs / rendered output
+
+W5.1b asserts the resolved key value never appears in the rendered codex
+`config.toml` (convention 7). W5.4c asserts the resolved key value never
+appears in `mergecraft models list` stdout. Both use sentinel key strings
+that would be catastrophic to leak in production.
+
+### Reconciliation plan (after W6 lands)
+
+1. Drop every `@pytest.mark.xfail(reason="green after W6: …", strict=False)`
+   marker on tests the implementation now satisfies.
+2. Keep the structural / regression-pin tests:
+   - `test_minimax_base_url_constant_matches_published_docs`
+   - `test_minimax_published_docs_url_is_only_referenced_in_documentation`
+   - `test_minimax_raw_passthrough_slug_resolves` (vacuous today, but the
+     xfail marker pins the regression intent)
+   - `test_existing_curated_slug_resolution_is_unchanged[*]` (72
+     parametrized cases; the xfail marker is the regression intent)
+3. Reconcile the W5.6 test: if W6 adds a curated `minimax/*` catalog
+   entry that **changes** `resolve_cli_model()` for any pre-existing
+   slug, that change is a Batch C regression and W6 fails the merge.
+
+### Open questions for W6
+
+- Should the helper's `resolve_gateway_endpoints()` add a `minimax`
+  preset to `GATEWAY_PRESETS` (parity with `nous` / `tokenhub`), or
+  should W6 instead extend the multi-provider resolver to honour the
+  active model's prefix even when it is not in the resolver dict?
+  **Recommend the preset** — keeps the surface small and reuses the
+  existing preset path for the harness lookup.
+- For the catalog entry, what should `minimax/MiniMax-M3`'s `env_vars`
+  be? **Recommend** `("MERGECRAFT_CUSTOM_PROVIDER_API_KEY",)` — the
+  singleton is the canonical D7 surface; the indexed-pair form is
+  operator-supplied.
+
+---
+
+## Batch B — Routing & chain semantics (W1, completed 2026-08-11)
 
 Wave plan: `.ignorelocal/waves/issues-provider-routing-wave-plan.md`
 Worktree: `mergecraft-prov-b-routing` @ `wave/prov-b-routing`
