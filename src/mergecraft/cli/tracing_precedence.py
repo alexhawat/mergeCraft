@@ -108,10 +108,11 @@ def _resolve_env_layer(env: dict[str, str]) -> dict[str, Any]:
         out["logfire_token"] = env["MERGECRAFT_LOGFIRE_TOKEN"]
     if "MERGECRAFT_OTEL_ENDPOINT" in env:
         out["otel_endpoint"] = env["MERGECRAFT_OTEL_ENDPOINT"]
-    # ``MERGECRAFT_TRACING_PROJECT`` carries the Logfire project label that
-    # becomes the ``x-logfire-project`` header at runtime. The CLI
-    # ``auth logfire`` command writes this alongside ``MERGECRAFT_LOGFIRE_TOKEN``
-    # so the operator never has to edit ``.env`` by hand.
+    # ``MERGECRAFT_TRACING_PROJECT`` carries the Logfire project label. This is
+    # informational only — Logfire routes spans by the token itself, not a
+    # header. The CLI ``auth logfire`` command writes this alongside
+    # ``MERGECRAFT_LOGFIRE_TOKEN`` so the operator never has to edit ``.env``
+    # by hand.
     if "MERGECRAFT_TRACING_PROJECT" in env:
         project = env["MERGECRAFT_TRACING_PROJECT"].strip()
         if project:

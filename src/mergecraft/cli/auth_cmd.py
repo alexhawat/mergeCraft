@@ -37,7 +37,7 @@ DEFAULT_TOKENHUB = "https://tokenhub-intl.tencentcloudmaas.com/v1"
 # Logfire setup (issue #56 / D5). ``LOGFIRE_TOKEN`` is the Action secret the
 # ``logfire-token`` input maps to; ``MERGECRAFT_LOGFIRE_TOKEN`` is the
 # runtime-only env var the sink factory resolves as a fallback; the project
-# label becomes the ``x-logfire-project`` header at runtime.
+# label is informational only — Logfire routes spans by token, not a header.
 LOGFIRE_TOKEN_SECRET = "LOGFIRE_TOKEN"
 LOGFIRE_RUNTIME_TOKEN_ENV = "MERGECRAFT_LOGFIRE_TOKEN"
 LOGFIRE_PROJECT_ENV = "MERGECRAFT_TRACING_PROJECT"
@@ -598,9 +598,8 @@ def auth_logfire(
     if not project:
         console.print("canceled.")
         raise typer.Exit(0)
-    # Same surface as the validator: Logfire accepts arbitrary project strings
-    # via the ``x-logfire-project`` header, but reject whitespace inside the
-    # label so a stray newline does not silently change the routing key.
+    # Same surface as the validator: reject whitespace inside the project label
+    # so a stray newline does not silently change the stored value.
     if any(ch.isspace() for ch in project):
         _bail("Logfire project label must not contain whitespace.")
 
