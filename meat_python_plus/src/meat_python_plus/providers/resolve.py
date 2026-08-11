@@ -6,10 +6,12 @@ import os
 from dataclasses import dataclass
 
 from meat_python_plus.model import Model
+from meat_python_plus.providers import gateway
 from meat_python_plus.providers.anthropic_msgs import AnthropicMessagesModel
 from meat_python_plus.providers.openai_compat import OpenAICompatModel
+from meat_python_plus.providers.openai_responses import OpenAIResponsesModel
 
-DEFAULT_MODEL = "gpt-4.1-mini"
+DEFAULT_MODEL = "gpt-5.6-sol"
 
 NOUS_BASE_URL = "https://inference-api.nousresearch.com/v1"
 TOKENHUB_BASE_URL = "https://tokenhub-intl.tencentcloudmaas.com/v1"
@@ -24,7 +26,7 @@ CODEX_ONLY_MSG = (
 
 @dataclass(frozen=True)
 class ResolvedProvider:
-    kind: str  # openai_compat | anthropic
+    kind: str  # openai_responses | openai_compat | anthropic
     model: str
     api_key: str
     base_url: str
@@ -86,18 +88,29 @@ def resolve_provider(model: str = "") -> ResolvedProvider:
     meat_key = _env("MEAT_API_KEY")
 
     if is_anthropic_model(model):
-        if not anthropic_key and not _env("ANTHROPIC_BASE_URL"):
-            raise ValueError(
-                "no Anthropic credentials: set ANTHROPIC_API_KEY "
-                "(Claude models require the Messages API)"
+        anthropic_base = _env("ANTHROPIC_BASE_URL")
+        if anthropic_key or anthropic_base:
+            base = (anthropic_base or "https://api.anthropic.com").rstrip("/")
+            return ResolvedProvider(
+                kind="anthropic",
+                model=model.removeprefix("anthropic/"),
+                api_key=anthropic_key,
+                base_url=base,
+                provider_name="anthropic",
             )
-        base = (_env("ANTHROPIC_BASE_URL") or "https://api.anthropic.com").rstrip("/")
-        return ResolvedProvider(
-            kind="anthropic",
-            model=model.removeprefix("anthropic/"),
-            api_key=anthropic_key,
-            base_url=base,
-            provider_name="anthropic",
+        gateway_base = gateway.discover_exe_gateway_base()
+        if gateway_base:
+            return ResolvedProvider(
+                kind="anthropic",
+                model=model.removeprefix("anthropic/"),
+                api_key=gateway.IMPLICIT_GATEWAY_KEY,
+                base_url=f"{gateway_base}/anthropic",
+                provider_name="anthropic",
+            )
+        raise ValueError(
+            "no Anthropic credentials: set ANTHROPIC_API_KEY "
+            "(Claude models require the Messages API), or run on an exe.dev VM "
+            "with an attached 'llm' integration"
         )
 
     if is_tokenhub_model(model):
@@ -142,7 +155,7 @@ def resolve_provider(model: str = "") -> ResolvedProvider:
     if openai_key:
         base = meat_base or "https://api.openai.com/v1"
         return ResolvedProvider(
-            kind="openai_compat",
+            kind="openai_responses",
             model=model,
             api_key=openai_key,
             base_url=base,
@@ -167,6 +180,16 @@ def resolve_provider(model: str = "") -> ResolvedProvider:
             provider_name="tokenhub",
         )
 
+    gateway_base = gateway.discover_exe_gateway_base()
+    if gateway_base:
+        return ResolvedProvider(
+            kind="openai_responses",
+            model=model,
+            api_key=gateway.IMPLICIT_GATEWAY_KEY,
+            base_url=f"{gateway_base}/openai",
+            provider_name="openai",
+        )
+
     if _env("CODEX_AUTH_JSON") and not any(
         [_env("OPENAI_API_KEY"), nous_key, tokenhub_key, anthropic_key, meat_key]
     ):
@@ -174,7 +197,8 @@ def resolve_provider(model: str = "") -> ResolvedProvider:
 
     raise ValueError(
         "no LLM credentials: set OPENAI_API_KEY, NOUS_API_KEY, TOKENHUB_API_KEY, "
-        "ANTHROPIC_API_KEY, or MEAT_BASE_URL+MEAT_API_KEY"
+        "ANTHROPIC_API_KEY, or MEAT_BASE_URL+MEAT_API_KEY, or run on an exe.dev VM "
+        "with an attached 'llm' integration"
     )
 
 
@@ -182,6 +206,12 @@ def new_model_from_env(model: str = "") -> Model:
     resolved = resolve_provider(model)
     if resolved.kind == "anthropic":
         return AnthropicMessagesModel(
+            api_key=resolved.api_key,
+            model=resolved.model,
+            base_url=resolved.base_url,
+        )
+    if resolved.kind == "openai_responses":
+        return OpenAIResponsesModel(
             api_key=resolved.api_key,
             model=resolved.model,
             base_url=resolved.base_url,

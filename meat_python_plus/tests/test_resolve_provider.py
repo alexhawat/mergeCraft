@@ -11,7 +11,7 @@ from meat_python_plus.providers.resolve import (
 
 def test_resolve_model_from_env(monkeypatch):
     monkeypatch.delenv("MEAT_MODEL", raising=False)
-    assert resolve_model_name("") == "gpt-4.1-mini"
+    assert resolve_model_name("") == "gpt-5.6-sol"
     monkeypatch.setenv("MEAT_MODEL", "hy3")
     assert resolve_model_name("") == "hy3"
     assert resolve_model_name("explicit") == "explicit"
@@ -81,6 +81,34 @@ def test_custom_base(monkeypatch):
     assert r.provider_name == "custom"
     assert r.base_url == "https://example.com/v1"
     assert r.api_key == "custom-key"
+
+
+def test_native_openai_selects_responses_api(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("NOUS_API_KEY", raising=False)
+    monkeypatch.delenv("TOKENHUB_API_KEY", raising=False)
+    monkeypatch.delenv("MEAT_BASE_URL", raising=False)
+    r = resolve_provider("gpt-4.1-mini")
+    assert r.kind == "openai_responses"
+    assert r.provider_name == "openai"
+
+
+def test_tokenhub_resolve_stays_chat_completions(monkeypatch):
+    monkeypatch.setenv("TOKENHUB_API_KEY", "th-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-not-win-for-hy3")
+    r = resolve_provider("hy3")
+    assert r.kind == "openai_compat"
+    assert r.provider_name == "tokenhub"
+    assert r.base_url == TOKENHUB_BASE_URL
+
+
+def test_nous_resolve_stays_chat_completions(monkeypatch):
+    monkeypatch.setenv("NOUS_API_KEY", "nous-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-not-win-for-nous-model")
+    r = resolve_provider("nous/deepseek/deepseek-v4-flash")
+    assert r.kind == "openai_compat"
+    assert r.provider_name == "nous"
+    assert r.base_url == NOUS_BASE_URL
 
 
 def test_codex_only_fails(monkeypatch):

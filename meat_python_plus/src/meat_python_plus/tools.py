@@ -10,6 +10,7 @@ from typing import Any
 
 from meat_python_plus.editplan import (
     CompiledPlan,
+    DetectedMove,
     Submission,
     compile_edit_plan,
     compile_submission,
@@ -93,20 +94,13 @@ def edit_plan_schema(with_summary: bool) -> dict[str, Any]:
 
 
 def truncate_for_tool(s: str) -> str:
-    if len(s.encode("utf-8")) <= MAX_TOOL_OUTPUT:
+    raw = s.encode("utf-8")
+    if len(raw) <= MAX_TOOL_OUTPUT:
         return s
-    # Truncate by characters approximating byte budget.
     cut = MAX_TOOL_OUTPUT
-    encoded = s.encode("utf-8")[:cut]
-    while encoded:
-        try:
-            text = encoded.decode("utf-8")
-            break
-        except UnicodeDecodeError:
-            encoded = encoded[:-1]
-    else:
-        text = ""
-    return text + f"\n... (truncated, {len(s.encode('utf-8'))} total bytes)"
+    while cut > 0 and (raw[cut] & 0xC0) == 0x80:
+        cut -= 1
+    return raw[:cut].decode("utf-8") + f"\n... (truncated, {len(raw)} total bytes)"
 
 
 def cap_lines(s: str, max_lines: int) -> str:
@@ -129,9 +123,21 @@ def slice_lines(text: str, start: int, end: int) -> str:
 
 
 class Toolbox:
-    def __init__(self, root: str, raw_diff: str) -> None:
+    def __init__(
+        self,
+        root: str = "",
+        raw_diff: str = "",
+        *,
+        repo_root: str | None = None,
+        no_moves: bool = False,
+        moves: list[DetectedMove] | None = None,
+    ) -> None:
+        if repo_root is not None:
+            root = repo_root
         self.root = root
         self.raw_diff = raw_diff
+        self.no_moves = no_moves
+        self.moves = list(moves or [])
         self.smart_diff = ""
         self.submitted: Submission | None = None
         self.submitted_plan: CompiledPlan | None = None
@@ -143,8 +149,9 @@ class Toolbox:
             description=(
                 "Validate a complete remove/replace/fold plan against the numbered "
                 "ORIGINAL diff and preview the resulting reading diff with retention "
-                "statistics. Imports are removed automatically. Large previews are "
-                "explicitly truncated. Plans are never incremental."
+                "statistics. Imports are removed automatically and moved code must be "
+                "treated symmetrically; the feedback reports anything that needs fixing. "
+                "Large previews are explicitly truncated. Plans are never incremental."
             ),
             input_schema=edit_plan_schema(False),
         )
@@ -152,8 +159,9 @@ class Toolbox:
             name="submit",
             description=(
                 "Submit a final complete remove/replace/fold plan against the numbered "
-                "ORIGINAL diff plus a one-line summary. Meat applies the plan locally; "
-                "do not submit a rewritten diff."
+                "ORIGINAL diff plus a one-line summary. Meat applies the plan locally "
+                "(removing imports automatically and rejecting asymmetric treatment of "
+                "moved code); do not submit a rewritten diff."
             ),
             input_schema=edit_plan_schema(True),
         )
@@ -163,13 +171,21 @@ class Toolbox:
             Tool(
                 name="read_file",
                 description=(
-                    "Read a UTF-8 text file from the repository. Paths are relative to "
-                    "the repo root. Optionally restrict to start_line/end_line."
+                    "Read a UTF-8 text file from the repository to gather clues about "
+                    "whether a diff line is load-bearing (or whether a file is generated). "
+                    "Paths are relative to the repo root. Optionally restrict to an "
+                    "inclusive 1-based line range with start_line/end_line."
                 ),
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string"},
+                        "path": {
+                            "type": "string",
+                            "description": (
+                                "File path relative to the repo root; read-only, "
+                                "does not remove content."
+                            ),
+                        },
                         "start_line": {"type": "integer"},
                         "end_line": {"type": "integer"},
                     },
@@ -179,8 +195,9 @@ class Toolbox:
             Tool(
                 name="grep",
                 description=(
-                    "Search the repository for a regular expression (git grep). "
-                    "Optionally scope to a path prefix."
+                    "Search the repository for a regular expression (git grep). Use it to "
+                    "find call sites, type definitions, generator directives, or whether a "
+                    "symbol is used elsewhere. Optionally scope to a path prefix."
                 ),
                 input_schema={
                     "type": "object",
@@ -284,7 +301,12 @@ class Toolbox:
             return f"invalid input: {err}", True
         try:
             plan = parse_edit_plan(data)
-            compiled = compile_edit_plan(self.raw_diff, plan)
+            compiled = compile_edit_plan(
+                self.raw_diff,
+                plan,
+                provided_moves=self.moves,
+                detect_moves=not self.no_moves,
+            )
         except (TypeError, ValueError, KeyError) as e:
             return truncate_for_tool(f"invalid edit plan: {e}"), True
         return truncate_for_tool(plan_feedback(compiled)), False
@@ -297,7 +319,12 @@ class Toolbox:
             return f"invalid input: {err}", True
         try:
             submission = parse_submission(data)
-            compiled = compile_submission(self.raw_diff, submission)
+            compiled = compile_submission(
+                self.raw_diff,
+                submission,
+                provided_moves=self.moves,
+                detect_moves=not self.no_moves,
+            )
         except (TypeError, ValueError, KeyError) as e:
             return truncate_for_tool(f"invalid edit plan: {e}"), True
         self.submitted = submission
