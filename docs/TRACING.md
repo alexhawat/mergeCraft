@@ -277,6 +277,58 @@ Malformed events are skipped and counted: the consumer never raises on
 a bad line. The counter is available via `StreamSpanAccumulator.malformed_event_count`
 and the line is logged at `warning` level.
 
+## Provider and HTTP spans (T2)
+
+Every outbound provider request surfaces as a `provider.call` row with
+the transport family on it (`provider.transport_family` is one of
+`anthropic` / `responses_api` / `chat_completions`). The driver's
+existing `llm.call` span becomes a child of `provider.call`, and every
+outbound `httpx` call the driver made (e.g. the OpenAI-compatible
+custom-provider POST) becomes a grandchild via `instrument_httpx`.
+
+The Logfire tree therefore matches the sevn reference shape:
+
+```
+agent.attempt
+├── provider.call  (provider.transport_family=...)
+│   ├── http.client.request  (http.method, http.url-redacted, status)
+│   └── llm.call             (model.id, cost.*, gen_ai.usage.*)
+├── tool.call
+└── ...
+```
+
+- **When does `provider.call` fire?** Once per upstream API request.
+  Claude fires on `message_start` / closes on `message_stop`; Codex on
+  `thread.started` / `turn.completed`; Gemini on `init` / `result`. The
+  span exists so Logfire groups rows by transport family.
+- **When does `http.client.request` fire?** Once per outbound `httpx`
+  `send()` on a wrapper mergeCraft constructed (D8 — no global monkey
+  patch). The wrapper installs on the two `httpx.AsyncClient` instances
+  `agents/opencode.py::_prompt_session` and `agents/opencode.py::_run`
+  use for the custom OpenAI-compatible provider path, the only httpx
+  sites in the repo.
+- **`http.url` is always redacted inline** (D9 — see the URL redaction
+  table below).
+
+### URL redaction table
+
+`mergecraft.tracing.redaction.redact_url(url)` masks credential-shaped
+fragments while preserving the URL shape. Applied in order; first
+match wins per region:
+
+| Pattern | Before | After |
+|---------|--------|-------|
+| Telegram bot token | `https://api.telegram.org/bot123456:ABC/sendMessage` | `https://api.telegram.org/bot<redacted>/sendMessage` |
+| Basic auth | `https://user:pass@example.com/path` | `https://user:<redacted>@example.com/path` |
+| Query token (`api_key`, `access_token`, `token`, `key`, `secret`) | `https://example.com/v1/messages?api_key=sk-abc&x=1` | `https://example.com/v1/messages?api_key=<redacted>&x=1` |
+| Bearer header value | `Bearer ghp_longtoken123…` | `Bearer <redacted>` |
+| Embedded `sk-` / `ghp_` / `eyJ…` substring | `…sk-abc123def…` | `…<redacted>…` |
+
+The literal marker is `mergecraft.tracing.redaction.REDACTED = "<redacted>"`.
+The URL stays parseable (`urllib.parse.urlparse` round-trips on every
+shape), and non-token query parameters are preserved so the path-based
+grouping in Logfire's row inspector keeps working.
+
 ## One trace per run (T3)
 
 One `mergecraft diff-review` run emits one Logfire trace. Every span

@@ -752,6 +752,7 @@ def _codex_stream_event_handler(
     """
     open_tool_spans: dict[str, dict[str, Any]] = {}
     open_llm_spans: dict[str, dict[str, Any]] = {}
+    open_provider_spans: dict[str, dict[str, Any]] = {}
 
     def handler(
         accumulator: StreamSpanAccumulator,
@@ -783,8 +784,21 @@ def _codex_stream_event_handler(
             if thread_id in open_llm_spans:
                 return
             if tracer is not None:
+                # T2 / D10 — ``provider.call`` is a real span kind, not an
+                # attr. Opens on ``thread.started`` and closes on
+                # ``turn.completed``; the ``llm.call`` span becomes its
+                # child so Logfire groups every Responses API request under
+                # one row with the transport family on it.
+                provider_span = tracer.start_span("provider.call")
+                provider_span.set_attribute("provider.id", "openai_codex")
+                provider_span.set_attribute("provider.transport_family", "responses_api")
+                provider_span.set_attribute("model.id", model_id)
+                provider_span.set_attribute("gen_ai.system", "openai")
+                provider_span.set_attribute("gen_ai.operation.name", "chat")
+                provider_span.__enter__()
                 span = tracer.start_span(
                     "llm.call",
+                    parent_span_id=provider_span.span_id,
                 )
                 span.__enter__()
                 span.set_attribute("model.id", model_id)
@@ -792,6 +806,7 @@ def _codex_stream_event_handler(
                 span.set_attribute("gen_ai.operation.name", "chat")
                 span.set_attribute("gen_ai.request.model", model_id)
                 span.set_attribute("gen_ai.response.model", model_id)
+                open_provider_spans[thread_id] = {"span": provider_span}
                 open_llm_spans[thread_id] = {
                     "span": span,
                     "tokens_in": 0,
@@ -875,6 +890,15 @@ def _codex_stream_event_handler(
                     span_obj.ts_end_ns = time.time_ns()
                     span_obj.__exit__(None, None, None)
             open_llm_spans.clear()
+            # T2 / D10 — close the wrapping provider.call span after the
+            # inner llm.call span so the active-span stack unwinds
+            # inner-to-outer.
+            for entry in list(open_provider_spans.values()):
+                span_obj = entry.get("span")
+                if span_obj is not None:
+                    span_obj.ts_end_ns = time.time_ns()
+                    span_obj.__exit__(None, None, None)
+            open_provider_spans.clear()
             return
 
     def close_all() -> None:
@@ -890,6 +914,13 @@ def _codex_stream_event_handler(
                 span_obj.ts_end_ns = time.time_ns()
                 span_obj.__exit__(None, None, None)
         open_llm_spans.clear()
+        # T2 / D10 — provider.call spans wrap llm.call spans.
+        for entry in list(open_provider_spans.values()):
+            span_obj = entry.get("span")
+            if span_obj is not None:
+                span_obj.ts_end_ns = time.time_ns()
+                span_obj.__exit__(None, None, None)
+        open_provider_spans.clear()
 
     return handler, close_all
 

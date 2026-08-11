@@ -249,9 +249,10 @@ def _claude_stream_event_handler(
     """
     open_llm_spans: dict[str, dict[str, Any]] = {}
     open_tool_spans: dict[str, Any] = {}
+    open_provider_spans: dict[str, dict[str, Any]] = {}
 
     def _handler(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        nonlocal open_llm_spans, open_tool_spans
+        nonlocal open_llm_spans, open_tool_spans, open_provider_spans
         event_type = event.get("type")
 
         if event_type == "message_start":
@@ -268,9 +269,27 @@ def _claude_stream_event_handler(
                     "tokens_out": int(usage_payload.get("output_tokens") or 0),
                 }
                 return
+            # T2 / D10 — ``provider.call`` is a real span kind, not an attr.
+            # It opens on ``message_start`` and closes on ``message_stop``
+            # so the Logfire tree groups every Anthropic request under one
+            # row with its transport family on it; the ``llm.call`` span
+            # emitted below becomes the parent of any
+            # ``http.client.request`` row for visibility into the actual
+            # wire call.
+            provider_span = tracer.start_span(
+                "provider.call",
+                parent_span_id=parent_span_id,
+            )
+            provider_span.set_attribute("provider.id", "anthropic")
+            provider_span.set_attribute("provider.transport_family", "anthropic")
+            provider_span.set_attribute("model.id", model_id)
+            provider_span.set_attribute("gen_ai.system", "anthropic")
+            provider_span.set_attribute("gen_ai.operation.name", "chat")
+            provider_span.ts_start_ns = time.time_ns()
+            provider_span.__enter__()
             span = tracer.start_span(
                 "llm.call",
-                parent_span_id=parent_span_id,
+                parent_span_id=provider_span.span_id,
             )
             span.set_attribute("model.id", model_id)
             span.set_attribute("model.event", "message_start")
@@ -293,6 +312,7 @@ def _claude_stream_event_handler(
             )
             span.ts_start_ns = time.time_ns()
             span.__enter__()
+            open_provider_spans[message_id] = {"span": provider_span}
             open_llm_spans[message_id] = {
                 "span": span,
                 "tokens_in": int(usage_payload.get("input_tokens") or 0),
@@ -336,13 +356,22 @@ def _claude_stream_event_handler(
         if event_type == "message_stop":
             # Close any in-flight llm.call spans. The claude stream does
             # not always carry the message id on stop, so close all open
-            # spans — typical shape is one open span at a time.
+            # spans — typical shape is one open span at a time. The
+            # ``provider.call`` span wraps the ``llm.call`` span (D10) and
+            # closes after the inner span closes so the active-span stack
+            # unwinds cleanly.
             for entry in list(open_llm_spans.values()):
                 span_obj = entry.get("span")
                 if span_obj is not None:
                     span_obj.ts_end_ns = time.time_ns()
                     span_obj.__exit__(None, None, None)
             open_llm_spans.clear()
+            for entry in list(open_provider_spans.values()):
+                span_obj = entry.get("span")
+                if span_obj is not None:
+                    span_obj.ts_end_ns = time.time_ns()
+                    span_obj.__exit__(None, None, None)
+            open_provider_spans.clear()
             return
 
         if event_type == "content_block_start":
@@ -438,6 +467,13 @@ def _claude_stream_event_handler(
         # Then llm.call spans, in reverse insertion order.
         for key in list(reversed(list(open_llm_spans.keys()))):
             entry = open_llm_spans.pop(key)
+            span = entry.get("span") if isinstance(entry, dict) else None
+            if span is not None and span._context_token is not None:
+                span.__exit__(None, None, None)
+        # T2 / D10 — provider.call spans wrap llm.call spans. Close after
+        # the llm.call spans so the active-span stack unwinds inner-to-outer.
+        for key in list(reversed(list(open_provider_spans.keys()))):
+            entry = open_provider_spans.pop(key)
             span = entry.get("span") if isinstance(entry, dict) else None
             if span is not None and span._context_token is not None:
                 span.__exit__(None, None, None)

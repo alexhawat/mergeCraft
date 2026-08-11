@@ -37,14 +37,11 @@ for ``trace_id`` plumbing) because the implementation does not exist yet:
 - ``src/mergecraft/utils/agent_resolve.py`` — the chat-completions cached
   token paths are not yet recognised.
 
-Acceptance (after T2.2 lands): **12 collected; 11 green; 1 xfailed** —
-``test_provider_call_span_wraps_llm_call_for_anthropic`` stays xfail through
-the GREEN pass because wrapping ``llm.call`` inside a ``provider.call``
-parent is the defining T2.2 surface — a fresh test-creator pass removes the
-marker once the impl wave lands.
-
-The xfail marker is ``strict=False`` so an unsatisfied xfail never hard-fails
-the suite (the T2.2 impl wave is allowed to turn tests green on touch).
+Acceptance (after T2.2 lands): **12 collected; 12 green**.
+``test_provider_call_span_wraps_llm_call_for_anthropic`` was xfailed in the
+T2.1 RED suite because wrapping ``llm.call`` inside a ``provider.call``
+parent is the defining T2.2 surface. After T2.2 the marker is removed
+entirely — the test passes deterministically.
 """
 
 from __future__ import annotations
@@ -127,9 +124,8 @@ def test_instrument_httpx_emits_one_span_per_send(http_tracer: Any) -> None:
     every send" is observable on the failure path. The span count is what
     the test pins, not the failure status (test 10 covers that surface).
     """
-    from mergecraft.tracing.http import instrument_httpx
-
     from mergecraft.tracing import MemorySink, Tracer
+    from mergecraft.tracing.http import instrument_httpx
 
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="s", run_id="r")
@@ -156,9 +152,8 @@ def test_http_span_attrs_have_method_status_duration(unused_tcp_port: int) -> No
     import http.server
     import threading
 
-    from mergecraft.tracing.http import instrument_httpx
-
     from mergecraft.tracing import MemorySink, Tracer
+    from mergecraft.tracing.http import instrument_httpx
 
     served = threading.Event()
     stop = threading.Event()
@@ -292,9 +287,8 @@ def test_instrument_httpx_idempotent() -> None:
     so a second ``instrument_httpx`` call is a no-op rather than a
     double-emit per send.
     """
-    from mergecraft.tracing.http import instrument_httpx
-
     from mergecraft.tracing import MemorySink, Tracer
+    from mergecraft.tracing.http import instrument_httpx
 
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="s", run_id="r")
@@ -310,14 +304,12 @@ def test_instrument_httpx_idempotent() -> None:
 
 # ---------------------------------------------------------------------------
 # Test 8 — ``provider.call`` parent wrapping ``llm.call`` for Anthropic.
-# Xfail — this is the defining T2.2 GREEN surface.
+# Was xfail under T2.1; the T2.2 implementation now wraps ``llm.call`` in a
+# ``provider.call`` parent on ``message_start`` / closes on ``message_stop``
+# so this test is now expected to pass.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after T2.2: provider.call parent wraps llm.call (anthropic)",
-    strict=False,
-)
 def test_provider_call_span_wraps_llm_call_for_anthropic(recording_sink: Any) -> None:
     """Claude driver emits ``provider.call`` (anthropic) + ``llm.call`` + ``http.client.request``.
 
@@ -391,9 +383,8 @@ def test_provider_call_span_wraps_llm_call_for_chat_completions(
     ``llm.call`` span via a new ``provider.call`` parent — the assertion
     pins the parent-child tree shape end-to-end.
     """
-    from mergecraft.tracing.http import instrument_httpx
-
     from mergecraft.tracing import MemorySink, Tracer
+    from mergecraft.tracing.http import instrument_httpx
 
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="cc-test", run_id="cc-run")
@@ -428,9 +419,8 @@ def test_provider_call_span_wraps_llm_call_for_chat_completions(
 
 def test_http_failure_emits_span_with_status_code_0() -> None:
     """Connection refused → span with ``http.status_code=0`` and ``http.error_class``."""
-    from mergecraft.tracing.http import instrument_httpx
-
     from mergecraft.tracing import MemorySink, Tracer
+    from mergecraft.tracing.http import instrument_httpx
 
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="s", run_id="r")
@@ -473,9 +463,8 @@ def test_http_span_inherits_trace_id_from_mergecraft_run(
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("MERGECRAFT_TRACE_SESSION_ID", "shared-trace-t2-test")
 
-    from mergecraft.tracing.http import instrument_httpx
-
     from mergecraft.tracing import MemorySink, Tracer
+    from mergecraft.tracing.http import instrument_httpx
 
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="shared", run_id="shared")
@@ -508,9 +497,8 @@ def test_disabled_tracer_path_emits_no_http_span() -> None:
     the sink; the same must hold for ``instrument_httpx`` when the wrapped
     tracer is the null path.
     """
-    from mergecraft.tracing.http import instrument_httpx
-
     from mergecraft.tracing import NullTracer
+    from mergecraft.tracing.http import instrument_httpx
 
     client = httpx.Client(timeout=0.05)
     try:

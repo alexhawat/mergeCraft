@@ -33,6 +33,8 @@ from mergecraft.agents.shared import (
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.tracing import current_tracer
+from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.privilege import wrap_agent_command
 from mergecraft.utils.process_group import (
@@ -283,6 +285,14 @@ async def _prompt_session(
     if model:
         payload["model"] = model
     async with httpx.AsyncClient(timeout=600.0) as client:
+        # T2 / D8 — narrow instrumentation: wrap clients mergeCraft builds
+        # (the custom OpenAI-compatible provider path) so every outbound
+        # ``send`` emits an ``http.client.request`` span. ``current_tracer``
+        # resolves to the active mergeCraft span's tracer or ``None`` when
+        # tracing is disabled — ``instrument_httpx`` no-ops in that case
+        # without setting the idempotency sentinel so a later activation
+        # is possible.
+        instrument_httpx(client, tracer=current_tracer())
         try:
             resp = await client.post(
                 f"{base_url}/session/{session_id}/message",
@@ -315,12 +325,29 @@ async def _prompt_session(
         if isinstance(info, dict):
             inp = int(info.get("input_tokens") or info.get("input") or 0)
             out = int(info.get("output_tokens") or info.get("output") or 0)
+            # T2 — recognise the OpenAI Responses / Chat Completions
+            # cached-token paths so the Nous / MiniMax passthrough
+            # surfaces its cache_read on the same ``AgentUsage`` field
+            # the Anthropic path uses. Falls back to the explicit cache
+            # fields when a provider surfaces them separately.
+            cache_read = 0
+            for outer_key in ("prompt_tokens_details", "input_tokens_details"):
+                details = info.get(outer_key)
+                if isinstance(details, dict):
+                    cached = details.get("cached_tokens")
+                    if isinstance(cached, (int, float)):
+                        cache_read = int(cached)
+                        break
+            cache_read = cache_read or int(
+                info.get("cache_read_input_tokens") or info.get("cacheReadTokens") or 0
+            )
             cost = info.get("cost") or info.get("costUsd")
             if inp or out or cost:
                 usage = AgentUsage(
                     agent="opencode",
-                    input_tokens=inp,
+                    input_tokens=inp + cache_read,
                     output_tokens=out,
+                    cache_read_tokens=cache_read or None,
                     cost_usd=float(cost) if cost is not None else None,
                 )
                 log_token_table(
@@ -367,6 +394,10 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     assert handle is not None
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
+            # T2 / D8 — see ``_prompt_session`` for the same wrap; the
+            # opencode serve + session bootstrap request goes through this
+            # client, so it must emit ``http.client.request`` spans too.
+            instrument_httpx(client, tracer=current_tracer())
             created = await client.post(
                 f"{handle.base_url}/session",
                 json={"title": "mergecraft"},

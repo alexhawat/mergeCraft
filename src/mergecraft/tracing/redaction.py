@@ -44,6 +44,18 @@ _CLI_SECRET_VALUE = re.compile(
 )
 _REDACTED = "[REDACTED]"
 
+# Inline URL redaction markers — T2 / PR D9. ``redact_url`` masks the
+# credential-bearing portion of a URL while preserving scheme/host/path so
+# the URL stays readable (and parseable) in Logfire rows.
+_TELEGRAM_BOT_RE = re.compile(r"https?://api\.telegram\.org/bot[^/?\s]+")
+_BASIC_AUTH_RE = re.compile(r"https?://([^:@\s]+):[^@\s]+@")
+_QUERY_TOKEN_KEYS = ("api_key", "access_token", "token", "key", "secret")
+_QUERY_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(_QUERY_TOKEN_KEYS) + r")=([^&\s]+)")
+_BEARER_RE = re.compile(r"(Bearer\s)[A-Za-z0-9._-]{16,}")
+_EMBEDDED_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(sk-|ghp_|eyJ)[A-Za-z0-9._-]{8,}")
+
+REDACTED = "<redacted>"
+
 DENY_KEYS: tuple[str, ...] = (
     "authorization",
     "cookie",
@@ -135,4 +147,54 @@ def redact_cli_argv(argv: list[str]) -> str:
     return " ".join(masked)
 
 
-__all__ = ["DENY_KEYS", "redact_attrs", "redact_cli_argv", "redact_event"]
+def redact_url(url: str) -> str:
+    """Inline-redact credential-bearing portions of a URL (D9 / T2).
+
+    Patterns, applied in order (first match wins per region):
+
+    1. ``api.telegram.org/bot<TOKEN>`` → ``api.telegram.org/bot<redacted>``
+    2. ``https://user:pass@host`` → ``https://user:<redacted>@host`` (basic auth)
+    3. ``?api_key=…&token=…&key=…`` → ``?<key>=<redacted>`` (query token params)
+    4. ``Bearer sk-…`` → ``Bearer <redacted>`` (header values; URL-safe)
+    5. Catch-all for embedded ``sk-*`` / ``ghp_*`` / ``eyJ*`` substrings.
+
+    The URL stays parseable (D9 "inline, not opaque"): scheme, host, port,
+    path, and non-token query parameters are preserved so Logfire's
+    path-based grouping keeps working on the redacted form.
+
+    Args:
+        url (str): The URL or URL-shaped string to redact.
+
+    Returns:
+        str: The redacted URL.
+
+    Examples:
+        >>> redact_url("https://api.telegram.org/bot123456:ABC/sendMessage")
+        'https://api.telegram.org/bot<redacted>/sendMessage'
+        >>> redact_url("https://user:pass@example.com/path")
+        'https://user:<redacted>@example.com/path'
+        >>> redact_url("https://example.com/v1/messages?api_key=sk-abc&x=1")
+        'https://example.com/v1/messages?api_key=<redacted>&x=1'
+    """
+    if not url:
+        return url
+    # Pattern 1 — telegram bot token in path. Match-before-basic-auth because
+    # telegram URLs do not carry userinfo, but the catch-all embedded-token
+    # pattern below already covers the bare token substring; without this
+    # explicit shape the bot path would be folded into a generic sk-/ghp- mask
+    # and the URL would lose its ``/bot<token>`` shape.
+    url = _TELEGRAM_BOT_RE.sub(lambda _m: _m.group(0).split("/bot", 1)[0] + "/bot" + REDACTED, url)
+    # Pattern 2 — basic-auth userinfo.
+    url = _BASIC_AUTH_RE.sub(r"https://\1:" + REDACTED + r"@", url)
+    # Pattern 3 — known token query params. Per-key replace so non-token
+    # params (``x=1``, ``stream=true``) survive untouched (test 6 contract).
+    url = _QUERY_TOKEN_RE.sub(lambda m: f"{m.group(1)}={REDACTED}", url)
+    # Pattern 4 — Bearer tokens (header-shaped; URL-safe because URLs do not
+    # embed "Bearer" tokens, but a query string carrying one is still scrubbed).
+    url = _BEARER_RE.sub(r"\1" + REDACTED, url)
+    # Pattern 5 — embedded sk-/ghp-/eyJ substrings (catch-all, mirrors
+    # ``redact_cli_argv`` so behaviour stays consistent across surfaces).
+    return _EMBEDDED_TOKEN_RE.sub(REDACTED, url)
+
+
+__all__ = ["DENY_KEYS", "REDACTED", "redact_attrs", "redact_cli_argv", "redact_event", "redact_url"]

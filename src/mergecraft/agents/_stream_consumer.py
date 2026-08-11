@@ -24,15 +24,13 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from mergecraft.agents.shared import AgentUsage
     from mergecraft.tracing.tracer import Span
 
@@ -77,6 +75,7 @@ class StreamSpanAccumulator:
         self.cache_read += int(
             usage_payload.get("cache_read_input_tokens")
             or usage_payload.get("cacheReadTokens")
+            or _extract_openai_cached_tokens(usage_payload)
             or 0
         )
         self.cache_write += int(
@@ -99,6 +98,13 @@ class StreamSpanAccumulator:
         whose ``usage`` is the authoritative total. Calling ``replace_usage``
         on the ``result`` event avoids double-counting tokens and matches
         the legacy blob-parse shape that W5.7's equivalence test pins.
+
+        T2 adds OpenAI ``prompt_tokens_details.cached_tokens`` /
+        ``input_tokens_details.cached_tokens`` recognition so the Nous /
+        MiniMax / opencode Responses / Chat Completions paths populate
+        ``cache_read`` alongside the Anthropic-native
+        ``cache_read_input_tokens`` field. The fold is additive: any native
+        Anthropic value still wins.
         """
         if not isinstance(usage_payload, dict):
             return
@@ -111,6 +117,7 @@ class StreamSpanAccumulator:
         self.cache_read = int(
             usage_payload.get("cache_read_input_tokens")
             or usage_payload.get("cacheReadTokens")
+            or _extract_openai_cached_tokens(usage_payload)
             or 0
         )
         self.cache_write = int(
@@ -158,6 +165,32 @@ def _safe_iter_lines(stream: Iterable[str]) -> Iterator[str]:
             continue
         text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
         yield text
+
+
+def _extract_openai_cached_tokens(usage_payload: Mapping[str, Any]) -> int:
+    """Return the cached-input token count from an OpenAI Responses / Chat Completions usage dict.
+
+    T2 extends the legacy Anthropic ``cache_read_input_tokens`` path so the
+    Nous / MiniMax / opencode Responses / Chat Completions providers
+    surface their cached-input token usage on the same ``cache_read``
+    accumulator field. The two recognised shapes are:
+
+    - ``prompt_tokens_details.cached_tokens`` (Chat Completions / older)
+    - ``input_tokens_details.cached_tokens`` (Responses API / newer)
+
+    Returns ``0`` when neither field is present or the payload does not
+    match a dict shape — the helper is intentionally non-raising so a
+    malformed stream event cannot poison the accumulator.
+    """
+    if not isinstance(usage_payload, Mapping):
+        return 0
+    for outer_key in ("prompt_tokens_details", "input_tokens_details"):
+        details = usage_payload.get(outer_key)
+        if isinstance(details, Mapping):
+            cached = details.get("cached_tokens")
+            if isinstance(cached, (int, float)):
+                return int(cached)
+    return 0
 
 
 def _resolve_active_span_for_otel_bridge() -> Span | None:

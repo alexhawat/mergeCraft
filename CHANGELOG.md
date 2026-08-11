@@ -143,6 +143,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   describing the precedence and the Logfire-grouping contract. Tests:
   the 11-case RED suite in `tests/tracing/test_trace_id_bridge.py` (10
   green + 1 xfail passing through)
+- `feat(tracing): provider.call parent + outbound HTTP spans with URL redaction` —
+  each upstream API request becomes a `provider.call` row with the transport family;
+  each outbound `httpx` call becomes a `http.client.request` row with inline URL
+  redaction (telegram bot tokens, basic auth, query params, bearer headers).
+  `agents/{claude,codex,gemini}.py::_stream_event_handler` now opens a `provider.call`
+  span on the upstream's start event (`message_start` / `thread.started` / `init`),
+  attaches `provider.id` and `provider.transport_family` (`anthropic` /
+  `responses_api` / `chat_completions`), and closes the span in LIFO order with the
+  existing `llm.call` span on the matching terminal event. The `llm.call` span
+  becomes a child of `provider.call`, so the Logfire tree shows one
+  `provider.call → llm.call` pair per upstream request. New
+  `src/mergecraft/tracing/http.py` ships `instrument_httpx(client, *, tracer=None)`
+  — a narrow, idempotent wrapper around the `httpx` `Client.send` /
+  `AsyncClient.send` site in `agents/opencode.py` (D8 — only the clients
+  mergeCraft constructs; no global monkey patch). The wrapper emits an
+  `http.client.request` span with `http.method`, `http.url` (always
+  `redact_url`-scrubbed), `http.status_code`, `http.duration_ms`, and
+  `http.{request,response}_bytes` (best-effort `len(request.content)` /
+  `len(response.content)`); on exception the span is closed with
+  `status="error"` and `http.error_class`. New
+  `mergecraft.tracing.redaction.redact_url(url)` plus the `REDACTED`
+  constant extend the existing D7 redaction boundary to URLs without
+  breaking parseability — `urllib.parse.urlparse` round-trips on every
+  redacted shape, scheme/host/path/non-token query params survive.
+  `agents/opencode.py::_prompt_session` and `::_run` use the existing
+  OpenAI-compatible cached-token paths (`prompt_tokens_details.cached_tokens`
+  / `input_tokens_details.cached_tokens`) to fold cached input tokens into
+  `cost.cache_read` / `gen_ai.usage.cache_read_input_tokens` (matching the
+  existing Anthropic `cache_read_input_tokens` /
+  `cache_creation_input_tokens` behaviour). New
+  `mergecraft.tracing.current_tracer()` resolves the tracer that owns the
+  active mergeCraft `Span` for `instrument_httpx` callers that don't have a
+  tracer in hand. `docs/TRACING.md` gains a "Provider and HTTP spans"
+  section with the parent/child shape, the `instrument_httpx` site list,
+  and the URL redaction table. Tests: the 12-case RED suite in
+  `tests/tracing/test_http_spans.py` (12 green, including the formerly
+  `xfail` `test_provider_call_span_wraps_llm_call_for_anthropic`).
 - `mergecraft config tracing` now renders faithfully even when tracing is
   **disabled**, mirroring sevn's `show_tracing_config`. The table gains two
   rows plus a hint block:
