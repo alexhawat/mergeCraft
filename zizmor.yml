@@ -1,0 +1,17 @@
+# zizmor config for `make workflow-lint` (W12.3 / punch #27).
+#
+# Intentional ignores only — each entry is a documented product choice, not a
+# blanket disable. Prefer fixing findings (pin hashes, job-scoped permissions,
+# env-passed expressions) over adding ignores.
+rules:
+  dangerous-triggers:
+    ignore:
+      # Dogfood Action: must run with base-repo privileges to post reviews /
+      # check-runs; never checks out or executes the PR head (SHA-pinned Action
+      # image + push/shell disabled). See workflow header comments.
+      - mergecraft.yml
+      # Reads merged PR body via context.payload only — no checkout, no `run:`
+      # interpolation of attacker-controlled text. Authorization = merge itself.
+      - auto-close-fixed-issues.yml
+      # Delegates to a SHA-pinned Craft reusable workflow; no PR-head checkout.
+      - changelog-preview.yml

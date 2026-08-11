@@ -59,6 +59,10 @@ echo "» actionlint ${ACTIONLINT_VERSION}"
 "${ACTIONLINT_BIN}" -color .github/workflows/*.yml
 
 echo "» zizmor ${ZIZMOR_VERSION}"
-"${ZIZMOR_BIN}" .github/workflows/
+# Fail the gate on high-severity findings only. Medium/low (e.g. artipacked
+# persist-credentials suggestions, secrets-inherit on Craft preview) stay
+# visible in the log as a ratchet surface without blocking the PR. Intentional
+# high-severity exceptions live in repo-root ``zizmor.yml``.
+"${ZIZMOR_BIN}" --config "${ROOT}/zizmor.yml" --min-severity high .github/workflows/
 
 echo "workflow-lint OK"
