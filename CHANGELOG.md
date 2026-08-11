@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft auth logfire` — operator-facing setup for the Logfire tracing sink
+  (issue #56 / D5). The subcommand prompts for a Logfire write token via
+  `getpass` and a project label via `typer.prompt`, validates the token against
+  `GET https://logfire.pydantic.dev/api/v1/projects` (OTLP/HTTP returns 200 for
+  invalid tokens — it accepts and discards — so the REST endpoint is the only
+  path that actually enforces the bearer with a real `401`/`403`), then writes
+  `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` into the local
+  `.env` (via `python-dotenv`'s idempotent `set_key`) and/or the
+  `LOGFIRE_TOKEN` Actions secret via `gh secret set`. `--scope local|github|both`
+  selects where the credentials land; the default is `both`. The `[tracing]`
+  extra check is non-blocking — the command warns when `logfire` is missing
+  but does not auto-install (BYOK / convention 5). New env var
+  `MERGECRAFT_TRACING_PROJECT` plumbed through the precedence layer
+  (`src/mergecraft/cli/tracing_precedence.py`) and the sink factory
+  (`_resolve_logfire_project` in `src/mergecraft/tracing/exporters.py`) so the
+  project label becomes the `x-logfire-project` header at runtime
 - First-class Nous Research / DeepSeek V4 Flash support (#57). The catalog now
   enumerates `nous/deepseek/deepseek-v4-flash` as a curated alias
   (`PROVIDERS["nous"]` in `src/mergecraft/models.py`), with `resolve` set to the

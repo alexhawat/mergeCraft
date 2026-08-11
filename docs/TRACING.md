@@ -22,6 +22,41 @@ A repo that does not declare a `tracing:` block sees identical behaviour,
 identical performance, and zero egress — the default is off, and the
 disabled path is a true no-op (no directory is created).
 
+## Quick start: enable Logfire tracing
+
+The shortest path from a fresh checkout to spans landing in Logfire:
+
+```bash
+# 1. install the optional extra (one time)
+uv sync --extra tracing
+
+# 2. run the auth command (validates the token, writes .env + gh secret)
+mergecraft auth logfire
+
+# 3. verify wiring (token is redacted in the table)
+mergecraft config tracing
+
+# 4. ship a trace
+mergecraft diff-review --tracing --tracing-to logfire
+```
+
+`mergecraft auth logfire` accepts `--scope local|github|both` (default
+`both`). `local` writes `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT`
+into `.env`; `github` calls `gh secret set LOGFIRE_TOKEN` on the origin
+repo; `both` does both. The validator probes
+`GET https://logfire.pydantic.dev/api/v1/projects` (parity with the other
+`auth` providers) and rejects the token on `401`/`403` before any state
+changes. The `[tracing]` extra must be installed for spans to actually leave
+the runner — the command prints a warning when the extra is missing but does
+not auto-install (BYOK, convention 5).
+
+For the GitHub Action, the workflow step should pass
+`tracing-to: logfire` + `logfire-token: ${{ secrets.LOGFIRE_TOKEN }}` (the
+`LOGFIRE_TOKEN` secret is the same value `auth logfire --scope github`
+sets). The Action input `logfire-token` maps to the runtime
+`MERGECRAFT_LOGFIRE_TOKEN` env var; the project label is read from
+`MERGECRAFT_TRACING_PROJECT` or the YAML `tracing.sinks[].project` field.
+
 ## Config schema
 
 ```yaml
