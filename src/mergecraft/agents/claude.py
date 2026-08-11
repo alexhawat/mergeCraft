@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
+from mergecraft.agents._tool_attrs import emit_verb_subevent, enrich_tool_call_attrs
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
@@ -59,30 +60,6 @@ CLAUDE_DISALLOWED_TOOLS = ",".join(CLAUDE_EXEC_TOOL_DENY_RULES)
 def _strip_provider_prefix(specifier: str) -> str:
     slash = specifier.find("/")
     return specifier[slash + 1 :] if slash > 0 else specifier
-
-
-def _truncate_tool_payload(value: Any) -> str:
-    """Render a tool input/output payload as a redacted, truncated string.
-
-    Tool inputs/outputs can carry repo content (D15), so they are capped to a
-    safe length and passed through the shared secret matcher. Returns ``""``
-    for non-string payloads that cannot be meaningfully inlined.
-    """
-    from mergecraft.analyzers.redact import redact_secrets
-
-    if isinstance(value, str):
-        text = value
-    elif isinstance(value, (dict, list)):
-        try:
-            text = json.dumps(value, default=str)
-        except TypeError, ValueError:
-            text = str(value)
-    else:
-        return ""
-    text = redact_secrets(text)
-    if len(text) > 2048:
-        return text[:2048] + "…"
-    return text
 
 
 def write_mcp_config(ctx: AgentRunContext) -> str:
@@ -394,7 +371,13 @@ def _claude_stream_event_handler(
             span.set_attribute("gen_ai.operation.name", "execute_tool")
             span.set_attribute("gen_ai.tool.name", tool_name)
             span.set_attribute("gen_ai.tool.call.id", tool_id)
-            span.set_attribute("gen_ai.tool.input", _truncate_tool_payload(tool_input))
+            # T1 / D5 — request-side enrichment: byte counts + input-key list
+            # so Logfire's row inspector surfaces the request shape even when
+            # the driver carries the input as a dict (claude always does).
+            from mergecraft.tracing.redaction import redact_tool_payload
+
+            enrich_tool_call_attrs(span, arguments=tool_input)
+            span.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
             span.ts_start_ns = time.time_ns()
             span.__enter__()
             open_tool_spans[tool_id] = span
@@ -420,12 +403,26 @@ def _claude_stream_event_handler(
             tool_use_id = str(event.get("tool_use_id") or "")
             span = open_tool_spans.pop(tool_use_id, None)
             if span is not None:
+                output = event.get("content") or ""
                 span.ts_end_ns = time.time_ns()
-                span.set_attribute("tool.output", event.get("content") or "")
-                span.set_attribute(
-                    "gen_ai.tool.output", _truncate_tool_payload(event.get("content") or "")
-                )
+                # T1 / D5 — response-side enrichment: exit_code, byte
+                # count, kind label, and the verbatim output for the row.
+                enrich_tool_call_attrs(span, output=output, exit_code="ok")
+                span.set_attribute("tool.output", output)
+                from mergecraft.tracing.redaction import redact_tool_payload
+
+                span.set_attribute("gen_ai.tool.output", redact_tool_payload(output))
                 span.__exit__(None, None, None)
+                # T1 / D5 — known-verb tools also emit a verb-specific child
+                # span (tool.browse for ``browser``, etc.) for finer-grained
+                # Logfire grouping. Fire-and-forget; no new bookkeeping.
+                tool_name = str(span._attrs.get("tool.name", "unknown"))
+                emit_verb_subevent(
+                    tracer,
+                    parent_span_id=span.span_id,
+                    tool_name=tool_name,
+                    attrs=dict(span._attrs),
+                )
             return
 
         if event_type == "result":

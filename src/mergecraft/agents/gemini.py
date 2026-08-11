@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.agents._tool_attrs import emit_verb_subevent, enrich_tool_call_attrs
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
@@ -42,16 +43,6 @@ GOOGLE_GENERATIVE_AI_API_KEY_ENV = "GOOGLE_GENERATIVE_AI_API_KEY"
 def _strip_provider_prefix(specifier: str) -> str:
     slash = specifier.find("/")
     return specifier[slash + 1 :] if slash > 0 else specifier
-
-
-def _gemini_truncate_tool_payload(value: str) -> str:
-    """Render a gemini tool payload as a redacted, truncated string (GenAI attr)."""
-    from mergecraft.analyzers.redact import redact_secrets
-
-    text = redact_secrets(value or "")
-    if len(text) > 2048:
-        return text[:2048] + "…"
-    return text
 
 
 def _gemini_home(ctx: AgentRunContext) -> Path:
@@ -438,6 +429,16 @@ def _gemini_stream_event_handler(
                 span.set_attribute("gen_ai.operation.name", "execute_tool")
                 span.set_attribute("gen_ai.tool.name", tool_name)
                 span.set_attribute("gen_ai.tool.call.id", tool_id)
+                tool_input = event.get("input")
+                if tool_input is not None:
+                    # T1 / D5 — request-side enrichment so Logfire's row
+                    # inspector surfaces the request shape (byte count,
+                    # input-key list, full input dict).
+                    enrich_tool_call_attrs(span, arguments=tool_input)
+                    span.set_attribute("tool.input", tool_input)
+                    from mergecraft.tracing.redaction import redact_tool_payload
+
+                    span.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
                 open_tool_spans[tool_id] = {"span": span, "name": tool_name}
             return
 
@@ -449,12 +450,25 @@ def _gemini_stream_event_handler(
             span_obj = entry.get("span")
             if span_obj is not None:
                 tool_output = str(event.get("output") or "")
+                # T1 / D5 — response-side enrichment: exit_code, byte
+                # count, kind label, and the verbatim output for the row.
+                enrich_tool_call_attrs(span_obj, output=tool_output, exit_code="ok")
                 span_obj.set_attribute("tool.output", tool_output)
-                span_obj.set_attribute(
-                    "gen_ai.tool.output", _gemini_truncate_tool_payload(tool_output)
-                )
+                from mergecraft.tracing.redaction import redact_tool_payload
+
+                span_obj.set_attribute("gen_ai.tool.output", redact_tool_payload(tool_output))
                 span_obj.ts_end_ns = time.time_ns()
                 span_obj.__exit__(None, None, None)
+                # T1 / D5 — known-verb tools also emit a verb-specific
+                # child span (tool.browse for ``browser``, etc.) for
+                # finer-grained Logfire grouping. Fire-and-forget; no new
+                # bookkeeping state.
+                emit_verb_subevent(
+                    tracer,
+                    parent_span_id=span_obj.span_id,
+                    tool_name=entry.get("name", "unknown"),
+                    attrs=dict(span_obj._attrs),
+                )
             return
 
         if event_type == "result":

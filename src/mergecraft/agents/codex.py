@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.agents._tool_attrs import emit_verb_subevent, enrich_tool_call_attrs
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
     CUSTOM_PROVIDER_BASE_URL_ENV,
@@ -73,16 +74,6 @@ _FORBIDDEN_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/usr/tmp")
 def _strip_provider_prefix(specifier: str) -> str:
     slash = specifier.find("/")
     return specifier[slash + 1 :] if slash > 0 else specifier
-
-
-def _codex_truncate_tool_payload(value: str) -> str:
-    """Render a codex tool payload as a redacted, truncated string (GenAI attr)."""
-    from mergecraft.analyzers.redact import redact_secrets
-
-    text = redact_secrets(value or "")
-    if len(text) > 2048:
-        return text[:2048] + "…"
-    return text
 
 
 def _is_under_forbidden_temp(path: Path) -> bool:
@@ -833,6 +824,13 @@ def _codex_stream_event_handler(
                 span.set_attribute("gen_ai.operation.name", "execute_tool")
                 span.set_attribute("gen_ai.tool.name", tool_name)
                 span.set_attribute("gen_ai.tool.call.id", tool_id)
+                # T1 / D5 — request-side enrichment is deferred to the
+                # ``item.completed`` site because codex's
+                # ``item.started`` event does not carry the input payload
+                # — codex sends the input on the matching
+                # ``item.completed``. The close path below applies
+                # ``enrich_tool_call_attrs`` so the byte count + input
+                # representation still surface on the span.
                 open_tool_spans[tool_id] = {"span": span, "name": tool_name}
             return
 
@@ -853,11 +851,30 @@ def _codex_stream_event_handler(
                     span_obj.set_attribute("gen_ai.tool.name", resolved_name)
                     tool_input = str(item.get("input") or "")
                     span_obj.set_attribute("tool.input", tool_input)
-                    span_obj.set_attribute(
-                        "gen_ai.tool.input", _codex_truncate_tool_payload(tool_input)
+                    from mergecraft.tracing.redaction import redact_tool_payload
+
+                    span_obj.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
+                    # T1 / D5 — response-side enrichment on the close path:
+                    # codex emits tool_call + tool_result as sibling
+                    # ``item.completed`` events; the request side is
+                    # ``tool.input`` (string), the response side is the
+                    # synthesized exit_code/byte-count/kind set so Logfire
+                    # still has the request/response split on a single row.
+                    enrich_tool_call_attrs(
+                        span_obj, arguments=tool_input, output=tool_input, exit_code="ok"
                     )
                     span_obj.ts_end_ns = time.time_ns()
                     span_obj.__exit__(None, None, None)
+                    # T1 / D5 — known-verb tools also emit a verb-specific
+                    # child span (tool.browse for ``browser``, etc.) for
+                    # finer-grained Logfire grouping. Fire-and-forget; no
+                    # new bookkeeping state.
+                    emit_verb_subevent(
+                        tracer,
+                        parent_span_id=span_obj.span_id,
+                        tool_name=resolved_name,
+                        attrs=dict(span_obj._attrs),
+                    )
                 return
             if item_type == "tool_result":
                 # The matching tool.call span was closed on item.completed

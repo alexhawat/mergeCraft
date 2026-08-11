@@ -329,6 +329,84 @@ The URL stays parseable (`urllib.parse.urlparse` round-trips on every
 shape), and non-token query parameters are preserved so the path-based
 grouping in Logfire's row inspector keeps working.
 
+## Tool call attributes (T1)
+
+Every `tool.call` span carries the request/response byte counts,
+`exit_code`, error class/message, and input-key list sevn splits across
+`tool.invoke` / `tool.complete`. The shape is additive on the post-#137
+tree (D5: one enriched `tool.call` span, not sevn's `tool.invoke` /
+`tool.complete` split) so the existing `tool.name` / `tool.id` /
+`tool.server` / `gen_ai.*` attrs remain on the same row. The
+`src/mergecraft/agents/_tool_attrs.py` helper exposes
+`enrich_tool_call_attrs` + `emit_verb_subevent` so the three drivers
+(`claude` / `codex` / `gemini`) and the MCP `tools/call` handler all
+emit the same shape.
+
+### `tool.call` attributes
+
+| Attribute | Type | Example | Source |
+|-----------|------|---------|--------|
+| `tool.name` | str | `"browser"` | existing — preserved |
+| `tool.id` | str | `"tool-claude-1"` | existing — preserved |
+| `tool.server` | str | `"claude"` / `"codex"` / `"gemini"` / `"mergecraft"` | existing — preserved |
+| `tool.input` | dict / str | `{"q": "hello"}` / `"codex-input"` | existing — preserved |
+| `tool.output` | any | `"claude-output-text"` | existing — preserved |
+| `tool.arguments` | dict | `{"q": "hello"}` | T1 — request-side raw args (MCP server) |
+| `tool.argument_count` | int | `1` | T1 — request-side count |
+| `tool.argument_bytes` | int | `15` | T1 — request-side JSON-encoded size |
+| `tool.input_keys` | list[str] | `["q"]` | T1 — sorted key list (dict input only) |
+| `tool.input_bytes` | int | `15` | T1 — driver-side request byte count |
+| `tool.exit_code` | str | `"ok"` / `"error"` | T1 — success / failure marker |
+| `tool.result_kind` | str | `"text"` / `"json"` / `"image"` / `"list_of_blocks"` / `"unknown"` | T1 — MCP server success path |
+| `tool.result_bytes` | int | `18` | T1 — MCP server success path |
+| `tool.output_kind` | str | `"text"` / `"json"` / `"image"` / `"list_of_blocks"` / `"unknown"` | T1 — driver-side response classification |
+| `tool.output_bytes` | int | `18` | T1 — driver-side response byte count |
+| `tool.error_class` | str | `"RuntimeError"` | T1 — failure path only |
+| `tool.error_message` | str | `"tool kaboom: …"` (redacted + capped) | T1 — failure path only |
+| `gen_ai.operation.name` | str | `"execute_tool"` | existing — preserved |
+| `gen_ai.tool.name` | str | `"browser"` | existing — preserved |
+| `gen_ai.tool.call.id` | str | `"ab12cd…"` | existing — preserved |
+| `gen_ai.tool.input` | str | `"<redacted>"` | T1 — `redact_tool_payload` of the input |
+| `gen_ai.tool.output` | str | `"<redacted>"` | T1 — `redact_tool_payload` of the output (success or error message) |
+
+### Verb sub-events (`tool.browse` / `tool.search` / …)
+
+Known-verb tools — `browser`, `search`, `read_file`, `write_file`,
+`run_code`, `load_tool` — also emit a verb-specific child span on the
+`tool_result` / `item.completed` close event. The mapping is the closed
+`KNOWN_VERB_TOOLS` dict in `src/mergecraft/agents/_tool_attrs.py`:
+
+| Tool name | Child span kind |
+|-----------|----------------|
+| `browser` | `tool.browse` |
+| `search` | `tool.search` |
+| `read_file` | `tool.read` |
+| `write_file` | `tool.write` |
+| `run_code` | `tool.run_code` |
+| `load_tool` | `tool.load_tool` |
+
+The child span's `parent_span_id` is the parent `tool.call`'s `span_id`,
+and its attrs mirror the parent's so Logfire's row inspector still has
+full context for each verb row. Lifecycle: opened on the close event,
+closed immediately — no new bookkeeping state. Tools outside the closed
+set (a hypothetical `frobnicate`) emit only the parent `tool.call` and
+no child.
+
+### Cap and redaction behaviour
+
+`tool.arguments` is capped at `TRACE_ATTRS_JSON_MAX_BYTES` (64 KiB) via
+the existing `cap_event_attrs` path: a value past the cap collapses
+the row's `attrs` to `{"truncated": True}` so the JSONL line stays
+parseable. `tool.output` is stringified + redacted via
+`mergecraft.tracing.redaction.redact_tool_payload(payload)` — the helper
+runs `json.dumps(default=str)` on non-str values, caps at 64 KiB
+(returning `"<truncated>"` on overflow), and pipes the result through
+`redact_secrets` so embedded tokens (`ghp_…` / `sk-…` / bearer headers)
+cannot escape onto the span. The same helper replaces the local
+`_truncate_tool_payload` copies in `agents/claude.py` and
+`agents/codex.py` so every driver + the MCP server share one source of
+truth.
+
 ## One trace per run (T3)
 
 One `mergecraft diff-review` run emits one Logfire trace. Every span

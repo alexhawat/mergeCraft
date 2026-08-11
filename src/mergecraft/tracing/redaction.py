@@ -13,17 +13,22 @@ tracing-specific additions are:
 
 Exports:
     DENY_KEYS -- tuple of attr keys whose values are dropped wholesale.
+    REDACTED -- sentinel literal ``"<redacted>"`` used by URL + tool-payload redaction.
     redact_attrs -- recursively redact an ``attrs`` dict, returning a new dict.
     redact_event -- return a deep-copied ``TraceEvent`` with redacted attrs.
     redact_cli_argv -- mask token/secret-like CLI argv values for ``agent.cli_argv``.
+    redact_url -- inline-redact credential-bearing portions of a URL.
+    redact_tool_payload -- stringify + cap + secret-redact a tool input/output.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES
 
 if TYPE_CHECKING:
     from mergecraft.tracing.event import TraceEvent
@@ -197,4 +202,59 @@ def redact_url(url: str) -> str:
     return _EMBEDDED_TOKEN_RE.sub(REDACTED, url)
 
 
-__all__ = ["DENY_KEYS", "REDACTED", "redact_attrs", "redact_cli_argv", "redact_event", "redact_url"]
+__all__ = [
+    "DENY_KEYS",
+    "REDACTED",
+    "redact_attrs",
+    "redact_cli_argv",
+    "redact_event",
+    "redact_tool_payload",
+    "redact_url",
+]
+
+
+def redact_tool_payload(payload: Any) -> str:
+    """Redact a tool input/output payload for safe attachment to a span (T1).
+
+    The stringified payload is capped at :data:`TRACE_ATTRS_JSON_MAX_BYTES`
+    (64 KiB) so a 1 MB tool body cannot blow past the JSONL ceiling, and the
+    result is run through :func:`redact_secrets` so embedded tokens
+    (``ghp_…`` / ``sk-…`` / bearer headers) cannot leak onto the span.
+
+    Non-string values are stringified via ``json.dumps(default=str)`` so dicts
+    and lists survive. The cap is applied to the **final** string length, not
+    to any individual field — a single oversized value truncates the whole
+    payload to the sentinel ``"<truncated>"`` so the row stays a single JSON
+    line and Logfire's row inspector still surfaces the marker.
+
+    Args:
+        payload: The raw input/output payload from a driver event or the MCP
+            ``tools/call`` handler. May be ``str`` / ``dict`` / ``list`` /
+            ``None``. ``None`` returns ``""``.
+
+    Returns:
+        str: A redacted, capped string suitable for ``gen_ai.tool.output``.
+
+    Examples:
+        >>> redact_tool_payload({"q": "hello"})
+        '{"q": "hello"}'
+        >>> redact_tool_payload("Bearer ghp_longtoken123…")
+        'Bearer <redacted>'
+    """
+    if payload is None:
+        return ""
+    if isinstance(payload, str):
+        text = payload
+    elif isinstance(payload, (dict, list)):
+        try:
+            text = json.dumps(payload, default=str)
+        except TypeError, ValueError:
+            text = str(payload)
+    elif isinstance(payload, bytes):
+        text = payload.decode("utf-8", errors="replace")
+    else:
+        text = str(payload)
+    text = redact_secrets(text)
+    if len(text) > TRACE_ATTRS_JSON_MAX_BYTES:
+        return "<truncated>"
+    return text

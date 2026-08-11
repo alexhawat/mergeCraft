@@ -23,6 +23,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `feat(tracing): enrich tool.call attrs to carry invoke + complete + verb sub-event info` —
+  every `tool.call` span carries the request/response byte counts, `exit_code`,
+  error class/message, and input-key list. Known-verb tools (`browser`,
+  `search`, `read_file`, `write_file`, `run_code`, `load_tool`) also emit a
+  verb-specific child span (`tool.browse`, `tool.search`, `tool.read`,
+  `tool.write`, `tool.run_code`, `tool.load_tool`) for finer-grained Logfire
+  grouping. The MCP `tools/call` handler now stamps `tool.arguments` /
+  `tool.argument_count` / `tool.argument_bytes` on the open side and
+  `tool.exit_code` / `tool.result_kind` / `tool.result_bytes` on close
+  (success path); failures additionally carry `tool.error_class` /
+  `tool.error_message` (redacted) and keep `gen_ai.tool.output` set so the
+  GenAI dashboard sees the row. The three driver event handlers
+  (`agents/claude.py` `_claude_stream_event_handler`,
+  `agents/codex.py` `_codex_stream_event_handler`,
+  `agents/gemini.py` `_gemini_stream_event_handler`) apply the same
+  enrichment on the open/close sites they already emit from. New
+  `src/mergecraft/agents/_tool_attrs.py` ships `KNOWN_VERB_TOOLS`,
+  `enrich_tool_call_attrs`, `emit_verb_subevent`, and `_classify_tool_result`
+  so all three drivers + the MCP server share one source of truth. New
+  `mergecraft.tracing.redaction.redact_tool_payload(payload)` extends the
+  existing D7 redaction boundary: stringifies non-str values via
+  `json.dumps(default=str)`, caps at `TRACE_ATTRS_JSON_MAX_BYTES` (returning
+  `"<truncated>"` on overflow), and pipes the result through `redact_secrets`
+  so embedded tokens (`ghp_…` / `sk-…` / bearer headers) cannot escape onto
+  the span. The local `_truncate_tool_payload` copies in `claude.py` /
+  `codex.py` / `gemini.py` are folded into the shared helper. The 64 KiB cap
+  on `TraceEvent.attrs` still applies — `tool.arguments` is stored as a
+  string so a 100 KB value collapses the row to `{"truncated": True}`
+  instead of blowing past the JSONL ceiling. `docs/TRACING.md` gains a
+  "Tool call attributes" section with the full attribute table, the verb
+  sub-event list, and the cap + redaction behaviour. Tests: the 11-case
+  RED suite in `tests/tracing/test_tool_call_attrs.py` (10 pass + 1 xfail
+  passing through — the formerly xfail `test_known_verb_tool_emits_verb_sub_event`
+  now passes deterministically; the `strict=False` xfail marker is removed
+  by `xfail-reconciliation` once the next wave lands the xfail cleanup)
 - Six-value run outcome taxonomy (`passed` / `failed` / `inconclusive` /
   `infra_error` / `timed_out` / `configuration_error`) drives check conclusions
   and Action `result` JSON, including a stable `error.code` on failure paths
