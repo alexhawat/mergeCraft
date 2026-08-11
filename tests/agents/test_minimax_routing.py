@@ -220,13 +220,16 @@ def test_minimax_routes_via_opencode_with_singleton_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Singleton pair + ``minimax/MiniMax-M3`` → opencode config has a
-    provider block keyed by ``default`` whose ``baseURL`` is MiniMax's
-    OpenAI-compatible endpoint.
+    provider block keyed by ``minimax`` (the model prefix; the W6
+    recommendation adds a ``minimax`` preset so the prefix drives the
+    provider lookup) whose ``baseURL`` is MiniMax's OpenAI-compatible
+    endpoint.
 
     The active model's prefix (``minimax``) is the slug's first path
-    segment; the helper resolves to the singleton ``default`` record
-    when no indexed pair is set. The harness's active-provider lookup
-    must surface a block whose ``baseURL`` is the MiniMax endpoint.
+    segment; the preset's env vars re-use the D7 singleton names, so the
+    block's ``baseURL`` is MiniMax's published endpoint. The harness's
+    active-provider lookup must surface that block and register
+    ``minimax`` under ``enabled_providers``.
     """
     _clear_provider_env(monkeypatch)
     monkeypatch.setenv(SINGLETON_BASE_URL_ENV, MINIMAX_BASE_URL)
@@ -234,7 +237,7 @@ def test_minimax_routes_via_opencode_with_singleton_env(
 
     config = _build_opencode_config(tmp_path, model=MINIMAX_SLUG)
 
-    block = _config_block_for_minimax(config, expected_provider_id="default")
+    block = _config_block_for_minimax(config, expected_provider_id="minimax")
     options = block["options"]
     assert options["apiKey"] == SENTINEL_MINIMAX_KEY
     # The block must register the MiniMax model id so the harness can

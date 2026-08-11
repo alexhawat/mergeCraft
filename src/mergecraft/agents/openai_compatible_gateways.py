@@ -31,6 +31,16 @@ DEFAULT_TOKENHUB_BASE_URL = "https://tokenhub-intl.tencentcloudmaas.com/v1"
 CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
 CUSTOM_PROVIDER_API_KEY_ENV = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
 
+# W6 (#34): MiniMax is reachable through the existing custom-provider helper
+# (operator-locked D10 / option ii). The alias env vars re-use the D7
+# singleton names so the operator's mental model stays uniform with the
+# generic custom-provider surface; the default base URL pins the
+# OpenAI-compatible endpoint documented at
+# https://platform.minimax.io/docs/api-reference/text-openai-api.md.
+MINIMAX_API_KEY_ENV = CUSTOM_PROVIDER_API_KEY_ENV
+MINIMAX_BASE_URL_ENV = CUSTOM_PROVIDER_BASE_URL_ENV
+DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.io/v1"
+
 # Indexed multi-provider convention (W3 / issue #71). Both halves must be
 # set per index; partial pairs are dropped. Discovery enumerates every
 # matching env-var suffix and pairs by numeric N. Gaps are preserved
@@ -85,6 +95,12 @@ GATEWAY_PRESETS: dict[str, GatewayPreset] = {
         base_url_env=TOKENHUB_BASE_URL_ENV,
         default_base_url=DEFAULT_TOKENHUB_BASE_URL,
     ),
+    "minimax": GatewayPreset(
+        provider_id="minimax",
+        api_key_env=MINIMAX_API_KEY_ENV,
+        base_url_env=MINIMAX_BASE_URL_ENV,
+        default_base_url=DEFAULT_MINIMAX_BASE_URL,
+    ),
 }
 
 
@@ -108,6 +124,8 @@ def has_gateway_credentials(provider_id: str) -> bool:
     that wires the alias alone should still resolve credentials (D4).
     """
     if has_custom_provider_env():
+        return True
+    if resolve_gateway_endpoints():
         return True
     preset = GATEWAY_PRESETS.get(provider_id.lower())
     if preset is None:
@@ -246,9 +264,12 @@ def resolve_gateway_endpoints() -> dict[str, ProviderRecord]:
 __all__ = [
     "CUSTOM_PROVIDER_API_KEY_ENV",
     "CUSTOM_PROVIDER_BASE_URL_ENV",
+    "DEFAULT_MINIMAX_BASE_URL",
     "DEFAULT_NOUS_BASE_URL",
     "DEFAULT_TOKENHUB_BASE_URL",
     "GATEWAY_PRESETS",
+    "MINIMAX_API_KEY_ENV",
+    "MINIMAX_BASE_URL_ENV",
     "NOUS_API_KEY_ENV",
     "NOUS_BASE_URL_ENV",
     "SINGLETON_PROVIDER_ID",

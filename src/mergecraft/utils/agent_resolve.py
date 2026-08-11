@@ -106,6 +106,13 @@ def has_credentials_for_slug(slug: str) -> bool:
         return _has_vertex_auth() and bool(os.environ.get(VERTEX_MODEL_ID_ENV, "").strip())
     if provider in {"nous", "tokenhub"}:
         return _has_gateway_auth(provider)
+    if provider == "minimax":
+        # W6 (#34): MiniMax is reachable through the existing custom-provider
+        # helper (operator-locked D10 / option ii). The single pair that
+        # surfaces a credential is the D7 singleton; the indexed
+        # ``_N`` form is also accepted because the helper's multi-provider
+        # resolver may surface the provider via ``provider_<N>``.
+        return _has_gateway_auth(provider)
     return False
 
 
@@ -132,6 +139,9 @@ def _agent_binary_available(slug: str) -> bool:
         # so there is no required CLI on PATH. Explicit ``None`` short-circuits
         # the gate to ``True`` and pins the W1.7 regression pin.
         "nous": None,
+        # W6 (#34): MiniMax rides the same env-var-driven opencode harness
+        # path; no CLI binary is required on PATH.
+        "minimax": None,
     }
     binary = binary_by_provider.get(provider)
     if binary is None:
@@ -724,6 +734,25 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
                 f"Set {hints[0]} (via `{hints[1]}` or a GitHub Actions secret), "
                 "or set MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + "
                 "MERGECRAFT_CUSTOM_PROVIDER_API_KEY, or choose a different model."
+            )
+            raise ValueError(msg)
+
+        if provider == "minimax":
+            # W6 (#34): MiniMax rides the custom-provider helper. Fail loud
+            # (convention 5) rather than silently falling through to the
+            # opencode harness when the env vars are missing — the harness
+            # will not be able to reach MiniMax without them, and the
+            # operator's CLI auth gate would mask the configuration error.
+            if _has_gateway_auth(provider):
+                return agents["opencode"]
+            msg = (
+                f"MiniMax model {model!r} selected but no credential is configured. "
+                "Set MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + "
+                "MERGECRAFT_CUSTOM_PROVIDER_API_KEY "
+                "(via `mergecraft auth minimax` or GitHub Actions secrets), "
+                "or an indexed pair "
+                "MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_1, "
+                "or choose a different model."
             )
             raise ValueError(msg)
 

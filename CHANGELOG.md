@@ -59,6 +59,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `test_config_tracing_lists_trace_env_vars_when_disabled`,
     `test_config_tracing_prints_next_steps_when_disabled`,
     `test_config_tracing_omits_next_steps_when_enabled`
+- First-class **MiniMax** provider via the existing custom-provider helper
+  (#34 / W6). The catalog now enumerates `minimax/MiniMax-M3` as a curated
+  alias (`PROVIDERS["minimax"]` in `src/mergecraft/models.py`), reachable
+  through the D7 singleton env vars (`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`
+  + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`) or an indexed pair
+  (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`). The default
+  endpoint is MiniMax's published OpenAI-compatible URL
+  (`https://api.minimax.io/v1`, documented at
+  <https://platform.minimax.io/docs/api-reference/text-openai-api.md>),
+  added to `GATEWAY_PRESETS` in `src/mergecraft/agents/openai_compatible_gateways.py`
+  so the slug prefix drives the provider lookup without an explicit
+  `<N>` slot. The credential gate honours the D7 singleton and the
+  indexed pair; the binary gate short-circuits to `True` for the
+  `minimax` provider (same posture as `nous` — the opencode harness
+  reads env vars directly, no CLI is required on PATH). A new
+  `mergecraft auth minimax` subcommand (`src/mergecraft/cli/auth_cmd.py`)
+  mirrors `auth gemini` / `auth nous` / `auth tokenhub` line-for-line:
+  prompts with `getpass`, validates against
+  `https://api.minimax.io/v1/chat/completions` (the unauthenticated
+  catalog endpoint would return 200 for a fake bearer; the probe path
+  enforces auth, matching `_validate_nous_api_key`'s shape), then writes
+  `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` via `gh secret set`. The validator
+  returns `True` on 200, `False` on 401/403, and `True` with a
+  `logger.warning` on network errors. A `mergecraft models list` row
+  appears for the new catalog entry; the credentials column flips
+  `no` → `yes` when the env var is set (convention 7 — the key value
+  is never rendered). The pre-existing `opencode/minimax-m2.5` and
+  `opencode/minimax-m2.5-free` entries are untouched (D12 additive
+  invariant — operators using OpenCode as a proxy still work). No
+  Dockerfile change — MiniMax does not require a first-party CLI binary
+  (D10 / option ii: route through the existing helper, not a bespoke
+  `mmx-cli` harness). README "Authentication" table gains a MiniMax
+  row.
 
 ### Changed
 
