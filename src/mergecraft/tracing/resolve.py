@@ -53,7 +53,6 @@ def _build_sinks(merged: dict[str, Any]) -> list[TraceSinkEntry]:
             TraceSinkEntry(
                 type="logfire",
                 project=tracing_project,
-                token_ref=None,
             )
             # The resolved ``logfire_token`` is forwarded separately via the
             # env-var seam that ``build_remote_sink`` consults
