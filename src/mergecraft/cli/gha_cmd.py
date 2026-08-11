@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import uuid
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from loguru import logger
 from rich.console import Console
+
+from mergecraft.analyzers.redact import redact_secrets
+
+if TYPE_CHECKING:
+    from mergecraft.run_outcome import RunOutcome
 
 app = typer.Typer(
     help="Run the GitHub Action runtime flow.",
@@ -41,7 +49,13 @@ def _get_state(name: str) -> str:
     )
 
 
-def _set_output(name: str, value: str) -> None:
+def _set_output(name: str, value: str, *, mask: bool = False) -> None:
+    """Write a step output. Never ``::add-mask::`` multiline values (H1 / Final).
+
+    GitHub's add-mask is line-oriented; masking a pretty-printed JSON body only
+    registers the first line (often ``{``) and leaves the rest in the log.
+    Non-secret outputs (``result``, ``evidence_packet``) default to ``mask=False``.
+    """
     out_file = os.environ.get("GITHUB_OUTPUT")
     if out_file:
         # Multi-line values must use the heredoc form; a bare `name=value` with
@@ -55,16 +69,59 @@ def _set_output(name: str, value: str) -> None:
                 fh.write(f"{name}<<{delimiter}\n{value}\n{delimiter}\n")
             else:
                 fh.write(f"{name}={value}\n")
-    # also mask
-    console.print(f"::add-mask::{value}")
+    if mask and "\n" not in value and value:
+        console.print(f"::add-mask::{value}")
+
+
+def _structured_failure_result(outcome: RunOutcome, message: str) -> str:
+    """Render the ``result`` output payload for a failed run (W5.3, ``#9``).
+
+    JSON, not just ``::error::`` + exit 1, so a workflow step can branch on
+    ``outcome`` / ``error.code`` without string-matching the human-readable
+    message. ``error.code`` is a pure function of the outcome (stable across
+    releases); ``error.message`` is redacted the same way analyzer output is
+    (``analyzers.redact.redact_secrets``) before it ever reaches the output
+    file, which GitHub echoes back into logs.
+    """
+    from mergecraft.run_outcome import error_code_for_outcome
+
+    payload = {
+        "outcome": outcome.value,
+        "error": {
+            "code": error_code_for_outcome(outcome),
+            "message": redact_secrets(message),
+        },
+    }
+    return json.dumps(payload)
+
+
+def _write_evidence_packet_output(packet_path: str) -> None:
+    """Wire the declared ``evidence_packet`` output to the packet on disk (W5.4, ``#47``/``#96``).
+
+    The packet was already written by ``emit_run_packet``; this only has to
+    read it back and hand it to ``_set_output`` — the existing UUID-heredoc
+    form already handles a multiline JSON body correctly (``#38``), so no new
+    output-writing path is introduced.
+    """
+    try:
+        packet_json = Path(packet_path).read_text(encoding="utf-8")
+    except OSError as err:
+        logger.warning("evidence_packet output: could not read {} — {}", packet_path, err)
+        return
+    _set_output("evidence_packet", packet_json)
 
 
 async def _run_main() -> None:
-    from mergecraft.main import main
+    from mergecraft.main import RunOutcome, main
 
     result = await main()
+    if result.evidence_packet_path:
+        _write_evidence_packet_output(result.evidence_packet_path)
     if not result.success:
-        _set_failed(f"action failed: {result.error or 'agent execution failed'}")
+        outcome = result.outcome or RunOutcome.infra_error
+        error_message = result.error or "agent execution failed"
+        _set_output("result", _structured_failure_result(outcome, error_message))
+        _set_failed(f"action failed: {error_message}")
     if result.result:
         _set_output("result", result.result)
 
@@ -75,7 +132,7 @@ async def _token_main() -> None:
     repos_input = os.environ.get("INPUT_REPOS", "").strip()
     additional = [r.strip() for r in repos_input.split(",") if r.strip()] if repos_input else []
     token = await acquire_installation_token(repos=additional or None)
-    _set_output("token", token)
+    _set_output("token", token, mask=True)
     _save_state(STATE_TOKEN, token)
     scope = f"current repo + {', '.join(additional)}" if additional else "current repo only"
     console.print(f"» installation token acquired ({scope})")

@@ -256,24 +256,44 @@ def git_fetch_tool(ctx: ToolContext):
     )
 
 
+def _require_push_allowed(
+    ctx: ToolContext,
+    *,
+    branch: str | None,
+    action: str,
+) -> None:
+    """Enforce ``push`` disabled / restricted-default-branch policy (W2 / Final)."""
+    if ctx.payload.push == "disabled":
+        msg = "push is disabled for this run"
+        raise RuntimeError(msg)
+    state = primary_repo_state(ctx.tool_state)
+    if (
+        ctx.payload.push == "restricted"
+        and branch
+        and state.default_branch
+        and branch == state.default_branch
+    ):
+        verb = {
+            "push": "push to",
+            "delete": "delete",
+            "update": "update",
+            "tag": "push tags affecting",
+        }.get(action, "mutate")
+        msg = (
+            f"Push blocked: cannot {verb} default branch "
+            f"'{state.default_branch}' in restricted mode"
+        )
+        raise RuntimeError(msg)
+
+
 def push_branch_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        if ctx.payload.push == "disabled":
-            msg = "push is disabled for this run"
-            raise RuntimeError(msg)
         cwd = primary_repo_state(ctx.tool_state).dir
         branch = params.get("branchName")
         if not branch:
             branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()
         reject_special_ref(str(branch), "branch")
-        state = primary_repo_state(ctx.tool_state)
-        if (
-            ctx.payload.push == "restricted"
-            and state.default_branch
-            and branch == state.default_branch
-        ):
-            msg = f"Push blocked: cannot push to default branch '{state.default_branch}' in restricted mode"
-            raise RuntimeError(msg)
+        _require_push_allowed(ctx, branch=str(branch), action="push")
         force = bool(params.get("force", False))
         args = ["push", "origin", str(branch)]
         if force:
@@ -301,9 +321,7 @@ def push_branch_tool(ctx: ToolContext):
 
 def push_tags_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        if ctx.payload.push == "disabled":
-            msg = "push is disabled for this run"
-            raise RuntimeError(msg)
+        _require_push_allowed(ctx, branch=None, action="tag")
         cwd = primary_repo_state(ctx.tool_state).dir
         tags = list(params.get("tags") or [])
         if not tags:
@@ -343,6 +361,7 @@ def delete_branch_tool(ctx: ToolContext):
         cwd = primary_repo_state(ctx.tool_state).dir
         remote = bool(params.get("remote", False))
         if remote:
+            _require_push_allowed(ctx, branch=branch, action="delete")
             output = _run_git(
                 ["push", "origin", "--delete", branch],
                 cwd=cwd,
@@ -376,8 +395,8 @@ def commit_changes_tool(ctx: ToolContext):
         message = str(params["message"])
         cwd = primary_repo_state(ctx.tool_state).dir
         branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()
-        # Stage everything then create a signed commit via API when possible;
-        # fall back to local commit + note for unsigned environments.
+        # Local commit is always allowed; push policy gates only the remote ref
+        # update (W4.2 — same local-vs-remote split as ``delete_branch``).
         status = _run_git(["status", "--porcelain"], cwd=cwd)
         if not status.strip():
             return {"success": True, "skipped": True, "reason": "nothing to commit"}
@@ -385,6 +404,17 @@ def commit_changes_tool(ctx: ToolContext):
         # Local commit first so tree is consistent; API signing can replace later.
         _run_git(["-c", "core.hooksPath=/dev/null", "commit", "-m", message], cwd=cwd)
         sha = _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
+        try:
+            _require_push_allowed(ctx, branch=branch, action="update")
+        except RuntimeError as err:
+            logger.info("API ref update skipped (push policy): {}", err)
+            return {
+                "success": True,
+                "sha": sha,
+                "branch": branch,
+                "message": message,
+                "pushed": False,
+            }
         # Best-effort: update remote ref via API for Verified commits.
         try:
             await ctx.github.patch(

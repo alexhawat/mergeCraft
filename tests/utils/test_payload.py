@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from mergecraft.config.settings import RepoSettings, default_settings
 from mergecraft.utils.payload import (
     TRUSTED_AUTHOR_ASSOCIATIONS,
+    ActionInputs,
     JsonPayload,
     resolve_native_event,
     resolve_output_schema,
@@ -680,3 +681,40 @@ def test_trusted_author_associations_is_the_single_definition(
             _comment_event(author_association=association),
         )
         assert resolve_native_event() is not None, association
+
+
+# ── W12.4 suggest_eval_add normalization ────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("false", "disabled"),
+        ("0", "disabled"),
+        ("no", "disabled"),
+        ("off", "disabled"),
+        ("disabled", "disabled"),
+        ("true", "enabled"),
+        ("1", "enabled"),
+        ("yes", "enabled"),
+        ("on", "enabled"),
+        ("enabled", "enabled"),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_normalize_suggest_eval_add_maps_boolish(
+    raw: object,
+    expected: str | None,
+) -> None:
+    """W12.4 — ``_normalize_suggest_eval_add`` maps action.yml bool-ish → Literal."""
+    assert ActionInputs._normalize_suggest_eval_add(raw) == expected
+    if expected is None:
+        assert ActionInputs.model_validate({"suggest_eval_add": raw}).suggest_eval_add is None
+    else:
+        assert ActionInputs.model_validate({"suggest_eval_add": raw}).suggest_eval_add == expected
+
+
+def test_normalize_suggest_eval_add_passes_unknown_strings_through() -> None:
+    """Unknown tokens stay lowercased for Pydantic to reject downstream."""
+    assert ActionInputs._normalize_suggest_eval_add("  Maybe  ") == "maybe"

@@ -8,6 +8,7 @@ legacy last-line-JSON parse when the streaming read returns no events.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -27,6 +28,7 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    spawn_agent_cli,
 )
 from mergecraft.agents.verifier import (
     VERIFIER_AGENT_NAME,
@@ -36,6 +38,10 @@ from mergecraft.agents.verifier import (
 )
 from mergecraft.tracing.sinks import claim_sink
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.privilege import wrap_agent_command
+from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
+from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -172,17 +178,24 @@ def _build_claude_failure_error(
 
 
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
-    env = dict(os.environ)
-    # Agent process keeps full env (needs LLM keys). Secrets are filtered at MCP shell.
-    env.setdefault("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-    if ctx.resolved_model:
-        # Bedrock / Vertex routing via env when configured upstream
-        model = ctx.resolved_model.lower()
-        if "bedrock" in model or os.environ.get("CLAUDE_CODE_USE_BEDROCK"):
-            env["CLAUDE_CODE_USE_BEDROCK"] = "1"
-        if "vertex" in model or os.environ.get("CLAUDE_CODE_USE_VERTEX"):
-            env["CLAUDE_CODE_USE_VERTEX"] = "1"
-    return env
+    extras: dict[str, str] = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    model = (ctx.resolved_model or "").strip()
+    bedrock_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
+    vertex_id = os.environ.get("VERTEX_MODEL_ID", "").strip()
+    lowered = model.lower()
+    if (
+        "bedrock" in lowered
+        or os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").strip()
+        or (bedrock_id and model == bedrock_id)
+    ):
+        extras["CLAUDE_CODE_USE_BEDROCK"] = "1"
+    if (
+        "vertex" in lowered
+        or os.environ.get("CLAUDE_CODE_USE_VERTEX", "").strip()
+        or (vertex_id and model == vertex_id)
+    ):
+        extras["CLAUDE_CODE_USE_VERTEX"] = "1"
+    return build_agent_env("claude", extras)
 
 
 def _build_claude_streaming_usage(payload: dict[str, Any]) -> AgentUsage:
@@ -601,15 +614,7 @@ def _run_claude_once(
     tracer = _resolve_active_tracer()
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=os.getcwd(),
-            env=_build_env(ctx),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
+        process = spawn_agent_cli(cmd, env=_build_env(ctx))
     except FileNotFoundError:
         # W5.4 / W5.5 regression pins and the W5.7 equivalence test patch
         # only ``subprocess.run``. When the real CLI is missing AND the
@@ -634,20 +639,22 @@ def _run_claude_once(
     )
 
     stderr_text = ""
+    returncode: int = -1
     try:
-        try:
-            consume_stream(
-                raw_stream=process.stdout,
-                accumulator=accumulator,
-                handler=handler,
-            )
-            stderr_text = process.stderr.read() or ""
-            returncode = process.wait(
-                timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
-            )
-        except subprocess.TimeoutExpired:
-            process.kill()
-            return AgentResult(success=False, error="claude CLI timed out")
+        with track_process_group(process):
+            try:
+                consume_stream(
+                    raw_stream=process.stdout,
+                    accumulator=accumulator,
+                    handler=handler,
+                )
+                stderr_text = process.stderr.read() or ""
+                returncode = wait_or_kill_process_group(
+                    process,
+                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                )
+            except subprocess.TimeoutExpired:
+                return AgentResult(success=False, error="claude CLI timed out")
     finally:
         # Defensive close: the streaming event order does not guarantee
         # LIFO span closure (e.g. ``message_stop`` before ``tool_result``
@@ -677,6 +684,7 @@ def _run_claude_once(
                 returncode,
                 stderr_text,
             )
+            retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
             return AgentResult(
                 success=False,
                 output=accumulator.final_output,
@@ -687,6 +695,7 @@ def _run_claude_once(
                     skip_permissions=skip_permissions,
                 ),
                 usage=accumulator.to_usage(),
+                metadata={"retryable": True} if retryable else {},
             )
         return AgentResult(
             success=True,
@@ -717,7 +726,7 @@ def _run_claude_legacy_subprocess(
     """
     try:
         completed = subprocess.run(
-            cmd,
+            wrap_agent_command(cmd),
             cwd=os.getcwd(),
             env=_build_env(ctx),
             capture_output=True,
@@ -752,7 +761,10 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         return AgentResult(success=False, error=str(err))
 
     mcp_config = write_mcp_config(ctx)
-    initial = _run_claude_once(
+    # Blocking Popen/wait/stream consume runs in a worker thread so
+    # ``asyncio.wait_for`` in ``main`` can preempt the coroutine (W9.2).
+    initial = await asyncio.to_thread(
+        _run_claude_once,
         cli=cli,
         prompt=ctx.instructions.user,
         ctx=ctx,
@@ -760,7 +772,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     )
 
     async def resume(prompt: str) -> AgentResult:
-        return _run_claude_once(
+        return await asyncio.to_thread(
+            _run_claude_once,
             cli=cli,
             prompt=prompt,
             ctx=ctx,
@@ -772,4 +785,4 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     return await finalize_agent_result(ctx, result)
 
 
-claude = agent(name="claude", install=_install, run=_run)
+claude = agent(name="claude", install=_install, run=_run, build_env=_build_env)

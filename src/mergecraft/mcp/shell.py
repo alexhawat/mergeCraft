@@ -1,12 +1,15 @@
-"""Restricted shell + kill_background tools with CI unshare sandboxing."""
+"""Restricted shell + kill_background tools with CI unshare sandboxing.
+
+Timeout/cancel tears down the shell process group via
+:func:`mergecraft.utils.process_group.kill_process_group` (``os.killpg``
+TERM → grace → KILL), matching agent CLI teardown (W9 / ``#14``).
+"""
 
 from __future__ import annotations
 
 import os
 import re
-import signal
 import subprocess
-import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -15,7 +18,9 @@ from loguru import logger
 
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import BackgroundProcess, primary_repo_state
+from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import resolve_env
+from mergecraft.utils.workspace import WorkspacePathError, resolve_allowed_working_directory
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -24,6 +29,7 @@ SandboxMethod = Literal["unshare", "sudo-unshare", "none"]
 MAX_OUTPUT_CHARS = 5000
 
 _detected_sandbox: SandboxMethod | None = None
+_detected_netns: bool | None = None
 
 
 def get_sandbox_method() -> SandboxMethod:
@@ -67,6 +73,37 @@ def detect_sandbox_method() -> SandboxMethod:
     return "none"
 
 
+def network_namespace_available() -> bool:
+    """True when ``unshare --net`` works in this environment (W12.7 / #35).
+
+    Probed once and cached. Outside CI the probe is skipped (same policy as
+    PID namespaces) — callers treat that as unavailable and lean on credential
+    isolation instead.
+    """
+    global _detected_netns
+    if _detected_netns is not None:
+        return _detected_netns
+    if os.environ.get("CI") != "true":
+        _detected_netns = False
+        return False
+    try:
+        result = subprocess.run(
+            ["unshare", "--net", "true"],
+            timeout=5,
+            capture_output=True,
+            check=False,
+        )
+        _detected_netns = result.returncode == 0
+    except OSError:
+        _detected_netns = False
+    if not _detected_netns:
+        logger.debug(
+            "network namespace unavailable (unshare --net failed); "
+            "MCP shell network stays outside the sandbox guarantee"
+        )
+    return _detected_netns
+
+
 def _is_git_command(command: str) -> bool:
     trimmed = command.strip()
     if trimmed == "git" or trimmed.startswith("git "):
@@ -88,6 +125,13 @@ def _cap_output(output: str, tmpdir: str) -> str:
     )
 
 
+def _unshare_argv(*, isolate_network: bool) -> list[str]:
+    argv = ["unshare", "--pid", "--fork", "--mount-proc"]
+    if isolate_network and network_namespace_available():
+        argv.append("--net")
+    return argv
+
+
 def _spawn_shell(
     command: str,
     *,
@@ -95,6 +139,7 @@ def _spawn_shell(
     cwd: str,
     stdout: Any,
     stderr: Any,
+    isolate_network: bool = False,
 ) -> subprocess.Popen[bytes]:
     method = detect_sandbox_method()
     if os.environ.get("CI") == "true" and method == "none":
@@ -127,10 +172,11 @@ def _spawn_shell(
         )
     )
     wrapped = f"{proc_cleanup} {socket_cleanup} {fs_mounts} {command}"
+    unshare_argv = _unshare_argv(isolate_network=isolate_network)
 
     if method == "unshare":
         return subprocess.Popen(
-            ["unshare", "--pid", "--fork", "--mount-proc", "bash", "-c", wrapped],
+            [*unshare_argv, "bash", "-c", wrapped],
             cwd=cwd,
             env=env,
             stdout=stdout,
@@ -143,10 +189,7 @@ def _spawn_shell(
                 "sudo",
                 "env",
                 *[f"{k}={v}" for k, v in env.items()],
-                "unshare",
-                "--pid",
-                "--fork",
-                "--mount-proc",
+                *unshare_argv,
                 "bash",
                 "-c",
                 wrapped,
@@ -191,16 +234,34 @@ def shell_tool(ctx: ToolContext):
             )
             raise RuntimeError(msg)
         timeout_ms = min(int(params.get("timeout") or 30_000), 120_000)
-        cwd = str(params.get("working_directory") or primary_repo_state(ctx.tool_state).dir)
+        default_dir = primary_repo_state(ctx.tool_state).dir
+        working_directory = params.get("working_directory")
+        try:
+            cwd = resolve_allowed_working_directory(
+                str(working_directory) if working_directory else None,
+                default=default_dir,
+            )
+        except WorkspacePathError as exc:
+            raise RuntimeError(str(exc)) from exc
         env = resolve_env("inherit" if ctx.payload.shell == "enabled" else "restricted")
         tmpdir = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
+        # W12.7 — untrusted MCP shell gets ``unshare --net`` when the host
+        # supports it; otherwise network stays outside the sandbox guarantee.
+        isolate_network = ctx.trust_tier == "untrusted"
 
         if params.get("background"):
             handle = f"bg-{uuid.uuid4().hex[:8]}"
             output_path = str(Path(tmpdir) / f"{handle}.log")
             pid_path = str(Path(tmpdir) / f"{handle}.pid")
             with open(output_path, "ab") as log_fd:
-                proc = _spawn_shell(command, env=env, cwd=cwd, stdout=log_fd, stderr=log_fd)
+                proc = _spawn_shell(
+                    command,
+                    env=env,
+                    cwd=cwd,
+                    stdout=log_fd,
+                    stderr=log_fd,
+                    isolate_network=isolate_network,
+                )
             if proc.pid is None:
                 msg = "failed to start background process"
                 raise RuntimeError(msg)
@@ -216,14 +277,19 @@ def shell_tool(ctx: ToolContext):
             }
 
         proc = _spawn_shell(
-            command, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            command,
+            env=env,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            isolate_network=isolate_network,
         )
         try:
             stdout_b, stderr_b = proc.communicate(timeout=timeout_ms / 1000)
             timed_out = False
         except subprocess.TimeoutExpired:
             timed_out = True
-            _kill_pg(proc.pid)
+            kill_process_group(proc.pid)
             stdout_b, stderr_b = proc.communicate(timeout=5)
         stdout = (stdout_b or b"").decode("utf-8", errors="replace")
         stderr = (stderr_b or b"").decode("utf-8", errors="replace")
@@ -268,22 +334,6 @@ def shell_tool(ctx: ToolContext):
     )
 
 
-def _kill_pg(pid: int | None) -> None:
-    if pid is None:
-        return
-    try:
-        os.killpg(pid, signal.SIGTERM)
-        time.sleep(0.2)
-        os.killpg(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    except PermissionError:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-
-
 def kill_background_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         handle = str(params["handle"])
@@ -293,7 +343,7 @@ def kill_background_tool(ctx: ToolContext):
                 "success": False,
                 "message": f"no background process with handle {handle}",
             }
-        _kill_pg(proc.pid)
+        kill_process_group(proc.pid)
         ctx.tool_state.background_processes.pop(handle, None)
         return {
             "success": True,

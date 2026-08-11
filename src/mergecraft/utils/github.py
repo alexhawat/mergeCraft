@@ -7,12 +7,18 @@ from typing import Any
 
 import httpx
 from loguru import logger
-from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
+from tenacity import retry
 
 from mergecraft.config.settings import (
     RepoSettings,
     RunContextData,
     load_repo_settings,
+)
+from mergecraft.utils.retry_policy import (
+    DEFAULT_STOP,
+    DEFAULT_WAIT,
+    is_transient_http_error,
+    retry_transient_safe_methods,
 )
 
 DEFAULT_API_URL = "https://api.github.com"
@@ -57,11 +63,19 @@ def parse_repo_context(repository: str | None = None) -> RepoContext:
 
 
 def _is_transient_http_error(exc: BaseException) -> bool:
-    if isinstance(exc, httpx.TransportError):
-        return True
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code >= 500 or exc.response.status_code == 429
-    return False
+    """Backward-compatible alias for ``is_transient_http_error`` (W9 tests)."""
+    return is_transient_http_error(exc)
+
+
+def _default_api_base_url() -> str:
+    """Resolve the GitHub REST base URL (GHES / Actions / E2E mock).
+
+    Honours the runner-provided ``GITHUB_API_URL`` (standard GitHub Actions /
+    GHES env) before falling back to ``https://api.github.com``. The W11 E2E
+    gate points this at a fixture mock so PR CI never hits live GitHub or
+    live LLMs (D6).
+    """
+    return (os.environ.get("GITHUB_API_URL") or DEFAULT_API_URL).rstrip("/")
 
 
 class GitHubClient:
@@ -71,13 +85,13 @@ class GitHubClient:
         self,
         token: str,
         *,
-        base_url: str = DEFAULT_API_URL,
+        base_url: str | None = None,
         timeout: float = 60.0,
         user_agent: str = "mergeCraft",
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.token = token
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or _default_api_base_url()).rstrip("/")
         self._owns_client = client is None
         headers = {
             "Accept": DEFAULT_ACCEPT,
@@ -102,9 +116,9 @@ class GitHubClient:
         await self.aclose()
 
     @retry(
-        retry=retry_if_exception(_is_transient_http_error),
-        wait=wait_fixed(0.5),
-        stop=stop_after_attempt(3),
+        retry=retry_transient_safe_methods(),
+        wait=DEFAULT_WAIT,
+        stop=DEFAULT_STOP,
         reraise=True,
     )
     async def request(
@@ -116,7 +130,12 @@ class GitHubClient:
         json: Any = None,
         headers: dict[str, str] | None = None,
     ) -> Any:
-        """Perform a REST request and return parsed JSON (or ``None`` for 204)."""
+        """Perform a REST request and return parsed JSON (or ``None`` for 204).
+
+        Safe methods (GET/HEAD/OPTIONS) retry on transient 429/5xx/transport
+        errors with bounded exponential backoff + jitter. Mutations
+        (POST/PATCH/PUT/DELETE) are never retried blindly (W9.3 / ``#34``).
+        """
         response = await self._client.request(
             method,
             path,

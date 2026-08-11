@@ -7,8 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Trust tier is derived before any repo-controlled git setup or `setupScript`;
+  untrusted events skip operator scripts instead of running them first
+- Agent CLI subprocesses receive an explicit credential allowlist — no ambient
+  `GIT_ASKPASS`, `GITHUB_TOKEN`/`GH_TOKEN`, or non-active provider keys; git
+  auth is brokered per MCP invocation
+- Containment: `safe.directory` is scoped (no `*`), git hooks stay off unless
+  `shell: enabled`, working directories must stay inside registered workspace
+  roots, and agent CLIs drop to the unprivileged `mergecraft` user
+- Askpass helpers are written then immediately shredded after git setup
+  (auth is brokered via MCP `http.extraHeader`, never ambient `GIT_ASKPASS`);
+  runner-temp wipe only removes mergeCraft-registered paths
+
+### Added
+
+- Six-value run outcome taxonomy (`passed` / `failed` / `inconclusive` /
+  `infra_error` / `timed_out` / `configuration_error`) drives check conclusions
+  and Action `result` JSON, including a stable `error.code` on failure paths
+- Action `evidence_packet` output is emitted on the live `mergecraft gha` path
+  (packet JSON via the multiline heredoc helper)
+- PR CI builds the production Action image and runs it against fixture
+  `pull_request` / `pull_request_target` payloads with a fake provider CLI
+  shim (no live LLMs); the adversarial `shell × push` suite also runs
+  in-image, and `docs/compatibility-matrix.md` defines the supported events ×
+  agents × providers × shell × push × arch matrix with a secrets-gated nightly
+  job
+- Release pipeline builds each image once, attaches SBOM + vulnerability scan
+  reports, cosign-signs and attests the digests, then promotes mutable tags to
+  those same digests (no second rebuild)
+- Operators can refuse model-chain fallback with `allowFallback: false` in
+  `.mergecraft/config.yaml`; an unavailable primary fails closed as
+  `configuration_error` instead of silently reviewing under a backup
+- Every merge evidence packet records requested vs executed model, provider,
+  and fallback index/occurrence so operators can prove which reviewer model
+  actually ran
+- Integration gate in PR CI (`make test-integration`, coverage floors,
+  `npm audit` on agent CLIs, actionlint/zizmor) plus a secrets-gated live
+  integration job as a release precondition
+
+### Changed
+
+- Docker Action images pin base layers, `uv`, Node, `gh`, and agent CLIs by
+  digest or lockfile so rebuilds are reproducible and Dependabot can bump
+  every pinned artifact
+- Security and runtime config models (`RepoSettings`, `GatesSettings`,
+  `AnalyzersSettings`, `TracingSettings`) now reject unknown keys
+  (`extra="forbid"`) instead of silently ignoring typos
+- Unparseable Action `timeout` input fails closed as `configuration_error`
+  (keep `--notimeout` to disable); dependency-install failure maps the run to
+  `inconclusive` rather than a silent continue
+- Tracing `enabled` is tri-state (`true` / `false` / unset); Action
+  `tracing` input no longer collapses unset to false, and is wired into the
+  live Action path (input > env > YAML > default)
+- GitHub REST and Cursor Cloud HTTP clients use bounded exponential backoff
+  with jitter for retryable reads (429/5xx/transport); mutations are never
+  retried blindly
+- Opt-in structured JSON logs (`MERGECRAFT_LOG_FORMAT=json`) bind
+  `run_id` / repo / PR / phase for operator debugging alongside opt-in tracing
+- Craft reusable workflows are SHA-pinned; release and publish jobs use
+  least-privilege `permissions` (no blanket `secrets: inherit`)
+
 ### Fixed
 
+- Pydantic config `ValidationError` (unknown keys / bad enums) maps to
+  `configuration_error` instead of `infra_error` on the live Action path
+- Mid-run `wipe_runner_leak_surface` no longer deletes the active
+  `MERGECRAFT_TEMP_DIR`, which previously broke askpass creation inside the
+  Docker Action (`setup_git` → missing `credentials/` parent)
+- Agent CLI subprocesses now head their own process group
+  (`start_new_session=True`); timeout/cancel sends TERM → grace → KILL to the
+  whole group so grandchild processes cannot outlive the Action run
 - `has_gateway_credentials` no longer false-positives for unrelated gateway
   presets. A Batch C (#34 / PR #126) addition let an indexed custom-provider
   pair (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`) or the singleton

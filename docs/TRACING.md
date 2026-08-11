@@ -61,7 +61,7 @@ sets). The Action input `logfire-token` maps to the runtime
 
 ```yaml
 tracing:
-  enabled: true                # default: false
+  enabled: true                # default: unset (treated as off); bool | null
   retentionDays: 30            # default: 30
   redaction: true              # default: true
   sinks:
@@ -69,6 +69,12 @@ tracing:
       path: .mergecraft/traces/
     # Batch D adds: logfire, otel (behind the [tracing] extra, D6).
 ```
+
+`enabled` is tri-state: `true`, `false`, or unset (`null`). Unset defers to
+the next precedence layer and is **not** the same as `false`. On the Action
+path the precedence is: `tracing` / `INPUT_TRACING` action input >
+`MERGECRAFT_TRACING` env > YAML `tracing.enabled` > default (unset → tracer
+off). See `src/mergecraft/action/inputs.py::apply_tracing_overrides`.
 
 ### Shorthand form
 
@@ -424,3 +430,28 @@ workflow ships them out of CI with `actions/upload-artifact@v4`:
 exits non-zero — the trace is the most useful when the run failed.
 The path is `.mergecraft/traces/` by default; override with the
 `trace_dir` config field or the `--trace-dir` flag.
+
+## Structured logs (operator debugging, W12.6 / #33)
+
+Tracing owns spans; default Loguru output stays human-readable. For
+correlation fields in the log stream itself (without enabling tracing),
+opt into JSON:
+
+```bash
+export MERGECRAFT_LOG_FORMAT=json   # or LOG_FORMAT=json
+# optional: LOG_LEVEL=DEBUG
+```
+
+When JSON is on, each record includes bound context when available:
+
+| Field | Source |
+|-------|--------|
+| `run_id` | `GITHUB_RUN_ID` (bound in `main`) |
+| `repo` | `owner/name` for the run |
+| `pr` | pull-request number when the event carries one |
+| `phase` | coarse run phase (`setup`, …) |
+
+Bind or refresh fields from code with
+`mergecraft.utils.log.bind_run_context(...)`. Use tracing (`docs/TRACING.md`
+above) when you need model/tool span trees; use JSON logs when you need a
+grep-friendly stream of the same run on the runner console or log drain.

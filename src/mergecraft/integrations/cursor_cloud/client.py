@@ -7,6 +7,15 @@ import os
 from typing import Any
 
 import httpx
+from tenacity import retry
+
+from mergecraft.utils.retry_policy import (
+    DEFAULT_STOP,
+    DEFAULT_WAIT,
+    is_safe_http_method,
+    is_transient_http_error,
+    retry_transient_safe_methods,
+)
 
 CURSOR_API_KEY_ENV = "CURSOR_API_KEY"
 _CURSOR_BASE_URL = "https://api.cursor.com"
@@ -38,6 +47,12 @@ class CursorCloudClient:
         self._agent_id: str | None = None
         self._run_id: str | None = None
 
+    @retry(
+        retry=retry_transient_safe_methods(),
+        wait=DEFAULT_WAIT,
+        stop=DEFAULT_STOP,
+        reraise=True,
+    )
     async def _request(
         self,
         *,
@@ -46,6 +61,11 @@ class CursorCloudClient:
         json_body: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        """HTTP helper with W9.3 retry: safe methods only, exponential+jitter.
+
+        Mutations (POST create) never retry blindly — a 5xx may have landed.
+        Reads (GET run/artifacts) retry on 429/5xx/transport.
+        """
         url = f"{_CURSOR_BASE_URL}{path}"
         headers = {
             **_basic_auth_header(self._api_key),
@@ -62,6 +82,8 @@ class CursorCloudClient:
                     params=params,
                 )
         except httpx.HTTPError as exc:
+            if is_transient_http_error(exc) and is_safe_http_method(method):
+                raise
             msg = f"cursor upstream failed: {exc}"
             raise RuntimeError(msg) from exc
 
@@ -76,6 +98,16 @@ class CursorCloudClient:
             raise RuntimeError(msg)
 
         if response.status_code >= 400:
+            # Raise httpx.HTTPStatusError so the retry classifier can see 429/5xx
+            # on safe methods; wrap permanent / mutation failures as RuntimeError.
+            request = httpx.Request(method, url)
+            err = httpx.HTTPStatusError(
+                f"cursor API error {response.status_code}",
+                request=request,
+                response=response,
+            )
+            if is_transient_http_error(err) and is_safe_http_method(method):
+                raise err
             detail = str(data.get("detail") or data.get("message") or data)
             msg = f"cursor API error {response.status_code}: {detail}"
             raise RuntimeError(msg)

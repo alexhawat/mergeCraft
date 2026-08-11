@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Craft release configuration — https://getsentry.github.io/craft/
+# Docker targets retag the CI/CD-built SHA tags (same digest that was scanned,
+# cosign-signed, and attested) onto version / latest tags — never rebuild.
 minVersion: '2.21.0'
 
 github:
@@ -30,13 +32,20 @@ targets:
     includeNames: /^merge[_-]craft.*$/
   - name: github
     tagPrefix: v
+  # Build-once promote: source is the immutable SHA tag from ci-cd.yml.
   - name: docker
     id: slim
-    source: ghcr.io/alexhawat/mergecraft
-    target: ghcr.io/alexhawat/mergecraft
+    source:
+      image: ghcr.io/alexhawat/mergecraft
+      format: '{{{image}}}:{{{revision}}}'
+    target:
+      image: ghcr.io/alexhawat/mergecraft
+      format: '{{{image}}}:{{{version}}}'
   - name: docker
     id: slim-latest
-    source: ghcr.io/alexhawat/mergecraft
+    source:
+      image: ghcr.io/alexhawat/mergecraft
+      format: '{{{image}}}:{{{revision}}}'
     target:
       image: ghcr.io/alexhawat/mergecraft
       format: '{{{image}}}:latest'

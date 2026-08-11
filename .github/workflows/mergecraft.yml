@@ -111,14 +111,6 @@ on:
 
 permissions:
   contents: read
-  # Post inline PR review + comments.
-  pull-requests: write
-  issues: write
-  # Post mergecraft / mergecraft-approval check-runs.
-  checks: write
-  statuses: write
-  # mergeCraft can mint short-lived tokens via OIDC when configured.
-  id-token: write
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
@@ -220,6 +212,17 @@ jobs:
   review:
     name: mergecraft review
     needs: wait-for-ci
+    # Write scopes stay on the review job only (zizmor excessive-permissions).
+    permissions:
+      contents: read
+      # Post inline PR review + comments.
+      pull-requests: write
+      issues: write
+      # Post mergecraft / mergecraft-approval check-runs.
+      checks: write
+      statuses: write
+      # mergeCraft can mint short-lived tokens via OIDC when configured.
+      id-token: write
     # `always()` keeps the required check reporting even if the (fail-open) wait
     # job errors out on a runner fault; a skipped wait job still skips the review,
     # because the draft/dispatch condition below is the same one it uses.
@@ -250,9 +253,11 @@ jobs:
 
       - name: Ensure PR base ref exists locally
         if: github.event_name == 'pull_request_target'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          base="${{ github.event.pull_request.base.ref }}"
+          base="${BASE_REF}"
           git fetch --no-tags origin "${base}:refs/remotes/origin/${base}"
           # pull_request_target checks out the default branch (`main`). When the
           # PR targets `main`, `git branch -f main …` fails because that branch
@@ -264,10 +269,10 @@ jobs:
       - name: Skip when provider auth is not configured
         if: env.HAS_AUTH != 'true'
         run: |
-          if [ "${{ env.IS_SAME_REPO }}" != "true" ]; then
+          if [ "${IS_SAME_REPO}" != "true" ]; then
             echo "::notice title=mergecraft skipped::Fork PR — review skipped (same as before)."
           else
-            echo '::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (`mergecraft auth codex`), OPENAI_API_KEY, or NOUS_API_KEY to enable mergeCraft reviews.'
+            echo "::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (mergecraft auth codex), OPENAI_API_KEY, or NOUS_API_KEY to enable mergeCraft reviews."
           fi
 
       # Composed in a step rather than inline in `with:` so the CI-context clause

@@ -1,0 +1,7 @@
+# Minimal fixture repo config for the Action-image E2E gate (D6).
+# Single pinned model — fake CLI shim on PATH supplies canned output.
+models:
+  - anthropic/claude-sonnet
+allowFallback: false
+analyzers:
+  enabled: false

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -28,9 +29,13 @@ from mergecraft.agents.shared import (
     agent,
     log_token_table,
     payload_shell_mode,
+    spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
+from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -494,9 +499,8 @@ def ctx_tmpdir_fallback() -> str:
 
 
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
-    env = dict(os.environ)
     codex_home = _codex_home(ctx)
-    env["CODEX_HOME"] = str(codex_home)
+    env = build_agent_env("codex", {"CODEX_HOME": str(codex_home)})
     _setup_codex_auth(ctx, codex_home=codex_home)
     return env
 
@@ -658,15 +662,7 @@ def _run_codex_streaming(
     )
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=os.getcwd(),
-            env=_build_env(ctx),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
+        process = spawn_agent_cli(cmd, env=_build_env(ctx))
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
@@ -674,20 +670,22 @@ def _run_codex_streaming(
     assert process.stderr is not None
 
     stderr_text = ""
+    returncode: int = -1
     try:
-        try:
-            consume_stream(
-                raw_stream=process.stdout,
-                accumulator=accumulator,
-                handler=handler,
-            )
-            stderr_text = process.stderr.read() or ""
-            returncode = process.wait(
-                timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
-            )
-        except subprocess.TimeoutExpired:
-            process.kill()
-            return AgentResult(success=False, error="codex CLI timed out")
+        with track_process_group(process):
+            try:
+                consume_stream(
+                    raw_stream=process.stdout,
+                    accumulator=accumulator,
+                    handler=handler,
+                )
+                stderr_text = process.stderr.read() or ""
+                returncode = wait_or_kill_process_group(
+                    process,
+                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                )
+            except subprocess.TimeoutExpired:
+                return AgentResult(success=False, error="codex CLI timed out")
     finally:
         try:
             close_all_open_spans()
@@ -717,11 +715,13 @@ def _run_codex_streaming(
                 CODEX_SANDBOX_UNSANDBOXED,
             )
             error = f"{user_namespace_failure_hint()}\n\ncodex stderr:\n{error}"
+        retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
         return AgentResult(
             success=False,
             output=output or None,
             error=error,
             usage=usage,
+            metadata={"retryable": True} if retryable else {},
         )
     return AgentResult(success=True, output=output or None, usage=usage)
 
@@ -901,7 +901,10 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         return AgentResult(success=False, error=str(err))
 
     mcp_config = write_mcp_config(ctx)
-    initial = _run_codex_once(
+    # Blocking Popen/wait/stream consume runs in a worker thread so
+    # ``asyncio.wait_for`` in ``main`` can preempt the coroutine (W9.2).
+    initial = await asyncio.to_thread(
+        _run_codex_once,
         cli=cli,
         prompt=ctx.instructions.user,
         ctx=ctx,
@@ -909,7 +912,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     )
 
     async def resume(prompt: str) -> AgentResult:
-        return _run_codex_once(
+        return await asyncio.to_thread(
+            _run_codex_once,
             cli=cli,
             prompt=prompt,
             ctx=ctx,
@@ -921,4 +925,4 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     return await finalize_agent_result(ctx, result)
 
 
-codex = agent(name="codex", install=_install, run=_run)
+codex = agent(name="codex", install=_install, run=_run, build_env=_build_env)

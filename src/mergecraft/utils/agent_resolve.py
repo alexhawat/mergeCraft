@@ -30,6 +30,16 @@ if TYPE_CHECKING:
 
     from mergecraft.agents.shared import Agent
     from mergecraft.config.settings import RepoSettings
+    from mergecraft.mcp.tool_state import ToolState
+
+
+class ModelFallbackPolicyError(RuntimeError):
+    """Raised when ``allow_fallback=false`` blocks advancing the model chain (W10.1).
+
+    Mapped to ``RunOutcome.configuration_error`` by ``main._classify_error_outcome``.
+    Message always names configuration/fallback so operators and RED tests can
+    match the policy without inspecting the exception type alone.
+    """
 
 
 def _has_env(name: str) -> bool:
@@ -279,12 +289,36 @@ def effective_model_chain(
     return chain[:_MAX_FALLBACK_DEPTH]
 
 
-def select_runnable_model_slug(*, settings: RepoSettings) -> str:
-    """Pick the first chain entry with credentials and an available agent binary."""
-    chain = effective_model_chain(settings)
+def pick_runnable_slug_from_chain(
+    chain: list[str],
+    *,
+    allow_fallback: bool = True,
+) -> str:
+    """Pick the first runnable entry from an already-computed model chain.
+
+    Shared by :func:`select_runnable_model_slug` and ``main()`` so W10
+    ``allow_fallback`` policy cannot drift across call sites.
+    """
     if not chain:
         msg = "no model chain configured — set models: or model: in .mergecraft/config.yaml"
         raise RuntimeError(msg)
+
+    if not allow_fallback:
+        slug = chain[0]
+        if not has_credentials_for_slug(slug):
+            msg = (
+                f"configuration error: allow_fallback is false and primary model "
+                f"{slug!r} is unavailable (missing credentials)"
+            )
+            raise ModelFallbackPolicyError(msg)
+        if not _agent_binary_available(slug):
+            msg = (
+                f"configuration error: allow_fallback is false and primary model "
+                f"{slug!r} is unavailable (agent binary missing)"
+            )
+            raise ModelFallbackPolicyError(msg)
+        logger.info("» model chain selected slug={} (allow_fallback=false)", slug)
+        return slug
 
     skipped: list[str] = []
     for slug in chain:
@@ -305,10 +339,72 @@ def select_runnable_model_slug(*, settings: RepoSettings) -> str:
     raise RuntimeError(msg)
 
 
+def select_runnable_model_slug(*, settings: RepoSettings) -> str:
+    """Pick the first chain entry with credentials and an available agent binary."""
+    return pick_runnable_slug_from_chain(
+        effective_model_chain(settings),
+        allow_fallback=settings.allow_fallback,
+    )
+
+
 def _is_retryable_failure(result: AgentResult) -> bool:
     metadata = result.metadata or {}
     retryable = metadata.get("retryable")
     return retryable is True
+
+
+def _attach_model_evidence(
+    result: AgentResult,
+    *,
+    requested_model: str,
+    executed_model: str,
+    fallback_index: int,
+) -> AgentResult:
+    """Stamp requested/executed/fallback fields onto ``result.metadata`` (W10.2/W10.3).
+
+    Operators read these via the evidence packet and Action ``result`` surfaces;
+    the stamp is unconditional so fallback is never silent.
+    """
+    meta = dict(result.metadata or {})
+    meta.update(
+        {
+            "requested_model": requested_model,
+            "executed_model": executed_model,
+            "provider": _agent_provider_for_slug(executed_model),
+            "fallback_index": fallback_index,
+            "fallback_occurred": fallback_index > 0,
+        }
+    )
+    result.metadata = meta
+    return result
+
+
+def promote_model_evidence(
+    tool_state: ToolState,
+    *,
+    requested_model: str | None,
+    executed_model: str | None,
+    fallback_index: int,
+) -> None:
+    """Write W10 model-evidence fields onto ``tool_state`` (single promotion path).
+
+    Used for both the chain path (after :func:`_attach_model_evidence`) and the
+    single-slug path so ``main`` never re-infers ``fallback_index`` from a
+    requested≠executed heuristic.
+    """
+    if requested_model:
+        tool_state.requested_model = requested_model
+    if executed_model:
+        tool_state.model = executed_model
+    tool_state.fallback_index = fallback_index
+    tool_state.fallback_occurred = fallback_index > 0
+    if tool_state.fallback_occurred:
+        logger.warning(
+            "model fallback in review metadata: requested={} executed={} fallback_index={}",
+            tool_state.requested_model,
+            executed_model,
+            tool_state.fallback_index,
+        )
 
 
 async def run_with_model_chain(
@@ -328,6 +424,11 @@ async def run_with_model_chain(
     by credentials or binary availability. This keeps the chain loop testable in
     environments that lack agent binaries or provider credentials, while preserving
     production semantics (``run_once`` fails fast when the agent cannot run).
+
+    When ``settings.allow_fallback`` is ``False`` (W10.1), a retryable failure of
+    the primary (or current) entry raises :class:`ModelFallbackPolicyError`
+    instead of advancing — operators who pin the reviewer model get a
+    ``configuration_error`` rather than a silent review under a different slug.
 
     Args:
         settings (RepoSettings): Resolved repository settings (drives tracing + chain).
@@ -360,6 +461,7 @@ async def run_with_model_chain(
     )
 
     chain = effective_model_chain(settings, head=head, pin=pin)
+    requested_model = chain[0] if chain else (head or "")
 
     # Always emit the root span — the trace tree is the run's, not the
     # chain's. An empty chain short-circuits with a flagged agent result;
@@ -412,7 +514,7 @@ async def run_with_model_chain(
 
                 call_attrs: dict[str, Any] = {
                     "model.id": slug,
-                    "model.requested": slug,
+                    "model.requested": requested_model or slug,
                     "model.resolved": slug,
                     "model.fallback_index": chain_index,
                     "gen_ai.operation.name": "chat",
@@ -447,13 +549,25 @@ async def run_with_model_chain(
                         result.error or "unknown error",
                     )
                 elif chain_index < len(chain) - 1:
+                    if not settings.allow_fallback:
+                        attempt_span.set_status("error", result.error or "fallback forbidden")
+                        msg = (
+                            "configuration error: allow_fallback is false — refusing "
+                            f"model fallback from unavailable primary {slug!r}: "
+                            f"{result.error or 'unknown error'}"
+                        )
+                        raise ModelFallbackPolicyError(msg)
                     nxt = chain[chain_index + 1]
                     attempt_span.set_status("retryable", result.error or "unknown error")
+                    # W10.3 — structured, operator-visible warning (must name
+                    # "fallback"; also stamped onto result.metadata below).
                     logger.warning(
-                        "» model chain slug={} failed (retryable): {} — advancing to {}",
-                        slug,
+                        "model fallback occurred: requested={} failed ({}); "
+                        "advancing to executed={} (fallback_index={})",
+                        requested_model or slug,
                         result.error or "unknown error",
                         nxt,
+                        chain_index + 1,
                     )
                 else:
                     attempt_span.set_status("retryable", result.error or "unknown error")
@@ -472,6 +586,7 @@ async def run_with_model_chain(
             # happened to visit. W4.3 / issue §4 — visibility into why
             # an earlier entry was skipped.
             if terminal_status in {"ok", "error"}:
+                winner_index = chain_index
                 for follow_on_slug in chain[chain_index + 1 :]:
                     chain_index += 1
                     _emit_advanced_attempt(
@@ -489,11 +604,17 @@ async def run_with_model_chain(
                 # instrumentation emitted the root span but did not
                 # propagate the attempt-level status; this is the W6
                 # reconciliation.
+                stamped = _attach_model_evidence(
+                    result,
+                    requested_model=requested_model or slug,
+                    executed_model=slug,
+                    fallback_index=winner_index,
+                )
                 if terminal_status == "ok":
                     _root.set_status("ok")
-                    return slug, result
+                    return slug, stamped
                 _root.set_status("error", result.error or "unknown error")
-                return slug, result
+                return slug, stamped
 
             if chain_index < len(chain) - 1:
                 chain_index += 1
@@ -802,10 +923,13 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
 
 
 __all__ = [
+    "ModelFallbackPolicyError",
     "effective_model_chain",
     "effective_model_slugs",
     "has_credentials_for_slug",
     "is_runnable_model_slug",
+    "pick_runnable_slug_from_chain",
+    "promote_model_evidence",
     "resolve_model",
     "resolve_runtime_agent",
     "run_with_model_chain",

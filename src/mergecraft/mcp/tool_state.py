@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from mergecraft.prep.types import PrepResult
 
 RepoAccess = Literal["primary", "write", "read"]
 
@@ -130,7 +133,7 @@ class ReviewReplyRecord:
 class DependencyInstallationState:
     status: Literal["not_started", "in_progress", "completed", "failed"]
     promise: Any = None
-    results: list[Any] | None = None
+    results: list[PrepResult] | None = None
 
 
 @dataclass(slots=True)
@@ -215,6 +218,12 @@ class ToolState:
     author_association: str | None = None
     # ``derive_trust_tier()``'s return value for this run (trusted|untrusted).
     trust_tier: str | None = None
+    # When ``setup_script`` is skipped on an untrusted tier (W1.2), the reason
+    # string is recorded here for harness/tests and later RunOutcome mapping.
+    setup_script_skip_reason: str | None = None
+    # Former askpass path retained for bookkeeping only — ``setup_git`` shreds
+    # the on-disk helper immediately (auth is MCP ``http.extraHeader``; W2.2).
+    git_askpass_path: str | None = None
     xrepo_learnings_file_path: str | None = None
     xrepo_learnings_seed: str | None = None
     xrepo_learnings_persist_attempted: bool = False
@@ -231,7 +240,11 @@ class ToolState:
     # import cycle back into ``evidence``.
     tool_calls: list[Any] = field(default_factory=list)
     model: str | None = None
-    model_fallback: dict[str, str] | None = None
+    # W10.2 / #20 — requested vs executed model evidence (always populated on
+    # the live path so the packet can prove which model actually ran).
+    requested_model: str | None = None
+    fallback_index: int = 0
+    fallback_occurred: bool = False
     unselected_proxy_default: bool | None = None
     model_clamped: dict[str, str] | None = None
     sha_pinned: bool | None = None

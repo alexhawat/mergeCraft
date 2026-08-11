@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: MIT
+# W12.1 / #21 — integration gate + W12.3 workflow-lint / npm-audit.
+#
+# PR: mocked / self-skipping ``@pytest.mark.integration`` suite + coverage
+# ratchet + npm audit + actionlint/zizmor.
+# Schedule / dispatch: live-provider integration with secrets (release
+# precondition — see CONTRIBUTING.md §Cut a release).
+name: Integration
+
+on:
+  pull_request:
+    branches: [main, pre-0.0.1]
+  schedule:
+    - cron: "47 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-pr:
+    name: Integration (PR / mocked + self-skip)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: Integration suite
+        run: make test-integration
+      - name: Coverage ratchet
+        run: make coverage-gate
+
+  security-scope:
+    name: npm audit + workflow lint
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: docker/agent-clis/package-lock.json
+      - name: npm audit (agent-clis lockfile)
+        run: make npm-audit
+      - name: actionlint + zizmor
+        run: make workflow-lint
+
+  integration-live:
+    name: Integration (nightly / live-provider)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: Live-provider integration (release precondition)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}
+        run: make test-integration-live

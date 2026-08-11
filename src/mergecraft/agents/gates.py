@@ -144,7 +144,12 @@ def decide_approval(
       state or tier. The narrative cannot outvote a blocker.
     - ``run_succeeded=False`` ⇒ ``"neutral"``. A crashed / timed-out run must
       not propagate a permissive outcome; the hardened enforce step blocks on
-      ``neutral`` (W8.4 / D13).
+      ``neutral`` (W8.4 / D13). D3/W5.2 — every ``RunOutcome`` value except
+      ``passed`` (``failed``, ``inconclusive``, ``infra_error``,
+      ``timed_out``, ``configuration_error``) maps to ``run_succeeded=False``
+      here via ``mergecraft.run_outcome.run_succeeded_for_outcome``; this
+      function's monotone-in-blockers contract is unchanged; a caller with a
+      typed ``RunOutcome`` simply derives the boolean before calling in.
     - ``tier="untrusted"`` ⇒ never ``"success"``. The gate is inert for fork PRs
       and ``pull_request_target`` regardless of ``prApproveEnabled`` and the
       agent's ``approved=True`` (D14). With no blockers the conclusion is

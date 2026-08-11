@@ -40,7 +40,7 @@ inputs:
     description: "Working directory for the agent (defaults to GITHUB_WORKSPACE)"
     required: false
   push:
-    description: "Git push permission: disabled, restricted, or enabled. Default: enabled"
+    description: "Git push permission: disabled, restricted, or enabled. Default: restricted"
     required: false
   shell:
     description: "Shell permission: disabled, restricted, or enabled."
@@ -110,12 +110,13 @@ inputs:
     default: ${{ github.token }}
   suggest_eval_add:
     description: |
-      Opt-in (W12.4 / #44): when true, log a logger.info suggestion to add
+      Opt-in (W12.4 / #44): when enabled, log a logger.info suggestion to add
       the run to the eval bank when the run produced no positive
       findings, the trust tier is trusted, and the trigger is a re-review
-      (not a fresh PR). Default off; mergeCraft never auto-adds.
+      (not a fresh PR). Accepts disabled|enabled (also true/false aliases).
+      Default: disabled; mergeCraft never auto-adds.
     required: false
-    default: "false"
+    default: "disabled"
   tracing:
     description: |
       Tracing enablement (W8.5 / W7.7): true / false. Wins over the
@@ -152,12 +153,12 @@ outputs:
     value: ${{ steps.run.outputs.result }}
   evidence_packet:
     description: |
-      Path to this run's Merge Evidence Packet JSON (#47) — the versioned,
+      JSON body of this run's Merge Evidence Packet (#47) — the versioned,
       structured record of the findings, deterministic checks, blast-radius
-      lane, self-assessment, and decision behind the review. Written under
-      RUNNER_TEMP (override the directory with MERGECRAFT_EVIDENCE_DIR), so a
-      later `actions/upload-artifact` step can publish it. Empty when the run
-      had no pull request to attest to. Schema:
+      lane, self-assessment, and decision behind the review. Emitted via
+      `$GITHUB_OUTPUT` as multiline JSON (not a filesystem path). Empty when
+      the run had no pull request to attest to. To upload as an artifact,
+      write the output to a file in a later step. Schema:
       `docs/evidence-packet.md`.
     value: ${{ steps.run.outputs.evidence_packet }}
 
