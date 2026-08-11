@@ -154,21 +154,28 @@ def resolve_token_ref(token_ref: str | None) -> str | None:
 def _build_logfire_endpoint_and_headers(
     project: str | None,
     token: str | None,
+    region: str = "us",
+    endpoint_override: str | None = None,
 ) -> tuple[str, dict[str, str]]:
     """Derive the OTLP endpoint and headers for a Logfire sink.
 
-    Logfire speaks OTLP/HTTP at ``https://logfire.pydantic.dev/api/v1/otlp/v1/traces``
-    (the public ingest endpoint). Authorization is the bearer token. The
-    ``project`` attribute maps to a Logfire project label via a header so the
-    incoming spans are routed correctly inside the Logfire backend.
+    Logfire speaks OTLP/HTTP (``http/protobuf``) at the region-aware ingest
+    endpoint — ``https://logfire-us.pydantic.dev/v1/traces`` (US) or
+    ``https://logfire-eu.pydantic.dev/v1/traces`` (EU). Authorization is the
+    bearer token; Logfire routes spans to the project encoded **in the token
+    itself** — there is no ``x-logfire-project`` header and emitting one is
+    incorrect. ``project`` is retained only as an informational label.
+
+    When ``endpoint_override`` is set (self-hosted/testing) it is used verbatim.
     """
-    endpoint = "https://logfire.pydantic.dev/api/v1/otlp/v1/traces"
+    if endpoint_override:
+        endpoint = endpoint_override
+    else:
+        host = "logfire-eu.pydantic.dev" if region == "eu" else "logfire-us.pydantic.dev"
+        endpoint = f"https://{host}/v1/traces"
     headers: dict[str, str] = {}
     if token:
         headers["authorization"] = f"Bearer {token}"
-    if project:
-        # Logfire projects are routed by a header (see Logfire docs).
-        headers["x-logfire-project"] = project
     return endpoint, headers
 
 
@@ -446,10 +453,14 @@ class OTLPSink:
         *,
         project: str | None,
         token: str | None,
+        region: str = "us",
+        endpoint_override: str | None = None,
         logfire_module: Any | None = None,
     ) -> OTLPSink:
         """Build an :class:`OTLPSink` configured for Logfire."""
-        endpoint, headers = _build_logfire_endpoint_and_headers(project, token)
+        endpoint, headers = _build_logfire_endpoint_and_headers(
+            project, token, region=region, endpoint_override=endpoint_override
+        )
         return cls(
             endpoint=endpoint,
             headers=headers,
@@ -635,7 +646,9 @@ def _build_logfire_sink(
     return OTLPSink.for_logfire(
         project=_resolve_logfire_project(entry),
         token=token,
+        region=getattr(entry, "region", "us") or "us",
         logfire_module=logfire_module,
+        endpoint_override=getattr(entry, "endpoint", None) or None,
     )
 
 

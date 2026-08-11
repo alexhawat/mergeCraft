@@ -295,10 +295,13 @@ tracing:
         x-tenant: mergecraft
 ```
 
-For Logfire, the endpoint is hard-coded to the public ingest URL
-(`https://logfire.pydantic.dev/api/v1/otlp/v1/traces`); the `project`
-field is forwarded as the `x-logfire-project` header. The token is
-resolved through `tokenRef` (D5) — see *Token resolution* below.
+For Logfire, the endpoint is the region-aware OTLP/HTTP ingest URL —
+`https://logfire-us.pydantic.dev/v1/traces` (US) or
+`https://logfire-eu.pydantic.dev/v1/traces` (EU), selected by the sink's
+`region` field (default `us`). The `project` field is informational only;
+Logfire routes spans by the token itself, so no `x-logfire-project` header
+is sent. The token is resolved through `tokenRef` (D5) — see *Token
+resolution* below.
 
 ## Token resolution (W8.2 / D5)
 

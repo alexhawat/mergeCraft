@@ -106,7 +106,7 @@ def logfire_enable(
     project: str | None = typer.Option(
         None,
         "--project",
-        help="Logfire project label (becomes the ``x-logfire-project`` header).",
+        help="Logfire project label (informational; Logfire routes by token, not a header).",
     ),
     scope: str = typer.Option(
         "both",
