@@ -15,7 +15,7 @@ Exports:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.config.settings import (
@@ -41,6 +41,8 @@ def _build_sinks(merged: dict[str, Any]) -> list[TraceSinkEntry]:
     tracing_project: str | None = merged.get("tracing_project")
     otel_endpoint: str | None = merged.get("otel_endpoint")
     trace_dir: str | None = merged.get("trace_dir")
+    raw_region = merged.get("region")
+    region: Literal["us", "eu"] = raw_region if raw_region in ("us", "eu") else "us"
 
     # A logfire destination is selected when the operator explicitly asked for
     # it, or when a token is present and nothing else overrides the
@@ -53,6 +55,7 @@ def _build_sinks(merged: dict[str, Any]) -> list[TraceSinkEntry]:
             TraceSinkEntry(
                 type="logfire",
                 project=tracing_project,
+                region=region,
             )
             # The resolved ``logfire_token`` is forwarded separately via the
             # env-var seam that ``build_remote_sink`` consults

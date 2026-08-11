@@ -29,6 +29,12 @@ from mergecraft.cli.auth_cmd import (
     _write_env_value,
 )
 
+# ``MERGECRAFT_TRACING_REGION`` selects the Logfire OTLP data region; it is
+# written by ``tracing logfire enable --region`` and read by the precedence
+# layer alongside the other ``MERGECRAFT_*`` tracing vars.
+LOGFIRE_REGION_ENV = "MERGECRAFT_TRACING_REGION"
+_VALID_REGIONS = ("us", "eu")
+
 app = typer.Typer(
     name="tracing",
     help="Trace export configuration (Logfire). Mirrors ``sevn tracing logfire``.",
@@ -114,6 +120,11 @@ def logfire_enable(
         "-s",
         help="Where to persist: 'local' (.env), 'github' (gh secret), or 'both'.",
     ),
+    region: str | None = typer.Option(
+        None,
+        "--region",
+        help="Logfire data region for the OTLP endpoint: 'us' or 'eu' (default us).",
+    ),
 ) -> None:
     """Enable Logfire tracing by writing the token + project locally and on GitHub.
 
@@ -125,6 +136,11 @@ def logfire_enable(
     from mergecraft.cli.auth_cmd import _normalise_scope
 
     target = _normalise_scope(scope)
+
+    if region is not None:
+        region = region.strip().lower()
+        if region not in _VALID_REGIONS:
+            _bail(f"--region must be one of: {', '.join(_VALID_REGIONS)} (got {region!r}).")
 
     if token is None:
         token = getpass.getpass("Logfire write token (Enter to cancel): ").strip()
@@ -150,12 +166,20 @@ def logfire_enable(
         env_path = _local_env_path()
         env_token_ok = _write_env_value(env_path, LOGFIRE_RUNTIME_TOKEN_ENV, token)
         env_project_ok = _write_env_value(env_path, LOGFIRE_PROJECT_ENV, project)
-        wrote_local = env_token_ok and env_project_ok
+        # ``--region`` (when given) is persisted so ``config tracing`` and the
+        # sink factory pick it up through the same ``MERGECRAFT_*`` seam as
+        # the token; it never lands in the model dump / config on disk.
+        env_region_ok = True
+        if region is not None:
+            env_region_ok = _write_env_value(env_path, LOGFIRE_REGION_ENV, region)
+        wrote_local = env_token_ok and env_project_ok and env_region_ok
         if wrote_local:
             console.print(
                 f"[green]wrote[/green] {LOGFIRE_RUNTIME_TOKEN_ENV} and "
                 f"{LOGFIRE_PROJECT_ENV} to {env_path}"
             )
+            if region is not None:
+                console.print(f"[green]wrote[/green] {LOGFIRE_REGION_ENV}={region} to {env_path}")
         else:
             # Bandit's B608 fires on the interpolated `env_path`; this is a
             # console warning, not a SQL statement (no DB engine involved).
