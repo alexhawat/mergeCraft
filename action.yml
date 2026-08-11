@@ -13,7 +13,11 @@ inputs:
     description: "Maximum run duration (e.g., 10m, 1h30m). Default: 1h"
     required: false
   model:
-    description: "Model to use — a curated slug (e.g. anthropic/claude-opus) or a raw models.dev specifier. Overrides repo settings."
+    description: >-
+      Model to use — a curated slug (e.g. anthropic/claude-opus, tokenhub/hy3,
+      nous/deepseek/deepseek-v4-flash) or a raw models.dev specifier. Overrides
+      repo settings. OpenAI-compatible gateways: set NOUS_API_KEY or
+      TOKENHUB_API_KEY (or MERGECRAFT_CUSTOM_PROVIDER_*).
     required: false
   cwd:
     description: "Working directory for the agent (defaults to GITHUB_WORKSPACE)"

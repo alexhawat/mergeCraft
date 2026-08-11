@@ -25,7 +25,12 @@ CODEX_AUTH_SECRET = "CODEX_AUTH_JSON"
 CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN"
 GEMINI_API_SECRET = "GEMINI_API_KEY"
 CURSOR_API_SECRET = "CURSOR_API_KEY"
+NOUS_API_SECRET = "NOUS_API_KEY"
+NOUS_PORTAL_BASE_URL = "https://inference-api.nousresearch.com/v1"
+TOKENHUB_API_SECRET = "TOKENHUB_API_KEY"
 CLAUDE_OAUTH_TOKEN_PREFIX = "sk-ant-oat"
+DEFAULT_NOUS_PORTAL = "https://inference-api.nousresearch.com/v1"
+DEFAULT_TOKENHUB = "https://tokenhub-intl.tencentcloudmaas.com/v1"
 
 
 def _bail(msg: str) -> NoReturn:
@@ -256,3 +261,135 @@ def auth_cursor() -> None:
             f"  https://github.com/{repo_slug}/settings/secrets/actions"
         )
     console.print(f"[green]saved {CURSOR_API_SECRET}[/green] to GitHub Actions secrets")
+
+
+def _validate_openai_compatible_key(*, api_key: str, base_url: str, label: str) -> bool:
+    """GET ``{base}/models`` with a Bearer token; treat 401/403 as invalid."""
+    url = base_url.rstrip("/") + "/models"
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(
+                url,
+                headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+                params={"limit": 1},
+            )
+        if response.status_code == 200:
+            return True
+        if response.status_code in {401, 403}:
+            return False
+        logger.warning(
+            "{} key validation returned HTTP {} — saving anyway",
+            label,
+            response.status_code,
+        )
+        return True
+    except httpx.HTTPError as exc:
+        logger.warning("{} key validation skipped (network): {}", label, exc)
+        return True
+
+
+def _validate_nous_api_key(api_key: str) -> bool:
+    """Return whether ``api_key`` authenticates against the Nous Portal.
+
+    Probes ``POST {NOUS_PORTAL_BASE_URL}/chat/completions`` with a minimal
+    body (``{"model": "deepseek/deepseek-v4-flash", "messages": []}``) and a
+    ``Bearer`` auth header. Mirrors ``_validate_gemini_api_key`` semantics:
+
+    - ``200`` → accept (True)
+    - ``401`` / ``403`` → reject (False)
+    - any other status, ``httpx.HTTPError``, network/DNS/5xx → warn and accept
+      (True) so an offline operator can still save the secret locally and
+      retry later.
+
+    The probe path is ``/v1/chat/completions`` rather than ``/v1/models``
+    because the Portal's catalog endpoint is unauthenticated and would return
+    200 even for a fake bearer token (W0.4).
+    """
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(
+                f"{NOUS_PORTAL_BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"model": "deepseek/deepseek-v4-flash", "messages": []},
+            )
+        if response.status_code == 200:
+            return True
+        if response.status_code in {401, 403}:
+            return False
+        logger.warning("nous key validation returned HTTP {} — saving anyway", response.status_code)
+        return True
+    except httpx.HTTPError as exc:
+        logger.warning("nous key validation skipped (network): {}", exc)
+        return True
+
+
+@app.command("nous")
+def auth_nous() -> None:
+    """Save a Nous Portal API key as NOUS_API_KEY."""
+    _get_gh_token()
+    owner, repo = _parse_git_remote()
+    repo_slug = f"{owner}/{repo}"
+    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    console.print(
+        "create an API key at [cyan]https://portal.nousresearch.com[/cyan], then paste it below."
+    )
+    try:
+        api_key = getpass.getpass("Nous Portal API key (Enter to cancel): ").strip()
+    except EOFError, KeyboardInterrupt:
+        console.print("canceled.")
+        raise typer.Exit(0) from None
+    if not api_key:
+        console.print("canceled.")
+        raise typer.Exit(0)
+    if not _validate_nous_api_key(api_key):
+        _bail("Nous API key validation failed (401/403). Check the key and retry.")
+
+    console.print(f"saving [cyan]{NOUS_API_SECRET}[/cyan] via gh secret set...")
+    if not _set_gh_secret(name=NOUS_API_SECRET, value=api_key, repo_slug=repo_slug):
+        _bail(
+            f"could not set secret — set it manually at:\n"
+            f"  https://github.com/{repo_slug}/settings/secrets/actions"
+        )
+    console.print(f"[green]saved {NOUS_API_SECRET}[/green] to GitHub Actions secrets")
+    console.print(
+        "use model [cyan]nous/deepseek/deepseek-v4-flash[/cyan] "
+        "(opencode harness; no MERGECRAFT_CUSTOM_PROVIDER_* required)."
+    )
+
+
+@app.command("tokenhub")
+def auth_tokenhub() -> None:
+    """Save a Tencent TokenHub API key as TOKENHUB_API_KEY."""
+    _get_gh_token()
+    owner, repo = _parse_git_remote()
+    repo_slug = f"{owner}/{repo}"
+    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    console.print(
+        "create an API key in the TokenHub console, then paste it below "
+        f"(OpenAI-compatible endpoint [cyan]{DEFAULT_TOKENHUB}[/cyan]; models include "
+        "[cyan]hy3[/cyan], DeepSeek, GLM, Kimi)."
+    )
+    try:
+        api_key = getpass.getpass("TokenHub API key (Enter to cancel): ").strip()
+    except EOFError, KeyboardInterrupt:
+        console.print("canceled.")
+        raise typer.Exit(0) from None
+    if not api_key:
+        console.print("canceled.")
+        raise typer.Exit(0)
+    if not _validate_openai_compatible_key(
+        api_key=api_key, base_url=DEFAULT_TOKENHUB, label="tokenhub"
+    ):
+        _bail("TokenHub API key validation failed (401/403). Check the key and retry.")
+
+    console.print(f"saving [cyan]{TOKENHUB_API_SECRET}[/cyan] via gh secret set...")
+    if not _set_gh_secret(name=TOKENHUB_API_SECRET, value=api_key, repo_slug=repo_slug):
+        _bail(
+            f"could not set secret — set it manually at:\n"
+            f"  https://github.com/{repo_slug}/settings/secrets/actions"
+        )
+    console.print(f"[green]saved {TOKENHUB_API_SECRET}[/green] to GitHub Actions secrets")
+    console.print(
+        "use model [cyan]tokenhub/hy3[/cyan] (or any TokenHub model id as "
+        "[cyan]tokenhub/<id>[/cyan]; opencode harness)."
+    )

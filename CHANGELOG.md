@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First-class Nous Research / DeepSeek V4 Flash support (#57). The catalog now
+  enumerates `nous/deepseek/deepseek-v4-flash` as a curated alias
+  (`PROVIDERS["nous"]` in `src/mergecraft/models.py`), with `resolve` set to the
+  catalog slug the opencode harness consumes. The credential gate honours
+  `NOUS_API_KEY` as the operator-owned first-class secret and
+  `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` as a back-compat alias (D4); the binary
+  gate (`_agent_binary_available`) short-circuits to `True` for the `nous`
+  provider since the opencode harness reads env vars directly and no CLI is
+  required on `PATH` (D5). A new `mergecraft auth nous` subcommand
+  (`src/mergecraft/cli/auth_cmd.py`) mirrors `auth gemini`/`auth cursor`
+  line-for-line: prompts with `getpass`, validates against
+  `https://inference-api.nousresearch.com/v1/chat/completions` (the Portal
+  catalog endpoint is unauthenticated and would return 200 for a fake bearer;
+  `/v1/chat/completions` enforces auth and is the probe the validator uses),
+  then writes `NOUS_API_KEY` via `gh secret set`. The validator returns
+  `True` on `200`, `False` on `401`/`403`, and `True` (with a `logger.warning`)
+  on network errors — parity with the existing `_validate_gemini_api_key`/
+  `_validate_cursor_api_key` paths
+- First-class **Nous Portal** and **Tencent TokenHub** providers in the CLI and
+  Action. `mergecraft auth nous` / `mergecraft auth tokenhub` store
+  `NOUS_API_KEY` / `TOKENHUB_API_KEY`; models `nous/…` and `tokenhub/…`
+  (including `tokenhub/hy3` and any TokenHub model id) auto-wire the opencode
+  OpenAI-compatible harness without requiring `MERGECRAFT_CUSTOM_PROVIDER_*`.
+  Explicit custom-provider env vars still override the named presets
+- `meat_python_plus/` — Python port of [boldsoftware/meat](https://github.com/boldsoftware/meat)
+  with OpenAI, Anthropic, Nous, and TokenHub (Hy3+) providers; CLI entry
+  points `meat-py` / `meat_python_plus`
+- Meat reading-diff harness prototype (#60 spike). `src/mergecraft/utils/meat_harness.py`
+  ships `run_meat_harness(...)` — a typed, pure-boundary entry point that takes
+  a unified diff, invokes `meat -json` as a subprocess with a bounded timeout,
+  parses the pinned wire format (`smart_diff`, `summary`, `input_tokens`,
+  `output_tokens`, optional `elision`), and returns a `MeatHarnessResult` whose
+  `raw_diff` field is the input diff byte-for-byte on every code path. Trust
+  gate (D7), opt-in flag (convention 7), shell-disabled gate (D7), and
+  missing-binary skip (D13) are enforced inside the harness so every future
+  caller inherits them. The harness never reads, logs, or stores the credential
+  value (convention 8); the credential is referenced by env-var name only. Every
+  failure branch (non-zero exit, malformed JSON, timeout, missing binary, gate
+  tripped) degrades to the raw diff with a named `skip_reason` — a missing
+  optional tool never fails a review. `tests/utils/test_meat_harness.py` carries
+  the W1 contract suite (17 passing, 1 `@pytest.mark.integration` smoke test
+  skipped when `meat` is not on PATH). `docs/meat-spike.md` publishes the W2
+  measurements and the spike's qualified-conditional recommendation
+- Operator-runnable measurement script at `scripts/measure_meat_corpus.py` that
+  extracted the corpus diffs, time the harness subprocess boundary, and invoke
+  the real `meat -json` once per corpus diff. The script is the reproducible
+  artifact behind the spike report's tables; the four D10 measurements (token
+  delta, cold/warm latency, cost, fidelity) are blocked on the operator LLM
+  credential and the script is the path to producing them on rerun
 - Reviews now check *how* a change was produced, not only the diff. Eight named
   trajectory checks read the tool calls mergeCraft mediated and report a file
   modified but never read, a tool error that was never retried, edits with no
@@ -44,6 +93,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`tests/test_runtime_call_sites.py`) pins both `decide_action` and
   `record_shadow_prediction` to modules the Action orchestrator reaches
   (#50)
+
+### Documentation
+
+- Document the Nous Research provider in `README.md` (Authentication table
+  row for `nous` / `deepseek/deepseek-v4-flash`, a worked `.mergecraft/config.yaml`
+  example block, and a `mergecraft auth nous` CLI row) and add a
+  cross-reference note in `docs/ANALYZERS.md` pointing at the README's
+  Authentication section so the analyzer-catalog page stops looking like the
+  surface for provider configuration. `Dockerfile`, `action.yml`, and
+  `.github/workflows/mergecraft.yml` are deliberately unchanged (PR #120
+  already mirrors the sevn cascade correctly). (#57)
+
+### Security
+
+- The `github-issue-triage` skill now reads issue bodies and comments only through the
+  new sanitizing fetcher (`scripts/fetch_issue_safe.py`, queue sweeps via
+  `fetch_open_issues.py`); each untrusted field is fenced with a nonce-delimited block
+  and best-effort scanned, while maintainer-authored fields (`OWNER`/`MEMBER`/`COLLABORATOR`)
+  pass through unfenced on a per-field basis
+- `scripts/post_issue_update.py` rejects plans that are off-allowlist before any
+  `gh` mutation runs: labels must match the live repo label set, assignees must come
+  from the pinned roster in `--skw-toml`, public comments must match one of the two
+  closed-set SKILL.md templates, and a `close: true` requires an attached decision
+  object with `should_close: true`
+- `.llmignore/blocked/` quarantines any untrusted field that the scanner flagged,
+  keeps raw bytes out of agent context, and is gitignored so it never reaches a PR
 
 ### Changed
 
@@ -566,6 +641,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wire D7 sandbox planning into adapter execution; fail-closed trust tier when the GitHub
   event is missing; redact analyzer artifacts before persist; apply repo ``inlineBudget``;
   extract canonical ``analyzers/pipeline.py``; use baked binaries when ``MERGECRAFT_ANALYZERS=full``.
+- `github-issue-manager` and `github-issue-triage` agents now route body/comment
+  reads through the sanitizing fetcher; the SKILL.md `Configuration` section drops
+  the `spec-kit-wave/skills` lookup (kit not vendored) and documents the
+  `--skw-toml` override path
 
 ### Changed
 

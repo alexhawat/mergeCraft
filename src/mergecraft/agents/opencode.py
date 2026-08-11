@@ -14,6 +14,11 @@ import httpx
 from loguru import logger
 
 from mergecraft.agents.gates import build_opencode_native_fs_permission
+from mergecraft.agents.openai_compatible_gateways import (
+    CUSTOM_PROVIDER_API_KEY_ENV,
+    CUSTOM_PROVIDER_BASE_URL_ENV,
+    resolve_gateway_endpoint,
+)
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
@@ -26,26 +31,30 @@ from mergecraft.agents.shared import (
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.types import MERGECRAFT_MCP_NAME
 
-CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
-CUSTOM_PROVIDER_API_KEY_ENV = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
+# Re-exported for tests / callers that import these names from opencode.
+__all_gateway_envs__ = (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV)
 
 
 def build_custom_provider(model: str | None) -> dict[str, object] | None:
-    """Describe an OpenAI-compatible provider declared through the environment.
+    """Describe an OpenAI-compatible provider for opencode.
+
+    Resolution order (see :func:`resolve_gateway_endpoint`):
+
+    1. ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`` + ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY``
+    2. Named presets: ``nous/*`` via ``NOUS_API_KEY``, ``tokenhub/*`` via
+       ``TOKENHUB_API_KEY`` (optional ``NOUS_BASE_URL`` / ``TOKENHUB_BASE_URL``)
 
     The provider id is the segment of ``model`` before the first slash, so
-    ``nous/deepseek/deepseek-v4-flash`` registers provider ``nous`` serving model
-    ``deepseek/deepseek-v4-flash``. Returns ``None`` unless both the base URL and
-    the API key are set, since opencode cannot authenticate with either alone.
+    ``nous/deepseek/deepseek-v4-flash`` registers provider ``nous`` serving
+    ``deepseek/deepseek-v4-flash``, and ``tokenhub/hy3`` registers ``tokenhub``
+    serving ``hy3``.
     """
-    base_url = os.environ.get(CUSTOM_PROVIDER_BASE_URL_ENV, "").strip()
-    api_key = os.environ.get(CUSTOM_PROVIDER_API_KEY_ENV, "").strip()
-    if not (base_url and api_key and model):
+    endpoint = resolve_gateway_endpoint(model)
+    if endpoint is None or not model:
         return None
+    provider_id, base_url, api_key = endpoint
     slash = model.find("/")
-    if slash <= 0:
-        return None
-    provider_id, model_id = model[:slash].lower(), model[slash + 1 :]
+    model_id = model[slash + 1 :]
     return {
         provider_id: {
             "npm": "@ai-sdk/openai-compatible",

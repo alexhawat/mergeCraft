@@ -71,6 +71,20 @@ def _has_cursor_auth() -> bool:
     return _has_env("CURSOR_API_KEY")
 
 
+def _has_gateway_auth(provider: str) -> bool:
+    """Return whether the gateway credential for ``provider`` is configured.
+
+    Covers Nous Portal (``NOUS_API_KEY``) and Tencent TokenHub
+    (``TOKENHUB_API_KEY``) through the opencode harness. The
+    ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` env var acts as a back-compat alias
+    for any named preset (D4): consumers that wired the opencode harness
+    contract directly without ``mergecraft auth nous`` keep working.
+    """
+    from mergecraft.agents.openai_compatible_gateways import has_gateway_credentials
+
+    return has_gateway_credentials(provider)
+
+
 def has_credentials_for_slug(slug: str) -> bool:
     """Return whether the current environment has credentials for ``slug``."""
     try:
@@ -90,6 +104,8 @@ def has_credentials_for_slug(slug: str) -> bool:
         return _has_bedrock_auth() and bool(os.environ.get(BEDROCK_MODEL_ID_ENV, "").strip())
     if provider == "vertex":
         return _has_vertex_auth() and bool(os.environ.get(VERTEX_MODEL_ID_ENV, "").strip())
+    if provider in {"nous", "tokenhub"}:
+        return _has_gateway_auth(provider)
     return False
 
 
@@ -112,6 +128,10 @@ def _agent_binary_available(slug: str) -> bool:
         "openai": "codex",
         "google": "gemini",
         "cursor": "cursor",
+        # D5: the opencode harness consumes env vars directly for the Nous path,
+        # so there is no required CLI on PATH. Explicit ``None`` short-circuits
+        # the gate to ``True`` and pins the W1.7 regression pin.
+        "nous": None,
     }
     binary = binary_by_provider.get(provider)
     if binary is None:
@@ -646,6 +666,22 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
 
         if provider == "anthropic" and _has_claude_code_auth():
             return agents["claude"]
+
+        if provider in {"nous", "tokenhub"}:
+            if _has_gateway_auth(provider):
+                return agents["opencode"]
+            hints = (
+                ("NOUS_API_KEY", "mergecraft auth nous")
+                if provider == "nous"
+                else ("TOKENHUB_API_KEY", "mergecraft auth tokenhub")
+            )
+            msg = (
+                f"{provider} model {model!r} selected but no credential is configured. "
+                f"Set {hints[0]} (via `{hints[1]}` or a GitHub Actions secret), "
+                "or set MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + "
+                "MERGECRAFT_CUSTOM_PROVIDER_API_KEY, or choose a different model."
+            )
+            raise ValueError(msg)
 
     return agents["opencode"]
 

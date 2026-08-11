@@ -192,6 +192,29 @@ staticChecks:
     command: make lint
 ```
 
+### Example 5 — SARIF upload to code scanning (opt-in)
+
+Publish analyzer findings as GitHub code-scanning alerts — off by default,
+requires `security-events: write`:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write   # required — without it GitHub answers 403
+
+jobs:
+  review:
+    steps:
+      - uses: alexhawat/mergeCraft@pre-0.0.1
+        with:
+          sarif_upload: enabled
+```
+
+Only findings admitted by the run's trust tier, `shell:` policy and
+`analyzers:` mode are uploaded, after secret redaction — agent narrative is
+never uploaded. Details: [docs/ANALYZERS.md](docs/ANALYZERS.md).
+
 Full config reference: [`examples/config.yaml`](examples/config.yaml).
 
 ## 🔑 Authentication
@@ -201,6 +224,8 @@ Full config reference: [`examples/config.yaml`](examples/config.yaml).
 | Anthropic Claude | `mergecraft auth claude` → `CLAUDE_CODE_OAUTH_TOKEN` (Claude Pro/Max) | `ANTHROPIC_API_KEY` |
 | OpenAI Codex | `mergecraft auth codex` → `CODEX_AUTH_JSON` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` |
 | Google Gemini | `mergecraft auth gemini` → `GEMINI_API_KEY` (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` |
+| Nous Portal | — (API key) | `mergecraft auth nous` → `NOUS_API_KEY` (`nous/deepseek/deepseek-v4-flash`) |
+| Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → `TOKENHUB_API_KEY` (`tokenhub/hy3` + any TokenHub model) |
 | Cursor Cloud | `mergecraft auth cursor` → `CURSOR_API_KEY` | `CURSOR_API_KEY` |
 
 Subscription auth runs the official `claude` / `codex` / `gemini` CLIs as *you*
@@ -218,7 +243,7 @@ providers you actually use.
 | Command | Purpose |
 |---------|---------|
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` + example workflow |
-| `mergecraft auth <provider>` | Save a credential via `gh secret set` (`claude`, `codex`, `gemini`, `cursor`) |
+| `mergecraft auth <provider>` | Save a credential via `gh secret set` (`claude`, `codex`, `gemini`, `nous`, `tokenhub`, `cursor`) |
 | `mergecraft models list / set / show` | Curated slugs, ordered preference list, effective winner |
 | `mergecraft diff-review` | Offline local git/patch review (`--dry-run`, `--json`) |
 | `mergecraft watch --pr N` | Stream PR/issue timeline as JSONL |

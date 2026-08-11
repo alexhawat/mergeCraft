@@ -404,6 +404,53 @@ PROVIDERS: dict[str, ProviderConfig] = {
             },
         )
     ),
+    "nous": _provider(
+        ProviderConfig(
+            display_name="Nous Portal",
+            env_vars=("NOUS_API_KEY", "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"),
+            models={
+                "deepseek/deepseek-v4-flash": ModelDef(
+                    display_name="DeepSeek V4 Flash (Nous Portal)",
+                    description=(
+                        "DeepSeek V4 Flash via the Nous Portal OpenAI-compatible endpoint. "
+                        "Pass as nous/deepseek/deepseek-v4-flash for the portal model id."
+                    ),
+                    resolve="nous/deepseek/deepseek-v4-flash",
+                    preferred=True,
+                ),
+            },
+        )
+    ),
+    "tokenhub": _provider(
+        ProviderConfig(
+            display_name="Tencent TokenHub",
+            env_vars=("TOKENHUB_API_KEY",),
+            models={
+                "hy3": ModelDef(
+                    display_name="Hy3",
+                    description="Tencent Hunyuan Hy3 via TokenHub (OpenAI-compatible).",
+                    resolve="tokenhub/hy3",
+                    preferred=True,
+                ),
+                "deepseek-v4-flash": ModelDef(
+                    display_name="DeepSeek V4 Flash (TokenHub)",
+                    resolve="tokenhub/deepseek-v4-flash",
+                ),
+                "deepseek-v4-pro": ModelDef(
+                    display_name="DeepSeek V4 Pro (TokenHub)",
+                    resolve="tokenhub/deepseek-v4-pro",
+                ),
+                "glm-5.2": ModelDef(
+                    display_name="GLM 5.2 (TokenHub)",
+                    resolve="tokenhub/glm-5.2",
+                ),
+                "kimi-k3": ModelDef(
+                    display_name="Kimi K3 (TokenHub)",
+                    resolve="tokenhub/kimi-k3",
+                ),
+            },
+        )
+    ),
     "openrouter": _provider(
         ProviderConfig(
             display_name="OpenRouter",
