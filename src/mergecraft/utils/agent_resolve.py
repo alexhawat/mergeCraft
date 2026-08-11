@@ -72,6 +72,14 @@ def _has_cursor_auth() -> bool:
 
 
 def _has_gateway_auth(provider: str) -> bool:
+    """Return whether the gateway credential for ``provider`` is configured.
+
+    Covers Nous Portal (``NOUS_API_KEY``) and Tencent TokenHub
+    (``TOKENHUB_API_KEY``) through the opencode harness. The
+    ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` env var acts as a back-compat alias
+    for any named preset (D4): consumers that wired the opencode harness
+    contract directly without ``mergecraft auth nous`` keep working.
+    """
     from mergecraft.agents.openai_compatible_gateways import has_gateway_credentials
 
     return has_gateway_credentials(provider)
@@ -120,6 +128,10 @@ def _agent_binary_available(slug: str) -> bool:
         "openai": "codex",
         "google": "gemini",
         "cursor": "cursor",
+        # D5: the opencode harness consumes env vars directly for the Nous path,
+        # so there is no required CLI on PATH. Explicit ``None`` short-circuits
+        # the gate to ``True`` and pins the W1.7 regression pin.
+        "nous": None,
     }
     binary = binary_by_provider.get(provider)
     if binary is None:

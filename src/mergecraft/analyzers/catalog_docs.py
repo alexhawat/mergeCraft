@@ -290,6 +290,32 @@ def _shell_trust_matrix_lines() -> list[str]:
     return lines
 
 
+def _related_providers_lines() -> list[str]:
+    """Render the related-providers cross-reference note.
+
+    Lives in the generator rather than in the markdown because
+    ``docs/ANALYZERS.md`` is written wholesale by ``make catalog-check`` — a
+    hand-written section there is erased on the next run (#57).
+    """
+    return [
+        "",
+        "> **Provider configuration (catalog slugs, credential detection, "
+        "`mergecraft auth <provider>`) is documented in "
+        "[the README → Authentication](../README.md#authentication).** "
+        "This page is the *analyzer* catalog — the rows below are "
+        "deterministic, manifest-driven tools (`actionlint`, `zizmor`, "
+        "`ShellCheck`, `Hadolint`, …) the reviewer runs mechanically. The "
+        "Nous Research / DeepSeek V4 Flash path (provider id `nous`, catalog "
+        "slug `nous/deepseek/deepseek-v4-flash`) is a *provider*, not an "
+        "analyzer, and lives in the README's "
+        "[Authentication table](../README.md#authentication) alongside "
+        "Anthropic, OpenAI, Google, and Cursor. Set up its secret with "
+        "[`mergecraft auth nous`](../README.md#authentication); see "
+        "[issue #57](https://github.com/alexhawat/mergeCraft/issues/57) for "
+        "the rationale.",
+    ]
+
+
 def _sarif_upload_lines() -> list[str]:
     """Render the code-scanning upload section (#39, D13/D14).
 
@@ -370,9 +396,15 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
         "Shipped mergeCraft catalog analyzers. Rows are generated from manifests — "
         "run ``uv run python -m mergecraft.analyzers.catalog_docs`` to refresh.",
         "",
-        "| id | category | languages | default | runtime | trust | exclusive group | notes |",
-        "|----|----------|-----------|---------|---------|-------|-----------------|-------|",
     ]
+    lines.extend(_related_providers_lines())
+    lines.extend(
+        [
+            "",
+            "| id | category | languages | default | runtime | trust | exclusive group | notes |",
+            "|----|----------|-----------|---------|---------|-------|-----------------|-------|",
+        ]
+    )
     for manifest in rows:
         languages = ", ".join(manifest.languages) if manifest.languages else "—"
         group = manifest.exclusive_group or "—"

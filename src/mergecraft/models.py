@@ -407,22 +407,16 @@ PROVIDERS: dict[str, ProviderConfig] = {
     "nous": _provider(
         ProviderConfig(
             display_name="Nous Portal",
-            env_vars=("NOUS_API_KEY",),
+            env_vars=("NOUS_API_KEY", "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"),
             models={
-                "deepseek-v4-flash": ModelDef(
-                    display_name="DeepSeek V4 Flash (Nous)",
+                "deepseek/deepseek-v4-flash": ModelDef(
+                    display_name="DeepSeek V4 Flash (Nous Portal)",
                     description=(
                         "DeepSeek V4 Flash via the Nous Portal OpenAI-compatible endpoint. "
                         "Pass as nous/deepseek/deepseek-v4-flash for the portal model id."
                     ),
                     resolve="nous/deepseek/deepseek-v4-flash",
                     preferred=True,
-                ),
-                "deepseek/deepseek-v4-flash": ModelDef(
-                    display_name="DeepSeek V4 Flash",
-                    resolve="nous/deepseek/deepseek-v4-flash",
-                    preferred=True,
-                    hidden=True,
                 ),
             },
         )

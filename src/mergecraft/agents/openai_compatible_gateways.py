@@ -61,13 +61,22 @@ def has_custom_provider_env() -> bool:
 
 
 def has_gateway_credentials(provider_id: str) -> bool:
-    """Return whether ``provider_id`` can authenticate from the environment."""
+    """Return whether ``provider_id`` can authenticate from the environment.
+
+    For ``nous``, ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` is honoured as a
+    back-compat alias even when ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`` is
+    unset — the opencode harness contract re-passes ``NOUS_API_KEY`` as
+    ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` on the Nous step, so a workflow
+    that wires the alias alone should still resolve credentials (D4).
+    """
     if has_custom_provider_env():
         return True
     preset = GATEWAY_PRESETS.get(provider_id.lower())
     if preset is None:
         return False
-    return _has_env(preset.api_key_env)
+    if _has_env(preset.api_key_env):
+        return True
+    return bool(provider_id.lower() == "nous" and _has_env(CUSTOM_PROVIDER_API_KEY_ENV))
 
 
 def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:

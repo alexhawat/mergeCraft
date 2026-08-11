@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First-class Nous Research / DeepSeek V4 Flash support (#57). The catalog now
+  enumerates `nous/deepseek/deepseek-v4-flash` as a curated alias
+  (`PROVIDERS["nous"]` in `src/mergecraft/models.py`), with `resolve` set to the
+  catalog slug the opencode harness consumes. The credential gate honours
+  `NOUS_API_KEY` as the operator-owned first-class secret and
+  `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` as a back-compat alias (D4); the binary
+  gate (`_agent_binary_available`) short-circuits to `True` for the `nous`
+  provider since the opencode harness reads env vars directly and no CLI is
+  required on `PATH` (D5). A new `mergecraft auth nous` subcommand
+  (`src/mergecraft/cli/auth_cmd.py`) mirrors `auth gemini`/`auth cursor`
+  line-for-line: prompts with `getpass`, validates against
+  `https://inference-api.nousresearch.com/v1/chat/completions` (the Portal
+  catalog endpoint is unauthenticated and would return 200 for a fake bearer;
+  `/v1/chat/completions` enforces auth and is the probe the validator uses),
+  then writes `NOUS_API_KEY` via `gh secret set`. The validator returns
+  `True` on `200`, `False` on `401`/`403`, and `True` (with a `logger.warning`)
+  on network errors — parity with the existing `_validate_gemini_api_key`/
+  `_validate_cursor_api_key` paths
 - First-class **Nous Portal** and **Tencent TokenHub** providers in the CLI and
   Action. `mergecraft auth nous` / `mergecraft auth tokenhub` store
   `NOUS_API_KEY` / `TOKENHUB_API_KEY`; models `nous/…` and `tokenhub/…`
@@ -18,7 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `meat_python_plus/` — Python port of [boldsoftware/meat](https://github.com/boldsoftware/meat)
   with OpenAI, Anthropic, Nous, and TokenHub (Hy3+) providers; CLI entry
   points `meat-py` / `meat_python_plus`
-
 - Meat reading-diff harness prototype (#60 spike). `src/mergecraft/utils/meat_harness.py`
   ships `run_meat_harness(...)` — a typed, pure-boundary entry point that takes
   a unified diff, invokes `meat -json` as a subprocess with a bounded timeout,
@@ -76,6 +93,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`tests/test_runtime_call_sites.py`) pins both `decide_action` and
   `record_shadow_prediction` to modules the Action orchestrator reaches
   (#50)
+
+### Documentation
+
+- Document the Nous Research provider in `README.md` (Authentication table
+  row for `nous` / `deepseek/deepseek-v4-flash`, a worked `.mergecraft/config.yaml`
+  example block, and a `mergecraft auth nous` CLI row) and add a
+  cross-reference note in `docs/ANALYZERS.md` pointing at the README's
+  Authentication section so the analyzer-catalog page stops looking like the
+  surface for provider configuration. `Dockerfile`, `action.yml`, and
+  `.github/workflows/mergecraft.yml` are deliberately unchanged (PR #120
+  already mirrors the sevn cascade correctly). (#57)
 
 ### Security
 
