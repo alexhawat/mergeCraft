@@ -70,16 +70,6 @@ def _strip_provider_prefix(specifier: str) -> str:
     return specifier[slash + 1 :] if slash > 0 else specifier
 
 
-def _codex_truncate_tool_payload(value: str) -> str:
-    """Render a codex tool payload as a redacted, truncated string (GenAI attr)."""
-    from mergecraft.analyzers.redact import redact_secrets
-
-    text = redact_secrets(value or "")
-    if len(text) > 2048:
-        return text[:2048] + "…"
-    return text
-
-
 def _is_under_forbidden_temp(path: Path) -> bool:
     try:
         resolved = path.resolve()
@@ -789,9 +779,6 @@ def _codex_stream_event_handler(
                 span.__enter__()
                 span.set_attribute("model.id", model_id)
                 span.set_attribute("model.event", "thread.started")
-                span.set_attribute("gen_ai.operation.name", "chat")
-                span.set_attribute("gen_ai.request.model", model_id)
-                span.set_attribute("gen_ai.response.model", model_id)
                 open_llm_spans[thread_id] = {
                     "span": span,
                     "tokens_in": 0,
@@ -815,9 +802,6 @@ def _codex_stream_event_handler(
                 span.set_attribute("tool.name", tool_name)
                 span.set_attribute("tool.id", tool_id)
                 span.set_attribute("tool.server", "codex")
-                span.set_attribute("gen_ai.operation.name", "execute_tool")
-                span.set_attribute("gen_ai.tool.name", tool_name)
-                span.set_attribute("gen_ai.tool.call.id", tool_id)
                 open_tool_spans[tool_id] = {"span": span, "name": tool_name}
             return
 
@@ -833,14 +817,10 @@ def _codex_stream_event_handler(
                     return
                 span_obj = entry.get("span")
                 if span_obj is not None:
-                    resolved_name = str(item.get("name") or entry.get("name") or "unknown")
-                    span_obj.set_attribute("tool.name", resolved_name)
-                    span_obj.set_attribute("gen_ai.tool.name", resolved_name)
-                    tool_input = str(item.get("input") or "")
-                    span_obj.set_attribute("tool.input", tool_input)
                     span_obj.set_attribute(
-                        "gen_ai.tool.input", _codex_truncate_tool_payload(tool_input)
+                        "tool.name", str(item.get("name") or entry.get("name") or "unknown")
                     )
+                    span_obj.set_attribute("tool.input", str(item.get("input") or ""))
                     span_obj.ts_end_ns = time.time_ns()
                     span_obj.__exit__(None, None, None)
                 return
@@ -870,8 +850,6 @@ def _codex_stream_event_handler(
                 if span_obj is not None:
                     span_obj.set_attribute("cost.tokens_in", entry["tokens_in"])
                     span_obj.set_attribute("cost.tokens_out", entry["tokens_out"])
-                    span_obj.set_attribute("gen_ai.usage.input_tokens", entry["tokens_in"])
-                    span_obj.set_attribute("gen_ai.usage.output_tokens", entry["tokens_out"])
                     span_obj.ts_end_ns = time.time_ns()
                     span_obj.__exit__(None, None, None)
             open_llm_spans.clear()

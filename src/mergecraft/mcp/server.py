@@ -202,18 +202,6 @@ def _is_notification(message: Any) -> bool:
     return isinstance(message, dict) and "id" not in message
 
 
-def _span_tool_call_id() -> str:
-    """Generate a stable id for a ``tool.call`` span's ``gen_ai.tool.call.id``.
-
-    The MCP server dispatches each ``tools/call`` synchronously; a fresh uuid
-    gives Logfire's GenAI dashboard a unique correlation id without leaking
-    any request content.
-    """
-    import uuid
-
-    return uuid.uuid4().hex
-
-
 def _record_trajectory(
     ctx: ToolContext | None,
     name: str,
@@ -307,9 +295,6 @@ def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> Fas
             call_attrs: dict[str, Any] = {
                 "tool.name": name,
                 "tool.server": MERGECRAFT_MCP_NAME,
-                "gen_ai.operation.name": "execute_tool",
-                "gen_ai.tool.name": name,
-                "gen_ai.tool.call.id": _span_tool_call_id(),
             }
             with tracer.start_span("tool.call", attrs_source=lambda: dict(call_attrs)) as _span:
                 try:
