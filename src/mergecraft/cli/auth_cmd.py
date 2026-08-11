@@ -420,6 +420,9 @@ def _validate_logfire_token(api_key: str) -> bool:
 
     - ``200`` → accept (True).
     - ``401`` / ``403`` → reject (False).
+    - ``3xx`` (redirect — Logfire uses a 302 to the auth flow when the bearer
+      is missing/expired) → reject (False). Treating 302 as "saving anyway"
+      leaves a token saved that never produces a span silently.
     - any other status, ``httpx.HTTPError``, network/DNS/5xx → warn and accept
       (True) so an offline operator can still save the secret locally and
       retry later.
@@ -429,7 +432,7 @@ def _validate_logfire_token(api_key: str) -> bool:
     while the projects endpoint enforces the bearer token with a real 401/403.
     """
     try:
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=15.0, follow_redirects=False) as client:
             response = client.get(
                 LOGFIRE_PROBE_URL,
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -440,6 +443,14 @@ def _validate_logfire_token(api_key: str) -> bool:
     if response.status_code == 200:
         return True
     if response.status_code in {401, 403}:
+        return False
+    if 300 <= response.status_code < 400:
+        # Logfire returns 302 to a sign-in URL when the bearer is missing or
+        # expired. A saved token that 302s will never ingest — refuse it now.
+        logger.warning(
+            "logfire key validation returned HTTP {} (redirect to auth) — token rejected",
+            response.status_code,
+        )
         return False
     logger.warning(
         "logfire key validation returned HTTP {} — saving anyway",
@@ -529,7 +540,7 @@ def auth_logfire(
         ),
     ),
 ) -> None:
-    """Save a Logfire write token + project for the ``logfire`` tracing sink.
+    r"""Save a Logfire write token + project for the ``logfire`` tracing sink.
 
     Writes ``MERGECRAFT_LOGFIRE_TOKEN`` and ``MERGECRAFT_TRACING_PROJECT``
     into the local ``.env`` and/or the ``LOGFIRE_TOKEN`` Actions secret on the
@@ -537,9 +548,11 @@ def auth_logfire(
     --tracing --tracing-to logfire`` ships spans to Logfire; ``mergecraft
     config tracing`` shows the project and a redacted token.
 
-    The ``[tracing]`` extra must be installed for spans to actually leave the
-    runner — install with ``uv pip install 'merge-craft[tracing]'`` (or
-    ``uv sync --extra tracing``) when the warning fires.
+    The ``\[tracing]`` extra must be installed for spans to actually leave
+    the runner — install with ``uv pip install 'merge-craft' --extra tracing``
+    (or ``uv sync --extra tracing``) when the warning fires.
+
+    NOTE: the ``\[tracing]`` above is literal text, not a Rich markup tag.
     """
     target = _normalise_scope(scope)
 
@@ -570,7 +583,10 @@ def auth_logfire(
         console.print("canceled.")
         raise typer.Exit(0)
     if not _validate_logfire_token(token):
-        _bail("Logfire token validation failed (401/403). Check the token and retry.")
+        _bail(
+            "Logfire token validation failed (HTTP 401/403 or auth redirect). "
+            "Check the token and retry."
+        )
 
     project = typer.prompt(
         "Logfire project label (Enter to cancel)",
@@ -591,12 +607,21 @@ def auth_logfire(
     # may want to set the secret first and install later — but print a clear
     # one-liner so the failure mode is not "nothing happens".
     if not _logfire_extra_installed():
+        # The literal `[tracing]` would be parsed as Rich markup inside the
+        # `[cyan]` spans, so render the warning in two passes: the colored
+        # prefix via markup, then the bracketed install command as plain text.
         console.print(
-            "[yellow]warning:[/yellow] the [cyan][tracing][/cyan] extra is "
-            "not installed. Spans will not leave the runner until you run "
-            "[cyan]uv pip install 'merge-craft[tracing]'[/cyan]. The token "
-            "and project were saved regardless — re-running this command "
-            "after install is not required."
+            "[yellow]warning:[/yellow] the [tracing] extra is not installed.", markup=False
+        )
+        console.print(
+            "Spans will not leave the runner until you run "
+            "`uv pip install 'merge-craft' --extra tracing`.",
+            markup=False,
+        )
+        console.print(
+            "The token and project were saved regardless — re-running this "
+            "command after install is not required.",
+            markup=False,
         )
 
     wrote_local = False

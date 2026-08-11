@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `mergecraft config tracing` now reports `enabled: true` immediately after
+  `mergecraft auth logfire` (or `tracing logfire enable`) writes to `.env`.
+  Root cause: the CLI's `main()` did not load `.env` into `os.environ`, so the
+  precedence layer saw an empty environment for `MERGECRAFT_LOGFIRE_TOKEN` /
+  `MERGECRAFT_TRACING_PROJECT` even when the file held them. Fix in
+  `src/mergecraft/cli/app.py` — `_load_local_env()` calls `python-dotenv`'s
+  `load_dotenv(..., override=False)` so real env (CI, shell, GitHub Actions)
+  wins and missing keys are populated from the file. The loader is silent on
+  a missing `.env` (CI sandboxes, fresh checkouts)
+- `_validate_logfire_token` now rejects HTTP 302 responses instead of saving
+  the bearer anyway. Logfire's `GET /api/v1/projects` returns 302 to the sign-in
+  URL when the bearer is missing or expired; previously the validator treated
+  the redirect as "saving anyway" and the operator walked away with a saved
+  token that never produced a span silently. The probe now uses
+  `httpx.Client(follow_redirects=False)` and explicitly refuses any 3xx
+  response (401/403 still reject; 5xx still warn-and-save). Tested in
+  `tests/cli/test_auth_logfire_cmd.py::test_auth_logfire_validator_rejects_302_redirect`
+  and `tests/cli/test_auth_logfire_cmd.py::test_tracing_logfire_enable_rejects_302`
+- `auth logfire` `--help` no longer renders `` `` `` `` as literal
+  four-backticks. The docstring's ``[tracing]`` was parsed by Rich
+  (`rich_markup_mode="rich"`) as a markup tag and the bracketed text was
+  consumed, leaving a four-backtick artifact. The docstring is now a raw
+  string (`r"""..."""`) with ``\[tracing]`` escapes so Rich renders the
+  brackets literally. The runtime warning for a missing `[tracing]` extra uses
+  `console.print(..., markup=False)` to keep the install command verbatim.
+  Test: `test_auth_logfire_help_does_not_emit_unbalanced_backticks`
+
 ### Changed
 
 - **BREAKING** — `with: model:` no longer means "suppress the configured
@@ -44,6 +73,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`src/mergecraft/cli/tracing_precedence.py`) and the sink factory
   (`_resolve_logfire_project` in `src/mergecraft/tracing/exporters.py`) so the
   project label becomes the `x-logfire-project` header at runtime
+- `mergecraft tracing logfire enable|disable` — non-interactive counterpart to
+  `auth logfire`, symmetric with `sevn tracing logfire enable|disable` (sevn
+  `specs/04-tracing.md`). `enable --token X --project Y [--scope local|github|both]`
+  validates the bearer against the same Logfire REST probe and persists the
+  token + project label via the same writers used by `auth logfire`; `disable`
+  clears the local `.env` keys via `set_key` with an empty value and removes the
+  `LOGFIRE_TOKEN` Actions secret via `gh secret delete` (a missing secret is
+  treated as success — the post-condition we want — secret is absent — already
+  holds). Both commands reuse `_set_gh_secret`, `_validate_logfire_token`,
+  `_write_env_value`, and the local-env loader from `cli/app.py`; the new
+  module lives at `src/mergecraft/cli/tracing_logfire_cmd.py`. Tests in
+  `tests/cli/test_tracing_logfire_cmd.py` (10 cases covering the four validators
+  × scope permutations and the missing-secret idempotency)
 - Codex CLI custom OpenAI-compatible provider passthrough + multi-provider surface
   (#71 / W3). `codex.py::write_mcp_config()` now emits Codex CLI 0.146's
   `[model_providers.<id>]` TOML blocks (`base_url` / `env_key` / `wire_api =
