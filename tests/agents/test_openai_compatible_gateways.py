@@ -54,6 +54,8 @@ def _clear_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for n in range(1, 8):
         monkeypatch.delenv(f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{n}", raising=False)
         monkeypatch.delenv(f"MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_{n}", raising=False)
+    monkeypatch.delenv("NOUS_API_KEY", raising=False)
+    monkeypatch.delenv("TOKENHUB_API_KEY", raising=False)
 
 
 # -- W1.4: shared helper returns a multi-provider shape --------------------
@@ -213,6 +215,54 @@ def test_shared_multi_provider_resolver_indexed_overrides_singleton(
     as_dict = _coerce_to_dict(result)
     assert PROVIDER_1_ID in as_dict
     assert DEFAULT_PROVIDER_ID not in as_dict
+
+
+# -- Thermos Blocker #1: scoped credential gate -----------------------------
+#
+# ``has_gateway_credentials`` must only report credentials for a named preset
+# when THAT preset's own env vars are set. An unrelated indexed custom-provider
+# pair (``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>``) maps to a generic
+# ``provider_<N>`` id, NOT to the named ``minimax`` / ``nous`` / ``tokenhub``
+# presets — so it must not make ``has_gateway_credentials`` return True for them.
+# Regression: a Batch C addition let ``resolve_gateway_endpoints()`` short-circuit
+# the gate, causing every preset to false-positive.
+
+
+def test_indexed_pair_does_not_grant_minimax_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unrelated indexed pair must NOT make ``minimax`` report credentials."""
+    from mergecraft.agents.openai_compatible_gateways import has_gateway_credentials
+
+    monkeypatch.setenv(
+        "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1", "https://provider-1.example.test/v1"
+    )
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1", "key-1")
+
+    assert has_gateway_credentials("minimax") is False
+
+
+def test_singleton_still_grants_minimax_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The singleton custom-provider pair still honours ``minimax`` (back-compat)."""
+    from mergecraft.agents.openai_compatible_gateways import has_gateway_credentials
+
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://default.example.test/v1")
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "default-key")
+
+    assert has_gateway_credentials("minimax") is True
+
+
+def test_nous_back_compat_alias_still_grants_nous_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``NOUS_API_KEY`` still grants ``nous`` credentials (D4 back-compat alias)."""
+    from mergecraft.agents.openai_compatible_gateways import has_gateway_credentials
+
+    monkeypatch.setenv("NOUS_API_KEY", "nous-key")
+
+    assert has_gateway_credentials("nous") is True
 
 
 # -- helpers -----------------------------------------------------------------

@@ -96,15 +96,24 @@ def _git_env(token: str) -> dict[str, str]:
 
 def git_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        command = str(params["command"])
+        command = str(params["command"]).strip()
         args = list(params.get("args") or [])
-        if not _SUBCOMMAND_RE.fullmatch(command):
+        # Deliberate tolerance for agent callers: the reviewing agent is often
+        # trained on `git <subcommand>` examples, so it may pass the redundant
+        # `git ` prefix in `command` or repeat the subcommand as args[0]. Normalize
+        # both instead of erroring, then validate the cleaned subcommand.
+        if command.lower() == "git":
+            command = ""
+        elif command.lower().startswith("git "):
+            command = command[len("git ") :].strip()
+        if command and args and args[0].lower() == command.lower():
+            # Agent redundantly repeated the subcommand as the first arg; honor
+            # the call rather than rejecting it.
+            args.pop(0)
+        if not command or not _SUBCOMMAND_RE.fullmatch(command):
             msg = f"invalid git subcommand: {command!r}"
             raise ValueError(msg)
         cwd = primary_repo_state(ctx.tool_state).dir
-        if args and args[0].lower() == command.lower():
-            msg = f"git {command}: '{args[0]}' duplicates the subcommand — drop args[0]"
-            raise ValueError(msg)
         redirect = _AUTH_REQUIRED.get(command)
         if redirect:
             msg = f"git {command} is not available through this tool — {redirect}"

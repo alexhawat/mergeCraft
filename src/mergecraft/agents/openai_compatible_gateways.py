@@ -125,8 +125,6 @@ def has_gateway_credentials(provider_id: str) -> bool:
     """
     if has_custom_provider_env():
         return True
-    if resolve_gateway_endpoints():
-        return True
     preset = GATEWAY_PRESETS.get(provider_id.lower())
     if preset is None:
         return False
