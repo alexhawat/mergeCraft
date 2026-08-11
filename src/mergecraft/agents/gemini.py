@@ -39,6 +39,16 @@ def _strip_provider_prefix(specifier: str) -> str:
     return specifier[slash + 1 :] if slash > 0 else specifier
 
 
+def _gemini_truncate_tool_payload(value: str) -> str:
+    """Render a gemini tool payload as a redacted, truncated string (GenAI attr)."""
+    from mergecraft.analyzers.redact import redact_secrets
+
+    text = redact_secrets(value or "")
+    if len(text) > 2048:
+        return text[:2048] + "…"
+    return text
+
+
 def _gemini_home(ctx: AgentRunContext) -> Path:
     return Path(ctx.tmpdir) / ".gemini"
 
@@ -379,6 +389,9 @@ def _gemini_stream_event_handler(
                 span.__enter__()
                 span.set_attribute("model.id", model_id)
                 span.set_attribute("model.event", "init")
+                span.set_attribute("gen_ai.operation.name", "chat")
+                span.set_attribute("gen_ai.request.model", model_id)
+                span.set_attribute("gen_ai.response.model", model_id)
                 open_llm_spans["default"] = {
                     "span": span,
                     "tokens_in": 0,
@@ -406,6 +419,9 @@ def _gemini_stream_event_handler(
                 span.set_attribute("tool.id", tool_id)
                 span.set_attribute("tool.name", tool_name)
                 span.set_attribute("tool.server", "gemini")
+                span.set_attribute("gen_ai.operation.name", "execute_tool")
+                span.set_attribute("gen_ai.tool.name", tool_name)
+                span.set_attribute("gen_ai.tool.call.id", tool_id)
                 open_tool_spans[tool_id] = {"span": span, "name": tool_name}
             return
 
@@ -416,7 +432,11 @@ def _gemini_stream_event_handler(
                 return
             span_obj = entry.get("span")
             if span_obj is not None:
-                span_obj.set_attribute("tool.output", str(event.get("output") or ""))
+                tool_output = str(event.get("output") or "")
+                span_obj.set_attribute("tool.output", tool_output)
+                span_obj.set_attribute(
+                    "gen_ai.tool.output", _gemini_truncate_tool_payload(tool_output)
+                )
                 span_obj.ts_end_ns = time.time_ns()
                 span_obj.__exit__(None, None, None)
             return
@@ -433,6 +453,8 @@ def _gemini_stream_event_handler(
                 if span_obj is not None:
                     span_obj.set_attribute("cost.tokens_in", entry["tokens_in"])
                     span_obj.set_attribute("cost.tokens_out", entry["tokens_out"])
+                    span_obj.set_attribute("gen_ai.usage.input_tokens", entry["tokens_in"])
+                    span_obj.set_attribute("gen_ai.usage.output_tokens", entry["tokens_out"])
                     span_obj.ts_end_ns = time.time_ns()
                     span_obj.__exit__(None, None, None)
             open_llm_spans.clear()
