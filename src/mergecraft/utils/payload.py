@@ -89,6 +89,10 @@ class JsonPayload(BaseModel):
     prompt: str
     model: str | None = None
     model_explicit: bool | None = Field(default=None, alias="modelExplicit")
+    # #37 / W4 / D8 — explicit-pin opt-in on the JSON payload surface.
+    # ``modelPin: true`` collapses the chain to ``[model]`` (preserves the
+    # legacy "use exactly this" semantics). Default absent ⇒ chain-preserving.
+    model_pin: bool | None = Field(default=None, alias="modelPin")
     triggerer: str | None = None
     base_instructions: str | None = Field(default=None, alias="baseInstructions")
     event_instructions: str | None = Field(default=None, alias="eventInstructions")
@@ -108,6 +112,7 @@ class ActionInputs(BaseModel):
     prompt: str | None = None
     prompt_file: str | None = None
     model: str | None = None
+    model_pin: StatusChecksInput | None = None
     timeout: str | None = None
     push: PushPermission | None = None
     shell: ShellPermission | None = None
@@ -118,7 +123,13 @@ class ActionInputs(BaseModel):
     suggest_eval_add: SuggestEvalAddInput | None = None
 
     @field_validator(
-        "push", "shell", "status_checks", "analyzers", "suggest_eval_add", mode="before"
+        "push",
+        "shell",
+        "status_checks",
+        "analyzers",
+        "suggest_eval_add",
+        "model_pin",
+        mode="before",
     )
     @classmethod
     def _empty_to_none(cls, value: object) -> object:
@@ -479,6 +490,7 @@ def resolve_non_prompt_inputs() -> ActionInputs:
     return ActionInputs.model_validate(
         {
             "model": get_action_input("model") or None,
+            "model_pin": get_action_input("model_pin") or None,
             "timeout": get_action_input("timeout") or None,
             "cwd": get_action_input("cwd") or None,
             "push": get_action_input("push") or None,
@@ -487,6 +499,41 @@ def resolve_non_prompt_inputs() -> ActionInputs:
             "suggest_eval_add": get_action_input("suggest_eval_add") or None,
         }
     )
+
+
+def resolve_custom_provider_env_inputs() -> None:
+    """Wire ``provider_base_url`` / ``provider_api_key_env`` into the singleton
+    custom-provider env vars (#71 / W3).
+
+    The ``provider_base_url`` action input maps directly to
+    ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL``. The ``provider_api_key_env``
+    input is the **name** of an env var that already holds the API key;
+    mergeCraft reads that env var's value and re-exports it under
+    ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` so the harness writers see one
+    consistent pair.
+
+    Convention 7: the resolved key value is never logged. The env-var name
+    is referenced symbolically; the value is forwarded silently from one
+    env var to another. The user wires the secret via ``env:`` in the
+    workflow (typically ``${{ secrets.MY_PROVIDER_API_KEY }}``) and never
+    inlines the value.
+
+    No-op when neither input is set. When only one is set, the existing
+    helper behaviour wins — a partial singleton pair is dropped.
+    """
+    base_url_input = get_action_input("provider_base_url")
+    api_key_env_input = get_action_input("provider_api_key_env")
+    if not base_url_input and not api_key_env_input:
+        return
+    if base_url_input:
+        os.environ["MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"] = base_url_input
+    if api_key_env_input:
+        # ``provider_api_key_env`` is the env-var *name* holding the key.
+        # The value of that env var becomes the singleton key. Convention 7:
+        # never log the value.
+        api_key_value = os.environ.get(api_key_env_input, "").strip()
+        if api_key_value:
+            os.environ["MERGECRAFT_CUSTOM_PROVIDER_API_KEY"] = api_key_value
 
 
 def _stricter_shell(
@@ -511,6 +558,11 @@ def resolve_payload(
     repo_settings: RepoSettings | None = None,
 ) -> dict[str, Any]:
     """Build the runtime payload from prompt input + action inputs + repo settings."""
+    # W3 / #71 — wire the ``provider_base_url`` and ``provider_api_key_env``
+    # action inputs into the singleton custom-provider env vars before any
+    # harness reads them. Convention 7: the resolved key value is forwarded
+    # silently between env vars and never logged.
+    resolve_custom_provider_env_inputs()
     settings = repo_settings or RepoSettings()
     if resolved_prompt_input is None:
         resolved_prompt_input = resolve_prompt_input()
@@ -556,8 +608,25 @@ def resolve_payload(
         "~mergecraft": True,
         "version": (json_payload.version if json_payload else None) or _package_version(),
         "model": model,
+        # #37 / W4 / D8 — a supplied ``model:`` input no longer means "suppress the
+        # chain". The supplied slug is the chain head; the configured tail follows
+        # unless the operator opts into pinning via ``model_pin: enabled`` (or
+        # ``.mergecraft/config.yaml``'s ``modelPin: true``).
+        #
+        # ``modelExplicit`` is kept for downstream consumers that still branch on
+        # it — it now reflects the explicit-pin opt-in only, not the bare
+        # presence of a ``model:`` input. ``modelHead`` is the new head-slug
+        # signal.
+        "modelHead": (json_payload.model if json_payload else None) or inputs.model or None,
         "modelExplicit": bool(
-            (json_payload.model_explicit if json_payload else None) or inputs.model
+            (json_payload.model_explicit if json_payload else None)
+            or (inputs.model and inputs.model_pin == "enabled")
+            or (settings.model and settings.model_pin)
+        ),
+        "modelPin": (
+            inputs.model_pin == "enabled"
+            or bool(json_payload.model_explicit if json_payload else None)
+            or settings.model_pin
         ),
         "prompt": prompt,
         "triggerer": triggerer,

@@ -7,8 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING** — `with: model:` no longer means "suppress the configured
+  model chain" (#37 / W4 / D8). It now becomes the **head** of the effective
+  chain; the configured `models:` / `modelFallbacks:` tail is preserved and
+  walked on credential miss or retryable failure. A single `uses:
+  alexhawat/mergeCraft@…` step now walks the configured chain across
+  providers without the consumer reimplementing dual Claude → Codex steps.
+  To restore the legacy "use exactly this model" semantics, set the new
+  `model_pin: enabled` action input (or `modelPin: true` in
+  `.mergecraft/config.yaml`). Workflows that relied on `model:` to disable
+  the chain see new fallback behaviour — set `model_pin: enabled` to opt
+  back into the old contract. The pinned chain order is the supplied
+  `model:` head followed by the configured tail (`effective_model_chain()`,
+  `utils/agent_resolve.py`). The `modelExplicit` payload field is retained
+  as a back-compat alias for the explicit-pin signal — any consumer that
+  branched on it sees the same answer; the new `modelHead` field carries
+  the chain head.
+
 ### Added
 
+- Codex CLI custom OpenAI-compatible provider passthrough + multi-provider surface
+  (#71 / W3). `codex.py::write_mcp_config()` now emits Codex CLI 0.146's
+  `[model_providers.<id>]` TOML blocks (`base_url` / `env_key` / `wire_api =
+  "responses"`) for every configured provider, so Codex can route to Nous,
+  TokenHub, MiniMax, OpenRouter, or any self-hosted OpenAI-compatible gateway
+  without a config fork. The shared resolver in
+  `src/mergecraft/agents/openai_compatible_gateways.py` returns a
+  `dict[str, ProviderRecord]` keyed by provider id, populated from two surfaces:
+  the singleton back-compat alias (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}`
+  → `default` provider) and the indexed multi-provider form
+  (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>` → `provider_<N>`). Indexed
+  pairs win over the singleton when any are set; partial indexed pairs (only one
+  half) are silently dropped; numeric gaps are preserved (no renumbering). Two
+  new top-level `with:` inputs (`provider_base_url` and `provider_api_key_env`)
+  map onto the singleton env vars so the common single-provider case does not
+  need `env:` plumbing — `provider_api_key_env` references the env-var **name**
+  that holds the key (the resolved value is forwarded silently, never logged).
+  The `provider_provenance` fields on `ProviderRecord` (`base_url_env`,
+  `api_key_env`) let config writers pass env-var names to the loguru redactor
+  (convention 7). The README's new "Custom OpenAI-compatible provider" section
+  documents the env-var convention, the `with:` inputs, and a worked
+  multi-provider example (#71 closes on this surface; PR #79 shipped the
+  OpenCode half — both harnesses now consume the same resolver).
 - First-class Nous Research / DeepSeek V4 Flash support (#57). The catalog now
   enumerates `nous/deepseek/deepseek-v4-flash` as a curated alias
   (`PROVIDERS["nous"]` in `src/mergecraft/models.py`), with `resolve` set to the

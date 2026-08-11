@@ -254,6 +254,12 @@ class RepoSettings(BaseModel):
     model: str | None = None
     models: list[str] | None = None
     model_fallbacks: dict[str, list[str]] | None = Field(default=None, alias="modelFallbacks")
+    # #37 / W4 / D8 — ``model_pin`` opts into the "use exactly this model"
+    # semantics: when ``True``, supplying ``model:`` (or ``MERGECRAFT_MODEL``)
+    # collapses the chain to a single entry instead of prepending it as the
+    # chain head. Default ``False`` keeps the chain-preserving behaviour the
+    # wave introduces — see ``utils/agent_resolve.py::effective_model_chain``.
+    model_pin: bool = Field(default=False, alias="modelPin")
     modes: list[ModeDefinition] = Field(default_factory=list)
     setup_script: str | None = Field(default=None, alias="setupScript")
     post_checkout_script: str | None = Field(default=None, alias="postCheckoutScript")

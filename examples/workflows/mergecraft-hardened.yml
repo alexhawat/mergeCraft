@@ -208,7 +208,14 @@ jobs:
       # Same-repo guard: fork PRs must never receive repository secrets under
       # pull_request_target.
       IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
-      HAS_AUTH: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # #37 / W4 — the review step walks the configured chain, so any
+      # credential in the chain qualifies as "we can run". The Claude pair is
+      # listed first because the hardened template pins ``model: anthropic/
+      # claude-sonnet`` as the chain head; uncomment the other provider env
+      # vars below to extend the chain (and the gate) — the single
+      # ``uses:`` step walks them in the order `.mergecraft/config.yaml`
+      # declares under ``models:``.
+      HAS_AUTH: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' || secrets.OPENAI_API_KEY != '' || secrets.CODEX_AUTH_JSON != '' || secrets.GEMINI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -241,7 +248,7 @@ jobs:
           if [ "${{ env.IS_SAME_REPO }}" != "true" ]; then
             echo "::notice title=mergeCraft skipped::Fork PR — secrets are withheld, review skipped."
           else
-            echo "::notice title=mergeCraft skipped::Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY to enable reviews."
+            echo "::notice title=mergeCraft skipped::Set a credential for at least one provider in the chain (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / OPENAI_API_KEY / CODEX_AUTH_JSON / GEMINI_API_KEY) to enable reviews."
           fi
 
       # Composed in a step rather than inline in `with:` so the CI-context clause
@@ -307,7 +314,14 @@ jobs:
           # the only diagnostic is lost. 5 minutes of headroom lets it exit
           # cleanly and report failure instead.
           timeout: 25m
+          # #37 / W4 — a single `uses:` step walks the configured chain. The
+          # ``model:`` input is the chain head; the configured ``models:``
+          # list (in `.mergecraft/config.yaml`) is the tail. Uncredentialed
+          # providers are skipped with a warning; retryable failures advance.
+          # Set ``model_pin: enabled`` ONLY if you want to suppress the
+          # fallback (rare). See `examples/config.yaml` for the chain config.
           model: anthropic/claude-sonnet
+          # model_pin: enabled   # uncomment to suppress fallbacks (legacy semantics)
           push: disabled
           shell: disabled
           status_checks: enabled
@@ -330,6 +344,13 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Add a second provider's credentials here to extend the chain —
+          # the single ``uses:`` step above walks them in order. See the
+          # Custom OpenAI-compatible provider section in README.md and the
+          # multi-provider worked example for the env-var convention.
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: mergeCraft review incomplete (non-fatal)
         if: env.HAS_AUTH == 'true' && steps.mergecraft.outcome != 'success'
