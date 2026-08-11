@@ -5,6 +5,5 @@ __pycache__/
 dist/
 build/
 
-.venv/
-.pytest_cache/
-__pycache__/
+# Optional upstream analysis/ demo corpora (D6 — document-only; do not commit)
+testdata/analysis/

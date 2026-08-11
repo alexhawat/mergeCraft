@@ -396,6 +396,27 @@ def analyze_diff(lines: list[SourceLine]) -> DiffLayout:
     return layout
 
 
+def containing_hunk(layout: DiffLayout, line: int) -> tuple[int, int]:
+    """Return (hunk_body_start, hunk_body_end) for the hunk containing line."""
+    start = line
+    while start > 0 and layout.kinds[start] != DiffLineKind.HUNK_HEADER:
+        start -= 1
+    if layout.kinds[start] == DiffLineKind.HUNK_HEADER:
+        start += 1
+    end = line + 1
+    while end < len(layout.kinds):
+        kind = layout.kinds[end]
+        if kind in (
+            DiffLineKind.HUNK_HEADER,
+            DiffLineKind.HEADER,
+            DiffLineKind.OLD_FILE,
+            DiffLineKind.MAIL_SIGNATURE,
+        ):
+            break
+        end += 1
+    return start, end
+
+
 def next_layout_line(
     layout: DiffLayout, start: int, stop_kinds: set[DiffLineKind]
 ) -> int:
