@@ -549,6 +549,28 @@ def _event_for_emit(*, kind: str, attrs: dict[str, Any], session_id: str) -> Any
     )
 
 
+def _resolve_logfire_project(entry: Any) -> str | None:
+    """Resolve the Logfire project label.
+
+    Order of precedence:
+
+    1. The sink entry's own ``project`` field (``tracing.sinks[].project``).
+    2. The ``MERGECRAFT_TRACING_PROJECT`` env var, written by
+       ``mergecraft auth logfire`` and surfaced through the precedence layer
+       (``mergecraft.cli.tracing_precedence``).
+
+    The env-var fallback lets an operator who set up Logfire via the CLI never
+    touch the YAML config — the project label travels with the token.
+    """
+    project = getattr(entry, "project", None)
+    if project:
+        return str(project)
+    import os
+
+    env_project = os.environ.get("MERGECRAFT_TRACING_PROJECT", "").strip()
+    return env_project or None
+
+
 def _build_logfire_sink(
     entry: Any,
     logfire_module: Any | None,
@@ -566,7 +588,7 @@ def _build_logfire_sink(
 
         return NullSink()
     return OTLPSink.for_logfire(
-        project=getattr(entry, "project", None),
+        project=_resolve_logfire_project(entry),
         token=token,
         logfire_module=logfire_module,
     )

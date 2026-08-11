@@ -102,6 +102,9 @@ def config_tracing(
     if "otel_endpoint" in resolved:
         table.add_row("otel_endpoint", resolved["otel_endpoint"])
 
+    if "tracing_project" in resolved:
+        table.add_row("project", resolved["tracing_project"])
+
     logfire_token = resolved.get("logfire_token")
     if logfire_token is not None:
         table.add_row("logfire_token", f"{_TOKEN_REDACTED_MARKER} [dim](redacted)[/dim]")
@@ -211,6 +214,8 @@ def render_resolved(resolved: dict[str, Any]) -> str:
         parts.append(f"  trace_dir: {resolved['trace_dir']}")
     if "otel_endpoint" in resolved:
         parts.append(f"  otel_endpoint: {resolved['otel_endpoint']}")
+    if "tracing_project" in resolved:
+        parts.append(f"  project: {resolved['tracing_project']}")
     if "logfire_token" in resolved:
         token = resolved["logfire_token"]
         if token is not None and not _is_redacted(str(token)):

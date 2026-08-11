@@ -232,6 +232,7 @@ Full config reference: [`examples/config.yaml`](examples/config.yaml).
 | Nous Portal | — (API key) | `mergecraft auth nous` → `NOUS_API_KEY` (`nous/deepseek/deepseek-v4-flash`) |
 | Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → `TOKENHUB_API_KEY` (`tokenhub/hy3` + any TokenHub model) |
 | Cursor Cloud | `mergecraft auth cursor` → `CURSOR_API_KEY` | `CURSOR_API_KEY` |
+| Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](docs/TRACING.md) |
 
 Subscription auth runs the official `claude` / `codex` / `gemini` CLIs as *you*
 — the same credential your local coding agent uses. Only set env vars for
@@ -427,12 +428,13 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
 | Command | Purpose |
 |---------|---------|
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` + example workflow |
-| `mergecraft auth <provider>` | Save a credential via `gh secret set` (`claude`, `codex`, `gemini`, `nous`, `tokenhub`, `cursor`) |
+| `mergecraft auth <provider>` | Save a credential via `gh secret set` (`claude`, `codex`, `gemini`, `nous`, `tokenhub`, `cursor`, `logfire`) |
 | `mergecraft models list / set / show` | Curated slugs, ordered preference list, effective winner |
 | `mergecraft diff-review` | Offline local git/patch review (`--dry-run`, `--json`) |
 | `mergecraft watch --pr N` | Stream PR/issue timeline as JSONL |
 | `mergecraft learnings active / staging / influence` | Audit memory entries and their provenance |
 | `mergecraft traces <run-id>` | Read back local tracing spans (re-redacted) |
+| `mergecraft config tracing` | Render resolved tracing state (token redacted) |
 | `mergecraft gha` | Action runtime entry (Docker action) |
 
 ## 🔒 Security model

@@ -108,6 +108,14 @@ def _resolve_env_layer(env: dict[str, str]) -> dict[str, Any]:
         out["logfire_token"] = env["MERGECRAFT_LOGFIRE_TOKEN"]
     if "MERGECRAFT_OTEL_ENDPOINT" in env:
         out["otel_endpoint"] = env["MERGECRAFT_OTEL_ENDPOINT"]
+    # ``MERGECRAFT_TRACING_PROJECT`` carries the Logfire project label that
+    # becomes the ``x-logfire-project`` header at runtime. The CLI
+    # ``auth logfire`` command writes this alongside ``MERGECRAFT_LOGFIRE_TOKEN``
+    # so the operator never has to edit ``.env`` by hand.
+    if "MERGECRAFT_TRACING_PROJECT" in env:
+        project = env["MERGECRAFT_TRACING_PROJECT"].strip()
+        if project:
+            out["tracing_project"] = project
     return out
 
 
@@ -130,6 +138,11 @@ def _resolve_config_layer(config_path: str | None) -> dict[str, Any]:
             out["tracing_to"] = sink_type
             if first.get("endpoint"):
                 out["otel_endpoint"] = first["endpoint"]
+            # Surface the per-sink ``project`` field for ``logfire`` entries so
+            # ``mergecraft config tracing`` and the sink factory can render
+            # the project the YAML declared (parity with the env layer).
+            if sink_type == "logfire" and first.get("project"):
+                out["tracing_project"] = first["project"]
     return out
 
 
