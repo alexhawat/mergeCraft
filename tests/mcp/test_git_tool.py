@@ -98,3 +98,56 @@ async def test_invalid_subcommand_after_normalization_rejected(
     assert result.is_error is True
     assert "invalid git subcommand" in result.content[0]["text"]
     assert recorder.calls == []
+
+
+async def test_global_c_option_is_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["-C", "/some/repo/dir"]}
+    )
+    assert result.is_error is False, result.content[0]["text"]
+    # `-C` must be forwarded before the subcommand, not rejected as a
+    # subcommand and not swallowed.
+    assert recorder.calls == [["-C", "/some/repo/dir", "status"]]
+
+
+async def test_c_config_option_forwarded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["-c", "core.quotepath=false", "-s"]}
+    )
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-c", "core.quotepath=false", "status", "-s"]]
+
+
+async def test_git_dir_global_option_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "git status", "args": ["--work-tree", "/some/repo/dir", "-s"]}
+    )
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["--work-tree", "/some/repo/dir", "status", "-s"]]
+
+
+async def test_global_opt_in_command_string_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    # Agent passes the global option as part of the `command` string.
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "git -C /some/repo/dir status", "args": []}
+    )
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-C", "/some/repo/dir", "status"]]
