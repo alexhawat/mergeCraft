@@ -131,6 +131,10 @@ def config_tracing(
     if "tracing_project" in resolved:
         table.add_row("project", resolved["tracing_project"])
 
+    region = resolved.get("region")
+    if region:
+        table.add_row("region", region)
+
     logfire_token = resolved.get("logfire_token")
     if logfire_token is not None:
         table.add_row("logfire_token", f"{_TOKEN_REDACTED_MARKER} [dim](redacted)[/dim]")
@@ -157,6 +161,7 @@ def config_tracing(
         "MERGECRAFT_TRACING_TO",
         "MERGECRAFT_LOGFIRE_TOKEN",
         "MERGECRAFT_TRACING_PROJECT",
+        "MERGECRAFT_TRACING_REGION",
         "MERGECRAFT_OTEL_ENDPOINT",
         "MERGECRAFT_TRACE_DIR",
     )
@@ -276,6 +281,8 @@ def render_resolved(resolved: dict[str, Any]) -> str:
         parts.append(f"  otel_endpoint: {resolved['otel_endpoint']}")
     if "tracing_project" in resolved:
         parts.append(f"  project: {resolved['tracing_project']}")
+    if resolved.get("region"):
+        parts.append(f"  region: {resolved['region']}")
     if "logfire_token" in resolved:
         token = resolved["logfire_token"]
         if token is not None and not _is_redacted(str(token)):
@@ -293,6 +300,7 @@ def render_resolved(resolved: dict[str, Any]) -> str:
         "MERGECRAFT_TRACING_TO",
         "MERGECRAFT_LOGFIRE_TOKEN",
         "MERGECRAFT_TRACING_PROJECT",
+        "MERGECRAFT_TRACING_REGION",
         "MERGECRAFT_OTEL_ENDPOINT",
         "MERGECRAFT_TRACE_DIR",
     )
