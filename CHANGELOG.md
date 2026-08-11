@@ -36,6 +36,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `console.print(..., markup=False)` to keep the install command verbatim.
   Test: `test_auth_logfire_help_does_not_emit_unbalanced_backticks`
 
+### Added
+
+- `mergecraft config tracing` now renders faithfully even when tracing is
+  **disabled**, mirroring sevn's `show_tracing_config`. The table gains two
+  rows plus a hint block:
+  - `local sinks` — `none` when tracing is off, the configured `trace_dir`
+    when on (sevn always surfaces the local-sink state so the operator can
+    see at a glance that no sink is attached).
+  - `trace env` — the `MERGECRAFT_*` env var names currently present in the
+    environment (or `(none set)`), so the operator knows exactly which keys
+    to set to enable tracing.
+  - `next steps` — a hard-coded hint block (sevn: `show_tracing_config`) listing
+    `mergecraft tracing logfire enable` (interactive and `--token X --project Y`),
+    the local JSONL-file path (`MERGECRAFT_TRACING=true` +
+    `MERGECRAFT_TRACING_TO=local_files`), and the generic OTLP path
+    (`MERGECRAFT_TRACING_TO=otel` + `MERGECRAFT_OTEL_ENDPOINT`). Printed only
+    when disabled; the enabled table is self-explanatory and omits the block.
+    Implemented in `src/mergecraft/cli/tracing_cmd.py` (`config_tracing` +
+    `render_resolved` + `_print_tracing_next_steps`). Tests:
+    `test_config_tracing_shows_local_sinks_none_when_disabled`,
+    `test_config_tracing_lists_trace_env_vars_when_disabled`,
+    `test_config_tracing_prints_next_steps_when_disabled`,
+    `test_config_tracing_omits_next_steps_when_enabled`
+
 ### Changed
 
 - **BREAKING** — `with: model:` no longer means "suppress the configured
