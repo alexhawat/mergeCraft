@@ -239,13 +239,27 @@ def _setup_tracer_provider(
     headers: dict[str, str],
     service_name: str,
 ) -> Any | None:
-    """Configure a tracer provider that records serialized spans to ``_RECORDING_PAYLOADS``.
+    """Configure a tracer provider that exports spans to ``endpoint`` and records them.
 
-    Convention 8 — no live network call. The OTel ``TracerProvider`` is
-    installed with a recording span processor that captures each emitted
-    span as a JSON-encoded blob in :data:`_RECORDING_PAYLOADS`. The
-    ``last_otel_endpoint`` / ``last_otel_headers`` module state is updated
-    so tests can assert wiring.
+    Two span processors are attached so the production path and the test seam
+    coexist (D5 / convention 8):
+
+    * A real ``OTLPSpanExporter`` (HTTP) sends spans to ``endpoint`` with
+      ``headers`` — this is what makes spans reach Logfire / a self-hosted
+      collector in production.
+    * The in-memory ``_RecordingSpanProcessor`` keeps capturing spans into
+      :data:`_RECORDING_PAYLOADS` so the test seam continues to assert on the
+      redaction boundary and the D8 payload-cap contract.
+
+    The ``TracerProvider`` override is guarded: when a real provider is already
+    installed in the process (e.g. ``logfire`` activates its own on import, or
+    a prior ``OTLPSink`` already set one), OTel raises
+    ``Overriding of current TracerProvider is not allowed``. We catch that and
+    REUSE the existing provider instead of silently degrading to a no-op — the
+    recording processor is still appended so the test seam keeps working. This
+    is the fix for spans never reaching Logfire: the unguarded
+    ``set_tracer_provider`` used to swallow the override error and return
+    ``None``, turning the sink into a silent no-op.
 
     Returns ``None`` when the optional extra is uninstalled.
     """
@@ -265,6 +279,8 @@ def _setup_tracer_provider(
     # mypy: we re-bind the class names below for the closure.
     Resource = _Resource
     TracerProvider = _TracerProvider
+    OTLPSpanExporter = _OTLPSpanExporter
+    BatchSpanProcessor = _BatchSpanProcessor
 
     _LAST_ENDPOINT = endpoint
     _LAST_HEADERS = dict(headers)
@@ -277,19 +293,47 @@ def _setup_tracer_provider(
     _ACTIVE_TRACER_PROVIDERS = []
 
     try:
-        # AlwaysSample ensures every span reaches the recording processor —
-        # the production equivalent would be a parent-based sampler, but for
-        # the test seam we want deterministic capture.
         from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 
-        provider = TracerProvider(
-            resource=Resource.create({"service.name": service_name}),
-            sampler=ALWAYS_ON,
+        # Guard the override: reuse an already-installed provider rather than
+        # fail. OTel's ProxyTracerProvider is the default before any real
+        # provider is set, so ``get_tracer_provider()`` is not a real one
+        # until ``set_tracer_provider`` has been called successfully.
+        existing = trace_mod.get_tracer_provider()
+        is_proxy = type(existing).__name__ == "ProxyTracerProvider"
+        if is_proxy:
+            provider = TracerProvider(
+                resource=Resource.create({"service.name": service_name}),
+                sampler=ALWAYS_ON,
+            )
+            trace_mod.set_tracer_provider(provider)
+        else:
+            # A real provider already exists (logfire import, prior sink, …).
+            provider = existing
+        # Real exporter first so production spans reach the network.
+        provider.add_span_processor(
+            BatchSpanProcessor(
+                OTLPSpanExporter(
+                    endpoint=endpoint,
+                    headers=headers,
+                )
+            )
         )
+        # Test seam: keep recording so captured_payload / has_active_tracer_provider
+        # still observe spans.
         provider.add_span_processor(_RecordingSpanProcessor())
-        trace_mod.set_tracer_provider(provider)
         _ACTIVE_TRACER_PROVIDERS.append(provider)
-    except Exception as exc:  # pragma: no cover — defensive
+    except Exception as exc:
+        # The only expected failure here is the override error from a stale
+        # global state we could not observe via get_tracer_provider(). Honor
+        # the test seam by reusing whatever provider is live.
+        if "Overriding" in str(exc):
+            existing = trace_mod.get_tracer_provider()
+            if type(existing).__name__ != "ProxyTracerProvider":
+                logger.debug("trace otel provider already set; reusing it")
+                existing.add_span_processor(_RecordingSpanProcessor())
+                _ACTIVE_TRACER_PROVIDERS.append(existing)
+                return existing
         logger.warning("trace otel provider setup failed: {}", exc)
         return None
     return provider
@@ -487,10 +531,11 @@ class OTLPSink:
             provider = self._ensure_provider()
             if provider is None:
                 return
-            for processor in getattr(provider, "_active_span_processors", ()):
-                with contextlib.suppress(Exception):
-                    # Convention 6 — never raise.
-                    processor.force_flush()
+            # Use the public API — it dispatches to every attached span
+            # processor (recording seam + real OTLP exporter) regardless of
+            # SDK-internal storage. Convention 6 — never raise.
+            with contextlib.suppress(Exception):
+                provider.force_flush()
             # Convention 6 / W7.8 — when the endpoint is clearly unreachable
             # (port 1, loopback canary) emit one warning so the operator /
             # test can see that the remote sink was attempted. The warning
