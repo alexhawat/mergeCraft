@@ -412,9 +412,9 @@ def _run_opencode_cli_streaming(
 
     accumulator = StreamSpanAccumulator(agent_name="opencode")
     try:
-        from mergecraft.config import RepoSettings
+        from mergecraft.tracing.resolve import resolve_active_tracing
 
-        sink = claim_sink(RepoSettings().tracing)
+        sink = claim_sink(resolve_active_tracing())
         if sink is not None:
             correlation = resolve_correlation_from_env()
             session_id = resolve_session_id()

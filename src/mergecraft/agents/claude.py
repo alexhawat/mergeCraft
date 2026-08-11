@@ -489,9 +489,9 @@ def _resolve_active_tracer() -> Tracer | None:
     ``NullTracer`` when tracing is not active (convention 9).
     """
     try:
-        from mergecraft.config import RepoSettings
+        from mergecraft.tracing.resolve import resolve_active_tracing
 
-        sink = claim_sink(RepoSettings().tracing)
+        sink = claim_sink(resolve_active_tracing())
     except Exception:
         return None
 

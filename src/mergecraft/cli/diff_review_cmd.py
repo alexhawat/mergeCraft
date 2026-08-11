@@ -127,6 +127,25 @@ def run(
     if diff is None and not (root / ".git").exists():
         _bail(f"not a git repository: {root} (or pass --diff PATH)")
 
+    # Build the tracing CLI tokens (CLI > env > config precedence) and forward
+    # them to the offline review, which exposes them as ``MERGECRAFT_*`` env
+    # overrides so the agent stream tracers honor the operator's flags. The
+    # ``--no-tracing`` / ``--tracing`` pair is a Typer bool flag (``None`` when
+    # the operator left it at default), so we only emit a token when it was set.
+    tracing_cli: list[str] = []
+    if tracing is True:
+        tracing_cli.append("--tracing")
+    elif tracing is False:
+        tracing_cli.append("--no-tracing")
+    if tracing_to is not None:
+        tracing_cli.extend(["--tracing-to", tracing_to])
+    if trace_dir is not None:
+        tracing_cli.extend(["--trace-dir", str(trace_dir)])
+    if logfire_token is not None:
+        tracing_cli.extend(["--logfire-token", logfire_token])
+    if otel_endpoint is not None:
+        tracing_cli.extend(["--otel-endpoint", otel_endpoint])
+
     result = asyncio.run(
         run_offline_diff_review(
             cwd=root,
@@ -137,6 +156,7 @@ def run(
             dry_run=dry_run,
             json_path=json_output,
             evidence_packet_path=evidence_packet,
+            tracing_cli=tracing_cli,
         )
     )
 

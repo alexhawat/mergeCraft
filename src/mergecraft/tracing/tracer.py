@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.tracing.event import TraceEvent
+from mergecraft.tracing.resolve import resolve_active_tracing
 from mergecraft.tracing.sinks import claim_sink
 
 if TYPE_CHECKING:
@@ -351,7 +352,14 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
         >>> isinstance(get_tracer_from_settings(RepoSettings()), NullTracer)
         True
     """
-    if not settings.tracing.enabled:
+    # Honor the env/CLI/YAML/default precedence (``MERGECRAFT_TRACING``,
+    # ``--tracing``, ``.mergecraft/config.yaml``) rather than the YAML block
+    # alone, so an operator's ``.env`` token + ``--tracing-to logfire`` drives
+    # the live sink. The resolver falls back to ``os.environ`` and config
+    # auto-discovery, keeping parity with the YAML-only path when no env/CLI
+    # overrides are set.
+    active_tracing = resolve_active_tracing(config=settings.tracing)
+    if not active_tracing.enabled:
         return NullTracer()
 
     active = _ACTIVE_SPAN.get()
@@ -359,7 +367,7 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
         return active.tracer
 
     try:
-        sink = claim_sink(settings.tracing)
+        sink = claim_sink(active_tracing)
     except Exception as exc:
         logger.warning("trace sink initialization failed: {}", exc)
         return NullTracer()
