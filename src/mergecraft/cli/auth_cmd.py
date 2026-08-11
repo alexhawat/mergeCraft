@@ -39,7 +39,20 @@ DEFAULT_TOKENHUB = "https://tokenhub-intl.tencentcloudmaas.com/v1"
 LOGFIRE_TOKEN_SECRET = "LOGFIRE_TOKEN"
 LOGFIRE_RUNTIME_TOKEN_ENV = "MERGECRAFT_LOGFIRE_TOKEN"
 LOGFIRE_PROJECT_ENV = "MERGECRAFT_TRACING_PROJECT"
-LOGFIRE_PROBE_URL = "https://logfire.pydantic.dev/api/v1/projects"
+# ``logfire.pydantic.dev`` is the marketing front page; the management REST API
+# lives at ``api-{us,eu}.pydantic.dev`` (write tokens resolve to the regional
+# ``logfire-{us,eu}.pydantic.dev`` host instead). The validator picks the
+# right probe by token prefix so both API keys and write tokens validate.
+LOGFIRE_API_PROBE_URL = "https://api.pydantic.dev/api/v1/projects"
+# Region prefix → base URL for the regional ``/v1/info`` probe (write tokens).
+_LOGFIRE_REGION_PROBE_URLS: dict[str, str] = {
+    "us": "https://logfire-us.pydantic.dev/v1/info",
+    "eu": "https://logfire-eu.pydantic.dev/v1/info",
+}
+# ``pylf_v{N}_<region>_`` — write-token prefix the Logfire SDK accepts. The
+# trailing underscore separates region from the base64 payload; region is
+# always exactly two letters.
+_LOGFIRE_WRITE_TOKEN_RE = re.compile(r"^pylf_v\d+_(?P<region>[a-z]{2})_")
 LogfireScope = Literal["local", "github", "both"]
 
 
@@ -412,11 +425,50 @@ def auth_tokenhub() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_logfire_probe(token: str) -> tuple[str, str]:
+    """Return ``(probe_url, probe_label)`` for the token format.
+
+    Logfire distinguishes two credentials (per pydantic/logfire auth docs):
+
+    - **API key** — bearer-authenticated against the management REST API
+      (``/api/v1/projects``). Created under *Settings → API keys* on the
+      org/project page; these are not what an app uses to send telemetry.
+    - **Write token** — used by the Logfire SDK to send spans/logs over OTLP.
+      Format: ``pylf_v{N}_{us|eu}_<payload>``. These are region-routed, and
+      they validate against ``/v1/info`` on the regional ``logfire-{us,eu}``
+      host — the management endpoint redirects (302) because write tokens
+      cannot read projects.
+
+    ``probe_label`` is one of ``"api-key"`` / ``"write-token"`` /
+    ``"unknown"``; the validator surfaces it in log messages so the operator
+    knows what was probed when validation fails.
+    """
+    match = _LOGFIRE_WRITE_TOKEN_RE.match(token)
+    if match:
+        region = match.group("region")
+        url = _LOGFIRE_REGION_PROBE_URLS.get(region)
+        if url is not None:
+            return url, "write-token"
+    # Default: probe the management API as an API key. A token that does not
+    # match the write-token format is most likely an API key (the only
+    # documented alternative).
+    return LOGFIRE_API_PROBE_URL, "api-key"
+
+
 def _validate_logfire_token(api_key: str) -> bool:
     """Return whether ``api_key`` authenticates against Logfire.
 
-    Probes ``GET /api/v1/projects`` on the public Logfire ingest host with a
-    ``Bearer`` auth header. Mirrors the other validators' contract:
+    Logfire has two credential types (per pydantic/logfire auth docs):
+
+    - **API key** — bearer against the management REST API
+      (``https://api.pydantic.dev/api/v1/projects``). Created under
+      *Settings → API keys* in the dashboard.
+    - **Write token** — used by the Logfire SDK to send spans over OTLP.
+      Format: ``pylf_v{N}_{us|eu}_<payload>``. Validates against
+      ``/v1/info`` on the regional ``logfire-{us,eu}.pydantic.dev`` host.
+
+    The validator picks the right probe by prefix. Mirrors the other
+    validators' contract:
 
     - ``200`` → accept (True).
     - ``401`` / ``403`` → reject (False).
@@ -427,34 +479,46 @@ def _validate_logfire_token(api_key: str) -> bool:
       (True) so an offline operator can still save the secret locally and
       retry later.
 
-    The probe path is ``/api/v1/projects`` rather than the OTLP ingest because
     OTLP/HTTP returns 200 even for invalid tokens (it accepts and discards),
-    while the projects endpoint enforces the bearer token with a real 401/403.
+    so the ``/api/v1/projects`` and ``/v1/info`` endpoints are the only paths
+    that actually enforce the credential with a real 401/403.
     """
+    probe_url, probe_label = _resolve_logfire_probe(api_key)
     try:
         with httpx.Client(timeout=15.0, follow_redirects=False) as client:
             response = client.get(
-                LOGFIRE_PROBE_URL,
+                probe_url,
                 headers={"Authorization": f"Bearer {api_key}"},
             )
     except httpx.HTTPError as exc:
-        logger.warning("logfire key validation skipped (network): {}", exc)
+        logger.warning(
+            "logfire key validation skipped (network, probe={}): {}",
+            probe_label,
+            exc,
+        )
         return True
     if response.status_code == 200:
         return True
     if response.status_code in {401, 403}:
+        logger.warning(
+            "logfire key validation rejected (probe={}, HTTP {})",
+            probe_label,
+            response.status_code,
+        )
         return False
     if 300 <= response.status_code < 400:
         # Logfire returns 302 to a sign-in URL when the bearer is missing or
         # expired. A saved token that 302s will never ingest — refuse it now.
         logger.warning(
-            "logfire key validation returned HTTP {} (redirect to auth) — token rejected",
+            "logfire key validation returned HTTP {} (redirect to auth, probe={}) — token rejected",
             response.status_code,
+            probe_label,
         )
         return False
     logger.warning(
-        "logfire key validation returned HTTP {} — saving anyway",
+        "logfire key validation returned HTTP {} (probe={}) — saving anyway",
         response.status_code,
+        probe_label,
     )
     return True
 
@@ -485,9 +549,14 @@ def _write_env_value(env_path: Path, key: str, value: str) -> bool:
     ``set_key`` preserves comments and other keys, creates the file when
     absent, and returns the new value verbatim. We do not return the value to
     the caller — it is already in scope — only success/failure.
+
+    Quote mode is ``"never"`` (not ``"always"``): the only values we write are
+    Logfire write tokens (``[A-Za-z0-9_-]+``) and project labels
+    (``[A-Za-z0-9_-/]+``), neither of which needs quoting, and ``"always"``
+    produced a ``'value'`` wrapper that made downstream grep / ``diff`` noisy.
     """
     try:
-        _dotenv_set_key(str(env_path), key, value, quote_mode="always")
+        _dotenv_set_key(str(env_path), key, value, quote_mode="never")
     except OSError as exc:
         logger.warning("dotenv set_key failed for {}: {}", env_path, exc)
         return False

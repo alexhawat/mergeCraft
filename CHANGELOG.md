@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `_validate_logfire_token` now distinguishes Logfire **write tokens** from
+  API keys and probes the right endpoint. Write tokens (`pylf_v{N}_{us|eu}_…`
+  — the regional, base64-payload credentials the Logfire SDK accepts for
+  OTLP ingestion) were being rejected with HTTP 302 because the validator
+  only probed the management REST API (`/api/v1/projects`), which redirects
+  write tokens to the auth page. The fix: `_resolve_logfire_probe()` routes
+  `pylf_v{N}_{us|eu}_` to the regional `/v1/info` host
+  (`https://logfire-{us,eu}.pydantic.dev/v1/info`) — the same probe the
+  Logfire SDK uses internally. API keys still probe the management endpoint.
+  Tests: `test_auth_logfire_validator_probes_eu_write_token`,
+  `test_auth_logfire_validator_probes_us_write_token`,
+  `test_auth_logfire_validator_rejects_expired_write_token`
+- `.env` writes no longer wrap token + project values in single quotes.
+  `python-dotenv`'s `quote_mode="always"` produced `MERGECRAFT_LOGFIRE_TOKEN='pylf_v2_eu_…'`,
+  which broke grep workflows operators rely on to confirm a fresh save.
+  Tokens (`[A-Za-z0-9_-]+`) and project labels (`[A-Za-z0-9_-/]+`) are safe
+  unquoted, so `_write_env_value` now calls `set_key(..., quote_mode="never")`.
+  Test: `test_auth_logfire_writes_token_unquoted`
+
+### Fixed (PR #127 baseline)
+
 - `mergecraft config tracing` now reports `enabled: true` immediately after
   `mergecraft auth logfire` (or `tracing logfire enable`) writes to `.env`.
   Root cause: the CLI's `main()` did not load `.env` into `os.environ`, so the

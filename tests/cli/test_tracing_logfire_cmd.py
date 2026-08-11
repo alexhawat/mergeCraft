@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 runner = CliRunner()
 
 LOGFIRE_PROBE_PATH = "/api/v1/projects"
+LOGFIRE_PROBE_HOST = "api.pydantic.dev"
 
 
 def _load_logfire_cmd() -> object:

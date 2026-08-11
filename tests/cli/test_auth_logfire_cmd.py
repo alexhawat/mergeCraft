@@ -43,7 +43,10 @@ if TYPE_CHECKING:
 runner = CliRunner()
 
 LOGFIRE_PROBE_PATH = "/api/v1/projects"
-LOGFIRE_PROBE_URL = "https://logfire.pydantic.dev/api/v1/projects"
+LOGFIRE_PROBE_URL = "https://api.pydantic.dev/api/v1/projects"
+# Write-token probe: ``pylf_v1_eu_`` / ``pylf_v2_eu_`` region-routed to the EU host.
+LOGFIRE_EU_WRITE_PROBE = "https://logfire-eu.pydantic.dev/v1/info"
+LOGFIRE_US_WRITE_PROBE = "https://logfire-us.pydantic.dev/v1/info"
 
 
 def _load_auth_cmd() -> object:
@@ -61,6 +64,15 @@ def _load_validator() -> Any:
     if validator is None:
         pytest.fail("mergecraft.cli.auth_cmd._validate_logfire_token is not implemented")
     return validator
+
+
+def _load_write_env_value() -> Any:
+    """Return the ``_write_env_value`` symbol (or fail loudly if absent)."""
+    module = _load_auth_cmd()
+    fn = getattr(module, "_write_env_value", None)
+    if fn is None:
+        pytest.fail("mergecraft.cli.auth_cmd._write_env_value is not implemented")
+    return fn
 
 
 def _patch_httpx_with(monkeypatch: MonkeyPatch, handler) -> None:
@@ -441,6 +453,135 @@ def test_auth_logfire_validator_rejects_302_redirect(
     assert any(level == "WARNING" and "302" in message for level, message in captured), (
         f"expected a warning mentioning the 302, got: {captured}"
     )
+
+
+# ── write-token probe: pylf_v{N}_{us|eu}_… routes to the regional /v1/info ──
+
+
+def test_auth_logfire_validator_probes_eu_write_token(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``pylf_v2_eu_…`` → ``logfire-eu.pydantic.dev/v1/info`` (200 = accept).
+
+    The bug we just shipped: the validator was probing the management API
+    with a write token, getting a 302, and rejecting a perfectly valid
+    regional credential. The fix routes write tokens to the regional
+    ``/v1/info`` endpoint — the same one the Logfire SDK uses for token
+    validation in ``logfire/_internal/config.py::get_base_url_from_token``.
+    """
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/info", (
+            f"EU write-token probe must hit /v1/info, got {request.url.path!r}"
+        )
+        assert "logfire-eu.pydantic.dev" in str(request.url), (
+            f"EU write-token probe must hit the EU host, got {request.url!r}"
+        )
+        auth_header = request.headers.get("authorization", "")
+        assert auth_header.startswith("Bearer "), (
+            f"expected Bearer auth header, got {auth_header!r}"
+        )
+        return httpx.Response(200, json={"project_name": "mergecraft-dev"})
+
+    _patch_httpx_with(monkeypatch, _handler)
+
+    validator = _load_validator()
+    assert validator("pylf_v2_eu_c8a1f2ec-deadbeef-1234") is True
+
+
+def test_auth_logfire_validator_probes_us_write_token(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``pylf_v1_us_…`` → ``logfire-us.pydantic.dev/v1/info``."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/info", (
+            f"US write-token probe must hit /v1/info, got {request.url.path!r}"
+        )
+        assert "logfire-us.pydantic.dev" in str(request.url), (
+            f"US write-token probe must hit the US host, got {request.url!r}"
+        )
+        return httpx.Response(200, json={"project_name": "mergecraft-dev"})
+
+    _patch_httpx_with(monkeypatch, _handler)
+
+    validator = _load_validator()
+    assert validator("pylf_v1_us_c8a1f2ec-deadbeef-1234") is True
+
+
+def test_auth_logfire_validator_rejects_expired_write_token(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``/v1/info`` returns 401 for an expired write token → validator rejects.
+
+    An expired token is rejected, but we surface ``probe=write-token`` in the
+    warning so the operator knows which probe failed (the management probe
+    on a different token may still be healthy).
+    """
+    from loguru import logger
+
+    captured: list[tuple[str, str]] = []
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"detail": "expired"})
+
+    _patch_httpx_with(monkeypatch, _handler)
+
+    def _sink(record):  # type: ignore[no-untyped-def]
+        entry = record.record  # type: ignore[attr-defined]
+        captured.append((entry["level"].name, entry["message"]))
+
+    sink_id = logger.add(_sink, level="WARNING")
+    try:
+        validator = _load_validator()
+        result = validator("pylf_v2_eu_expired-token-xyz")
+    finally:
+        logger.remove(sink_id)
+
+    assert result is False, "expired write token must be rejected"
+    assert any(level == "WARNING" and "write-token" in message for level, message in captured), (
+        f"expected a warning mentioning 'write-token' probe, got: {captured}"
+    )
+
+
+# ── dotenv writing: tokens + project labels are not wrapped in quotes ──────
+
+
+def test_auth_logfire_writes_token_unquoted(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """The new ``quote_mode="never"`` writes the bare token (no ``'…'`` wrapper).
+
+    Repro: with ``quote_mode="always"`` the token came out as
+    ``MERGECRAFT_LOGFIRE_TOKEN='pylf_v2_eu_…'``. Operators grep their
+    ``.env`` for the token to confirm a fresh save; the quotes broke that
+    workflow. The fix: ``quote_mode="never"`` since the token (base64 payload
+    + ``-`` / ``_``) and the project label (``[A-Za-z0-9_-/]+``) are both
+    safe unquoted.
+    """
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    _patch_httpx_with(monkeypatch, _handler)
+    monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / ".env"))
+    env_path = tmp_path / ".env"
+    env_path.write_text("", encoding="utf-8")
+    _write_env_value = _load_write_env_value()
+
+    # Token contains the hyphen + underscore pattern of a real write token.
+    token_value = "pylf_v2_eu_c8a1f2ec-0521-40c0-8159-2625b0b3b485_JYx4yZjdxKxwHN3JgyvJm2sTvSQtdYjtyy1P9HV1SQQ1"
+    project_value = "mergecraft-dev"
+
+    result = _write_env_value(env_path, "MERGECRAFT_LOGFIRE_TOKEN", token_value)
+    assert result is True
+    result = _write_env_value(env_path, "MERGECRAFT_TRACING_PROJECT", project_value)
+    assert result is True
+
+    written = env_path.read_text(encoding="utf-8")
+    # Bare value, no single-quote wrapper.
+    assert f"MERGECRAFT_LOGFIRE_TOKEN={token_value}\n" in written, (
+        f"token must be written unquoted; got: {written!r}"
+    )
+    assert f"MERGECRAFT_TRACING_PROJECT={project_value}\n" in written
 
 
 # ── CLI bootstrap: ``mergecraft`` loads ``.env`` so subsequent commands see
