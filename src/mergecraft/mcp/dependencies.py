@@ -53,6 +53,10 @@ def start_installation(ctx: ToolContext) -> None:
             return
         try:
             results = task.result()
+            # W6.1 — surface install failure on the state; ``main()`` maps
+            # ``status="failed"`` to ``RunOutcome.inconclusive`` (not silent
+            # continue). The MCP tools still return the formatted summary so
+            # the agent can see the reason.
             has_failure = any((not r.dependencies_installed and r.issues) for r in results)
             state.status = "failed" if has_failure else "completed"
             state.results = results

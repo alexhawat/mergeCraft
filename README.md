@@ -454,6 +454,30 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
   advisory only.
 - **Analyzers under low trust run untrusted-only** — no secrets, no network, no
   PR-authored command construction; exclusions are reported as named skips.
+- **Agent subprocess env is an explicit allowlist (W2)** — agent CLIs never
+  inherit the full process environment. Stripped by default: ``GIT_ASKPASS``,
+  ``GITHUB_TOKEN``/``GH_TOKEN``, ``ACTIONS_ID_TOKEN_*``, and every non-active
+  provider API key. Git authentication for agent operations is brokered
+  per-invocation via MCP git's ``http.extraHeader`` injection, not ambient
+  askpass. Retained askpass files (entrypoint bookkeeping only) live at
+  ``0o600`` inside a ``0o700`` credentials directory the agent cannot read.
+  Run temp dirs and registered leak-surface paths are removed on success and
+  failure; ``wipe_runner_leak_surface`` only unlinks mergeCraft-owned paths.
+- **Containment hardening (W3)** — ``safe.directory`` is scoped to
+  ``$GITHUB_WORKSPACE`` and registered cross-repo checkout roots (no wildcard).
+  Git hooks run only when ``shell: enabled``; ``restricted`` and ``disabled``
+  neutralize hooks via ``core.hooksPath``. ``cwd`` and MCP shell
+  ``working_directory`` must resolve inside allowed workspace roots. Agent CLI
+  subprocesses drop to the unprivileged ``mergecraft`` user via ``setpriv``
+  while the action entrypoint stays root for GitHub file commands.
+- **Network is outside the hard sandbox guarantee when ``unshare --net`` is
+  unavailable (W12.7)** — on CI hosts that support it, untrusted MCP shell
+  spawns with ``unshare --pid --net`` so the child has an empty network
+  namespace. Where that probe fails (macOS runners, restricted containers,
+  missing CAP_SYS_ADMIN), shell egress is not kernel-isolated; the W2
+  credential allowlist (no ambient ``GITHUB_TOKEN`` / provider keys / askpass)
+  remains the binding control. Trusted-tier shell does not force ``--net`` so
+  provider CLIs can still reach their APIs.
 
 Report vulnerabilities via [SECURITY.md](SECURITY.md). What a review does and
 never does: [REVIEW-CHECKS.md](REVIEW-CHECKS.md).

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# D6 fake provider CLI shim — emits canned Codex exec --json output.
+# Used by the Action-image E2E gate so PR CI never calls a live LLM.
+set -euo pipefail
+cat <<'EOF'
+{"type":"thread.started","thread_id":"thread_e2e"}
+{"type":"message.completed","message":{"role":"assistant","content":"E2E review complete: no findings."}}
+{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":6},"total_cost_usd":0.0}
+EOF
+exit 0

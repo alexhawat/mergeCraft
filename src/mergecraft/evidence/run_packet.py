@@ -261,11 +261,26 @@ def build_run_packet(
     trajectory = build_trajectory_record(state, files_modified=changed_paths)
     trajectory_findings = audit_trajectory(trajectory)
 
+    executed_model = ctx.resolved_model or state.model or "(unresolved)"
+    requested_model = state.requested_model or executed_model
+    fallback_index = int(getattr(state, "fallback_index", 0) or 0)
+    fallback_occurred = bool(getattr(state, "fallback_occurred", False))
+    provider = _provider_for_model_evidence(
+        executed_model=executed_model,
+        requested_model=requested_model,
+        agent_id=ctx.agent_id,
+    )
+
     packet = build_packet(
         change_id=change_id,
         agent_id=ctx.agent_id,
         agent_version=_agent_version(),
-        model=ctx.resolved_model or state.model or "(unresolved)",
+        model=executed_model,
+        requested_model=requested_model,
+        executed_model=executed_model,
+        provider=provider,
+        fallback_index=fallback_index,
+        fallback_occurred=fallback_occurred,
         files_changed=changed_paths,
         findings=[*_structural_findings(ctx, extra_findings), *trajectory_findings],
         deterministic_checks=_deterministic_checks(state),
@@ -299,6 +314,31 @@ def _agent_version() -> str:
     from mergecraft import __version__
 
     return __version__
+
+
+def _provider_for_model_evidence(
+    *,
+    executed_model: str,
+    requested_model: str,
+    agent_id: str,
+) -> str:
+    """Resolve a truthy provider label for packet agent metadata (W10.2).
+
+    Prefer the executed slug's catalog provider; fall back to the requested
+    slug, then the agent id (always set on ``ToolContext``), then ``unknown``.
+    """
+    from mergecraft.models import get_model_provider
+
+    for slug in (executed_model, requested_model):
+        if not slug or slug == "(unresolved)":
+            continue
+        try:
+            return get_model_provider(slug)
+        except ValueError:
+            continue
+    if agent_id:
+        return str(agent_id)
+    return "unknown"
 
 
 def _resolve_gate_mode(ctx: ToolContext) -> str:

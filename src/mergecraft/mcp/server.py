@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import random
-import signal
 import socket
 from typing import TYPE_CHECKING, Any
 
@@ -69,6 +68,7 @@ from mergecraft.mcp.verification import (
 )
 from mergecraft.mcp.xrepo import checkout_repo_tool, list_repos_tool
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.process_group import kill_process_groups
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -356,17 +356,9 @@ async def _kill_background_processes(ctx: ToolContext) -> None:
     procs = ctx.tool_state.background_processes
     if not procs:
         return
-    for proc in list(procs.values()):
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except ProcessLookupError, PermissionError, OSError:
-            pass
-    await asyncio.sleep(0.2)
-    for proc in list(procs.values()):
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError, PermissionError, OSError:
-            pass
+    pids = {proc.pid for proc in list(procs.values()) if isinstance(proc.pid, int)}
+    # Off-loop: batch TERM -> one grace -> KILL (avoids N-times sleep on the event loop).
+    await asyncio.to_thread(kill_process_groups, pids)
     procs.clear()
 
 

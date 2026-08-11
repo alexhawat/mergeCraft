@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -20,9 +21,13 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
+from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -125,10 +130,8 @@ def _normalize_gemini_api_key(env: dict[str, str]) -> None:
 
 
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
-    env = dict(os.environ)
+    env = build_agent_env("gemini", {"HOME": str(Path(ctx.tmpdir))})
     _normalize_gemini_api_key(env)
-    # Isolate Gemini user config to the run temp dir (~/.gemini/settings.json).
-    env["HOME"] = str(Path(ctx.tmpdir))
     return env
 
 
@@ -276,15 +279,7 @@ def _run_gemini_streaming(
     )
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=os.getcwd(),
-            env=_build_env(ctx),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
+        process = spawn_agent_cli(cmd, env=_build_env(ctx))
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
@@ -292,20 +287,22 @@ def _run_gemini_streaming(
     assert process.stderr is not None
 
     stderr_text = ""
+    returncode: int = -1
     try:
-        try:
-            consume_stream(
-                raw_stream=process.stdout,
-                accumulator=accumulator,
-                handler=handler,
-            )
-            stderr_text = process.stderr.read() or ""
-            returncode = process.wait(
-                timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
-            )
-        except subprocess.TimeoutExpired:
-            process.kill()
-            return AgentResult(success=False, error="gemini CLI timed out")
+        with track_process_group(process):
+            try:
+                consume_stream(
+                    raw_stream=process.stdout,
+                    accumulator=accumulator,
+                    handler=handler,
+                )
+                stderr_text = process.stderr.read() or ""
+                returncode = wait_or_kill_process_group(
+                    process,
+                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                )
+            except subprocess.TimeoutExpired:
+                return AgentResult(success=False, error="gemini CLI timed out")
     finally:
         try:
             close_all_open_spans()
@@ -320,11 +317,13 @@ def _run_gemini_streaming(
     usage = accumulator.to_usage()
 
     if returncode != 0:
+        retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
         return AgentResult(
             success=False,
             output=output or None,
             error=stderr_text.strip() or f"gemini exited {returncode}",
             usage=usage,
+            metadata={"retryable": True} if retryable else {},
         )
     return AgentResult(success=True, output=output or None, usage=usage)
 
@@ -482,7 +481,10 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         return AgentResult(success=False, error=str(err))
 
     write_mcp_config(ctx)
-    initial = _run_gemini_once(
+    # Blocking Popen/wait/stream consume runs in a worker thread so
+    # ``asyncio.wait_for`` in ``main`` can preempt the coroutine (W9.2).
+    initial = await asyncio.to_thread(
+        _run_gemini_once,
         cli=cli,
         prompt=ctx.instructions.user,
         ctx=ctx,
@@ -490,7 +492,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     )
 
     async def resume(prompt: str) -> AgentResult:
-        return _run_gemini_once(
+        return await asyncio.to_thread(
+            _run_gemini_once,
             cli=cli,
             prompt=prompt,
             ctx=ctx,
@@ -502,4 +505,4 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     return await finalize_agent_result(ctx, result)
 
 
-gemini = agent(name="gemini", install=_install, run=_run)
+gemini = agent(name="gemini", install=_install, run=_run, build_env=_build_env)

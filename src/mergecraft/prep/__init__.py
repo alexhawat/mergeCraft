@@ -72,7 +72,14 @@ async def _restore_prep_dirtied_files(pre_dirty: set[str]) -> None:
 
 
 async def run_prep_phase(options: PrepOptions | None = None) -> list[PrepResult]:
-    """Run all applicable prep steps sequentially. Failures are non-fatal."""
+    """Run all applicable prep steps sequentially.
+
+    Individual step failures are recorded on :class:`PrepResult` (issues +
+    ``dependencies_installed=False``) rather than raising — the live Action
+    path maps a failed install to ``RunOutcome.inconclusive`` (W6.1 / D4).
+    Callers that need fail-closed behaviour must inspect the returned results
+    (see ``main._prep_failure_reason`` / ``mcp.dependencies``).
+    """
     opts = options or PrepOptions()
     logger.debug("» starting prep phase...")
     start = time.perf_counter()

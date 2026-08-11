@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mergecraft.utils.git_setup import (
     _is_under_forbidden_temp,
+    cleanup_temp_directory,
     create_temp_directory,
+    register_created_path,
+    wipe_runner_leak_surface,
     write_askpass_script,
 )
 
@@ -19,17 +23,23 @@ if TYPE_CHECKING:
 
 
 def test_askpass_returns_x_access_token_for_username(tmp_path: Path) -> None:
-    """Username prompt → ``x-access-token``; password prompt → the token."""
+    """Username prompt → ``x-access-token``; password prompt → the token.
+
+    Invoked via ``sh <path>`` because W2/D2 keeps the askpass file at ``0o600``
+    (non-executable); the contract under test is content/output, not ``+x``.
+    """
     script = write_askpass_script(str(tmp_path), "ghs_secrettoken")
+    mode = stat.S_IMODE(Path(script).stat().st_mode)
+    assert mode == 0o600, f"askpass must stay non-executable ({mode:o})"
 
     user = subprocess.run(
-        [script, "Username for 'https://github.com': "],
+        ["sh", script, "Username for 'https://github.com': "],
         capture_output=True,
         text=True,
         check=True,
     )
     password = subprocess.run(
-        [script, "Password for 'https://x-access-token@github.com': "],
+        ["sh", script, "Password for 'https://x-access-token@github.com': "],
         capture_output=True,
         text=True,
         check=True,
@@ -40,6 +50,54 @@ def test_askpass_returns_x_access_token_for_username(tmp_path: Path) -> None:
     # The token must never be emitted for the username prompt (the old bug that
     # produced https://<token>:<token>@ and intermittent "invalid credentials").
     assert "ghs_secrettoken" not in user.stdout
+
+
+def test_register_created_path_feeds_scoped_wipe(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Direct ``register_created_path`` contract — wipe removes only registered paths.
+
+    Fails if the registry is deleted: the owned file survives and the assert turns red.
+    """
+    owned = tmp_path / "owned-leak.sh"
+    owned.write_text("#!/bin/sh\necho secret\n", encoding="utf-8")
+    foreign = tmp_path / "foreign.sh"
+    foreign.write_text("#!/bin/sh\necho other\n", encoding="utf-8")
+    register_created_path(str(owned))
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+
+    wipe_runner_leak_surface()
+
+    assert not owned.exists()
+    assert foreign.exists(), "unregistered path must survive ownership-scoped wipe"
+
+
+def test_cleanup_temp_directory_removes_askpass_and_tmpdir(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Direct ``cleanup_temp_directory`` — askpass overwritten/gone and tmpdir rmtree'd."""
+    staging = _safe_staging_root("cleanup")
+    runner = staging / "runner-temp"
+    runner.mkdir()
+    monkeypatch.setenv("RUNNER_TEMP", str(runner))
+    monkeypatch.delenv("MERGECRAFT_TEMP_PARENT", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    os.environ.pop("MERGECRAFT_TEMP_DIR", None)
+
+    try:
+        created = create_temp_directory()
+        askpass = write_askpass_script(created, "ghs_cleanup_token")
+        assert Path(created).is_dir()
+        assert Path(askpass).is_file()
+
+        cleanup_temp_directory()
+
+        assert not Path(created).exists(), "cleanup_temp_directory left the run tmpdir"
+        assert not Path(askpass).exists(), "cleanup_temp_directory left the askpass file"
+        # MERGECRAFT_TEMP_DIR may still name the removed path; the dir must be gone.
+    finally:
+        leftover = os.environ.pop("MERGECRAFT_TEMP_DIR", None)
+        if leftover:
+            shutil.rmtree(leftover, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def _safe_staging_root(label: str) -> Path:

@@ -116,11 +116,23 @@ def _agent_metadata(
     agent_id: str,
     agent_version: str,
     model: str,
+    requested_model: str | None = None,
+    executed_model: str | None = None,
+    provider: str | None = None,
+    fallback_index: int = 0,
+    fallback_occurred: bool = False,
 ) -> AgentMetadata:
+    executed = executed_model or model
+    requested = requested_model or executed
     return AgentMetadata(
         id=agent_id,
         version=agent_version,
         model=model,
+        requested_model=requested,
+        executed_model=executed,
+        provider=provider or "",
+        fallback_index=fallback_index,
+        fallback_occurred=fallback_occurred,
     )
 
 
@@ -140,6 +152,11 @@ def build_packet(
     ci_check_runs: dict[str, Any] | None = None,
     ci_intelligence: dict[str, Any] | None = None,
     usage_entries: Any = None,
+    requested_model: str | None = None,
+    executed_model: str | None = None,
+    provider: str | None = None,
+    fallback_index: int = 0,
+    fallback_occurred: bool = False,
 ) -> MergeEvidencePacket:
     """Assemble a :class:`MergeEvidencePacket` from structured sources.
 
@@ -157,6 +174,9 @@ def build_packet(
     assessment is the only positive signal — see
     :func:`mergecraft.agents.gates.decide_approval` and ``tests/evidence/
     test_self_assessment.py``.
+
+    W10 (#20) records ``requested_model`` / ``executed_model`` / ``provider``
+    / ``fallback_index`` / ``fallback_occurred`` on ``agent`` unconditionally.
 
     ``blast_radius`` and ``evals``) remain optional. Batch B populates
     ``blast_radius`` with a typed ``BlastRadiusClassification``; Batches C / E
@@ -195,6 +215,11 @@ def build_packet(
             agent_id=agent_id,
             agent_version=agent_version,
             model=model,
+            requested_model=requested_model,
+            executed_model=executed_model,
+            provider=provider,
+            fallback_index=fallback_index,
+            fallback_occurred=fallback_occurred,
         ),
         files_changed=list(files_changed),
         findings=coerced_findings,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import re
@@ -28,9 +30,20 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.privilege import wrap_agent_command
+from mergecraft.utils.process_group import (
+    kill_process_group,
+    register_process_group,
+    track_process_group,
+    unregister_process_group,
+    wait_or_kill_process_group,
+)
+from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.secrets import build_agent_env
 
 # Re-exported for tests / callers that import these names from opencode.
 __all_gateway_envs__ = (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV)
@@ -190,17 +203,20 @@ class _ServerHandle:
         if self._closed:
             return
         self._closed = True
+        pid = self.proc.pid
         if self.proc.poll() is None:
-            self.proc.terminate()
+            kill_process_group(pid)
             try:
                 self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.proc.kill()
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    self.proc.kill()
+        unregister_process_group(pid)
 
 
 def _boot_opencode_server(*, cli: str, env: dict[str, str], cwd: str) -> _ServerHandle:
     proc = subprocess.Popen(
-        [cli, "serve", "--port", "0", "--hostname", "127.0.0.1"],
+        wrap_agent_command([cli, "serve", "--port", "0", "--hostname", "127.0.0.1"]),
         cwd=cwd,
         env=env,
         stdout=subprocess.PIPE,
@@ -228,9 +244,10 @@ def _boot_opencode_server(*, cli: str, env: dict[str, str], cwd: str) -> _Server
             base_url = match.group(0).rstrip("/")
             break
     if not base_url:
-        proc.kill()
+        kill_process_group(proc.pid)
         msg = "opencode serve did not print a listening URL"
         raise RuntimeError(msg)
+    register_process_group(proc.pid)
     return _ServerHandle(base_url=base_url, proc=proc)
 
 
@@ -310,12 +327,20 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
 
     model = ctx.resolved_model
     config_json = build_security_config(ctx, model)
-    env = dict(os.environ)
-    env["OPENCODE_CONFIG_CONTENT"] = config_json
-    # Also write a config file for CLIs that prefer files
     config_path = Path(ctx.tmpdir) / "opencode.json"
     config_path.write_text(config_json, encoding="utf-8")
-    env["OPENCODE_CONFIG"] = str(config_path)
+    extras: dict[str, str] = {
+        "OPENCODE_CONFIG_CONTENT": config_json,
+        "OPENCODE_CONFIG": str(config_path),
+    }
+    model_s = (model or "").strip()
+    bedrock_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
+    vertex_id = os.environ.get("VERTEX_MODEL_ID", "").strip()
+    if bedrock_id and model_s == bedrock_id:
+        extras["CLAUDE_CODE_USE_BEDROCK"] = "1"
+    if vertex_id and model_s == vertex_id:
+        extras["CLAUDE_CODE_USE_VERTEX"] = "1"
+    env = build_agent_env("opencode", extras)
 
     # Prefer serve + HTTP when available; fall back to `opencode run`
     handle: _ServerHandle | None = None
@@ -379,7 +404,9 @@ async def _run_cli_fallback(*, cli: str, ctx: AgentRunContext, env: dict[str, st
     # events. We attempt the streaming read loop and fall back to the
     # legacy last-line parse if the events are not granular enough (D12).
     # Run-level spans are emitted through the W4 tracer regardless.
-    return _run_opencode_cli_streaming(
+    # Blocking Popen/wait runs in a worker thread so outer wait_for can preempt.
+    return await asyncio.to_thread(
+        _run_opencode_cli_streaming,
         cmd=cmd,
         ctx=ctx,
         env=env,
@@ -424,15 +451,7 @@ def _run_opencode_cli_streaming(
         logger.debug("opencode stream tracer resolution failed: {}", exc)
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=os.getcwd(),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
+        process = spawn_agent_cli(cmd, env=env)
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
@@ -440,31 +459,35 @@ def _run_opencode_cli_streaming(
     assert process.stderr is not None
 
     stderr_text = ""
+    returncode: int = -1
     try:
-        try:
-            # Opencode events are partial: try streaming, but the
-            # handler is a no-op for unknown shapes (graceful degradation).
-            consume_stream(
-                raw_stream=process.stdout,
-                accumulator=accumulator,
-                handler=lambda _acc, _event: None,
-            )
-            stderr_text = process.stderr.read() or ""
-            returncode = process.wait(
-                timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
-            )
-        except subprocess.TimeoutExpired:
-            process.kill()
-            return AgentResult(success=False, error="opencode run timed out")
+        with track_process_group(process):
+            try:
+                # Opencode events are partial: try streaming, but the
+                # handler is a no-op for unknown shapes (graceful degradation).
+                consume_stream(
+                    raw_stream=process.stdout,
+                    accumulator=accumulator,
+                    handler=lambda _acc, _event: None,
+                )
+                stderr_text = process.stderr.read() or ""
+                returncode = wait_or_kill_process_group(
+                    process,
+                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                )
+            except subprocess.TimeoutExpired:
+                return AgentResult(success=False, error="opencode run timed out")
     finally:
         pass
 
     if returncode != 0:
+        retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
         return AgentResult(
             success=False,
             error=(stderr_text or "opencode failed").strip() or f"opencode exited {returncode}",
+            metadata={"retryable": True} if retryable else {},
         )
     return AgentResult(success=True, output=accumulator.final_output or None)
 
 
-opencode = agent(name="opencode", install=_install, run=_run)
+opencode = agent(name="opencode", install=_install, run=_run, module_file=__file__)

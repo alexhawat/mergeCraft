@@ -12,6 +12,7 @@ from loguru import logger
 from mergecraft.mcp.git import _git_env, _run_git
 from mergecraft.mcp.shared import EMPTY_SCHEMA, execute, tool
 from mergecraft.mcp.tool_state import RepoAccess, ensure_repo_state, repo_key
+from mergecraft.utils.workspace import register_workspace_root
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -102,6 +103,7 @@ def checkout_repo_tool(ctx: ToolContext):
         access = _access_for(ctx, repo)
         dir_path = Path(ctx.tmpdir) / "xrepo" / repo
         dir_path.mkdir(parents=True, exist_ok=True)
+        register_workspace_root(str(dir_path))
         state = ensure_repo_state(
             ctx.tool_state,
             owner=owner,

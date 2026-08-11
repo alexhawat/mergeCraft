@@ -152,7 +152,10 @@ def test_action_inputs_do_not_clobber_github_token(monkeypatch: pytest.MonkeyPat
 
 
 def test_unset_action_inputs_default_to_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When no ``INPUT_TRACING*`` is set, the resolver returns the disabled default."""
+    """Unset ``INPUT_TRACING*`` resolves to ``enabled=None`` (defer), not hard-disabled ``False``.
+
+    Runtime still treats ``None`` as off; empty sinks remain the unset default.
+    """
     for key in (
         "INPUT_TRACING",
         "INPUT_TRACING_TO",
@@ -165,7 +168,7 @@ def test_unset_action_inputs_default_to_disabled(monkeypatch: pytest.MonkeyPatch
     from mergecraft.action.inputs import resolve_tracing_from_action_inputs
 
     resolved = resolve_tracing_from_action_inputs()
-    assert resolved["enabled"] is False
+    assert resolved["enabled"] is None
     assert resolved["sinks"] == []
 
 

@@ -62,7 +62,10 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   attribution. The optional ``numeric_score`` field is intentionally
 #   **absent** — a numeric score must never appear without findings and a
 #   decision beside it (#46 "not a dashboard" criterion).
-PACKET_SCHEMA_VERSION = "1.5.0"
+# - 1.6.0 — production-readiness W10 (#20) adds requested/executed model,
+#   provider, and fallback index/occurrence fields on ``AgentMetadata`` so
+#   every packet proves which model actually ran (not opt-in tracing only).
+PACKET_SCHEMA_VERSION = "1.6.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]
@@ -93,7 +96,10 @@ class AgentMetadata(BaseModel):
     """Identifies the agent that produced the run.
 
     The carrying fields (``id``, ``version``, ``model``) are the minimum the
-    packet needs to attribute findings and reproduce a run.
+    packet needs to attribute findings and reproduce a run. W10 (#20) adds
+    requested/executed/provider/fallback fields so operators can pin the
+    reviewer model and prove which slug actually ran — always present on
+    emitted packets, not only via opt-in tracing.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -101,6 +107,13 @@ class AgentMetadata(BaseModel):
     id: str
     version: str
     model: str
+    # Additive defaults keep pre-1.6.0 constructors / fixtures valid while
+    # ``build_packet`` / ``emit_run_packet`` always populate them.
+    requested_model: str = ""
+    executed_model: str = ""
+    provider: str = ""
+    fallback_index: int = 0
+    fallback_occurred: bool = False
 
 
 class DeterministicCheck(BaseModel):
