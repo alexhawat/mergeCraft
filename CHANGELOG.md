@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `has_gateway_credentials` no longer false-positives for unrelated gateway
+  presets. A Batch C (#34 / PR #126) addition let an indexed custom-provider
+  pair (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`) or the singleton
+  pair make `has_gateway_credentials("minimax")` / `"nous"` / `"tokenhub"` all
+  return `True` regardless of whether that preset's own env vars were set,
+  partly undercutting the minimax fail-loud guarantee. The `resolve_gateway_endpoints()`
+  short-circuit was removed from `has_gateway_credentials` so a named preset
+  only reports credentials when its own env vars are set; the singleton is still
+  honoured for minimax via `MINIMAX_API_KEY_ENV == CUSTOM_PROVIDER_API_KEY_ENV`,
+  and the D4 `NOUS_API_KEY` back-compat alias for nous is preserved. Surfaced by
+  the Thermos review (Blocker #1). Regression tests:
+  `tests/agents/test_openai_compatible_gateways.py::test_indexed_pair_does_not_grant_minimax_credentials`,
+  `::test_singleton_still_grants_minimax_credentials`,
+  `::test_nous_back_compat_alias_still_grants_nous_credentials`
 - `mergecraft config tracing` now reports `enabled: true` immediately after
   `mergecraft auth logfire` (or `tracing logfire enable`) writes to `.env`.
   Root cause: the CLI's `main()` did not load `.env` into `os.environ`, so the
