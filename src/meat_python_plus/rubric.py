@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
-
 # Protocol version mixed into the cache key. Bump when edit semantics or the
 # frozen prompt surface change in a way that should invalidate caches.
-ABRIDGE_PROTOCOL_VERSION = "source-edit-plan-v10-python-plus-v1"
+ABRIDGE_PROTOCOL_VERSION = "source-edit-plan-v10-frozen-prompt-surface"
 
 SYSTEM_PROMPT = """You are a code-reading assistant for a senior engineer who spends their day reading diffs of GOOD code. The code compiles and its tests pass. The reviewer is NOT hunting for nil panics or sweating details. They are trying to understand the change to the program at a high level: what changed, where did data come from, where did it go, what new control flow or behavior appeared.
 
@@ -110,7 +108,7 @@ Numbered Python table and consumer:
     220|+CASES = [
     221|+    ("empty", "", None),
     222|+    ("simple", "a", "a"),
-    223|+    ("escaped", "a\\nb", "a\nb"),
+    223|+    ("escaped", "a\\\\nb", "a\\nb"),
     224|+    ("unicode", "π", "π"),
     225|+]
     226|+
@@ -177,9 +175,7 @@ The final result should be a dense reading diff made from the original diff by M
 
 
 def rubric_hash() -> str:
-    """Short content hash of protocol version + system prompt (cache identity)."""
-    h = hashlib.sha256()
-    h.update(ABRIDGE_PROTOCOL_VERSION.encode())
-    h.update(b"\0")
-    h.update(SYSTEM_PROMPT.encode())
-    return h.hexdigest()[:16]
+    """Short content hash of the complete frozen prompt surface (cache identity)."""
+    from meat_python_plus.prompt_surface import rubric_hash as _surface_hash
+
+    return _surface_hash()

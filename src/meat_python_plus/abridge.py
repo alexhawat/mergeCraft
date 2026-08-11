@@ -8,12 +8,21 @@ from typing import Callable
 from meat_python_plus.chunk import (
     MAX_TOTAL_DIFF_BYTES,
     fits_single_run,
+    map_moves_to_chunk,
     split_diff_for_abridging,
+    strip_replicated_meta,
+    first_line_text,
+    piece_contains_line,
 )
 from meat_python_plus.diffutil import numbered_diff, validate_supported_diff
-from meat_python_plus.editplan import retention_pressure
+from meat_python_plus.editplan import DetectedMove, retention_pressure
 from meat_python_plus.model import Block, Message, Model, Role, text_block
 from meat_python_plus.rubric import SYSTEM_PROMPT
+from meat_python_plus.moves import (
+    MAX_MOVE_HINTS,
+    detected_moves_in_diff,
+    format_move_pairs,
+)
 from meat_python_plus.tools import Toolbox, describe_tool_call
 
 DEFAULT_MAX_TURNS = 24
@@ -39,6 +48,12 @@ USER_PROMPT_IMPORTS = (
     "appear in the numbered input but never in a preview or result. Do not spend edit "
     "coordinates on them, never fold across them into behavioral rows, and do not "
     "mention them in the summary.\n"
+)
+USER_PROMPT_MOVES = (
+    "Meat detected exact source-evidenced moves across hunks/files: %s. Give both sides "
+    "of each pair identical keep/remove/fold/replace treatment, including matching fold "
+    "boundaries and equivalent local elisions; automatically removed rows need none. "
+    "Asymmetric plans are rejected.\n"
 )
 USER_PROMPT_TOOLS = (
     "Use read_file/grep on the surrounding source only when it changes your judgment "
@@ -87,8 +102,17 @@ class Request:
     progress: Callable[[str], None] | None = None
 
 
-def build_user_prompt(req: Request, numbered: str) -> str:
+@dataclass
+class RunOptions:
+    chunk_run: bool = False
+    chunk_moves: list[DetectedMove] | None = None
+
+
+def build_user_prompt(req: Request, numbered: str, chunk_moves: list | None = None) -> str:
     parts = [USER_PROMPT_INTRO, USER_PROMPT_IMPORTS]
+    moves = chunk_moves if chunk_moves is not None else detected_moves_in_diff(req.unified_diff)
+    if moves:
+        parts.append(USER_PROMPT_MOVES % format_move_pairs(moves, MAX_MOVE_HINTS))
     if req.repo_root:
         parts.append(USER_PROMPT_TOOLS)
     else:
@@ -114,37 +138,71 @@ def abridge(model: Model, req: Request) -> Result:
     validate_supported_diff(req.unified_diff)
     if not fits_single_run(req.unified_diff):
         return _abridge_chunked(model, req)
-    return _abridge_one(model, req)
+    return _abridge_one(model, req, RunOptions())
 
 
 def _abridge_chunked(model: Model, req: Request) -> Result:
     progress = req.progress or (lambda _m: None)
     chunks = split_diff_for_abridging(req.unified_diff)
-    progress(f"splitting into {len(chunks)} chunks")
+    model_chunks = sum(1 for c in chunks if not c.passthrough)
+    whole_moves = detected_moves_in_diff(req.unified_diff)
+    if model_chunks > 0:
+        progress(f"large diff: abridging {model_chunks} chunks")
+
     smart_parts: list[str] = []
     summaries: list[str] = []
+    seen_summary: set[str] = set()
+    emitted_meta: dict[int, bool] = {}
     in_tok = 0
     out_tok = 0
-    for i, chunk in enumerate(chunks):
-        progress(f"chunk {i + 1}/{len(chunks)}")
+    run = 0
 
-        def chunk_progress(msg: str, _i: int = i) -> None:
-            progress(f"chunk {_i + 1}/{len(chunks)}: {msg}")
+    def append_piece(piece: str) -> None:
+        if smart_parts and not smart_parts[-1].endswith("\n"):
+            smart_parts[-1] += "\n"
+        smart_parts.append(piece)
+
+    for chunk in chunks:
+        if chunk.passthrough:
+            append_piece(chunk.text)
+            continue
+        run += 1
+        label = f"chunk {run}/{model_chunks}"
+
+        def chunk_progress(msg: str, _label: str = label) -> None:
+            progress(f"{_label}: {msg}")
 
         chunk_req = Request(
-            unified_diff=chunk,
+            unified_diff=chunk.text,
             repo_root=req.repo_root,
             max_turns=req.max_turns,
             progress=chunk_progress,
         )
-        res = _abridge_one(model, chunk_req)
-        if res.smart_diff.strip():
-            smart_parts.append(res.smart_diff)
-        if res.summary.strip():
-            summaries.append(res.summary.strip())
+        opts = RunOptions(
+            chunk_run=True,
+            chunk_moves=map_moves_to_chunk(whole_moves, chunk),
+        )
+        res = _abridge_one(model, chunk_req, opts)
         in_tok += res.input_tokens
         out_tok += res.output_tokens
-    summary = "; ".join(summaries) if summaries else "No changes."
+        if res.smart_diff.strip():
+            piece = res.smart_diff
+            if chunk.section_id >= 0:
+                if emitted_meta.get(chunk.section_id):
+                    piece = strip_replicated_meta(piece, chunk.meta_prefix)
+                elif piece_contains_line(piece, first_line_text(chunk.meta_prefix)):
+                    emitted_meta[chunk.section_id] = True
+            if piece:
+                append_piece(piece)
+        summary = res.summary.strip()
+        if summary and summary not in seen_summary:
+            seen_summary.add(summary)
+            summaries.append(summary)
+
+    if model_chunks == 0:
+        return Result(smart_diff="", summary="Only imports and unchanged context; nothing to read.")
+
+    summary = " ".join(summaries) if summaries else "No changes."
     if len(summary) > 500:
         summary = summary[:497] + "..."
     return Result(
@@ -155,13 +213,30 @@ def _abridge_chunked(model: Model, req: Request) -> Result:
     )
 
 
-def _abridge_one(model: Model, req: Request) -> Result:
+def _abridge_one(model: Model, req: Request, opts: RunOptions | None = None) -> Result:
+    opts = opts or RunOptions()
     numbered = numbered_diff(req.unified_diff)
     max_turns = req.max_turns if req.max_turns > 0 else DEFAULT_MAX_TURNS
-    tb = Toolbox(root=req.repo_root, raw_diff=req.unified_diff)
+    tb = Toolbox(
+        root=req.repo_root,
+        raw_diff=req.unified_diff,
+        no_moves=opts.chunk_run,
+        moves=opts.chunk_moves,
+    )
     tools = tb.tools()
     messages: list[Message] = [
-        Message(role=Role.USER, content=[text_block(build_user_prompt(req, numbered))])
+        Message(
+            role=Role.USER,
+            content=[
+                text_block(
+                    build_user_prompt(
+                        req,
+                        numbered,
+                        chunk_moves=opts.chunk_moves if opts.chunk_run else None,
+                    )
+                )
+            ],
+        )
     ]
     progress = req.progress or (lambda _m: None)
     in_tok = 0

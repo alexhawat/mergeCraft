@@ -1,0 +1,329 @@
+diff --git a/django/middleware/http.py b/django/middleware/http.py
+index 72ef52a1..ec9fecdc 100644
+--- a/django/middleware/http.py
++++ b/django/middleware/http.py
+@@ -1,6 +1,6 @@
+-from django.utils.cache import cc_delim_re, get_conditional_response, set_response_etag
++from django.utils.cache import get_conditional_response, set_response_etag
+ from django.utils.deprecation import MiddlewareMixin
+-from django.utils.http import parse_http_date_safe
++from django.utils.http import parse_http_date_safe, split_header_value
+ 
+ 
+ class ConditionalGetMiddleware(MiddlewareMixin):
+@@ -37,5 +37,5 @@ class ConditionalGetMiddleware(MiddlewareMixin):
+ 
+     def needs_etag(self, response):
+         """Return True if an ETag header should be added to response."""
+-        cache_control_headers = cc_delim_re.split(response.get("Cache-Control", ""))
++        cache_control_headers = split_header_value(response.get("Cache-Control", ""))
+         return all(header.lower() != "no-store" for header in cache_control_headers)
+diff --git a/django/utils/cache.py b/django/utils/cache.py
+index 8fe856ed..4bdae65b 100644
+--- a/django/utils/cache.py
++++ b/django/utils/cache.py
+@@ -22,14 +22,17 @@ from hashlib import md5
+ from django.conf import settings
+ from django.core.cache import caches
+ from django.http import HttpResponse, HttpResponseNotModified
+-from django.utils.http import http_date, parse_etags, parse_http_date_safe, quote_etag
++from django.utils.http import (
++    http_date,
++    parse_etags,
++    parse_http_date_safe,
++    quote_etag,
++    split_header_value,
++)
+ from django.utils.log import log_response
+-from django.utils.regex_helper import _lazy_re_compile
+ from django.utils.timezone import get_current_timezone_name
+ from django.utils.translation import get_language
+ 
+-cc_delim_re = _lazy_re_compile(r"\s*,\s*")
+-
+ 
+ def patch_cache_control(response, **kwargs):
+     """
+@@ -59,7 +62,7 @@ def patch_cache_control(response, **kwargs):
+ 
+     cc = defaultdict(set)
+     if response.get("Cache-Control"):
+-        for field in cc_delim_re.split(response.headers["Cache-Control"]):
++        for field in split_header_value(response.headers["Cache-Control"]):
+             directive, value = dictitem(field)
+             if directive == "no-cache":
+                 # no-cache supports multiple field names.
+@@ -108,7 +111,7 @@ def get_max_age(response):
+     if not response.has_header("Cache-Control"):
+         return
+     cc = dict(
+-        _to_tuple(el) for el in cc_delim_re.split(response.headers["Cache-Control"])
++        _to_tuple(el) for el in split_header_value(response.headers["Cache-Control"])
+     )
+     try:
+         return int(cc["max-age"])
+@@ -308,11 +311,12 @@ def patch_vary_headers(response, newheaders):
+     # implementations may rely on the order of the Vary contents in, say,
+     # computing an MD5 hash.
+     if response.has_header("Vary"):
+-        vary_headers = cc_delim_re.split(response.headers["Vary"])
++        vary_headers = list(split_header_value(response.headers["Vary"]))
+     else:
+         vary_headers = []
+     # Use .lower() here so we treat headers as case-insensitive.
+     existing_headers = {header.lower() for header in vary_headers}
++    newheaders = [newheader.strip() for newheader in newheaders]
+     additional_headers = [
+         newheader
+         for newheader in newheaders
+@@ -331,8 +335,7 @@ def has_vary_header(response, header_query):
+     """
+     if not response.has_header("Vary"):
+         return False
+-    vary_headers = cc_delim_re.split(response.headers["Vary"])
+-    existing_headers = {header.lower().strip() for header in vary_headers}
++    existing_headers = {h.lower() for h in split_header_value(response.headers["Vary"])}
+     return header_query.lower().strip() in existing_headers
+ 
+ 
+@@ -424,7 +427,7 @@ def learn_cache_key(request, response, cache_timeout=None, key_prefix=None, cach
+         # in that case and would result in storing the same content under
+         # multiple keys in the cache. See #18191 for details.
+         headerlist = []
+-        for header in cc_delim_re.split(response.headers["Vary"]):
++        for header in split_header_value(response.headers["Vary"]):
+             header = header.upper().replace("-", "_")
+             if header != "ACCEPT_LANGUAGE" or not is_accept_language_redundant:
+                 headerlist.append("HTTP_" + header)
+diff --git a/django/utils/http.py b/django/utils/http.py
+index f6cce962..040b2841 100644
+--- a/django/utils/http.py
++++ b/django/utils/http.py
+@@ -197,17 +197,32 @@ def urlsafe_base64_decode(s):
+         raise ValueError(e)
+ 
+ 
++def split_header_value(value, sep=","):
++    """Yield stripped parts of an HTTP header value split by sep.
++
++    Use only with headers whose values are token lists (e.g. Vary,
++    Cache-Control). Do not use with headers that allow quoted strings in values
++    (e.g. Set-Cookie), as commas inside values will be used as separators.
++    """
++    for part in value.split(sep):
++        if stripped := part.strip():
++            yield stripped
++
++
+ def parse_etags(etag_str):
+     """
+     Parse a string of ETags given in an If-None-Match or If-Match header as
+     defined by RFC 9110. Return a list of quoted ETags, or ['*'] if all ETags
+     should be matched.
++
++    ETags values containing a comma are not supported, as the comma is used as
++    list separator.
+     """
+     if etag_str.strip() == "*":
+         return ["*"]
+     else:
+         # Parse each ETag individually, and return any that are valid.
+-        etag_matches = (ETAG_MATCH.match(etag.strip()) for etag in etag_str.split(","))
++        etag_matches = (ETAG_MATCH.match(etag) for etag in split_header_value(etag_str))
+         return [match[1] for match in etag_matches if match]
+ 
+ 
+diff --git a/tests/cache/tests.py b/tests/cache/tests.py
+index 96a1c558..92641240 100644
+--- a/tests/cache/tests.py
++++ b/tests/cache/tests.py
+@@ -56,8 +56,8 @@ from django.test.signals import setting_changed
+ from django.test.utils import CaptureQueriesContext
+ from django.utils import timezone, translation
+ from django.utils.cache import (
+-    cc_delim_re,
+     get_cache_key,
++    get_max_age,
+     has_vary_header,
+     learn_cache_key,
+     patch_cache_control,
+@@ -2258,6 +2258,61 @@ class CacheUtils(SimpleTestCase):
+                 patch_vary_headers(response, newheaders)
+                 self.assertEqual(response.headers["Vary"], resulting_vary)
+ 
++    def test_patch_vary_headers_strips_whitespace(self):
++        headers = (
++            # Whitespace-padded tokens in existing Vary must be stripped before
++            # deduplication so that adding a header already present (with
++            # surrounding whitespace) does not produce a duplicate entry.
++            (" Cookie", ("Accept-Encoding",), "Cookie, Accept-Encoding"),
++            ("Cookie ", ("Cookie",), "Cookie"),
++            (" Cookie ", ("Cookie",), "Cookie"),
++            # Tab-padded tokens must also be normalized.
++            (
++                "Cookie, Accept-Encoding",
++                ("Accept-Encoding\t", "\tcookie"),
++                "Cookie, Accept-Encoding",
++            ),
++            # Whitespace-padded wildcard in existing Vary must be recognized so
++            # that patch_vary_headers() still outputs a single "*" rather than
++            # appending new headers alongside the (unrecognized) padded "*".
++            ("* ", ("Accept-Language",), "*"),
++            (" *", ("Cookie",), "*"),
++            (" * ", ("Cookie", "Accept-Language"), "*"),
++            # Whitespace-padded wildcard supplied as a new header must also be
++            # recognized and collapsed to a single "*".
++            (None, (" * ",), "*"),
++            ("Cookie", (" * ",), "*"),
++            ("Cookie, Accept-Encoding", (" * ",), "*"),
++        )
++        for initial_vary, newheaders, resulting_vary in headers:
++            with self.subTest(initial_vary=initial_vary, newheaders=newheaders):
++                response = HttpResponse()
++                if initial_vary is not None:
++                    response.headers["Vary"] = initial_vary
++                patch_vary_headers(response, newheaders)
++                self.assertEqual(response.headers["Vary"], resulting_vary)
++
++    def test_get_max_age_strips_whitespace(self):
++        # A max-age directive with surrounding whitespace must be parsed
++        # correctly; a leading space (e.g. from manual header construction)
++        # previously caused the directive key to be " max-age" which never
++        # matched, returning None instead of the integer value.
++        tests = [
++            # Whitespace before directive (no preceding comma).
++            (" max-age=300", 300),
++            ("\tmax-age=300", 300),
++            # Whitespace around a non-first directive after split(",").
++            ("no-cache, max-age=600", 600),
++            ("no-cache,\tmax-age=600", 600),
++            # Whitespace after the value is handled by int() transparently.
++            ("max-age=300 ", 300),
++        ]
++        for header_value, expected in tests:
++            with self.subTest(header_value=header_value):
++                response = HttpResponse()
++                response.headers["Cache-Control"] = header_value
++                self.assertEqual(get_max_age(response), expected)
++
+     def test_get_cache_key(self):
+         request = self.factory.get(self.path)
+         response = HttpResponse()
+@@ -2317,6 +2372,30 @@ class CacheUtils(SimpleTestCase):
+             "18a03f9c9649f7d684af5db3524f5c99.d41d8cd98f00b204e9800998ecf8427e",
+         )
+ 
++    def test_learn_cache_key_strips_whitespace(self):
++        # Vary header tokens with leading or trailing whitespace must be
++        # stripped before being used as request.META lookup keys, so that the
++        # generated cache key correctly incorporates the header value rather
++        # than silently ignoring it.
++        request_a = self.factory.get(
++            self.path, headers={"cookie": "a=1", "x-pony": "gold"}
++        )
++        request_b = self.factory.get(
++            self.path, headers={"cookie": "a=2", "x-pony": "gold"}
++        )
++
++        response = HttpResponse()
++        # Whitespace-padded token: should be treated identically to "Cookie".
++        response.headers["Vary"] = " Cookie "
++        learn_cache_key(request_a, response)
++
++        # Requests with different Cookie values must get different cache keys.
++        key_a = get_cache_key(request_a)
++        key_b = get_cache_key(request_b)
++        self.assertIsNotNone(key_a)
++        self.assertIsNotNone(key_b)
++        self.assertNotEqual(key_a, key_b)
++
+     def test_patch_cache_control(self):
+         tests = (
+             # Initial Cache-Control, kwargs to patch_cache_control, expected
+@@ -2366,7 +2445,7 @@ class CacheUtils(SimpleTestCase):
+                 if initial_cc is not None:
+                     response.headers["Cache-Control"] = initial_cc
+                 patch_cache_control(response, **newheaders)
+-                parts = set(cc_delim_re.split(response.headers["Cache-Control"]))
++                parts = {cc for cc in response.headers["Cache-Control"].split(", ")}
+                 self.assertEqual(parts, expected_cc)
+ 
+     def test_has_vary_header(self):
+diff --git a/tests/middleware/tests.py b/tests/middleware/tests.py
+index e35b77e0..374dc739 100644
+--- a/tests/middleware/tests.py
++++ b/tests/middleware/tests.py
+@@ -595,6 +595,19 @@ class ConditionalGetMiddlewareTest(SimpleTestCase):
+             ConditionalGetMiddleware(self.get_response)(self.req).has_header("ETag")
+         )
+ 
++    def test_no_etag_no_store_cache_whitespace(self):
++        # A no-store directive with surrounding whitespace (e.g. from a
++        # multi-value header where split(",") leaves leading space) must still
++        # prevent ETag generation.
++        for cc in (" no-store", "\tno-store", "no-cache, no-store"):
++            with self.subTest(cache_control=cc):
++                self.resp_headers["Cache-Control"] = cc
++                self.assertFalse(
++                    ConditionalGetMiddleware(self.get_response)(self.req).has_header(
++                        "ETag"
++                    )
++                )
++
+     def test_etag_extended_cache_control(self):
+         self.resp_headers["Cache-Control"] = 'my-directive="my-no-store"'
+         self.assertTrue(
+diff --git a/tests/utils_tests/test_http.py b/tests/utils_tests/test_http.py
+index f18deb7c..6bbc7eb9 100644
+--- a/tests/utils_tests/test_http.py
++++ b/tests/utils_tests/test_http.py
+@@ -18,6 +18,7 @@ from django.utils.http import (
+     parse_header_parameters,
+     parse_http_date,
+     quote_etag,
++    split_header_value,
+     url_has_allowed_host_and_scheme,
+     urlencode,
+     urlsafe_base64_decode,
+@@ -321,6 +322,41 @@ class IsSameDomainTests(unittest.TestCase):
+             self.assertIs(is_same_domain(*pair), False)
+ 
+ 
++class SplitHeaderValueTests(unittest.TestCase):
++    def test_basic(self):
++        tests = [
++            ("", []),
++            ("no-store", ["no-store"]),
++            ("no-store, max-age=0", ["no-store", "max-age=0"]),
++            # Trailing/leading commas from header concatenation.
++            ("no-store,", ["no-store"]),
++            (",no-store", ["no-store"]),
++            # Whitespace around tokens.
++            (" no-store , max-age=0 ", ["no-store", "max-age=0"]),
++            # Semicolons are not separators with the default sep.
++            ("text/html; charset=utf-8", ["text/html; charset=utf-8"]),
++            ("a; b, c; d", ["a; b", "c; d"]),
++        ]
++        for value, expected in tests:
++            with self.subTest(value=value):
++                self.assertEqual(list(split_header_value(value)), expected)
++
++    def test_custom_sep(self):
++        tests = [
++            ("", []),
++            ("text/html", ["text/html"]),
++            ("text/html; charset=utf-8", ["text/html", "charset=utf-8"]),
++            # Trailing/leading separators.
++            ("text/html;", ["text/html"]),
++            (";text/html", ["text/html"]),
++            # Whitespace around tokens.
++            (" text/html ; charset=utf-8 ", ["text/html", "charset=utf-8"]),
++        ]
++        for value, expected in tests:
++            with self.subTest(value=value):
++                self.assertEqual(list(split_header_value(value, sep=";")), expected)
++
++
+ class ETagProcessingTests(unittest.TestCase):
+     def test_parsing(self):
+         self.assertEqual(
