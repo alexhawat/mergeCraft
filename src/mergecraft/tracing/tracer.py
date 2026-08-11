@@ -3,7 +3,7 @@
 Module: mergecraft.tracing.tracer
 Depends: mergecraft.tracing.{event,sinks}, loguru
 
-Exports:
+|Exports:
     Classes:
         Tracer — Creates and emits real spans to a configured sink.
         Span — Context-managed trace span.
@@ -12,6 +12,7 @@ Exports:
     Functions:
         resolve_correlation_from_env — Read GitHub correlation fields from the environment.
         resolve_session_id — Resolve or generate the trace session identifier.
+        resolve_trace_id — Resolve or generate the per-run trace identifier.
         get_tracer_from_settings — Build a real or null tracer from repo settings.
 """
 
@@ -27,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.tracing.event import TraceEvent
+from mergecraft.tracing.resolve import resolve_active_tracing
 from mergecraft.tracing.sinks import claim_sink
 
 if TYPE_CHECKING:
@@ -44,6 +46,23 @@ class Tracer:
     session_id: str
     run_id: str
     tier: str = "balanced"
+    trace_id: str = ""
+
+    def __post_init__(self) -> None:
+        """Resolve ``trace_id`` from env when the caller did not pass one.
+
+        Tracers constructed without an explicit ``trace_id`` (the common
+        path — ``Tracer(sink=..., session_id=..., run_id=...)``) share the
+        same per-run identifier so every span in one run lands under one
+        Logfire trace. The resolver keeps the T3 precedence (D7 / T3.2):
+        ``MERGECRAFT_TRACE_ID`` → ``MERGECRAFT_TRACE_SESSION_ID`` →
+        ``GITHUB_RUN_ID`` → ``uuid.uuid4().hex``. An explicit empty
+        ``trace_id`` from a caller who wants the no-op fallback is
+        preserved so the disabled path (``NullTracer``) keeps its
+        ``trace_id = ""`` contract.
+        """
+        if not self.trace_id:
+            self.trace_id = resolve_trace_id()
 
     def current_span(self) -> Span | None:
         """Return this tracer's active span, if any."""
@@ -84,6 +103,7 @@ class Tracer:
             parent_span_id=resolved_parent,
             span_id=uuid.uuid4().hex,
             session_id=self.session_id,
+            trace_id=self.trace_id,
             turn_id=uuid.uuid4().hex,
             tier=self.tier,
             _attrs_source=attrs_source,
@@ -97,7 +117,7 @@ class Tracer:
 
         Examples:
             >>> Tracer(sink=object(), session_id="session", run_id="run")._write
-            <bound method Tracer._write of Tracer(sink=<object object at ...>, session_id='session', run_id='run', tier='balanced')>
+            <bound method Tracer._write of Tracer(sink=<object object at ...>, session_id='session', run_id='run', trace_id='', tier='balanced')>
         """
         write = getattr(self.sink, "write", None)
         if not callable(write):
@@ -119,6 +139,7 @@ class Span:
     session_id: str
     turn_id: str
     tier: str
+    trace_id: str = ""
     status: str = "ok"
     error: str | None = None
     _attrs_source: Callable[[], dict[str, Any]] | None = None
@@ -168,6 +189,7 @@ class Span:
                 span_id=self.span_id,
                 parent_span_id=self.parent_span_id,
                 session_id=self.session_id,
+                trace_id=self.trace_id,
                 turn_id=self.turn_id,
                 tier=self.tier,
                 ts_start_ns=self.ts_start_ns,
@@ -215,6 +237,7 @@ class NullSpan:
     span_id = ""
     parent_span_id: str | None = None
     status = "ok"
+    trace_id = ""
 
     def __enter__(self) -> NullSpan:
         """Return this no-op span."""
@@ -255,6 +278,7 @@ class NullTracer:
     session_id = ""
     run_id = ""
     tier = "balanced"
+    trace_id = ""
 
     def current_span(self) -> None:
         """Return no active span while tracing is disabled."""
@@ -337,6 +361,35 @@ def resolve_session_id() -> str:
     )
 
 
+def resolve_trace_id() -> str:
+    """Resolve the per-run trace identifier (Logfire / OTel ``trace_id``).
+
+    One ``trace_id`` is shared by every span emitted by a single
+    ``mergecraft diff-review`` run; Logfire (and any OTel backend) groups
+    those spans under one trace. The precedence mirrors the existing
+    session-id resolver (D7 / T3.2):
+
+    1. ``MERGECRAFT_TRACE_ID`` — explicit per-run override.
+    2. ``MERGECRAFT_TRACE_SESSION_ID`` — alias preserving the
+       pre-#137 contract so existing pipelines keep working.
+    3. ``GITHUB_RUN_ID`` — the Actions run id, monotonic and unique.
+    4. ``uuid.uuid4().hex`` — local fallback when no env vars are set.
+
+    Returns:
+        str: 32-hex (uuid4) trace identifier, or the resolved env value.
+
+    Examples:
+        >>> bool(resolve_trace_id())
+        True
+    """
+    return (
+        os.environ.get("MERGECRAFT_TRACE_ID")
+        or os.environ.get("MERGECRAFT_TRACE_SESSION_ID")
+        or os.environ.get("GITHUB_RUN_ID")
+        or uuid.uuid4().hex
+    )
+
+
 def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     """Build the enabled tracer for ``settings`` or return the null path.
 
@@ -351,7 +404,14 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
         >>> isinstance(get_tracer_from_settings(RepoSettings()), NullTracer)
         True
     """
-    if not settings.tracing.enabled:
+    # Honor the env/CLI/YAML/default precedence (``MERGECRAFT_TRACING``,
+    # ``--tracing``, ``.mergecraft/config.yaml``) rather than the YAML block
+    # alone, so an operator's ``.env`` token + ``--tracing-to logfire`` drives
+    # the live sink. The resolver falls back to ``os.environ`` and config
+    # auto-discovery, keeping parity with the YAML-only path when no env/CLI
+    # overrides are set.
+    active_tracing = resolve_active_tracing(config=settings.tracing)
+    if not active_tracing.enabled:
         return NullTracer()
 
     active = _ACTIVE_SPAN.get()
@@ -359,7 +419,7 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
         return active.tracer
 
     try:
-        sink = claim_sink(settings.tracing)
+        sink = claim_sink(active_tracing)
     except Exception as exc:
         logger.warning("trace sink initialization failed: {}", exc)
         return NullTracer()
@@ -367,8 +427,9 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     correlation = resolve_correlation_from_env()
     session_id = resolve_session_id()
     run_id = str(correlation.get("run_id") or session_id)
+    trace_id = resolve_trace_id()
     tier = os.environ.get("MERGECRAFT_TRUST_TIER") or "balanced"
-    return Tracer(sink=sink, session_id=session_id, run_id=run_id, tier=tier)
+    return Tracer(sink=sink, session_id=session_id, run_id=run_id, tier=tier, trace_id=trace_id)
 
 
 __all__ = [
@@ -379,4 +440,5 @@ __all__ = [
     "get_tracer_from_settings",
     "resolve_correlation_from_env",
     "resolve_session_id",
+    "resolve_trace_id",
 ]

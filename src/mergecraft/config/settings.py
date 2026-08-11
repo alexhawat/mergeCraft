@@ -204,6 +204,7 @@ class TraceSinkEntry(_OptionalFeatureModel):
     path: str | None = None
     token_ref: str | None = Field(default=None, alias="tokenRef")
     project: str | None = None
+    region: Literal["us", "eu"] = Field(default="us", alias="region")
     endpoint: str | None = None
     headers: dict[str, str] | None = None
 

@@ -49,6 +49,16 @@ from mergecraft.utils.secrets import build_agent_env
 __all_gateway_envs__ = (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV)
 
 
+class ProviderTimeoutError(RuntimeError):
+    """Raised when the opencode provider endpoint times out.
+
+    This is a controlled domain error so callers (``shared.run`` /
+    ``offline_review._run_agent_review``) treat the attempt as a clean failure
+    instead of letting a raw ``httpx.ReadTimeout`` traceback abort the whole
+    review.
+    """
+
+
 def build_custom_provider(model: str | None) -> dict[str, object] | None:
     """Describe an OpenAI-compatible provider (or several) for opencode.
 
@@ -273,16 +283,20 @@ async def _prompt_session(
     if model:
         payload["model"] = model
     async with httpx.AsyncClient(timeout=600.0) as client:
-        resp = await client.post(
-            f"{base_url}/session/{session_id}/message",
-            json=payload,
-        )
-        if resp.status_code >= 400:
-            # Fallback path for older/newer API shapes
+        try:
             resp = await client.post(
-                f"{base_url}/session/{session_id}/prompt",
+                f"{base_url}/session/{session_id}/message",
                 json=payload,
             )
+            if resp.status_code >= 400:
+                # Fallback path for older/newer API shapes
+                resp = await client.post(
+                    f"{base_url}/session/{session_id}/prompt",
+                    json=payload,
+                )
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as exc:
+            logger.warning("opencode provider request timed out: {}", exc)
+            raise ProviderTimeoutError(f"opencode provider request timed out: {exc}") from exc
         if resp.status_code >= 400:
             return AgentResult(
                 success=False,
@@ -387,7 +401,12 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 model=model_obj,
             )
 
-        result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
+        try:
+            result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
+        except ProviderTimeoutError as exc:
+            # Controlled domain error: surface as a clean failed attempt
+            # rather than letting a raw httpx traceback abort the review.
+            return AgentResult(success=False, error=str(exc))
         return await finalize_agent_result(ctx, result)
     finally:
         handle.close()
@@ -439,9 +458,9 @@ def _run_opencode_cli_streaming(
 
     accumulator = StreamSpanAccumulator(agent_name="opencode")
     try:
-        from mergecraft.config import RepoSettings
+        from mergecraft.tracing.resolve import resolve_active_tracing
 
-        sink = claim_sink(RepoSettings().tracing)
+        sink = claim_sink(resolve_active_tracing())
         if sink is not None:
             correlation = resolve_correlation_from_env()
             session_id = resolve_session_id()

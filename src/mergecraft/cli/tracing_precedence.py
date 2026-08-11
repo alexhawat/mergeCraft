@@ -90,6 +90,9 @@ def _resolve_cli_layer(args: list[str]) -> dict[str, Any]:
     otel_endpoint = _flag_value(args, "--otel-endpoint")
     if otel_endpoint is not None:
         out["otel_endpoint"] = otel_endpoint
+    region = _flag_value(args, "--region")
+    if region is not None:
+        out["region"] = region.strip().lower()
     return out
 
 
@@ -108,14 +111,24 @@ def _resolve_env_layer(env: dict[str, str]) -> dict[str, Any]:
         out["logfire_token"] = env["MERGECRAFT_LOGFIRE_TOKEN"]
     if "MERGECRAFT_OTEL_ENDPOINT" in env:
         out["otel_endpoint"] = env["MERGECRAFT_OTEL_ENDPOINT"]
-    # ``MERGECRAFT_TRACING_PROJECT`` carries the Logfire project label that
-    # becomes the ``x-logfire-project`` header at runtime. The CLI
-    # ``auth logfire`` command writes this alongside ``MERGECRAFT_LOGFIRE_TOKEN``
-    # so the operator never has to edit ``.env`` by hand.
+    # ``MERGECRAFT_TRACING_PROJECT`` carries the Logfire project label. This is
+    # informational only — Logfire routes spans by the token itself, not a
+    # header. The CLI ``auth logfire`` command writes this alongside
+    # ``MERGECRAFT_LOGFIRE_TOKEN`` so the operator never has to edit ``.env``
+    # by hand.
     if "MERGECRAFT_TRACING_PROJECT" in env:
         project = env["MERGECRAFT_TRACING_PROJECT"].strip()
         if project:
             out["tracing_project"] = project
+    # ``MERGECRAFT_TRACING_REGION`` selects the Logfire OTLP data region
+    # (``us`` / ``eu``). Logfire routes spans to region-specific ingest
+    # endpoints; this overrides the YAML ``region`` default (``us``). The
+    # CLI ``--region`` flag (``tracing logfire enable``) sits above this in
+    # the precedence stack via the merged dict.
+    if "MERGECRAFT_TRACING_REGION" in env:
+        region = env["MERGECRAFT_TRACING_REGION"].strip().lower()
+        if region in {"us", "eu"}:
+            out["region"] = region
     return out
 
 

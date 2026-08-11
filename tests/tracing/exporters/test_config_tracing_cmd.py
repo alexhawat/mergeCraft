@@ -117,6 +117,120 @@ def test_config_tracing_reports_disabled_when_unset(
     assert "disabled" in out or "off" in out or "false" in out
 
 
+def test_config_tracing_shows_local_sinks_none_when_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A disabled tracing config prints a ``local sinks: none`` row.
+
+    sevn's ``show_tracing_config`` always surfaces the local-sink state even
+    when tracing is off; the operator should see at a glance that no sink
+    (local or remote) is attached. We mirror that in ``config_tracing``.
+    """
+    config = tmp_path / "config.yaml"
+    config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("MERGECRAFT_CONFIG", str(config))
+
+    from mergecraft.cli.app import app
+
+    result = _RUNNER.invoke(
+        app,
+        ["config", "tracing"],
+        env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_CONFIG": str(config)},
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    out = _plain(result.stdout)
+    assert "local sinks" in out.lower()
+    assert "none" in out.lower()
+
+
+def test_config_tracing_lists_trace_env_vars_when_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Disabled config lists the ``MERGECRAFT_*`` env vars that drive tracing.
+
+    The row tells the operator exactly which keys to set. When the operator
+    already has some set (e.g. from a prior ``auth logfire`` run), those names
+    appear; otherwise the row shows ``(none set)``.
+    """
+    config = tmp_path / "config.yaml"
+    config.write_text("", encoding="utf-8")
+    # Simulate an operator who ran ``auth logfire`` but has not enabled tracing.
+    monkeypatch.setenv("MERGECRAFT_CONFIG", str(config))
+    monkeypatch.setenv("MERGECRAFT_LOGFIRE_TOKEN", "pylf_v2_eu_test")
+    monkeypatch.setenv("MERGECRAFT_TRACING_PROJECT", "mergecraft-dev")
+
+    from mergecraft.cli.app import app
+
+    result = _RUNNER.invoke(
+        app,
+        ["config", "tracing"],
+        env={
+            "NO_COLOR": "1",
+            "TERM": "dumb",
+            "MERGECRAFT_CONFIG": str(config),
+            "MERGECRAFT_LOGFIRE_TOKEN": "pylf_v2_eu_test",
+            "MERGECRAFT_TRACING_PROJECT": "mergecraft-dev",
+        },
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    out = _plain(result.stdout)
+    assert "trace env" in out.lower()
+    assert "MERGECRAFT_LOGFIRE_TOKEN" in out
+    assert "MERGECRAFT_TRACING_PROJECT" in out
+
+
+def test_config_tracing_prints_next_steps_when_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Disabled config prints the next-step hints (sevn: ``show_tracing_config``).
+
+    The block lists the symmetric commands (``mergecraft tracing logfire
+    enable`` with and without flags, plus the local/env path) so the operator
+    knows how to turn tracing on without re-reading docs.
+    """
+    config = tmp_path / "config.yaml"
+    config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("MERGECRAFT_CONFIG", str(config))
+
+    from mergecraft.cli.app import app
+
+    result = _RUNNER.invoke(
+        app,
+        ["config", "tracing"],
+        env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_CONFIG": str(config)},
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    out = _plain(result.stdout).lower()
+    assert "next steps" in out
+    assert "mergecraft tracing logfire enable" in out
+    assert "--token" in out
+    assert "--project" in out
+
+
+def test_config_tracing_omits_next_steps_when_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Enabled config does not print the remediation hints (the table is enough)."""
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "tracing:\n  enabled: true\n  sinks:\n    - type: jsonl_file\n      path: traces\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MERGECRAFT_CONFIG", str(config))
+
+    from mergecraft.cli.app import app
+
+    result = _RUNNER.invoke(
+        app,
+        ["config", "tracing"],
+        env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_CONFIG": str(config)},
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    out = _plain(result.stdout).lower()
+    assert "enabled" in out
+    assert "next steps" not in out
+
+
 # ---------------------------------------------------------------------------
 # ``mergecraft traces <run-id>``
 # ---------------------------------------------------------------------------

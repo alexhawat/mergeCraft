@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -116,6 +117,13 @@ def has_credentials_for_slug(slug: str) -> bool:
         return _has_vertex_auth() and bool(os.environ.get(VERTEX_MODEL_ID_ENV, "").strip())
     if provider in {"nous", "tokenhub"}:
         return _has_gateway_auth(provider)
+    if provider == "minimax":
+        # W6 (#34): MiniMax is reachable through the existing custom-provider
+        # helper (operator-locked D10 / option ii). The single pair that
+        # surfaces a credential is the D7 singleton; the indexed
+        # ``_N`` form is also accepted because the helper's multi-provider
+        # resolver may surface the provider via ``provider_<N>``.
+        return _has_gateway_auth(provider)
     return False
 
 
@@ -142,6 +150,9 @@ def _agent_binary_available(slug: str) -> bool:
         # so there is no required CLI on PATH. Explicit ``None`` short-circuits
         # the gate to ``True`` and pins the W1.7 regression pin.
         "nous": None,
+        # W6 (#34): MiniMax rides the same env-var-driven opencode harness
+        # path; no CLI binary is required on PATH.
+        "minimax": None,
     }
     binary = binary_by_provider.get(provider)
     if binary is None:
@@ -469,6 +480,8 @@ async def run_with_model_chain(
 
         root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
 
+        cli_argv = _redacted_cli_argv()
+
         while attempts < max_attempts:
             slug = chain[chain_index]
             attempts += 1
@@ -482,6 +495,13 @@ async def run_with_model_chain(
                 "model.attempt_number": attempts,
                 "agent.provider": _agent_provider_for_slug(slug),
                 "agent.mode": _agent_mode_for_slug(slug),
+                # OTel GenAI semantic-convention names so Logfire's native
+                # GenAI dashboard populates. ``gen_ai.system`` is the provider
+                # slug (anthropic/openai/google/opencode/...).
+                "gen_ai.system": _agent_provider_for_slug(slug),
+                "gen_ai.agent.name": _agent_mode_for_slug(slug),
+                "gen_ai.request.model": slug,
+                "agent.cli_argv": cli_argv,
             }
             attempt_kind = "agent.attempt"
             terminal_status = "retryable"  # default until set inside the span body
@@ -497,6 +517,9 @@ async def run_with_model_chain(
                     "model.requested": requested_model or slug,
                     "model.resolved": slug,
                     "model.fallback_index": chain_index,
+                    "gen_ai.operation.name": "chat",
+                    "gen_ai.request.model": slug,
+                    "gen_ai.response.model": slug,
                 }
                 usage = result.usage
                 if usage is not None:
@@ -641,7 +664,32 @@ def _cost_attrs_from_usage(usage: Any) -> dict[str, Any]:
         attrs["cost.cache_write"] = cache_write
     if isinstance(cost_usd, (int, float)):
         attrs["cost.usd"] = float(cost_usd)
+    # Mirror the mergeCraft cost.* names as OpenTelemetry GenAI semantic
+    # conventions so Logfire's native GenAI dashboard populates. ``cache_write``
+    # maps to ``cache_creation_input_tokens`` per the GenAI spec.
+    if isinstance(tokens_in, int):
+        attrs["gen_ai.usage.input_tokens"] = tokens_in
+    if isinstance(tokens_out, int):
+        attrs["gen_ai.usage.output_tokens"] = tokens_out
+    if isinstance(cache_read, int):
+        attrs["gen_ai.usage.cache_read_input_tokens"] = cache_read
+    if isinstance(cache_write, int):
+        attrs["gen_ai.usage.cache_creation_input_tokens"] = cache_write
+    if isinstance(cost_usd, (int, float)):
+        attrs["gen_ai.usage.cost_usd"] = float(cost_usd)
     return attrs
+
+
+def _redacted_cli_argv() -> str:
+    """Return the redacted CLI argv for the ``agent.cli_argv`` span attribute.
+
+    D7 / TRACING.md §redaction: a span must never carry a credential. The
+    helper masks token/secret-shaped values (``--api-key sk-…``, bearer
+    substrings) while preserving the command shape.
+    """
+    from mergecraft.tracing.redaction import redact_cli_argv
+
+    return redact_cli_argv(list(sys.argv))
 
 
 def _empty_chain_result() -> AgentResult:
@@ -692,6 +740,10 @@ def _emit_advanced_attempt(
         "model.fallback_index": fallback_index,
         "agent.provider": _agent_provider_for_slug(slug),
         "agent.mode": _agent_mode_for_slug(slug),
+        "gen_ai.system": _agent_provider_for_slug(slug),
+        "gen_ai.agent.name": _agent_mode_for_slug(slug),
+        "gen_ai.request.model": slug,
+        "agent.cli_argv": _redacted_cli_argv(),
     }
     with tracer.start_span(
         "agent.attempt",
@@ -845,6 +897,25 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
                 f"Set {hints[0]} (via `{hints[1]}` or a GitHub Actions secret), "
                 "or set MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + "
                 "MERGECRAFT_CUSTOM_PROVIDER_API_KEY, or choose a different model."
+            )
+            raise ValueError(msg)
+
+        if provider == "minimax":
+            # W6 (#34): MiniMax rides the custom-provider helper. Fail loud
+            # (convention 5) rather than silently falling through to the
+            # opencode harness when the env vars are missing — the harness
+            # will not be able to reach MiniMax without them, and the
+            # operator's CLI auth gate would mask the configuration error.
+            if _has_gateway_auth(provider):
+                return agents["opencode"]
+            msg = (
+                f"MiniMax model {model!r} selected but no credential is configured. "
+                "Set MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + "
+                "MERGECRAFT_CUSTOM_PROVIDER_API_KEY "
+                "(via `mergecraft auth minimax` or GitHub Actions secrets), "
+                "or an indexed pair "
+                "MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_1, "
+                "or choose a different model."
             )
             raise ValueError(msg)
 

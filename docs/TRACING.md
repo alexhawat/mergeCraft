@@ -277,6 +277,60 @@ Malformed events are skipped and counted: the consumer never raises on
 a bad line. The counter is available via `StreamSpanAccumulator.malformed_event_count`
 and the line is logged at `warning` level.
 
+## One trace per run (T3)
+
+One `mergecraft diff-review` run emits one Logfire trace. Every span
+emitted by the run — `mergecraft.run`, `mergecraft.prep`,
+`mergecraft.publish`, `mergecraft.analyzers.pipeline`, `analyzer.run`,
+`agent.attempt`, `llm.call`, `tool.call`, plus the future `provider.call`
+and `http.client.request` — shares one Logfire `trace_id`. The UI groups
+spans by `trace_id` (the OTel `trace_id` field on the produced span), so
+a single click in the Logfire tree shows the full run — a feature the
+pre-#137 tree did not deliver because `mergecraft.trace_id` was just an
+attribute on every span rather than the OTel `trace_id` itself.
+
+### What `trace_id` is
+
+`trace_id` is the Logfire / OpenTelemetry trace identifier shared by every
+span in one run. The mergeCraft run resolves it once per process (via
+`resolve_trace_id()` in `tracing/tracer.py`) and propagates it onto every
+child span via the `Tracer` (`self.trace_id`) and the `Span`
+(`self.trace_id`). The OTel exporter (`OTLPSink`) forwards it as the
+real OTel `trace_id` on the produced span so Logfire groups by it
+automatically — no attribute search required.
+
+### How it is generated
+
+The resolver follows the same precedence as the existing session-id
+resolver (D7 / T3.2):
+
+1. `MERGECRAFT_TRACE_ID` — explicit per-run override.
+2. `MERGECRAFT_TRACE_SESSION_ID` — alias preserving the pre-#137 contract
+   so existing pipelines keep working.
+3. `GITHUB_RUN_ID` — the Actions run id, monotonic and unique.
+4. `uuid.uuid4().hex` — local fallback when no env vars are set.
+
+`session_id` remains the per-process correlation id (the W4 batch-B
+session correlation) and `turn_id` is the per-span `uuid4().hex`. The
+three fields are orthogonal: change the env precedence and the run still
+groups under one trace.
+
+### How Logfire groups by it
+
+`OTLPSink.write` rewrites the OTel `trace_id` on the produced span via
+`SpanContext(trace_id=otel_trace_id, …)` (the same private `_context`
+field the OTel SDK uses internally). The recording-processor test seam
+captures the rewritten `trace_id` so the Logfire-grouping contract is
+observable through the existing surface. The
+`otel_bridge.attach_trace_context` context manager does the same on the
+OTel **context** side, so any nested OTel auto-instrumented operation
+(e.g. an `httpx` call inside a tool) inherits the same `trace_id`
+without the caller having to know about mergeCraft's tracer. The
+`attach_trace_context` integration in
+`agents/_stream_consumer.py::consume_stream` wraps the handler call so
+any nested OTel operation inside an agent's per-event handler inherits
+the run's trace.
+
 ## What's next
 
 | Batch | Wave  | Scope                                                |
@@ -301,10 +355,13 @@ tracing:
         x-tenant: mergecraft
 ```
 
-For Logfire, the endpoint is hard-coded to the public ingest URL
-(`https://logfire.pydantic.dev/api/v1/otlp/v1/traces`); the `project`
-field is forwarded as the `x-logfire-project` header. The token is
-resolved through `tokenRef` (D5) — see *Token resolution* below.
+For Logfire, the endpoint is the region-aware OTLP/HTTP ingest URL —
+`https://logfire-us.pydantic.dev/v1/traces` (US) or
+`https://logfire-eu.pydantic.dev/v1/traces` (EU), selected by the sink's
+`region` field (default `us`). The `project` field is informational only;
+Logfire routes spans by the token itself, so no `x-logfire-project` header
+is sent. The token is resolved through `tokenRef` (D5) — see *Token
+resolution* below.
 
 ## Token resolution (W8.2 / D5)
 

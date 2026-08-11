@@ -79,6 +79,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent CLI subprocesses now head their own process group
   (`start_new_session=True`); timeout/cancel sends TERM → grace → KILL to the
   whole group so grandchild processes cannot outlive the Action run
+- `has_gateway_credentials` no longer false-positives for unrelated gateway
+  presets. A Batch C (#34 / PR #126) addition let an indexed custom-provider
+  pair (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`) or the singleton
+  pair make `has_gateway_credentials("minimax")` / `"nous"` / `"tokenhub"` all
+  return `True` regardless of whether that preset's own env vars were set,
+  partly undercutting the minimax fail-loud guarantee. The `resolve_gateway_endpoints()`
+  short-circuit was removed from `has_gateway_credentials` so a named preset
+  only reports credentials when its own env vars are set; the singleton is still
+  honoured for minimax via `MINIMAX_API_KEY_ENV == CUSTOM_PROVIDER_API_KEY_ENV`,
+  and the D4 `NOUS_API_KEY` back-compat alias for nous is preserved. Surfaced by
+  the Thermos review (Blocker #1). Regression tests:
+  `tests/agents/test_openai_compatible_gateways.py::test_indexed_pair_does_not_grant_minimax_credentials`,
+  `::test_singleton_still_grants_minimax_credentials`,
+  `::test_nous_back_compat_alias_still_grants_nous_credentials`
 - `mergecraft config tracing` now reports `enabled: true` immediately after
   `mergecraft auth logfire` (or `tracing logfire enable`) writes to `.env`.
   Root cause: the CLI's `main()` did not load `.env` into `os.environ`, so the
@@ -105,6 +119,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   brackets literally. The runtime warning for a missing `[tracing]` extra uses
   `console.print(..., markup=False)` to keep the install command verbatim.
   Test: `test_auth_logfire_help_does_not_emit_unbalanced_backticks`
+
+### Added
+
+- `feat(tracing): one trace_id per run + OTel context bridge` — every span
+  emitted by a single `mergecraft diff-review` run shares one Logfire trace;
+  the OTel context is propagated so any nested OTel auto-instrumented
+  operation inherits the same trace. `TraceEvent.trace_id` is the new
+  per-run Logfire/OTel trace identifier (resolved once per process via
+  `resolve_trace_id()` in `src/mergecraft/tracing/tracer.py` with the env
+  precedence `MERGECRAFT_TRACE_ID` → `MERGECRAFT_TRACE_SESSION_ID` →
+  `GITHUB_RUN_ID` → `uuid.uuid4().hex`); `session_id` stays the per-process
+  correlation id and `turn_id` stays the per-span uuid4. `OTLPSink.write`
+  rewrites the OTel `trace_id` on the produced span so Logfire groups by it
+  automatically (the `mergecraft.trace_id` attribute is the structural
+  fallback). The new `src/mergecraft/tracing/otel_bridge.py` ships
+  `attach_trace_context(span)` — a context manager that bridges the OTel
+  context so nested OTel auto-instrumented calls (e.g. an `httpx` call
+  inside a tool) inherit the run's trace without the caller having to know
+  about mergeCraft's tracer. `agents/_stream_consumer.py::consume_stream`
+  wraps the per-event handler in `attach_trace_context` when an active
+  span is present. `docs/TRACING.md` gains a "One trace per run" section
+  describing the precedence and the Logfire-grouping contract. Tests:
+  the 11-case RED suite in `tests/tracing/test_trace_id_bridge.py` (10
+  green + 1 xfail passing through)
+- `mergecraft config tracing` now renders faithfully even when tracing is
+  **disabled**, mirroring sevn's `show_tracing_config`. The table gains two
+  rows plus a hint block:
+  - `local sinks` — `none` when tracing is off, the configured `trace_dir`
+    when on (sevn always surfaces the local-sink state so the operator can
+    see at a glance that no sink is attached).
+  - `trace env` — the `MERGECRAFT_*` env var names currently present in the
+    environment (or `(none set)`), so the operator knows exactly which keys
+    to set to enable tracing.
+  - `next steps` — a hard-coded hint block (sevn: `show_tracing_config`) listing
+    `mergecraft tracing logfire enable` (interactive and `--token X --project Y`),
+    the local JSONL-file path (`MERGECRAFT_TRACING=true` +
+    `MERGECRAFT_TRACING_TO=local_files`), and the generic OTLP path
+    (`MERGECRAFT_TRACING_TO=otel` + `MERGECRAFT_OTEL_ENDPOINT`). Printed only
+    when disabled; the enabled table is self-explanatory and omits the block.
+    Implemented in `src/mergecraft/cli/tracing_cmd.py` (`config_tracing` +
+    `render_resolved` + `_print_tracing_next_steps`). Tests:
+    `test_config_tracing_shows_local_sinks_none_when_disabled`,
+    `test_config_tracing_lists_trace_env_vars_when_disabled`,
+    `test_config_tracing_prints_next_steps_when_disabled`,
+    `test_config_tracing_omits_next_steps_when_enabled`
+- First-class **MiniMax** provider via the existing custom-provider helper
+  (#34 / W6). The catalog now enumerates `minimax/MiniMax-M3` as a curated
+  alias (`PROVIDERS["minimax"]` in `src/mergecraft/models.py`), reachable
+  through the D7 singleton env vars (`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`
+  + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`) or an indexed pair
+  (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`). The default
+  endpoint is MiniMax's published OpenAI-compatible URL
+  (`https://api.minimax.io/v1`, documented at
+  <https://platform.minimax.io/docs/api-reference/text-openai-api.md>),
+  added to `GATEWAY_PRESETS` in `src/mergecraft/agents/openai_compatible_gateways.py`
+  so the slug prefix drives the provider lookup without an explicit
+  `<N>` slot. The credential gate honours the D7 singleton and the
+  indexed pair; the binary gate short-circuits to `True` for the
+  `minimax` provider (same posture as `nous` — the opencode harness
+  reads env vars directly, no CLI is required on PATH). A new
+  `mergecraft auth minimax` subcommand (`src/mergecraft/cli/auth_cmd.py`)
+  mirrors `auth gemini` / `auth nous` / `auth tokenhub` line-for-line:
+  prompts with `getpass`, validates against
+  `https://api.minimax.io/v1/chat/completions` (the unauthenticated
+  catalog endpoint would return 200 for a fake bearer; the probe path
+  enforces auth, matching `_validate_nous_api_key`'s shape), then writes
+  `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` via `gh secret set`. The validator
+  returns `True` on 200, `False` on 401/403, and `True` with a
+  `logger.warning` on network errors. A `mergecraft models list` row
+  appears for the new catalog entry; the credentials column flips
+  `no` → `yes` when the env var is set (convention 7 — the key value
+  is never rendered). The pre-existing `opencode/minimax-m2.5` and
+  `opencode/minimax-m2.5-free` entries are untouched (D12 additive
+  invariant — operators using OpenCode as a proxy still work). No
+  Dockerfile change — MiniMax does not require a first-party CLI binary
+  (D10 / option ii: route through the existing helper, not a bespoke
+  `mmx-cli` harness). README "Authentication" table gains a MiniMax
+  row.
 
 ### Changed
 

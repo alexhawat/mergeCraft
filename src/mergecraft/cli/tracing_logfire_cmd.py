@@ -29,6 +29,12 @@ from mergecraft.cli.auth_cmd import (
     _write_env_value,
 )
 
+# ``MERGECRAFT_TRACING_REGION`` selects the Logfire OTLP data region; it is
+# written by ``tracing logfire enable --region`` and read by the precedence
+# layer alongside the other ``MERGECRAFT_*`` tracing vars.
+LOGFIRE_REGION_ENV = "MERGECRAFT_TRACING_REGION"
+_VALID_REGIONS = ("us", "eu")
+
 app = typer.Typer(
     name="tracing",
     help="Trace export configuration (Logfire). Mirrors ``sevn tracing logfire``.",
@@ -106,13 +112,18 @@ def logfire_enable(
     project: str | None = typer.Option(
         None,
         "--project",
-        help="Logfire project label (becomes the ``x-logfire-project`` header).",
+        help="Logfire project label (informational; Logfire routes by token, not a header).",
     ),
     scope: str = typer.Option(
         "both",
         "--scope",
         "-s",
         help="Where to persist: 'local' (.env), 'github' (gh secret), or 'both'.",
+    ),
+    region: str | None = typer.Option(
+        None,
+        "--region",
+        help="Logfire data region for the OTLP endpoint: 'us' or 'eu' (default us).",
     ),
 ) -> None:
     """Enable Logfire tracing by writing the token + project locally and on GitHub.
@@ -125,6 +136,11 @@ def logfire_enable(
     from mergecraft.cli.auth_cmd import _normalise_scope
 
     target = _normalise_scope(scope)
+
+    if region is not None:
+        region = region.strip().lower()
+        if region not in _VALID_REGIONS:
+            _bail(f"--region must be one of: {', '.join(_VALID_REGIONS)} (got {region!r}).")
 
     if token is None:
         token = getpass.getpass("Logfire write token (Enter to cancel): ").strip()
@@ -150,19 +166,31 @@ def logfire_enable(
         env_path = _local_env_path()
         env_token_ok = _write_env_value(env_path, LOGFIRE_RUNTIME_TOKEN_ENV, token)
         env_project_ok = _write_env_value(env_path, LOGFIRE_PROJECT_ENV, project)
-        wrote_local = env_token_ok and env_project_ok
+        # ``--region`` (when given) is persisted so ``config tracing`` and the
+        # sink factory pick it up through the same ``MERGECRAFT_*`` seam as
+        # the token; it never lands in the model dump / config on disk.
+        env_region_ok = True
+        if region is not None:
+            env_region_ok = _write_env_value(env_path, LOGFIRE_REGION_ENV, region)
+        # Flips the master switch so ``mergecraft config tracing`` reports
+        # enabled after this command runs (the env layer's ``MERGECRAFT_TRACING``
+        # is the only local-side knob that sets ``enabled=true``).
+        env_enable_ok = _write_env_value(env_path, "MERGECRAFT_TRACING", "true")
+        wrote_local = env_token_ok and env_project_ok and env_region_ok and env_enable_ok
         if wrote_local:
             console.print(
-                f"[green]wrote[/green] {LOGFIRE_RUNTIME_TOKEN_ENV} and "
-                f"{LOGFIRE_PROJECT_ENV} to {env_path}"
+                f"[green]wrote[/green] {LOGFIRE_RUNTIME_TOKEN_ENV}, "
+                f"{LOGFIRE_PROJECT_ENV} and MERGECRAFT_TRACING to {env_path}"
             )
+            if region is not None:
+                console.print(f"[green]wrote[/green] {LOGFIRE_REGION_ENV}={region} to {env_path}")
         else:
             # Bandit's B608 fires on the interpolated `env_path`; this is a
             # console warning, not a SQL statement (no DB engine involved).
             console.print(
                 f"[yellow]warning:[/yellow] could not update {env_path} "  # nosec B608
-                f"— set {LOGFIRE_RUNTIME_TOKEN_ENV} and "
-                f"{LOGFIRE_PROJECT_ENV} manually or check file permissions."
+                f"— set {LOGFIRE_RUNTIME_TOKEN_ENV}, {LOGFIRE_PROJECT_ENV} "
+                f"and MERGECRAFT_TRACING manually or check file permissions."
             )
 
     wrote_github = False
@@ -217,16 +245,20 @@ def logfire_disable(
         # is present (for re-enable) but blank.
         env_token_ok = _write_env_value(env_path, LOGFIRE_RUNTIME_TOKEN_ENV, "")
         env_project_ok = _write_env_value(env_path, LOGFIRE_PROJECT_ENV, "")
-        wrote_local = env_token_ok and env_project_ok
+        # Clear the master switch too so ``mergecraft config tracing`` reports
+        # disabled again.
+        env_enable_ok = _write_env_value(env_path, "MERGECRAFT_TRACING", "")
+        wrote_local = env_token_ok and env_project_ok and env_enable_ok
         if wrote_local:
             console.print(
-                f"[green]cleared[/green] {LOGFIRE_RUNTIME_TOKEN_ENV} and "
-                f"{LOGFIRE_PROJECT_ENV} in {env_path}"
+                f"[green]cleared[/green] {LOGFIRE_RUNTIME_TOKEN_ENV}, "
+                f"{LOGFIRE_PROJECT_ENV} and MERGECRAFT_TRACING in {env_path}"
             )
         else:
             console.print(
                 f"[yellow]warning:[/yellow] could not clear {env_path} — unset "
-                f"{LOGFIRE_RUNTIME_TOKEN_ENV} and {LOGFIRE_PROJECT_ENV} manually."
+                f"{LOGFIRE_RUNTIME_TOKEN_ENV}, {LOGFIRE_PROJECT_ENV} and "
+                f"MERGECRAFT_TRACING manually."
             )
 
     wrote_github = False

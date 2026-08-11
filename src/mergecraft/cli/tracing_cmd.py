@@ -28,6 +28,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.tracing.redaction import redact_attrs
 from mergecraft.tracing.sinks import read_jsonl_events
@@ -63,6 +64,32 @@ config_app = typer.Typer(
     help="Inspect resolved mergeCraft settings.",
     no_args_is_help=True,
 )
+
+
+def _print_tracing_next_steps(console: Console) -> None:
+    """Print the disabled-state remediation hints (sevn: ``show_tracing_config``).
+
+    sevn hard-codes this block in its ``show_tracing_config`` command so the
+    operator is never left with a bare ``disabled`` status and no remedy. We
+    mirror it: list the two symmetric commands (``mergecraft tracing logfire
+    enable`` for the remote Logfire sink, and the local/env path) so the
+    operator knows exactly how to turn tracing on.
+    """
+    console.print(
+        "\n[bold]next steps[/bold]\n"
+        "  - enable the Logfire sink interactively:\n"
+        "      [cyan]mergecraft tracing logfire enable[/cyan]\n"
+        "  - or set it up non-interactively (token + project):\n"
+        "      [cyan]mergecraft tracing logfire enable --token X --project Y[/cyan]\n"
+        "  - or disable remote tracing and keep a local JSONL file sink:\n"
+        "      [cyan]export MERGECRAFT_TRACING=true[/cyan]\n"
+        "      [cyan]export MERGECRAFT_TRACING_TO=local_files[/cyan]\n"
+        "      [cyan]export MERGECRAFT_TRACE_DIR=.mergecraft/traces/[/cyan]\n"
+        "  - to push spans to any OTLP endpoint instead:\n"
+        "      [cyan]export MERGECRAFT_TRACING_TO=otel[/cyan]\n"
+        "      [cyan]export MERGECRAFT_OTEL_ENDPOINT=http://127.0.0.1:4318/v1/traces[/cyan]\n"
+        "  - verify after enabling: [cyan]mergecraft config tracing[/cyan]"
+    )
 
 
 @config_app.command("tracing")
@@ -105,6 +132,10 @@ def config_tracing(
     if "tracing_project" in resolved:
         table.add_row("project", resolved["tracing_project"])
 
+    region = resolved.get("region")
+    if region:
+        table.add_row("region", region)
+
     logfire_token = resolved.get("logfire_token")
     if logfire_token is not None:
         table.add_row("logfire_token", f"{_TOKEN_REDACTED_MARKER} [dim](redacted)[/dim]")
@@ -112,12 +143,61 @@ def config_tracing(
         # The reference was set but resolved to None — still show the env var name.
         table.add_row("logfire_token", "[dim]unset[/dim]")
 
+    # Local sinks — sevn's ``show_tracing_config`` prints this even when disabled
+    # so the operator can see at a glance whether a local JSONL file sink is on.
+    # When tracing is off, no sink (local or remote) is attached, so the row is
+    # ``none``. When on and a local dir is configured, it echoes the trace_dir.
+    if enabled and resolved.get("trace_dir"):
+        table.add_row("local sinks", resolved["trace_dir"])
+    else:
+        table.add_row("local sinks", "[dim]none[/dim]")
+
+    # Trace env — the env var names that drive tracing. Surfaced so an operator
+    # reading ``config tracing`` while disabled can see exactly which keys to
+    # set (or which are currently present in the environment). sevn's
+    # ``show_tracing_config`` lists the equivalent ``sevn.json`` fields; here
+    # the canonical knobs are the ``MERGECRAFT_*`` env vars.
+    _TRACE_ENV_VARS = (
+        "MERGECRAFT_TRACING",
+        "MERGECRAFT_TRACING_TO",
+        "MERGECRAFT_LOGFIRE_TOKEN",
+        "MERGECRAFT_TRACING_PROJECT",
+        "MERGECRAFT_TRACING_REGION",
+        "MERGECRAFT_OTEL_ENDPOINT",
+        "MERGECRAFT_TRACE_DIR",
+    )
+    present = [v for v in _TRACE_ENV_VARS if v in os.environ]
+    table.add_row(
+        "trace env",
+        ", ".join(present) if present else "[dim](none set)[/dim]",
+    )
+
     if not enabled:
         table.add_row("status", "[yellow]disabled[/yellow]")
     else:
         table.add_row("status", "[green]enabled[/green]")
 
+    # GitHub Action tracing visibility — a local ``.env`` cannot see the
+    # Action's runtime env, but the workflow file tells the operator whether
+    # tracing is enabled *for the GitHub Action*. Only shown when a workflow
+    # file was found (don't noise the local-only case).
+    gh = detect_github_action_tracing()
+    if gh.get("source") != "not found":
+        gh_value = (
+            "[green]enabled[/green]"
+            if gh.get("github_action_tracing")
+            else "[dim]not configured[/dim]"
+        )
+        gh_detail = f" [dim]({gh.get('detail', '')})[/dim]"
+        table.add_row("github action", gh_value + gh_detail)
+
     console.print(table)
+
+    # Next-step hints — sevn hard-codes these in ``show_tracing_config`` so the
+    # operator is never left staring at "disabled" with no remedy. Print the
+    # block only when tracing is off; when on, the table is self-explanatory.
+    if not enabled:
+        _print_tracing_next_steps(console)
 
 
 # ---------------------------------------------------------------------------
@@ -216,12 +296,43 @@ def render_resolved(resolved: dict[str, Any]) -> str:
         parts.append(f"  otel_endpoint: {resolved['otel_endpoint']}")
     if "tracing_project" in resolved:
         parts.append(f"  project: {resolved['tracing_project']}")
+    if resolved.get("region"):
+        parts.append(f"  region: {resolved['region']}")
     if "logfire_token" in resolved:
         token = resolved["logfire_token"]
         if token is not None and not _is_redacted(str(token)):
             parts.append("  logfire_token: *** (redacted)")
         else:
             parts.append(f"  logfire_token: {token}")
+    # Mirror ``config_tracing``: always surface the local-sink state and the
+    # trace env vars, and append next-step hints when tracing is disabled.
+    if resolved.get("enabled") and resolved.get("trace_dir"):
+        parts.append(f"  local sinks: {resolved['trace_dir']}")
+    else:
+        parts.append("  local sinks: none")
+    _TRACE_ENV_VARS = (
+        "MERGECRAFT_TRACING",
+        "MERGECRAFT_TRACING_TO",
+        "MERGECRAFT_LOGFIRE_TOKEN",
+        "MERGECRAFT_TRACING_PROJECT",
+        "MERGECRAFT_TRACING_REGION",
+        "MERGECRAFT_OTEL_ENDPOINT",
+        "MERGECRAFT_TRACE_DIR",
+    )
+    present = [v for v in _TRACE_ENV_VARS if os.environ.get(v)]
+    parts.append("  trace env: " + (", ".join(present) if present else "(none set)"))
+    if not resolved.get("enabled"):
+        parts.append(
+            "  next steps: mergecraft tracing logfire enable "
+            "[--token X --project Y] | or set MERGECRAFT_TRACING=true "
+            "MERGECRAFT_TRACING_TO=local_files"
+        )
+    # GitHub Action tracing visibility — surfaced even though a local render
+    # cannot see the Action's runtime env. Skipped when no workflow was found.
+    gh = detect_github_action_tracing()
+    if gh.get("source") != "not found":
+        gh_line = "enabled" if gh.get("github_action_tracing") else "not configured"
+        parts.append(f"  github action: {gh_line}")
     return "\n".join(parts)
 
 

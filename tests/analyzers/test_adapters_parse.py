@@ -1,0 +1,130 @@
+"""Tests for analyzer skip-reason classification at the parse boundary.
+
+Distinguishes "analyzer did not run (no output)" from "output present but
+unparseable" so the skip reason is honest, without touching sandbox/execution
+logic in execution.py.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pytest
+
+from mergecraft.analyzers.adapters import run_adapter
+from mergecraft.analyzers.resolve import AnalyzerPlan
+from mergecraft.analyzers.run import AnalyzerOutcome
+
+_TOOL_ID = "ruff"
+
+
+def _stub_chain(monkeypatch: pytest.MonkeyPatch, *, output_text: str, tmp_path: Path) -> None:
+    """Wire run_adapter to reach the parse boundary with a canned output file.
+
+    Everything between manifest resolution and run_plan is stubbed; only the
+    parse classification (adapters.py lines ~291-302) is exercised for real.
+    """
+    from mergecraft.analyzers import adapters as adapters_mod
+
+    def _get_manifest(tool_id: str):
+        registry = __import__("mergecraft.analyzers.registry", fromlist=["load_catalog"])
+        for m in registry.load_catalog():
+            if m.id == tool_id:
+                return m
+        raise AssertionError(f"no manifest for {tool_id}")
+
+    def _filter_changed(_manifest, changed_files):
+        return list(changed_files)
+
+    plan = AnalyzerPlan(manifest_id=_TOOL_ID, mode="repo-native", argv=("trufflehog",))
+
+    def _resolve_analyzer(**_kwargs):
+        return plan
+
+    def _provision_managed_argv(_plan, **_kwargs):
+        return plan
+
+    def _plan_sandbox(**_kwargs):
+        return type(
+            "D",
+            (),
+            {"can_run": True, "skip_reason": None, "context": None},
+        )()
+
+    def _finalize_plan(_plan, **_kwargs):
+        return plan
+
+    out_path = tmp_path / f"{_TOOL_ID}.out"
+    out_path.write_text(output_text, encoding="utf-8")
+
+    def _run_plan(_plan, **_kwargs):
+        return AnalyzerOutcome(
+            name=_TOOL_ID,
+            command="trufflehog",
+            status="passed",
+            output=output_text,
+            exit_code=0,
+            output_path=str(out_path),
+        )
+
+    monkeypatch.setattr(adapters_mod, "get_manifest", _get_manifest)
+    monkeypatch.setattr(
+        "mergecraft.analyzers.registry.filter_changed_files_for_manifest", _filter_changed
+    )
+    monkeypatch.setattr(adapters_mod, "resolve_analyzer", _resolve_analyzer)
+    monkeypatch.setattr(adapters_mod, "provision_managed_argv", _provision_managed_argv)
+    monkeypatch.setattr(adapters_mod, "plan_sandbox", _plan_sandbox)
+    monkeypatch.setattr(adapters_mod, "finalize_plan", _finalize_plan)
+    monkeypatch.setattr(adapters_mod, "run_plan", _run_plan)
+
+
+def test_empty_output_yields_did_not_run_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_chain(monkeypatch, output_text="", tmp_path=tmp_path)
+
+    result = run_adapter(
+        tool_id=_TOOL_ID,
+        repo_root=tmp_path,
+        changed_files=["src/app.py"],
+        tier="trusted",
+    )
+    assert result.skipped is True
+    reason = result.skip_reason or ""
+    assert "did not run" in reason, reason
+    assert "sandbox unavailable" in reason, reason
+    assert "failed to parse" not in reason, reason
+
+
+def test_none_output_yields_did_not_run_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_chain(monkeypatch, output_text="   \n  ", tmp_path=tmp_path)
+
+    result = run_adapter(
+        tool_id=_TOOL_ID,
+        repo_root=tmp_path,
+        changed_files=["src/app.py"],
+        tier="trusted",
+    )
+    assert result.skipped is True
+    assert "did not run" in (result.skip_reason or ""), result.skip_reason
+
+
+def test_nonempty_invalid_json_yields_parse_failure_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_chain(monkeypatch, output_text="not valid json {", tmp_path=tmp_path)
+
+    result = run_adapter(
+        tool_id=_TOOL_ID,
+        repo_root=tmp_path,
+        changed_files=["src/app.py"],
+        tier="trusted",
+    )
+    assert result.skipped is True
+    reason = result.skip_reason or ""
+    assert "failed to parse analyzer output" in reason, reason
+    assert "did not run" not in reason, reason

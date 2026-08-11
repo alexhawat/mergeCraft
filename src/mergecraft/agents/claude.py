@@ -61,6 +61,30 @@ def _strip_provider_prefix(specifier: str) -> str:
     return specifier[slash + 1 :] if slash > 0 else specifier
 
 
+def _truncate_tool_payload(value: Any) -> str:
+    """Render a tool input/output payload as a redacted, truncated string.
+
+    Tool inputs/outputs can carry repo content (D15), so they are capped to a
+    safe length and passed through the shared secret matcher. Returns ``""``
+    for non-string payloads that cannot be meaningfully inlined.
+    """
+    from mergecraft.analyzers.redact import redact_secrets
+
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, (dict, list)):
+        try:
+            text = json.dumps(value, default=str)
+        except TypeError, ValueError:
+            text = str(value)
+    else:
+        return ""
+    text = redact_secrets(text)
+    if len(text) > 2048:
+        return text[:2048] + "…"
+    return text
+
+
 def write_mcp_config(ctx: AgentRunContext) -> str:
     config_dir = Path(ctx.tmpdir) / ".claude"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -258,6 +282,15 @@ def _claude_stream_event_handler(
                 "cost.tokens_out",
                 int(usage_payload.get("output_tokens") or 0),
             )
+            span.set_attribute("gen_ai.operation.name", "chat")
+            span.set_attribute("gen_ai.request.model", model_id)
+            span.set_attribute("gen_ai.response.model", model_id)
+            span.set_attribute(
+                "gen_ai.usage.input_tokens", int(usage_payload.get("input_tokens") or 0)
+            )
+            span.set_attribute(
+                "gen_ai.usage.output_tokens", int(usage_payload.get("output_tokens") or 0)
+            )
             span.ts_start_ns = time.time_ns()
             span.__enter__()
             open_llm_spans[message_id] = {
@@ -297,6 +330,7 @@ def _claude_stream_event_handler(
             span_obj: Span | None = target.get("span")
             if span_obj is not None:
                 span_obj.set_attribute("cost.tokens_out", target["tokens_out"])
+                span_obj.set_attribute("gen_ai.usage.output_tokens", target["tokens_out"])
             return
 
         if event_type == "message_stop":
@@ -328,6 +362,10 @@ def _claude_stream_event_handler(
             span.set_attribute("tool.id", tool_id)
             span.set_attribute("tool.server", "claude")
             span.set_attribute("tool.input", tool_input)
+            span.set_attribute("gen_ai.operation.name", "execute_tool")
+            span.set_attribute("gen_ai.tool.name", tool_name)
+            span.set_attribute("gen_ai.tool.call.id", tool_id)
+            span.set_attribute("gen_ai.tool.input", _truncate_tool_payload(tool_input))
             span.ts_start_ns = time.time_ns()
             span.__enter__()
             open_tool_spans[tool_id] = span
@@ -355,6 +393,9 @@ def _claude_stream_event_handler(
             if span is not None:
                 span.ts_end_ns = time.time_ns()
                 span.set_attribute("tool.output", event.get("content") or "")
+                span.set_attribute(
+                    "gen_ai.tool.output", _truncate_tool_payload(event.get("content") or "")
+                )
                 span.__exit__(None, None, None)
             return
 
@@ -502,9 +543,9 @@ def _resolve_active_tracer() -> Tracer | None:
     ``NullTracer`` when tracing is not active (convention 9).
     """
     try:
-        from mergecraft.config import RepoSettings
+        from mergecraft.tracing.resolve import resolve_active_tracing
 
-        sink = claim_sink(RepoSettings().tracing)
+        sink = claim_sink(resolve_active_tracing())
     except Exception:
         return None
 
