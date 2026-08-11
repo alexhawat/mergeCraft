@@ -12,6 +12,13 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.agents.openai_compatible_gateways import (
+    CUSTOM_PROVIDER_API_KEY_ENV,
+    CUSTOM_PROVIDER_BASE_URL_ENV,
+    INDEXED_CUSTOM_PROVIDER_API_KEY_RE,
+    INDEXED_CUSTOM_PROVIDER_BASE_URL_RE,
+    resolve_gateway_endpoints,
+)
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
@@ -304,6 +311,66 @@ def _codex_use_permission_profiles(ctx: AgentRunContext) -> bool:
     return bool(ctx.mcp_server_url) and _sandbox_mode(ctx) == "read-only"
 
 
+def _has_env(name: str) -> bool:
+    val = os.environ.get(name)
+    return isinstance(val, str) and bool(val.strip())
+
+
+def _has_any_custom_provider_env() -> bool:
+    """True when at least one ``MERGECRAFT_CUSTOM_PROVIDER_*`` env var is set.
+
+    Triggers emission of an empty ``[model_providers]`` table so consumers can
+    read it as a dict regardless of whether any pair was complete. The
+    contract is that the table's *contents* reflect valid pairs only —
+    partial pairs (only one of ``_KEY_<N>`` / ``_URL_<N>``) are dropped.
+    """
+    for key in os.environ:
+        if INDEXED_CUSTOM_PROVIDER_BASE_URL_RE.match(key):
+            return True
+        if INDEXED_CUSTOM_PROVIDER_API_KEY_RE.match(key):
+            return True
+        if key in (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV):
+            if _has_env(key):
+                return True
+    return False
+
+
+def _append_custom_provider_lines(lines: list[str]) -> None:
+    """Emit ``[model_providers.<id>]`` tables for every configured custom provider.
+
+    #71 / W3: routes ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`` and
+    the singleton alias into Codex CLI 0.146's ``model_providers`` config
+    schema. Verified against the installed Codex CLI version pinned at
+    ``Dockerfile:49`` (``@openai/codex``, locally ``codex-cli 0.146.0``) and
+    the upstream ``codex-rs/model-provider-info`` schema: each block carries
+    ``base_url``, ``env_key`` (referencing the env-var name, not the resolved
+    value — convention 7), and ``wire_api = "responses"`` (the only
+    supported wire protocol since February 2026).
+
+    No-op when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are touched at
+    all — the existing ``write_mcp_config`` output is byte-identical to
+    today's in that case. Partial pairs (only one half set) emit an empty
+    ``model_providers`` table; consumers reading the table find no entries
+    and skip.
+    """
+    if not _has_any_custom_provider_env():
+        return
+    providers = resolve_gateway_endpoints()
+    if not providers:
+        # Touched but no valid pair — emit an empty table so readers find a
+        # dict. The TOML parser does not care about an empty table.
+        lines.append("")
+        lines.append("[model_providers]")
+        return
+    for record in providers.values():
+        lines.append("")
+        lines.append(f"[model_providers.{record.provider_id}]")
+        lines.append(f"name = {_toml_string(record.provider_id)}")
+        lines.append(f"base_url = {_toml_string(record.base_url)}")
+        lines.append(f"env_key = {_toml_string(record.api_key_env)}")
+        lines.append('wire_api = "responses"')
+
+
 def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
     lines.extend(
         [
@@ -375,6 +442,11 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
         f"experimental_instructions_file = {_toml_string(str(instructions_path))}",
         f"model_reasoning_effort = {_toml_string('high')}",
     ]
+    # W3 / #71 — Codex passthrough for OpenAI-compatible providers. No-op
+    # when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set, so the
+    # permission-profile / ``sandbox_mode`` branch below is unchanged
+    # when this is a no-op (#70 / D5).
+    _append_custom_provider_lines(lines)
     if use_permission_profiles:
         _append_read_only_mcp_network_lines(lines)
     else:

@@ -63,6 +63,27 @@ inputs:
   codex_sandbox:
     description: "Codex platform-sandbox policy. Leave unset (default) to keep Codex's own bubblewrap/Landlock sandbox. Set to `danger-full-access` ONLY when the runner is already an ephemeral, isolated container — inside a Docker container action, bubblewrap cannot create a nested user namespace and every Codex call fails before doing work. mergeCraft's own shell/push controls are unaffected either way. See issue #70."
     required: false
+  provider_base_url:
+    description: >-
+      Custom OpenAI-compatible base URL for the singleton provider
+      (`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`, PR #79 / D7). Use this to point
+      Codex or OpenCode at a third-party OpenAI-compatible gateway without
+      committing env-var names in workflow YAML. The indexed multi-provider
+      form (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>` for `N >= 1`)
+      is env-only and not exposed here — that path is for advanced
+      multi-provider setups where `with:` cannot enumerate multiple entries.
+      See issue #71.
+    required: false
+  provider_api_key_env:
+    description: >-
+      Name of an environment variable that holds the singleton provider's API
+      key (e.g. `MY_PROVIDER_API_KEY`). mergeCraft reads this env var's value
+      and exposes it to the harness as `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`.
+      Never inline the API key value here — reference the env-var *name*
+      only (convention 7). Wire the secret via the workflow's `env:` block
+      from a GitHub Actions secret (`${{ secrets.MY_PROVIDER_API_KEY }}`).
+      See issue #71.
+    required: false
   output_schema:
     description: "JSON Schema (draft-07) for structured output validation."
     required: false
@@ -143,6 +164,8 @@ runs:
     INPUT_OUTPUT_SCHEMA: ${{ inputs.output_schema }}
     INPUT_ALLOW_PR_TARGET_COMMENTS: ${{ inputs.allow_pr_target_comments }}
     MERGECRAFT_CODEX_SANDBOX: ${{ inputs.codex_sandbox }}
+    INPUT_PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}
+    INPUT_PROVIDER_API_KEY_ENV: ${{ inputs.provider_api_key_env }}
     INPUT_TOKEN: ${{ inputs.token }}
     INPUT_SUGGEST_EVAL_ADD: ${{ inputs.suggest_eval_add }}
     INPUT_TRACING: ${{ inputs.tracing }}

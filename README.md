@@ -238,6 +238,124 @@ providers you actually use.
 > its own `shell`/`push` controls remain the security boundary
 > ([issue #70](https://github.com/alexhawat/mergeCraft/issues/70)).
 
+### Custom OpenAI-compatible provider
+
+For any OpenAI-compatible endpoint (Nous Portal, Tencent TokenHub,
+MiniMax, OpenRouter, a self-hosted vLLM, etc.), mergeCraft exposes one
+mechanism that both harnesses consume. Issue
+[#71](https://github.com/alexhawat/mergeCraft/issues/71) closes on this
+surface — the **Codex half** is new in `v0.0.x`; the OpenCode half
+shipped earlier in PR
+[#79](https://github.com/alexhawat/mergeCraft/pull/79) and is
+regression-tested.
+
+#### Env-var convention
+
+| Form | Example | Provider id |
+|------|---------|-------------|
+| Singleton back-compat alias (PR #79 / D7) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `default` (or the active model's prefix when the model is `nous/...` or `tokenhub/...`) |
+| Indexed multi-provider | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1`, `_2`, `_3`, … | `provider_1`, `provider_2`, `provider_3`, … |
+
+Indexed env vars are operator-locked — both halves of each numeric pair
+must be set with non-empty values; partial pairs are silently dropped.
+Discovery enumerates every matching suffix, sorts by numeric `N`
+ascending, and preserves gaps (no renumbering). When any indexed pair is
+set, the singleton is ignored.
+
+#### Action inputs (`with:`)
+
+For the common single-provider case, two top-level `with:` inputs map
+onto the singleton env vars — no need to name them in `env:`:
+
+```yaml
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    model: default/your-model-id
+    provider_base_url: https://api.example.com/v1
+    provider_api_key_env: MY_PROVIDER_API_KEY   # the NAME of an env var, not the key value
+  env:
+    MY_PROVIDER_API_KEY: ${{ secrets.MY_PROVIDER_API_KEY }}  # wire the secret here
+```
+
+`provider_api_key_env` is the **env-var name** that holds the key;
+mergeCraft reads that env var's value and re-exports it as
+`MERGECRAFT_CUSTOM_PROVIDER_API_KEY`. The resolved key value is never
+inlined into the workflow file and never logged (convention 7). For
+multi-provider setups, fall back to the indexed env-var form below —
+`with:` cannot enumerate multiple providers.
+
+#### Worked example — Nous-hosted DeepSeek V4 Flash
+
+A raw pass-through slug reaches Nous's OpenAI-compatible endpoint via
+either harness:
+
+```yaml
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    model: nous/deepseek/deepseek-v4-flash  # raw pass-through slug
+  env:
+    NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}      # preset path — no MERGECRAFT_* needed
+```
+
+The model prefix `nous` resolves against `NOUS_API_KEY` (set above) and
+`https://inference-api.nousresearch.com/v1`. The harness then registers
+the provider, sets `enabled_providers = ["nous"]`, and serves the model.
+
+#### Multi-provider — Codex-side indexed pairs
+
+Two distinct OpenAI-compatible providers in one workflow (e.g. MiniMax
+and Nous alongside OpenAI):
+
+```yaml
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    model: provider_1/deepseek-v4-flash           # active provider_1
+  env:
+    MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1: https://inference-api.nousresearch.com/v1
+    MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1:  ${{ secrets.NOUS_API_KEY }}
+    MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_2: https://api.MiniMax.io/v1
+    MERGECRAFT_CUSTOM_PROVIDER_API_KEY_2:  ${{ secrets.MINIMAX_API_KEY }}
+```
+
+Codex writes the corresponding `config.toml`:
+
+```toml
+[model_providers.provider_1]
+name = "provider_1"
+base_url = "https://inference-api.nousresearch.com/v1"
+env_key = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1"
+wire_api = "responses"
+
+[model_providers.provider_2]
+name = "provider_2"
+base_url = "https://api.MiniMax.io/v1"
+env_key = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_2"
+wire_api = "responses"
+```
+
+The `env_key` field references the **env-var name**, not the resolved
+key value — convention 7. The harness reads the env var at exec time.
+
+#### Which harness handles which
+
+| Harness | Format written | Where it lives |
+|---------|----------------|----------------|
+| OpenCode | `provider.<id>.options.baseURL` / `.apiKey` (JSON) | `OPENCODE_CONFIG_CONTENT` (inline) and `OPENCODE_CONFIG` (file) |
+| Codex CLI 0.146 | `[model_providers.<id>]` with `base_url` / `env_key` / `wire_api = "responses"` (TOML) | `$CODEX_HOME/config.toml` |
+
+Both harnesses consume the same shared resolver
+(`src/mergecraft/agents/openai_compatible_gateways.py`), so the env-var
+contract is one — pass-through slugs (`<provider>/<model>`) route to
+the right harness via the existing chain logic. OpenAI-compatible
+models route to the OpenCode harness (no first-party Codex provider);
+"true" OpenAI models route to Codex.
+
+> PR [#79](https://github.com/alexhawat/mergeCraft/pull/79) shipped the
+> OpenCode side of this feature; the Codex side, the `with:` input
+> surface, and the env-var multi-provider extension all land together in
+> this release — see issue
+> [#71](https://github.com/alexhawat/mergeCraft/issues/71).
+
 ## 🧰 CLI
 
 | Command | Purpose |

@@ -136,7 +136,7 @@ def test_codex_config_toml_has_no_provider_block_without_env(tmp_path: Path) -> 
         # No env vars → no provider blocks (same as the structural test
         # above, repeated here to pin the contract in the parametrize
         # matrix).
-        (set(), set(), set()),
+        ({}, set(), set()),
         # Only ``_1`` API key, no ``_1`` base URL → provider_1 absent.
         ({1: {"api_key": True, "base_url": False}}, set(), {PROVIDER_1_ID}),
         # Only ``_1`` base URL, no ``_1`` API key → provider_1 absent.
@@ -317,10 +317,6 @@ SENTINEL_URL_1 = "https://provider-1-leak-check.example.test/v1"
 SENTINEL_URL_2 = "https://provider-2-leak-check.example.test/v1"
 
 
-@pytest.mark.xfail(
-    reason="green after W3: shared helper + harness writers never emit any resolved api_key",
-    strict=False,
-)
 def test_generated_configs_never_log_either_api_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

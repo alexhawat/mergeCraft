@@ -26,7 +26,6 @@ Wave plan: ``.ignorelocal/waves/issues-provider-routing-wave-plan.md``
 from __future__ import annotations
 
 import importlib
-import inspect
 import re
 from pathlib import Path
 
@@ -259,23 +258,20 @@ def _coerce_to_dict(result: object) -> dict[str, object]:
 # W3 contract; today codex does NOT import, so this test is xfailed.
 
 
-@pytest.mark.xfail(
-    reason="green after W3: codex.py consumes the same shared helper as opencode.py",
-    strict=False,
-)
 def test_both_harnesses_consume_the_shared_helper() -> None:
     """Both ``opencode.py`` and ``codex.py`` import a function from
     ``openai_compatible_gateways`` — the shared helper backs both harnesses.
 
-    The import is structural: ``inspect.getsource`` on the harness module
-    must reference the helper module name. Today only ``opencode.py`` does
-    so; ``codex.py`` does not. W3.1 re-wires codex.
+    The harness modules are wrapped by the ``agent()`` decorator (an
+    ``AgentImpl``), so ``inspect.getsource`` does not work directly. The
+    test reads the source files on disk and checks the helper module name
+    appears in the imports.
     """
-    import mergecraft.agents.codex as codex_mod
-    import mergecraft.agents.opencode as opencode_mod
+    from pathlib import Path
 
-    opencode_src = inspect.getsource(opencode_mod)
-    codex_src = inspect.getsource(codex_mod)
+    repo_src = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "agents"
+    opencode_src = (repo_src / "opencode.py").read_text(encoding="utf-8")
+    codex_src = (repo_src / "codex.py").read_text(encoding="utf-8")
     assert "openai_compatible_gateways" in opencode_src
     assert "openai_compatible_gateways" in codex_src
 

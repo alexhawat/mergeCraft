@@ -5,11 +5,19 @@ These providers are reached through the opencode harness via
 ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`` + ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY``
 to override any preset; when those are absent, model prefixes ``nous/`` and
 ``tokenhub/`` resolve from ``NOUS_API_KEY`` / ``TOKENHUB_API_KEY``.
+
+W3 (issue #71) extends the contract so a workflow can wire several
+OpenAI-compatible providers simultaneously — each addressed by an indexed
+``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`` env-var pair (operator
+locked). The single-provider shape (and the named-preset paths) are
+preserved; the multi-provider resolver adds a dict-valued surface that both
+``agents/opencode.py`` and ``agents/codex.py`` consume.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 NOUS_API_KEY_ENV = "NOUS_API_KEY"
@@ -23,6 +31,17 @@ DEFAULT_TOKENHUB_BASE_URL = "https://tokenhub-intl.tencentcloudmaas.com/v1"
 CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
 CUSTOM_PROVIDER_API_KEY_ENV = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
 
+# Indexed multi-provider convention (W3 / issue #71). Both halves must be
+# set per index; partial pairs are dropped. Discovery enumerates every
+# matching env-var suffix and pairs by numeric N. Gaps are preserved
+# (no renumbering).
+INDEXED_CUSTOM_PROVIDER_BASE_URL_RE = re.compile(r"^MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_(\d+)$")
+INDEXED_CUSTOM_PROVIDER_API_KEY_RE = re.compile(r"^MERGECRAFT_CUSTOM_PROVIDER_API_KEY_(\d+)$")
+# Provider-id derivation rule (operator locked): ``"provider_" + str(N)`` for
+# indexed pairs; ``"default"`` for the singleton back-compat alias.
+INDEXED_PROVIDER_ID_FMT = "provider_{n}"
+SINGLETON_PROVIDER_ID = "default"
+
 
 @dataclass(frozen=True, slots=True)
 class GatewayPreset:
@@ -32,6 +51,25 @@ class GatewayPreset:
     api_key_env: str
     base_url_env: str
     default_base_url: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderRecord:
+    """One configured OpenAI-compatible provider, sourced from env vars.
+
+    Carries the env-var names (``base_url_env`` / ``api_key_env``) that sourced
+    the resolved values so loguru redaction can target the env-var *names*
+    rather than the resolved key values (convention 7 / D11). The resolved
+    ``api_key`` is never logged by the harness writers — this record exists so
+    the writers can pass the env-var name to a redactor and still call the
+    resolved value to populate a generated config file.
+    """
+
+    provider_id: str
+    base_url: str
+    api_key: str
+    base_url_env: str
+    api_key_env: str
 
 
 GATEWAY_PRESETS: dict[str, GatewayPreset] = {
@@ -114,6 +152,97 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
     return provider_id, base_url, api_key
 
 
+def _resolve_indexed_providers() -> dict[str, ProviderRecord]:
+    """Enumerate ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`` pairs.
+
+    Returns a dict keyed by provider id (``"provider_<N>"``). Both halves of a
+    numeric suffix must be set with non-empty values; partial pairs are
+    dropped, never half-emitted. The numeric ordering of indices is
+    preserved — gaps are not renumbered.
+    """
+    by_index: dict[int, tuple[str, str]] = {}
+    for key, value in os.environ.items():
+        match = INDEXED_CUSTOM_PROVIDER_BASE_URL_RE.match(key)
+        if match is not None:
+            n = int(match.group(1))
+            stripped = value.strip()
+            if not stripped:
+                continue
+            base_url, api_key = by_index.get(n, ("", ""))
+            by_index[n] = (stripped, api_key)
+            continue
+        match = INDEXED_CUSTOM_PROVIDER_API_KEY_RE.match(key)
+        if match is not None:
+            n = int(match.group(1))
+            stripped = value.strip()
+            if not stripped:
+                continue
+            base_url, api_key = by_index.get(n, ("", ""))
+            by_index[n] = (base_url, stripped)
+    out: dict[str, ProviderRecord] = {}
+    for n in sorted(by_index):
+        base_url, api_key = by_index[n]
+        if not base_url or not api_key:
+            # Partial pair — drop silently.
+            continue
+        provider_id = INDEXED_PROVIDER_ID_FMT.format(n=n)
+        out[provider_id] = ProviderRecord(
+            provider_id=provider_id,
+            base_url=base_url,
+            api_key=api_key,
+            base_url_env=f"MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_{n}",
+            api_key_env=f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{n}",
+        )
+    return out
+
+
+def _resolve_singleton_provider() -> ProviderRecord | None:
+    """Back-compat alias for a single ``default`` provider.
+
+    Returns ``None`` if either half of the singleton pair is missing or empty.
+    """
+    base_url = os.environ.get(CUSTOM_PROVIDER_BASE_URL_ENV, "").strip()
+    api_key = os.environ.get(CUSTOM_PROVIDER_API_KEY_ENV, "").strip()
+    if not base_url or not api_key:
+        return None
+    return ProviderRecord(
+        provider_id=SINGLETON_PROVIDER_ID,
+        base_url=base_url,
+        api_key=api_key,
+        base_url_env=CUSTOM_PROVIDER_BASE_URL_ENV,
+        api_key_env=CUSTOM_PROVIDER_API_KEY_ENV,
+    )
+
+
+def resolve_gateway_endpoints() -> dict[str, ProviderRecord]:
+    """Return every configured OpenAI-compatible provider, keyed by provider id.
+
+    Multi-provider resolver (W3 / issue #71). The returned dict carries all
+    providers the environment currently configures:
+
+    - Indexed pairs ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>``
+      for ``N >= 1``, with provider ids ``"provider_<N>"``.
+    - The singleton ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}`` pair
+      (PR #79 / D7 back-compat alias), as a single ``"default"`` provider.
+
+    Precedence: **indexed pairs win**. When any indexed pair is present the
+    singleton is ignored — the ``"default"`` id is reserved for
+    singleton-only deployments so the two surfaces never silently merge.
+
+    Discovery preserves gaps in the numeric suffix sequence
+    (``_1`` + ``_3`` set, ``_2`` absent → ``provider_1`` and ``provider_3``
+    present, ``provider_2`` absent). Partial indexed pairs (only one half
+    set) are dropped, never half-emitted.
+    """
+    indexed = _resolve_indexed_providers()
+    if indexed:
+        return indexed
+    singleton = _resolve_singleton_provider()
+    if singleton is None:
+        return {}
+    return {singleton.provider_id: singleton}
+
+
 __all__ = [
     "CUSTOM_PROVIDER_API_KEY_ENV",
     "CUSTOM_PROVIDER_BASE_URL_ENV",
@@ -122,10 +251,13 @@ __all__ = [
     "GATEWAY_PRESETS",
     "NOUS_API_KEY_ENV",
     "NOUS_BASE_URL_ENV",
+    "SINGLETON_PROVIDER_ID",
     "TOKENHUB_API_KEY_ENV",
     "TOKENHUB_BASE_URL_ENV",
     "GatewayPreset",
+    "ProviderRecord",
     "has_custom_provider_env",
     "has_gateway_credentials",
     "resolve_gateway_endpoint",
+    "resolve_gateway_endpoints",
 ]

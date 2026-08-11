@@ -489,6 +489,41 @@ def resolve_non_prompt_inputs() -> ActionInputs:
     )
 
 
+def resolve_custom_provider_env_inputs() -> None:
+    """Wire ``provider_base_url`` / ``provider_api_key_env`` into the singleton
+    custom-provider env vars (#71 / W3).
+
+    The ``provider_base_url`` action input maps directly to
+    ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL``. The ``provider_api_key_env``
+    input is the **name** of an env var that already holds the API key;
+    mergeCraft reads that env var's value and re-exports it under
+    ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` so the harness writers see one
+    consistent pair.
+
+    Convention 7: the resolved key value is never logged. The env-var name
+    is referenced symbolically; the value is forwarded silently from one
+    env var to another. The user wires the secret via ``env:`` in the
+    workflow (typically ``${{ secrets.MY_PROVIDER_API_KEY }}``) and never
+    inlines the value.
+
+    No-op when neither input is set. When only one is set, the existing
+    helper behaviour wins — a partial singleton pair is dropped.
+    """
+    base_url_input = get_action_input("provider_base_url")
+    api_key_env_input = get_action_input("provider_api_key_env")
+    if not base_url_input and not api_key_env_input:
+        return
+    if base_url_input:
+        os.environ["MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"] = base_url_input
+    if api_key_env_input:
+        # ``provider_api_key_env`` is the env-var *name* holding the key.
+        # The value of that env var becomes the singleton key. Convention 7:
+        # never log the value.
+        api_key_value = os.environ.get(api_key_env_input, "").strip()
+        if api_key_value:
+            os.environ["MERGECRAFT_CUSTOM_PROVIDER_API_KEY"] = api_key_value
+
+
 def _stricter_shell(
     repo_shell: ShellPermission,
     input_shell: ShellPermission | None,
@@ -511,6 +546,11 @@ def resolve_payload(
     repo_settings: RepoSettings | None = None,
 ) -> dict[str, Any]:
     """Build the runtime payload from prompt input + action inputs + repo settings."""
+    # W3 / #71 — wire the ``provider_base_url`` and ``provider_api_key_env``
+    # action inputs into the singleton custom-provider env vars before any
+    # harness reads them. Convention 7: the resolved key value is forwarded
+    # silently between env vars and never logged.
+    resolve_custom_provider_env_inputs()
     settings = repo_settings or RepoSettings()
     if resolved_prompt_input is None:
         resolved_prompt_input = resolve_prompt_input()
