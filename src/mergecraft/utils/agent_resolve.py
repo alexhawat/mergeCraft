@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -377,6 +378,8 @@ async def run_with_model_chain(
 
         root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
 
+        cli_argv = _redacted_cli_argv()
+
         while attempts < max_attempts:
             slug = chain[chain_index]
             attempts += 1
@@ -390,6 +393,13 @@ async def run_with_model_chain(
                 "model.attempt_number": attempts,
                 "agent.provider": _agent_provider_for_slug(slug),
                 "agent.mode": _agent_mode_for_slug(slug),
+                # OTel GenAI semantic-convention names so Logfire's native
+                # GenAI dashboard populates. ``gen_ai.system`` is the provider
+                # slug (anthropic/openai/google/opencode/...).
+                "gen_ai.system": _agent_provider_for_slug(slug),
+                "gen_ai.agent.name": _agent_mode_for_slug(slug),
+                "gen_ai.request.model": slug,
+                "agent.cli_argv": cli_argv,
             }
             attempt_kind = "agent.attempt"
             terminal_status = "retryable"  # default until set inside the span body
@@ -405,6 +415,9 @@ async def run_with_model_chain(
                     "model.requested": slug,
                     "model.resolved": slug,
                     "model.fallback_index": chain_index,
+                    "gen_ai.operation.name": "chat",
+                    "gen_ai.request.model": slug,
+                    "gen_ai.response.model": slug,
                 }
                 usage = result.usage
                 if usage is not None:
@@ -530,7 +543,32 @@ def _cost_attrs_from_usage(usage: Any) -> dict[str, Any]:
         attrs["cost.cache_write"] = cache_write
     if isinstance(cost_usd, (int, float)):
         attrs["cost.usd"] = float(cost_usd)
+    # Mirror the mergeCraft cost.* names as OpenTelemetry GenAI semantic
+    # conventions so Logfire's native GenAI dashboard populates. ``cache_write``
+    # maps to ``cache_creation_input_tokens`` per the GenAI spec.
+    if isinstance(tokens_in, int):
+        attrs["gen_ai.usage.input_tokens"] = tokens_in
+    if isinstance(tokens_out, int):
+        attrs["gen_ai.usage.output_tokens"] = tokens_out
+    if isinstance(cache_read, int):
+        attrs["gen_ai.usage.cache_read_input_tokens"] = cache_read
+    if isinstance(cache_write, int):
+        attrs["gen_ai.usage.cache_creation_input_tokens"] = cache_write
+    if isinstance(cost_usd, (int, float)):
+        attrs["gen_ai.usage.cost_usd"] = float(cost_usd)
     return attrs
+
+
+def _redacted_cli_argv() -> str:
+    """Return the redacted CLI argv for the ``agent.cli_argv`` span attribute.
+
+    D7 / TRACING.md §redaction: a span must never carry a credential. The
+    helper masks token/secret-shaped values (``--api-key sk-…``, bearer
+    substrings) while preserving the command shape.
+    """
+    from mergecraft.tracing.redaction import redact_cli_argv
+
+    return redact_cli_argv(list(sys.argv))
 
 
 def _empty_chain_result() -> AgentResult:
@@ -581,6 +619,10 @@ def _emit_advanced_attempt(
         "model.fallback_index": fallback_index,
         "agent.provider": _agent_provider_for_slug(slug),
         "agent.mode": _agent_mode_for_slug(slug),
+        "gen_ai.system": _agent_provider_for_slug(slug),
+        "gen_ai.agent.name": _agent_mode_for_slug(slug),
+        "gen_ai.request.model": slug,
+        "agent.cli_argv": _redacted_cli_argv(),
     }
     with tracer.start_span(
         "agent.attempt",
