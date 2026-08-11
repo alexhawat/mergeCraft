@@ -267,7 +267,7 @@ jobs:
           if [ "${{ env.IS_SAME_REPO }}" != "true" ]; then
             echo "::notice title=mergecraft skipped::Fork PR — review skipped (same as before)."
           else
-            echo '::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (`mergecraft auth codex`), OPENAI_API_KEY, or NOUS_API_KEY to enable mergeCraft reviews.'
+            echo "::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (mergecraft auth codex), OPENAI_API_KEY, or NOUS_API_KEY to enable mergeCraft reviews."
           fi
 
       # Composed in a step rather than inline in `with:` so the CI-context clause
