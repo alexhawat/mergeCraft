@@ -28,6 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unquoted, so `_write_env_value` now calls `set_key(..., quote_mode="never")`.
   Test: `test_auth_logfire_writes_token_unquoted`
 
+- `mergecraft tracing logfire enable` now resolves the token + project via the
+  same precedence layer used by every other mergecraft config command:
+  **flag > env > prompt**, applied independently per key. With neither flag on
+  the CLI, the command reads `MERGECRAFT_LOGFIRE_TOKEN` / `MERGECRAFT_TRACING_PROJECT`
+  from `.env` (loaded into `os.environ` by `main()`'s `_load_local_env()`) and
+  skips the prompt; a partial `.env` (token present, project absent) prompts
+  only for the missing project; an explicit `--token` / `--project` always wins
+  over the env value. The token still goes through `_validate_logfire_token`
+  regardless of source (re-validating a stale env token is the whole point of
+  the probe — the 302/expired cases are caught here). Tests:
+  `test_tracing_logfire_enable_reads_token_from_env_when_flag_omitted`,
+  `test_tracing_logfire_enable_flag_overrides_env_token`,
+  `test_tracing_logfire_enable_prompts_only_missing_project_when_token_in_env`,
+  `test_tracing_logfire_enable_validates_env_token_and_rejects_expired`
+
 ### Fixed (PR #127 baseline)
 
 - `mergecraft config tracing` now reports `enabled: true` immediately after

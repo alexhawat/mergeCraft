@@ -14,6 +14,7 @@ Exports:
 from __future__ import annotations
 
 import getpass
+import os
 from typing import NoReturn
 
 import typer
@@ -101,12 +102,19 @@ def logfire_enable(
     token: str | None = typer.Option(
         None,
         "--token",
-        help="Logfire write token. When omitted, the prompt asks for one (hidden).",
+        help=(
+            "Logfire write token. Precedence: --token flag > "
+            "$MERGECRAFT_LOGFIRE_TOKEN in the .env > hidden prompt."
+        ),
     ),
     project: str | None = typer.Option(
         None,
         "--project",
-        help="Logfire project label (becomes the ``x-logfire-project`` header).",
+        help=(
+            "Logfire project label (becomes the ``x-logfire-project`` header). "
+            "Precedence: --project flag > $MERGECRAFT_TRACING_PROJECT in the "
+            ".env > interactive prompt."
+        ),
     ),
     scope: str = typer.Option(
         "both",
@@ -115,35 +123,71 @@ def logfire_enable(
         help="Where to persist: 'local' (.env), 'github' (gh secret), or 'both'.",
     ),
 ) -> None:
-    """Enable Logfire tracing by writing the token + project locally and on GitHub.
+    r"""Enable Logfire tracing by writing the token + project locally and on GitHub.
 
-    Mirrors ``sevn tracing logfire enable --token X --project Y``. When ``--token``
-    is omitted the command reads the token via ``getpass`` so it does not appear
-    in shell history. ``--project`` is required; the ``logfire`` sink is a
-    *named* export target and the operator must own the project label.
+    Mirrors ``sevn tracing logfire enable --token X --project Y``. Per-key
+    precedence (flag > ``$MERGECRAFT_LOGFIRE_TOKEN`` / ``$MERGECRAFT_TRACING_PROJECT``
+    in the local ``.env`` — already loaded by ``main()`` — > interactive
+    prompt). Each key is resolved independently, so a partial ``.env``
+    (token present, project absent) prompts only for the missing piece.
+
+    The token is always validated against Logfire, regardless of source. The
+    write-token regex (``pylf_v\{N\}_\{us\|eu\}_…``) routes to the regional
+    ``/v1/info`` host; everything else probes the management REST API.
     """
     from mergecraft.cli.auth_cmd import _normalise_scope
 
     target = _normalise_scope(scope)
 
-    if token is None:
-        token = getpass.getpass("Logfire write token (Enter to cancel): ").strip()
-    if not token:
-        console.print("canceled.")
-        raise typer.Exit(0)
+    # Resolve per-key precedence: flag > env (.env, loaded by main()) > prompt.
+    # Each key is independent so a partial `.env` (token present, project
+    # absent) prompts only for the missing piece.
+    token_source: str  # one of "flag" | "env" | "prompt" — used for logging only
+    if token is not None and token.strip():
+        token_source = "flag"
+        token = token.strip()
+    else:
+        env_token = os.environ.get(LOGFIRE_RUNTIME_TOKEN_ENV, "").strip()
+        if env_token:
+            token_source = "env"
+            token = env_token
+        else:
+            token_source = "prompt"
+            token = getpass.getpass("Logfire write token (Enter to cancel): ").strip()
+            if not token:
+                console.print("canceled.")
+                raise typer.Exit(0)
 
-    if project is None or not project.strip():
-        _bail("--project is required (logfire is a named export target).")
+    project_source: str
+    if project is not None and project.strip():
+        project_source = "flag"
+        project = project.strip()
+    else:
+        env_project = os.environ.get(LOGFIRE_PROJECT_ENV, "").strip()
+        if env_project:
+            project_source = "env"
+            project = env_project
+        else:
+            project_source = "prompt"
+            import typer as _typer
 
+            project = _typer.prompt("Logfire project label").strip()
+            if not project:
+                _bail("--project is required (logfire is a named export target).")
+
+    # Always validate the token before writing — flag, env, or prompt.
+    # The flag/env paths skip re-prompting; this probe is the only guarantee
+    # that the operator has a credential that actually ingests.
     if not _validate_logfire_token(token):
         _bail(
             "Logfire token validation failed (HTTP 401/403 or auth redirect). "
             "Check the token and retry."
         )
 
-    project = project.strip()
     if any(ch.isspace() for ch in project):
         _bail("Logfire project label must not contain whitespace.")
+
+    console.print(f"[dim]resolved token via {token_source}; project via {project_source}[/dim]")
 
     wrote_local = False
     if target in {"local", "both"}:

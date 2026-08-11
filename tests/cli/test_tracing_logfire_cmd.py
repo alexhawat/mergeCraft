@@ -175,6 +175,7 @@ def test_tracing_logfire_enable_prompts_for_token_when_missing(
     captured = _capture_secret_set(monkeypatch)
     monkeypatch.setattr(getpass, "getpass", lambda _prompt: "lf-prompted-token")
     monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / ".env"))
+    monkeypatch.delenv("MERGECRAFT_LOGFIRE_TOKEN", raising=False)
     env_path = tmp_path / ".env"
     env_path.write_text("", encoding="utf-8")
 
@@ -189,14 +190,38 @@ def test_tracing_logfire_enable_prompts_for_token_when_missing(
 
 
 def test_tracing_logfire_enable_requires_project() -> None:
-    """``enable`` without ``--project`` bails — logfire is a named export target."""
-    result = runner.invoke(
-        app,
-        ["tracing", "logfire", "enable", "--token", "x"],
-    )
-    assert result.exit_code != 0
-    output = (result.stdout + result.stderr).lower()
-    assert "project" in output
+    """``enable`` without ``--project`` prompts (logfire is a named export target).
+
+    The previous contract bailed on missing project; the precedence layer
+    now prompts via ``typer.prompt`` so an operator running with neither
+    flag nor ``$MERGECRAFT_TRACING_PROJECT`` can still complete the setup.
+    A blank prompt (operator pressed Enter) still bails.
+    """
+    import typer
+
+    _patch_httpx_with_safe = lambda mp: mp  # noqa: E731 — placeholder, patched below
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    monkeypatch = pytest.MonkeyPatch()  # local fixture
+    try:
+        _patch_httpx_with(monkeypatch, _handler)
+        monkeypatch.setattr(getpass, "getpass", lambda _prompt: "lf-test-token")
+        monkeypatch.setattr(typer, "prompt", lambda *_a, **_kw: "")  # blank → bail
+        # No env vars, no .env project — must bail because the operator typed Enter.
+        monkeypatch.delenv("MERGECRAFT_TRACING_PROJECT", raising=False)
+        monkeypatch.delenv("MERGECRAFT_LOGFIRE_TOKEN", raising=False)
+
+        result = runner.invoke(
+            app,
+            ["tracing", "logfire", "enable"],
+        )
+        assert result.exit_code != 0
+        output = (result.stdout + result.stderr).lower()
+        assert "project" in output
+    finally:
+        monkeypatch.undo()
 
 
 def test_tracing_logfire_enable_rejects_401(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -304,6 +329,149 @@ def test_tracing_logfire_enable_scope_local_only_writes_env(
     assert "MERGECRAFT_LOGFIRE_TOKEN=" in written
     assert "MERGECRAFT_TRACING_PROJECT=" in written
     assert "mergecraft-dev" in written
+
+
+# ── precedence: flag > env > prompt (per key) ───────────────────────────────
+
+
+def test_tracing_logfire_enable_reads_token_from_env_when_flag_omitted(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """``enable`` without ``--token`` uses ``$MERGECRAFT_LOGFIRE_TOKEN`` from the env.
+
+    Repro: operator has the token in ``.env`` from a previous ``auth logfire``
+    run and just wants to (re-)enable tracing. The command must not re-prompt
+    for the token — it reads it from ``os.environ`` (main() already loaded
+    the ``.env``) and validates it.
+    """
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    _patch_httpx_with(monkeypatch, _handler)
+    _stub_gh_token(monkeypatch)
+    _stub_git_remote(monkeypatch)
+    captured = _capture_secret_set(monkeypatch)
+    monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / ".env"))
+    # Write a real-looking token + project to the .env, then ensure the loader
+    # picked them up (main() runs load_dotenv).
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "MERGECRAFT_LOGFIRE_TOKEN=pylf_v2_eu_c8a1f2ec-0521-40c0-8159-2625b0b3b485_test\n"
+        "MERGECRAFT_TRACING_PROJECT=mergecraft-dev\n",
+        encoding="utf-8",
+    )
+    # Simulate the already-loaded env (main() runs this before app()).
+    monkeypatch.setenv(
+        "MERGECRAFT_LOGFIRE_TOKEN",
+        "pylf_v2_eu_c8a1f2ec-0521-40c0-8159-2625b0b3b485_test",
+    )
+    monkeypatch.setenv("MERGECRAFT_TRACING_PROJECT", "mergecraft-dev")
+
+    result = runner.invoke(app, ["tracing", "logfire", "enable"])
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    # Prompt must NOT have been hit (token via env).
+    assert "Logfire write token" not in result.stdout
+    assert len(captured) == 1
+    assert captured[0]["value"] == "pylf_v2_eu_c8a1f2ec-0521-40c0-8159-2625b0b3b485_test"
+
+
+def test_tracing_logfire_enable_flag_overrides_env_token(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Explicit ``--token`` wins over ``$MERGECRAFT_LOGFIRE_TOKEN`` in the env."""
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    _patch_httpx_with(monkeypatch, _handler)
+    _stub_gh_token(monkeypatch)
+    _stub_git_remote(monkeypatch)
+    captured = _capture_secret_set(monkeypatch)
+    monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / ".env"))
+    # Env holds an OLD token; flag supplies the NEW one.
+    monkeypatch.setenv("MERGECRAFT_LOGFIRE_TOKEN", "pylf_v2_eu_OLD-token")
+    monkeypatch.setenv("MERGECRAFT_TRACING_PROJECT", "mergecraft-dev")
+
+    result = runner.invoke(
+        app,
+        [
+            "tracing",
+            "logfire",
+            "enable",
+            "--token",
+            "pylf_v2_eu_NEW-token",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert len(captured) == 1
+    assert captured[0]["value"] == "pylf_v2_eu_NEW-token"
+
+
+def test_tracing_logfire_enable_prompts_only_missing_project_when_token_in_env(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Partial ``.env`` (token set, project absent) prompts only for the project."""
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    _patch_httpx_with(monkeypatch, _handler)
+    _stub_gh_token(monkeypatch)
+    _stub_git_remote(monkeypatch)
+    captured = _capture_secret_set(monkeypatch)
+    monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / ".env"))
+    # Token in env, project missing.
+    monkeypatch.setenv("MERGECRAFT_LOGFIRE_TOKEN", "pylf_v2_eu_token-xyz")
+    monkeypatch.delenv("MERGECRAFT_TRACING_PROJECT", raising=False)
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "MERGECRAFT_LOGFIRE_TOKEN=pylf_v2_eu_token-xyz\n",
+        encoding="utf-8",
+    )
+    prompted_project: list[str] = []
+    import typer
+
+    monkeypatch.setattr(
+        typer,
+        "prompt",
+        lambda _message, **_kw: prompted_project.append("asked") or "project-from-prompt",
+    )
+
+    result = runner.invoke(app, ["tracing", "logfire", "enable"])
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert prompted_project == ["asked"], "project prompt must fire once"
+    assert len(captured) == 1
+    assert captured[0]["value"] == "pylf_v2_eu_token-xyz"
+    written = env_path.read_text(encoding="utf-8")
+    # The missing project is written to .env after the prompt.
+    assert "MERGECRAFT_TRACING_PROJECT=project-from-prompt" in written
+
+
+def test_tracing_logfire_enable_validates_env_token_and_rejects_expired(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A token read from ``.env`` still goes through the validator (no silent save)."""
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"detail": "expired"})
+
+    _patch_httpx_with(monkeypatch, _handler)
+    _stub_gh_token(monkeypatch)
+    _stub_git_remote(monkeypatch)
+    captured = _capture_secret_set(monkeypatch)
+    monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / ".env"))
+    monkeypatch.setenv("MERGECRAFT_LOGFIRE_TOKEN", "pylf_v2_eu_expired")
+    monkeypatch.setenv("MERGECRAFT_TRACING_PROJECT", "mergecraft-dev")
+
+    result = runner.invoke(app, ["tracing", "logfire", "enable"])
+
+    assert result.exit_code != 0
+    assert captured == []
+    assert not (tmp_path / ".env").exists()
 
 
 # ── disable: clears env vars + gh secret ─────────────────────────────────────
