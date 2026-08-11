@@ -387,6 +387,18 @@ class _RecordingSpanProcessor:
                 "end_time": getattr(span, "end_time", None),
                 "status": str(getattr(getattr(span, "status", None), "status_code", "")),
             }
+            # T3.2 — surface the OTel ``trace_id`` so the test seam and
+            # the Logfire-grouping contract are observable through the
+            # existing processor. ``get_span_context()`` is the public
+            # OTel handle on the span; ``trace_id`` is ``0`` when no
+            # provider is wired (the disabled path) and the format
+            # ``032x`` mirrors the production Logfire-grouping shape.
+            span_ctx = getattr(span, "get_span_context", None)
+            if callable(span_ctx):
+                resolved_ctx = span_ctx()
+                otel_trace_id = getattr(resolved_ctx, "trace_id", 0)
+                if otel_trace_id:
+                    payload["trace_id"] = format(int(otel_trace_id), "032x")
             if StatusCode is not None:
                 with contextlib.suppress(Exception):  # pragma: no cover
                     payload["status"] = str(span.status.status_code)
@@ -523,13 +535,69 @@ class OTLPSink:
             # attribute so consumers see it (D8).
             if event.attrs.get("truncated") is True:
                 attrs["truncated"] = True
+            # T3.2 — forward the mergeCraft ``trace_id`` as the real OTel
+            # ``trace_id`` on the produced span so Logfire groups every
+            # span in one run under one trace. The OTel SDK does not expose
+            # a public ``trace.set_trace_id`` helper in the version we
+            # pin; the fallback is to (a) forward the trace_id as a
+            # ``mergecraft.trace_id`` attribute (Logfire attribute search
+            # groups on it) and (b) rewrite the span's ``_context`` field
+            # so the recording-processor test seam and any downstream
+            # OTel exporter observe the right trace_id. The rewrite is
+            # the same private field the OTel SDK uses internally; if the
+            # attribute is missing on a future SDK release, the mergecraft
+            # attribute fallback still groups the trace.
+            otel_trace_id: int | None = None
+            if event.trace_id:
+                try:
+                    otel_trace_id = int(event.trace_id[:32], 16)
+                except TypeError, ValueError:
+                    otel_trace_id = None
+                attrs["mergecraft.trace_id"] = event.trace_id
             span = self._tracer.start_span(name=event.kind, attributes=attrs)
+            if otel_trace_id:
+                self._override_span_trace_id(span, otel_trace_id)
             span.end()
         except Exception as exc:
             # Convention 6 — never fail the caller's review on a remote sink.
             if not self._warned:
                 logger.warning("trace otel sink write failed: {}", exc)
                 self._warned = True
+
+    @staticmethod
+    def _override_span_trace_id(span: Any, trace_id: int) -> None:
+        """Rewrite the OTel ``trace_id`` on a freshly-built span.
+
+        The OTel SDK builds spans with a fresh trace_id from the active
+        tracer provider; this helper substitutes the mergeCraft run's
+        ``trace_id`` so the recording-processor and any downstream
+        exporter see the same value. The substitution is the same
+        private ``_context`` field the SDK uses internally — if the
+        attribute is missing on a future SDK release, the
+        ``mergecraft.trace_id`` attribute fallback (set in :meth:`write`)
+        is the structural guarantee.
+        """
+        try:
+            from opentelemetry.trace import (
+                SpanContext,
+                TraceFlags,
+                TraceState,
+            )
+        except ImportError:
+            return
+        try:
+            span_ctx = span.get_span_context()
+            new_ctx = SpanContext(
+                trace_id=trace_id,
+                span_id=span_ctx.span_id,
+                is_remote=False,
+                trace_flags=TraceFlags(TraceFlags.SAMPLED),
+                trace_state=TraceState(),
+            )
+            if hasattr(span, "_context"):
+                span._context = new_ctx
+        except Exception as exc:
+            logger.debug("trace otel sink trace_id override failed: {}", exc)
 
     def flush(self) -> None:
         """Best-effort flush; idempotent and never raises (convention 6).

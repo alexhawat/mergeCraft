@@ -174,10 +174,10 @@ def test_attach_trace_context_makes_nested_otel_span_share_trace_id(
     # then. ``pytest.importorskip`` keeps collection clean in environments
     # where the module is absent (the test will surface as FAILED, not a
     # collection error, when OTel is installed but the module is missing).
-    from mergecraft.tracing.otel_bridge import attach_trace_context
     from opentelemetry import trace as otel_trace
 
     from mergecraft.tracing import Tracer
+    from mergecraft.tracing.otel_bridge import attach_trace_context
 
     tracer = Tracer(sink=object(), session_id="session", run_id="run")
     with tracer.start_span("mergecraft.run") as span, attach_trace_context(span):
@@ -274,7 +274,7 @@ def test_otel_sink_forwards_real_trace_id(trace_event_payload: dict[str, Any]) -
     ).tracing
     sink = sink_factory(settings)
 
-    trace_id_hex = "0123456789abcdef" * 4  # 32 hex chars
+    trace_id_hex = "0123456789abcdef" * 2  # 32 hex chars (OTel trace_id is 128 bits)
     event = TraceEvent.model_validate(trace_event_payload | {"trace_id": trace_id_hex})
     sink.write(event)
     sink.flush()

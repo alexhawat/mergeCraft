@@ -52,6 +52,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `feat(tracing): one trace_id per run + OTel context bridge` — every span
+  emitted by a single `mergecraft diff-review` run shares one Logfire trace;
+  the OTel context is propagated so any nested OTel auto-instrumented
+  operation inherits the same trace. `TraceEvent.trace_id` is the new
+  per-run Logfire/OTel trace identifier (resolved once per process via
+  `resolve_trace_id()` in `src/mergecraft/tracing/tracer.py` with the env
+  precedence `MERGECRAFT_TRACE_ID` → `MERGECRAFT_TRACE_SESSION_ID` →
+  `GITHUB_RUN_ID` → `uuid.uuid4().hex`); `session_id` stays the per-process
+  correlation id and `turn_id` stays the per-span uuid4. `OTLPSink.write`
+  rewrites the OTel `trace_id` on the produced span so Logfire groups by it
+  automatically (the `mergecraft.trace_id` attribute is the structural
+  fallback). The new `src/mergecraft/tracing/otel_bridge.py` ships
+  `attach_trace_context(span)` — a context manager that bridges the OTel
+  context so nested OTel auto-instrumented calls (e.g. an `httpx` call
+  inside a tool) inherit the run's trace without the caller having to know
+  about mergeCraft's tracer. `agents/_stream_consumer.py::consume_stream`
+  wraps the per-event handler in `attach_trace_context` when an active
+  span is present. `docs/TRACING.md` gains a "One trace per run" section
+  describing the precedence and the Logfire-grouping contract. Tests:
+  the 11-case RED suite in `tests/tracing/test_trace_id_bridge.py` (10
+  green + 1 xfail passing through)
 - `mergecraft config tracing` now renders faithfully even when tracing is
   **disabled**, mirroring sevn's `show_tracing_config`. The table gains two
   rows plus a hint block:
