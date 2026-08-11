@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
 import time
 from typing import Callable, TextIO
 
+from meat_python_plus import tty
 from meat_python_plus.abridge import Request, Result, abridge
 from meat_python_plus.cache import cache_key, cache_load, cache_store, default_cache_dir
 from meat_python_plus.diffutil import elision_line
 from meat_python_plus.providers.resolve import new_model_from_env, resolve_model_name
+from meat_python_plus.render import render_json, render_result
 from meat_python_plus.rubric import rubric_hash
 
 USAGE = """meat_python_plus — abridge a diff into a "reading diff"
@@ -27,14 +28,17 @@ Usage:
   git show | meat-py              Abridge a diff piped on stdin.
 
 Results are cached under ~/.meat_python_plus keyed by SHA of
-(protocol version + system prompt + model + diff).
+(RubricHash of the full frozen prompt surface + model + diff).
+
+On an interactive terminal the diff is colored and paged like git show (using
+your git pager and color.diff config); piped/redirected output stays plain.
 
 Flags:
-  -model string   Model id (default $MEAT_MODEL or gpt-4.1-mini).
+  -model string   Model id (default $MEAT_MODEL or gpt-5.6-sol).
   -no-cache       Ignore cached result and recompute (still updates cache).
   -staged         Read staged changes (git diff --staged).
   -w              Read unstaged working-tree changes (git diff).
-  -json           Emit JSON on stdout.
+  -json           Emit JSON on stdout (no color, no pager).
   -h, --help      Show this help.
 
 Environment:
@@ -44,6 +48,7 @@ Environment:
   TOKENHUB_API_KEY      Tencent TokenHub (https://tokenhub-intl.tencentcloudmaas.com/v1)
   MEAT_BASE_URL + MEAT_API_KEY   Custom OpenAI-compatible endpoint
   MEAT_MODEL / MEAT_CACHE
+  GIT_PAGER / PAGER     Pager for interactive output (via `git var GIT_PAGER`)
 """
 
 
@@ -98,8 +103,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     json_out = args.json_out
+    # Progress only when BOTH stdout and stderr are TTYs (and never in -json),
+    # matching Go meat — so `meat-py > file` and `meat-py 2> log` stay clean.
     interactive = (
-        not json_out and sys.stdout.isatty() and sys.stderr.isatty()
+        not json_out
+        and tty.is_terminal(sys.stdout)
+        and tty.is_terminal(sys.stderr)
     )
 
     def progress(msg: str) -> None:
@@ -128,21 +137,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.flush()
         elision = elision_line(diff, res.smart_diff)
         if json_out:
-            payload = res.to_dict()
-            payload["elision"] = elision
-            json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
-            sys.stdout.write("\n")
+            render_json(sys.stdout, res, elision)
             return
-        if res.summary:
-            sys.stdout.write(res.summary + "\n")
-        if elision:
-            sys.stdout.write(f"({elision})\n")
-        if res.smart_diff:
-            if res.summary or elision:
-                sys.stdout.write("\n")
-            sys.stdout.write(res.smart_diff)
-            if not res.smart_diff.endswith("\n"):
-                sys.stdout.write("\n")
+        # Interactive TTY: git color.diff + pager. Piped/redirected: plain.
+        render_result(sys.stdout, res, elision)
 
     try:
         run(
@@ -208,7 +206,7 @@ def read_diff(revision: str | None, staged: bool, worktree: bool) -> tuple[str, 
         if ".." in revision:
             return git("diff", revision), revision
         return git_show(revision), revision
-    if not sys.stdin.isatty():
+    if not tty.is_terminal(sys.stdin):
         return sys.stdin.read(), "stdin"
     return git_show("HEAD"), "HEAD"
 

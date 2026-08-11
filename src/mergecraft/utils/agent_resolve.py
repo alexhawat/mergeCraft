@@ -201,8 +201,28 @@ def _expand_slug_with_fallbacks(slug: str, settings: RepoSettings) -> list[str]:
     return entries
 
 
-def effective_model_chain(settings: RepoSettings) -> list[str]:
-    """Ordered chain: config ``models``/``modelFallbacks``, env override, catalog ``fallback:``."""
+def effective_model_chain(
+    settings: RepoSettings,
+    *,
+    head: str | None = None,
+    pin: bool = False,
+) -> list[str]:
+    """Ordered chain: config ``models``/``modelFallbacks``, env override, catalog ``fallback:``.
+
+    #37 / W4 — the ``head`` argument is the chain head: when supplied, the
+    effective chain starts with ``head`` and the configured tail follows.
+    This is what powers the new ``with: model:`` semantics — the action
+    input becomes the head, the configured ``models:`` / ``modelFallbacks:``
+    stays in place.
+
+    When ``pin`` is ``True`` the chain collapses to ``[head]`` (or the
+    configured single entry when ``head`` is empty) and the fallback tail
+    is dropped. The pin escape hatch keeps working for operators who
+    explicitly want "use exactly this model" (#37 / D8).
+
+    ``head`` is deduped against the configured tail so a slug that appears
+    in both surfaces is not listed twice.
+    """
     configured = _configured_model_slugs(settings)
     explicit_chain = len(configured) > 1 or bool(settings.model_fallbacks)
 
@@ -229,6 +249,21 @@ def effective_model_chain(settings: RepoSettings) -> list[str]:
         else:
             expanded = _expand_slug_with_fallbacks(env_model, settings)
         chain = expanded + [entry for entry in chain if entry not in expanded]
+
+    if pin:
+        # Pin: collapse to exactly the head, or — when no head is
+        # supplied — to the first configured entry. The configured tail
+        # is dropped; this is the explicit opt-out from chain behaviour.
+        if head:
+            return [head]
+        return chain[:1] if chain else []
+
+    if head:
+        # Chain-preserving: head first, then the configured tail minus the
+        # head (so a slug that the operator named in both surfaces is not
+        # listed twice).
+        tail = [entry for entry in chain if entry != head]
+        chain = [head, *tail]
 
     return chain[:_MAX_FALLBACK_DEPTH]
 
@@ -271,6 +306,8 @@ async def run_with_model_chain(
     run_once: Callable[[str], Awaitable[AgentResult]],
     max_attempts: int = _MAX_FALLBACK_DEPTH,
     correlation: dict[str, Any] | None = None,
+    head: str | None = None,
+    pin: bool = False,
 ) -> tuple[str, AgentResult]:
     """Walk the model chain, advancing on retryable failures.
 
@@ -288,6 +325,13 @@ async def run_with_model_chain(
         correlation (dict[str, Any] | None, optional): Root-span correlation attributes
             (run_id, repo, pr_number, commit_sha, workflow_run_id, job_id). When ``None``,
             the values are derived from the GitHub Actions environment.
+        head (str | None, optional): #37 / W4 — chain head. When supplied (and
+            ``pin`` is False) the chain starts with ``head`` and the configured
+            tail follows. The GHA payload path threads the ``with: model:``
+            action input through this argument.
+        pin (bool, optional): #37 / W4 — collapse to ``[head]`` (or the first
+            configured entry) and skip the fallback tail. The escape hatch for
+            operators who explicitly want "use exactly this model".
 
     Returns:
         tuple[str, AgentResult]: The winning slug and its agent result.
@@ -304,7 +348,7 @@ async def run_with_model_chain(
         dict(correlation) if correlation is not None else resolve_correlation_from_env()
     )
 
-    chain = effective_model_chain(settings)
+    chain = effective_model_chain(settings, head=head, pin=pin)
 
     # Always emit the root span — the trace tree is the run's, not the
     # chain's. An empty chain short-circuits with a flagged agent result;

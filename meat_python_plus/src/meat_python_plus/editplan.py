@@ -16,26 +16,14 @@ from meat_python_plus.diffutil import (
     split_source_lines,
     validate_supported_diff_lines,
 )
+from meat_python_plus.imports import (
+    complete_mandatory_import_framing,
+    mandatory_import_removal_plan,
+    mandatory_removal_mask,
+)
 
 MAX_REPLACEMENT_BYTES = 4 << 10
 MAX_SUMMARY_BYTES = 500
-
-# Simplified import-line heuristics (v1; not full Go imports.go parity).
-_IMPORT_RE = re.compile(
-    r"""(?x)
-    ^\s*(
-        from\s+\S+\s+import\b
-      | import\s+\S
-      | use\s+(\{|[\w:]+)
-      | \#\s*include\s*[<"]
-      | require\s*\(
-      | require_once\s*\(
-      | using\s+[\w.]+
-    )
-    """
-)
-_GO_IMPORT_BLOCK = re.compile(r"^\s*import\s*\(\s*$")
-_GO_IMPORT_SINGLE = re.compile(r'^\s*import\s+"')
 
 
 @dataclass
@@ -243,73 +231,6 @@ def validate_summary(summary: str) -> str | None:
     return validate_single_line_text("summary", summary, MAX_SUMMARY_BYTES)
 
 
-def looks_like_import(body: str) -> bool:
-    stripped = body.strip()
-    if not stripped:
-        return False
-    if _IMPORT_RE.match(stripped):
-        return True
-    if _GO_IMPORT_BLOCK.match(stripped) or _GO_IMPORT_SINGLE.match(stripped):
-        return True
-    # Inside a Go import ( "pkg" ) block — quoted path alone.
-    if re.match(r'^[\w./\-]*"[^"]+"\s*$', stripped) or re.match(
-        r"^[\w]*\s*\"[^\"]+\"\s*$", stripped
-    ):
-        return True
-    if stripped in ("(", ")") and False:
-        return False
-    return False
-
-
-def mandatory_import_mask(lines: list[SourceLine], layout: DiffLayout) -> list[bool]:
-    """Simplified mandatory import removal (common cases only)."""
-    hidden = [False] * len(lines)
-    in_go_import_block: dict[str, bool] = {"-": False, "+": False, " ": False}
-
-    for i, line in enumerate(lines):
-        if not is_hunk_source(layout.kinds[i]) or not line.text:
-            continue
-        marker = line.text[0]
-        body = line.text[1:]
-        side = marker if marker in "-+" else " "
-        stripped = body.strip()
-
-        if _GO_IMPORT_BLOCK.match(stripped):
-            in_go_import_block[side] = True
-            hidden[i] = True
-            continue
-        if in_go_import_block.get(side) and stripped == ")":
-            in_go_import_block[side] = False
-            hidden[i] = True
-            continue
-        if in_go_import_block.get(side):
-            hidden[i] = True
-            continue
-        if looks_like_import(body):
-            hidden[i] = True
-            # Context import rows: hide if both sides would match (already body).
-            continue
-
-    # Hide context lines that are clearly imports (both sides same).
-    for i, line in enumerate(lines):
-        if layout.kinds[i] == DiffLineKind.HUNK_CONTEXT and line.text.startswith(" "):
-            if looks_like_import(line.text[1:]):
-                hidden[i] = True
-    return hidden
-
-
-def detect_exact_moves(
-    lines: list[SourceLine], layout: DiffLayout
-) -> list[DetectedMove]:
-    """Simplified move detection stub — returns empty in v1.
-
-    Full Go meat move pairing (moves.go) is intentionally not ported yet.
-    The prompt still mentions moves; the compiler does not enforce symmetry.
-    """
-    _ = (lines, layout)
-    return []
-
-
 def prepare_fold(
     lines: list[SourceLine],
     layout: DiffLayout,
@@ -345,6 +266,21 @@ def prepare_fold(
                 f"{line_marker!r} in range {fold.start_line}-{fold.end_line}"
             )
         body = lines[index].text[1:]
+        trimmed_body = body.strip()
+        if (
+            layout.python[index]
+            and python_triple_state_before_line(lines, layout, index)
+            == PythonTripleState.NONE
+            and marker != "-"
+            and (
+                trimmed_body.startswith("@")
+                or is_python_suite_header_start(trimmed_body)
+            )
+        ):
+            raise ValueError(
+                f"fold[{plan_index}]: line {n} is a Python decorator or suite owner; "
+                "keep the anchor and fold only its indented interior"
+            )
         if not body.strip():
             continue
         line_indent = leading_whitespace(body)
@@ -504,7 +440,13 @@ def validate_retained_structure(layout: DiffLayout, state: PlanState) -> list[st
     return problems
 
 
-def compile_edit_plan(raw: str, plan: EditPlan) -> CompiledPlan:
+def compile_edit_plan(
+    raw: str,
+    plan: EditPlan,
+    *,
+    provided_moves: list[DetectedMove] | None = None,
+    detect_moves: bool = True,
+) -> CompiledPlan:
     problems: list[str] = []
     lines = split_source_lines(raw)
     validate_supported_diff_lines(lines)
@@ -512,8 +454,13 @@ def compile_edit_plan(raw: str, plan: EditPlan) -> CompiledPlan:
     if layout.problems:
         raise ValueError(join_errors(layout.problems))
 
-    moves = detect_exact_moves(lines, layout)
-    mandatory_hidden = mandatory_import_mask(lines, layout)
+    if detect_moves:
+        moves = detect_exact_moves(lines, layout)
+    else:
+        moves = list(provided_moves or [])
+    mandatory_ranges = mandatory_import_removal_plan(lines, layout)
+    mandatory_hidden = mandatory_removal_mask(len(lines), mandatory_ranges)
+    apply_mandatory_move_precedence(moves, mandatory_hidden)
     state = PlanState(
         hidden=list(mandatory_hidden),
         folded=[-1] * len(lines),
@@ -584,6 +531,28 @@ def compile_edit_plan(raw: str, plan: EditPlan) -> CompiledPlan:
             state.hidden[n - 1] = True
             state.folded[n - 1] = fold_index
 
+    if removals_valid and folds_valid:
+        add_mandatory_python_suite_placeholders(lines, layout, state, mandatory_hidden)
+        problems.extend(validate_move_symmetry(moves, state, mandatory_hidden))
+
+    python_validation_state = state
+    if removals_valid and folds_valid:
+        python_validation_state = state_with_mandatory_imports_represented(
+            state, mandatory_hidden, layout
+        )
+        problems.extend(
+            validate_hidden_python_owners(lines, layout, python_validation_state)
+        )
+        problems.extend(
+            validate_hidden_python_boundaries(lines, layout, python_validation_state)
+        )
+        problems.extend(
+            validate_hidden_references(lines, layout, python_validation_state)
+        )
+        problems.extend(
+            validate_python_suite_skeleton(lines, layout, python_validation_state)
+        )
+
     replacements: dict[int, list[PlannedReplacement]] = {}
     replacements_valid = True
     for i, r in enumerate(plan.replace):
@@ -624,6 +593,23 @@ def compile_edit_plan(raw: str, plan: EditPlan) -> CompiledPlan:
             )
             continue
         body = lines[r.line - 1].text[1:]
+        if (
+            layout.python[r.line - 1]
+            and python_triple_state_before_line(lines, layout, r.line - 1)
+            == PythonTripleState.NONE
+        ):
+            code = trim_python_code(body)
+            if code.startswith("@") or is_python_suite_header_start(code):
+                problems.append(
+                    f"replace[{i}]: line {r.line} is a Python decorator or suite "
+                    "header; keep structural anchors intact"
+                )
+                continue
+        if layout.python[r.line - 1] and changes_python_boundary_tokens(r.old, r.new):
+            problems.append(
+                f"replace[{i}]: must preserve Python string and expression boundary tokens"
+            )
+            continue
         start, unique = unique_substring_index(body, r.old)
         if not unique:
             problems.append(
@@ -647,7 +633,30 @@ def compile_edit_plan(raw: str, plan: EditPlan) -> CompiledPlan:
                 )
                 replacements_valid = False
 
+    if removals_valid and folds_valid and replacements_valid and not problems:
+        problems.extend(
+            validate_move_replacement_symmetry(
+                moves, lines, state, mandatory_hidden, replacements
+            )
+        )
+
     if removals_valid and folds_valid and replacements_valid:
+        problems.extend(
+            validate_triple_quote_parity(
+                lines, layout, python_validation_state, replacements
+            )
+        )
+        problems.extend(
+            validate_python_delimiter_balance(
+                lines, layout, python_validation_state, replacements
+            )
+        )
+        problems.extend(
+            validate_python_backslash_continuations(
+                lines, layout, python_validation_state, replacements
+            )
+        )
+        complete_mandatory_import_framing(layout, state, mandatory_hidden)
         problems.extend(validate_retained_structure(layout, state))
 
     if problems:
@@ -676,13 +685,24 @@ def compile_edit_plan(raw: str, plan: EditPlan) -> CompiledPlan:
     return CompiledPlan(smart_diff="".join(out), stats=stats, moves=moves)
 
 
-def compile_submission(raw: str, submission: Submission) -> CompiledPlan:
+def compile_submission(
+    raw: str,
+    submission: Submission,
+    *,
+    provided_moves: list[DetectedMove] | None = None,
+    detect_moves: bool = True,
+) -> CompiledPlan:
     problems: list[str] = []
     err = validate_summary(submission.summary)
     if err:
         problems.append(err)
     try:
-        compiled = compile_edit_plan(raw, submission)
+        compiled = compile_edit_plan(
+            raw,
+            submission,
+            provided_moves=provided_moves,
+            detect_moves=detect_moves,
+        )
     except ValueError as e:
         problems.append(str(e))
         compiled = None  # type: ignore[assignment]
@@ -698,6 +718,20 @@ def retention_pressure(stats: PlanStats) -> bool:
     return stats.visible_changed >= 80 or stats.visible_changed * 100 >= stats.raw_changed * 45
 
 
+FEEDBACK_PRESSURE_HIGH = (
+    "Pressure: high retention. Reconsider repeated rename/call-site hunks "
+    "after one representative anchor, default git context, mechanical prose, "
+    "duplicate setup/cases, and assertion batches or suites that can become "
+    "fixed ... folds. Imports are already removed mechanically. For Python, "
+    "keep each suite owner, required setup, and decisive stimulus/outcome: "
+    "never hide a table assignment used by a retained loop, or an entire "
+    "pytester.makeini/makeconftest configuration that defines the scenario. "
+    "Move folds inside those boundaries. This is advisory: preserve every "
+    "distinct contract, security or compatibility caveat, condition, "
+    "lifecycle edge, transformation, effect, stimulus, and outcome.\n"
+)
+
+
 def plan_feedback(compiled: CompiledPlan) -> str:
     stats = compiled.stats
     percent = 0
@@ -711,15 +745,41 @@ def plan_feedback(compiled: CompiledPlan) -> str:
     if stats.raw_files > 0:
         parts[0] += f"; files {stats.visible_files}/{stats.raw_files}"
     parts[0] += ".\n"
-    if retention_pressure(stats):
+    if compiled.moves:
         parts.append(
-            "Pressure: high retention. Reconsider repeated rename/call-site hunks "
-            "after one representative anchor, default git context, mechanical prose, "
-            "duplicate setup/cases, and assertion batches or suites that can become "
-            "fixed ... folds. Imports are already removed mechanically.\n"
+            f"Moves: {len(compiled.moves)} exact cross-hunk/cross-file span(s) "
+            f"treated symmetrically ({format_move_pairs(compiled.moves, MAX_MOVE_HINTS)}).\n"
         )
+    if retention_pressure(stats):
+        parts.append(FEEDBACK_PRESSURE_HIGH)
     else:
         parts.append("Pressure: acceptable. Preserve uncertain behavior.\n")
     parts.append("Preview (revised plans still use ORIGINAL line coordinates):\n")
     parts.append(compiled.smart_diff)
     return "".join(parts)
+
+
+from meat_python_plus.moves import (  # noqa: E402
+    MAX_MOVE_HINTS,
+    apply_mandatory_move_precedence,
+    detect_exact_moves,
+    format_move_pairs,
+    validate_move_replacement_symmetry,
+    validate_move_symmetry,
+)
+from meat_python_plus.python_suites import (  # noqa: E402
+    PythonTripleState,
+    add_mandatory_python_suite_placeholders,
+    changes_python_boundary_tokens,
+    is_python_suite_header_start,
+    python_triple_state_before_line,
+    state_with_mandatory_imports_represented,
+    validate_hidden_python_boundaries,
+    validate_hidden_python_owners,
+    validate_hidden_references,
+    validate_python_backslash_continuations,
+    validate_python_delimiter_balance,
+    validate_python_suite_skeleton,
+    validate_triple_quote_parity,
+)
+from meat_python_plus.imports import trim_python_code  # noqa: E402

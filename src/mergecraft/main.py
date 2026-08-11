@@ -32,7 +32,6 @@ from mergecraft.utils.agent_resolve import (
     resolve_model,
     resolve_runtime_agent,
     run_with_model_chain,
-    select_runnable_model_slug,
 )
 from mergecraft.utils.code_scanning import report_sarif_upload
 from mergecraft.utils.git_setup import create_temp_directory, setup_git, wipe_runner_leak_surface
@@ -71,6 +70,36 @@ class MainResult:
     # when the run had no pull request to attest to. Surfaced as the action's
     # ``evidence_packet`` output by ``action/entry.py``.
     evidence_packet_path: str | None = None
+
+
+def _first_runnable_in_chain(chain: list[str]) -> str | None:
+    """Pick the first chain entry with credentials and an available agent binary.
+
+    Mirrors ``select_runnable_model_slug`` but operates on an already-computed
+    chain. Used by ``main()`` so the chain that drives selection is the same
+    chain that ``run_with_model_chain`` walks — when W4's new ``head`` /
+    ``pin`` semantics apply, both ends agree on the order (W4.2 / D8).
+    """
+    from mergecraft.utils.agent_resolve import (
+        _agent_binary_available,
+        has_credentials_for_slug,
+    )
+
+    skipped: list[str] = []
+    for slug in chain:
+        if not has_credentials_for_slug(slug):
+            skipped.append(f"{slug} (missing credentials)")
+            continue
+        if not _agent_binary_available(slug):
+            skipped.append(f"{slug} (agent binary missing)")
+            continue
+        if skipped:
+            logger.warning("» model chain skipped backups: {}", ", ".join(skipped))
+        logger.info("» model chain selected slug={}", slug)
+        return slug
+    if skipped:
+        logger.warning("» model chain skipped backups: {}", ", ".join(skipped))
+    return None
 
 
 def _payload_to_ctx(payload: dict[str, Any]) -> ResolvedPayload:
@@ -161,19 +190,53 @@ async def main() -> MainResult:
             os.chdir(cwd)
 
         payload_model = payload.get("model")
-        model_explicit = bool(payload.get("modelExplicit"))
-        use_model_chain = bool(effective_model_chain(settings)) and not model_explicit
+        # #37 / W4 / D8 — ``model_pin`` opts into the legacy "use exactly this
+        # model" semantics: when True, ``model:`` collapses the chain to a
+        # single entry. Default is chain-preserving — the supplied ``model:``
+        # becomes the head of the effective chain and the configured ``models:``
+        # tail follows. ``modelExplicit`` is retained as a back-compat alias
+        # for the legacy pin signal so any consumer that branched on it still
+        # behaves the same.
+        model_pin = bool(
+            payload.get("modelPin") or payload.get("modelExplicit")  # legacy alias
+        )
+        model_head = payload.get("modelHead") or (
+            payload_model if isinstance(payload_model, str) else None
+        )
+        chain_for_decision = effective_model_chain(
+            settings=settings, head=model_head, pin=model_pin
+        )
+        # ``use_model_chain`` is true whenever an effective chain has more
+        # than one entry OR the operator asked for the chain explicitly. The
+        # legacy ``not model_explicit`` short-circuit is gone — a supplied
+        # ``model:`` no longer disables the chain.
+        use_model_chain = len(chain_for_decision) > 1 or (
+            bool(chain_for_decision) and model_head is not None and not model_pin
+        )
         selected_slug: str | None
 
         if use_model_chain:
-            selected_slug = select_runnable_model_slug(settings=settings)
+            # ``select_runnable_model_slug`` walks the same chain but skips
+            # uncredentialed / unavailable entries — pass the already-computed
+            # chain so the chain and selection agree on the order.
+            selected_slug = _first_runnable_in_chain(chain_for_decision)
+            if selected_slug is None:
+                msg = (
+                    "no runnable model slug in chain — configure credentials for at least one entry"
+                )
+                raise RuntimeError(msg)
             resolved_model = resolve_model(slug=selected_slug, respect_env_override=False)
         else:
-            resolved_model = resolve_model(
-                slug=payload_model if isinstance(payload_model, str) else None,
-                respect_env_override=not model_explicit,
+            # Single-entry chain (or pin opt-in). The chain is collapsed to
+            # exactly ``[model_head]`` when pinned; otherwise it is just the
+            # first configured entry. Honour ``respect_env_override=False``
+            # when the operator named a model explicitly — the action input
+            # already wins.
+            only_slug = (
+                model_head if model_pin else (chain_for_decision[0] if chain_for_decision else None)
             )
-            selected_slug = payload_model if isinstance(payload_model, str) else None
+            resolved_model = resolve_model(slug=only_slug, respect_env_override=False)
+            selected_slug = only_slug
         agent = resolve_runtime_agent(model=resolved_model)
         agent_id = agent.name
         tool_state.model = payload.get("proxyModel") or resolved_model or payload.get("model")
@@ -394,6 +457,8 @@ async def main() -> MainResult:
                 winning_slug, chain_result = await run_with_model_chain(
                     settings=settings,
                     run_once=_run_agent_once,
+                    head=model_head,
+                    pin=model_pin,
                 )
                 return winning_slug, chain_result
             return selected_slug, await agent.run(run_ctx)

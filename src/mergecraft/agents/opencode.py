@@ -18,6 +18,7 @@ from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
     CUSTOM_PROVIDER_BASE_URL_ENV,
     resolve_gateway_endpoint,
+    resolve_gateway_endpoints,
 )
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
@@ -36,25 +37,62 @@ __all_gateway_envs__ = (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_EN
 
 
 def build_custom_provider(model: str | None) -> dict[str, object] | None:
-    """Describe an OpenAI-compatible provider for opencode.
+    """Describe an OpenAI-compatible provider (or several) for opencode.
 
-    Resolution order (see :func:`resolve_gateway_endpoint`):
+    Resolution order (W3 / #71):
 
-    1. ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`` + ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY``
-    2. Named presets: ``nous/*`` via ``NOUS_API_KEY``, ``tokenhub/*`` via
-       ``TOKENHUB_API_KEY`` (optional ``NOUS_BASE_URL`` / ``TOKENHUB_BASE_URL``)
-
-    The provider id is the segment of ``model`` before the first slash, so
-    ``nous/deepseek/deepseek-v4-flash`` registers provider ``nous`` serving
-    ``deepseek/deepseek-v4-flash``, and ``tokenhub/hy3`` registers ``tokenhub``
-    serving ``hy3``.
+    1. **Multi-provider first**: ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>``
+       env-var pairs (operator-locked) emit one provider block per index
+       under ``provider_<N>``. Gaps are preserved, partial pairs dropped,
+       singleton ignored when any indexed pair is set. The active model's
+       provider gets the model-id mapping; the rest are emitted with an
+       empty ``models`` table so the harness can still resolve fallbacks at
+       runtime.
+    2. **Singleton back-compat alias**: ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL``
+       + ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` (PR #79 / D7) emit a single
+       provider block keyed by the model's prefix (``default`` for the
+       canonical ``default/...`` model, ``nous`` for ``nous/...``, etc.).
+       This preserves the W1.1 single-provider regression pin's emitted
+       shape: a singleton + ``nous/...`` model still produces a
+       ``provider.nous`` block, not a ``provider.default`` one.
+    3. **Named presets**: ``nous/*`` via ``NOUS_API_KEY``, ``tokenhub/*`` via
+       ``TOKENHUB_API_KEY`` (optional ``NOUS_BASE_URL`` / ``TOKENHUB_BASE_URL``).
     """
+    providers = resolve_gateway_endpoints()
+    slash = model.find("/") if model else -1
+    active_provider_id = model[:slash].lower() if (model and slash > 0) else None
+    active_model_id = model[slash + 1 :] if (model and slash > 0) else None
+
+    if providers:
+        # Multi-provider path (W3). If the active model's provider id is in
+        # the resolver dict, use that record; otherwise fall through to the
+        # singleton/preset fallback so a model whose prefix is not registered
+        # still surfaces a useful block (PR #79 compatibility).
+        if active_provider_id is not None and active_provider_id in providers:
+            active_record = providers[active_provider_id]
+            out: dict[str, object] = {}
+            for record in providers.values():
+                models: dict[str, object] = {}
+                if record is active_record and active_model_id:
+                    models[active_model_id] = {"name": active_model_id}
+                out[record.provider_id] = {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "name": record.provider_id,
+                    "options": {
+                        "baseURL": record.base_url,
+                        "apiKey": record.api_key,
+                    },
+                    "models": models,
+                }
+            return out
+        # Fall through to legacy preset path — the active model is not in
+        # the resolver dict, so use the singleton (or preset) record keyed
+        # by the model's prefix.
     endpoint = resolve_gateway_endpoint(model)
     if endpoint is None or not model:
         return None
     provider_id, base_url, api_key = endpoint
-    slash = model.find("/")
-    model_id = model[slash + 1 :]
+    model_id = model[model.find("/") + 1 :]
     return {
         provider_id: {
             "npm": "@ai-sdk/openai-compatible",
@@ -63,6 +101,27 @@ def build_custom_provider(model: str | None) -> dict[str, object] | None:
             "models": {model_id: {"name": model_id}},
         }
     }
+
+
+def _custom_provider_ids(model: str | None) -> list[str]:
+    """Return provider ids to register as ``enabled_providers`` for the model.
+
+    Mirrors :func:`build_custom_provider`'s resolution order — multi-provider
+    (W3), then singleton, then named presets — so the harness enables every
+    provider the configuration surfaces, including fallbacks for the chain
+    walk.
+    """
+    providers = resolve_gateway_endpoints()
+    if providers:
+        slash = model.find("/") if model else -1
+        active = model[:slash].lower() if (model and slash > 0) else None
+        if active is not None and active in providers:
+            return sorted(providers.keys())
+        # Fall through to legacy resolution.
+    endpoint = resolve_gateway_endpoint(model)
+    if endpoint is None:
+        return []
+    return [endpoint[0]]
 
 
 def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
@@ -100,9 +159,13 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
     }
     if model:
         config["model"] = model
-        slash = model.find("/")
-        if slash > 0:
-            config["enabled_providers"] = [model[:slash].lower()]
+        provider_ids = _custom_provider_ids(model)
+        if provider_ids:
+            config["enabled_providers"] = provider_ids
+        else:
+            slash = model.find("/")
+            if slash > 0:
+                config["enabled_providers"] = [model[:slash].lower()]
     provider = build_custom_provider(model)
     if provider is not None:
         config["provider"] = provider

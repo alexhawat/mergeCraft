@@ -18,7 +18,24 @@ inputs:
       nous/deepseek/deepseek-v4-flash) or a raw models.dev specifier. Overrides
       repo settings. OpenAI-compatible gateways: set NOUS_API_KEY or
       TOKENHUB_API_KEY (or MERGECRAFT_CUSTOM_PROVIDER_*).
+
+      Default behaviour (#37 / W4): the supplied `model:` becomes the **head**
+      of the configured chain — the repo's `models:` list (and any
+      `modelFallbacks:`) is retained as the tail and walked on credential
+      miss or retryable failure. To restore the legacy "use exactly this
+      model, suppress the chain" semantics, set `model_pin: enabled`.
     required: false
+  model_pin:
+    description: >-
+      #37 / W4 / D8 — opt into the legacy "use exactly this model" semantics
+      for the `model:` input. Default `disabled`: `model:` becomes the chain
+      head; the configured `models:` / `modelFallbacks:` tail is walked on
+      credential miss or retryable failure. Set to `enabled` to collapse the
+      chain to `[model]` (suppress fallbacks). Wire this through `.mergecraft/
+      config.yaml`'s `modelPin: true` for repo-wide default; the action input
+      wins.
+    required: false
+    default: "disabled"
   cwd:
     description: "Working directory for the agent (defaults to GITHUB_WORKSPACE)"
     required: false
@@ -62,6 +79,27 @@ inputs:
     default: "false"
   codex_sandbox:
     description: "Codex platform-sandbox policy. Leave unset (default) to keep Codex's own bubblewrap/Landlock sandbox. Set to `danger-full-access` ONLY when the runner is already an ephemeral, isolated container — inside a Docker container action, bubblewrap cannot create a nested user namespace and every Codex call fails before doing work. mergeCraft's own shell/push controls are unaffected either way. See issue #70."
+    required: false
+  provider_base_url:
+    description: >-
+      Custom OpenAI-compatible base URL for the singleton provider
+      (`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`, PR #79 / D7). Use this to point
+      Codex or OpenCode at a third-party OpenAI-compatible gateway without
+      committing env-var names in workflow YAML. The indexed multi-provider
+      form (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>` for `N >= 1`)
+      is env-only and not exposed here — that path is for advanced
+      multi-provider setups where `with:` cannot enumerate multiple entries.
+      See issue #71.
+    required: false
+  provider_api_key_env:
+    description: >-
+      Name of an environment variable that holds the singleton provider's API
+      key (e.g. `MY_PROVIDER_API_KEY`). mergeCraft reads this env var's value
+      and exposes it to the harness as `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`.
+      Never inline the API key value here — reference the env-var *name*
+      only (convention 7). Wire the secret via the workflow's `env:` block
+      from a GitHub Actions secret (`${{ secrets.MY_PROVIDER_API_KEY }}`).
+      See issue #71.
     required: false
   output_schema:
     description: "JSON Schema (draft-07) for structured output validation."
@@ -134,6 +172,7 @@ runs:
     INPUT_PROMPT_FILE: ${{ inputs.prompt_file }}
     INPUT_TIMEOUT: ${{ inputs.timeout }}
     INPUT_MODEL: ${{ inputs.model }}
+    INPUT_MODEL_PIN: ${{ inputs.model_pin }}
     INPUT_CWD: ${{ inputs.cwd }}
     INPUT_PUSH: ${{ inputs.push }}
     INPUT_SHELL: ${{ inputs.shell }}
@@ -143,6 +182,8 @@ runs:
     INPUT_OUTPUT_SCHEMA: ${{ inputs.output_schema }}
     INPUT_ALLOW_PR_TARGET_COMMENTS: ${{ inputs.allow_pr_target_comments }}
     MERGECRAFT_CODEX_SANDBOX: ${{ inputs.codex_sandbox }}
+    INPUT_PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}
+    INPUT_PROVIDER_API_KEY_ENV: ${{ inputs.provider_api_key_env }}
     INPUT_TOKEN: ${{ inputs.token }}
     INPUT_SUGGEST_EVAL_ADD: ${{ inputs.suggest_eval_add }}
     INPUT_TRACING: ${{ inputs.tracing }}

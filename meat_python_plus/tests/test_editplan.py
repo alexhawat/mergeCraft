@@ -23,6 +23,18 @@ DIFF = """diff --git a/x.py b/x.py
  context
 """
 
+# Hunk without mandatory-hidden import rows (structure-retention contract only).
+DIFF_NO_MANDATORY_IMPORT = """diff --git a/x.py b/x.py
+--- a/x.py
++++ b/x.py
+@@ -1,3 +1,3 @@
+-old_a = 1
+-old_b = 2
++new_a = 1
++new_b = 2
+ context
+"""
+
 
 def test_elision_projection():
     assert is_elision_projection("hello world", "hello ...")
@@ -78,6 +90,8 @@ def test_submission_requires_summary():
 
 def test_structure_retention_hunk_header():
     # Remove every change; only context remains → hunk header must not survive alone.
-    plan = EditPlan(remove=[LineRange(6, 9)], replace=[], fold=[])
+    # Use a hunk without mandatory-hidden imports: Go completeMandatoryImportFraming
+    # collapses hunks that only retain import context (see test_imports.py).
+    plan = EditPlan(remove=[LineRange(5, 8)], replace=[], fold=[])
     with pytest.raises(ValueError, match="hunk header"):
-        compile_edit_plan(DIFF, plan)
+        compile_edit_plan(DIFF_NO_MANDATORY_IMPORT, plan)
