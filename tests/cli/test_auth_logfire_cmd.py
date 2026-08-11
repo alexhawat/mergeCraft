@@ -283,6 +283,9 @@ def test_auth_logfire_warns_and_saves_on_network_error(
         (200, True),
         (401, False),
         (403, False),
+        # 302 → reject (Logfire returns 302 to a sign-in URL when the bearer
+        # is missing or expired; saving it would silently no-op).
+        (302, False),
         (500, True),  # 5xx → warn-and-save (parity with the other validators)
         (502, True),
     ],
@@ -304,6 +307,11 @@ def test_auth_logfire_validator_returns_correct_status(
             return httpx.Response(200, json=[])
         if status in {401, 403}:
             return httpx.Response(status, json={"detail": "unauthorized"})
+        if status == 302:
+            return httpx.Response(
+                302,
+                headers={"Location": "https://logfire.pydantic.dev/auth/sign-in"},
+            )
         return httpx.Response(status, text="server error")
 
     _patch_httpx_with(monkeypatch, _handler)
@@ -388,4 +396,228 @@ def test_no_real_logfire_call_in_unit_tests() -> None:
     assert len(hits) <= 4, (
         f"tests/cli/test_auth_logfire_cmd.py references the production Logfire "
         f"URL ({len(hits)} occurrences); unit tests must mock httpx."
+    )
+
+
+# ── auth_logfire validator: 302 redirect → reject (issue: 302 saved anyway) ──
+
+
+def test_auth_logfire_validator_rejects_302_redirect(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Logfire returns 302 to a sign-in URL when the bearer is missing/expired.
+
+    A token that 302s will never ingest — saving it is a silent no-op. The
+    validator must reject (False) so the operator is told to retry.
+    """
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            302,
+            headers={"Location": "https://logfire.pydantic.dev/auth/sign-in"},
+        )
+
+    _patch_httpx_with(monkeypatch, _handler)
+
+    from loguru import logger
+
+    captured: list[tuple[str, str]] = []
+
+    def _sink(record):  # type: ignore[no-untyped-def]
+        entry = record.record  # type: ignore[attr-defined]
+        captured.append((entry["level"].name, entry["message"]))
+
+    sink_id = logger.add(_sink, level="WARNING")
+    try:
+        validator = _load_validator()
+        result = validator("lf-test-token")
+    finally:
+        logger.remove(sink_id)
+
+    assert result is False, (
+        "302 redirect to auth must be rejected — a saved token that 302s will "
+        "never ingest. The operator must be told to retry."
+    )
+    assert any(level == "WARNING" and "302" in message for level, message in captured), (
+        f"expected a warning mentioning the 302, got: {captured}"
+    )
+
+
+# ── CLI bootstrap: ``mergecraft`` loads ``.env`` so subsequent commands see
+#    what ``auth logfire`` wrote (issue: precedence layer saw empty os.environ) ──
+
+
+def test_cli_loads_local_env_into_os_environ(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """``main()`` must call ``load_dotenv`` so the precedence layer sees .env keys.
+
+    Repro for the "config tracing shows enabled: false" bug: the auth command
+    writes ``MERGECRAFT_LOGFIRE_TOKEN`` to ``.env``, but the next CLI invocation
+    in the same shell reads ``os.environ`` (which is loaded once at python
+    startup) and finds the key absent. The fix is to call ``load_dotenv``
+    idempotently at ``main()`` with ``override=False`` so real env still wins.
+    """
+    import os
+
+    from mergecraft.cli import app as cli_app
+
+    # Pin the .env path so the test does not depend on the operator's cwd.
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "MERGECRAFT_LOGFIRE_TOKEN=tk-from-env-file\n"
+        "MERGECRAFT_TRACING_PROJECT=mergecraft-dev\n"
+        "MERGECRAFT_TRACING=true\n"
+        "MERGECRAFT_TRACING_TO=logfire\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MERGECRAFT_ENV", str(env_path))
+    # Strip the pre-existing values so the test would fail without the loader.
+    monkeypatch.delenv("MERGECRAFT_LOGFIRE_TOKEN", raising=False)
+    monkeypatch.delenv("MERGECRAFT_TRACING_PROJECT", raising=False)
+    monkeypatch.delenv("MERGECRAFT_TRACING", raising=False)
+    monkeypatch.delenv("MERGECRAFT_TRACING_TO", raising=False)
+
+    # Snapshot os.environ so the test cleans up after itself — these writes
+    # leak into the next test's view of the world without a teardown.
+    saved = {
+        k: os.environ.get(k)
+        for k in (
+            "MERGECRAFT_LOGFIRE_TOKEN",
+            "MERGECRAFT_TRACING_PROJECT",
+            "MERGECRAFT_TRACING",
+            "MERGECRAFT_TRACING_TO",
+        )
+    }
+    try:
+        # Drive the loader directly — the same path `main()` runs before `app()`.
+        cli_app._load_local_env()
+
+        # ``load_dotenv`` writes to ``os.environ``; verify that, not the monkeypatch
+        # snapshot (which only sees setenv/delenv calls).
+        assert os.environ["MERGECRAFT_LOGFIRE_TOKEN"] == "tk-from-env-file"
+        assert os.environ["MERGECRAFT_TRACING_PROJECT"] == "mergecraft-dev"
+        assert os.environ["MERGECRAFT_TRACING"] == "true"
+        assert os.environ["MERGECRAFT_TRACING_TO"] == "logfire"
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_cli_env_loader_does_not_override_real_env(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """``load_dotenv`` is called with ``override=False`` — real env vars win.
+
+    Operators want their shell-set values to take precedence over the .env
+    file (CI secrets, GitHub Actions env, `direnv`, etc.). The loader must
+    populate only missing keys.
+    """
+    import os
+
+    from mergecraft.cli import app as cli_app
+
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "MERGECRAFT_LOGFIRE_TOKEN=tk-from-env-file\nMERGECRAFT_TRACING_PROJECT=from-file\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MERGECRAFT_ENV", str(env_path))
+    # Pre-set the env var as if the operator had set it in their shell. The
+    # loader must NOT overwrite this with the value from the .env file.
+    monkeypatch.setenv("MERGECRAFT_TRACING_PROJECT", "from-shell")
+    # Ensure the token key is unset so the loader populates it from the file.
+    monkeypatch.delenv("MERGECRAFT_LOGFIRE_TOKEN", raising=False)
+
+    # Snapshot for cleanup — these writes leak into the next test's view.
+    saved_token = os.environ.get("MERGECRAFT_LOGFIRE_TOKEN")
+    try:
+        cli_app._load_local_env()
+
+        # The shell-set project label must win over the file.
+        assert os.environ["MERGECRAFT_TRACING_PROJECT"] == "from-shell"
+        # Only the missing key was filled in from the file.
+        assert os.environ["MERGECRAFT_LOGFIRE_TOKEN"] == "tk-from-env-file"
+    finally:
+        # Leave the env as monkeypatch expects — undo the load_dotenv write.
+        if saved_token is None:
+            os.environ.pop("MERGECRAFT_LOGFIRE_TOKEN", None)
+        else:
+            os.environ["MERGECRAFT_LOGFIRE_TOKEN"] = saved_token
+
+
+def test_cli_env_loader_is_silent_when_env_absent(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Loader is a no-op when ``.env`` does not exist (CI sandboxes).
+
+    The loader must not raise when the operator has not initialized a .env
+    yet — that is the default state for fresh checkouts and CI.
+    """
+    from mergecraft.cli import app as cli_app
+
+    # Point at a non-existent file.
+    monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / "missing.env"))
+    # Loader must not raise.
+    cli_app._load_local_env()
+
+
+# ── ``auth logfire`` help text: ``[tracing]`` must render as literal text ────
+
+
+def test_auth_logfire_help_does_not_emit_unbalanced_backticks() -> None:
+    """The ``[tracing]`` literal in the docstring must render with the brackets.
+
+    Repro: the original docstring had ``The ``[tracing]`` extra must be…`` and
+    Rich parsed ``[tracing]`` as a markup tag, dropping the bracketed text
+    (``The ```` extra…``). The fix is to escape with ``\\[tracing]`` (raw
+    string docstring) so Rich renders the brackets literally.
+    """
+    result = runner.invoke(app, ["auth", "logfire", "--help"])
+
+    assert result.exit_code == 0
+    output = result.stdout
+    # The bracketed text must be present, not consumed as markup.
+    assert "[tracing]" in output, f"expected literal '[tracing]' in help output, got: {output!r}"
+    # And the four-backticks artifact must not reappear.
+    assert "````" not in output, f"four-backticks artifact regressed; got: {output!r}"
+
+
+# ── enabling / disabling Logfire (sevn symmetry, see issue #56 follow-up) ────
+
+
+def test_auth_logfire_subcommand_emits_no_syntax_warning(tmp_path: Path) -> None:
+    """The docstring must not emit ``SyntaxWarning`` (``\\[…`` without raw).
+
+    With Python 3.14 the legacy ``\\[`` escape is a deprecation warning, and
+    tomorrow's Python will hard-error. The docstring is a raw string literal;
+    this test guards against a regression to a plain triple-quoted docstring
+    that would re-introduce the warning.
+    """
+    import importlib
+    import sys
+    import warnings
+
+    # Wipe the module's __warningregistry__ if any, then re-import to force
+    # the docstring to be reparsed. Catch any SyntaxWarning that fires.
+
+    saved = sys.modules.pop("mergecraft.cli.auth_cmd", None)
+    try:
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always", SyntaxWarning)
+            importlib.import_module("mergecraft.cli.auth_cmd")
+    finally:
+        if saved is not None:
+            sys.modules["mergecraft.cli.auth_cmd"] = saved
+
+    bad = [w for w in captured if "invalid escape sequence" in str(w.message)]
+    assert not bad, f"auth_logfire module emits SyntaxWarning(s): {[str(w.message) for w in bad]}"
+    # The raw string marker is the tripwire on the docstring.
+    import inspect
+
+    from mergecraft.cli import auth_cmd as reloaded
+
+    source = inspect.getsource(reloaded.auth_logfire)
+    assert 'r"""' in source or "r'''" in source, (
+        "auth_logfire docstring should be a raw string to keep ``\\[tracing]`` "
+        "literal without a SyntaxWarning."
     )
