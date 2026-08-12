@@ -24,16 +24,15 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from mergecraft.agents.shared import AgentUsage
+    from mergecraft.tracing.tracer import Span
 
 # A classifier decides for each parsed event whether to emit a tool.call span,
 # an llm.call span, or drop the event entirely. The callable receives the
@@ -76,6 +75,7 @@ class StreamSpanAccumulator:
         self.cache_read += int(
             usage_payload.get("cache_read_input_tokens")
             or usage_payload.get("cacheReadTokens")
+            or _extract_openai_cached_tokens(usage_payload)
             or 0
         )
         self.cache_write += int(
@@ -98,6 +98,13 @@ class StreamSpanAccumulator:
         whose ``usage`` is the authoritative total. Calling ``replace_usage``
         on the ``result`` event avoids double-counting tokens and matches
         the legacy blob-parse shape that W5.7's equivalence test pins.
+
+        T2 adds OpenAI ``prompt_tokens_details.cached_tokens`` /
+        ``input_tokens_details.cached_tokens`` recognition so the Nous /
+        MiniMax / opencode Responses / Chat Completions paths populate
+        ``cache_read`` alongside the Anthropic-native
+        ``cache_read_input_tokens`` field. The fold is additive: any native
+        Anthropic value still wins.
         """
         if not isinstance(usage_payload, dict):
             return
@@ -110,6 +117,7 @@ class StreamSpanAccumulator:
         self.cache_read = int(
             usage_payload.get("cache_read_input_tokens")
             or usage_payload.get("cacheReadTokens")
+            or _extract_openai_cached_tokens(usage_payload)
             or 0
         )
         self.cache_write = int(
@@ -157,6 +165,53 @@ def _safe_iter_lines(stream: Iterable[str]) -> Iterator[str]:
             continue
         text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
         yield text
+
+
+def _extract_openai_cached_tokens(usage_payload: Mapping[str, Any]) -> int:
+    """Return the cached-input token count from an OpenAI Responses / Chat Completions usage dict.
+
+    T2 extends the legacy Anthropic ``cache_read_input_tokens`` path so the
+    Nous / MiniMax / opencode Responses / Chat Completions providers
+    surface their cached-input token usage on the same ``cache_read``
+    accumulator field. The two recognised shapes are:
+
+    - ``prompt_tokens_details.cached_tokens`` (Chat Completions / older)
+    - ``input_tokens_details.cached_tokens`` (Responses API / newer)
+
+    Returns ``0`` when neither field is present or the payload does not
+    match a dict shape — the helper is intentionally non-raising so a
+    malformed stream event cannot poison the accumulator.
+    """
+    if not isinstance(usage_payload, Mapping):
+        return 0
+    for outer_key in ("prompt_tokens_details", "input_tokens_details"):
+        details = usage_payload.get(outer_key)
+        if isinstance(details, Mapping):
+            cached = details.get("cached_tokens")
+            if isinstance(cached, (int, float)):
+                return int(cached)
+    return 0
+
+
+def _resolve_active_span_for_otel_bridge() -> Span | None:
+    """Return the currently active mergeCraft ``Span`` for the OTel bridge.
+
+    The lookup is lazy (the import is deferred to the call site) so the
+    stream consumer never pulls the tracer module at import time. The
+    function returns ``None`` when tracing is disabled, when no span is
+    active, or when the optional tracer import is unavailable — the
+    result is the same as the pre-T3.2 behaviour: the handler runs
+    unwrapped.
+    """
+    try:
+        from mergecraft.tracing import tracer as _tracer_mod
+        from mergecraft.tracing.tracer import Span as _Span
+    except ImportError:
+        return None
+    active = _tracer_mod._ACTIVE_SPAN.get()
+    if isinstance(active, _Span):
+        return active
+    return None
 
 
 def _echo_line_to_stdout(line: str) -> None:
@@ -222,6 +277,31 @@ def consume_stream(
         # (D13). Malformed lines do not echo — they're noise by definition.
         _echo_line_to_stdout(stripped)
 
+        # T3.2 — when a mergeCraft span is active, wrap the handler call in
+        # ``attach_trace_context`` so any nested OTel auto-instrumented
+        # operation (e.g. an ``httpx`` call inside a tool) inherits the
+        # run's ``trace_id`` without the driver code having to know
+        # about mergeCraft's tracer. The lookup is lazy to avoid
+        # circular imports at module load time; a missing span (the
+        # disabled path) leaves the handler unwrapped, exactly the
+        # pre-T3.2 behaviour.
+        active_span = _resolve_active_span_for_otel_bridge()
+        if active_span is not None:
+            try:
+                from mergecraft.tracing.otel_bridge import attach_trace_context
+            except ImportError:
+                attach_trace_context = None  # type: ignore[assignment]
+            if attach_trace_context is not None:
+                try:
+                    with attach_trace_context(active_span):
+                        handler(accumulator, event)
+                except Exception as exc:
+                    logger.warning(
+                        "stream consumer handler failed on event type={!r}: {}",
+                        event.get("type"),
+                        exc,
+                    )
+                continue
         try:
             handler(accumulator, event)
         except Exception as exc:

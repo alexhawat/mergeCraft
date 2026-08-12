@@ -240,8 +240,8 @@ def test_trace_dir_flag_overrides_yaml(monkeypatch: pytest.MonkeyPatch, tmp_path
 
 # ---------------------------------------------------------------------------
 # W8.4 — ``MERGECRAFT_TRACING_PROJECT`` env var (auth logfire surface).
-# Issue #56 / D5 — the Logfire project label becomes the
-# ``x-logfire-project`` header at runtime. The CLI ``auth logfire`` command
+# Issue #56 / D5 — the Logfire project label is informational only; Logfire
+# routes spans by token, not a header. The CLI ``auth logfire`` command
 # writes this alongside ``MERGECRAFT_LOGFIRE_TOKEN``; the precedence layer
 # surfaces it for ``mergecraft config tracing`` and the sink factory.
 # ---------------------------------------------------------------------------

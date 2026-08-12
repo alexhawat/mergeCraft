@@ -61,7 +61,7 @@ sets). The Action input `logfire-token` maps to the runtime
 
 ```yaml
 tracing:
-  enabled: true                # default: false
+  enabled: true                # default: unset (treated as off); bool | null
   retentionDays: 30            # default: 30
   redaction: true              # default: true
   sinks:
@@ -69,6 +69,12 @@ tracing:
       path: .mergecraft/traces/
     # Batch D adds: logfire, otel (behind the [tracing] extra, D6).
 ```
+
+`enabled` is tri-state: `true`, `false`, or unset (`null`). Unset defers to
+the next precedence layer and is **not** the same as `false`. On the Action
+path the precedence is: `tracing` / `INPUT_TRACING` action input >
+`MERGECRAFT_TRACING` env > YAML `tracing.enabled` > default (unset → tracer
+off). See `src/mergecraft/action/inputs.py::apply_tracing_overrides`.
 
 ### Shorthand form
 
@@ -271,6 +277,192 @@ Malformed events are skipped and counted: the consumer never raises on
 a bad line. The counter is available via `StreamSpanAccumulator.malformed_event_count`
 and the line is logged at `warning` level.
 
+## Provider and HTTP spans (T2)
+
+Every outbound provider request surfaces as a `provider.call` row with
+the transport family on it (`provider.transport_family` is one of
+`anthropic` / `responses_api` / `chat_completions`). The driver's
+existing `llm.call` span becomes a child of `provider.call`, and every
+outbound `httpx` call the driver made (e.g. the OpenAI-compatible
+custom-provider POST) becomes a grandchild via `instrument_httpx`.
+
+The Logfire tree therefore matches the sevn reference shape:
+
+```
+agent.attempt
+├── provider.call  (provider.transport_family=...)
+│   ├── http.client.request  (http.method, http.url-redacted, status)
+│   └── llm.call             (model.id, cost.*, gen_ai.usage.*)
+├── tool.call
+└── ...
+```
+
+- **When does `provider.call` fire?** Once per upstream API request.
+  Claude fires on `message_start` / closes on `message_stop`; Codex on
+  `thread.started` / `turn.completed`; Gemini on `init` / `result`. The
+  span exists so Logfire groups rows by transport family.
+- **When does `http.client.request` fire?** Once per outbound `httpx`
+  `send()` on a wrapper mergeCraft constructed (D8 — no global monkey
+  patch). The wrapper installs on the two `httpx.AsyncClient` instances
+  `agents/opencode.py::_prompt_session` and `agents/opencode.py::_run`
+  use for the custom OpenAI-compatible provider path, the only httpx
+  sites in the repo.
+- **`http.url` is always redacted inline** (D9 — see the URL redaction
+  table below).
+
+### URL redaction table
+
+`mergecraft.tracing.redaction.redact_url(url)` masks credential-shaped
+fragments while preserving the URL shape. Applied in order; first
+match wins per region:
+
+| Pattern | Before | After |
+|---------|--------|-------|
+| Telegram bot token | `https://api.telegram.org/bot123456:ABC/sendMessage` | `https://api.telegram.org/bot<redacted>/sendMessage` |
+| Basic auth | `https://user:pass@example.com/path` | `https://user:<redacted>@example.com/path` |
+| Query token (`api_key`, `access_token`, `token`, `key`, `secret`) | `https://example.com/v1/messages?api_key=sk-abc&x=1` | `https://example.com/v1/messages?api_key=<redacted>&x=1` |
+| Bearer header value | `Bearer ghp_longtoken123…` | `Bearer <redacted>` |
+| Embedded `sk-` / `ghp_` / `eyJ…` substring | `…sk-abc123def…` | `…<redacted>…` |
+
+The literal marker is `mergecraft.tracing.redaction.REDACTED = "<redacted>"`.
+The URL stays parseable (`urllib.parse.urlparse` round-trips on every
+shape), and non-token query parameters are preserved so the path-based
+grouping in Logfire's row inspector keeps working.
+
+## Tool call attributes (T1)
+
+Every `tool.call` span carries the request/response byte counts,
+`exit_code`, error class/message, and input-key list sevn splits across
+`tool.invoke` / `tool.complete`. The shape is additive on the post-#137
+tree (D5: one enriched `tool.call` span, not sevn's `tool.invoke` /
+`tool.complete` split) so the existing `tool.name` / `tool.id` /
+`tool.server` / `gen_ai.*` attrs remain on the same row. The
+`src/mergecraft/tracing/_tool_attrs.py` helpers expose the open-side
+`enrich_tool_request` and the close-side `enrich_tool_response`
+(W4 / M1 split the legacy single `enrich_tool_call_attrs` into two
+single-purpose calls), plus `emit_verb_subevent` so the three drivers
+(`claude` / `codex` / `gemini`) and the MCP `tools/call` handler all
+emit the same shape.
+
+### `tool.call` attributes
+
+| Attribute | Type | Example | Source |
+|-----------|------|---------|--------|
+| `tool.name` | str | `"browser"` | existing — preserved |
+| `tool.id` | str | `"tool-claude-1"` | existing — preserved |
+| `tool.server` | str | `"claude"` / `"codex"` / `"gemini"` / `"mergecraft"` | existing — preserved |
+| `tool.input` | dict / str | `{"q": "hello"}` / `"codex-input"` | existing — preserved |
+| `tool.output` | any | `"claude-output-text"` | existing — preserved |
+| `tool.arguments` | dict | `{"q": "hello"}` | T1 — request-side raw args (MCP server) |
+| `tool.argument_count` | int | `1` | T1 — request-side count |
+| `tool.argument_bytes` | int | `15` | T1 — request-side JSON-encoded size |
+| `tool.input_keys` | list[str] | `["q"]` | T1 — sorted key list (dict input only) |
+| `tool.input_bytes` | int | `15` | T1 — driver-side request byte count |
+| `tool.exit_code` | str | `"ok"` / `"error"` | T1 — success / failure marker |
+| `tool.result_kind` | str | `"text"` / `"json"` / `"image"` / `"list_of_blocks"` / `"unknown"` | T1 — MCP server success path |
+| `tool.result_bytes` | int | `18` | T1 — MCP server success path |
+| `tool.output_kind` | str | `"text"` / `"json"` / `"image"` / `"list_of_blocks"` / `"unknown"` | T1 — driver-side response classification |
+| `tool.output_bytes` | int | `18` | T1 — driver-side response byte count |
+| `tool.error_class` | str | `"RuntimeError"` | T1 — failure path only |
+| `tool.error_message` | str | `"tool kaboom: …"` (redacted + capped) | T1 — failure path only |
+| `gen_ai.operation.name` | str | `"execute_tool"` | existing — preserved |
+| `gen_ai.tool.name` | str | `"browser"` | existing — preserved |
+| `gen_ai.tool.call.id` | str | `"ab12cd…"` | existing — preserved |
+| `gen_ai.tool.input` | str | `"<redacted>"` | T1 — `redact_tool_payload` of the input |
+| `gen_ai.tool.output` | str | `"<redacted>"` | T1 — `redact_tool_payload` of the output (success or error message) |
+
+### Verb sub-events (`tool.browse` / `tool.search` / …)
+
+Known-verb tools — `browser`, `search`, `read_file`, `write_file`,
+`run_code`, `load_tool` — also emit a verb-specific child span on the
+`tool_result` / `item.completed` close event. The mapping is the closed
+`KNOWN_VERB_TOOLS` dict in `src/mergecraft/tracing/_tool_attrs.py`:
+
+| Tool name | Child span kind |
+|-----------|----------------|
+| `browser` | `tool.browse` |
+| `search` | `tool.search` |
+| `read_file` | `tool.read` |
+| `write_file` | `tool.write` |
+| `run_code` | `tool.run_code` |
+| `load_tool` | `tool.load_tool` |
+
+The child span's `parent_span_id` is the parent `tool.call`'s `span_id`,
+and its attrs mirror the parent's so Logfire's row inspector still has
+full context for each verb row. Lifecycle: opened on the close event,
+closed immediately — no new bookkeeping state. Tools outside the closed
+set (a hypothetical `frobnicate`) emit only the parent `tool.call` and
+no child.
+
+### Cap and redaction behaviour
+
+`tool.arguments` is capped at `TRACE_ATTRS_JSON_MAX_BYTES` (64 KiB) via
+the existing `cap_event_attrs` path: a value past the cap collapses
+the row's `attrs` to `{"truncated": True}` so the JSONL line stays
+parseable. `tool.output` is stringified + redacted via
+`mergecraft.tracing.redaction.redact_tool_payload(payload)` — the helper
+runs `json.dumps(default=str)` on non-str values, caps at 64 KiB
+(returning `"<truncated>"` on overflow), and pipes the result through
+`redact_secrets` so embedded tokens (`ghp_…` / `sk-…` / bearer headers)
+cannot escape onto the span. The same helper replaces the local
+`_truncate_tool_payload` copies in `agents/claude.py` and
+`agents/codex.py` so every driver + the MCP server share one source of
+truth.
+
+## One trace per run (T3)
+
+One `mergecraft diff-review` run emits one Logfire trace. Every span
+emitted by the run — `mergecraft.run`, `mergecraft.prep`,
+`mergecraft.publish`, `mergecraft.analyzers.pipeline`, `analyzer.run`,
+`agent.attempt`, `llm.call`, `tool.call`, plus the future `provider.call`
+and `http.client.request` — shares one Logfire `trace_id`. The UI groups
+spans by `trace_id` (the OTel `trace_id` field on the produced span), so
+a single click in the Logfire tree shows the full run — a feature the
+pre-#137 tree did not deliver because `mergecraft.trace_id` was just an
+attribute on every span rather than the OTel `trace_id` itself.
+
+### What `trace_id` is
+
+`trace_id` is the Logfire / OpenTelemetry trace identifier shared by every
+span in one run. The mergeCraft run resolves it once per process (via
+`resolve_trace_id()` in `tracing/tracer.py`) and propagates it onto every
+child span via the `Tracer` (`self.trace_id`) and the `Span`
+(`self.trace_id`). The OTel exporter (`OTLPSink`) forwards it as the
+real OTel `trace_id` on the produced span so Logfire groups by it
+automatically — no attribute search required.
+
+### How it is generated
+
+The resolver follows the same precedence as the existing session-id
+resolver (D7 / T3.2):
+
+1. `MERGECRAFT_TRACE_ID` — explicit per-run override.
+2. `MERGECRAFT_TRACE_SESSION_ID` — alias preserving the pre-#137 contract
+   so existing pipelines keep working.
+3. `GITHUB_RUN_ID` — the Actions run id, monotonic and unique.
+4. `uuid.uuid4().hex` — local fallback when no env vars are set.
+
+`session_id` remains the per-process correlation id (the W4 batch-B
+session correlation) and `turn_id` is the per-span `uuid4().hex`. The
+three fields are orthogonal: change the env precedence and the run still
+groups under one trace.
+
+### How Logfire groups by it
+
+`OTLPSink.write` rewrites the OTel `trace_id` on the produced span via
+`SpanContext(trace_id=otel_trace_id, …)` (the same private `_context`
+field the OTel SDK uses internally). The recording-processor test seam
+captures the rewritten `trace_id` so the Logfire-grouping contract is
+observable through the existing surface. The
+`otel_bridge.attach_trace_context` context manager does the same on the
+OTel **context** side, so any nested OTel auto-instrumented operation
+(e.g. an `httpx` call inside a tool) inherits the same `trace_id`
+without the caller having to know about mergeCraft's tracer. The
+`attach_trace_context` integration in
+`agents/_stream_consumer.py::consume_stream` wraps the handler call so
+any nested OTel operation inside an agent's per-event handler inherits
+the run's trace.
+
 ## What's next
 
 | Batch | Wave  | Scope                                                |
@@ -295,10 +487,13 @@ tracing:
         x-tenant: mergecraft
 ```
 
-For Logfire, the endpoint is hard-coded to the public ingest URL
-(`https://logfire.pydantic.dev/api/v1/otlp/v1/traces`); the `project`
-field is forwarded as the `x-logfire-project` header. The token is
-resolved through `tokenRef` (D5) — see *Token resolution* below.
+For Logfire, the endpoint is the region-aware OTLP/HTTP ingest URL —
+`https://logfire-us.pydantic.dev/v1/traces` (US) or
+`https://logfire-eu.pydantic.dev/v1/traces` (EU), selected by the sink's
+`region` field (default `us`). The `project` field is informational only;
+Logfire routes spans by the token itself, so no `x-logfire-project` header
+is sent. The token is resolved through `tokenRef` (D5) — see *Token
+resolution* below.
 
 ## Token resolution (W8.2 / D5)
 
@@ -367,3 +562,28 @@ workflow ships them out of CI with `actions/upload-artifact@v4`:
 exits non-zero — the trace is the most useful when the run failed.
 The path is `.mergecraft/traces/` by default; override with the
 `trace_dir` config field or the `--trace-dir` flag.
+
+## Structured logs (operator debugging, W12.6 / #33)
+
+Tracing owns spans; default Loguru output stays human-readable. For
+correlation fields in the log stream itself (without enabling tracing),
+opt into JSON:
+
+```bash
+export MERGECRAFT_LOG_FORMAT=json   # or LOG_FORMAT=json
+# optional: LOG_LEVEL=DEBUG
+```
+
+When JSON is on, each record includes bound context when available:
+
+| Field | Source |
+|-------|--------|
+| `run_id` | `GITHUB_RUN_ID` (bound in `main`) |
+| `repo` | `owner/name` for the run |
+| `pr` | pull-request number when the event carries one |
+| `phase` | coarse run phase (`setup`, …) |
+
+Bind or refresh fields from code with
+`mergecraft.utils.log.bind_run_context(...)`. Use tracing (`docs/TRACING.md`
+above) when you need model/tool span trees; use JSON logs when you need a
+grep-friendly stream of the same run on the runner console or log drain.

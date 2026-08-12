@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
@@ -16,6 +17,32 @@ if TYPE_CHECKING:
 
 MAX_STDERR_LINES = 20
 MAX_POST_RUN_RETRIES = 3
+
+
+def spawn_agent_cli(
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    cwd: str | None = None,
+) -> subprocess.Popen[str]:
+    """Wrap argv with privilege drop and open a session-leader agent process.
+
+    Shared by Claude/Codex/Gemini/OpenCode so wrap + pipes + ``start_new_session``
+    stay one place (W9 / Final CQ). Callers own streaming and
+    :func:`wait_or_kill_process_group`.
+    """
+    from mergecraft.utils.privilege import wrap_agent_command
+
+    return subprocess.Popen(
+        wrap_agent_command(cmd),
+        cwd=cwd if cwd is not None else os.getcwd(),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        start_new_session=True,
+    )
 
 
 def get_git_status(cwd: str | None = None) -> str:
@@ -161,6 +188,8 @@ class AgentImpl:
     name: AgentId
     _install: Callable[[str | None], Awaitable[str]]
     _run: Callable[[AgentRunContext], Awaitable[AgentResult]]
+    _build_env: Callable[[AgentRunContext], dict[str, str]] | None = field(default=None, repr=False)
+    _module_file: str | None = field(default=None, repr=False)
 
     async def install(self, token: str | None = None) -> str:
         return await self._install(token)
@@ -169,14 +198,35 @@ class AgentImpl:
         logger.debug("payload: {}", ctx.payload)
         return await self._run(ctx)
 
+    @property
+    def __file__(self) -> str:
+        """Source path for AST pins that import AgentImpl via the package export.
+
+        ``from mergecraft.agents import opencode`` resolves to this object, not
+        the module — ``tests/security/test_credentials.py`` reads ``.__file__``
+        to AST-parse the real opencode driver. Not dead magic.
+        """
+        if self._module_file is None:
+            msg = "no source module registered for this agent"
+            raise AttributeError(msg)
+        return self._module_file
+
 
 def agent(
     *,
     name: AgentId,
     install: Callable[[str | None], Awaitable[str]],
     run: Callable[[AgentRunContext], Awaitable[AgentResult]],
+    build_env: Callable[[AgentRunContext], dict[str, str]] | None = None,
+    module_file: str | None = None,
 ) -> AgentImpl:
-    return AgentImpl(name=name, _install=install, _run=run)
+    return AgentImpl(
+        name=name,
+        _install=install,
+        _run=run,
+        _build_env=build_env,
+        _module_file=module_file,
+    )
 
 
 def format_cost_usd(cost_usd: float) -> str:
@@ -234,3 +284,15 @@ def log_token_table(
     if cost_usd is not None and cost_usd > 0:
         row += f" Cost($)={format_cost_usd(cost_usd)}"
     logger.info("token usage: {}", row)
+
+
+def wrap_agent_subprocess(cmd: list[str]) -> list[str]:
+    """Prefix argv with ``setpriv`` so agent CLIs run as the ``mergecraft`` user (W3.4).
+
+    Back-compat alias for :func:`mergecraft.utils.privilege.wrap_agent_command`.
+    Agent spawn sites import ``wrap_agent_command`` directly; this name remains
+    for tests and any external callers that still use the agents-package facade.
+    """
+    from mergecraft.utils.privilege import wrap_agent_command
+
+    return wrap_agent_command(cmd)

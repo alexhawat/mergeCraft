@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
 import subprocess
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,9 +28,24 @@ from mergecraft.agents.shared import (
     agent,
     log_token_table,
     payload_shell_mode,
+    spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.tracing._tool_attrs import (
+    emit_verb_subevent,
+    enrich_tool_request,
+    enrich_tool_response,
+)
+from mergecraft.tracing.redaction import redact_tool_payload
+from mergecraft.tracing.tracer import (
+    ProviderLLMPair,
+    _close_provider_llm_pair,
+    _open_provider_llm_pair,
+)
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
+from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -484,9 +499,8 @@ def ctx_tmpdir_fallback() -> str:
 
 
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
-    env = dict(os.environ)
     codex_home = _codex_home(ctx)
-    env["CODEX_HOME"] = str(codex_home)
+    env = build_agent_env("codex", {"CODEX_HOME": str(codex_home)})
     _setup_codex_auth(ctx, codex_home=codex_home)
     return env
 
@@ -631,9 +645,9 @@ def _run_codex_streaming(
     accumulator = StreamSpanAccumulator(agent_name="codex")
     tracer: Tracer | None = None
     try:
-        from mergecraft.config import RepoSettings
+        from mergecraft.tracing.resolve import resolve_active_tracing
 
-        sink = claim_sink(RepoSettings().tracing)
+        sink = claim_sink(resolve_active_tracing())
         if sink is not None:
             correlation = resolve_correlation_from_env()
             session_id = resolve_session_id()
@@ -648,15 +662,7 @@ def _run_codex_streaming(
     )
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=os.getcwd(),
-            env=_build_env(ctx),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
+        process = spawn_agent_cli(cmd, env=_build_env(ctx))
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
@@ -664,20 +670,22 @@ def _run_codex_streaming(
     assert process.stderr is not None
 
     stderr_text = ""
+    returncode: int = -1
     try:
-        try:
-            consume_stream(
-                raw_stream=process.stdout,
-                accumulator=accumulator,
-                handler=handler,
-            )
-            stderr_text = process.stderr.read() or ""
-            returncode = process.wait(
-                timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
-            )
-        except subprocess.TimeoutExpired:
-            process.kill()
-            return AgentResult(success=False, error="codex CLI timed out")
+        with track_process_group(process):
+            try:
+                consume_stream(
+                    raw_stream=process.stdout,
+                    accumulator=accumulator,
+                    handler=handler,
+                )
+                stderr_text = process.stderr.read() or ""
+                returncode = wait_or_kill_process_group(
+                    process,
+                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                )
+            except subprocess.TimeoutExpired:
+                return AgentResult(success=False, error="codex CLI timed out")
     finally:
         try:
             close_all_open_spans()
@@ -707,11 +715,13 @@ def _run_codex_streaming(
                 CODEX_SANDBOX_UNSANDBOXED,
             )
             error = f"{user_namespace_failure_hint()}\n\ncodex stderr:\n{error}"
+        retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
         return AgentResult(
             success=False,
             output=output or None,
             error=error,
             usage=usage,
+            metadata={"retryable": True} if retryable else {},
         )
     return AgentResult(success=True, output=output or None, usage=usage)
 
@@ -740,8 +750,15 @@ def _codex_stream_event_handler(
         authoritative final usage and close the thread's ``llm.call``
         span.
     """
+    # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt, not two
+    # independent dicts keyed by the same id. Opening the provider span and
+    # the LLM span is atomic: they share a ``parent_span_id`` and both
+    # enter before the first event. The close path is symmetric: the inner
+    # ``llm.call`` span closes first (LIFO), then the outer
+    # ``provider.call`` span.
     open_tool_spans: dict[str, dict[str, Any]] = {}
-    open_llm_spans: dict[str, dict[str, Any]] = {}
+    open_pairs: dict[str, ProviderLLMPair | None] = {}
+    open_pair_bookkeeping: dict[str, dict[str, Any]] = {}
 
     def handler(
         accumulator: StreamSpanAccumulator,
@@ -770,20 +787,36 @@ def _codex_stream_event_handler(
 
         if event_type == "thread.started":
             thread_id = str(event.get("thread_id") or "default")
-            if thread_id in open_llm_spans:
+            if thread_id in open_pairs:
                 return
             if tracer is not None:
-                span = tracer.start_span(
-                    "llm.call",
+                # T2 / D10 — ``provider.call`` is a real span kind, not an
+                # attr. Opens on ``thread.started`` and closes on
+                # ``turn.completed``; the ``llm.call`` span becomes its
+                # child so Logfire groups every Responses API request under
+                # one row with the transport family on it. W5 / H1 — open
+                # via the shared pair helper so the provider + llm attrs
+                # + ``__enter__`` are applied atomically; the resulting
+                # ``ProviderLLMPair`` is the single state unit per attempt.
+                pair = _open_provider_llm_pair(
+                    tracer,
+                    model_id=model_id,
+                    family="responses_api",
+                    provider_id="openai_codex",
                 )
-                span.__enter__()
-                span.set_attribute("model.id", model_id)
-                span.set_attribute("model.event", "thread.started")
-                open_llm_spans[thread_id] = {
-                    "span": span,
-                    "tokens_in": 0,
-                    "tokens_out": 0,
-                }
+                if pair is not None:
+                    # W6 / L3 — ``_open_provider_llm_pair`` already stamps
+                    # ``model.id`` on the parent ``provider.call`` span (the
+                    # canonical home per the helper docstring). The llm span
+                    # inherits the value through the OTel/mergeCraft parent
+                    # chain; do not re-stamp here.
+                    pair.llm.set_attribute("model.event", "thread.started")
+                    pair.llm.set_attribute("gen_ai.system", "openai")
+                    pair.llm.set_attribute("gen_ai.operation.name", "chat")
+                    pair.llm.set_attribute("gen_ai.request.model", model_id)
+                    pair.llm.set_attribute("gen_ai.response.model", model_id)
+                open_pairs[thread_id] = pair
+                open_pair_bookkeeping[thread_id] = {"tokens_in": 0, "tokens_out": 0}
             return
 
         if event_type == "item.started":
@@ -802,6 +835,17 @@ def _codex_stream_event_handler(
                 span.set_attribute("tool.name", tool_name)
                 span.set_attribute("tool.id", tool_id)
                 span.set_attribute("tool.server", "codex")
+                span.set_attribute("gen_ai.operation.name", "execute_tool")
+                span.set_attribute("gen_ai.tool.name", tool_name)
+                span.set_attribute("gen_ai.tool.call.id", tool_id)
+                # T1 / D5 / W4 — request-side enrichment is deferred to the
+                # ``item.completed`` site because codex's
+                # ``item.started`` event does not carry the input payload
+                # — codex sends the input on the matching
+                # ``item.completed``. The close path below applies
+                # ``enrich_tool_request`` + ``enrich_tool_response`` so the
+                # byte count + input representation still surface on the
+                # span.
                 open_tool_spans[tool_id] = {"span": span, "name": tool_name}
             return
 
@@ -817,12 +861,30 @@ def _codex_stream_event_handler(
                     return
                 span_obj = entry.get("span")
                 if span_obj is not None:
-                    span_obj.set_attribute(
-                        "tool.name", str(item.get("name") or entry.get("name") or "unknown")
+                    resolved_name = str(item.get("name") or entry.get("name") or "unknown")
+                    span_obj.set_attribute("tool.name", resolved_name)
+                    span_obj.set_attribute("gen_ai.tool.name", resolved_name)
+                    tool_input = str(item.get("input") or "")
+                    span_obj.set_attribute("tool.input", tool_input)
+                    span_obj.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
+                    # T1 / D5 / W4 — request + response enrichment on the
+                    # close path. W4 / H2 — the split helpers mean each
+                    # call site is one obvious line; the prior codex
+                    # double-set bug (``arguments=tool_input,
+                    # output=tool_input``) is gone.
+                    enrich_tool_request(span_obj, arguments=tool_input)
+                    enrich_tool_response(span_obj, output=tool_input)
+                    span_obj.close()
+                    # T1 / D5 — known-verb tools also emit a verb-specific
+                    # child span (tool.browse for ``browser``, etc.) for
+                    # finer-grained Logfire grouping. Fire-and-forget; no
+                    # new bookkeeping state.
+                    emit_verb_subevent(
+                        tracer,
+                        parent_span_id=span_obj.span_id,
+                        tool_name=resolved_name,
+                        attrs=dict(span_obj._attrs),
                     )
-                    span_obj.set_attribute("tool.input", str(item.get("input") or ""))
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
                 return
             if item_type == "tool_result":
                 # The matching tool.call span was closed on item.completed
@@ -845,29 +907,38 @@ def _codex_stream_event_handler(
             cost = event.get("total_cost_usd")
             if isinstance(cost, (int, float)) and usage is not None:
                 accumulator.cost_usd = float(cost)
-            for entry in list(open_llm_spans.values()):
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    span_obj.set_attribute("cost.tokens_in", entry["tokens_in"])
-                    span_obj.set_attribute("cost.tokens_out", entry["tokens_out"])
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
-            open_llm_spans.clear()
+            # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt owns the
+            # close discipline (inner llm span first, outer provider span
+            # second). Stamp the cost + usage attrs on the inner llm span
+            # before closing so the per-message totals land on the row.
+            for key in list(open_pairs.keys()):
+                pair = open_pairs[key]
+                bookkeeping = open_pair_bookkeeping.get(key, {})
+                if pair is not None:
+                    pair.llm.set_attribute("cost.tokens_in", bookkeeping.get("tokens_in", 0))
+                    pair.llm.set_attribute("cost.tokens_out", bookkeeping.get("tokens_out", 0))
+                    pair.llm.set_attribute(
+                        "gen_ai.usage.input_tokens", bookkeeping.get("tokens_in", 0)
+                    )
+                    pair.llm.set_attribute(
+                        "gen_ai.usage.output_tokens", bookkeeping.get("tokens_out", 0)
+                    )
+            for key in list(open_pairs.keys()):
+                _close_provider_llm_pair(open_pairs.pop(key))
+            open_pair_bookkeeping.clear()
             return
 
     def close_all() -> None:
         for entry in list(open_tool_spans.values()):
             span_obj = entry.get("span")
             if span_obj is not None:
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
+                span_obj.close()
         open_tool_spans.clear()
-        for entry in list(open_llm_spans.values()):
-            span_obj = entry.get("span")
-            if span_obj is not None:
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
-        open_llm_spans.clear()
+        # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt; the inner
+        # ``_close_provider_llm_pair`` enforces the LIFO close discipline.
+        for key in list(reversed(list(open_pairs.keys()))):
+            _close_provider_llm_pair(open_pairs.pop(key))
+        open_pair_bookkeeping.clear()
 
     return handler, close_all
 
@@ -879,7 +950,10 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         return AgentResult(success=False, error=str(err))
 
     mcp_config = write_mcp_config(ctx)
-    initial = _run_codex_once(
+    # Blocking Popen/wait/stream consume runs in a worker thread so
+    # ``asyncio.wait_for`` in ``main`` can preempt the coroutine (W9.2).
+    initial = await asyncio.to_thread(
+        _run_codex_once,
         cli=cli,
         prompt=ctx.instructions.user,
         ctx=ctx,
@@ -887,7 +961,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     )
 
     async def resume(prompt: str) -> AgentResult:
-        return _run_codex_once(
+        return await asyncio.to_thread(
+            _run_codex_once,
             cli=cli,
             prompt=prompt,
             ctx=ctx,
@@ -899,4 +974,4 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     return await finalize_agent_result(ctx, result)
 
 
-codex = agent(name="codex", install=_install, run=_run)
+codex = agent(name="codex", install=_install, run=_run, build_env=_build_env)

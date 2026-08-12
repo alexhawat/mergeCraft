@@ -25,8 +25,10 @@ deliberate on both counts: it survives the step, so a later
 checkout, so an agent running `git add -A` can never sweep the packet into a
 commit.
 
-The Action exposes the resolved path as its **`evidence_packet` output**, and
-logs it. A workflow attaches it like this:
+The Action exposes the packet **JSON body** as its **`evidence_packet`**
+output (via `$GITHUB_OUTPUT` multiline heredoc — not a filesystem path),
+and the on-disk path is still logged. A workflow that wants an artifact
+writes the body to a file first:
 
 ```yaml
 - id: review
@@ -34,12 +36,18 @@ logs it. A workflow attaches it like this:
   with:
     prompt: /review
 
+- name: Persist merge evidence packet
+  if: steps.review.outputs.evidence_packet != ''
+  env:
+    PACKET: ${{ steps.review.outputs.evidence_packet }}
+  run: printf '%s\n' "$PACKET" > merge-evidence-packet.json
+
 - name: Upload merge evidence packet
   if: steps.review.outputs.evidence_packet != ''
   uses: actions/upload-artifact@v4
   with:
     name: merge-evidence-packet
-    path: ${{ steps.review.outputs.evidence_packet }}
+    path: merge-evidence-packet.json
 ```
 
 Locally, `mergecraft diff-review --evidence-packet PATH` writes the packet for
@@ -80,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.3.0`.
+The current version is `1.6.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -108,6 +116,11 @@ not move.
   `list[EvalMetadata] | None`. Additive — a packet that previously set `evals`
   to `None` continues to validate.
 
+- `1.6.0` — production-readiness W10 (#20). Extends `AgentMetadata` with
+  `requested_model`, `executed_model`, `provider`, `fallback_index`, and
+  `fallback_occurred` so every packet proves which model was requested vs
+  which actually ran — unconditionally, not only via opt-in tracing.
+
 ## Top-level fields
 
 ### `schema_version` — required
@@ -129,7 +142,18 @@ Identifies the producing agent. Shape:
 |------|------|-------|
 | `id` | `str` | The agent name (e.g. `claude`). |
 | `version` | `str` | The agent's runtime version string. |
-| `model` | `str` | The model slug the agent ran with. |
+| `model` | `str` | The model slug the agent ran with (legacy alias of `executed_model`). |
+| `requested_model` | `str` | The chain-head / operator-requested slug (W10 / #20). |
+| `executed_model` | `str` | The slug that actually produced the review (W10 / #20). |
+| `provider` | `str` | Provider key for the executed (or requested) slug (W10 / #20). |
+| `fallback_index` | `int` | Zero-based index in the model chain (`0` = primary) (W10 / #20). |
+| `fallback_occurred` | `bool` | `true` when the run advanced past the requested primary (W10 / #20). |
+
+`requested_model` / `executed_model` / `provider` / `fallback_index` /
+`fallback_occurred` are recorded **unconditionally** on every emitted packet —
+not only when tracing is enabled. Operators who set `allowFallback: false` in
+`.mergecraft/config.yaml` refuse chain advance; an unavailable primary fails
+closed as `configuration_error` instead of silently reviewing under a backup.
 
 ### `files_changed` — required (`list[str]`)
 
@@ -220,7 +244,12 @@ also the canonical fixture used by the WA-T round-trip tests:
   "agent": {
     "id": "claude",
     "version": "1.2.3",
-    "model": "claude-sonnet-4-5"
+    "model": "claude-sonnet-4-5",
+    "requested_model": "claude-sonnet-4-5",
+    "executed_model": "claude-sonnet-4-5",
+    "provider": "claude",
+    "fallback_index": 0,
+    "fallback_occurred": false
   },
   "files_changed": ["src/mergecraft/evidence/packet.py"],
   "findings": [

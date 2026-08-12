@@ -209,6 +209,58 @@ def _emit_offline_packet(
     return str(written) if written else None
 
 
+def _apply_tracing_cli_overrides(
+    tracing_cli: list[str] | None,
+) -> dict[str, str | None]:
+    """Translate ``diff-review`` tracing flags into ``MERGECRAFT_*`` env overrides.
+
+    The agent stream tracers resolve their sink from ``os.environ`` via
+    :func:`mergecraft.tracing.resolve.resolve_active_tracing`, so forwarding the
+    CLI flags as env overrides makes them win over any ``.env`` value already
+    set (CLI > env precedence). A flag that was not supplied is left untouched,
+    preserving the operator's ``.env`` setting. Returns the previous values so
+    the caller can restore them after the run.
+
+    Args:
+        tracing_cli (list[str] | None): CLI-style tokens from the ``diff-review``
+            command (``--tracing``, ``--no-tracing``, ``--tracing-to X``, …).
+
+    Returns:
+        dict[str, str | None]: The prior ``os.environ`` values for the keys we
+        touched (``None`` when the key was absent), for restoration.
+    """
+    if not tracing_cli:
+        return {}
+
+    overrides: dict[str, str] = {}
+    iterator = iter(tracing_cli)
+    for token in iterator:
+        if token in {"--tracing", "--no-tracing"}:
+            overrides["MERGECRAFT_TRACING"] = "true" if token == "--tracing" else "false"
+        elif token == "--tracing-to":
+            overrides["MERGECRAFT_TRACING_TO"] = next(iterator, "")
+        elif token == "--trace-dir":
+            overrides["MERGECRAFT_TRACE_DIR"] = str(next(iterator, ""))
+        elif token == "--logfire-token":
+            overrides["MERGECRAFT_LOGFIRE_TOKEN"] = next(iterator, "")
+        elif token == "--otel-endpoint":
+            overrides["MERGECRAFT_OTEL_ENDPOINT"] = next(iterator, "")
+        elif token.startswith("--tracing-to="):
+            overrides["MERGECRAFT_TRACING_TO"] = token.split("=", 1)[1]
+        elif token.startswith("--trace-dir="):
+            overrides["MERGECRAFT_TRACE_DIR"] = token.split("=", 1)[1]
+        elif token.startswith("--logfire-token="):
+            overrides["MERGECRAFT_LOGFIRE_TOKEN"] = token.split("=", 1)[1]
+        elif token.startswith("--otel-endpoint="):
+            overrides["MERGECRAFT_OTEL_ENDPOINT"] = token.split("=", 1)[1]
+
+    previous: dict[str, str | None] = {}
+    for key, value in overrides.items():
+        previous[key] = os.environ.get(key)
+        os.environ[key] = value
+    return previous
+
+
 async def run_offline_diff_review(
     *,
     cwd: Path,
@@ -219,6 +271,7 @@ async def run_offline_diff_review(
     dry_run: bool = False,
     json_path: Path | None = None,
     evidence_packet_path: Path | None = None,
+    tracing_cli: list[str] | None = None,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
     cwd = cwd.resolve()
@@ -228,57 +281,72 @@ async def run_offline_diff_review(
             error=f"not a git repository: {cwd} (pass --diff for a standalone patch file)",
         )
 
+    # Forward the ``diff-review`` tracing flags as ``MERGECRAFT_*`` env
+    # overrides so the agent stream tracers (which resolve from
+    # ``os.environ``) honor CLI > env precedence. Restored in the ``finally``
+    # block so the override never leaks into the caller's environment.
+    tracing_env_previous = _apply_tracing_cli_overrides(tracing_cli)
+
     out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
     try:
         materialization = materialize_diff(cwd=cwd, out_dir=out_dir, base=base, diff_file=diff_file)
     except (OSError, RuntimeError) as exc:
         return OfflineReviewResult(success=False, error=str(exc))
 
-    if materialization.empty:
-        if json_path is not None:
-            try:
-                write_findings_json(json_path, [])
-            except OSError as exc:
-                return OfflineReviewResult(
-                    success=False,
-                    error=f"failed to write findings JSON: {exc}",
-                )
-        return OfflineReviewResult(
-            success=True,
-            output="no changes to review (empty diff).",
-            diff_path=str(materialization.path),
-            empty_diff=True,
+    try:
+        if materialization.empty:
+            if json_path is not None:
+                try:
+                    write_findings_json(json_path, [])
+                except OSError as exc:
+                    return OfflineReviewResult(
+                        success=False,
+                        error=f"failed to write findings JSON: {exc}",
+                    )
+            return OfflineReviewResult(
+                success=True,
+                output="no changes to review (empty diff).",
+                diff_path=str(materialization.path),
+                empty_diff=True,
+            )
+
+        output_schema = findings_output_schema() if json_path is not None else None
+        prompt = build_offline_review_prompt(
+            diff_path=materialization.path,
+            base_ref=materialization.base_ref,
+            extra=prompt_extra,
+            json_mode=output_schema is not None,
         )
 
-    output_schema = findings_output_schema() if json_path is not None else None
-    prompt = build_offline_review_prompt(
-        diff_path=materialization.path,
-        base_ref=materialization.base_ref,
-        extra=prompt_extra,
-        json_mode=output_schema is not None,
-    )
+        if dry_run:
+            return OfflineReviewResult(
+                success=True,
+                output=prompt,
+                diff_path=str(materialization.path),
+                empty_diff=False,
+            )
 
-    if dry_run:
-        return OfflineReviewResult(
-            success=True,
-            output=prompt,
-            diff_path=str(materialization.path),
-            empty_diff=False,
+        result = await _run_agent_review(
+            cwd=cwd,
+            materialization=materialization,
+            prompt=prompt,
+            model=model,
+            tmpdir=out_dir,
+            output_schema=output_schema,
+            evidence_packet_path=evidence_packet_path,
         )
+        if json_path is None:
+            return result
 
-    result = await _run_agent_review(
-        cwd=cwd,
-        materialization=materialization,
-        prompt=prompt,
-        model=model,
-        tmpdir=out_dir,
-        output_schema=output_schema,
-        evidence_packet_path=evidence_packet_path,
-    )
-    if json_path is None:
-        return result
-
-    return _finalize_structured_findings(result, json_path)
+        return _finalize_structured_findings(result, json_path)
+    finally:
+        # Restore the operator's ``.env`` tracing vars so the ``diff-review``
+        # overrides never leak into the caller's environment.
+        for key, value in tracing_env_previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 async def _run_agent_review(

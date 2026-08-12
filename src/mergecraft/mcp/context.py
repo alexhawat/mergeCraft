@@ -68,7 +68,6 @@ class ToolContext:
     refresh_git_token: Callable[[str], Awaitable[str]] | None = None
     read_token: str | None = None
     xrepo: XrepoConfig | None = None
-    post_checkout_script: str | None = None
     prepush_script: str | None = None
     pr_approve_enabled: bool = False
     auto_merge_enabled: bool = False

@@ -9,6 +9,7 @@ content in it.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -281,34 +282,59 @@ class TestPacketPathResolution:
 
 
 class TestActionOutputSurfacing:
-    """The packet is worthless to an operator if its path never leaves the run."""
+    """The packet is worthless to an operator if its path never leaves the run.
+
+    Retargeted (test-creator, W5 xfail reconciliation) from the dead
+    ``action`` package's ``entry`` module (``_write_outputs``) onto the
+    *live* entrypoint — ``action.yml`` -> ``docker-entrypoint.sh`` ->
+    ``mergecraft gha`` -> ``cli/gha_cmd.py::_run_main`` (confirmed via
+    ``action.yml``). W5.4 pinned the output value as the packet JSON body
+    itself (heredoc-delimited), not the bare path the dead writer used — see
+    ``cli/gha_cmd.py::_write_evidence_packet_output``.
+    """
 
     def test_packet_path_is_written_to_github_output(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from mergecraft.action.entry import _write_outputs
-        from mergecraft.main import MainResult
+        from mergecraft.cli.gha_cmd import _write_evidence_packet_output
 
+        packet_path = tmp_path / "packet.json"
+        packet_path.write_text('{"schema_version": "1.5.0"}', encoding="utf-8")
         output_file = tmp_path / "gh_output"
         monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
-        _write_outputs(
-            MainResult(success=True, result="ok", evidence_packet_path="/tmp/packet.json")
-        )
+
+        _write_evidence_packet_output(str(packet_path))
 
         written = output_file.read_text(encoding="utf-8")
-        assert "evidence_packet=/tmp/packet.json\n" in written
-        assert "result=ok\n" in written
+        assert "evidence_packet" in written
+        assert '{"schema_version": "1.5.0"}' in written
 
     def test_absent_packet_omits_the_output(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A workflow must be able to gate on the output being set at all."""
-        from mergecraft.action.entry import _write_outputs
+        """A workflow must be able to gate on the output being set at all.
+
+        Drives the real ``_run_main`` orchestration (not the writer in
+        isolation) since the "no packet" case is ``_run_main`` choosing not
+        to call ``_write_evidence_packet_output`` at all when
+        ``MainResult.evidence_packet_path`` is falsy — that call-site
+        decision is exactly what this test pins.
+        """
+        from mergecraft.cli.gha_cmd import _run_main
         from mergecraft.main import MainResult
 
         output_file = tmp_path / "gh_output"
+        output_file.touch()
         monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
-        _write_outputs(MainResult(success=True, result="ok", evidence_packet_path=None))
+
+        async def _fake_main() -> MainResult:
+            return MainResult(success=True, result="ok", evidence_packet_path=None)
+
+        import mergecraft.main as main_mod
+
+        monkeypatch.setattr(main_mod, "main", _fake_main)
+
+        asyncio.run(_run_main())
 
         assert "evidence_packet" not in output_file.read_text(encoding="utf-8")
 

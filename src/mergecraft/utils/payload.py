@@ -127,7 +127,6 @@ class ActionInputs(BaseModel):
         "shell",
         "status_checks",
         "analyzers",
-        "suggest_eval_add",
         "model_pin",
         mode="before",
     )
@@ -137,6 +136,21 @@ class ActionInputs(BaseModel):
             return None
         if isinstance(value, str):
             return value.lower()
+        return value
+
+    @field_validator("suggest_eval_add", mode="before")
+    @classmethod
+    def _normalize_suggest_eval_add(cls, value: object) -> object:
+        """Map action.yml bool-ish defaults onto ``disabled`` / ``enabled`` (W12.4)."""
+        if value == "" or value is None:
+            return None
+        if isinstance(value, str):
+            low = value.lower().strip()
+            if low in {"false", "0", "no", "off", "disabled"}:
+                return "disabled"
+            if low in {"true", "1", "yes", "on", "enabled"}:
+                return "enabled"
+            return low
         return value
 
 

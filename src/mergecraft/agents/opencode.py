@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import re
@@ -28,12 +30,35 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.tracing import current_tracer
+from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.privilege import wrap_agent_command
+from mergecraft.utils.process_group import (
+    kill_process_group,
+    register_process_group,
+    track_process_group,
+    unregister_process_group,
+    wait_or_kill_process_group,
+)
+from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.secrets import build_agent_env
 
 # Re-exported for tests / callers that import these names from opencode.
 __all_gateway_envs__ = (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV)
+
+
+class ProviderTimeoutError(RuntimeError):
+    """Raised when the opencode provider endpoint times out.
+
+    This is a controlled domain error so callers (``shared.run`` /
+    ``offline_review._run_agent_review``) treat the attempt as a clean failure
+    instead of letting a raw ``httpx.ReadTimeout`` traceback abort the whole
+    review.
+    """
 
 
 def build_custom_provider(model: str | None) -> dict[str, object] | None:
@@ -190,17 +215,20 @@ class _ServerHandle:
         if self._closed:
             return
         self._closed = True
+        pid = self.proc.pid
         if self.proc.poll() is None:
-            self.proc.terminate()
+            kill_process_group(pid)
             try:
                 self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.proc.kill()
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    self.proc.kill()
+        unregister_process_group(pid)
 
 
 def _boot_opencode_server(*, cli: str, env: dict[str, str], cwd: str) -> _ServerHandle:
     proc = subprocess.Popen(
-        [cli, "serve", "--port", "0", "--hostname", "127.0.0.1"],
+        wrap_agent_command([cli, "serve", "--port", "0", "--hostname", "127.0.0.1"]),
         cwd=cwd,
         env=env,
         stdout=subprocess.PIPE,
@@ -228,9 +256,10 @@ def _boot_opencode_server(*, cli: str, env: dict[str, str], cwd: str) -> _Server
             base_url = match.group(0).rstrip("/")
             break
     if not base_url:
-        proc.kill()
+        kill_process_group(proc.pid)
         msg = "opencode serve did not print a listening URL"
         raise RuntimeError(msg)
+    register_process_group(proc.pid)
     return _ServerHandle(base_url=base_url, proc=proc)
 
 
@@ -256,16 +285,28 @@ async def _prompt_session(
     if model:
         payload["model"] = model
     async with httpx.AsyncClient(timeout=600.0) as client:
-        resp = await client.post(
-            f"{base_url}/session/{session_id}/message",
-            json=payload,
-        )
-        if resp.status_code >= 400:
-            # Fallback path for older/newer API shapes
+        # T2 / D8 — narrow instrumentation: wrap clients mergeCraft builds
+        # (the custom OpenAI-compatible provider path) so every outbound
+        # ``send`` emits an ``http.client.request`` span. ``current_tracer``
+        # resolves to the active mergeCraft span's tracer or ``None`` when
+        # tracing is disabled — ``instrument_httpx`` no-ops in that case
+        # without setting the idempotency sentinel so a later activation
+        # is possible.
+        instrument_httpx(client, tracer=current_tracer())
+        try:
             resp = await client.post(
-                f"{base_url}/session/{session_id}/prompt",
+                f"{base_url}/session/{session_id}/message",
                 json=payload,
             )
+            if resp.status_code >= 400:
+                # Fallback path for older/newer API shapes
+                resp = await client.post(
+                    f"{base_url}/session/{session_id}/prompt",
+                    json=payload,
+                )
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as exc:
+            logger.warning("opencode provider request timed out: {}", exc)
+            raise ProviderTimeoutError(f"opencode provider request timed out: {exc}") from exc
         if resp.status_code >= 400:
             return AgentResult(
                 success=False,
@@ -284,12 +325,29 @@ async def _prompt_session(
         if isinstance(info, dict):
             inp = int(info.get("input_tokens") or info.get("input") or 0)
             out = int(info.get("output_tokens") or info.get("output") or 0)
+            # T2 — recognise the OpenAI Responses / Chat Completions
+            # cached-token paths so the Nous / MiniMax passthrough
+            # surfaces its cache_read on the same ``AgentUsage`` field
+            # the Anthropic path uses. Falls back to the explicit cache
+            # fields when a provider surfaces them separately.
+            cache_read = 0
+            for outer_key in ("prompt_tokens_details", "input_tokens_details"):
+                details = info.get(outer_key)
+                if isinstance(details, dict):
+                    cached = details.get("cached_tokens")
+                    if isinstance(cached, (int, float)):
+                        cache_read = int(cached)
+                        break
+            cache_read = cache_read or int(
+                info.get("cache_read_input_tokens") or info.get("cacheReadTokens") or 0
+            )
             cost = info.get("cost") or info.get("costUsd")
             if inp or out or cost:
                 usage = AgentUsage(
                     agent="opencode",
-                    input_tokens=inp,
+                    input_tokens=inp + cache_read,
                     output_tokens=out,
+                    cache_read_tokens=cache_read or None,
                     cost_usd=float(cost) if cost is not None else None,
                 )
                 log_token_table(
@@ -310,12 +368,20 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
 
     model = ctx.resolved_model
     config_json = build_security_config(ctx, model)
-    env = dict(os.environ)
-    env["OPENCODE_CONFIG_CONTENT"] = config_json
-    # Also write a config file for CLIs that prefer files
     config_path = Path(ctx.tmpdir) / "opencode.json"
     config_path.write_text(config_json, encoding="utf-8")
-    env["OPENCODE_CONFIG"] = str(config_path)
+    extras: dict[str, str] = {
+        "OPENCODE_CONFIG_CONTENT": config_json,
+        "OPENCODE_CONFIG": str(config_path),
+    }
+    model_s = (model or "").strip()
+    bedrock_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
+    vertex_id = os.environ.get("VERTEX_MODEL_ID", "").strip()
+    if bedrock_id and model_s == bedrock_id:
+        extras["CLAUDE_CODE_USE_BEDROCK"] = "1"
+    if vertex_id and model_s == vertex_id:
+        extras["CLAUDE_CODE_USE_VERTEX"] = "1"
+    env = build_agent_env("opencode", extras)
 
     # Prefer serve + HTTP when available; fall back to `opencode run`
     handle: _ServerHandle | None = None
@@ -328,6 +394,10 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     assert handle is not None
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
+            # T2 / D8 — see ``_prompt_session`` for the same wrap; the
+            # opencode serve + session bootstrap request goes through this
+            # client, so it must emit ``http.client.request`` spans too.
+            instrument_httpx(client, tracer=current_tracer())
             created = await client.post(
                 f"{handle.base_url}/session",
                 json={"title": "mergecraft"},
@@ -362,7 +432,12 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 model=model_obj,
             )
 
-        result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
+        try:
+            result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
+        except ProviderTimeoutError as exc:
+            # Controlled domain error: surface as a clean failed attempt
+            # rather than letting a raw httpx traceback abort the review.
+            return AgentResult(success=False, error=str(exc))
         return await finalize_agent_result(ctx, result)
     finally:
         handle.close()
@@ -379,7 +454,9 @@ async def _run_cli_fallback(*, cli: str, ctx: AgentRunContext, env: dict[str, st
     # events. We attempt the streaming read loop and fall back to the
     # legacy last-line parse if the events are not granular enough (D12).
     # Run-level spans are emitted through the W4 tracer regardless.
-    return _run_opencode_cli_streaming(
+    # Blocking Popen/wait runs in a worker thread so outer wait_for can preempt.
+    return await asyncio.to_thread(
+        _run_opencode_cli_streaming,
         cmd=cmd,
         ctx=ctx,
         env=env,
@@ -404,35 +481,24 @@ def _run_opencode_cli_streaming(
         consume_stream,
     )
     from mergecraft.tracing.sinks import claim_sink
-    from mergecraft.tracing.tracer import (
-        Tracer,
-        resolve_correlation_from_env,
-        resolve_session_id,
-    )
 
     accumulator = StreamSpanAccumulator(agent_name="opencode")
+    # W4 H7 — the legacy code claimed a sink and built a Tracer but discarded it.
+    # Opencode's stream handler is currently a no-op closure, so the tracer had
+    # no observer to wire into. We keep the resolve + claim path so the sink
+    # is still claimed (preventing the NullSink fallback during this run), but
+    # we no longer construct the unused Tracer. If opencode gains real
+    # stream handlers in the future, wire the Tracer into ``consume_stream``
+    # here.
     try:
-        from mergecraft.config import RepoSettings
+        from mergecraft.tracing.resolve import resolve_active_tracing
 
-        sink = claim_sink(RepoSettings().tracing)
-        if sink is not None:
-            correlation = resolve_correlation_from_env()
-            session_id = resolve_session_id()
-            run_id = str(correlation.get("run_id") or session_id)
-            Tracer(sink=sink, session_id=session_id, run_id=run_id)
+        claim_sink(resolve_active_tracing())
     except Exception as exc:
         logger.debug("opencode stream tracer resolution failed: {}", exc)
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=os.getcwd(),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
+        process = spawn_agent_cli(cmd, env=env)
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
@@ -440,31 +506,35 @@ def _run_opencode_cli_streaming(
     assert process.stderr is not None
 
     stderr_text = ""
+    returncode: int = -1
     try:
-        try:
-            # Opencode events are partial: try streaming, but the
-            # handler is a no-op for unknown shapes (graceful degradation).
-            consume_stream(
-                raw_stream=process.stdout,
-                accumulator=accumulator,
-                handler=lambda _acc, _event: None,
-            )
-            stderr_text = process.stderr.read() or ""
-            returncode = process.wait(
-                timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
-            )
-        except subprocess.TimeoutExpired:
-            process.kill()
-            return AgentResult(success=False, error="opencode run timed out")
+        with track_process_group(process):
+            try:
+                # Opencode events are partial: try streaming, but the
+                # handler is a no-op for unknown shapes (graceful degradation).
+                consume_stream(
+                    raw_stream=process.stdout,
+                    accumulator=accumulator,
+                    handler=lambda _acc, _event: None,
+                )
+                stderr_text = process.stderr.read() or ""
+                returncode = wait_or_kill_process_group(
+                    process,
+                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                )
+            except subprocess.TimeoutExpired:
+                return AgentResult(success=False, error="opencode run timed out")
     finally:
         pass
 
     if returncode != 0:
+        retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
         return AgentResult(
             success=False,
             error=(stderr_text or "opencode failed").strip() or f"opencode exited {returncode}",
+            metadata={"retryable": True} if retryable else {},
         )
     return AgentResult(success=True, output=accumulator.final_output or None)
 
 
-opencode = agent(name="opencode", install=_install, run=_run)
+opencode = agent(name="opencode", install=_install, run=_run, module_file=__file__)

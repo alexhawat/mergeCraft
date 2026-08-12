@@ -1,0 +1,164 @@
+# SPDX-License-Identifier: MIT
+# Action-image E2E gate + compatibility matrix (W11 / #3 / #36 / D6).
+#
+# PR job: build the production image from the PR, docker-run the Action against
+# fixture event payloads with a fake provider CLI shim (no live LLMs), assert
+# structured result + check-run shape, then run the W4 adversarial suite
+# inside the built image (the real containment boundary).
+#
+# Nightly / workflow_dispatch: same security slice, plus a secrets-gated live
+# provider matrix (skipped with an explicit note when secrets are absent).
+name: E2E
+
+on:
+  pull_request:
+    branches: [main, pre-0.0.1]
+  schedule:
+    # Nightly broad + live-provider slice (UTC).
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  E2E_IMAGE: mergecraft:e2e
+  E2E_MOCK_PORT: "8765"
+  E2E_CHECK_RUNS_DIR: docker/e2e/fixtures/check-runs/live
+
+jobs:
+  e2e-pr:
+    name: Action-image E2E (PR / security slice)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build production image (PR artifact)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: ${{ env.E2E_IMAGE }}
+          cache-from: type=gha,scope=mergeCraft-e2e
+          cache-to: type=gha,mode=max,scope=mergeCraft-e2e
+
+      - name: Prepare E2E helpers
+        run: |
+          mkdir -p "${E2E_CHECK_RUNS_DIR}"
+          chmod +x docker/e2e/run_action_e2e.sh \
+            docker/e2e/run_in_image_adversarial.sh \
+            docker/e2e/fake-provider-cli/*
+
+      - name: Start mock GitHub API
+        run: |
+          python3 docker/e2e/mock_github_api.py \
+            --host 0.0.0.0 \
+            --port "${E2E_MOCK_PORT}" \
+            --check-runs-dir "${E2E_CHECK_RUNS_DIR}" \
+            --ready-file /tmp/mock-github-ready &
+          echo "MOCK_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 30); do
+            if [[ -f /tmp/mock-github-ready ]]; then
+              break
+            fi
+            sleep 0.2
+          done
+          test -f /tmp/mock-github-ready
+
+      - name: Action E2E — pull_request fixture
+        env:
+          E2E_GITHUB_API_URL: http://host.docker.internal:${{ env.E2E_MOCK_PORT }}
+        run: |
+          rm -f "${E2E_CHECK_RUNS_DIR}"/*.json
+          docker/e2e/run_action_e2e.sh "${E2E_IMAGE}" pull_request
+
+      - name: Action E2E — pull_request_target fixture
+        env:
+          E2E_GITHUB_API_URL: http://host.docker.internal:${{ env.E2E_MOCK_PORT }}
+        run: |
+          rm -f "${E2E_CHECK_RUNS_DIR}"/*.json
+          docker/e2e/run_action_e2e.sh "${E2E_IMAGE}" pull_request_target
+
+      - name: In-image W4 adversarial suite (shell × push)
+        run: docker/e2e/run_in_image_adversarial.sh "${E2E_IMAGE}"
+
+      - name: Stop mock GitHub API
+        if: always()
+        run: |
+          if [[ -n "${MOCK_PID:-}" ]]; then
+            kill "${MOCK_PID}" 2>/dev/null || true
+          fi
+
+  e2e-nightly:
+    name: Action-image E2E (nightly / broad + live)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build production image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: ${{ env.E2E_IMAGE }}
+          cache-from: type=gha,scope=mergeCraft-e2e
+          cache-to: type=gha,mode=max,scope=mergeCraft-e2e
+
+      - name: Prepare E2E helpers
+        run: |
+          mkdir -p "${E2E_CHECK_RUNS_DIR}"
+          chmod +x docker/e2e/run_action_e2e.sh \
+            docker/e2e/run_in_image_adversarial.sh \
+            docker/e2e/fake-provider-cli/*
+
+      - name: Security slice (fixture + fake CLI)
+        env:
+          E2E_GITHUB_API_URL: http://host.docker.internal:${{ env.E2E_MOCK_PORT }}
+        run: |
+          python3 docker/e2e/mock_github_api.py \
+            --host 0.0.0.0 \
+            --port "${E2E_MOCK_PORT}" \
+            --check-runs-dir "${E2E_CHECK_RUNS_DIR}" \
+            --ready-file /tmp/mock-github-ready &
+          MOCK_PID=$!
+          for _ in $(seq 1 30); do
+            [[ -f /tmp/mock-github-ready ]] && break
+            sleep 0.2
+          done
+          rm -f "${E2E_CHECK_RUNS_DIR}"/*.json
+          docker/e2e/run_action_e2e.sh "${E2E_IMAGE}" pull_request
+          rm -f "${E2E_CHECK_RUNS_DIR}"/*.json
+          docker/e2e/run_action_e2e.sh "${E2E_IMAGE}" pull_request_target
+          docker/e2e/run_in_image_adversarial.sh "${E2E_IMAGE}"
+          kill "${MOCK_PID}" 2>/dev/null || true
+
+      - name: Live-provider matrix (secrets-gated)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          # D6 — live LLMs are scheduled-only and secrets-gated. Documented
+          # skip (not a silent pass) when no provider secret is present.
+          if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" ]]; then
+            echo "skipped: no live credential — nightly live-provider matrix requires ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY"
+            exit 0
+          fi
+          echo "Live-provider matrix: at least one provider secret is present."
+          echo "Broad live cells are operator-expanded against docs/compatibility-matrix.md;"
+          echo "security slice above already proved the shipped image with D6 shims."
+          docker run --rm "${E2E_IMAGE}" --help

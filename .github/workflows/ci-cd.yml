@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Lean post-merge delivery (adapted from sevn; no mergecraft review job).
+# W8 supply chain: build once → SBOM+scan → cosign+attest → promote digests
+# (no second rebuild of :latest / :analyzers). Dependabot owns action SHA bumps.
 name: CI/CD
 
 on:
@@ -8,19 +10,25 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
-permissions:
-  contents: write
-  packages: write
+# Least privilege: no top-level write; each job declares its own permissions.
+permissions: {}
 
 concurrency:
   group: ci-cd-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_SLIM: ghcr.io/alexhawat/mergecraft
+  IMAGE_ANALYZERS: ghcr.io/alexhawat/mergecraft
 
 jobs:
   verify:
     name: Full verify
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
@@ -33,6 +41,8 @@ jobs:
     if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
@@ -45,39 +55,228 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  publish-ghcr:
-    name: Publish GHCR image
+  # W8.3 — build once; push immutable SHA tags only; capture digests for promote.
+  build-images:
+    name: Build GHCR images (once)
     needs: verify
     if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      slim_digest: ${{ steps.build-slim.outputs.digest }}
+      analyzers_digest: ${{ steps.build-analyzers.outputs.digest }}
+      slim_ref: ${{ steps.meta.outputs.slim_ref }}
+      analyzers_ref: ${{ steps.meta.outputs.analyzers_ref }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push slim
+      - name: Image refs
+        id: meta
+        run: |
+          set -euo pipefail
+          echo "slim_ref=${IMAGE_SLIM}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "analyzers_ref=${IMAGE_ANALYZERS}:analyzers-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Build and push slim (SHA tag only)
+        id: build-slim
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile
           push: true
-          tags: |
-            ghcr.io/alexhawat/mergecraft:latest
-            ghcr.io/alexhawat/mergecraft:${{ github.sha }}
+          tags: ${{ env.IMAGE_SLIM }}:${{ github.sha }}
           cache-from: type=gha,scope=mergeCraft-slim
           cache-to: type=gha,mode=max,scope=mergeCraft-slim
-      - name: Build and push analyzers
+      - name: Build and push analyzers (SHA tag only)
+        id: build-analyzers
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile.analyzers
           push: true
-          tags: |
-            ghcr.io/alexhawat/mergecraft:analyzers
-            ghcr.io/alexhawat/mergecraft:analyzers-${{ github.sha }}
+          tags: ${{ env.IMAGE_ANALYZERS }}:analyzers-${{ github.sha }}
           cache-from: type=gha,scope=mergeCraft-analyzers
           cache-to: type=gha,mode=max,scope=mergeCraft-analyzers
+
+  # W8.4 — SBOM (syft) + vulnerability scan (trivy); gate on release branches/tags.
+  sbom-scan:
+    name: SBOM + vulnerability scan
+    needs: build-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve scan gate
+        id: gate
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/heads/release/* || "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "exit_code=1" >> "$GITHUB_OUTPUT"
+            echo "severity=CRITICAL,HIGH" >> "$GITHUB_OUTPUT"
+          else
+            # Advisory on main / pre-0.0.1 — report but do not fail the job.
+            echo "exit_code=0" >> "$GITHUB_OUTPUT"
+            echo "severity=CRITICAL,HIGH" >> "$GITHUB_OUTPUT"
+          fi
+      - name: SBOM slim (syft via anchore/sbom-action)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ needs.build-images.outputs.slim_ref }}
+          format: spdx-json
+          output-file: sbom-slim.spdx.json
+          upload-artifact: false
+      - name: SBOM analyzers (syft via anchore/sbom-action)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ needs.build-images.outputs.analyzers_ref }}
+          format: spdx-json
+          output-file: sbom-analyzers.spdx.json
+          upload-artifact: false
+      - name: Trivy scan slim
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ needs.build-images.outputs.slim_ref }}
+          format: sarif
+          output: trivy-slim.sarif
+          severity: ${{ steps.gate.outputs.severity }}
+          exit-code: ${{ steps.gate.outputs.exit_code }}
+          ignore-unfixed: true
+      - name: Trivy scan analyzers
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ needs.build-images.outputs.analyzers_ref }}
+          format: sarif
+          output: trivy-analyzers.sarif
+          severity: ${{ steps.gate.outputs.severity }}
+          exit-code: ${{ steps.gate.outputs.exit_code }}
+          ignore-unfixed: true
+      - name: Upload SBOM + scan reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: image-scan-reports
+          path: |
+            sbom-slim.spdx.json
+            sbom-analyzers.spdx.json
+            trivy-slim.sarif
+            trivy-analyzers.sarif
+          if-no-files-found: warn
+
+  # W8.5 — cosign keyless sign + build-provenance + SBOM attestation (same digests).
+  sign-attest:
+    name: Sign and attest digests
+    needs: [build-images, sbom-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+      - name: Cosign sign slim
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE_SLIM}@${{ needs.build-images.outputs.slim_digest }}"
+      - name: Cosign sign analyzers
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE_ANALYZERS}@${{ needs.build-images.outputs.analyzers_digest }}"
+      - name: Attest build provenance (slim)
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ${{ env.IMAGE_SLIM }}
+          subject-digest: ${{ needs.build-images.outputs.slim_digest }}
+          push-to-registry: true
+      - name: Attest build provenance (analyzers)
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ${{ env.IMAGE_ANALYZERS }}
+          subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
+          push-to-registry: true
+      - name: Download SBOM + scan reports
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: image-scan-reports
+          path: reports
+      - name: Attest SBOM (slim)
+        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        with:
+          subject-name: ${{ env.IMAGE_SLIM }}
+          subject-digest: ${{ needs.build-images.outputs.slim_digest }}
+          sbom-path: reports/sbom-slim.spdx.json
+          push-to-registry: true
+      - name: Attest SBOM (analyzers)
+        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        with:
+          subject-name: ${{ env.IMAGE_ANALYZERS }}
+          subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
+          sbom-path: reports/sbom-analyzers.spdx.json
+          push-to-registry: true
+
+  # W8.3 — promote mutable tags by retagging the signed digests (no rebuild).
+  promote:
+    name: Promote digests to mutable tags
+    needs: [build-images, sign-attest]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Retag slim digest → :latest
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1'
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE_SLIM}:latest" \
+            "${IMAGE_SLIM}@${{ needs.build-images.outputs.slim_digest }}"
+      - name: Retag analyzers digest → :analyzers
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1'
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE_ANALYZERS}:analyzers" \
+            "${IMAGE_ANALYZERS}@${{ needs.build-images.outputs.analyzers_digest }}"
+      - name: Record digests for Craft SHA→version retag
+        run: |
+          set -euo pipefail
+          cat <<EOF
+          slim digest:       ${{ needs.build-images.outputs.slim_digest }}
+          analyzers digest:  ${{ needs.build-images.outputs.analyzers_digest }}
+          slim SHA tag:      ${{ needs.build-images.outputs.slim_ref }}
+          analyzers SHA tag: ${{ needs.build-images.outputs.analyzers_ref }}
+
+          Craft publish (.craft.yml) retags {{{revision}}} → {{{version}}} /
+          :latest / :analyzers-* from these same digests — no rebuild.
+          EOF

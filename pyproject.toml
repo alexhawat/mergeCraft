@@ -201,15 +201,24 @@ xfail_strict = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
-    "integration: opt-in tests that need network or credentials",
+    "integration: opt-in tests that need network, credentials, or real binaries",
+    "live: real-provider / live-credential integration (scheduled + release precondition)",
 ]
 
 [tool.coverage.run]
 source = ["mergecraft"]
 branch = true
+omit = ["*/tests/*"]
 
 [tool.coverage.report]
-fail_under = 0
+fail_under = 65
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.bandit]
 exclude_dirs = ["tests", "scripts"]

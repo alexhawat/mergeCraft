@@ -12,7 +12,8 @@ event. W3.7 re-asserts that contract at the **emit sites**:
    embedded in a prompt fragment) is redacted before fan-out, even when
    the deny-key list does not name the attribute.
 3. A deny-key attribute (``api_key``, ``secret``, ``authorization``, …)
-   has its value replaced with ``[REDACTED]``.
+   has its value replaced with the canonical ``<redacted>`` sentinel
+   (W4 / H4 — was ``[REDACTED]`` before the three-sentinel consolidation).
 
 These tests drive the real ``run_with_model_chain`` and assert that the
 ``MemorySink`` (captured through ``sink_factory``) sees only redacted

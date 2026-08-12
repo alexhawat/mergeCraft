@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# D6 fake provider CLI shim — emits canned Claude Code stream-json.
+# Used by the Action-image E2E gate so PR CI never calls a live LLM.
+set -euo pipefail
+# Swallow argv (mcp-config, model, prompt, …); only the NDJSON result matters.
+cat <<'EOF'
+{"type":"message_start","message":{"id":"msg_e2e","role":"assistant","model":"claude-sonnet-5","usage":{"input_tokens":12,"output_tokens":0}}}
+{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"E2E review complete: no findings."}}
+{"type":"content_block_stop","index":0}
+{"type":"message_delta","delta":{"stop_reason":"end_turn","usage":{"output_tokens":8}}}
+{"type":"message_stop"}
+{"type":"result","result":"E2E review complete: no findings.","usage":{"input_tokens":12,"output_tokens":8},"total_cost_usd":0.0}
+EOF
+exit 0

@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import random
-import signal
 import socket
 from typing import TYPE_CHECKING, Any
 
@@ -68,7 +67,14 @@ from mergecraft.mcp.verification import (
     verify_agent_findings_tool,
 )
 from mergecraft.mcp.xrepo import checkout_repo_tool, list_repos_tool
+from mergecraft.tracing._tool_attrs import (
+    emit_verb_subevent,
+    enrich_tool_request,
+    enrich_tool_response,
+)
+from mergecraft.tracing.tracer import get_tracer_from_settings
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.process_group import kill_process_groups
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -202,6 +208,18 @@ def _is_notification(message: Any) -> bool:
     return isinstance(message, dict) and "id" not in message
 
 
+def _span_tool_call_id() -> str:
+    """Generate a stable id for a ``tool.call`` span's ``gen_ai.tool.call.id``.
+
+    The MCP server dispatches each ``tools/call`` synchronously; a fresh uuid
+    gives Logfire's GenAI dashboard a unique correlation id without leaking
+    any request content.
+    """
+    import uuid
+
+    return uuid.uuid4().hex
+
+
 def _record_trajectory(
     ctx: ToolContext | None,
     name: str,
@@ -289,21 +307,35 @@ def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> Fas
                     "error": {"code": -32601, "message": f"Unknown tool: {name}"},
                 }
             from mergecraft.config.settings import RepoSettings
-            from mergecraft.tracing.tracer import get_tracer_from_settings
 
             tracer = get_tracer_from_settings(RepoSettings())
             call_attrs: dict[str, Any] = {
                 "tool.name": name,
                 "tool.server": MERGECRAFT_MCP_NAME,
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.name": name,
+                "gen_ai.tool.call.id": _span_tool_call_id(),
             }
             with tracer.start_span("tool.call", attrs_source=lambda: dict(call_attrs)) as _span:
+                enrich_tool_request(_span, arguments=arguments)
                 try:
                     result = await tool.execute(arguments)
                 except Exception as exc:
                     _span.set_status("error", str(exc))
+                    enrich_tool_response(_span, output=None, error=exc)
                     _record_trajectory(tool_ctx, name, arguments, ok=False, error=str(exc))
                     raise
+                enrich_tool_response(_span, output=result)
                 _record_trajectory(tool_ctx, name, arguments, ok=True, result=result)
+                # T1 / D5 — known-verb tools also emit a verb-specific child
+                # span (tool.browse for ``browser``, etc.) for finer-grained
+                # Logfire grouping. Fire-and-forget; no new bookkeeping.
+                emit_verb_subevent(
+                    tracer,
+                    parent_span_id=_span.span_id,
+                    tool_name=name,
+                    attrs=call_attrs,
+                )
                 return {
                     "jsonrpc": "2.0",
                     "id": req_id,
@@ -356,17 +388,9 @@ async def _kill_background_processes(ctx: ToolContext) -> None:
     procs = ctx.tool_state.background_processes
     if not procs:
         return
-    for proc in list(procs.values()):
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except ProcessLookupError, PermissionError, OSError:
-            pass
-    await asyncio.sleep(0.2)
-    for proc in list(procs.values()):
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError, PermissionError, OSError:
-            pass
+    pids = {proc.pid for proc in list(procs.values()) if isinstance(proc.pid, int)}
+    # Off-loop: batch TERM -> one grace -> KILL (avoids N-times sleep on the event loop).
+    await asyncio.to_thread(kill_process_groups, pids)
     procs.clear()
 
 

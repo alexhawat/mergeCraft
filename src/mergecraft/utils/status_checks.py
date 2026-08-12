@@ -15,6 +15,14 @@ Wire-shape semantics:
   narrative cannot outvote a blocker.
 - ``neutral`` — run crashed / timed out / produced no findings / untrusted tier;
   the hardened enforce step treats this as blocking (#75, D13).
+
+D3/W5.2 — the ``mergecraft`` completion check's conclusion is driven by the
+caller's optional ``conclusion`` (the ``RunOutcome`` -> ``CompletionConclusion``
+mapping in ``mergecraft.run_outcome.RUN_OUTCOME_CONCLUSION``) rather than the
+bare ``run_succeeded`` boolean, so a timeout can report GitHub's literal
+``timed_out`` conclusion instead of being flattened to ``failure``. Callers
+that only have the boolean (pre-W5 call sites, tests) keep working unchanged —
+``conclusion`` defaults to the old ``success``/``failure`` split.
 """
 
 from __future__ import annotations
@@ -22,6 +30,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
+
+from mergecraft.run_outcome import CompletionConclusion
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -65,7 +75,7 @@ async def _create_check_run(
     *,
     name: str,
     head_sha: str,
-    conclusion: Conclusion,
+    conclusion: CompletionConclusion,
     title: str,
     summary: str,
 ) -> None:
@@ -94,8 +104,18 @@ async def report_status_checks(
     *,
     run_succeeded: bool,
     failure_reason: str | None = None,
+    conclusion: CompletionConclusion | None = None,
 ) -> None:
-    """Post opt-in status checks. Best-effort; never raises into the run outcome."""
+    """Post opt-in status checks. Best-effort; never raises into the run outcome.
+
+    ``conclusion`` (D3/W5.2) overrides the ``mergecraft`` completion check's
+    GitHub conclusion — pass ``mergecraft.run_outcome.RUN_OUTCOME_CONCLUSION
+    [outcome]`` once a caller has a ``RunOutcome`` rather than a bare bool.
+    Omitted, it falls back to the pre-W5 ``success``/``failure`` split driven
+    by ``run_succeeded`` alone. The ``mergecraft-approval`` check is
+    unaffected either way — it is always computed from ``run_succeeded`` via
+    ``decide_approval`` (D12-D14).
+    """
     payload = ctx.payload
     status_enabled = getattr(payload, "status_checks", False) or (
         isinstance(getattr(payload, "extra", None), dict)
@@ -121,12 +141,15 @@ async def report_status_checks(
     from mergecraft.mcp.tool_state import primary_repo_state
 
     completion_sha = primary_repo_state(ctx.tool_state).checkout_sha or head_sha
+    completion_conclusion: CompletionConclusion = conclusion or (
+        "success" if run_succeeded else "failure"
+    )
     try:
         await _create_check_run(
             ctx,
             name=COMPLETION_CHECK,
             head_sha=completion_sha,
-            conclusion="success" if run_succeeded else "failure",
+            conclusion=completion_conclusion,
             title="mergeCraft run completed" if run_succeeded else "mergeCraft run failed",
             summary=(
                 "The mergeCraft run finished successfully."
@@ -204,4 +227,10 @@ async def report_status_checks(
         logger.debug("status checks: {} post failed: {}", APPROVAL_CHECK, err)
 
 
-__all__ = ["APPROVAL_CHECK", "COMPLETION_CHECK", "report_status_checks"]
+__all__ = [
+    "APPROVAL_CHECK",
+    "COMPLETION_CHECK",
+    "CompletionConclusion",
+    "Conclusion",
+    "report_status_checks",
+]

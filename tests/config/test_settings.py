@@ -22,7 +22,7 @@ def test_default_settings_match_upstream() -> None:
     assert settings.model is None
     assert settings.modes == []
     assert settings.setup_script is None
-    assert settings.post_checkout_script is None
+    assert not hasattr(settings, "post_checkout_script")
     assert settings.prepush_script is None
     assert settings.stop_script is None
     assert settings.push == "restricted"

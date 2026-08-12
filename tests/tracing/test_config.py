@@ -8,11 +8,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_tracing_block_parses_and_defaults_disabled(tmp_path: Path) -> None:
+def test_tracing_block_parses_and_defaults_unset(tmp_path: Path) -> None:
+    """Unset ``tracing.enabled`` is ``None`` (defer); YAML ``enabled: true`` still loads."""
     from mergecraft.config import RepoSettings, load_repo_settings
 
     default_settings = RepoSettings.model_validate({})
-    assert default_settings.tracing.enabled is False
+    assert default_settings.tracing.enabled is None
 
     config = tmp_path / "config.yaml"
     config.write_text(

@@ -24,6 +24,7 @@ from mergecraft.tracing.sinks import (
     sink_factory,
 )
 from mergecraft.tracing.tracer import (
+    _ACTIVE_SPAN,
     NullSpan,
     NullTracer,
     Span,
@@ -32,6 +33,23 @@ from mergecraft.tracing.tracer import (
     resolve_correlation_from_env,
     resolve_session_id,
 )
+
+
+def current_tracer() -> Tracer | NullTracer | None:
+    """Return the tracer that owns the currently-active mergeCraft ``Span``.
+
+    Used by narrow instrumentation sites (``instrument_httpx`` consumers,
+    custom provider wires) when the caller has not been handed a tracer
+    explicitly but is known to be invoked under a traced span. Returns
+    ``None`` when tracing is disabled or no span is active — the caller
+    must treat that as a no-op rather than falling back to a fresh tracer
+    (a fresh tracer would orphan the new span from the run's trace tree).
+    """
+    active = _ACTIVE_SPAN.get()
+    if isinstance(active, Span):
+        return active.tracer
+    return None
+
 
 __all__ = [
     "DENY_KEYS",
@@ -48,6 +66,7 @@ __all__ = [
     "TraceEvent",
     "Tracer",
     "cap_event_attrs",
+    "current_tracer",
     "get_tracer_from_settings",
     "read_jsonl_events",
     "redact_attrs",

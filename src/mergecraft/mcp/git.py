@@ -94,17 +94,91 @@ def _git_env(token: str) -> dict[str, str]:
     return env
 
 
+# Git global options that may precede the subcommand. `-C`/`-c` take a
+# separate argument; the `--git-dir`/`--work-tree`/`--namespace` family may
+# be spelled as `--flag value` or `--flag=value`.
+_GLOBAL_OPTS = ("-C", "-c", "--git-dir", "--work-tree", "--namespace")
+_GLOBAL_OPT_RE = re.compile(r"^--(?:git-dir|work-tree|namespace)(?:=.*)?$")
+
+# Tokens that take a separate value argument rather than an inline `=value`.
+_GLOBAL_OPT_TAKES_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace")
+
+
+def _extract_global_opts(
+    cmd_tokens: list[str], args: list[str]
+) -> tuple[str, list[str], list[str]]:
+    """Pull global git options out of command tokens + args, placing them first.
+
+    git requires global options (``-C``/``-c``/``--git-dir``/``--work-tree``/
+    ``--namespace``) before the subcommand, but the reviewing agent may emit
+    them anywhere (e.g. ``command="status"`` with ``args=["-C", dir]`` or
+    ``command="git -C dir status"``). Extract them regardless of position,
+    collect them into ``global_opts`` (flag plus its value when separate), and
+    return the real subcommand plus the remaining positional args. The
+    subcommand is validated separately so these options are forwarded rather
+    than rejected as an "invalid subcommand".
+    """
+    tokens: list[str] = list(cmd_tokens)
+    tokens.extend(args)
+
+    global_opts: list[str] = []
+    rest: list[str] = []
+    subcommand = ""
+    idx = 0
+    while idx < len(tokens):
+        tok = tokens[idx]
+        is_global = tok in _GLOBAL_OPTS or _GLOBAL_OPT_RE.fullmatch(tok) is not None
+        if not is_global:
+            if not subcommand:
+                subcommand = tok
+            else:
+                rest.append(tok)
+            idx += 1
+            continue
+        global_opts.append(tok)
+        inline_value = "=" in tok
+        if not inline_value and idx + 1 < len(tokens):
+            global_opts.append(tokens[idx + 1])
+            idx += 2
+        else:
+            idx += 1
+
+    return subcommand, rest, global_opts
+
+
 def git_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        command = str(params["command"])
+        command = str(params["command"]).strip()
         args = list(params.get("args") or [])
-        if not _SUBCOMMAND_RE.fullmatch(command):
+        # Deliberate tolerance for agent callers: the reviewing agent is often
+        # trained on `git <subcommand>` examples, so it may pass the redundant
+        # `git ` prefix in `command` or repeat the subcommand as args[0]. Normalize
+        # both instead of erroring, then validate the cleaned subcommand.
+        had_git_prefix = command.lower().startswith("git ") or command.lower() == "git"
+        if command.lower() == "git":
+            command = ""
+        elif command.lower().startswith("git "):
+            command = command[len("git ") :].strip()
+        # Only a command that arrived with a `git ` prefix (a full git
+        # invocation string, e.g. `git -C /abs status`) is tokenized for
+        # global-option extraction. A bare non-prefix multi-token command like
+        # `rm -rf` must still be rejected as an invalid subcommand.
+        cmd_tokens = command.split() if had_git_prefix and command else [command] if command else []
+        # Pull any global git options (e.g. `-C <dir>`, `-c key=val`) out of
+        # command/args and forward them before the subcommand, rather than
+        # treating them as the subcommand or rejecting them as an
+        # "invalid subcommand".
+        subcommand, rest_args, global_opts = _extract_global_opts(cmd_tokens, args)
+        command = subcommand
+        args = rest_args
+        if command and args and args[0].lower() == command.lower():
+            # Agent redundantly repeated the subcommand as the first arg; honor
+            # the call rather than rejecting it.
+            args.pop(0)
+        if not command or not _SUBCOMMAND_RE.fullmatch(command):
             msg = f"invalid git subcommand: {command!r}"
             raise ValueError(msg)
         cwd = primary_repo_state(ctx.tool_state).dir
-        if args and args[0].lower() == command.lower():
-            msg = f"git {command}: '{args[0]}' duplicates the subcommand — drop args[0]"
-            raise ValueError(msg)
         redirect = _AUTH_REQUIRED.get(command)
         if redirect:
             msg = f"git {command} is not available through this tool — {redirect}"
@@ -117,7 +191,7 @@ def git_tool(ctx: ToolContext):
                 if any(arg == flag or arg.startswith(f"{flag}=") for flag in _NOSHELL_BLOCKED_ARGS):
                     msg = f"Blocked: '{arg}' flag can execute arbitrary code."
                     raise RuntimeError(msg)
-        output = _run_git([command, *args], cwd=cwd)
+        output = _run_git([*global_opts, command, *args], cwd=cwd)
         if len(output) > 50_000:
             temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
             path = str(Path(temp) / f"git-{command}-{uuid.uuid4().hex[:8]}.txt")
@@ -182,24 +256,44 @@ def git_fetch_tool(ctx: ToolContext):
     )
 
 
+def _require_push_allowed(
+    ctx: ToolContext,
+    *,
+    branch: str | None,
+    action: str,
+) -> None:
+    """Enforce ``push`` disabled / restricted-default-branch policy (W2 / Final)."""
+    if ctx.payload.push == "disabled":
+        msg = "push is disabled for this run"
+        raise RuntimeError(msg)
+    state = primary_repo_state(ctx.tool_state)
+    if (
+        ctx.payload.push == "restricted"
+        and branch
+        and state.default_branch
+        and branch == state.default_branch
+    ):
+        verb = {
+            "push": "push to",
+            "delete": "delete",
+            "update": "update",
+            "tag": "push tags affecting",
+        }.get(action, "mutate")
+        msg = (
+            f"Push blocked: cannot {verb} default branch "
+            f"'{state.default_branch}' in restricted mode"
+        )
+        raise RuntimeError(msg)
+
+
 def push_branch_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        if ctx.payload.push == "disabled":
-            msg = "push is disabled for this run"
-            raise RuntimeError(msg)
         cwd = primary_repo_state(ctx.tool_state).dir
         branch = params.get("branchName")
         if not branch:
             branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()
         reject_special_ref(str(branch), "branch")
-        state = primary_repo_state(ctx.tool_state)
-        if (
-            ctx.payload.push == "restricted"
-            and state.default_branch
-            and branch == state.default_branch
-        ):
-            msg = f"Push blocked: cannot push to default branch '{state.default_branch}' in restricted mode"
-            raise RuntimeError(msg)
+        _require_push_allowed(ctx, branch=str(branch), action="push")
         force = bool(params.get("force", False))
         args = ["push", "origin", str(branch)]
         if force:
@@ -227,9 +321,7 @@ def push_branch_tool(ctx: ToolContext):
 
 def push_tags_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        if ctx.payload.push == "disabled":
-            msg = "push is disabled for this run"
-            raise RuntimeError(msg)
+        _require_push_allowed(ctx, branch=None, action="tag")
         cwd = primary_repo_state(ctx.tool_state).dir
         tags = list(params.get("tags") or [])
         if not tags:
@@ -269,6 +361,7 @@ def delete_branch_tool(ctx: ToolContext):
         cwd = primary_repo_state(ctx.tool_state).dir
         remote = bool(params.get("remote", False))
         if remote:
+            _require_push_allowed(ctx, branch=branch, action="delete")
             output = _run_git(
                 ["push", "origin", "--delete", branch],
                 cwd=cwd,
@@ -302,8 +395,8 @@ def commit_changes_tool(ctx: ToolContext):
         message = str(params["message"])
         cwd = primary_repo_state(ctx.tool_state).dir
         branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()
-        # Stage everything then create a signed commit via API when possible;
-        # fall back to local commit + note for unsigned environments.
+        # Local commit is always allowed; push policy gates only the remote ref
+        # update (W4.2 — same local-vs-remote split as ``delete_branch``).
         status = _run_git(["status", "--porcelain"], cwd=cwd)
         if not status.strip():
             return {"success": True, "skipped": True, "reason": "nothing to commit"}
@@ -311,6 +404,17 @@ def commit_changes_tool(ctx: ToolContext):
         # Local commit first so tree is consistent; API signing can replace later.
         _run_git(["-c", "core.hooksPath=/dev/null", "commit", "-m", message], cwd=cwd)
         sha = _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
+        try:
+            _require_push_allowed(ctx, branch=branch, action="update")
+        except RuntimeError as err:
+            logger.info("API ref update skipped (push policy): {}", err)
+            return {
+                "success": True,
+                "sha": sha,
+                "branch": branch,
+                "message": message,
+                "pushed": False,
+            }
         # Best-effort: update remote ref via API for Verified commits.
         try:
             await ctx.github.patch(

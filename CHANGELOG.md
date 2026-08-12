@@ -7,8 +7,156 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Trust tier is derived before any repo-controlled git setup or `setupScript`;
+  untrusted events skip operator scripts instead of running them first
+- Agent CLI subprocesses receive an explicit credential allowlist — no ambient
+  `GIT_ASKPASS`, `GITHUB_TOKEN`/`GH_TOKEN`, or non-active provider keys; git
+  auth is brokered per MCP invocation
+- Containment: `safe.directory` is scoped (no `*`), git hooks stay off unless
+  `shell: enabled`, working directories must stay inside registered workspace
+  roots, and agent CLIs drop to the unprivileged `mergecraft` user
+- Askpass helpers are written then immediately shredded after git setup
+  (auth is brokered via MCP `http.extraHeader`, never ambient `GIT_ASKPASS`);
+  runner-temp wipe only removes mergeCraft-registered paths
+
+### Added
+
+- `feat(tracing): enrich tool.call attrs to carry invoke + complete + verb sub-event info` —
+  every `tool.call` span carries the request/response byte counts, `exit_code`,
+  error class/message, and input-key list. Known-verb tools (`browser`,
+  `search`, `read_file`, `write_file`, `run_code`, `load_tool`) also emit a
+  verb-specific child span (`tool.browse`, `tool.search`, `tool.read`,
+  `tool.write`, `tool.run_code`, `tool.load_tool`) for finer-grained Logfire
+  grouping. The MCP `tools/call` handler now stamps `tool.arguments` /
+  `tool.argument_count` / `tool.argument_bytes` on the open side and
+  `tool.exit_code` / `tool.result_kind` / `tool.result_bytes` on close
+  (success path); failures additionally carry `tool.error_class` /
+  `tool.error_message` (redacted) and keep `gen_ai.tool.output` set so the
+  GenAI dashboard sees the row. The three driver event handlers
+  (`agents/claude.py` `_claude_stream_event_handler`,
+  `agents/codex.py` `_codex_stream_event_handler`,
+  `agents/gemini.py` `_gemini_stream_event_handler`) apply the same
+  enrichment on the open/close sites they already emit from. New
+  `src/mergecraft/agents/_tool_attrs.py` ships `KNOWN_VERB_TOOLS`,
+  `enrich_tool_call_attrs`, `emit_verb_subevent`, and `_classify_tool_result`
+  so all three drivers + the MCP server share one source of truth. The
+  `enrich_tool_call_attrs` helper landed in T1 as a single combined helper;
+  W4 split it into the open-side `enrich_tool_request` and close-side
+  `enrich_tool_response` (see the W4 `### Changed` entry below). New
+  `mergecraft.tracing.redaction.redact_tool_payload(payload)` extends the
+  existing D7 redaction boundary: stringifies non-str values via
+  `json.dumps(default=str)`, caps at `TRACE_ATTRS_JSON_MAX_BYTES` (returning
+  `"<truncated>"` on overflow), and pipes the result through `redact_secrets`
+  so embedded tokens (`ghp_…` / `sk-…` / bearer headers) cannot escape onto
+  the span. The local `_truncate_tool_payload` copies in `claude.py` /
+  `codex.py` / `gemini.py` are folded into the shared helper. The 64 KiB cap
+  on `TraceEvent.attrs` still applies — `tool.arguments` is stored as a
+  string so a 100 KB value collapses the row to `{"truncated": True}`
+  instead of blowing past the JSONL ceiling. `docs/TRACING.md` gains a
+  "Tool call attributes" section with the full attribute table, the verb
+  sub-event list, and the cap + redaction behaviour. Tests: the 11-case
+  RED suite in `tests/tracing/test_tool_call_attrs.py` (10 pass + 1 xfail
+  passing through — the formerly xfail `test_known_verb_tool_emits_verb_sub_event`
+  now passes deterministically; the `strict=False` xfail marker is removed
+  by `xfail-reconciliation` once the next wave lands the xfail cleanup)
+- Six-value run outcome taxonomy (`passed` / `failed` / `inconclusive` /
+  `infra_error` / `timed_out` / `configuration_error`) drives check conclusions
+  and Action `result` JSON, including a stable `error.code` on failure paths
+- Action `evidence_packet` output is emitted on the live `mergecraft gha` path
+  (packet JSON via the multiline heredoc helper)
+- PR CI builds the production Action image and runs it against fixture
+  `pull_request` / `pull_request_target` payloads with a fake provider CLI
+  shim (no live LLMs); the adversarial `shell × push` suite also runs
+  in-image, and `docs/compatibility-matrix.md` defines the supported events ×
+  agents × providers × shell × push × arch matrix with a secrets-gated nightly
+  job
+- Release pipeline builds each image once, attaches SBOM + vulnerability scan
+  reports, cosign-signs and attests the digests, then promotes mutable tags to
+  those same digests (no second rebuild)
+- Operators can refuse model-chain fallback with `allowFallback: false` in
+  `.mergecraft/config.yaml`; an unavailable primary fails closed as
+  `configuration_error` instead of silently reviewing under a backup
+- Every merge evidence packet records requested vs executed model, provider,
+  and fallback index/occurrence so operators can prove which reviewer model
+  actually ran
+- Integration gate in PR CI (`make test-integration`, coverage floors,
+  `npm audit` on agent CLIs, actionlint/zizmor) plus a secrets-gated live
+  integration job as a release precondition
+
+### Changed
+
+- Tracing: W6 — `_open_provider_llm_pair` / `_close_provider_llm_pair` now
+  wrap the post-`provider_span.__enter__()` body in a `try/except` so a
+  raised inner `start_span` (or `llm_span.__enter__`) closes the provider
+  span and pops its active-span frame before the exception propagates.
+  The three driver event handlers (`claude` / `codex` / `gemini`) no
+  longer re-stamp `model.id` on the inner llm span — the helper is the
+  single source of truth and the provider span is the canonical home.
+- Tracing: tool-call attribute helpers moved from `agents/_tool_attrs.py` to
+  `tracing/_tool_attrs.py` so the MCP package no longer reaches into agents
+  (W4 H3); the single `enrich_tool_call_attrs` helper split into the open-
+  side `enrich_tool_request` and the close-side `enrich_tool_response`
+  (W4 M1 — each call site is now one obvious line and the codex double-set
+  bug is fixed).
+- Tracing: three different redacted sentinels (`[REDACTED]`, `<redacted>`,
+  masked lines) collapsed to the single canonical `REDACTED = "<redacted>"`
+  literal in `tracing/redaction.py` (W4 H4).
+- Tracing: `tracing/tracer.py` gained `active_span_for` (W4 M4) and the
+  `Span.close()` method (W4 M6); new `provider_llm_pair` context manager
+  pairs a `provider.call` parent with its `llm.call` child on a shared
+  `parent_span_id` (W4 H1) — the three driver event handlers now store one
+  `ProviderLLMPair` per attempt instead of two independent span dicts
+  (W5 H1, M2).
+- Tracing: `tracing/http.py` short-circuits to a true no-op when the caller
+  passes `None` or a `NullTracer` (W4 H6).
+- Tracing: `agents/opencode.py` no longer constructs a `Tracer` whose result
+  was discarded (W4 H7).
+- Docker Action images pin base layers, `uv`, Node, `gh`, and agent CLIs by
+  digest or lockfile so rebuilds are reproducible and Dependabot can bump
+  every pinned artifact
+- Security and runtime config models (`RepoSettings`, `GatesSettings`,
+  `AnalyzersSettings`, `TracingSettings`) now reject unknown keys
+  (`extra="forbid"`) instead of silently ignoring typos
+- Unparseable Action `timeout` input fails closed as `configuration_error`
+  (keep `--notimeout` to disable); dependency-install failure maps the run to
+  `inconclusive` rather than a silent continue
+- Tracing `enabled` is tri-state (`true` / `false` / unset); Action
+  `tracing` input no longer collapses unset to false, and is wired into the
+  live Action path (input > env > YAML > default)
+- GitHub REST and Cursor Cloud HTTP clients use bounded exponential backoff
+  with jitter for retryable reads (429/5xx/transport); mutations are never
+  retried blindly
+- Opt-in structured JSON logs (`MERGECRAFT_LOG_FORMAT=json`) bind
+  `run_id` / repo / PR / phase for operator debugging alongside opt-in tracing
+- Craft reusable workflows are SHA-pinned; release and publish jobs use
+  least-privilege `permissions` (no blanket `secrets: inherit`)
+
 ### Fixed
 
+- Pydantic config `ValidationError` (unknown keys / bad enums) maps to
+  `configuration_error` instead of `infra_error` on the live Action path
+- Mid-run `wipe_runner_leak_surface` no longer deletes the active
+  `MERGECRAFT_TEMP_DIR`, which previously broke askpass creation inside the
+  Docker Action (`setup_git` → missing `credentials/` parent)
+- Agent CLI subprocesses now head their own process group
+  (`start_new_session=True`); timeout/cancel sends TERM → grace → KILL to the
+  whole group so grandchild processes cannot outlive the Action run
+- `has_gateway_credentials` no longer false-positives for unrelated gateway
+  presets. A Batch C (#34 / PR #126) addition let an indexed custom-provider
+  pair (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`) or the singleton
+  pair make `has_gateway_credentials("minimax")` / `"nous"` / `"tokenhub"` all
+  return `True` regardless of whether that preset's own env vars were set,
+  partly undercutting the minimax fail-loud guarantee. The `resolve_gateway_endpoints()`
+  short-circuit was removed from `has_gateway_credentials` so a named preset
+  only reports credentials when its own env vars are set; the singleton is still
+  honoured for minimax via `MINIMAX_API_KEY_ENV == CUSTOM_PROVIDER_API_KEY_ENV`,
+  and the D4 `NOUS_API_KEY` back-compat alias for nous is preserved. Surfaced by
+  the Thermos review (Blocker #1). Regression tests:
+  `tests/agents/test_openai_compatible_gateways.py::test_indexed_pair_does_not_grant_minimax_credentials`,
+  `::test_singleton_still_grants_minimax_credentials`,
+  `::test_nous_back_compat_alias_still_grants_nous_credentials`
 - `_validate_logfire_token` now distinguishes Logfire **write tokens** from
   API keys and probes the right endpoint. Write tokens (`pylf_v{N}_{us|eu}_…`
   — the regional, base64-payload credentials the Logfire SDK accepts for
@@ -27,7 +175,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tokens (`[A-Za-z0-9_-]+`) and project labels (`[A-Za-z0-9_-/]+`) are safe
   unquoted, so `_write_env_value` now calls `set_key(..., quote_mode="never")`.
   Test: `test_auth_logfire_writes_token_unquoted`
-
 - `mergecraft tracing logfire enable` now resolves the token + project via the
   same precedence layer used by every other mergecraft config command:
   **flag > env > prompt**, applied independently per key. With neither flag on
@@ -42,9 +189,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test_tracing_logfire_enable_flag_overrides_env_token`,
   `test_tracing_logfire_enable_prompts_only_missing_project_when_token_in_env`,
   `test_tracing_logfire_enable_validates_env_token_and_rejects_expired`
-
-### Fixed (PR #127 baseline)
-
 - `mergecraft config tracing` now reports `enabled: true` immediately after
   `mergecraft auth logfire` (or `tracing logfire enable`) writes to `.env`.
   Root cause: the CLI's `main()` did not load `.env` into `os.environ`, so the
@@ -71,6 +215,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   brackets literally. The runtime warning for a missing `[tracing]` extra uses
   `console.print(..., markup=False)` to keep the install command verbatim.
   Test: `test_auth_logfire_help_does_not_emit_unbalanced_backticks`
+- Bump `aquasecurity/trivy-action` from `v0.33.1` to `v0.36.0` (SHA
+  `ed142fd0`). The pinned `v0.33.1` defaults to Trivy `v0.65.0`, whose
+  release tag was deleted from `aquasecurity/trivy`; the action's
+  install script resolves the version from the GitHub API (success) then
+  downloads the asset (HTTP 404), failing the `SBOM + vulnerability scan`
+  job deterministically on every `pre-0.0.1` push since the T1-reconcile
+  commit. `v0.36.0` defaults to Trivy `v0.70.0`, which is still
+  published. Two-line change to `.github/workflows/ci-cd.yml`.
+
+### Added
+
+- `feat(tracing): one trace_id per run + OTel context bridge` — every span
+  emitted by a single `mergecraft diff-review` run shares one Logfire trace;
+  the OTel context is propagated so any nested OTel auto-instrumented
+  operation inherits the same trace. `TraceEvent.trace_id` is the new
+  per-run Logfire/OTel trace identifier (resolved once per process via
+  `resolve_trace_id()` in `src/mergecraft/tracing/tracer.py` with the env
+  precedence `MERGECRAFT_TRACE_ID` → `MERGECRAFT_TRACE_SESSION_ID` →
+  `GITHUB_RUN_ID` → `uuid.uuid4().hex`); `session_id` stays the per-process
+  correlation id and `turn_id` stays the per-span uuid4. `OTLPSink.write`
+  rewrites the OTel `trace_id` on the produced span so Logfire groups by it
+  automatically (the `mergecraft.trace_id` attribute is the structural
+  fallback). The new `src/mergecraft/tracing/otel_bridge.py` ships
+  `attach_trace_context(span)` — a context manager that bridges the OTel
+  context so nested OTel auto-instrumented calls (e.g. an `httpx` call
+  inside a tool) inherit the run's trace without the caller having to know
+  about mergeCraft's tracer. `agents/_stream_consumer.py::consume_stream`
+  wraps the per-event handler in `attach_trace_context` when an active
+  span is present. `docs/TRACING.md` gains a "One trace per run" section
+  describing the precedence and the Logfire-grouping contract. Tests:
+  the 11-case RED suite in `tests/tracing/test_trace_id_bridge.py` (10
+  green + 1 xfail passing through)
+- `feat(tracing): provider.call parent + outbound HTTP spans with URL redaction` —
+  each upstream API request becomes a `provider.call` row with the transport family;
+  each outbound `httpx` call becomes a `http.client.request` row with inline URL
+  redaction (telegram bot tokens, basic auth, query params, bearer headers).
+  `agents/{claude,codex,gemini}.py::_stream_event_handler` now opens a `provider.call`
+  span on the upstream's start event (`message_start` / `thread.started` / `init`),
+  attaches `provider.id` and `provider.transport_family` (`anthropic` /
+  `responses_api` / `chat_completions`), and closes the span in LIFO order with the
+  existing `llm.call` span on the matching terminal event. The `llm.call` span
+  becomes a child of `provider.call`, so the Logfire tree shows one
+  `provider.call → llm.call` pair per upstream request. New
+  `src/mergecraft/tracing/http.py` ships `instrument_httpx(client, *, tracer=None)`
+  — a narrow, idempotent wrapper around the `httpx` `Client.send` /
+  `AsyncClient.send` site in `agents/opencode.py` (D8 — only the clients
+  mergeCraft constructs; no global monkey patch). The wrapper emits an
+  `http.client.request` span with `http.method`, `http.url` (always
+  `redact_url`-scrubbed), `http.status_code`, `http.duration_ms`, and
+  `http.{request,response}_bytes` (best-effort `len(request.content)` /
+  `len(response.content)`); on exception the span is closed with
+  `status="error"` and `http.error_class`. New
+  `mergecraft.tracing.redaction.redact_url(url)` plus the `REDACTED`
+  constant extend the existing D7 redaction boundary to URLs without
+  breaking parseability — `urllib.parse.urlparse` round-trips on every
+  redacted shape, scheme/host/path/non-token query params survive.
+  `agents/opencode.py::_prompt_session` and `::_run` use the existing
+  OpenAI-compatible cached-token paths (`prompt_tokens_details.cached_tokens`
+  / `input_tokens_details.cached_tokens`) to fold cached input tokens into
+  `cost.cache_read` / `gen_ai.usage.cache_read_input_tokens` (matching the
+  existing Anthropic `cache_read_input_tokens` /
+  `cache_creation_input_tokens` behaviour). New
+  `mergecraft.tracing.current_tracer()` resolves the tracer that owns the
+  active mergeCraft `Span` for `instrument_httpx` callers that don't have a
+  tracer in hand. `docs/TRACING.md` gains a "Provider and HTTP spans"
+  section with the parent/child shape, the `instrument_httpx` site list,
+  and the URL redaction table. Tests: the 12-case RED suite in
+  `tests/tracing/test_http_spans.py` (12 green, including the formerly
+  `xfail` `test_provider_call_span_wraps_llm_call_for_anthropic`).
+- `mergecraft config tracing` now renders faithfully even when tracing is
+  **disabled**, mirroring sevn's `show_tracing_config`. The table gains two
+  rows plus a hint block:
+  - `local sinks` — `none` when tracing is off, the configured `trace_dir`
+    when on (sevn always surfaces the local-sink state so the operator can
+    see at a glance that no sink is attached).
+  - `trace env` — the `MERGECRAFT_*` env var names currently present in the
+    environment (or `(none set)`), so the operator knows exactly which keys
+    to set to enable tracing.
+  - `next steps` — a hard-coded hint block (sevn: `show_tracing_config`) listing
+    `mergecraft tracing logfire enable` (interactive and `--token X --project Y`),
+    the local JSONL-file path (`MERGECRAFT_TRACING=true` +
+    `MERGECRAFT_TRACING_TO=local_files`), and the generic OTLP path
+    (`MERGECRAFT_TRACING_TO=otel` + `MERGECRAFT_OTEL_ENDPOINT`). Printed only
+    when disabled; the enabled table is self-explanatory and omits the block.
+    Implemented in `src/mergecraft/cli/tracing_cmd.py` (`config_tracing` +
+    `render_resolved` + `_print_tracing_next_steps`). Tests:
+    `test_config_tracing_shows_local_sinks_none_when_disabled`,
+    `test_config_tracing_lists_trace_env_vars_when_disabled`,
+    `test_config_tracing_prints_next_steps_when_disabled`,
+    `test_config_tracing_omits_next_steps_when_enabled`
+- First-class **MiniMax** provider via the existing custom-provider helper
+  (#34 / W6). The catalog now enumerates `minimax/MiniMax-M3` as a curated
+  alias (`PROVIDERS["minimax"]` in `src/mergecraft/models.py`), reachable
+  through the D7 singleton env vars (`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`
+  + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`) or an indexed pair
+  (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`). The default
+  endpoint is MiniMax's published OpenAI-compatible URL
+  (`https://api.minimax.io/v1`, documented at
+  <https://platform.minimax.io/docs/api-reference/text-openai-api.md>),
+  added to `GATEWAY_PRESETS` in `src/mergecraft/agents/openai_compatible_gateways.py`
+  so the slug prefix drives the provider lookup without an explicit
+  `<N>` slot. The credential gate honours the D7 singleton and the
+  indexed pair; the binary gate short-circuits to `True` for the
+  `minimax` provider (same posture as `nous` — the opencode harness
+  reads env vars directly, no CLI is required on PATH). A new
+  `mergecraft auth minimax` subcommand (`src/mergecraft/cli/auth_cmd.py`)
+  mirrors `auth gemini` / `auth nous` / `auth tokenhub` line-for-line:
+  prompts with `getpass`, validates against
+  `https://api.minimax.io/v1/chat/completions` (the unauthenticated
+  catalog endpoint would return 200 for a fake bearer; the probe path
+  enforces auth, matching `_validate_nous_api_key`'s shape), then writes
+  `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` via `gh secret set`. The validator
+  returns `True` on 200, `False` on 401/403, and `True` with a
+  `logger.warning` on network errors. A `mergecraft models list` row
+  appears for the new catalog entry; the credentials column flips
+  `no` → `yes` when the env var is set (convention 7 — the key value
+  is never rendered). The pre-existing `opencode/minimax-m2.5` and
+  `opencode/minimax-m2.5-free` entries are untouched (D12 additive
+  invariant — operators using OpenCode as a proxy still work). No
+  Dockerfile change — MiniMax does not require a first-party CLI binary
+  (D10 / option ii: route through the existing helper, not a bespoke
+  `mmx-cli` harness). README "Authentication" table gains a MiniMax
+  row.
 
 ### Changed
 

@@ -29,13 +29,15 @@ CURSOR_API_SECRET = "CURSOR_API_KEY"
 NOUS_API_SECRET = "NOUS_API_KEY"
 NOUS_PORTAL_BASE_URL = "https://inference-api.nousresearch.com/v1"
 TOKENHUB_API_SECRET = "TOKENHUB_API_KEY"
+MINIMAX_API_SECRET = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
+MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 CLAUDE_OAUTH_TOKEN_PREFIX = "sk-ant-oat"
 DEFAULT_NOUS_PORTAL = "https://inference-api.nousresearch.com/v1"
 DEFAULT_TOKENHUB = "https://tokenhub-intl.tencentcloudmaas.com/v1"
 # Logfire setup (issue #56 / D5). ``LOGFIRE_TOKEN`` is the Action secret the
 # ``logfire-token`` input maps to; ``MERGECRAFT_LOGFIRE_TOKEN`` is the
 # runtime-only env var the sink factory resolves as a fallback; the project
-# label becomes the ``x-logfire-project`` header at runtime.
+# label is informational only — Logfire routes spans by token, not a header.
 LOGFIRE_TOKEN_SECRET = "LOGFIRE_TOKEN"
 LOGFIRE_RUNTIME_TOKEN_ENV = "MERGECRAFT_LOGFIRE_TOKEN"
 LOGFIRE_PROJECT_ENV = "MERGECRAFT_TRACING_PROJECT"
@@ -665,9 +667,8 @@ def auth_logfire(
     if not project:
         console.print("canceled.")
         raise typer.Exit(0)
-    # Same surface as the validator: Logfire accepts arbitrary project strings
-    # via the ``x-logfire-project`` header, but reject whitespace inside the
-    # label so a stray newline does not silently change the routing key.
+    # Same surface as the validator: reject whitespace inside the project label
+    # so a stray newline does not silently change the stored value.
     if any(ch.isspace() for ch in project):
         _bail("Logfire project label must not contain whitespace.")
 
@@ -739,4 +740,82 @@ def auth_logfire(
         f"  - run with traces: [cyan]mergecraft diff-review --tracing --tracing-to logfire[/cyan]\n"
         f"  - in the GitHub Action, the workflow can pass "
         f"[cyan]tracing-to: logfire[/cyan] + [cyan]logfire-token: ${{{{ secrets.{LOGFIRE_TOKEN_SECRET} }}}}[/cyan]"
+    )
+
+
+def _validate_minimax_api_key(api_key: str) -> bool:
+    """Probe the MiniMax OpenAI-compatible endpoint with ``api_key``.
+
+    POSTs a minimal body to ``{MINIMAX_BASE_URL}/chat/completions`` with a
+    ``Bearer`` auth header — mirrors ``_validate_nous_api_key``'s pattern
+    because the unauthenticated catalog endpoint would return 200 for a
+    fake bearer token. Returns:
+
+    - ``True`` on HTTP 200
+    - ``False`` on HTTP 401/403 (the operator's key is wrong)
+    - ``True`` with a ``logger.warning`` on any other status or on
+      ``httpx.HTTPError`` (network/DNS/5xx) so an offline operator can
+      still save the secret locally and retry later.
+    """
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(
+                f"{MINIMAX_BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"model": "MiniMax-M3", "messages": []},
+            )
+        if response.status_code == 200:
+            return True
+        if response.status_code in {401, 403}:
+            return False
+        logger.warning(
+            "minimax key validation returned HTTP {} — saving anyway", response.status_code
+        )
+        return True
+    except httpx.HTTPError as exc:
+        logger.warning("minimax key validation skipped (network): {}", exc)
+        return True
+
+
+@app.command("minimax")
+def auth_minimax() -> None:
+    """Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY.
+
+    MiniMax is reachable through the existing custom-provider helper
+    (D10 / option ii) — no first-party ``mmx-cli`` install is required.
+    The key is stored under the D7 singleton secret name so it pairs with
+    the singleton ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`` (which the
+    operator may override, or rely on the preset's default
+    ``https://api.minimax.io/v1``).
+    """
+    _get_gh_token()
+    owner, repo = _parse_git_remote()
+    repo_slug = f"{owner}/{repo}"
+    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    console.print(
+        "create an API key on the MiniMax platform "
+        f"([cyan]{MINIMAX_BASE_URL}[/cyan]), then paste it below."
+    )
+    try:
+        api_key = getpass.getpass("MiniMax API key (Enter to cancel): ").strip()
+    except EOFError, KeyboardInterrupt:
+        console.print("canceled.")
+        raise typer.Exit(0) from None
+    if not api_key:
+        console.print("canceled.")
+        raise typer.Exit(0) from None
+    if not _validate_minimax_api_key(api_key):
+        _bail("MiniMax API key validation failed (401/403). Check the key and retry.")
+
+    console.print(f"saving [cyan]{MINIMAX_API_SECRET}[/cyan] via gh secret set...")
+    if not _set_gh_secret(name=MINIMAX_API_SECRET, value=api_key, repo_slug=repo_slug):
+        _bail(
+            f"could not set secret — set it manually at:\n"
+            f"  https://github.com/{repo_slug}/settings/secrets/actions"
+        )
+    console.print(f"[green]saved {MINIMAX_API_SECRET}[/green] to GitHub Actions secrets")
+    console.print(
+        "use model [cyan]minimax/MiniMax-M3[/cyan] (opencode harness; no "
+        "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL required if you accept the "
+        f"default endpoint [cyan]{MINIMAX_BASE_URL}[/cyan])."
     )

@@ -125,6 +125,24 @@ self-report. Two consequences follow:
   `mergecraft.agents.gates.decide_approval` (the security-trust-boundary
   plan's Batch D contract, D5) and `tests/status_checks/test_decide_approval.py`.
 
+### Run outcome taxonomy (D3, W5)
+
+A run ends in exactly one of six named outcomes —
+`mergecraft.run_outcome.RunOutcome`: `passed`, `failed`, `inconclusive`,
+`infra_error`, `timed_out`, `configuration_error`. `MainResult.outcome`
+carries it, and two mappings key off it:
+
+| Mapping | Lives in | Notes |
+|---------|----------|-------|
+| outcome → `mergecraft` completion check-run conclusion | `mergecraft.run_outcome.RUN_OUTCOME_CONCLUSION` | Only `passed` → `success`; `failed` → `failure`; `timed_out` → GitHub's literal `timed_out`; everything else → `neutral`. |
+| outcome → `result` output JSON | `cli/gha_cmd.py` (`_structured_failure_result`, W5.3) | `{"outcome": ..., "error": {"code": "mergecraft.<outcome>", "message": <redacted>}}` on any failure path — not just `::error::` + exit 1. |
+
+The `mergecraft-approval` check stays governed by the existing
+`decide_approval` 3-way conclusion above: every outcome except `passed`
+feeds it `run_succeeded=False` (`run_outcome.run_succeeded_for_outcome`), so
+this taxonomy is additive detail on top of the pre-W5 boolean, never a
+looser gate.
+
 ### Evidence weighting
 
 What the merge-evidence packet carries, and how each signal weights:

@@ -289,6 +289,11 @@ def run_adapter(
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     try:
+        raw = (
+            Path(outcome.output_path).read_text(encoding="utf-8")
+            if outcome.output_path
+            else outcome.output
+        )
         findings = parse_output_file(
             Path(outcome.output_path),
             manifest=manifest,
@@ -297,7 +302,16 @@ def run_adapter(
         if not findings and outcome.output.strip():
             findings = parse_output(outcome.output, manifest=manifest, repo_root=repo_root)
     except (ValueError, KeyError) as exc:
-        reason = f"skipped {tool_id}: failed to parse analyzer output ({exc})"
+        # Classify the failure: empty output means the analyzer never produced
+        # anything (sandbox unavailable outside CI), not that it emitted garbage
+        # we could not parse.
+        if not (raw or "").strip():
+            reason = (
+                f"skipped {tool_id}: no output (analyzer did not run — "
+                "likely sandbox unavailable outside CI)"
+            )
+        else:
+            reason = f"skipped {tool_id}: failed to parse analyzer output ({exc})"
         logger.info("{}", reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 

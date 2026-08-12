@@ -24,11 +24,47 @@ from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 AccountPlan = Literal["none", "payg"]
 HeadingDepth = Literal[1, 2, 3, 4, 5, 6]
 
+# D4 / W6.2 — security/runtime models use ``extra="forbid"``; optional-feature
+# models keep ``extra="ignore"`` for one release with a warning shim. See
+# ``docs/config-failure-policy.md``.
+_SECURITY_RUNTIME_EXTRA: Literal["forbid"] = "forbid"
+_OPTIONAL_FEATURE_EXTRA: Literal["ignore"] = "ignore"
 
-class ModeDefinition(BaseModel):
+
+def _warn_unknown_config_keys(model_name: str, data: object, fields: dict[str, Any]) -> object:
+    """Warn on unknown keys for optional-feature models (D4 one-release shim)."""
+    if not isinstance(data, dict):
+        return data
+    known: set[str] = set()
+    for name, info in fields.items():
+        known.add(name)
+        alias = getattr(info, "alias", None)
+        if isinstance(alias, str):
+            known.add(alias)
+    for key in data:
+        if key not in known:
+            logger.warning(
+                "unknown config key {!r} on {} ignored "
+                "(will be forbidden in a future release; see docs/config-failure-policy.md)",
+                key,
+                model_name,
+            )
+    return data
+
+
+class _OptionalFeatureModel(BaseModel):
+    """Optional-feature config models: ``extra="ignore"`` + unknown-key warning."""
+
+    model_config = ConfigDict(extra=_OPTIONAL_FEATURE_EXTRA, populate_by_name=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_extras(cls, data: object) -> object:
+        return _warn_unknown_config_keys(cls.__name__, data, cls.model_fields)
+
+
+class ModeDefinition(_OptionalFeatureModel):
     """Custom / built-in mode selectable via ``select_mode``."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     id: str
     name: str
@@ -36,10 +72,8 @@ class ModeDefinition(BaseModel):
     prompt: str = ""
 
 
-class LearningsHeading(BaseModel):
+class LearningsHeading(_OptionalFeatureModel):
     """TOC entry for a learnings markdown body (1-indexed line ranges)."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     depth: HeadingDepth
     title: str
@@ -47,21 +81,19 @@ class LearningsHeading(BaseModel):
     end_line: int = Field(alias="endLine")
 
 
-class StaticCheckDefinition(BaseModel):
+class StaticCheckDefinition(_OptionalFeatureModel):
     """A mechanical gate the repo declares for reviewers to run.
 
     ``command`` may contain a ``{files}`` token, replaced with the diff's changed
     paths. ``suffixes`` restricts the gate to diffs that touch matching files.
     """
 
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
     name: str
     command: str
     suffixes: list[str] = Field(default_factory=list)
 
 
-class CiEvidenceSettings(BaseModel):
+class CiEvidenceSettings(_OptionalFeatureModel):
     """Which of the repo's *own* CI results mergeCraft may treat as evidence (#36).
 
     Both fields default empty, so a repo that declares no ``ciEvidence`` block
@@ -77,16 +109,12 @@ class CiEvidenceSettings(BaseModel):
     ingest as CI findings.
     """
 
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
     gates: dict[str, str] = Field(default_factory=dict)
     sarif_artifacts: list[str] = Field(default_factory=list, alias="sarifArtifacts")
 
 
-class AnalyzerOverride(BaseModel):
+class AnalyzerOverride(_OptionalFeatureModel):
     """Per-analyzer config override."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     enabled: bool | None = None
 
@@ -114,27 +142,30 @@ class GatesSettings(BaseModel):
     vocabulary is enforced at the gate itself, so a mis-spelled value
     here is rejected by ``decide_action`` rather than silently widening
     the gate (W9.2).
+
+    D4/W6.2 — ``extra="forbid"``: unknown keys are configuration errors.
     """
 
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
     gate_action: GateMode = "shadow"
     thermostat: GateMode = "shadow"
     override: dict[str, str] = Field(default_factory=dict)
 
 
-class AnalyzerPatternSettings(BaseModel):
+class AnalyzerPatternSettings(_OptionalFeatureModel):
     """Pattern backend selection for analyzer detection."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     backend: str | None = None
 
 
 class AnalyzersSettings(BaseModel):
-    """Catalog analyzer configuration block."""
+    """Catalog analyzer configuration block.
 
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    D4/W6.2 — ``extra="forbid"``: unknown keys are configuration errors.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
     enabled: bool = True
     inline_budget: int = Field(default=8, alias="inlineBudget")
@@ -156,7 +187,7 @@ class AnalyzersSettings(BaseModel):
 # exports reviewed-repo content (W2.9 / W8.7).
 
 
-class TraceSinkEntry(BaseModel):
+class TraceSinkEntry(_OptionalFeatureModel):
     """One sink entry in ``tracing.sinks``.
 
     The ``_drop_unset`` serializer keeps the round-trip output identical to the
@@ -169,12 +200,11 @@ class TraceSinkEntry(BaseModel):
     filter checks against ``__pydantic_fields_set__`` in both forms.
     """
 
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
     type: str
     path: str | None = None
     token_ref: str | None = Field(default=None, alias="tokenRef")
     project: str | None = None
+    region: Literal["us", "eu"] = Field(default="us", alias="region")
     endpoint: str | None = None
     headers: dict[str, str] | None = None
 
@@ -214,11 +244,14 @@ class TracingSettings(BaseModel):
     The shorthand form ``tracing: {enabled: true, to: local_files}`` is parsed
     into the canonical ``sinks`` list at validation time (D9); only the list
     shape exists downstream.
+
+    D4/W6.2 — ``extra="forbid"``. W6.4 — ``enabled`` is tri-state
+    (``None`` = unset / defer; the tracer treats unset as off).
     """
 
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
-    enabled: bool = False
+    enabled: bool | None = None
     retention_days: int = Field(default=30, alias="retentionDays")
     sinks: list[TraceSinkEntry] = Field(default_factory=list)
     redaction: bool = True
@@ -247,9 +280,12 @@ class TracingSettings(BaseModel):
 
 
 class RepoSettings(BaseModel):
-    """Per-repo runtime settings — local equivalent of upstream ``RepoSettings``."""
+    """Per-repo runtime settings — local equivalent of upstream ``RepoSettings``.
 
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    D4/W6.2 — ``extra="forbid"``: unknown top-level keys are configuration errors.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
     model: str | None = None
     models: list[str] | None = None
@@ -260,9 +296,12 @@ class RepoSettings(BaseModel):
     # chain head. Default ``False`` keeps the chain-preserving behaviour the
     # wave introduces — see ``utils/agent_resolve.py::effective_model_chain``.
     model_pin: bool = Field(default=False, alias="modelPin")
+    # W10.1 / #20 — when ``False``, a retryable failure of the primary model
+    # is a ``configuration_error`` instead of silently advancing the chain.
+    # Default ``True`` preserves today's fallback behaviour.
+    allow_fallback: bool = Field(default=True, alias="allowFallback")
     modes: list[ModeDefinition] = Field(default_factory=list)
     setup_script: str | None = Field(default=None, alias="setupScript")
-    post_checkout_script: str | None = Field(default=None, alias="postCheckoutScript")
     prepush_script: str | None = Field(default=None, alias="prepushScript")
     stop_script: str | None = Field(default=None, alias="stopScript")
     push: PushPermission = "restricted"
@@ -355,7 +394,6 @@ def default_settings() -> RepoSettings:
             "model_fallbacks": None,
             "modes": [],
             "setup_script": None,
-            "post_checkout_script": None,
             "prepush_script": None,
             "stop_script": None,
             "push": "restricted",

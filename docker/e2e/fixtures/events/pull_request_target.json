@@ -1,0 +1,36 @@
+{
+  "action": "synchronize",
+  "number": 43,
+  "pull_request": {
+    "number": 43,
+    "state": "open",
+    "title": "E2E fixture PR (target)",
+    "body": "Fixture pull_request_target event for the Action-image E2E gate.",
+    "user": { "login": "external-contributor" },
+    "head": {
+      "ref": "feature/fork-e2e",
+      "sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "repo": {
+        "full_name": "external-contributor/demo",
+        "fork": true,
+        "owner": { "login": "external-contributor" }
+      }
+    },
+    "base": {
+      "ref": "main",
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "repo": {
+        "full_name": "acme/demo",
+        "owner": { "login": "acme" }
+      }
+    }
+  },
+  "repository": {
+    "full_name": "acme/demo",
+    "name": "demo",
+    "owner": { "login": "acme" },
+    "private": false,
+    "default_branch": "main"
+  },
+  "sender": { "login": "external-contributor" }
+}

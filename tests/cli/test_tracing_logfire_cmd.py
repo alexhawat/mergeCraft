@@ -9,9 +9,12 @@ These tests cover the four failure modes and the two happy paths:
 
 - ``enable`` writes ``MERGECRAFT_LOGFIRE_TOKEN`` + ``MERGECRAFT_TRACING_PROJECT``
   to ``.env`` and the ``LOGFIRE_TOKEN`` Actions secret.
+- ``enable`` also flips the master switch ``MERGECRAFT_TRACING=true`` so
+  ``mergecraft config tracing`` reports enabled.
 - ``enable`` validates the bearer against ``GET /api/v1/projects`` and rejects
   302 / 401 / 403.
-- ``disable`` clears the two env vars and removes the ``LOGFIRE_TOKEN`` secret.
+- ``disable`` clears the token/project env vars and ``MERGECRAFT_TRACING``, and
+  removes the ``LOGFIRE_TOKEN`` secret.
 - ``disable`` treats a missing ``LOGFIRE_TOKEN`` secret as success (the
   post-condition we want — secret is absent — already holds).
 """
@@ -20,14 +23,17 @@ from __future__ import annotations
 
 import getpass
 import importlib
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -583,3 +589,142 @@ def test_tracing_logfire_disable_handles_missing_gh_secret(
     assert result.exit_code == 0, result.stdout + result.stderr
     # The local file is not touched under --scope github.
     assert env_path.read_text(encoding="utf-8") == ""
+
+
+# ── Deliverable 1 regression: ``enable`` / ``disable`` flip the master switch ─
+
+
+def test_logfire_enable_sets_master_switch(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """``enable --scope local`` must also write ``MERGECRAFT_TRACING=true``."""
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    # Validator passes without any network call (patch the name the consumer
+    # module imported, exactly like the existing enable/disable tests patch).
+    monkeypatch.setattr(
+        "mergecraft.cli.tracing_logfire_cmd._validate_logfire_token", lambda _token: True
+    )
+    monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / ".env"))
+    env_path = tmp_path / ".env"
+    env_path.write_text("", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "tracing",
+            "logfire",
+            "enable",
+            "--token",
+            "pylf_test_xxx",
+            "--project",
+            "mergecraft-dev",
+            "--scope",
+            "local",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    written = env_path.read_text(encoding="utf-8")
+    assert re.search(r"^MERGECRAFT_TRACING=['\"]?true['\"]?$", written, re.MULTILINE), (
+        f"expected MERGECRAFT_TRACING=true, got: {written!r}"
+    )
+
+
+def test_logfire_disable_clears_master_switch(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """``disable --scope local`` clears ``MERGECRAFT_TRACING``."""
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    monkeypatch.setattr("mergecraft.cli.auth_cmd._validate_logfire_token", lambda _token: True)
+    monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / ".env"))
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "MERGECRAFT_LOGFIRE_TOKEN=pylf_test_xxx\n"
+        "MERGECRAFT_TRACING_PROJECT=mergecraft-dev\n"
+        "MERGECRAFT_TRACING=true\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["tracing", "logfire", "disable", "--scope", "local"],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    written = env_path.read_text(encoding="utf-8")
+    # The switch is cleared (blank value, key preserved for re-enable).
+    assert re.search(r"^MERGECRAFT_TRACING=['\"]?['\"]?$", written, re.MULTILINE), (
+        f"expected MERGECRAFT_TRACING to be blank, got: {written!r}"
+    )
+
+
+# ── Deliverable 2: GitHub Action tracing visibility ─
+
+
+def _write_workflow(
+    workspace: Path,
+    *,
+    inputs: dict[str, Any] | None,
+    image: str = "alexhawat/mergecraft@8d747f39",
+) -> Path:
+    """Write a minimal mergecraft.yml with a mergeCraft step ``with`` inputs."""
+    workflows = workspace / ".github" / "workflows"
+    workflows.mkdir(parents=True, exist_ok=True)
+    step: dict[str, Any] = {"uses": image}
+    if inputs is not None:
+        step["with"] = inputs
+    doc = {
+        "name": "mergecraft",
+        "on": {"pull_request_target": {"types": ["opened"]}},
+        "jobs": {
+            "review": {
+                "runs-on": "ubuntu-latest",
+                "steps": [step],
+            }
+        },
+    }
+    path = workflows / "mergecraft.yml"
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def test_github_action_tracing_visibility(tmp_path: Path) -> None:
+    """A configured workflow reports ``github_action_tracing=True``."""
+    _write_workflow(
+        tmp_path,
+        inputs={"tracing": True, "logfire-token": "${{ secrets.LOGFIRE_TOKEN }}"},
+    )
+    result = detect_github_action_tracing(workspace=str(tmp_path))
+    assert result["github_action_tracing"] is True
+    assert result["source"] != "not found"
+
+
+def test_github_action_tracing_visibility_negative(tmp_path: Path) -> None:
+    """A workflow without tracing inputs reports ``github_action_tracing=False``."""
+    _write_workflow(tmp_path, inputs={"model": "nous/deepseek/deepseek-v4-flash"})
+    result = detect_github_action_tracing(workspace=str(tmp_path))
+    assert result["github_action_tracing"] is False
+    assert result["source"] != "not found"
+
+
+def test_github_action_tracing_visibility_not_found(tmp_path: Path) -> None:
+    """No workflow file yields ``github_action_tracing=False`` and source 'not found'."""
+    result = detect_github_action_tracing(workspace=str(tmp_path))
+    assert result["github_action_tracing"] is False
+    assert result["source"] == "not found"
+
+
+def test_config_tracing_shows_github_action_row(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """``render_resolved`` surfaces a github action line when a workflow is configured."""
+    _write_workflow(
+        tmp_path,
+        inputs={"tracing": True, "logfire-token": "${{ secrets.LOGFIRE_TOKEN }}"},
+    )
+    # ``detect_github_action_tracing`` falls back to ``$GITHUB_WORKSPACE``.
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path))
+    from mergecraft.cli.tracing_cmd import render_resolved
+
+    rendered = render_resolved({"enabled": False})
+    assert "github action: enabled" in rendered

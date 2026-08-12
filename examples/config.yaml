@@ -7,8 +7,6 @@ prApproveEnabled: false
 autoMergeEnabled: false
 # setupScript: |
 #   npm ci
-# postCheckoutScript: |
-#   echo ready
 # envAllowlist: NODE_ENV,CI
 # Extra GitHub logins allowed to invoke mergeCraft by comment even though their
 # `author_association` is outside {OWNER, MEMBER, COLLABORATOR}. Empty (the

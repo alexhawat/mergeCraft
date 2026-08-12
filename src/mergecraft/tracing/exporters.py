@@ -154,21 +154,28 @@ def resolve_token_ref(token_ref: str | None) -> str | None:
 def _build_logfire_endpoint_and_headers(
     project: str | None,
     token: str | None,
+    region: str = "us",
+    endpoint_override: str | None = None,
 ) -> tuple[str, dict[str, str]]:
     """Derive the OTLP endpoint and headers for a Logfire sink.
 
-    Logfire speaks OTLP/HTTP at ``https://logfire.pydantic.dev/api/v1/otlp/v1/traces``
-    (the public ingest endpoint). Authorization is the bearer token. The
-    ``project`` attribute maps to a Logfire project label via a header so the
-    incoming spans are routed correctly inside the Logfire backend.
+    Logfire speaks OTLP/HTTP (``http/protobuf``) at the region-aware ingest
+    endpoint — ``https://logfire-us.pydantic.dev/v1/traces`` (US) or
+    ``https://logfire-eu.pydantic.dev/v1/traces`` (EU). Authorization is the
+    bearer token; Logfire routes spans to the project encoded **in the token
+    itself** — there is no ``x-logfire-project`` header and emitting one is
+    incorrect. ``project`` is retained only as an informational label.
+
+    When ``endpoint_override`` is set (self-hosted/testing) it is used verbatim.
     """
-    endpoint = "https://logfire.pydantic.dev/api/v1/otlp/v1/traces"
+    if endpoint_override:
+        endpoint = endpoint_override
+    else:
+        host = "logfire-eu.pydantic.dev" if region == "eu" else "logfire-us.pydantic.dev"
+        endpoint = f"https://{host}/v1/traces"
     headers: dict[str, str] = {}
     if token:
         headers["authorization"] = f"Bearer {token}"
-    if project:
-        # Logfire projects are routed by a header (see Logfire docs).
-        headers["x-logfire-project"] = project
     return endpoint, headers
 
 
@@ -239,13 +246,27 @@ def _setup_tracer_provider(
     headers: dict[str, str],
     service_name: str,
 ) -> Any | None:
-    """Configure a tracer provider that records serialized spans to ``_RECORDING_PAYLOADS``.
+    """Configure a tracer provider that exports spans to ``endpoint`` and records them.
 
-    Convention 8 — no live network call. The OTel ``TracerProvider`` is
-    installed with a recording span processor that captures each emitted
-    span as a JSON-encoded blob in :data:`_RECORDING_PAYLOADS`. The
-    ``last_otel_endpoint`` / ``last_otel_headers`` module state is updated
-    so tests can assert wiring.
+    Two span processors are attached so the production path and the test seam
+    coexist (D5 / convention 8):
+
+    * A real ``OTLPSpanExporter`` (HTTP) sends spans to ``endpoint`` with
+      ``headers`` — this is what makes spans reach Logfire / a self-hosted
+      collector in production.
+    * The in-memory ``_RecordingSpanProcessor`` keeps capturing spans into
+      :data:`_RECORDING_PAYLOADS` so the test seam continues to assert on the
+      redaction boundary and the D8 payload-cap contract.
+
+    The ``TracerProvider`` override is guarded: when a real provider is already
+    installed in the process (e.g. ``logfire`` activates its own on import, or
+    a prior ``OTLPSink`` already set one), OTel raises
+    ``Overriding of current TracerProvider is not allowed``. We catch that and
+    REUSE the existing provider instead of silently degrading to a no-op — the
+    recording processor is still appended so the test seam keeps working. This
+    is the fix for spans never reaching Logfire: the unguarded
+    ``set_tracer_provider`` used to swallow the override error and return
+    ``None``, turning the sink into a silent no-op.
 
     Returns ``None`` when the optional extra is uninstalled.
     """
@@ -265,6 +286,8 @@ def _setup_tracer_provider(
     # mypy: we re-bind the class names below for the closure.
     Resource = _Resource
     TracerProvider = _TracerProvider
+    OTLPSpanExporter = _OTLPSpanExporter
+    BatchSpanProcessor = _BatchSpanProcessor
 
     _LAST_ENDPOINT = endpoint
     _LAST_HEADERS = dict(headers)
@@ -277,19 +300,47 @@ def _setup_tracer_provider(
     _ACTIVE_TRACER_PROVIDERS = []
 
     try:
-        # AlwaysSample ensures every span reaches the recording processor —
-        # the production equivalent would be a parent-based sampler, but for
-        # the test seam we want deterministic capture.
         from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 
-        provider = TracerProvider(
-            resource=Resource.create({"service.name": service_name}),
-            sampler=ALWAYS_ON,
+        # Guard the override: reuse an already-installed provider rather than
+        # fail. OTel's ProxyTracerProvider is the default before any real
+        # provider is set, so ``get_tracer_provider()`` is not a real one
+        # until ``set_tracer_provider`` has been called successfully.
+        existing = trace_mod.get_tracer_provider()
+        is_proxy = type(existing).__name__ == "ProxyTracerProvider"
+        if is_proxy:
+            provider = TracerProvider(
+                resource=Resource.create({"service.name": service_name}),
+                sampler=ALWAYS_ON,
+            )
+            trace_mod.set_tracer_provider(provider)
+        else:
+            # A real provider already exists (logfire import, prior sink, …).
+            provider = existing
+        # Real exporter first so production spans reach the network.
+        provider.add_span_processor(
+            BatchSpanProcessor(
+                OTLPSpanExporter(
+                    endpoint=endpoint,
+                    headers=headers,
+                )
+            )
         )
+        # Test seam: keep recording so captured_payload / has_active_tracer_provider
+        # still observe spans.
         provider.add_span_processor(_RecordingSpanProcessor())
-        trace_mod.set_tracer_provider(provider)
         _ACTIVE_TRACER_PROVIDERS.append(provider)
-    except Exception as exc:  # pragma: no cover — defensive
+    except Exception as exc:
+        # The only expected failure here is the override error from a stale
+        # global state we could not observe via get_tracer_provider(). Honor
+        # the test seam by reusing whatever provider is live.
+        if "Overriding" in str(exc):
+            existing = trace_mod.get_tracer_provider()
+            if type(existing).__name__ != "ProxyTracerProvider":
+                logger.debug("trace otel provider already set; reusing it")
+                existing.add_span_processor(_RecordingSpanProcessor())
+                _ACTIVE_TRACER_PROVIDERS.append(existing)
+                return existing
         logger.warning("trace otel provider setup failed: {}", exc)
         return None
     return provider
@@ -336,6 +387,18 @@ class _RecordingSpanProcessor:
                 "end_time": getattr(span, "end_time", None),
                 "status": str(getattr(getattr(span, "status", None), "status_code", "")),
             }
+            # T3.2 — surface the OTel ``trace_id`` so the test seam and
+            # the Logfire-grouping contract are observable through the
+            # existing processor. ``get_span_context()`` is the public
+            # OTel handle on the span; ``trace_id`` is ``0`` when no
+            # provider is wired (the disabled path) and the format
+            # ``032x`` mirrors the production Logfire-grouping shape.
+            span_ctx = getattr(span, "get_span_context", None)
+            if callable(span_ctx):
+                resolved_ctx = span_ctx()
+                otel_trace_id = getattr(resolved_ctx, "trace_id", 0)
+                if otel_trace_id:
+                    payload["trace_id"] = format(int(otel_trace_id), "032x")
             if StatusCode is not None:
                 with contextlib.suppress(Exception):  # pragma: no cover
                     payload["status"] = str(span.status.status_code)
@@ -402,10 +465,14 @@ class OTLPSink:
         *,
         project: str | None,
         token: str | None,
+        region: str = "us",
+        endpoint_override: str | None = None,
         logfire_module: Any | None = None,
     ) -> OTLPSink:
         """Build an :class:`OTLPSink` configured for Logfire."""
-        endpoint, headers = _build_logfire_endpoint_and_headers(project, token)
+        endpoint, headers = _build_logfire_endpoint_and_headers(
+            project, token, region=region, endpoint_override=endpoint_override
+        )
         return cls(
             endpoint=endpoint,
             headers=headers,
@@ -468,13 +535,69 @@ class OTLPSink:
             # attribute so consumers see it (D8).
             if event.attrs.get("truncated") is True:
                 attrs["truncated"] = True
+            # T3.2 — forward the mergeCraft ``trace_id`` as the real OTel
+            # ``trace_id`` on the produced span so Logfire groups every
+            # span in one run under one trace. The OTel SDK does not expose
+            # a public ``trace.set_trace_id`` helper in the version we
+            # pin; the fallback is to (a) forward the trace_id as a
+            # ``mergecraft.trace_id`` attribute (Logfire attribute search
+            # groups on it) and (b) rewrite the span's ``_context`` field
+            # so the recording-processor test seam and any downstream
+            # OTel exporter observe the right trace_id. The rewrite is
+            # the same private field the OTel SDK uses internally; if the
+            # attribute is missing on a future SDK release, the mergecraft
+            # attribute fallback still groups the trace.
+            otel_trace_id: int | None = None
+            if event.trace_id:
+                try:
+                    otel_trace_id = int(event.trace_id[:32], 16)
+                except TypeError, ValueError:
+                    otel_trace_id = None
+                attrs["mergecraft.trace_id"] = event.trace_id
             span = self._tracer.start_span(name=event.kind, attributes=attrs)
+            if otel_trace_id:
+                self._override_span_trace_id(span, otel_trace_id)
             span.end()
         except Exception as exc:
             # Convention 6 — never fail the caller's review on a remote sink.
             if not self._warned:
                 logger.warning("trace otel sink write failed: {}", exc)
                 self._warned = True
+
+    @staticmethod
+    def _override_span_trace_id(span: Any, trace_id: int) -> None:
+        """Rewrite the OTel ``trace_id`` on a freshly-built span.
+
+        The OTel SDK builds spans with a fresh trace_id from the active
+        tracer provider; this helper substitutes the mergeCraft run's
+        ``trace_id`` so the recording-processor and any downstream
+        exporter see the same value. The substitution is the same
+        private ``_context`` field the SDK uses internally — if the
+        attribute is missing on a future SDK release, the
+        ``mergecraft.trace_id`` attribute fallback (set in :meth:`write`)
+        is the structural guarantee.
+        """
+        try:
+            from opentelemetry.trace import (
+                SpanContext,
+                TraceFlags,
+                TraceState,
+            )
+        except ImportError:
+            return
+        try:
+            span_ctx = span.get_span_context()
+            new_ctx = SpanContext(
+                trace_id=trace_id,
+                span_id=span_ctx.span_id,
+                is_remote=False,
+                trace_flags=TraceFlags(TraceFlags.SAMPLED),
+                trace_state=TraceState(),
+            )
+            if hasattr(span, "_context"):
+                span._context = new_ctx
+        except Exception as exc:
+            logger.debug("trace otel sink trace_id override failed: {}", exc)
 
     def flush(self) -> None:
         """Best-effort flush; idempotent and never raises (convention 6).
@@ -487,10 +610,11 @@ class OTLPSink:
             provider = self._ensure_provider()
             if provider is None:
                 return
-            for processor in getattr(provider, "_active_span_processors", ()):
-                with contextlib.suppress(Exception):
-                    # Convention 6 — never raise.
-                    processor.force_flush()
+            # Use the public API — it dispatches to every attached span
+            # processor (recording seam + real OTLP exporter) regardless of
+            # SDK-internal storage. Convention 6 — never raise.
+            with contextlib.suppress(Exception):
+                provider.force_flush()
             # Convention 6 / W7.8 — when the endpoint is clearly unreachable
             # (port 1, loopback canary) emit one warning so the operator /
             # test can see that the remote sink was attempted. The warning
@@ -590,7 +714,9 @@ def _build_logfire_sink(
     return OTLPSink.for_logfire(
         project=_resolve_logfire_project(entry),
         token=token,
+        region=getattr(entry, "region", "us") or "us",
         logfire_module=logfire_module,
+        endpoint_override=getattr(entry, "endpoint", None) or None,
     )
 
 
