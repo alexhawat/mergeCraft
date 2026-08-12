@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+import pytest
+
 import mergecraft.utils.privilege as privilege
 from mergecraft.agents.shared import wrap_agent_subprocess
 from mergecraft.utils.privilege import (
@@ -47,6 +49,15 @@ def test_wrap_agent_command_prefixes_setpriv_when_root(
     Fails if the privilege drop is deleted: returned argv equals the bare cmd.
     Runtime UID≠0 proof stays deferred to W11 in-image; this pins structure.
     """
+    import sys
+
+    class _Pw:
+        pw_uid = 1001
+        pw_gid = 1001
+
+    fake_pwd = MagicMock()
+    fake_pwd.getpwnam.return_value = _Pw()
+    monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
     monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
     monkeypatch.setattr(privilege.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
@@ -61,11 +72,18 @@ def test_wrap_agent_command_prefixes_setpriv_when_root(
 def test_wrap_agent_command_skips_setpriv_when_missing(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Direct ``wrap_agent_command`` — root without setpriv returns bare cmd."""
+    """Direct ``wrap_agent_command`` — root without setpriv fails closed (F4' fix).
+
+    Previously this test pinned the fail-open default (returning the bare
+    command so the agent ran as root). S2 inverts that: a missing ``setpriv``
+    is now a configuration error, surfaced via ``main._ConfigurationError``.
+    """
+    from mergecraft.main import _ConfigurationError
+
     monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
     monkeypatch.setattr(privilege.shutil, "which", lambda _name: None)
-    cmd = ["gemini", "run"]
-    assert wrap_agent_command(cmd) == cmd
+    with pytest.raises(_ConfigurationError, match="setpriv"):
+        wrap_agent_command(["gemini", "run"])
 
 
 def test_wrap_agent_subprocess_delegates_to_wrap_agent_command(
@@ -75,6 +93,15 @@ def test_wrap_agent_subprocess_delegates_to_wrap_agent_command(
 
     Fails if the shared wrapper is deleted or bypasses ``wrap_agent_command``.
     """
+    import sys
+
+    class _Pw:
+        pw_uid = 1001
+        pw_gid = 1001
+
+    fake_pwd = MagicMock()
+    fake_pwd.getpwnam.return_value = _Pw()
+    monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
     monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
     monkeypatch.setattr(privilege.shutil, "which", lambda name: f"/usr/bin/{name}")
     wrapped = wrap_agent_subprocess(["opencode", "serve"])

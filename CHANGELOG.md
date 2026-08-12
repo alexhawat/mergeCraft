@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Fixed: the agent privilege drop now fails closed. When the action image runs
+  as root and `setpriv` or the `mergecraft` user is unavailable, the run
+  aborts as `configuration_error` instead of silently executing the agent as
+  root — previously that degradation was logged at `debug` and the review
+  continued. The image build now asserts both are present.
 - Trust tier is derived before any repo-controlled git setup or `setupScript`;
   untrusted events skip operator scripts instead of running them first
 - Agent CLI subprocesses receive an explicit credential allowlist — no ambient
