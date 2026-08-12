@@ -87,7 +87,14 @@ def derive_trust_tier(
                 return "untrusted"
         return "trusted"
 
-    return "trusted"
+    # Fail closed (#144): an unrecognised event shape is more restricted, never
+    # more permissive. Convention 5 / D7 — matches ``UNKNOWN_MODE_FALLBACK``
+    # above. Comment / schedule / workflow_call / workflow_run / merge_group /
+    # push / release / empty ``GITHUB_EVENT_NAME`` all land here and resolve to
+    # ``untrusted``; events that must stay trusted (``workflow_dispatch``,
+    # ``pull_request_target``, fork / same-repo ``pull_request``) have explicit
+    # branches above.
+    return "untrusted"
 
 
 def build_analyzer_env(
