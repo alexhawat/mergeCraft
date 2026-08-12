@@ -183,6 +183,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   brackets literally. The runtime warning for a missing `[tracing]` extra uses
   `console.print(..., markup=False)` to keep the install command verbatim.
   Test: `test_auth_logfire_help_does_not_emit_unbalanced_backticks`
+- Bump `aquasecurity/trivy-action` from `v0.33.1` to `v0.36.0` (SHA
+  `ed142fd0`). The pinned `v0.33.1` defaults to Trivy `v0.65.0`, whose
+  release tag was deleted from `aquasecurity/trivy`; the action's
+  install script resolves the version from the GitHub API (success) then
+  downloads the asset (HTTP 404), failing the `SBOM + vulnerability scan`
+  job deterministically on every `pre-0.0.1` push since the T1-reconcile
+  commit. `v0.36.0` defaults to Trivy `v0.70.0`, which is still
+  published. Two-line change to `.github/workflows/ci-cd.yml`.
 
 ### Added
 
