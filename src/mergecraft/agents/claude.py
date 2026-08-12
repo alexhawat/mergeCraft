@@ -43,6 +43,11 @@ from mergecraft.tracing._tool_attrs import (
 )
 from mergecraft.tracing.redaction import redact_tool_payload
 from mergecraft.tracing.sinks import claim_sink
+from mergecraft.tracing.tracer import (
+    ProviderLLMPair,
+    _close_provider_llm_pair,
+    _open_provider_llm_pair,
+)
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.privilege import wrap_agent_command
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
@@ -52,7 +57,7 @@ from mergecraft.utils.secrets import build_agent_env
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from mergecraft.tracing.tracer import Span, Tracer
+    from mergecraft.tracing.tracer import Tracer
 
 CLAUDE_EXEC_TOOLS = ("Bash", "Monitor", "REPL", "Workflow")
 CLAUDE_EXEC_TOOL_DENY_RULES = [
@@ -229,12 +234,18 @@ def _claude_stream_event_handler(
         span before an inner ``tool.call`` span, which would otherwise
         leave the tool span as the active span when the next test runs).
     """
-    open_llm_spans: dict[str, dict[str, Any]] = {}
+    # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt, not two
+    # independent dicts keyed by the same id. Opening the provider span and
+    # the LLM span is atomic: they share a ``parent_span_id`` and both
+    # enter before the first event. The close path is symmetric: the inner
+    # ``llm.call`` span closes first (LIFO), then the outer
+    # ``provider.call`` span.
+    open_pairs: dict[str, ProviderLLMPair | None] = {}
+    open_pair_bookkeeping: dict[str, dict[str, Any]] = {}
     open_tool_spans: dict[str, Any] = {}
-    open_provider_spans: dict[str, dict[str, Any]] = {}
 
     def _handler(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        nonlocal open_llm_spans, open_tool_spans, open_provider_spans
+        nonlocal open_pairs, open_pair_bookkeeping, open_tool_spans
         event_type = event.get("type")
 
         if event_type == "message_start":
@@ -245,8 +256,7 @@ def _claude_stream_event_handler(
             if tracer is None:
                 # Still track the open-span bookkeeping so message_stop can
                 # find and clear it.
-                open_llm_spans[message_id] = {
-                    "span": None,
+                open_pair_bookkeeping[message_id] = {
                     "tokens_in": int(usage_payload.get("input_tokens") or 0),
                     "tokens_out": int(usage_payload.get("output_tokens") or 0),
                 }
@@ -257,46 +267,40 @@ def _claude_stream_event_handler(
             # row with its transport family on it; the ``llm.call`` span
             # emitted below becomes the parent of any
             # ``http.client.request`` row for visibility into the actual
-            # wire call.
-            provider_span = tracer.start_span(
-                "provider.call",
+            # wire call. W5 / H1 — open via the shared pair helper so the
+            # provider + llm attrs + ts_start_ns + ``__enter__`` are
+            # applied atomically; the resulting ``ProviderLLMPair`` is
+            # the single state unit per attempt.
+            pair = _open_provider_llm_pair(
+                tracer,
+                model_id=model_id,
+                family="anthropic",
+                provider_id="anthropic",
                 parent_span_id=parent_span_id,
             )
-            provider_span.set_attribute("provider.id", "anthropic")
-            provider_span.set_attribute("provider.transport_family", "anthropic")
-            provider_span.set_attribute("model.id", model_id)
-            provider_span.set_attribute("gen_ai.system", "anthropic")
-            provider_span.set_attribute("gen_ai.operation.name", "chat")
-            provider_span.ts_start_ns = time.time_ns()
-            provider_span.__enter__()
-            span = tracer.start_span(
-                "llm.call",
-                parent_span_id=provider_span.span_id,
-            )
-            span.set_attribute("model.id", model_id)
-            span.set_attribute("model.event", "message_start")
-            span.set_attribute(
-                "cost.tokens_in",
-                int(usage_payload.get("input_tokens") or 0),
-            )
-            span.set_attribute(
-                "cost.tokens_out",
-                int(usage_payload.get("output_tokens") or 0),
-            )
-            span.set_attribute("gen_ai.operation.name", "chat")
-            span.set_attribute("gen_ai.request.model", model_id)
-            span.set_attribute("gen_ai.response.model", model_id)
-            span.set_attribute(
-                "gen_ai.usage.input_tokens", int(usage_payload.get("input_tokens") or 0)
-            )
-            span.set_attribute(
-                "gen_ai.usage.output_tokens", int(usage_payload.get("output_tokens") or 0)
-            )
-            span.ts_start_ns = time.time_ns()
-            span.__enter__()
-            open_provider_spans[message_id] = {"span": provider_span}
-            open_llm_spans[message_id] = {
-                "span": span,
+            span = pair.llm if pair is not None else None
+            if span is not None:
+                span.set_attribute("model.id", model_id)
+                span.set_attribute("model.event", "message_start")
+                span.set_attribute(
+                    "cost.tokens_in",
+                    int(usage_payload.get("input_tokens") or 0),
+                )
+                span.set_attribute(
+                    "cost.tokens_out",
+                    int(usage_payload.get("output_tokens") or 0),
+                )
+                span.set_attribute("gen_ai.operation.name", "chat")
+                span.set_attribute("gen_ai.request.model", model_id)
+                span.set_attribute("gen_ai.response.model", model_id)
+                span.set_attribute(
+                    "gen_ai.usage.input_tokens", int(usage_payload.get("input_tokens") or 0)
+                )
+                span.set_attribute(
+                    "gen_ai.usage.output_tokens", int(usage_payload.get("output_tokens") or 0)
+                )
+            open_pairs[message_id] = pair
+            open_pair_bookkeeping[message_id] = {
                 "tokens_in": int(usage_payload.get("input_tokens") or 0),
                 "tokens_out": int(usage_payload.get("output_tokens") or 0),
             }
@@ -321,38 +325,42 @@ def _claude_stream_event_handler(
                     message_id = candidate
                     break
             target = (
-                open_llm_spans.get(message_id)
-                if message_id and message_id in open_llm_spans
-                else (next(iter(open_llm_spans.values()), None) if open_llm_spans else None)
+                open_pair_bookkeeping.get(message_id)
+                if message_id and message_id in open_pair_bookkeeping
+                else (
+                    next(iter(open_pair_bookkeeping.values()), None)
+                    if open_pair_bookkeeping
+                    else None
+                )
             )
             if target is None:
                 return
             delta_out = int(usage_payload.get("output_tokens") or 0)
             target["tokens_out"] += delta_out
-            span_obj: Span | None = target.get("span")
-            if span_obj is not None:
-                span_obj.set_attribute("cost.tokens_out", target["tokens_out"])
-                span_obj.set_attribute("gen_ai.usage.output_tokens", target["tokens_out"])
+            pair_for_msg_id = (
+                open_pairs.get(message_id)
+                if message_id and message_id in open_pairs
+                else next(iter(open_pairs.values()), None)
+            )
+            if isinstance(pair_for_msg_id, ProviderLLMPair):
+                pair_for_msg_id.llm.set_attribute("cost.tokens_out", target["tokens_out"])
+                pair_for_msg_id.llm.set_attribute(
+                    "gen_ai.usage.output_tokens", target["tokens_out"]
+                )
             return
 
         if event_type == "message_stop":
-            # Close any in-flight llm.call spans. The claude stream does
-            # not always carry the message id on stop, so close all open
-            # spans — typical shape is one open span at a time. The
-            # ``provider.call`` span wraps the ``llm.call`` span (D10) and
-            # closes after the inner span closes so the active-span stack
-            # unwinds cleanly. W4 / M6 — use ``Span.close`` so the
-            # end-time + active-context reset happens in one place.
-            for entry in list(open_llm_spans.values()):
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    span_obj.close()
-            open_llm_spans.clear()
-            for entry in list(open_provider_spans.values()):
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    span_obj.close()
-            open_provider_spans.clear()
+            # Close any in-flight pairs. The claude stream does not always
+            # carry the message id on stop, so close all open pairs —
+            # typical shape is one open pair at a time. W5 / H1 — the
+            # ``ProviderLLMPair`` owns the close discipline (inner llm
+            # span first, outer provider span second), so the driver just
+            # iterates and calls the helper. W4 / M6 — ``Span.close``
+            # inside the helper owns end-time + active-context reset.
+            for pair in list(open_pairs.values()):
+                _close_provider_llm_pair(pair)
+            open_pairs.clear()
+            open_pair_bookkeeping.clear()
             return
 
         if event_type == "content_block_start":
@@ -456,19 +464,14 @@ def _claude_stream_event_handler(
             if span is not None:
                 if span._context_token is not None:
                     span.close()
-        # Then llm.call spans, in reverse insertion order.
-        for key in list(reversed(list(open_llm_spans.keys()))):
-            entry = open_llm_spans.pop(key)
-            span = entry.get("span") if isinstance(entry, dict) else None
-            if span is not None and span._context_token is not None:
-                span.close()
-        # T2 / D10 — provider.call spans wrap llm.call spans. Close after
-        # the llm.call spans so the active-span stack unwinds inner-to-outer.
-        for key in list(reversed(list(open_provider_spans.keys()))):
-            entry = open_provider_spans.pop(key)
-            span = entry.get("span") if isinstance(entry, dict) else None
-            if span is not None and span._context_token is not None:
-                span.close()
+        # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt owns both
+        # the inner ``llm.call`` span and the outer ``provider.call`` span
+        # close path. LIFO on the pair dict mirrors the close discipline
+        # the inner ``_close_provider_llm_pair`` already enforces.
+        for key in list(reversed(list(open_pairs.keys()))):
+            pair = open_pairs.pop(key)
+            _close_provider_llm_pair(pair)
+        open_pair_bookkeeping.clear()
         # Defensive: the streaming event order can leave ``_ACTIVE_SPAN``
         # pointing at a closed span because individual ``close`` calls
         # popped the wrong ContextVar frame. Clear the slot so the next

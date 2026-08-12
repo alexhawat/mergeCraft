@@ -152,6 +152,7 @@ class Span:
     _attrs: dict[str, Any] = field(default_factory=dict)
     _exc: BaseException | None = None
     _context_token: Token[Span | NullSpan | None] | None = None
+    _closed: bool = False
 
     def __enter__(self) -> Span:
         """Start timing and make this span active."""
@@ -175,6 +176,11 @@ class Span:
         del exc_type, tb
         if exc is not None:
             self.record_exception(exc)
+        # W5 / L2 — ``Span.close`` is the single source of truth for
+        # emitting the TraceEvent and resetting the active ContextVar.
+        # ``__exit__`` delegates to it so the manually-built span path
+        # (which calls ``close`` without an ``__enter__``) and the
+        # ``with`` block path converge on the same emit + reset discipline.
         self.close()
 
     def set_attribute(self, key: str, value: Any) -> None:
@@ -214,11 +220,16 @@ class Span:
         directly. The active-context reset mirrors ``__exit__`` so a span
         closed manually still pops its ContextVar frame.
 
-        The method is a no-op when the span has already closed (``_context_token``
-        is ``None``). Re-closing is defensive — repeated emits would corrupt
-        the JSONL sink's per-row ordering.
+        Re-calling ``close()`` is a no-op — the dedicated ``_closed`` flag
+        tracks the close path independently of ``_context_token`` so the
+        manually-built span case (no ``__enter__``; ``_context_token`` is
+        still ``None`` on the first ``close``) emits its TraceEvent exactly
+        once. W5 / L2 — the prior implementation conflated the never-
+        entered and already-closed cases by gating on ``_context_token is
+        None`` alone, which silently dropped manually-built spans; the flag
+        keeps the contract that ``close()`` is idempotent and emits once.
         """
-        if self._context_token is None:
+        if self._closed:
             return
         self.ts_end_ns = time.time_ns()
 
@@ -247,8 +258,10 @@ class Span:
                 attrs=attrs,
             )
         )
-        _ACTIVE_SPAN.reset(self._context_token)
-        self._context_token = None
+        if self._context_token is not None:
+            _ACTIVE_SPAN.reset(self._context_token)
+            self._context_token = None
+        self._closed = True
 
 
 class NullSpan:
@@ -383,6 +396,65 @@ class ProviderLLMPair:
     llm: Span
 
 
+def _open_provider_llm_pair(
+    tracer: Tracer | NullTracer | None,
+    *,
+    model_id: str,
+    family: str,
+    provider_id: str,
+    parent_span_id: str | None = None,
+) -> ProviderLLMPair | None:
+    """Open a ``ProviderLLMPair`` and enter both spans.
+
+    Shared body for the ``provider_llm_pair`` context manager and the
+    streaming driver event handlers (W5 / H1). Returns ``None`` when
+    ``tracer`` is ``None`` / ``NullTracer`` so the disabled path is a
+    single-line guard at every call site.
+
+    Args:
+        tracer: The owning tracer. ``None`` / ``NullTracer`` is a no-op.
+        model_id: Model identifier attached to both spans.
+        family: Transport family (``"anthropic"`` / ``"chat_completions"`` /
+            ``"responses_api"``); becomes ``provider.transport_family``.
+        provider_id: Provider identifier; becomes ``provider.id``.
+        parent_span_id: Optional explicit parent span id.
+
+    Returns:
+        ProviderLLMPair | None: The open pair, or ``None`` when disabled.
+    """
+    if tracer is None or isinstance(tracer, NullTracer):
+        return None
+    provider_span = tracer.start_span("provider.call", parent_span_id=parent_span_id)
+    provider_span.set_attribute("provider.id", provider_id)
+    provider_span.set_attribute("provider.transport_family", family)
+    provider_span.set_attribute("model.id", model_id)
+    provider_span.set_attribute("gen_ai.system", provider_id)
+    provider_span.set_attribute("gen_ai.operation.name", "chat")
+    provider_span.ts_start_ns = time.time_ns()
+    provider_span.__enter__()
+    llm_span = tracer.start_span("llm.call", parent_span_id=provider_span.span_id)
+    llm_span.__enter__()
+    return ProviderLLMPair(provider=provider_span, llm=llm_span)
+
+
+def _close_provider_llm_pair(pair: ProviderLLMPair | None) -> None:
+    """Close a ``ProviderLLMPair`` opened by ``_open_provider_llm_pair``.
+
+    Closes the inner ``llm.call`` span first (LIFO) and the outer
+    ``provider.call`` span after — matching the close discipline the driver
+    event handlers were already defending against (#56 D6). ``None`` is a
+    no-op so the disabled path is a single-line guard.
+
+    Args:
+        pair: The pair returned by ``_open_provider_llm_pair``. ``None``
+            (disabled path) is accepted.
+    """
+    if pair is None:
+        return
+    pair.llm.close()
+    pair.provider.close()
+
+
 @contextlib.contextmanager
 def provider_llm_pair(
     tracer: Tracer | NullTracer | None,
@@ -434,25 +506,17 @@ def provider_llm_pair(
         ...     if pair is not None:
         ...         pair.llm.set_attribute("model.event", "message_start")
     """
-    if tracer is None or isinstance(tracer, NullTracer):
-        yield None
-        return
-    provider_span = tracer.start_span("provider.call", parent_span_id=parent_span_id)
-    provider_span.set_attribute("provider.id", provider_id)
-    provider_span.set_attribute("provider.transport_family", family)
-    provider_span.set_attribute("model.id", model_id)
-    provider_span.set_attribute("gen_ai.system", provider_id)
-    provider_span.set_attribute("gen_ai.operation.name", "chat")
-    provider_span.ts_start_ns = time.time_ns()
-    provider_span.__enter__()
-    llm_span = tracer.start_span("llm.call", parent_span_id=provider_span.span_id)
-    llm_span.__enter__()
-    pair = ProviderLLMPair(provider=provider_span, llm=llm_span)
+    pair = _open_provider_llm_pair(
+        tracer,
+        model_id=model_id,
+        family=family,
+        provider_id=provider_id,
+        parent_span_id=parent_span_id,
+    )
     try:
         yield pair
     finally:
-        llm_span.close()
-        provider_span.close()
+        _close_provider_llm_pair(pair)
 
 
 def active_span_for(tracer: Tracer | NullTracer | None) -> Span | None:
