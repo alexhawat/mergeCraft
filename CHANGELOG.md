@@ -157,6 +157,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/agents/test_openai_compatible_gateways.py::test_indexed_pair_does_not_grant_minimax_credentials`,
   `::test_singleton_still_grants_minimax_credentials`,
   `::test_nous_back_compat_alias_still_grants_nous_credentials`
+- `_validate_logfire_token` now distinguishes Logfire **write tokens** from
+  API keys and probes the right endpoint. Write tokens (`pylf_v{N}_{us|eu}_…`
+  — the regional, base64-payload credentials the Logfire SDK accepts for
+  OTLP ingestion) were being rejected with HTTP 302 because the validator
+  only probed the management REST API (`/api/v1/projects`), which redirects
+  write tokens to the auth page. The fix: `_resolve_logfire_probe()` routes
+  `pylf_v{N}_{us|eu}_` to the regional `/v1/info` host
+  (`https://logfire-{us,eu}.pydantic.dev/v1/info`) — the same probe the
+  Logfire SDK uses internally. API keys still probe the management endpoint.
+  Tests: `test_auth_logfire_validator_probes_eu_write_token`,
+  `test_auth_logfire_validator_probes_us_write_token`,
+  `test_auth_logfire_validator_rejects_expired_write_token`
+- `.env` writes no longer wrap token + project values in single quotes.
+  `python-dotenv`'s `quote_mode="always"` produced `MERGECRAFT_LOGFIRE_TOKEN='pylf_v2_eu_…'`,
+  which broke grep workflows operators rely on to confirm a fresh save.
+  Tokens (`[A-Za-z0-9_-]+`) and project labels (`[A-Za-z0-9_-/]+`) are safe
+  unquoted, so `_write_env_value` now calls `set_key(..., quote_mode="never")`.
+  Test: `test_auth_logfire_writes_token_unquoted`
+- `mergecraft tracing logfire enable` now resolves the token + project via the
+  same precedence layer used by every other mergecraft config command:
+  **flag > env > prompt**, applied independently per key. With neither flag on
+  the CLI, the command reads `MERGECRAFT_LOGFIRE_TOKEN` / `MERGECRAFT_TRACING_PROJECT`
+  from `.env` (loaded into `os.environ` by `main()`'s `_load_local_env()`) and
+  skips the prompt; a partial `.env` (token present, project absent) prompts
+  only for the missing project; an explicit `--token` / `--project` always wins
+  over the env value. The token still goes through `_validate_logfire_token`
+  regardless of source (re-validating a stale env token is the whole point of
+  the probe — the 302/expired cases are caught here). Tests:
+  `test_tracing_logfire_enable_reads_token_from_env_when_flag_omitted`,
+  `test_tracing_logfire_enable_flag_overrides_env_token`,
+  `test_tracing_logfire_enable_prompts_only_missing_project_when_token_in_env`,
+  `test_tracing_logfire_enable_validates_env_token_and_rejects_expired`
 - `mergecraft config tracing` now reports `enabled: true` immediately after
   `mergecraft auth logfire` (or `tracing logfire enable`) writes to `.env`.
   Root cause: the CLI's `main()` did not load `.env` into `os.environ`, so the
