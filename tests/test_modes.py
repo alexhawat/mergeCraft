@@ -207,7 +207,9 @@ def test_expanded_prompts_have_no_template_markers() -> None:
 # ``test_mode_prompt_text_is_byte_identical_after_split`` test below is the
 # load-bearing pin that defends this refactor: any silent prompt drift across
 # the modes.py -> modes/ move fails this test loudly.
-_PRE_SPLIT_PROMPTS_PATH: Final[Path] = Path(__file__).parent / "_fixtures" / "pre_split_prompts.json"
+_PRE_SPLIT_PROMPTS_PATH: Final[Path] = (
+    Path(__file__).parent / "_fixtures" / "pre_split_prompts.json"
+)
 
 
 def _load_pre_split_snapshot() -> Mapping[str, Mapping[str, str]]:
@@ -240,7 +242,8 @@ def test_every_mode_exposes_a_prompt_version() -> None:
         mode = next(m for m in compute_modes("opencode") if m.name == mode_name)
         assert hasattr(mode, "version"), mode_name
         version = getattr(mode, "version", "")
-        assert isinstance(version, str) and version, mode_name
+        assert isinstance(version, str), mode_name
+        assert version, mode_name
         # Content-hash versions are short hex strings; pin the shape so a
         # future refactor that swaps the scheme has to revisit this test.
         assert len(version) >= 8, (mode_name, version)
@@ -314,7 +317,7 @@ def test_all_modes_still_resolve_by_name() -> None:
 
     # Custom mode merging is in main.py — guard that the public surface
     # used by main.py is still importable from the same location.
-    from mergecraft.modes import _custom_modes  # noqa: PLC0415
+    from mergecraft.modes import _custom_modes
 
     assert _custom_modes([]) == []
 
@@ -338,9 +341,7 @@ def test_mode_prompt_text_is_byte_identical_after_split() -> None:
 
     for name, (description, prompt) in current.items():
         expected = snapshot[name]
-        assert description == expected["description"], (
-            f"{name}: description drifted",
-        )
+        assert description == expected["description"], (f"{name}: description drifted",)
         assert prompt == expected["prompt"], f"{name}: prompt drifted"
 
 
@@ -353,11 +354,12 @@ def test_custom_modes_from_config_still_merge() -> None:
     package root so the existing call sites do not change.
     """
     from mergecraft.config.settings import ModeDefinition
-    from mergecraft.modes import _custom_modes  # noqa: PLC0415
+    from mergecraft.modes import _custom_modes
 
     custom = _custom_modes(
         [
             ModeDefinition(
+                id="my-mode",
                 name="MyMode",
                 description="a custom mode",
                 prompt="do the thing",

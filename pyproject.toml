@@ -147,6 +147,7 @@ ignore = [
 "scripts/**" = ["T20"]
 # Catalog prompts intentionally retain upstream emoji / typography.
 "src/mergecraft/modes.py" = ["RUF001", "TC003"]
+"src/mergecraft/modes/**" = ["RUF001", "TC003"]
 # MCP tool handlers and agent CLI harnesses use sync subprocess/Path I/O by design.
 "src/mergecraft/mcp/**" = ["ASYNC221", "ASYNC230", "ASYNC240", "SIM105", "SIM102", "RUF001"]
 "src/mergecraft/ci/**" = ["ASYNC240", "RUF001"]

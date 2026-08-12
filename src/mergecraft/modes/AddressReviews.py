@@ -1,0 +1,25 @@
+"""Built-in mode: AddressReviews.
+
+This module exists as a one-mode-per-file split of the legacy
+``src/mergecraft/modes.py`` monolith (#145). The prompt text is the
+identical body the monolith carried on ``pre-0.0.1`` HEAD — byte-for-byte,
+no rewording, no "while I'm here" prompt edits. Any prompt improvement is
+a separate PR against this versioned baseline.
+
+Exports:
+    NAME: Mode name (``"AddressReviews"``).
+    DESCRIPTION: Short description used by ``select_mode``.
+    TEMPLATE: The raw template body — ``${...}`` markers are expanded
+        by ``compute_modes`` at render time.
+"""
+
+from __future__ import annotations
+
+NAME: str = "AddressReviews"
+DESCRIPTION: str = "Address PR review feedback; respond to reviewer comments; make requested changes to an existing PR"
+
+# Triple-quoted single-quote string preserves the body verbatim. The original
+# template is a Python single-quoted string whose escape sequences (\\n,
+# \\, etc.) we keep as-is. ``TEMPLATE`` is consumed by ``compute_modes``
+# exactly as ``_MODE_DEFS[i][2]`` was in the monolith.
+TEMPLATE: str = '### Checklist\n\n1. **task list**: create your task list for this run as your first action.\n\n2. Checkout the PR branch via `${t("checkout_pr")}`.\n\n3. Fetch review comments via `${t("get_review_comments")}`.\n\n4. For each comment:\n   - understand the feedback\n   - **verify the finding yourself** against the actual code before deciding whether to apply — every comment (human or agent) is a hypothesis, not a directive. agent reviewers especially are fallible.\n   - you are searching for a solution that is **complete, minimal, and elegant** — you may need to think hard to find it. do not over-engineer, do not be over-defensive, **do not write AI slop**. reviewers bias toward *recommending additions*, and that bias has a recognizable slop texture: defensive checks for impossible cases, extra abstractions used once, comments restating obvious code, tests asserting tautologies, "just-in-case" guards, error handlers for cases the type system already rules out. reject those. evaluate whether applying the finding would leave the code more **sound, correct, AND elegant**; two-out-of-three is a signal to look harder for a fix that gets all three. if a request would add bloat — ceremony without commensurate correctness benefit — push back in your reply rather than mechanically applying it.\n   - if the request stands, make the code change using your native tools; otherwise reply explaining why\n   - record what was done (or why nothing was done)\n   - **when you refute a finding raised by a mergecraft review, write it into the learnings file** under `## Withdrawn review findings (known non-issues)` (create the heading if absent), as one bullet: what was claimed, and the fact that makes it wrong. This is the highest-leverage thing you can do in this mode. A reviewer with no memory of being wrong repeats the same false positive on every PR forever — that is how a review bot goes from useful to ignored — and one durable line here retires the whole family. Record the *reason*, not the verdict: `docstring schema is not enforced under tests/** — make lint only checks src/ and scripts/` is reusable, `docstring finding was wrong` is not. Only record findings from an automated review, and only when you are confident the pushback is correct; a wrong entry here silently suppresses a real finding later.\n\n5. Quality check:\n   - test changes, then review the diff before committing — verify only intended changes are present, no debug artifacts remain, no fix turned out to be bloat in context (revert any that did), and the changes are clean enough that a senior engineer would approve without hesitation\n   - ${commitStep}\n\n6. Finalize. Reply + resolve are paired write actions: do BOTH or NEITHER for each thread.\n   - ${finalizeStep} (same push/prepush guidance as Build mode in *SYSTEM*)\n   - **if the push/commit fails**, call `${t("report_progress")}` with the exact error and STOP — do NOT reply or resolve any thread until the fix is live on the remote. Resolving a thread without the fix landing misleads the reviewer.\n   - **once the fix is live on the remote**, for each thread you acted on:\n     - reply ONCE via `${t("reply_to_review_comment")}`. The `comment_id` parameter takes the root comment\'s numeric `id=` (from the first `comment author=...` tag in the `${t("get_review_comments")}` output) — NOT the `thread=` value; that\'s a separate GraphQL ID used by resolve. The runtime dedupes identical bodies within a session.\n     - **immediately** call `${t("resolve_review_thread")}` with that thread\'s `thread=` value as `thread_id`. Resolve every thread where you (a) made the requested code change in full — partial fixes leave the thread open — OR (b) replied with a substantive answer the user explicitly asked for. Do NOT resolve threads where you pushed back on the request and the disagreement is unresolved; leave those open for the human to mediate.\n   - call `${t("report_progress")}` with a brief summary'
