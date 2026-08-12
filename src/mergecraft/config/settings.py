@@ -24,15 +24,21 @@ from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 AccountPlan = Literal["none", "payg"]
 HeadingDepth = Literal[1, 2, 3, 4, 5, 6]
 
-# D4 / W6.2 — security/runtime models use ``extra="forbid"``; optional-feature
-# models keep ``extra="ignore"`` for one release with a warning shim. See
-# ``docs/config-failure-policy.md``.
+# D4 / D8 / W6.2 — security/runtime and optional-feature models both use
+# ``extra="forbid"``. The optional-feature one-release warning shim has ended
+# (D8 flipped at pre-0.0.1; see ``docs/config-failure-policy.md``).
 _SECURITY_RUNTIME_EXTRA: Literal["forbid"] = "forbid"
-_OPTIONAL_FEATURE_EXTRA: Literal["ignore"] = "ignore"
+_OPTIONAL_FEATURE_EXTRA: Literal["forbid"] = "forbid"
 
 
 def _warn_unknown_config_keys(model_name: str, data: object, fields: dict[str, Any]) -> object:
-    """Warn on unknown keys for optional-feature models (D4 one-release shim)."""
+    """Warn on unknown keys for optional-feature models (D4 one-release shim).
+
+    The shim was retired in D8 (``_OPTIONAL_FEATURE_EXTRA = "forbid"``); the
+    helper is preserved as a direct symbol anchor for tests that still assert
+    it warns when called, and as a fallback for any future caller that wants
+    to surface a soft warning before raising.
+    """
     if not isinstance(data, dict):
         return data
     known: set[str] = set()
@@ -53,14 +59,9 @@ def _warn_unknown_config_keys(model_name: str, data: object, fields: dict[str, A
 
 
 class _OptionalFeatureModel(BaseModel):
-    """Optional-feature config models: ``extra="ignore"`` + unknown-key warning."""
+    """Optional-feature config models: ``extra="forbid"`` (D8)."""
 
     model_config = ConfigDict(extra=_OPTIONAL_FEATURE_EXTRA, populate_by_name=True)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _warn_extras(cls, data: object) -> object:
-        return _warn_unknown_config_keys(cls.__name__, data, cls.model_fields)
 
 
 class ModeDefinition(_OptionalFeatureModel):

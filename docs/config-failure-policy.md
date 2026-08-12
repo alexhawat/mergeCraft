@@ -19,6 +19,7 @@ Surfaces in this class (Pydantic `extra="forbid"`):
 | `GatesSettings` | Gate mode / override vocabulary |
 | `AnalyzersSettings` | Analyzer enablement and trust-adjacent toggles |
 | `TracingSettings` | Whether reviewed-repo content may leave the runner |
+| Optional-feature blocks (`StaticCheckDefinition`, `CiEvidenceSettings`, `ModeDefinition`, `TraceSinkEntry`) | **Flipped to `forbid` at pre-0.0.1 (D8).** The one-release warning shim has ended — an unknown key now fails closed the same way the security/runtime blocks do, so a typo on a `staticChecks` / `ciEvidence` / `modes` / `tracing.sinks` entry aborts instead of silently dropping |
 
 Invalid enum values on `push` / `shell`, unknown keys on those models, and
 unparseable Action inputs that drive runtime (`timeout`) all fail closed.
@@ -36,8 +37,7 @@ Examples:
 
 | Surface | Behaviour |
 |---------|-----------|
-| Syntactically broken `.mergecraft/config.yaml` | Warn, fall back to `default_settings()` |
-| Nested informational blocks (`staticChecks`, `ciEvidence`, mode defs, sink entries, …) | Unknown keys warn for one release (`extra="ignore"` + warning shim), then flip to `forbid` |
+| Syntactically broken `.mergecraft/config.yaml` | Warn, fall back to `default_settings()` (D9 — broken YAML is **not** fail-closed) |
 | Trusted-tier `setupScript` non-zero exit | Warn-only; the run continues (untrusted tiers never execute it — trust ordering) |
 | Learnings seed / bundled-skills install failure | Warn and continue without that feature |
 
