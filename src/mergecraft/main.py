@@ -7,7 +7,7 @@ import contextlib
 import os
 import time
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -16,6 +16,10 @@ from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult, AgentRunContext
 from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_secrets
+
+if TYPE_CHECKING:
+    from mergecraft.config.settings import RepoSettings
+
 from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
 from mergecraft.analyzers.trust import (
     allow_repo_command_overrides,
@@ -26,10 +30,11 @@ from mergecraft.evidence.run_packet import emit_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
-from mergecraft.mcp.tool_state import ProgressComment, init_tool_state
+from mergecraft.mcp.tool_state import ProgressComment, ToolState, init_tool_state
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
+from mergecraft.tracing.event import trace_attrs_for_mode
 from mergecraft.utils.agent_resolve import (
     ModelFallbackPolicyError,
     effective_model_chain,
@@ -180,9 +185,12 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
 async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
     """Return a reason string when review-relevant dependency prep failed (W6.1).
 
-    Awaits an in-progress install before inspecting status. Trusted-tier
-    ``setup_script`` failures are intentionally *not* included here — they
-    stay warn-only by policy (see ``docs/config-failure-policy.md``).
+    Awaits an in-progress install before inspecting status.
+    Trusted-tier ``setup_script`` failures live in :func:`main`'s outcome
+    resolver (see the S1 / D5 / D10 block at the bottom of :func:`main`)
+    and never reach this helper — that path is policy-driven (configurable
+    via ``setup_failure_policy``), while dependency-prep failure is a
+    fixed-shape ``inconclusive`` mapping.
     """
     state = tool_context.tool_state.dependency_installation
     if state is None:
@@ -201,6 +209,160 @@ async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
     if reasons:
         return "; ".join(reasons)
     return "dependency installation failed"
+
+
+def _resolve_run_budget(payload: dict[str, Any], settings: RepoSettings) -> tuple[int | None, int]:
+    """Resolve the pre-deduction ``timeout_ms`` and the post-cap ``setup_timeout_s``.
+
+    Returns ``(timeout_ms, setup_timeout_s)`` where ``timeout_ms`` is ``None``
+    when ``timeout == "none"`` (no deadline), a positive duration in ms
+    otherwise, and defaults to one hour when no value is supplied.
+    ``setup_timeout_s`` is the ``settings.setup_timeout_s`` capped against
+    ``timeout_ms // 1000`` so a tight run deadline shrinks the setup budget
+    proportionally (S1 / F6). Raises :class:`_ConfigurationError` for an
+    unparseable duration string so the outer catch routes it to
+    ``RunOutcome.configuration_error``.
+    """
+    timeout_raw = payload.get("timeout")
+    if timeout_raw == TIMEOUT_DISABLED:
+        timeout_ms: int | None = None
+    elif timeout_raw:
+        usable = resolve_timeout_ms(timeout_raw)
+        if usable is None:
+            msg = (
+                f'invalid timeout "{timeout_raw}" '
+                "(use a duration like 10m/1h or --notimeout to disable)"
+            )
+            raise _ConfigurationError(msg)
+        timeout_ms = usable
+    else:
+        timeout_ms = 3_600_000
+
+    setup_timeout_s = settings.setup_timeout_s
+    if timeout_ms is not None and timeout_ms > 0:
+        setup_timeout_s = min(setup_timeout_s, timeout_ms // 1000)
+    return timeout_ms, setup_timeout_s
+
+
+async def _run_setup_script(
+    state: ToolState,
+    settings: RepoSettings,
+    trust_tier: str,
+    event_name: str,
+    setup_timeout_s: int,
+    *,
+    redactor: Any,
+) -> tuple[str, str, float]:
+    """Run the trusted-tier ``setup_script`` and report a skip / failure reason.
+
+    Returns ``(setup_hook_failure, setup_script_skip_reason, setup_elapsed_s)``.
+    A non-trusted tier sets ``setup_script_skip_reason`` and returns; a
+    trusted tier with no script returns zero-initialized values; a trusted
+    tier with a script runs the script under a session leader so
+    ``kill_process_group`` reaches grandchildren (F6), redacts ``stderr``
+    via the supplied ``redactor`` callable, and stamps the failure reason
+    on the run's :class:`ToolState` plus a warning log line. The
+    ``redactor`` is supplied so the helper does not depend on
+    ``analyzers.redact`` at module-import time (convention 9).
+    """
+    setup_script_skip_reason = ""
+    setup_hook_failure = ""
+    setup_started_at = time.monotonic()
+    if settings.setup_script:
+        if trust_tier == "trusted":
+            logger.info("» running setup script")
+            proc = await asyncio.create_subprocess_shell(
+                settings.setup_script,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,  # F6 — session leader so killpg reaches grandchildren
+            )
+            register_process_group(proc.pid)
+            try:
+                _out, err = await asyncio.wait_for(proc.communicate(), timeout=setup_timeout_s)
+            except TimeoutError:
+                # F6 — TERM → grace → KILL the whole tree (convention 9).
+                kill_process_group(proc.pid)
+                setup_hook_failure = f"setup script timed out after {setup_timeout_s}s"
+            else:
+                if proc.returncode != 0:
+                    detail = redactor((err or b"").decode(errors="replace")[:500])
+                    setup_hook_failure = f"setup script failed (exit {proc.returncode}): {detail}"
+            finally:
+                unregister_process_group(proc.pid)
+            if setup_hook_failure:
+                state.setup_hook_failure = setup_hook_failure
+                logger.warning("» {}", setup_hook_failure)
+        else:
+            setup_script_skip_reason = (
+                f"skipped setup_script on untrusted tier ({event_name} event)"
+            )
+            state.setup_script_skip_reason = setup_script_skip_reason
+            logger.warning("» {}", setup_script_skip_reason)
+    setup_elapsed_s = time.monotonic() - setup_started_at
+    return setup_hook_failure, setup_script_skip_reason, setup_elapsed_s
+
+
+def _compute_agent_deadline(
+    timeout_ms: int | None, setup_elapsed_s: float
+) -> tuple[int | None, str]:
+    """Deduct setup elapsed time from the agent deadline (S1 / F6).
+
+    Returns ``(agent_timeout_ms, log_line_or_empty)``. When ``timeout_ms`` is
+    ``None`` (``--notimeout``), the agent deadline is unbounded and no log
+    line is emitted. Otherwise the deadline is ``max(1, timeout_ms -
+    setup_elapsed_s * 1000)`` and a log line is returned whenever the
+    deduction actually changed the deadline. The helper does not emit the
+    log itself so the caller can route it through whichever logger bound
+    the run; ``main`` discards the second tuple element.
+    """
+    if timeout_ms is None:
+        return None, ""
+    agent_timeout_ms = max(1, int(timeout_ms - setup_elapsed_s * 1000))
+    if agent_timeout_ms != timeout_ms:
+        return (
+            agent_timeout_ms,
+            f"» deducted setup elapsed {setup_elapsed_s:.2f}s from agent deadline ({timeout_ms / 1000}s -> {agent_timeout_ms / 1000}s)",
+        )
+    return agent_timeout_ms, ""
+
+
+def _classify_outcome(
+    *,
+    result: AgentResult,
+    setup_reason: str,
+    setup_policy: str,
+    prep_reason: str | None,
+) -> tuple[RunOutcome, str | None]:
+    """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
+
+    Mirrors the inline resolver that lived at the bottom of :func:`main`.
+    Returns ``(outcome, failure_reason)``. The four branches are:
+    ``result.success is False`` -> ``RunOutcome.failed``; trusted-tier
+    ``setup_script`` failure under ``setup_failure_policy == "fail"`` ->
+    ``RunOutcome.configuration_error``; same under
+    ``setup_failure_policy == "inconclusive"`` or its default -> ``RunOutcome.inconclusive``;
+    review-relevant dependency-prep failure -> ``RunOutcome.inconclusive``;
+    otherwise -> ``RunOutcome.passed``. Each non-pass branch logs a warning
+    here so the call site only needs the tuple.
+    """
+    if not result.success:
+        return RunOutcome.failed, result.error
+    if setup_reason and setup_policy == "fail":
+        # D10 ``fail`` — operator has declared the failure is unrecoverable.
+        logger.warning(
+            "» setup script failure mapped run to configuration_error (fail policy): {}",
+            setup_reason,
+        )
+        return RunOutcome.configuration_error, setup_reason
+    if setup_reason and setup_policy == "inconclusive":
+        # D5 / D10 default — under-provisioned tree is no-verdict.
+        logger.warning("» setup script failure mapped run to inconclusive: {}", setup_reason)
+        return RunOutcome.inconclusive, setup_reason
+    if prep_reason:
+        logger.warning("» prep failure mapped run to inconclusive: {}", prep_reason)
+        return RunOutcome.inconclusive, prep_reason
+    return RunOutcome.passed, None
 
 
 async def main() -> MainResult:
@@ -282,23 +444,12 @@ async def main() -> MainResult:
 
         # Resolve the run deadline up front so the setup-script budget can
         # be capped against it (S1 / F6 — setup must never consume the
-        # whole run budget). Invalid input already fails closed as
-        # ``configuration_error`` below; this block only does the math.
+        # whole run budget). The fail-closed validation and the
+        # ``--notimeout`` / ``none`` escape both happen here; this block
+        # only does the math. ``timeout_raw`` is kept around for the agent
+        # timeout message later.
         timeout_raw = payload.get("timeout")
-        timeout_ms: int | None
-        if timeout_raw == TIMEOUT_DISABLED:
-            timeout_ms = None
-        elif timeout_raw:
-            usable = resolve_timeout_ms(timeout_raw)
-            if usable is None:
-                msg = (
-                    f'invalid timeout "{timeout_raw}" '
-                    "(use a duration like 10m/1h or --notimeout to disable)"
-                )
-                raise _ConfigurationError(msg)
-            timeout_ms = usable
-        else:
-            timeout_ms = 3_600_000
+        timeout_ms, setup_timeout_s = _resolve_run_budget(payload, settings)
 
         wipe_runner_leak_surface()
 
@@ -392,59 +543,25 @@ async def main() -> MainResult:
             octokit=github,
         )
 
-        # S1 / F6 — wall-clock budget for ``setup_script``. Two constraints: setup
-        # must not consume the whole run budget, and a ``--notimeout`` run must
-        # not make setup unbounded. The action-input resolver already bounds
-        # the upper end (``DEFAULT_SETUP_TIMEOUT_S`` = 10 m); we additionally
-        # cap it against the agent deadline computed below so a fast agent
-        # deadline shrinks the setup budget proportionally.
-        setup_timeout_s = settings.setup_timeout_s
-        if timeout_ms is not None and timeout_ms > 0:
-            setup_timeout_s = min(setup_timeout_s, timeout_ms // 1000)
-
-        setup_script_skip_reason = ""
-        setup_hook_failure = ""
-        setup_started_at = time.monotonic()
-        if settings.setup_script:
-            if trust_tier == "trusted":
-                logger.info("» running setup script")
-                proc = await asyncio.create_subprocess_shell(
-                    settings.setup_script,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    start_new_session=True,  # F6 — session leader so killpg reaches grandchildren
-                )
-                register_process_group(proc.pid)
-                try:
-                    _out, err = await asyncio.wait_for(proc.communicate(), timeout=setup_timeout_s)
-                except TimeoutError:
-                    # F6 — TERM → grace → KILL the whole tree (convention 9).
-                    kill_process_group(proc.pid)
-                    setup_hook_failure = f"setup script timed out after {setup_timeout_s}s"
-                else:
-                    if proc.returncode != 0:
-                        detail = redact_secrets((err or b"").decode(errors="replace")[:500])
-                        setup_hook_failure = (
-                            f"setup script failed (exit {proc.returncode}): {detail}"
-                        )
-                finally:
-                    unregister_process_group(proc.pid)
-                if setup_hook_failure:
-                    tool_state.setup_hook_failure = setup_hook_failure
-                    logger.warning("» {}", setup_hook_failure)
-            else:
-                event_name = os.environ.get("GITHUB_EVENT_NAME", "unknown")
-                setup_script_skip_reason = (
-                    f"skipped setup_script on untrusted tier ({event_name} event)"
-                )
-                tool_state.setup_script_skip_reason = setup_script_skip_reason
-                logger.warning("» {}", setup_script_skip_reason)
-        setup_elapsed_s = time.monotonic() - setup_started_at
+        # S1 / F6 — wall-clock budget for ``setup_script`` is resolved up
+        # front (see ``_resolve_run_budget``) so a tight run deadline
+        # shrinks the setup budget proportionally. The actual run + the
+        # skip / failure surface lives in ``_run_setup_script``.
+        event_name = os.environ.get("GITHUB_EVENT_NAME", "unknown")
+        setup_hook_failure, setup_script_skip_reason, setup_elapsed_s = await _run_setup_script(
+            tool_state,
+            settings,
+            trust_tier,
+            event_name,
+            setup_timeout_s,
+            redactor=redact_secrets,
+        )
 
         modes = [
             *compute_modes(agent_id, settings.signed_commits),
             *_custom_modes(settings.modes),
         ]
+        tool_state.modes = modes
         output_schema = resolve_output_schema()
 
         ctx_payload = _payload_to_ctx(payload)
@@ -642,18 +759,9 @@ async def main() -> MainResult:
         # deadline. ``setup_elapsed_s`` is the wall-clock duration measured
         # by the bounded setup block above; ``timeout_ms`` is the
         # pre-deduction run budget.
-        agent_timeout_ms: int | None
-        if timeout_ms is None:
-            agent_timeout_ms = None
-        else:
-            agent_timeout_ms = max(1, int(timeout_ms - setup_elapsed_s * 1000))
-            if agent_timeout_ms != timeout_ms:
-                logger.info(
-                    "» deducted setup elapsed {:.2f}s from agent deadline ({}s -> {}s)",
-                    setup_elapsed_s,
-                    timeout_ms / 1000,
-                    agent_timeout_ms / 1000,
-                )
+        agent_timeout_ms, deadline_log = _compute_agent_deadline(timeout_ms, setup_elapsed_s)
+        if deadline_log:
+            logger.info(deadline_log)
 
         if agent_timeout_ms is None:
             winning_slug, result = await agent_task
@@ -715,32 +823,12 @@ async def main() -> MainResult:
         # genuinely couldn't do its job). S1 also adds D10's
         # ``setup_failure_policy`` to the resolution.
         prep_reason = await _prep_failure_reason(tool_context)
-        setup_reason = tool_state.setup_hook_failure or ""
-        setup_policy = settings.setup_failure_policy
-
-        if not result.success:
-            outcome = RunOutcome.failed
-            failure_reason = result.error
-        elif setup_reason and setup_policy == "fail":
-            # D10 ``fail`` — operator has declared the failure is unrecoverable.
-            outcome = RunOutcome.configuration_error
-            failure_reason = setup_reason
-            logger.warning(
-                "» setup script failure mapped run to configuration_error (fail policy): {}",
-                setup_reason,
-            )
-        elif setup_reason and setup_policy == "inconclusive":
-            # D5 / D10 default — under-provisioned tree is no-verdict.
-            outcome = RunOutcome.inconclusive
-            failure_reason = setup_reason
-            logger.warning("» setup script failure mapped run to inconclusive: {}", setup_reason)
-        elif prep_reason:
-            outcome = RunOutcome.inconclusive
-            failure_reason = prep_reason
-            logger.warning("» prep failure mapped run to inconclusive: {}", prep_reason)
-        else:
-            outcome = RunOutcome.passed
-            failure_reason = None
+        outcome, failure_reason = _classify_outcome(
+            result=result,
+            setup_reason=tool_state.setup_hook_failure or "",
+            setup_policy=settings.setup_failure_policy,
+            prep_reason=prep_reason,
+        )
 
         packet_path: str | None = None
         if tool_context:
@@ -749,7 +837,14 @@ async def main() -> MainResult:
             tracer = get_tracer_from_settings(settings)
             with tracer.start_span(
                 "mergecraft.publish",
-                attrs_source=lambda: {"run_succeeded": outcome is RunOutcome.passed},
+                attrs_source=lambda: (
+                    {"run_succeeded": outcome is RunOutcome.passed}
+                    | {
+                        k: v
+                        for m in (tool_state.modes or [])
+                        for k, v in trace_attrs_for_mode(m).items()
+                    }
+                ),
             ) as _publish_span:
                 await persist_learnings(tool_context)
                 await report_status_checks(
