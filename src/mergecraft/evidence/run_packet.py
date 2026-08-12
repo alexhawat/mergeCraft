@@ -29,7 +29,7 @@ from mergecraft.analyzers.scope import parse_diff_scope
 from mergecraft.classify import ChangeSet, classify_blast_radius
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.emit import write_packet
-from mergecraft.evidence.packet import DeterministicCheck
+from mergecraft.evidence.packet import DeterministicCheck, ModePromptVersion
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -178,6 +178,24 @@ def _deterministic_checks(state: ToolState) -> list[DeterministicCheck]:
     return checks
 
 
+def _mode_prompt_versions(modes: list[object]) -> list[ModePromptVersion]:
+    """Project the run's ``Mode`` list into ``ModePromptVersion`` rows (#145).
+
+    One row per mode — built-in or custom. Modes without a version (an
+    older ``Mode`` object built before the S5 split) yield a row with an
+    empty ``prompt_version`` rather than being dropped, so the packet
+    stays a complete record of every mode that ran.
+    """
+    rows: list[ModePromptVersion] = []
+    for m in modes:
+        name = getattr(m, "name", "")
+        version = getattr(m, "version", "") or ""
+        if not name:
+            continue
+        rows.append(ModePromptVersion(mode_name=name, prompt_version=version))
+    return rows
+
+
 def _self_assessment(state: ToolState) -> dict[str, Any] | None:
     """Translate the legacy ``ApprovalRecord`` into the packet's input shape.
 
@@ -287,6 +305,10 @@ def build_run_packet(
         self_assessment=_self_assessment(state),
         blast_radius=blast_radius,
         trajectory=trajectory.model_dump(mode="json"),
+        # S5 (#145): one ``ModePromptVersion`` row per mode that ran, so an
+        # archived verdict can be attributed to the prompt that produced it.
+        # Mirrors the ``JudgePin`` pattern for the verifier.
+        mode_prompt_versions=_mode_prompt_versions(ctx.modes),
     )
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
     # W9 (#46): the decision row carries the closed action vocabulary and

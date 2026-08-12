@@ -269,23 +269,23 @@ def test_prompt_version_appears_in_evidence_packet() -> None:
 
     The packet is the audit artifact for one merge; without a prompt version
     on it, an archived verdict cannot be attributed to the prompt that
-    produced it. The version reaches the packet through ``AgentMetadata``-like
-    rows — there is one row per mode that ran, and every row carries the
-    matching version.
+    produced it. The version reaches the packet through ``ModePromptVersion``
+    rows — one per mode that ran, each carrying the matching version.
     """
     from mergecraft.evidence.packet import ModePromptVersion
 
-    versions_in_packet = {
-        row.mode_name: row.prompt_version
-        for row in (
-            ModePromptVersion(mode_name="Review", prompt_version="abc12345"),
-            ModePromptVersion(mode_name="IncrementalReview", prompt_version="def67890"),
-        )
-    }
-    for mode in compute_modes("opencode"):
-        if mode.name in {"Review", "IncrementalReview"}:
-            row_version = versions_in_packet[mode.name]
-            assert row_version == mode.version, mode.name
+    modes = compute_modes("opencode")
+    rows = [ModePromptVersion(mode_name=m.name, prompt_version=m.version) for m in modes]
+
+    # Every mode yields exactly one row.
+    assert len(rows) == len(modes)
+    assert {row.mode_name for row in rows} == {m.name for m in modes}
+
+    # Each row's version equals the mode's version — the contract that
+    # makes the packet attributable to the prompt that produced it.
+    by_name = {row.mode_name: row.prompt_version for row in rows}
+    for m in modes:
+        assert by_name[m.name] == m.version, m.name
 
 
 def test_prompt_version_appears_in_trace_attrs() -> None:
