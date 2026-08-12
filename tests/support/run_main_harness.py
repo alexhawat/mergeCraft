@@ -137,9 +137,14 @@ class _FakeShellProc:
     """Async stand-in for the setup-script subprocess."""
 
     returncode: int = 0
+    _stdout: bytes = b""
+    _stderr: bytes = b""
+    _delay_s: float = 0.0
 
     async def communicate(self) -> tuple[bytes, bytes]:
-        return b"", b""
+        if self._delay_s > 0:
+            await asyncio.sleep(self._delay_s)
+        return self._stdout, self._stderr
 
 
 def _strip_run_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -161,6 +166,9 @@ async def run_main_for_test(
     agents_by_slug: dict[str, FakeAgent] | None = None,
     prep_failure: str | None = None,
     setup_script_rc: int = 0,
+    setup_script_stdout: bytes = b"",
+    setup_script_stderr: bytes = b"",
+    setup_script_delay_s: float = 0.0,
     packet_path: Path | None = None,
     cleanup_tmpdir: bool = True,
     prompt: str = "review the diff",
@@ -264,7 +272,12 @@ async def run_main_for_test(
     async def _fake_setup_script(_command: str, **_kwargs: Any) -> _FakeShellProc:
         events.append("setup_script")
         setup_script_commands.append(_command)
-        return _FakeShellProc(returncode=setup_script_rc)
+        return _FakeShellProc(
+            returncode=setup_script_rc,
+            _stdout=setup_script_stdout,
+            _stderr=setup_script_stderr,
+            _delay_s=setup_script_delay_s,
+        )
 
     monkeypatch.setattr(asyncio, "create_subprocess_shell", _fake_setup_script)
 
