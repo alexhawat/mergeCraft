@@ -4,9 +4,12 @@ Contracts:
 
 - A review-relevant setup failure (dependency install failed) maps the run to
   ``inconclusive`` with the reason recorded — never a silent continue (D4).
-- ``setup_script`` failure on the *trusted* tier stays warn-only by policy
-  (documented); untrusted never runs it at all (W1 — covered in
-  ``tests/security/``).
+- ``setup_script`` failure on the *trusted* tier maps the run to
+  ``RunOutcome.inconclusive`` under the default ``setupFailurePolicy``
+  (S1 / D5 / D10). Operators can opt into the legacy warn-only behaviour
+  by setting ``setupFailurePolicy: warn`` (see
+  ``tests/config/test_setup_failure_policy.py``). Untrusted tiers never run
+  the script at all (W1 — covered in ``tests/security/``).
 """
 
 from __future__ import annotations
@@ -59,11 +62,20 @@ async def test_successful_prep_keeps_success_path(
     assert rec.result.success, f"run failed: {rec.result}"
 
 
-async def test_setup_script_failure_warn_only_on_trusted_tier(
+async def test_setup_script_failure_yields_inconclusive_on_trusted_tier(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """W6.1 — trusted-tier setup_script failure warns but does not fail the run."""
+    """S1 — trusted-tier ``setup_script`` failure maps to ``inconclusive`` (D5/D10 default).
+
+    Replaces the legacy ``test_setup_script_failure_warn_only_on_trusted_tier``
+    (W6.1 / pre-S1). The default ``setupFailurePolicy`` is ``inconclusive``
+    — an under-provisioned tree never receives a review verdict. Operators
+    that want the legacy continue-on-failure behaviour opt in via
+    ``setupFailurePolicy: warn`` (covered in
+    ``tests/config/test_setup_failure_policy.py::test_policy_warn_reproduces_legacy_continue``).
+    """
     from mergecraft.config.settings import RepoSettings
+    from mergecraft.run_outcome import RunOutcome
 
     rec = await run_main_for_test(
         monkeypatch=monkeypatch,
@@ -74,9 +86,11 @@ async def test_setup_script_failure_warn_only_on_trusted_tier(
         setup_script_rc=1,
     )
     assert rec.result is not None
-    assert rec.result.success, (
-        f"trusted-tier setup_script failure must stay warn-only: {rec.result}"
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome is RunOutcome.inconclusive, (
+        f"S1 / D5: trusted setup_script failure must map to inconclusive, got {outcome!r}"
     )
+    assert not rec.result.success
     assert rec.tool_context is not None
     assert rec.tool_context.trust_tier == "trusted"
 

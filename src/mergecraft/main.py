@@ -11,12 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.action.inputs import (
-    apply_setup_overrides,
-    apply_tracing_overrides,
-    resolve_setup_failure_policy,
-    resolve_setup_timeout_s,
-)
+from mergecraft.action.inputs import apply_setup_overrides, apply_tracing_overrides
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult, AgentRunContext
