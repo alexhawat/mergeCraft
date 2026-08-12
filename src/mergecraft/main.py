@@ -7,18 +7,25 @@ import contextlib
 import os
 import time
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
-from mergecraft.action.inputs import apply_setup_overrides, apply_tracing_overrides
+from mergecraft.action.inputs import (
+    SetupFailurePolicy,
+    apply_setup_overrides,
+    apply_tracing_overrides,
+)
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
-from mergecraft.agents.shared import AgentResult, AgentRunContext
+from mergecraft.agents.shared import Agent, AgentResult, AgentRunContext
 from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_secrets
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from mergecraft.config.settings import RepoSettings
+    from mergecraft.types import AgentId
 
 from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
 from mergecraft.analyzers.trust import (
@@ -31,7 +38,7 @@ from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, 
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import ProgressComment, ToolState, init_tool_state
-from mergecraft.modes import _custom_modes, compute_modes
+from mergecraft.modes import Mode, _custom_modes, compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
 from mergecraft.tracing.event import trace_attrs_for_mode
@@ -250,8 +257,6 @@ async def _run_setup_script(
     trust_tier: str,
     event_name: str,
     setup_timeout_s: int,
-    *,
-    redactor: Any,
 ) -> tuple[str, str, float]:
     """Run the trusted-tier ``setup_script`` and report a skip / failure reason.
 
@@ -260,10 +265,8 @@ async def _run_setup_script(
     trusted tier with no script returns zero-initialized values; a trusted
     tier with a script runs the script under a session leader so
     ``kill_process_group`` reaches grandchildren (F6), redacts ``stderr``
-    via the supplied ``redactor`` callable, and stamps the failure reason
-    on the run's :class:`ToolState` plus a warning log line. The
-    ``redactor`` is supplied so the helper does not depend on
-    ``analyzers.redact`` at module-import time (convention 9).
+    via :func:`mergecraft.analyzers.redact.redact_secrets`, and stamps the
+    failure reason on the run's :class:`ToolState` plus a warning log line.
     """
     setup_script_skip_reason = ""
     setup_hook_failure = ""
@@ -286,7 +289,7 @@ async def _run_setup_script(
                 setup_hook_failure = f"setup script timed out after {setup_timeout_s}s"
             else:
                 if proc.returncode != 0:
-                    detail = redactor((err or b"").decode(errors="replace")[:500])
+                    detail = redact_secrets((err or b"").decode(errors="replace")[:500])
                     setup_hook_failure = f"setup script failed (exit {proc.returncode}): {detail}"
             finally:
                 unregister_process_group(proc.pid)
@@ -327,11 +330,140 @@ def _compute_agent_deadline(
     return agent_timeout_ms, ""
 
 
+def _resolve_agent_model(
+    model_head: str | None,
+    model_pin: bool,
+    chain_for_decision: list[str],
+    settings: RepoSettings,
+) -> tuple[str | None, str | None, Agent, bool]:
+    """Resolve the model-chain selection block (W4/D8).
+
+    Returns ``(selected_slug, resolved_model, agent, use_model_chain)``.
+    ``use_model_chain`` is true whenever an effective chain has more than
+    one entry OR the operator asked for the chain explicitly; it is
+    consumed by :func:`main` when dispatching the agent run and re-used
+    inside :func:`_run_agent_with_timeout` to decide whether to wrap the
+    call in :func:`run_with_model_chain`. The helper raises
+    :class:`RuntimeError` when the chain has no runnable entry under the
+    operator's ``allow_fallback`` setting, mirroring the inline block that
+    used to live in :func:`main`.
+    """
+    use_model_chain = len(chain_for_decision) > 1 or (
+        bool(chain_for_decision) and model_head is not None and not model_pin
+    )
+    selected_slug: str | None
+    if use_model_chain:
+        _first_runnable_in_chain.allow_fallback = settings.allow_fallback  # type: ignore[attr-defined]
+        selected_slug = _first_runnable_in_chain(chain_for_decision)
+        if not selected_slug:
+            msg = "no runnable model slug in chain — configure credentials for at least one entry"
+            raise RuntimeError(msg)
+        resolved_model = resolve_model(slug=selected_slug, respect_env_override=False)
+    else:
+        # Single-entry chain (or pin opt-in). The chain is collapsed to
+        # exactly ``[model_head]`` when pinned; otherwise it is just the
+        # first configured entry. Honour ``respect_env_override=False``
+        # when the operator named a model explicitly — the action input
+        # already wins.
+        only_slug = (
+            model_head if model_pin else (chain_for_decision[0] if chain_for_decision else None)
+        )
+        resolved_model = resolve_model(slug=only_slug, respect_env_override=False)
+        selected_slug = only_slug
+    agent = resolve_runtime_agent(model=resolved_model)
+    return selected_slug, resolved_model, agent, use_model_chain
+
+
+def _build_tool_context(
+    *,
+    payload: dict[str, Any],
+    settings: RepoSettings,
+    run_context: Any,
+    agent_id: AgentId,
+    github: GitHubClient,
+    token_ref: Any,
+    modes: list[Mode],
+    tool_state: ToolState,
+    tmpdir: str,
+    trust_tier: Literal["trusted", "untrusted"],
+    resolved_model: str | None,
+) -> ToolContext:
+    """Build the ``ToolContext`` wired up for the MCP server + agent run.
+
+    Encapsulates the ``_payload_to_ctx(payload)`` -> ``ctx_payload`` ->
+    ``ToolContext(...)`` construction. ``analyzers_mode`` and
+    ``sarif_upload_enabled`` are resolved in-place so the call site only
+    deals with the final ``ToolContext`` value.
+    """
+    ctx_payload = _payload_to_ctx(payload)
+    analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
+    sarif_upload_enabled = resolve_sarif_upload_enabled(
+        action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
+        repo_setting=settings.analyzers.sarif_upload,
+    )
+    return ToolContext(
+        agent_id=agent_id,
+        repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
+        payload=ctx_payload,
+        github=github,
+        github_installation_token=token_ref.mcp_token,
+        git_token=token_ref.git_token,
+        api_token=run_context.api_token,
+        modes=modes,
+        tool_state=tool_state,
+        mcp_server_url="",
+        tmpdir=tmpdir,
+        refresh_git_token=token_ref.refresh_git_token,
+        read_token=token_ref.read_token,
+        xrepo=payload.get("xrepo"),
+        prepush_script=settings.prepush_script,
+        pr_approve_enabled=settings.pr_approve_enabled,
+        auto_merge_enabled=settings.auto_merge_enabled,
+        signed_commits=settings.signed_commits,
+        mode_instructions=settings.mode_instructions,
+        static_checks=[
+            StaticCheckConfig(
+                name=check.name,
+                command=check.command,
+                suffixes=tuple(check.suffixes),
+            )
+            for check in settings.static_checks
+        ],
+        static_checks_enabled=(
+            ctx_payload.shell != "disabled" and allow_repo_command_overrides(trust_tier)
+        ),
+        ci_gate_checks=dict(settings.ci_evidence.gates),
+        ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
+        analyzers_mode=analyzers_mode,
+        trust_tier=trust_tier,
+        analyzers_settings_enabled=settings.analyzers.enabled,
+        sarif_upload_enabled=sarif_upload_enabled,
+        run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
+        job_id=os.environ.get("GITHUB_JOB"),
+        oss=run_context.oss,
+        plan="unknown",
+        resolved_model=resolved_model,
+        suggest_eval_add=bool(payload.get("suggestEvalAdd")),
+    )
+
+
+def _publish_span_attrs(outcome: RunOutcome, modes: Sequence[Mode]) -> dict[str, Any]:
+    """Build the attrs dict the ``mergecraft.publish`` span emits.
+
+    #145 contract: every mode's prompt version reaches the trace attrs so
+    a Logfire/OTel row carries the prompt name and version of the
+    dispatched mode, even when the prompt text changes later.
+    """
+    return {"run_succeeded": outcome is RunOutcome.passed} | {
+        k: v for m in modes for k, v in trace_attrs_for_mode(m).items()
+    }
+
+
 def _classify_outcome(
     *,
     result: AgentResult,
     setup_reason: str,
-    setup_policy: str,
+    setup_policy: SetupFailurePolicy,
     prep_reason: str | None,
 ) -> tuple[RunOutcome, str | None]:
     """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
@@ -341,10 +473,11 @@ def _classify_outcome(
     ``result.success is False`` -> ``RunOutcome.failed``; trusted-tier
     ``setup_script`` failure under ``setup_failure_policy == "fail"`` ->
     ``RunOutcome.configuration_error``; same under
-    ``setup_failure_policy == "inconclusive"`` or its default -> ``RunOutcome.inconclusive``;
+    ``setup_failure_policy == "inconclusive"`` -> ``RunOutcome.inconclusive``;
     review-relevant dependency-prep failure -> ``RunOutcome.inconclusive``;
-    otherwise -> ``RunOutcome.passed``. Each non-pass branch logs a warning
-    here so the call site only needs the tuple.
+    otherwise (any ``warn`` / unknown policy, or no failure surface) ->
+    ``RunOutcome.passed``. Each non-pass branch logs a warning here so the
+    call site only needs the tuple.
     """
     if not result.success:
         return RunOutcome.failed, result.error
@@ -362,7 +495,133 @@ def _classify_outcome(
     if prep_reason:
         logger.warning("» prep failure mapped run to inconclusive: {}", prep_reason)
         return RunOutcome.inconclusive, prep_reason
+    # ``setup_policy`` is the closed ``SetupFailurePolicy`` vocabulary; any
+    # value other than ``fail`` / ``inconclusive`` (i.e. ``warn``, or the
+    # Pydantic default the action-input resolver accepted) means "proceed
+    # even if the setup script reported a failure".
     return RunOutcome.passed, None
+
+
+@dataclass(slots=True)
+class _AgentRunArgs:
+    """Closure bundle for ``_run_agent_with_timeout`` (Helper 7).
+
+    The agent-run block in :func:`main` references a dozen ``main``-local
+    variables (agent, run_ctx, payload, output_schema, tool_state,
+    tool_context, etc.). Hoisting it out as a module-scope helper would
+    require threading that many parameters; the audit allows up to 5, so
+    we bundle the closure variables here behind a single
+    ``_AgentRunArgs`` arg. The dataclass is private (``_``-prefixed) so it
+    does not extend the public surface.
+    """
+
+    agent: Agent
+    agent_id: str
+    selected_slug: str | None
+    use_model_chain: bool
+    settings: RepoSettings
+    model_head: str | None
+    model_pin: bool
+    run_ctx: AgentRunContext
+    payload: dict[str, Any]
+    run_context: Any  # ResolvedRunContext with .repo
+    output_schema: Any
+    tool_state: ToolState
+    tool_context: ToolContext
+    setup_hook_failure: str
+    setup_script_skip_reason: str
+
+
+async def _run_agent_with_timeout(
+    args: _AgentRunArgs,
+    agent_timeout_ms: int | None,
+    timeout_raw: Any,
+) -> tuple[str | None, AgentResult]:
+    """Run the model-chain agent dispatch with an optional timeout.
+
+    Encapsulates the ``_run_agent_once`` / ``_execute_agent`` closures
+    (W4/D8) and the :func:`asyncio.wait_for` deadline dance (S1 / F6,
+    D3/W5.2). Raises :class:`_AgentTimeoutError` on overrun; the outer
+    catch-all in :func:`main` routes it to ``RunOutcome.timed_out``. The
+    ``timeout_raw`` value is only used to format the timeout error
+    message, matching the inline behaviour in :func:`main`.
+    """
+
+    async def _run_agent_once(slug: str) -> AgentResult:
+        attempt_model = resolve_model(slug=slug, respect_env_override=False)
+        attempt_agent = resolve_runtime_agent(model=attempt_model)
+        attempt_agent_id = attempt_agent.name
+
+        if attempt_agent_id == args.agent_id:
+            attempt_ctx = replace(args.run_ctx, resolved_model=attempt_model)
+        else:
+            attempt_modes = [
+                *compute_modes(attempt_agent_id, args.settings.signed_commits),
+                *_custom_modes(args.settings.modes),
+            ]
+            attempt_instructions = resolve_instructions(
+                payload=args.payload,
+                repo=args.run_context.repo,
+                modes=attempt_modes,
+                agent_id=attempt_agent_id,
+                output_schema=args.output_schema,
+                signed_commits=args.settings.signed_commits,
+                learnings_file_path=args.tool_state.learnings_file_path,
+                learnings_headings=args.settings.learnings_headings,
+                setup_hook_failure=args.setup_hook_failure,
+                setup_script_skip_reason=args.setup_script_skip_reason,
+                xrepo_brief=args.settings.xrepo_brief,
+                xrepo_learnings_file_path=args.tool_state.xrepo_learnings_file_path,
+                xrepo_learnings_headings=args.settings.xrepo_learnings_headings,
+            )
+            attempt_denied = subagent_denied_tool_names(
+                replace(args.tool_context, agent_id=attempt_agent_id),
+                args.output_schema,
+            )
+            attempt_ctx = replace(
+                args.run_ctx,
+                resolved_model=attempt_model,
+                instructions=attempt_instructions,
+                subagent_denied_tools=attempt_denied,
+            )
+            args.tool_context.agent_id = attempt_agent_id
+            args.tool_context.modes = attempt_modes
+            # Keep ``tool_state.modes`` in sync so the publish-span
+            # ``attrs_source`` attributes the run to the prompt version
+            # that actually ran, not the original mode's version (#145
+            # contract).
+            args.tool_state.modes = attempt_modes
+            args.tool_context.resolved_model = attempt_model
+            logger.info(
+                "» model chain advanced to agent={} model={}",
+                attempt_agent_id,
+                attempt_model or "(auto)",
+            )
+        return await attempt_agent.run(attempt_ctx)
+
+    async def _execute_agent() -> tuple[str | None, AgentResult]:
+        if args.use_model_chain:
+            winning_slug, chain_result = await run_with_model_chain(
+                settings=args.settings,
+                run_once=_run_agent_once,
+                head=args.model_head,
+                pin=args.model_pin,
+            )
+            return winning_slug, chain_result
+        return args.selected_slug, await args.agent.run(args.run_ctx)
+
+    agent_task = asyncio.create_task(_execute_agent())
+    if agent_timeout_ms is None:
+        return await agent_task
+    try:
+        return await asyncio.wait_for(agent_task, timeout=agent_timeout_ms / 1000.0)
+    except TimeoutError:
+        agent_task.cancel()
+        from mergecraft.utils.process_group import kill_all_active_process_groups
+
+        kill_all_active_process_groups()
+        msg = f"agent run timed out after {timeout_raw or '1h'}"
+        raise _AgentTimeoutError(msg) from None
 
 
 async def main() -> MainResult:
@@ -487,36 +746,10 @@ async def main() -> MainResult:
         chain_for_decision = effective_model_chain(
             settings=settings, head=model_head, pin=model_pin
         )
-        # ``use_model_chain`` is true whenever an effective chain has more
-        # than one entry OR the operator asked for the chain explicitly. The
-        # legacy ``not model_explicit`` short-circuit is gone — a supplied
-        # ``model:`` no longer disables the chain.
-        use_model_chain = len(chain_for_decision) > 1 or (
-            bool(chain_for_decision) and model_head is not None and not model_pin
+        # Model-chain selection block (W4/D8) — see ``_resolve_agent_model``.
+        selected_slug, resolved_model, agent, use_model_chain = _resolve_agent_model(
+            model_head, model_pin, chain_for_decision, settings
         )
-        selected_slug: str | None
-
-        if use_model_chain:
-            _first_runnable_in_chain.allow_fallback = settings.allow_fallback  # type: ignore[attr-defined]
-            selected_slug = _first_runnable_in_chain(chain_for_decision)
-            if not selected_slug:
-                msg = (
-                    "no runnable model slug in chain — configure credentials for at least one entry"
-                )
-                raise RuntimeError(msg)
-            resolved_model = resolve_model(slug=selected_slug, respect_env_override=False)
-        else:
-            # Single-entry chain (or pin opt-in). The chain is collapsed to
-            # exactly ``[model_head]`` when pinned; otherwise it is just the
-            # first configured entry. Honour ``respect_env_override=False``
-            # when the operator named a model explicitly — the action input
-            # already wins.
-            only_slug = (
-                model_head if model_pin else (chain_for_decision[0] if chain_for_decision else None)
-            )
-            resolved_model = resolve_model(slug=only_slug, respect_env_override=False)
-            selected_slug = only_slug
-        agent = resolve_runtime_agent(model=resolved_model)
         agent_id = agent.name
         tool_state.model = payload.get("proxyModel") or resolved_model or payload.get("model")
         # W10.2 — record the chain head as the requested model so the packet
@@ -554,7 +787,6 @@ async def main() -> MainResult:
             trust_tier,
             event_name,
             setup_timeout_s,
-            redactor=redact_secrets,
         )
 
         modes = [
@@ -564,55 +796,18 @@ async def main() -> MainResult:
         tool_state.modes = modes
         output_schema = resolve_output_schema()
 
-        ctx_payload = _payload_to_ctx(payload)
-        analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
-        sarif_upload_enabled = resolve_sarif_upload_enabled(
-            action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
-            repo_setting=settings.analyzers.sarif_upload,
-        )
-        tool_context = ToolContext(
+        tool_context = _build_tool_context(
+            payload=payload,
+            settings=settings,
+            run_context=run_context,
             agent_id=agent_id,
-            repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
-            payload=ctx_payload,
             github=github,
-            github_installation_token=token_ref.mcp_token,
-            git_token=token_ref.git_token,
-            api_token=run_context.api_token,
+            token_ref=token_ref,
             modes=modes,
             tool_state=tool_state,
-            mcp_server_url="",
             tmpdir=tmpdir,
-            refresh_git_token=token_ref.refresh_git_token,
-            read_token=token_ref.read_token,
-            xrepo=payload.get("xrepo"),
-            prepush_script=settings.prepush_script,
-            pr_approve_enabled=settings.pr_approve_enabled,
-            auto_merge_enabled=settings.auto_merge_enabled,
-            signed_commits=settings.signed_commits,
-            mode_instructions=settings.mode_instructions,
-            static_checks=[
-                StaticCheckConfig(
-                    name=check.name,
-                    command=check.command,
-                    suffixes=tuple(check.suffixes),
-                )
-                for check in settings.static_checks
-            ],
-            static_checks_enabled=(
-                ctx_payload.shell != "disabled" and allow_repo_command_overrides(trust_tier)
-            ),
-            ci_gate_checks=dict(settings.ci_evidence.gates),
-            ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
-            analyzers_mode=analyzers_mode,
             trust_tier=trust_tier,
-            analyzers_settings_enabled=settings.analyzers.enabled,
-            sarif_upload_enabled=sarif_upload_enabled,
-            run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
-            job_id=os.environ.get("GITHUB_JOB"),
-            oss=run_context.oss,
-            plan="unknown",
             resolved_model=resolved_model,
-            suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         )
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
@@ -694,66 +889,6 @@ async def main() -> MainResult:
         # ``--notimeout`` / ``none`` escape and the fail-closed validation
         # both happen there; this block just spends the resolved values.
 
-        async def _run_agent_once(slug: str) -> AgentResult:
-            attempt_model = resolve_model(slug=slug, respect_env_override=False)
-            attempt_agent = resolve_runtime_agent(model=attempt_model)
-            attempt_agent_id = attempt_agent.name
-
-            if attempt_agent_id == agent_id:
-                attempt_ctx = replace(run_ctx, resolved_model=attempt_model)
-            else:
-                attempt_modes = [
-                    *compute_modes(attempt_agent_id, settings.signed_commits),
-                    *_custom_modes(settings.modes),
-                ]
-                attempt_instructions = resolve_instructions(
-                    payload=payload,
-                    repo=run_context.repo,
-                    modes=attempt_modes,
-                    agent_id=attempt_agent_id,
-                    output_schema=output_schema,
-                    signed_commits=settings.signed_commits,
-                    learnings_file_path=tool_state.learnings_file_path,
-                    learnings_headings=settings.learnings_headings,
-                    setup_hook_failure=setup_hook_failure,
-                    setup_script_skip_reason=setup_script_skip_reason,
-                    xrepo_brief=settings.xrepo_brief,
-                    xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
-                    xrepo_learnings_headings=settings.xrepo_learnings_headings,
-                )
-                attempt_denied = subagent_denied_tool_names(
-                    replace(tool_context, agent_id=attempt_agent_id),
-                    output_schema,
-                )
-                attempt_ctx = replace(
-                    run_ctx,
-                    resolved_model=attempt_model,
-                    instructions=attempt_instructions,
-                    subagent_denied_tools=attempt_denied,
-                )
-                tool_context.agent_id = attempt_agent_id
-                tool_context.modes = attempt_modes
-                tool_context.resolved_model = attempt_model
-                logger.info(
-                    "» model chain advanced to agent={} model={}",
-                    attempt_agent_id,
-                    attempt_model or "(auto)",
-                )
-            return await attempt_agent.run(attempt_ctx)
-
-        async def _execute_agent() -> tuple[str | None, AgentResult]:
-            if use_model_chain:
-                winning_slug, chain_result = await run_with_model_chain(
-                    settings=settings,
-                    run_once=_run_agent_once,
-                    head=model_head,
-                    pin=model_pin,
-                )
-                return winning_slug, chain_result
-            return selected_slug, await agent.run(run_ctx)
-
-        agent_task = asyncio.create_task(_execute_agent())
-
         # S1 / F6 — deduct the setup-script elapsed time from the agent
         # deadline. A slow setup must NOT silently extend the total run
         # deadline. ``setup_elapsed_s`` is the wall-clock duration measured
@@ -763,20 +898,27 @@ async def main() -> MainResult:
         if deadline_log:
             logger.info(deadline_log)
 
-        if agent_timeout_ms is None:
-            winning_slug, result = await agent_task
-        else:
-            try:
-                winning_slug, result = await asyncio.wait_for(
-                    agent_task, timeout=agent_timeout_ms / 1000.0
-                )
-            except TimeoutError:
-                agent_task.cancel()
-                from mergecraft.utils.process_group import kill_all_active_process_groups
-
-                kill_all_active_process_groups()
-                msg = f"agent run timed out after {timeout_raw or '1h'}"
-                raise _AgentTimeoutError(msg) from None
+        winning_slug, result = await _run_agent_with_timeout(
+            _AgentRunArgs(
+                agent=agent,
+                agent_id=agent_id,
+                selected_slug=selected_slug,
+                use_model_chain=use_model_chain,
+                settings=settings,
+                model_head=model_head,
+                model_pin=model_pin,
+                run_ctx=run_ctx,
+                payload=payload,
+                run_context=run_context,
+                output_schema=output_schema,
+                tool_state=tool_state,
+                tool_context=tool_context,
+                setup_hook_failure=setup_hook_failure,
+                setup_script_skip_reason=setup_script_skip_reason,
+            ),
+            agent_timeout_ms,
+            timeout_raw,
+        )
 
         if winning_slug:
             resolved_model = resolve_model(slug=winning_slug, respect_env_override=False)
@@ -837,14 +979,7 @@ async def main() -> MainResult:
             tracer = get_tracer_from_settings(settings)
             with tracer.start_span(
                 "mergecraft.publish",
-                attrs_source=lambda: (
-                    {"run_succeeded": outcome is RunOutcome.passed}
-                    | {
-                        k: v
-                        for m in (tool_state.modes or [])
-                        for k, v in trace_attrs_for_mode(m).items()
-                    }
-                ),
+                attrs_source=lambda: _publish_span_attrs(outcome, tool_state.modes),
             ) as _publish_span:
                 await persist_learnings(tool_context)
                 await report_status_checks(

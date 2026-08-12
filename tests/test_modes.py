@@ -303,39 +303,24 @@ def test_prompt_version_appears_in_trace_attrs() -> None:
 
 
 def test_publish_span_attrs_source_emits_mode_attrs_end_to_end() -> None:
-    """Regression pin: the ``mergecraft.publish`` span ``attrs_source``
-    spreads ``trace_attrs_for_mode`` over every mode in ``tool_state.modes``
-    (#145 + post-#145 wiring).
+    """Regression pin: ``_publish_span_attrs`` spreads ``trace_attrs_for_mode``
+    over every mode in the supplied ``modes`` sequence (#145 + post-#145 wiring).
 
     The audit found that ``trace_attrs_for_mode`` was unit-tested but never
     wired into production; the helper silently returned its dict into the
     void. This test guards against a re-introduction of that gap by
-    exercising the same ``attrs_source`` lambda ``main.py`` builds for the
-    ``mergecraft.publish`` span, against a tool_state whose ``modes`` field
-    carries the prompt list. Both ``run_succeeded`` and at least one set
-    of per-mode attrs must be present — a future refactor that drops the
-    spread (e.g. shrinks to ``lambda: {"run_succeeded": ...}``) fails this
-    test loudly.
+    exercising the module-scope ``_publish_span_attrs`` helper that
+    ``main.py`` invokes for the ``mergecraft.publish`` span. Both
+    ``run_succeeded`` and at least one set of per-mode attrs must be
+    present — a future refactor that drops the spread (e.g. shrinks to
+    ``{"run_succeeded": ...}``) fails this test loudly.
     """
-    from mergecraft.mcp.tool_state import init_tool_state
-    from mergecraft.tracing.event import trace_attrs_for_mode
+    from mergecraft.main import _publish_span_attrs
+    from mergecraft.run_outcome import RunOutcome
 
     review_mode = next(m for m in compute_modes("opencode") if m.name == "Review")
 
-    state = init_tool_state(owner="o", name="n", dir=".")
-    state.modes = [review_mode]
-
-    # Mirror the production ``attrs_source`` lambda in
-    # ``src/mergecraft/main.py`` exactly so a future drift in either side
-    # fails the test. The contract: the dict must contain ``run_succeeded``
-    # AND every ``trace_attrs_for_mode`` key for every mode in
-    # ``tool_state.modes``.
-    outcome = "passed"  # sentinel; only used to drive the bool
-    attrs_source = lambda: (  # noqa: E731 — production site uses a lambda
-        {"run_succeeded": outcome == "passed"}
-        | {k: v for m in (state.modes or []) for k, v in trace_attrs_for_mode(m).items()}
-    )
-    emitted = attrs_source()
+    emitted = _publish_span_attrs(RunOutcome.passed, [review_mode])
 
     assert emitted.get("run_succeeded") is True
     assert emitted.get("mergecraft.mode.name") == "Review"
