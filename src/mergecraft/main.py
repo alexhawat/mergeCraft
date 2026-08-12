@@ -7,7 +7,7 @@ import contextlib
 import os
 import time
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from loguru import logger
 
@@ -27,7 +27,7 @@ from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, 
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import ProgressComment, init_tool_state
-from mergecraft.modes import Mode, compute_modes
+from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
 from mergecraft.utils.agent_resolve import (
@@ -78,9 +78,6 @@ from mergecraft.utils.workspace import (
     ensure_github_workspace_registered,
     resolve_allowed_working_directory,
 )
-
-if TYPE_CHECKING:
-    from mergecraft.config.settings import ModeDefinition
 
 
 @dataclass(slots=True)
@@ -139,10 +136,6 @@ def _payload_to_ctx(payload: dict[str, Any]) -> ResolvedPayload:
         xrepo=payload.get("xrepo"),
         extra=payload,
     )
-
-
-def _custom_modes(defs: list[ModeDefinition]) -> list[Mode]:
-    return [Mode(name=d.name, description=d.description, prompt=d.prompt or None) for d in defs]
 
 
 class _AgentTimeoutError(RuntimeError):

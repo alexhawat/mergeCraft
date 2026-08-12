@@ -19,9 +19,12 @@ Exports:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from mergecraft.modes import Mode
 
 
 class TraceEvent(BaseModel):
@@ -61,4 +64,30 @@ class TraceEvent(BaseModel):
     attrs: dict[str, Any] = Field(default_factory=dict)
 
 
-__all__ = ["TraceEvent"]
+def trace_attrs_for_mode(mode: Mode) -> dict[str, Any]:
+    """Return the trace attrs that identify the prompt a run was dispatched on (#145).
+
+    The returned dict is intended to be spread onto a span's ``attrs`` so a
+    Logfire / OTel row carries the mode name and its prompt version —
+    enough to attribute the row to the prompt body that produced it, even
+    when the prompt text later changes. Mirrors the verifier's
+    ``JudgePin`` precedent (``agents/verifier.py:338``).
+
+    Args:
+        mode: The :class:`mergecraft.modes.Mode` the run dispatched on.
+
+    Returns:
+        A dict with two keys: ``mergecraft.mode.name`` and
+        ``mergecraft.mode.prompt_version``. ``prompt_version`` is the empty
+        string when the mode object predates the S5 split (no ``version``
+        attribute) so the contract is total — every mode yields a row, never
+        a missing attr.
+    """
+    version = getattr(mode, "version", "") or ""
+    return {
+        "mergecraft.mode.name": mode.name,
+        "mergecraft.mode.prompt_version": version,
+    }
+
+
+__all__ = ["TraceEvent", "trace_attrs_for_mode"]

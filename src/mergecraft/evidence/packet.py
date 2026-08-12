@@ -65,7 +65,12 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 # - 1.6.0 — production-readiness W10 (#20) adds requested/executed model,
 #   provider, and fallback index/occurrence fields on ``AgentMetadata`` so
 #   every packet proves which model actually ran (not opt-in tracing only).
-PACKET_SCHEMA_VERSION = "1.6.0"
+# - 1.7.0 — S5 (#145) adds the ``mode_prompt_versions`` section: one row per
+#   mode that ran, carrying the mode name and its prompt version. Additive
+#   (minor bump) — a packet that previously omitted the field still
+#   validates, and the section's ``None`` default keeps it forward-
+#   compatible with consumers that do not yet read it.
+PACKET_SCHEMA_VERSION = "1.7.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]
@@ -183,6 +188,22 @@ class SelfAssessment(BaseModel):
     sha: str | None = None
 
 
+class ModePromptVersion(BaseModel):
+    """Identifies the prompt body that produced a run for one mode (#145).
+
+    A run can carry multiple modes — built-ins, custom, future revisions —
+    each with its own content identity. Without this row an archived verdict
+    cannot be attributed to the prompt body that produced it, which is the
+    same problem ``JudgePin`` solves for the verifier (see
+    ``mergecraft.agents.verifier.JudgePin``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode_name: str
+    prompt_version: str
+
+
 class MergeEvidencePacket(BaseModel):
     """The versioned, structured record of one mergeCraft run.
 
@@ -193,7 +214,9 @@ class MergeEvidencePacket(BaseModel):
     section is typed ``list[EvalMetadata] | None`` from W12 (#44): each
     row is a lightweight summary of a replay run attached to this
     packet's verdict; the full case continues to live under
-    ``evals/cases/<case_id>.md``.
+    ``evals/cases/<case_id>.md``. ``mode_prompt_versions`` carries the
+    S5 (#145) prompt-version rows so an archived verdict can be read
+    against the prompt that produced it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -209,6 +232,7 @@ class MergeEvidencePacket(BaseModel):
     blast_radius: BlastRadiusClassification | None = None
     trajectory: TrajectoryRecord | None = None
     evals: list[EvalMetadata] | None = None
+    mode_prompt_versions: list[ModePromptVersion] | None = None
 
 
 def packet_output_schema() -> dict[str, Any]:
@@ -249,6 +273,7 @@ __all__ = [
     "Decision",
     "DeterministicCheck",
     "MergeEvidencePacket",
+    "ModePromptVersion",
     "SelfAssessment",
     "packet_output_schema",
 ]
