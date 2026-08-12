@@ -1,13 +1,18 @@
-"""Plan W6.2 — ``extra="forbid"`` on security/runtime settings models (D4, ``#16``).
+"""Plan W6.2 — ``extra="forbid"`` on settings models (D4, D8, ``#16``).
 
 Contracts:
 
 - Security/runtime settings models reject unknown keys with an *actionable*
   error naming the offending key (fail closed).
-- Non-security surfaces keep ``ignore`` + warning for one release (D4), so
-  this suite pins the flip per-model: ``RepoSettings`` and the nested
-  security/runtime blocks must forbid; purely informational blocks are
-  asserted separately in ``test_config_failure_policy.py``.
+- Optional-feature settings models also reject unknown keys (D8; the
+  one-release warning shim has ended). The strict policy for the
+  optional-feature blocks (``staticChecks``, ``ciEvidence``, custom mode
+  definitions, tracing sink entries) is asserted separately in
+  ``test_optional_feature_strictness.py``.
+- The historical warn-shim helper ``_warn_unknown_config_keys`` remains
+  importable as a symbol anchor — direct calls still warn — but it is no
+  longer wired into the model-validator path. This suite pins that
+  contract so the helper cannot be silently deleted or repurposed.
 """
 
 from __future__ import annotations
@@ -79,23 +84,24 @@ def test_load_repo_settings_fails_closed_on_unknown_key(tmp_path) -> None:
 
 
 def test_warn_unknown_config_keys_logs_for_optional_models() -> None:
-    """W6.2 / D4 — optional-feature models warn on unknown keys (one-release shim).
+    """W6.2 / D4 / D8 — ``_warn_unknown_config_keys`` warns when called directly.
 
-    Direct coverage for ``_warn_unknown_config_keys``: deleting the shim (or
-    switching optional models to silent ``extra="ignore"`` without a warning)
-    must break this test.
+    The shim was retired in D8 (``_OPTIONAL_FEATURE_EXTRA = "forbid"``), so
+    the model-validator path no longer calls this helper — that policy is
+    pinned separately by
+    ``tests/config/test_optional_feature_strictness.py``. This test keeps the
+    helper anchored as an importable symbol: deleting the function (or
+    silently swallowing its log call) must break this test.
     """
     messages: list[str] = []
     sink_id = logger.add(lambda record: messages.append(record.record["message"]), level="WARNING")
     try:
-        # Call the helper directly (symbol anchor).
+        # Direct symbol anchor — only this path still applies post-D8.
         _warn_unknown_config_keys(
             "ModeDefinition",
             {"id": "x", "name": "n", "description": "d", "mysteryKey": 1},
             ModeDefinition.model_fields,
         )
-        # And through the model validator path operators actually hit.
-        ModeDefinition.model_validate({"id": "x", "name": "n", "description": "d", "mysteryKey": 1})
     finally:
         logger.remove(sink_id)
     joined = "\n".join(messages)
