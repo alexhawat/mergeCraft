@@ -182,7 +182,8 @@ jobs:
     name: Sign and attest digests
     needs: [build-images, sbom-scan]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Sigstore/rekor occasionally times out; retries below absorb transient outages.
+    timeout-minutes: 25
     permissions:
       contents: read
       packages: write
@@ -200,18 +201,58 @@ jobs:
       - name: Cosign sign slim
         run: |
           set -euo pipefail
-          cosign sign --yes "${IMAGE_SLIM}@${{ needs.build-images.outputs.slim_digest }}"
+          ref="${IMAGE_SLIM}@${{ needs.build-images.outputs.slim_digest }}"
+          for attempt in 1 2 3; do
+            if cosign sign --yes "$ref"; then
+              exit 0
+            fi
+            echo "cosign sign slim failed (attempt ${attempt}/3); retrying in 15s…" >&2
+            sleep 15
+          done
+          echo "cosign sign slim failed after retries" >&2
+          exit 1
       - name: Cosign sign analyzers
         run: |
           set -euo pipefail
-          cosign sign --yes "${IMAGE_ANALYZERS}@${{ needs.build-images.outputs.analyzers_digest }}"
+          ref="${IMAGE_ANALYZERS}@${{ needs.build-images.outputs.analyzers_digest }}"
+          for attempt in 1 2 3; do
+            if cosign sign --yes "$ref"; then
+              exit 0
+            fi
+            echo "cosign sign analyzers failed (attempt ${attempt}/3); retrying in 15s…" >&2
+            sleep 15
+          done
+          echo "cosign sign analyzers failed after retries" >&2
+          exit 1
       - name: Attest build provenance (slim)
+        id: attest-provenance-slim
+        continue-on-error: true
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ${{ env.IMAGE_SLIM }}
+          subject-digest: ${{ needs.build-images.outputs.slim_digest }}
+          push-to-registry: true
+      - name: Attest build provenance (slim) retry
+        if: steps.attest-provenance-slim.outcome == 'failure'
+        id: attest-provenance-slim-retry
+        continue-on-error: true
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-name: ${{ env.IMAGE_SLIM }}
           subject-digest: ${{ needs.build-images.outputs.slim_digest }}
           push-to-registry: true
       - name: Attest build provenance (analyzers)
+        id: attest-provenance-analyzers
+        continue-on-error: true
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ${{ env.IMAGE_ANALYZERS }}
+          subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
+          push-to-registry: true
+      - name: Attest build provenance (analyzers) retry
+        if: steps.attest-provenance-analyzers.outcome == 'failure'
+        id: attest-provenance-analyzers-retry
+        continue-on-error: true
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-name: ${{ env.IMAGE_ANALYZERS }}
@@ -223,6 +264,18 @@ jobs:
           name: image-scan-reports
           path: reports
       - name: Attest SBOM (slim)
+        id: attest-sbom-slim
+        continue-on-error: true
+        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        with:
+          subject-name: ${{ env.IMAGE_SLIM }}
+          subject-digest: ${{ needs.build-images.outputs.slim_digest }}
+          sbom-path: reports/sbom-slim.spdx.json
+          push-to-registry: true
+      - name: Attest SBOM (slim) retry
+        if: steps.attest-sbom-slim.outcome == 'failure'
+        id: attest-sbom-slim-retry
+        continue-on-error: true
         uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
         with:
           subject-name: ${{ env.IMAGE_SLIM }}
@@ -230,12 +283,44 @@ jobs:
           sbom-path: reports/sbom-slim.spdx.json
           push-to-registry: true
       - name: Attest SBOM (analyzers)
+        id: attest-sbom-analyzers
+        continue-on-error: true
         uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
         with:
           subject-name: ${{ env.IMAGE_ANALYZERS }}
           subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
           sbom-path: reports/sbom-analyzers.spdx.json
           push-to-registry: true
+      - name: Attest SBOM (analyzers) retry
+        if: steps.attest-sbom-analyzers.outcome == 'failure'
+        id: attest-sbom-analyzers-retry
+        continue-on-error: true
+        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        with:
+          subject-name: ${{ env.IMAGE_ANALYZERS }}
+          subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
+          sbom-path: reports/sbom-analyzers.spdx.json
+          push-to-registry: true
+      - name: Require Sigstore attestations
+        if: always()
+        run: |
+          set -euo pipefail
+          failed=0
+          check() {
+            local label="$1" first="$2" retry="$3"
+            if [[ "$first" == "success" || "$retry" == "success" ]]; then
+              return 0
+            fi
+            echo "::error title=Sigstore attestation failed::${label} failed after retry (rekor.sigstore.dev may have timed out)." >&2
+            failed=1
+          }
+          check "build provenance (slim)" "${{ steps.attest-provenance-slim.outcome }}" "${{ steps.attest-provenance-slim-retry.outcome }}"
+          check "build provenance (analyzers)" "${{ steps.attest-provenance-analyzers.outcome }}" "${{ steps.attest-provenance-analyzers-retry.outcome }}"
+          check "SBOM (slim)" "${{ steps.attest-sbom-slim.outcome }}" "${{ steps.attest-sbom-slim-retry.outcome }}"
+          check "SBOM (analyzers)" "${{ steps.attest-sbom-analyzers.outcome }}" "${{ steps.attest-sbom-analyzers-retry.outcome }}"
+          if [[ "$failed" -ne 0 ]]; then
+            exit 1
+          fi
 
   # W8.3 — promote mutable tags by retagging the signed digests (no rebuild).
   promote:
