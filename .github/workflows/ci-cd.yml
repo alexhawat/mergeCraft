@@ -148,7 +148,7 @@ jobs:
           output-file: sbom-analyzers.spdx.json
           upload-artifact: false
       - name: Trivy scan slim
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ needs.build-images.outputs.slim_ref }}
           format: sarif
@@ -157,7 +157,7 @@ jobs:
           exit-code: ${{ steps.gate.outputs.exit_code }}
           ignore-unfixed: true
       - name: Trivy scan analyzers
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ needs.build-images.outputs.analyzers_ref }}
           format: sarif
