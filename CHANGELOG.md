@@ -87,6 +87,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Tracing: W6 — `_open_provider_llm_pair` / `_close_provider_llm_pair` now
+  wrap the post-`provider_span.__enter__()` body in a `try/except` so a
+  raised inner `start_span` (or `llm_span.__enter__`) closes the provider
+  span and pops its active-span frame before the exception propagates.
+  The three driver event handlers (`claude` / `codex` / `gemini`) no
+  longer re-stamp `model.id` on the inner llm span — the helper is the
+  single source of truth and the provider span is the canonical home.
 - Tracing: tool-call attribute helpers moved from `agents/_tool_attrs.py` to
   `tracing/_tool_attrs.py` so the MCP package no longer reaches into agents
   (W4 H3); the single `enrich_tool_call_attrs` helper split into the open-

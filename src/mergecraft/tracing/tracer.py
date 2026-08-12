@@ -411,6 +411,20 @@ def _open_provider_llm_pair(
     ``tracer`` is ``None`` / ``NullTracer`` so the disabled path is a
     single-line guard at every call site.
 
+    W6 / L-1 — once ``provider_span.__enter__()`` runs, the provider span
+    is the active frame on ``_ACTIVE_SPAN``. If the subsequent
+    ``tracer.start_span(...)`` or ``llm_span.__enter__()`` raises, the
+    public ``provider_llm_pair`` context manager's ``try/finally`` would
+    call ``_close_provider_llm_pair`` and the leak is contained — but
+    the streaming driver event handlers (claude / codex / gemini) call
+    this helper directly, store the pair in their own bookkeeping dict,
+    and rely on a matching terminal event to close it. Any raised
+    exception between the two ``__enter__()`` calls would leave the
+    provider span stuck on ``_ACTIVE_SPAN`` for the rest of the run.
+    The local ``try/except`` here ensures the provider span is closed
+    (and its active-span frame reset) before the exception propagates,
+    regardless of which caller path is used.
+
     Args:
         tracer: The owning tracer. ``None`` / ``NullTracer`` is a no-op.
         model_id: Model identifier attached to both spans.
@@ -432,8 +446,20 @@ def _open_provider_llm_pair(
     provider_span.set_attribute("gen_ai.operation.name", "chat")
     provider_span.ts_start_ns = time.time_ns()
     provider_span.__enter__()
-    llm_span = tracer.start_span("llm.call", parent_span_id=provider_span.span_id)
-    llm_span.__enter__()
+    try:
+        llm_span = tracer.start_span("llm.call", parent_span_id=provider_span.span_id)
+        llm_span.__enter__()
+    except BaseException:
+        # W6 / L-1 — the provider span is the active frame on
+        # ``_ACTIVE_SPAN`` at this point. Close it so its context-token
+        # frame is popped before the exception propagates to the caller;
+        # otherwise the next ``tracer.start_span`` would treat the
+        # provider span as its parent and chain a child onto a
+        # never-closed span. The provider span's ``close()`` is
+        # idempotent on its own (``_closed`` flag — W5 / L2) so a
+        # second close from a caller-side ``finally`` is a no-op.
+        provider_span.__exit__(None, None, None)
+        raise
     return ProviderLLMPair(provider=provider_span, llm=llm_span)
 
 

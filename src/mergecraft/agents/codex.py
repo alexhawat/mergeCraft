@@ -805,7 +805,11 @@ def _codex_stream_event_handler(
                     provider_id="openai_codex",
                 )
                 if pair is not None:
-                    pair.llm.set_attribute("model.id", model_id)
+                    # W6 / L3 — ``_open_provider_llm_pair`` already stamps
+                    # ``model.id`` on the parent ``provider.call`` span (the
+                    # canonical home per the helper docstring). The llm span
+                    # inherits the value through the OTel/mergeCraft parent
+                    # chain; do not re-stamp here.
                     pair.llm.set_attribute("model.event", "thread.started")
                     pair.llm.set_attribute("gen_ai.system", "openai")
                     pair.llm.set_attribute("gen_ai.operation.name", "chat")
