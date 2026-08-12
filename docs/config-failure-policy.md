@@ -38,13 +38,60 @@ Examples:
 |---------|-----------|
 | Syntactically broken `.mergecraft/config.yaml` | Warn, fall back to `default_settings()` |
 | Nested informational blocks (`staticChecks`, `ciEvidence`, mode defs, sink entries, …) | Unknown keys warn for one release (`extra="ignore"` + warning shim), then flip to `forbid` |
-| Trusted-tier `setupScript` non-zero exit | Warn-only; the run continues (untrusted tiers never execute it — trust ordering) |
 | Learnings seed / bundled-skills install failure | Warn and continue without that feature |
+
+> Trusted-tier `setupScript` failures are **not** in this table: see the
+> dedicated section below — S1 changed the default from warn-only to
+> `inconclusive`.
 
 Review-relevant **prep / dependency-install** failure is a third shape: the
 run maps to `RunOutcome.inconclusive` with the install reason recorded
 (not `passed`, not a silent continue). That is fail-closed for the
 *outcome*, not a hard abort before the agent starts.
+
+## Setup-script failures (S1 / D5 / D10 / F6)
+
+A trusted-tier `setupScript` failure (non-zero exit or timeout) used to be
+warn-only. **S1 changes that default**: a failed or timed-out setup script
+now maps the run to `RunOutcome.inconclusive` (D5) — an under-provisioned
+tree never receives a review verdict. Operators can opt into a different
+shape via the `setup_failure_policy` Action input:
+
+| Policy          | Effect on a trusted-tier setup failure (non-zero exit **or** timeout) |
+|-----------------|----------------------------------------------------------------------|
+| `inconclusive` (default) | Run → `RunOutcome.inconclusive` (neutral check conclusion). The agent still runs under the WARN semantic when a failure happens with this policy? **No** — see below. |
+| `fail`          | Run → `RunOutcome.configuration_error`. The consumer has declared the failure is unrecoverable; the run aborts. |
+| `warn`          | Today's behaviour: the run continues (`passed`), but the agent prompt still carries the failure text so the reviewing model knows its tree may be partially provisioned. |
+
+**What `inconclusive` actually means for the WARN legacy:** with the
+default policy, a setup failure aborts the review verdict — the run is
+neither a clean `passed` nor a `failed` review, but a `neutral` check
+conclusion. To get today's continue-on-failure behaviour back, explicitly
+set `setup_failure_policy: warn`.
+
+### `setupTimeout` (F6)
+
+`setupTimeout` (Action input, default `10m`) bounds the setup-script
+wall-clock duration. A hanging install stalls the run otherwise. The
+setup runs as a session leader (`start_new_session=True`), so a TERM →
+grace → KILL on the deadline reaches the **whole** process tree — the
+script's own children and grandchildren are reaped, not just the leader.
+
+### Redaction (convention 7)
+
+Setup-script stderr that surfaces to the agent prompt **or** the `result`
+payload is passed through `analyzers.redact.redact_secrets` first.
+Secrets (`ghp_…`, `sk-…`, `AKIA…`, etc.) become `[REDACTED]` in both
+output channels.
+
+### Skipping on untrusted tiers (convention 8)
+
+`setup_script` is never executed on untrusted tiers (fork PRs,
+`pull_request_target`, etc.). The trust check at `main.py:368` precedes
+every subprocess spawn and is **not** moved by S1. When skipped, the
+reason is recorded on `tool_state.setup_script_skip_reason` and threaded
+into the agent prompt as a `SETUP SCRIPT SKIPPED` section so the agent
+knows the setup did not run.
 
 ## Operator checklist
 
@@ -52,5 +99,15 @@ run maps to `RunOutcome.inconclusive` with the install reason recorded
    not run with a softened config.
 2. Broken YAML → fix the file; until then defaults apply (restricted push/shell).
 3. Bad `timeout` input → use a duration (`10m`, `1h30m`) or `--notimeout`.
-4. Prep install failed → treat the check conclusion as inconclusive/neutral
+4. Bad `setup_timeout` input → use a duration (`10m`, `1h30m`); the default
+   (`10m`) is set even when `timeout` is unset or `--notimeout`.
+5. Unknown `setup_failure_policy` value → fix the typo; the run fails closed
+   as `configuration_error` before any subprocess spawns (closed vocabulary:
+   `inconclusive` | `fail` | `warn`).
+6. Setup script exits non-zero under default policy → the run is
+   `inconclusive` (not `passed`). Set `setup_failure_policy: warn` to get
+   today's continue-on-failure behaviour back, or fix the script.
+7. Setup script hangs → it is killed at the `setupTimeout` deadline (default
+   10 m) along with any children. Bump `setupTimeout` for slow installs.
+8. Prep install failed → treat the check conclusion as inconclusive/neutral
    and re-run after fixing the install error.

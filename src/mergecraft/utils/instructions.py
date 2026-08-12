@@ -337,6 +337,7 @@ def resolve_instructions(
     learnings_file_path: str | None = None,
     learnings_headings: list[LearningsHeading] | None = None,
     setup_hook_failure: str = "",
+    setup_script_skip_reason: str = "",
     xrepo_brief: str | None = None,
     xrepo_learnings_file_path: str | None = None,
     xrepo_learnings_headings: list[LearningsHeading] | None = None,
@@ -458,6 +459,18 @@ def resolve_instructions(
             f"did not complete successfully. {setup_hook_failure}\n\n"
             "The environment may be only partially provisioned, but this is often benign. "
             "Proceed with YOUR TASK as normal."
+        )
+
+    setup_skip = ""
+    if setup_script_skip_reason:
+        setup_skip = (
+            "************* SETUP SCRIPT SKIPPED *************\n\n"
+            "The repo-configured setup script was not executed for this run because the "
+            "trust tier is not `trusted` (e.g. fork PR, pull_request_target, or another "
+            f"untrusted event). Reason: {setup_script_skip_reason}\n\n"
+            "The environment may be missing the dependencies the script would have "
+            "installed. Note this in your review when relevant; do not attempt to run "
+            "the script yourself."
         )
 
     mode_lines = "\n".join(f'- "{m.name}": {m.description}' for m in modes)
@@ -609,6 +622,8 @@ Trust the tools — do not repeatedly verify after successful operations. Except
         toc_entries.append(("CROSS-REPO", "cross-repo access set, brief, and learnings"))
     if setup_failure:
         toc_entries.append(("SETUP HOOK FAILED", "environment provisioning warning"))
+    if setup_skip:
+        toc_entries.append(("SETUP SCRIPT SKIPPED", "trust-tier skip notice"))
     toc_entries.append(("PROCEDURE", "mode selection and execution steps"))
     if event_context:
         toc_entries.append(("EVENT CONTEXT", "related PR/issue data"))
@@ -629,6 +644,7 @@ Trust the tools — do not repeatedly verify after successful operations. Except
             standing,
             xrepo_section,
             setup_failure,
+            setup_skip,
             procedure,
             # W6.4 — place learnings BEFORE event_context so the
             # seed-time fence for active entries is the first fence
@@ -658,6 +674,14 @@ Trust the tools — do not repeatedly verify after successful operations. Except
         event_instructions=event_instructions,
         event=event_blob,
         runtime=runtime,
+        extra={
+            **({"setup_hook_failure": setup_hook_failure} if setup_hook_failure else {}),
+            **(
+                {"setup_script_skip_reason": setup_script_skip_reason}
+                if setup_script_skip_reason
+                else {}
+            ),
+        },
     )
 
 

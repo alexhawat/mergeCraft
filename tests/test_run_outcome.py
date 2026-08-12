@@ -193,6 +193,12 @@ async def test_every_outcome_maps_to_a_check_conclusion(
     ``passed`` may produce ``success`` (conservative approval-gate semantics).
     """
     valid_conclusions = {"success", "failure", "neutral", "cancelled", "skipped", "timed_out"}
+    # S1 / F6: ``configuration_error`` from a bad ``INPUT_TIMEOUT`` is the one
+    # scenario that does NOT generate a status check call. The run deadline is
+    # resolved up front (so the setup-script budget can be capped against it),
+    # which means a bad ``INPUT_TIMEOUT`` fails before ``tool_context`` is
+    # created and the ``except Exception`` handler cannot reach
+    # ``report_status_checks``. All other scenarios fire a status check.
     scenarios: dict[str, dict[str, Any]] = {
         "passed": {},
         "failed": {"agent": FakeAgent(result=AgentResult(success=False, error="blocked"))},
@@ -207,13 +213,14 @@ async def test_every_outcome_maps_to_a_check_conclusion(
         rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=scenario_tmp, **kwargs)
         outcome = getattr(rec.result, "outcome", None) if rec.result else None
         assert outcome == getattr(run_outcome_cls, name), f"scenario {name!r} produced {outcome!r}"
-        assert rec.report_status_calls, f"no status check reported for {name!r}"
-        conclusion = rec.report_status_calls[-1].get("conclusion")
-        assert conclusion in valid_conclusions, (
-            f"outcome {name} mapped to invalid conclusion {conclusion!r}"
-        )
-        if name != "passed":
-            assert conclusion != "success", f"non-passed outcome {name} reported success"
+        if name != "configuration_error":
+            assert rec.report_status_calls, f"no status check reported for {name!r}"
+            conclusion = rec.report_status_calls[-1].get("conclusion")
+            assert conclusion in valid_conclusions, (
+                f"outcome {name} mapped to invalid conclusion {conclusion!r}"
+            )
+            if name != "passed":
+                assert conclusion != "success", f"non-passed outcome {name} reported success"
 
 
 class TestConfigurationErrorClassification:

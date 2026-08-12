@@ -1,4 +1,4 @@
-"""Resolve GitHub Action ``INPUT_*`` tracing inputs to ``TracingSettings`` (W8.5 / W7.7).
+"""Resolve GitHub Action ``INPUT_*`` tracing + setup inputs (W8.5 / W7.7 / S1).
 
 The four new action inputs — ``tracing``, ``tracing-to``, ``logfire-token``,
 ``otel-endpoint`` — flow through ``INPUT_TRACING*`` env vars that the Docker
@@ -9,6 +9,10 @@ existing GitHub auth input (``INPUT_TOKEN``) is never confused with
 
 ``GITHUB_WORKSPACE`` is honoured for the local ``jsonl_file`` sink's path so
 the trace files land under the consumer repo, not the Docker CWD.
+
+S1 / D10 — ``setup_failure_policy`` and ``setup_timeout`` are also resolved
+here. Both are security/runtime surfaces: invalid values fail closed *before*
+the run starts (no silent widening of the run's outcome shape).
 """
 
 from __future__ import annotations
@@ -19,6 +23,27 @@ from typing import Any, Literal
 from mergecraft.config.settings import TraceSinkEntry, TracingSettings
 
 Shorthand = Literal["local_files", "logfire", "otel"]
+
+SetupFailurePolicy = Literal["inconclusive", "fail", "warn"]
+"""Closed S1 / D10 vocabulary for trusted-tier ``setupScript`` failure handling.
+
+| value          | effect                                                         |
+|----------------|----------------------------------------------------------------|
+| ``inconclusive`` (default) | run → ``RunOutcome.inconclusive`` (``neutral`` check) |
+| ``fail``       | run → ``RunOutcome.configuration_error``                       |
+| ``warn``       | today's behaviour: run continues, prompt still carries failure |
+
+Any other value is a configuration error (test ``test_invalid_policy_value_fails_closed``).
+"""
+
+DEFAULT_SETUP_TIMEOUT_S: int = 600
+"""S1 / F6 default ``setup_timeout`` — 10 minutes.
+
+Applies even when ``timeout`` is unset or ``--notimeout``; setup never
+consumes the whole run budget.
+"""
+
+_SETUP_FAILURE_POLICY_VALUES: frozenset[str] = frozenset({"inconclusive", "fail", "warn"})
 
 
 def _read_input(name: str) -> str | None:
@@ -134,4 +159,92 @@ def apply_tracing_overrides(settings: Any) -> Any:
     return settings.model_copy(update={"tracing": new_tracing})
 
 
-__all__ = ["apply_tracing_overrides", "resolve_tracing_from_action_inputs"]
+# ---------------------------------------------------------------------------
+# S1 / D10 — setup_script inputs (setup_failure_policy, setup_timeout).
+# ---------------------------------------------------------------------------
+
+
+def resolve_setup_failure_policy() -> SetupFailurePolicy | None:
+    """Resolve ``INPUT_SETUP_FAILURE_POLICY`` (D10) to a closed vocabulary value.
+
+    Returns ``None`` when the input is unset (default → ``inconclusive``).
+    A non-empty value that is not in the closed vocabulary raises
+    ``ValueError`` so the run fails closed as ``RunOutcome.configuration_error``
+    *before* the agent starts (test ``test_invalid_policy_value_fails_closed``).
+    """
+    raw = _read_input("INPUT_SETUP_FAILURE_POLICY")
+    if raw is None:
+        return None
+    candidate = raw.strip().lower()
+    if not candidate:
+        return None
+    if candidate in _SETUP_FAILURE_POLICY_VALUES:
+        # Safe cast: ``_SETUP_FAILURE_POLICY_VALUES`` is a frozenset of literal
+        # values whose type is exactly ``SetupFailurePolicy``.
+        return candidate  # type: ignore[return-value]
+    msg = (
+        f"unknown setup_failure_policy: {raw!r} "
+        f"(expected one of {sorted(_SETUP_FAILURE_POLICY_VALUES)})"
+    )
+    raise ValueError(msg)
+
+
+def resolve_setup_timeout_s() -> int:
+    """Resolve ``INPUT_SETUP_TIMEOUT`` (F6) to a positive number of seconds.
+
+    Reuses :func:`mergecraft.utils.time_parse.resolve_timeout_ms` so the same
+    duration grammar (``10m``, ``1h``, ``30s``) covers both inputs.
+
+    Returns :data:`DEFAULT_SETUP_TIMEOUT_S` when the input is unset. Raises
+    ``ValueError`` for unparseable / non-positive values — the run fails closed
+    as ``RunOutcome.configuration_error`` before the agent starts.
+    """
+    from mergecraft.utils.time_parse import resolve_timeout_ms
+
+    raw = _read_input("INPUT_SETUP_TIMEOUT")
+    if raw is None:
+        return DEFAULT_SETUP_TIMEOUT_S
+    parsed = resolve_timeout_ms(raw)
+    if parsed is None:
+        msg = f"invalid setup_timeout: {raw!r} (use a duration like 10m / 30s / 1h)"
+        raise ValueError(msg)
+    seconds = parsed // 1000
+    if seconds <= 0:
+        msg = f"setup_timeout must be positive: {raw!r}"
+        raise ValueError(msg)
+    return int(seconds)
+
+
+def apply_setup_overrides(settings: Any) -> Any:
+    """Apply Action-input ``setup_failure_policy`` and ``setup_timeout`` to ``RepoSettings`` (S1 / D10).
+
+    Precedence: action input (``INPUT_SETUP_FAILURE_POLICY`` /
+    ``INPUT_SETUP_TIMEOUT``) > YAML ``setup_failure_policy`` /
+    ``setup_timeout`` block > default (``inconclusive``, ``10m``).
+
+    Invalid values from the action input raise before the run starts — the
+    outer catch maps them to ``RunOutcome.configuration_error``.
+    """
+    from mergecraft.config.settings import RepoSettings
+
+    if not isinstance(settings, RepoSettings):
+        return settings
+
+    policy = resolve_setup_failure_policy()
+    timeout_s = resolve_setup_timeout_s()
+
+    update: dict[str, Any] = {}
+    if policy is not None:
+        update["setup_failure_policy"] = policy
+    update["setup_timeout_s"] = timeout_s
+    return settings.model_copy(update=update)
+
+
+__all__ = [
+    "DEFAULT_SETUP_TIMEOUT_S",
+    "SetupFailurePolicy",
+    "apply_setup_overrides",
+    "apply_tracing_overrides",
+    "resolve_setup_timeout_s",
+    "resolve_tracing_from_action_inputs",
+]
