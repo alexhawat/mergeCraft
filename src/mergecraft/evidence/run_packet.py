@@ -23,6 +23,9 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 from loguru import logger
 
 from mergecraft.analyzers.scope import parse_diff_scope
@@ -178,7 +181,7 @@ def _deterministic_checks(state: ToolState) -> list[DeterministicCheck]:
     return checks
 
 
-def _mode_prompt_versions(modes: list[object]) -> list[ModePromptVersion]:
+def _mode_prompt_versions(modes: Sequence[object]) -> list[ModePromptVersion]:
     """Project the run's ``Mode`` list into ``ModePromptVersion`` rows (#145).
 
     One row per mode — built-in or custom. Modes without a version (an
