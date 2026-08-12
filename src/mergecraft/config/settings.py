@@ -304,6 +304,22 @@ class RepoSettings(BaseModel):
     setup_script: str | None = Field(default=None, alias="setupScript")
     prepush_script: str | None = Field(default=None, alias="prepushScript")
     stop_script: str | None = Field(default=None, alias="stopScript")
+    # S1 / D10 — ``setup_failure_policy`` decides what a trusted-tier
+    # ``setup_script`` failure means. Closed vocabulary
+    # (``inconclusive`` | ``fail`` | ``warn``); default ``inconclusive``
+    # matches D5 — the run maps to ``RunOutcome.inconclusive`` rather than
+    # passing a review of an under-provisioned tree. Unknown values fail
+    # closed via the action-input resolver (``apply_setup_overrides``).
+    setup_failure_policy: Literal["inconclusive", "fail", "warn"] = Field(
+        default="inconclusive",
+        alias="setupFailurePolicy",
+    )
+    # S1 / F6 — wall-clock budget for ``setup_script`` in seconds.
+    # Always applied (even with ``--notimeout``); never consumes the whole
+    # run deadline. Resolved from ``INPUT_SETUP_TIMEOUT`` via
+    # ``action.inputs.apply_setup_overrides`` so the same parser the
+    # ``timeout`` input uses covers both.
+    setup_timeout_s: int = 600
     push: PushPermission = "restricted"
     shell: ShellPermission = "restricted"
     pr_approve_enabled: bool = Field(default=False, alias="prApproveEnabled")
@@ -396,6 +412,8 @@ def default_settings() -> RepoSettings:
             "setup_script": None,
             "prepush_script": None,
             "stop_script": None,
+            "setup_failure_policy": "inconclusive",
+            "setup_timeout_s": 600,
             "push": "restricted",
             "shell": "restricted",
             "pr_approve_enabled": False,

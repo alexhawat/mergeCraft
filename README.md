@@ -291,6 +291,20 @@ inlined into the workflow file and never logged (convention 7). For
 multi-provider setups, fall back to the indexed env-var form below —
 `with:` cannot enumerate multiple providers.
 
+The full input list:
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `model` | _(empty)_ | Pass-through model slug. Resolved against the configured provider chain. |
+| `provider_base_url` | _(empty)_ | OpenAI-compatible base URL for the singleton provider. |
+| `provider_api_key_env` | _(empty)_ | **Env-var name** that holds the API key (never the key value itself). |
+| `tracing` | _(unset)_ | `true` enables telemetry; unset defers to the next precedence layer. |
+| `tracing-to` | _(empty)_ | `local_files` / `logfire` / `otel` — telemetry sink. |
+| `logfire-token` | _(empty)_ | Logfire auth token (W8.5). |
+| `otel-endpoint` | _(empty)_ | OTLP collector URL (W8.5 / W7.7). |
+| `setup_failure_policy` | `inconclusive` | S1 / D10 — what a trusted-tier `setupScript` failure (non-zero exit **or** timeout) maps to: `inconclusive` (default — neutral check conclusion, the run is no-verdict), `fail` (configuration_error), or `warn` (run continues; prompt still carries the failure text). Closed vocabulary — unknown values fail closed as `configuration_error` before the run starts. |
+| `setup_timeout` | `10m` | S1 / F6 — wall-clock budget for `setupScript` (e.g. `5m`, `30s`, `1h`). A hanging install stalls the run otherwise. Reuses the same duration grammar as `timeout`. The setup runs as a session leader so a TERM → grace → KILL on the deadline reaches the whole process tree. |
+
 #### Worked example — Nous-hosted DeepSeek V4 Flash
 
 A raw pass-through slug reaches Nous's OpenAI-compatible endpoint via

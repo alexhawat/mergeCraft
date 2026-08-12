@@ -5,16 +5,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import time
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.action.inputs import apply_tracing_overrides
+from mergecraft.action.inputs import (
+    apply_setup_overrides,
+    apply_tracing_overrides,
+    resolve_setup_failure_policy,
+    resolve_setup_timeout_s,
+)
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult, AgentRunContext
-from mergecraft.analyzers.redact import install_loguru_redaction_filter
+from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_secrets
 from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
 from mergecraft.analyzers.trust import (
     allow_repo_command_overrides,
@@ -63,6 +69,11 @@ from mergecraft.utils.payload import (
     resolve_timeout_ms,
 )
 from mergecraft.utils.privilege import prepare_workspace_for_agent
+from mergecraft.utils.process_group import (
+    kill_process_group,
+    register_process_group,
+    unregister_process_group,
+)
 from mergecraft.utils.secrets import set_env_allowlist
 from mergecraft.utils.skills import install_bundled_skills
 from mergecraft.utils.status_checks import report_status_checks
@@ -223,7 +234,17 @@ async def main() -> MainResult:
         job_token = get_job_token()
         github = GitHubClient(job_token)
         run_context = await resolve_run_context_data(github)
-        settings = apply_tracing_overrides(run_context.repo_settings)
+        # S1 / D10 — apply the action-input setup overrides (policy + timeout).
+        # ``apply_setup_overrides`` resolves ``INPUT_SETUP_FAILURE_POLICY`` and
+        # ``INPUT_SETUP_TIMEOUT`` and raises ``ValueError`` on bad input. We
+        # translate that into ``_ConfigurationError`` here so the outer
+        # ``except Exception`` block at line ~803 maps it to
+        # ``RunOutcome.configuration_error`` *after* ``tool_context`` is set up
+        # (so ``report_status_checks`` still fires).
+        try:
+            settings = apply_setup_overrides(apply_tracing_overrides(run_context.repo_settings))
+        except ValueError as exc:
+            raise _ConfigurationError(str(exc)) from None
 
         github_event = read_github_event()
         trust_tier = derive_trust_tier(event=github_event)
@@ -270,6 +291,26 @@ async def main() -> MainResult:
         payload = resolve_payload(resolved_prompt, settings)
         tool_state.model = payload.get("model")
         tool_state.oss = run_context.oss
+
+        # Resolve the run deadline up front so the setup-script budget can
+        # be capped against it (S1 / F6 — setup must never consume the
+        # whole run budget). Invalid input already fails closed as
+        # ``configuration_error`` below; this block only does the math.
+        timeout_raw = payload.get("timeout")
+        timeout_ms: int | None
+        if timeout_raw == TIMEOUT_DISABLED:
+            timeout_ms = None
+        elif timeout_raw:
+            usable = resolve_timeout_ms(timeout_raw)
+            if usable is None:
+                msg = (
+                    f'invalid timeout "{timeout_raw}" '
+                    "(use a duration like 10m/1h or --notimeout to disable)"
+                )
+                raise _ConfigurationError(msg)
+            timeout_ms = usable
+        else:
+            timeout_ms = 3_600_000
 
         wipe_runner_leak_surface()
 
@@ -363,7 +404,19 @@ async def main() -> MainResult:
             octokit=github,
         )
 
+        # S1 / F6 — wall-clock budget for ``setup_script``. Two constraints: setup
+        # must not consume the whole run budget, and a ``--notimeout`` run must
+        # not make setup unbounded. The action-input resolver already bounds
+        # the upper end (``DEFAULT_SETUP_TIMEOUT_S`` = 10 m); we additionally
+        # cap it against the agent deadline computed below so a fast agent
+        # deadline shrinks the setup budget proportionally.
+        setup_timeout_s = settings.setup_timeout_s
+        if timeout_ms is not None and timeout_ms > 0:
+            setup_timeout_s = min(setup_timeout_s, timeout_ms // 1000)
+
         setup_script_skip_reason = ""
+        setup_hook_failure = ""
+        setup_started_at = time.monotonic()
         if settings.setup_script:
             if trust_tier == "trusted":
                 logger.info("» running setup script")
@@ -371,14 +424,26 @@ async def main() -> MainResult:
                     settings.setup_script,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,  # F6 — session leader so killpg reaches grandchildren
                 )
-                _out, err = await proc.communicate()
-                if proc.returncode != 0:
-                    logger.warning(
-                        "» setup script failed (exit {}): {}",
-                        proc.returncode,
-                        (err or b"").decode(errors="replace")[:500],
-                    )
+                register_process_group(proc.pid)
+                try:
+                    _out, err = await asyncio.wait_for(proc.communicate(), timeout=setup_timeout_s)
+                except TimeoutError:
+                    # F6 — TERM → grace → KILL the whole tree (convention 9).
+                    kill_process_group(proc.pid)
+                    setup_hook_failure = f"setup script timed out after {setup_timeout_s}s"
+                else:
+                    if proc.returncode != 0:
+                        detail = redact_secrets((err or b"").decode(errors="replace")[:500])
+                        setup_hook_failure = (
+                            f"setup script failed (exit {proc.returncode}): {detail}"
+                        )
+                finally:
+                    unregister_process_group(proc.pid)
+                if setup_hook_failure:
+                    tool_state.setup_hook_failure = setup_hook_failure
+                    logger.warning("» {}", setup_hook_failure)
             else:
                 event_name = os.environ.get("GITHUB_EVENT_NAME", "unknown")
                 setup_script_skip_reason = (
@@ -386,6 +451,7 @@ async def main() -> MainResult:
                 )
                 tool_state.setup_script_skip_reason = setup_script_skip_reason
                 logger.warning("» {}", setup_script_skip_reason)
+        setup_elapsed_s = time.monotonic() - setup_started_at
 
         modes = [
             *compute_modes(agent_id, settings.signed_commits),
@@ -497,7 +563,8 @@ async def main() -> MainResult:
             signed_commits=settings.signed_commits,
             learnings_file_path=tool_state.learnings_file_path,
             learnings_headings=settings.learnings_headings,
-            setup_hook_failure="",
+            setup_hook_failure=setup_hook_failure,
+            setup_script_skip_reason=setup_script_skip_reason,
             xrepo_brief=settings.xrepo_brief,
             xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
             xrepo_learnings_headings=settings.xrepo_learnings_headings,
@@ -516,25 +583,11 @@ async def main() -> MainResult:
             stop_script=settings.stop_script,
         )
 
-        timeout_raw = payload.get("timeout")
-
-        # W6.3 — unparseable timeout fails closed *before* the agent starts.
-        # ``--notimeout`` / ``none`` remains the explicit escape; unset keeps
-        # the historical 1h default.
-        timeout_ms: int | None
-        if timeout_raw == TIMEOUT_DISABLED:
-            timeout_ms = None
-        elif timeout_raw:
-            usable = resolve_timeout_ms(timeout_raw)
-            if usable is None:
-                msg = (
-                    f'invalid timeout "{timeout_raw}" '
-                    "(use a duration like 10m/1h or --notimeout to disable)"
-                )
-                raise _ConfigurationError(msg)
-            timeout_ms = usable
-        else:
-            timeout_ms = 3_600_000
+        # ``timeout_ms`` and ``timeout_raw`` are resolved up front (just
+        # after ``payload = resolve_payload(...)``) so the setup-script
+        # budget can be capped against the run deadline (S1 / F6). The
+        # ``--notimeout`` / ``none`` escape and the fail-closed validation
+        # both happen there; this block just spends the resolved values.
 
         async def _run_agent_once(slug: str) -> AgentResult:
             attempt_model = resolve_model(slug=slug, respect_env_override=False)
@@ -557,7 +610,8 @@ async def main() -> MainResult:
                     signed_commits=settings.signed_commits,
                     learnings_file_path=tool_state.learnings_file_path,
                     learnings_headings=settings.learnings_headings,
-                    setup_hook_failure="",
+                    setup_hook_failure=setup_hook_failure,
+                    setup_script_skip_reason=setup_script_skip_reason,
                     xrepo_brief=settings.xrepo_brief,
                     xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
                     xrepo_learnings_headings=settings.xrepo_learnings_headings,
@@ -595,12 +649,30 @@ async def main() -> MainResult:
 
         agent_task = asyncio.create_task(_execute_agent())
 
+        # S1 / F6 — deduct the setup-script elapsed time from the agent
+        # deadline. A slow setup must NOT silently extend the total run
+        # deadline. ``setup_elapsed_s`` is the wall-clock duration measured
+        # by the bounded setup block above; ``timeout_ms`` is the
+        # pre-deduction run budget.
+        agent_timeout_ms: int | None
         if timeout_ms is None:
+            agent_timeout_ms = None
+        else:
+            agent_timeout_ms = max(1, int(timeout_ms - setup_elapsed_s * 1000))
+            if agent_timeout_ms != timeout_ms:
+                logger.info(
+                    "» deducted setup elapsed {:.2f}s from agent deadline ({}s -> {}s)",
+                    setup_elapsed_s,
+                    timeout_ms / 1000,
+                    agent_timeout_ms / 1000,
+                )
+
+        if agent_timeout_ms is None:
             winning_slug, result = await agent_task
         else:
             try:
                 winning_slug, result = await asyncio.wait_for(
-                    agent_task, timeout=timeout_ms / 1000.0
+                    agent_task, timeout=agent_timeout_ms / 1000.0
                 )
             except TimeoutError:
                 agent_task.cancel()
@@ -647,13 +719,33 @@ async def main() -> MainResult:
         except Exception as exc:
             logger.debug("post-run finalize skipped: {}", exc)
 
-        # D3/W5.2 + W6.1 — a completed run is `passed` / `failed`, or
-        # `inconclusive` when review-relevant dependency prep failed underneath
-        # a otherwise-successful agent. Agent failure wins over prep failure.
+        # D3/W5.2 + W6.1 + S1/D5/D10 — a completed run is ``passed`` / ``failed``,
+        # ``inconclusive`` when review-relevant dependency prep failed OR a
+        # trusted-tier ``setup_script`` failed under the default policy, or
+        # ``configuration_error`` when the operator opted into ``fail``. Agent
+        # failure wins over both prep and setup-script failure (the agent
+        # genuinely couldn't do its job). S1 also adds D10's
+        # ``setup_failure_policy`` to the resolution.
         prep_reason = await _prep_failure_reason(tool_context)
+        setup_reason = tool_state.setup_hook_failure or ""
+        setup_policy = settings.setup_failure_policy
+
         if not result.success:
             outcome = RunOutcome.failed
             failure_reason = result.error
+        elif setup_reason and setup_policy == "fail":
+            # D10 ``fail`` — operator has declared the failure is unrecoverable.
+            outcome = RunOutcome.configuration_error
+            failure_reason = setup_reason
+            logger.warning(
+                "» setup script failure mapped run to configuration_error (fail policy): {}",
+                setup_reason,
+            )
+        elif setup_reason and setup_policy == "inconclusive":
+            # D5 / D10 default — under-provisioned tree is no-verdict.
+            outcome = RunOutcome.inconclusive
+            failure_reason = setup_reason
+            logger.warning("» setup script failure mapped run to inconclusive: {}", setup_reason)
         elif prep_reason:
             outcome = RunOutcome.inconclusive
             failure_reason = prep_reason

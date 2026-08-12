@@ -74,6 +74,8 @@ packet wins over every other signal — including the recorded
 
 The reviewer reads the whole diff itself, then picks the **lenses** the PR actually warrants and investigates each as a falsifiable question — optionally dispatching a `mergecraft-reviewer` subagent per lens so they run in parallel. Nothing here is a fixed pass; a docs-only diff gets none of it.
 
+**Run lifecycle (S1)** — a failed or timed-out trusted-tier `setupScript` yields `RunOutcome.inconclusive` (neutral check conclusion), not a review. An under-provisioned tree never receives a review verdict. See [`docs/config-failure-policy.md`](docs/config-failure-policy.md#setup-script-failures-s1--d5--d10--f6) for the policy table and operator checklist.
+
 **Always in play**
 
 - **Correctness and invariants** — bugs, races, error handling, edge cases, state-machine boundaries.

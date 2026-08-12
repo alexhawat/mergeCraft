@@ -196,7 +196,10 @@ async def test_both_call_sites_pass_the_reason(
     trusted_payload: dict[str, object] = {"action": "workflow_dispatch"}
     head_agent = FakeAgent(
         name="claude",
-        result=AgentResult(success=False, error="primary failed"),
+        # ``retryable=True`` so the production chain advances to the fallback
+        # slug; the test's whole point is to exercise both ``resolve_instructions``
+        # call sites, which only happens when ``attempt_agent_id != agent_id``.
+        result=AgentResult(success=False, error="primary failed", metadata={"retryable": True}),
     )
     fallback_agent = FakeAgent(
         name="opencode",
