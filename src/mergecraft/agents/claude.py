@@ -280,7 +280,11 @@ def _claude_stream_event_handler(
             )
             span = pair.llm if pair is not None else None
             if span is not None:
-                span.set_attribute("model.id", model_id)
+                # W6 / L3 — ``_open_provider_llm_pair`` already stamps
+                # ``model.id`` on the parent ``provider.call`` span (the
+                # canonical home per the helper docstring). The llm span
+                # inherits the value through the OTel/mergeCraft parent
+                # chain; do not re-stamp here.
                 span.set_attribute("model.event", "message_start")
                 span.set_attribute(
                     "cost.tokens_in",

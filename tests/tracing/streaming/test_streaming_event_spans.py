@@ -166,9 +166,23 @@ def test_streaming_events_produce_llm_call_spans(
         f"second span tokens_out should be >= 20, got {second.attrs.get('cost.tokens_out')!r}"
     )
 
-    # Every llm.call span must carry the model identifier.
-    for span in llm_spans:
-        assert span.attrs.get("model.id"), f"llm.call span missing model.id: {span.attrs!r}"
+    # Every llm.call span must carry the model identifier on the
+    # canonical home — its parent ``provider.call`` span. W6 / L3 moved
+    # ``model.id`` off the llm span onto the parent provider span (the
+    # helper ``_open_provider_llm_pair`` is the single source of truth).
+    # The llm span itself no longer re-stamps ``model.id``; we resolve
+    # the parent via ``parent_span_id`` and assert the attribute is on
+    # the provider span.
+    provider_spans = captured_streaming_sink.by_kind.get("provider.call", [])
+    provider_by_id = {s.span_id: s for s in provider_spans}
+    for llm_span in llm_spans:
+        provider_span = provider_by_id.get(llm_span.parent_span_id or "")
+        assert provider_span is not None, (
+            f"llm.call span has no provider.call parent: {llm_span.parent_span_id!r}"
+        )
+        assert provider_span.attrs.get("model.id"), (
+            f"provider.call span missing model.id: {provider_span.attrs!r}"
+        )
 
 
 # ----------------------------------------------------------------------------
