@@ -63,3 +63,13 @@ jobs:
       - uses: ./.github/actions/bootstrap
       - name: bandit + pip-audit (OSV.dev)
         run: make security
+
+  integration:
+    name: Verify (integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: Integration suite (self-skips without live secrets)
+        run: make test-integration

@@ -1,0 +1,396 @@
+# #71 / #37 / #34 / #57 — Provider routing, chain semantics & MiniMax catalog — RED test plan
+
+Wave plan: `.ignorelocal/waves/issues-provider-routing-wave-plan.md`
+Worktree: `mergecraft-prov-b-routing` (Batch B) → `mergecraft-prov-c-catalog` (Batch C, this wave)
+Batch: B (W1, completed 2026-08-11 on PR #123) and C (W5, this wave)
+
+This file maps every contract W1.1–W1.10 (Batch B, completed) plus
+W5.1–W5.7 (Batch C, this wave) pins to the test that covers it, across
+the smart-coverage matrix (unit / integration / functional; happy / edge /
+error). The test-author wave owns the **RED** half of the tests-first pair:
+the suite must collect with zero errors and pass `make lint` + `make
+typecheck`, with the cross-wave contract assertions xfailed (`strict=False`)
+until W3/W4 (Batch B) or W6/W7 (Batch C) land.
+
+## Batch C — MiniMax (this wave)
+
+Batch C is gated on Batch B's merge (D4); with PR #123 merged into
+`origin/pre-0.0.1` @ `00c5d71` the Batch C worktree exists at
+`../mergecraft-prov-c-catalog` on branch `wave/prov-c-catalog`. W5 owns
+the RED suite for #34 (MiniMax) and #57 (Nous/DeepSeek V4 Flash — but
+#57 was already shipped via PR #122 / `wave/issue-57-nous` so W5.3 is
+**N/A** — see the "W5.3 N/A" section below).
+
+### MiniMax contract locked at W5
+
+MiniMax publishes an OpenAI-compatible endpoint at
+[`https://api.minimax.io/v1`](https://platform.minimax.io/docs/api-reference/text-openai-api.md)
+(verified 2026-08-11). The operator has confirmed D10 / option (ii): MiniMax
+routes through the existing custom-provider helper, **not** a bespoke
+`mmx-cli` harness. The locked model id is `MiniMax-M3` (latest M-series,
+1,000,000-token context, OpenAI-compatible Chat Completions).
+
+- Base URL: `https://api.minimax.io/v1`
+- Slug: `minimax/MiniMax-M3`
+- Env-var convention: inherits the W3 indexed pair (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`,
+  N ≥ 1, provider id `provider_<N>`) **and** the singleton alias
+  (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}` → provider id `default`).
+  Operator picks either surface; W6 owns the W3 helper extension so the
+  slug prefix `minimax/` resolves to either block.
+- W6 must not invent a third env-var family. The D7 contract is binding.
+
+### W5.3 N/A — Nous/DeepSeek V4 Flash already shipped
+
+Issue #57 was closed 2026-08-11T06:06:32Z by
+[PR #122](https://github.com/alexhawat/mergeCraft/pull/122) (`wave/issue-57-nous`,
+merge commit `26bfab9`, with `11035c0 feat(models): first-class Nous Research
+support (#57)`). The Nous catalog entry (`models.py:407` — provider `nous`,
+model `deepseek/deepseek-v4-flash` plus tokenhub variants), credential
+detection, README row, `mergecraft auth nous`, and `--validate` smoke test
+are all on `pre-0.0.1`. **W7's RED suite (W5.3) is already done — Batch C
+does not need to author it.** Batch C's remaining scope is #34 (MiniMax)
+plus any post-#57 cleanup.
+
+The previously authored W1.3 (`test_nous_provider_in_providers_and_aliases`,
+`test_models_list_renders_nous_row_*`) and W1.10 (`test_auth_nous_*`) tests
+live in the `wave/issue-57-nous` worktree and are part of `pre-0.0.1`
+today — they are not re-authored here.
+
+### Batch C xfail schedule
+
+| Wave | Test file | Marker reason prefix |
+|------|-----------|----------------------|
+| **W6** | `tests/agents/test_minimax_routing.py` | `green after W6:` for MiniMax helper routing + Codex config.toml emission + raw pass-through |
+| **W6** | `tests/cli/test_models_list_minimax.py` | `green after W6:` for `mergecraft models list` rendering the `minimax/MiniMax-M3` row |
+| **W6** | `tests/agents/test_minimax_routing.py::test_existing_curated_slug_resolution_is_unchanged` | `green after W6:` for D12 additive invariant (already XPASS vacuously today — assertion guards future catalog mutations) |
+
+All cross-wave markers use `strict=False` so an early-passing xfail is an
+XFAIL → XPASS upgrade, not a hard failure. W6 reconciles by deleting
+markers on tests the implementation now satisfies.
+
+### Batch C — Contract → test matrix (this wave)
+
+| #       | Decision / convention                                  | Test (this wave)                                                    | Scenario class                |
+|---------|--------------------------------------------------------|---------------------------------------------------------------------|-------------------------------|
+| W5.1a   | MiniMax slug routes via opencode + singleton env       | `test_minimax_routes_via_opencode_with_singleton_env`               | happy path (D10 / option ii)  |
+| W5.1b   | MiniMax slug routes via codex config.toml              | `test_minimax_routes_via_codex_with_singleton_env`                  | happy path (D10 / option ii)  |
+| W5.1c   | Indexed pair (provider_1) also works for MiniMax       | `test_minimax_routes_via_indexed_provider_pair`                     | happy path (indexed)          |
+| W5.1d   | Locked base URL matches published docs                 | `test_minimax_base_url_constant_matches_published_docs`             | structural                    |
+| W5.1e   | Locked URL never leaks into a live-call fixture        | `test_minimax_published_docs_url_is_only_referenced_in_documentation` | structural (convention 7)   |
+| W5.2a   | Missing MiniMax credential raises (parametrised)       | `test_minimax_missing_credential_fails_loud[minimax-minimax-m3]`    | error handling (convention 5) |
+| W5.2b   | Missing credential — unknown MiniMax model id          | `test_minimax_missing_credential_fails_loud[minimax-unknown-model]` | error handling (convention 5) |
+| W5.4a   | `models list` enumerates the MiniMax row (no creds)    | `test_mergecraft_models_list_renders_minimax_row_without_credentials` | happy path (CLI surface)    |
+| W5.4b   | `models list` flips credentials column `no` → `yes`    | `test_mergecraft_models_list_renders_minimax_row_with_credentials`  | happy path (CLI surface)      |
+| W5.4c   | `models list` does not leak the api key value          | `test_mergecraft_models_list_minimax_row_does_not_leak_api_key`     | error handling (convention 7) |
+| W5.5    | `resolve_model()` passes un-curated slugs through      | `test_minimax_raw_passthrough_slug_resolves`                        | regression pin (D12)          |
+| W5.6    | New catalog entries do not change existing resolution  | `test_existing_curated_slug_resolution_is_unchanged[slug]` (×72)   | regression pin (D12 additive) |
+| W5.4smoke| `mergecraft models --help` enumerates the subcommand   | `test_models_list_help`                                             | structural (collection smoke) |
+
+### Per-contract rationale (Batch C)
+
+#### D10 — MiniMax routing decision (operator-locked)
+
+The MiniMax base URL and model slug were locked at W5 by reading the
+[published OpenAI SDK integration guide](https://platform.minimax.io/docs/api-reference/text-openai-api.md)
+on 2026-08-11. The decision (route through the W3 custom-provider helper,
+**not** a bespoke `mmx-cli` harness) is operator-confirmed; the tests pin
+the **observable** contract — a `minimax/MiniMax-M3` slug with the
+singleton or indexed env-var pair set results in a provider block in
+both harnesses whose `baseURL` (or `base_url`) matches the published
+endpoint URL. The exact helper surface (whether W6 adds a `minimax`
+preset to `openai_compatible_gateways.GATEWAY_PRESETS` or extends
+`_custom_provider_ids` to honour the active model's prefix even when
+not in the resolver dict) is W6's call — the tests pin the behaviour,
+not the signature.
+
+#### D12 — Additive catalog invariants
+
+The W5.6 parametrized regression pin (`test_existing_curated_slug_resolution_is_unchanged`)
+captures every curated slug's `resolve_cli_model()` value today and
+re-asserts it after W6 lands. The test XPASSes vacuously today (the
+catalog hasn't changed) — the xfail marker is the regression pin
+that says "if W6 mutates any of these resolutions, this test goes
+RED and the W6 wave fails the merge". The 72 parametrized slugs cover
+every provider in `PROVIDERS`: anthropic, openai, google, xai, deepseek,
+moonshotai, opencode, opencode-go, bedrock, vertex, nous, tokenhub,
+openrouter.
+
+#### Convention 5 — Fail-loud, never silent fall-through
+
+W5.2 parametrises two MiniMax slugs (`minimax/MiniMax-M3` and
+`minimax/some-other-model`) and asserts `resolve_runtime_agent()` raises
+with a message that names MiniMax and the env-var names the operator can
+set. The test pins against the failure mode the wave plan flags: a
+provider's model selected without its credential must not silently fall
+through to the opencode harness (whose binary is absent). The test
+explicitly asserts `opencode` does NOT appear in the error message.
+
+#### Convention 7 — No API key in logs / rendered output
+
+W5.1b asserts the resolved key value never appears in the rendered codex
+`config.toml` (convention 7). W5.4c asserts the resolved key value never
+appears in `mergecraft models list` stdout. Both use sentinel key strings
+that would be catastrophic to leak in production.
+
+### Reconciliation plan (after W6 lands)
+
+1. Drop every `@pytest.mark.xfail(reason="green after W6: …", strict=False)`
+   marker on tests the implementation now satisfies.
+2. Keep the structural / regression-pin tests:
+   - `test_minimax_base_url_constant_matches_published_docs`
+   - `test_minimax_published_docs_url_is_only_referenced_in_documentation`
+   - `test_minimax_raw_passthrough_slug_resolves` (vacuous today, but the
+     xfail marker pins the regression intent)
+   - `test_existing_curated_slug_resolution_is_unchanged[*]` (72
+     parametrized cases; the xfail marker is the regression intent)
+3. Reconcile the W5.6 test: if W6 adds a curated `minimax/*` catalog
+   entry that **changes** `resolve_cli_model()` for any pre-existing
+   slug, that change is a Batch C regression and W6 fails the merge.
+
+### Open questions for W6
+
+- Should the helper's `resolve_gateway_endpoints()` add a `minimax`
+  preset to `GATEWAY_PRESETS` (parity with `nous` / `tokenhub`), or
+  should W6 instead extend the multi-provider resolver to honour the
+  active model's prefix even when it is not in the resolver dict?
+  **Recommend the preset** — keeps the surface small and reuses the
+  existing preset path for the harness lookup.
+- For the catalog entry, what should `minimax/MiniMax-M3`'s `env_vars`
+  be? **Recommend** `("MERGECRAFT_CUSTOM_PROVIDER_API_KEY",)` — the
+  singleton is the canonical D7 surface; the indexed-pair form is
+  operator-supplied.
+
+---
+
+## Batch B — Routing & chain semantics (W1, completed 2026-08-11)
+
+Wave plan: `.ignorelocal/waves/issues-provider-routing-wave-plan.md`
+Worktree: `mergecraft-prov-b-routing` @ `wave/prov-b-routing`
+Batch: B (routing + Codex passthrough)
+
+This file maps every contract W1.1–W1.10 (plus the multi-provider scope
+extension) pins to the test that covers it, across the smart-coverage matrix
+(unit / integration / functional; happy / edge / error). W1 owns the **RED**
+half of the tests-first pair: the suite must collect with zero errors and
+pass `make lint` + `make typecheck`, with the contract assertions xfailed
+(`strict=False`) until W3 (Codex `model_providers` passthrough + shared
+multi-provider helper) and W4 (chain semantics) land.
+
+## Design decisions (locked by W1, recorded here so W3 inherits them)
+
+### Env-var naming convention
+
+Indexed multi-provider pairs (canonical):
+
+```
+MERGECRAFT_CUSTOM_PROVIDER_API_KEY_<N>   +   MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_<N>
+```
+
+where `N >= 1` is an integer index. Both halves must be set for provider `N`
+to be present; partial pairs (only one half) are **dropped** — never partial-
+written.
+
+Plus the singleton back-compat alias (PR #79 / D7):
+
+```
+MERGECRAFT_CUSTOM_PROVIDER_API_KEY       +   MERGECRAFT_CUSTOM_PROVIDER_BASE_URL
+```
+
+maps to a single provider id `default` when no indexed pair is set, and is
+**ignored** when any indexed pair is present.
+
+### Provider id source of truth
+
+The provider id is `"provider_" + str(N)` for indexed pairs (e.g. `_1` →
+`provider_1`, `_2` → `provider_2`), and `default` for the singleton alias.
+The id is **deterministic and suffix-derived** — never derived from the base
+URL's hostname (hostnames change; indices are stable and grep-friendly).
+
+### Discovery
+
+Enumerate every `os.environ` key matching
+`MERGECRAFT_CUSTOM_PROVIDER_(API_KEY|BASE_URL)_\d+`, pair by numeric suffix,
+require both halves per index, sort by `N` ascending. **Gaps are preserved**
+(no renumbering — `_1` + `_3` set, `_2` absent → providers 1 and 3 present,
+2 absent).
+
+### Shared helper signature
+
+`src/mergecraft/agents/openai_compatible_gateways.py` must expose a
+multi-provider resolver, in addition to today's singleton
+`resolve_gateway_endpoint()`. Acceptable shapes (both pinned by tests):
+
+- `dict[str, ProviderRecord]` keyed by provider id; **or**
+- a sequence (`tuple` / `frozenset` / `list`) of `ProviderRecord`.
+
+`ProviderRecord` (or equivalent) must carry at minimum:
+
+| Field          | Purpose                                              |
+|----------------|------------------------------------------------------|
+| `provider_id`  | `provider_<N>` or `default`                          |
+| `base_url`     | resolved value                                       |
+| `api_key`      | resolved value (never logged)                        |
+| `base_url_env` | env-var name that sourced `base_url` (for redaction) |
+| `api_key_env`  | env-var name that sourced `api_key` (for redaction)  |
+
+Both `agents/opencode.py` and `agents/codex.py` must consume the same
+helper (D7); codex does NOT today, so the structural assertion is xfailed.
+
+## xfail schedule
+
+| Wave | Test file                                              | Marker reason prefix                                                  |
+|------|--------------------------------------------------------|-----------------------------------------------------------------------|
+| **W3** | `tests/agents/test_codex_custom_provider.py`         | `green after W3:` for `model_providers` emission + multi-provider shape |
+| **W3** | `tests/agents/test_opencode_custom_provider.py` (ext) | `green after W3:` for OpenCode multi-provider shape                    |
+| **W3** | `tests/agents/test_openai_compatible_gateways.py`     | `green after W3:` for the shared multi-provider resolver              |
+| **W4** | `tests/utils/test_explicit_model_chain.py`            | `green after W4:` for chain semantics (#37)                            |
+
+All cross-wave markers use `strict=False` so an early-passing xfail is an
+XFAIL → XPASS upgrade, not a hard failure. W3/W4 reconcile by deleting
+markers on tests the implementation now satisfies.
+
+## Structural / regression-pin cases (green from W1, not xfailed)
+
+| #     | Test                                                                | Reason it is structural                                                  |
+|-------|---------------------------------------------------------------------|--------------------------------------------------------------------------|
+| W1.1a | `test_custom_provider_is_registered_from_env` (existing)            | PR #79 regression pin — singleton helper already works.                  |
+| W1.1b | `test_provider_omitted_unless_both_env_vars_are_set` (existing)     | Singleton helper short-circuits to `None` when one half is missing.      |
+| W1.1c | `test_provider_omitted_for_an_unprefixed_model` (existing)          | Provider id derivation requires a slash in the model.                    |
+| W1.1d | `test_unconfigured_environment_leaves_config_unchanged` (existing)  | No env vars → no provider block; harness contract preserved.            |
+| W1.3a | `test_codex_config_toml_has_no_provider_block_without_env`          | Today `write_mcp_config()` writes no provider block — passes green.      |
+| W1.1e | `test_opencode_singleton_alone_emits_default_provider_block` (XPASS) | Singleton helper already returns `("default", ...)` when model prefix matches. |
+
+`test_opencode_partial_indexed_pair_is_dropped` and
+`test_opencode_indexed_wins_singleton_ignored` xpass vacuously today
+(assertions guarded by `isinstance(provider, dict)`); they become real
+assertions once W3 lands the multi-provider resolver.
+
+## Contract → test matrix
+
+| #       | Decision / convention                              | Test (this wave)                                                                 | Scenario class                |
+|---------|----------------------------------------------------|----------------------------------------------------------------------------------|-------------------------------|
+| W1.1a   | PR #79 regression pin (singleton)                  | `test_custom_provider_is_registered_from_env`                                    | structural (regression pin)   |
+| W1.1b   | partial singleton pair → no block                  | `test_provider_omitted_unless_both_env_vars_are_set` (parametrized)              | edge case                     |
+| W1.1c   | unprefixed model → no block                        | `test_provider_omitted_for_an_unprefixed_model`                                  | edge case                     |
+| W1.1d   | no env vars → unchanged                            | `test_unconfigured_environment_leaves_config_unchanged`                          | structural (no-op)            |
+| W1.1m   | indexed multi-provider shape                       | `test_opencode_emits_provider_blocks_for_each_indexed_pair`                      | happy path                    |
+| W1.1n   | indexed gap preserved                              | `test_opencode_emits_blocks_for_non_contiguous_indices`                          | edge case (gap)               |
+| W1.1p   | partial indexed pair dropped                       | `test_opencode_partial_indexed_pair_is_dropped`                                  | edge case (partial)           |
+| W1.1q   | singleton alone → `default`                        | `test_opencode_singleton_alone_emits_default_provider_block`                     | edge case (back-compat)       |
+| W1.1r   | indexed overrides singleton                        | `test_opencode_indexed_wins_singleton_ignored`                                   | precedence                    |
+| W1.2a   | single-provider TOML emission                      | (covered by W1.3a structural test against today's writer)                       | structural                    |
+| W1.2b   | two indexed providers → two TOML blocks            | `test_codex_config_toml_writes_both_indexed_providers`                          | happy path                    |
+| W1.2c   | N=3 indexed providers → three TOML blocks          | `test_codex_config_toml_writes_three_indexed_providers`                          | happy path (parametrized)     |
+| W1.3a   | no env vars → no TOML provider block               | `test_codex_config_toml_has_no_provider_block_without_env`                       | structural                    |
+| W1.3b   | partial coverage table                             | `test_codex_partial_indexed_coverage_writes_only_present_providers` (parametrized) | edge cases                    |
+| W1.3c   | singleton alone → `default` TOML block             | `test_codex_singleton_alone_emits_default_provider_block`                        | edge case (back-compat)       |
+| W1.3d   | indexed overrides singleton                        | `test_codex_indexed_wins_singleton_ignored`                                      | precedence                    |
+| W1.4a   | shared helper exposes multi-provider resolver      | `test_shared_helper_exposes_multi_provider_resolver`                             | structural                    |
+| W1.4b   | resolver handles indexed pairs                     | `test_shared_multi_provider_resolver_handles_indexed_pairs`                     | happy path                    |
+| W1.4c   | resolver preserves gaps                            | `test_shared_multi_provider_resolver_preserves_index_gaps`                       | edge case (gap)               |
+| W1.4d   | resolver drops partial pairs                       | `test_shared_multi_provider_resolver_drops_partial_pairs`                        | edge case (partial)           |
+| W1.4e   | resolver singleton → `default`                     | `test_shared_multi_provider_resolver_singleton_maps_to_default`                  | edge case (back-compat)       |
+| W1.4f   | resolver indexed overrides singleton               | `test_shared_multi_provider_resolver_indexed_overrides_singleton`               | precedence                    |
+| W1.4g   | both harnesses import the shared helper            | `test_both_harnesses_consume_the_shared_helper`                                  | structural (D7)               |
+| W1.4h   | `ProviderRecord` carries env-var provenance        | `test_provider_record_carries_env_var_provenance`                               | structural (convention 7)     |
+| W1.5    | no API key in logs                                 | `test_generated_configs_never_log_either_api_key`                                | error handling (convention 7) |
+| W1.6    | explicit model input → chain head + tail preserved | `test_explicit_model_input_preserves_configured_chain_tail`                      | happy path (#37)              |
+| W1.7    | explicit-pin opt-in → single-entry chain           | `test_explicit_pin_opt_in_still_yields_single_entry_chain`                      | edge case (escape hatch)      |
+| W1.8a   | GHA path walks chain on credential skip            | `test_gha_payload_path_walks_the_chain_credential_skip`                          | integration (D9)              |
+| W1.8b   | GHA path walks chain on retryable failure          | `test_gha_payload_path_walks_the_chain_retryable_failure`                        | integration (D9)              |
+
+## Per-decision rationale
+
+### D6 — PR #79 regression pin
+
+`test_custom_provider_is_registered_from_env` (existing, in
+`tests/agents/test_opencode_custom_provider.py`) pins the singleton helper's
+behaviour. The new tests build on top of it — none deletes or weakens the
+singleton contract.
+
+### D7 — Shared resolver + multi-provider
+
+The shared helper in `mergecraft.agents.openai_compatible_gateways` must
+expose both the existing singleton `resolve_gateway_endpoint()` AND a new
+multi-provider resolver (W3 lands). The structural assertion
+`test_both_harnesses_consume_the_shared_helper` (W1.4g) and the typed-
+record assertion `test_provider_record_carries_env_var_provenance` (W1.4h)
+pin the contract W3 must produce.
+
+### D8 — Chain semantics (#37)
+
+W4 changes the semantics so a supplied `model:` input becomes the **head** of
+the effective chain rather than a chain kill-switch. W1.6 / W1.7 / W1.8
+pin the contract from three angles: unit (W1.6, W1.7), integration through
+`run_with_model_chain` driven by the GHA payload path (W1.8). The exact
+surface W4 lands (a `head=` kwarg, a `pin=` opt-in, or something else) is
+the W4 implementer's choice — the tests pin the observable contract, not
+the signature.
+
+### D9 — Acceptance at the Action boundary
+
+W1.8 drives `run_with_model_chain` with the chain semantics the GHA payload
+path will feed it. The asserts are end-to-end: the chain walks across
+providers when the first entry is credential-missing or hits a retryable
+failure.
+
+### D11 — Convention 7 (no key in logs)
+
+W1.5 captures both stdlib logs (via `caplog`) and loguru output (via a
+synthetic sink) and asserts both sentinel keys never appear. Parametrized
+across providers in spirit (the test sets two distinct pairs).
+
+## Coverage matrix summary
+
+- **Layer:** unit tests dominate (resolver shapes, env-var discovery,
+  per-provider env parsing). Two integration tests cover the GHA payload
+  path (W1.8a/b).
+- **Scenario classes:**
+  - **happy path**: W1.1m, W1.2b, W1.2c, W1.4b, W1.6
+  - **edge cases**: W1.1n, W1.1p, W1.1q, W1.3b, W1.3c, W1.4c, W1.4d, W1.4e, W1.7
+  - **error handling**: W1.5, W1.8a, W1.8b
+  - **structural (regression pins)**: W1.1a, W1.1b, W1.1c, W1.1d, W1.3a, W1.4a, W1.4g, W1.4h
+  - **precedence**: W1.1r, W1.3d, W1.4f
+
+## Reconciliation plan
+
+After W3 lands:
+
+1. Drop every `@pytest.mark.xfail(reason="green after W3: …", strict=False)`
+   marker on tests the implementation now satisfies.
+2. Keep the structural tests (the W1.1 single-provider regression pin).
+3. Reconcile the multi-provider shape: if W3 lands a `dict` (the preferred
+   shape), no test changes; if W3 lands a sequence, the
+   `_coerce_to_dict` helper in `test_openai_compatible_gateways.py`
+   already accepts both.
+4. Update this file's xfail schedule to record which wave turned each xfail
+   green.
+
+After W4 lands:
+
+1. Drop every `green after W4:` marker on tests now satisfied.
+2. Re-evaluate `test_explicit_pin_opt_in_still_yields_single_entry_chain`
+   if W4 lands a different pin surface (today the test parametrizes a
+   `pin=` kwarg; W4 may land an input or config-key).
+
+## Open questions for W3
+
+- Should the singleton `MERGECRAFT_CUSTOM_PROVIDER_*` keys also be allowed
+  as a fallback for `provider_1` when only the singleton is set, or
+  strictly map to a separate `default` id? **Recommend the latter** —
+  cleaner separation; tests pin it as such.
+- For the typed `ProviderRecord`, should the env-var names be exposed as
+  attributes (record.base_url_env, record.api_key_env) or as a nested dict?
+  **Recommend attributes** — keeps the call sites short.
+
+## Notes
+
+- No `src/` or production-doc edits in this wave; the test plan lives at
+  `docs/test-plans/issues-provider-routing.md` and is **tracked** in this
+  repo (not gitignored — confirmed at wave time).
+- The W1 work does not touch the primary checkout's
+  `.ignorelocal/waves/issues-provider-routing-wave-plan.md` — that copy is
+  the planning ledger and is updated via `cp` sync after the W1 commit
+  lands.
+- All env-var naming derives from the operator-locked convention; W3 must
+  not invent a third mechanism (D7).

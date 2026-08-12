@@ -56,6 +56,56 @@ def test_low_value_effort_never_inline() -> None:
     assert not any(row.get("effort") == BODY_ONLY_EFFORT for row in placement.inline)
 
 
+def test_overflow_agent_findings_get_distinct_fingerprints() -> None:
+    """Overflowed agent findings must stay individually identifiable (C5)."""
+    budget = import_module("mergecraft.analyzers.budget")
+    taxonomy = import_module("mergecraft.review_taxonomy")
+    agent_findings = [
+        {
+            "severity": "Major",
+            "path": f"src/agent{i:02d}.py",
+            "line": i,
+            "body": f"agent finding number {i}",
+        }
+        for i in range(1, INLINE_BUDGET + 4)
+    ]
+    placement = budget.place_findings(
+        [], inline_budget=INLINE_BUDGET, agent_findings=agent_findings
+    )
+    overflow = [f for f in placement.mechanical if f.source == "agent"]
+    assert len(overflow) == 3
+    fingerprints = [f.fingerprint for f in overflow]
+    assert len(set(fingerprints)) == len(fingerprints)
+    assert "agent-inline" not in fingerprints
+    by_path = {str(row["path"]): str(row["body"]) for row in agent_findings}
+    for finding in overflow:
+        assert finding.fingerprint == taxonomy.finding_fingerprint(
+            path=finding.path, body=by_path[finding.path]
+        )
+
+
+def test_overflow_agent_finding_keeps_supplied_fingerprint() -> None:
+    budget = import_module("mergecraft.analyzers.budget")
+    agent_findings: list[dict[str, object]] = [
+        {"severity": "Major", "path": f"src/a{i:02d}.py", "line": i, "body": f"filler {i}"}
+        for i in range(1, INLINE_BUDGET + 1)
+    ]
+    agent_findings.append(
+        {
+            "severity": "Major",
+            "path": "src/zz-last.py",
+            "line": 3,
+            "body": "already stamped",
+            "fingerprint": "deadbeefcafe",
+        }
+    )
+    placement = budget.place_findings(
+        [], inline_budget=INLINE_BUDGET, agent_findings=agent_findings
+    )
+    overflow = [f for f in placement.mechanical if f.source == "agent"]
+    assert [f.fingerprint for f in overflow] == ["deadbeefcafe"]
+
+
 def test_agent_findings_win_ties_over_analyzer() -> None:
     budget = import_module("mergecraft.analyzers.budget")
     agent = _finding("Major", source="agent", path="src/tie.py", line=10)

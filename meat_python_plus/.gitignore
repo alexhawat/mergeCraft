@@ -1,0 +1,9 @@
+.pytest_cache/
+__pycache__/
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Optional upstream analysis/ demo corpora (D6 — document-only; do not commit)
+testdata/analysis/

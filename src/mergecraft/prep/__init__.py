@@ -72,38 +72,50 @@ async def _restore_prep_dirtied_files(pre_dirty: set[str]) -> None:
 
 
 async def run_prep_phase(options: PrepOptions | None = None) -> list[PrepResult]:
-    """Run all applicable prep steps sequentially. Failures are non-fatal."""
+    """Run all applicable prep steps sequentially.
+
+    Individual step failures are recorded on :class:`PrepResult` (issues +
+    ``dependencies_installed=False``) rather than raising — the live Action
+    path maps a failed install to ``RunOutcome.inconclusive`` (W6.1 / D4).
+    Callers that need fail-closed behaviour must inspect the returned results
+    (see ``main._prep_failure_reason`` / ``mcp.dependencies``).
+    """
     opts = options or PrepOptions()
     logger.debug("» starting prep phase...")
     start = time.perf_counter()
     results: list[PrepResult] = []
 
-    try:
-        pre_dirty = await _dirty_tracked_paths()
-    except Exception as exc:
-        logger.debug("» prep dirty snapshot skipped: {}", exc)
-        pre_dirty = set()
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.tracing.tracer import get_tracer_from_settings
 
-    try:
-        for step in _PREP_STEPS:
-            should = step.should_run()
-            if asyncio.iscoroutine(should):
-                should = await should
-            if not should:
-                logger.debug("» skipping {} (not applicable)", step.name)
-                continue
-            logger.debug("» running {}...", step.name)
-            result = await step.run(opts)
-            results.append(result)
-            if result.dependencies_installed:
-                logger.debug("» {}: dependencies installed", step.name)
-            elif result.issues:
-                logger.warning("» {}: {}", step.name, result.issues[0])
-    finally:
+    tracer = get_tracer_from_settings(RepoSettings())
+    with tracer.start_span("mergecraft.prep") as _prep_span:
         try:
-            await _restore_prep_dirtied_files(pre_dirty)
+            pre_dirty = await _dirty_tracked_paths()
         except Exception as exc:
-            logger.debug("» prep restore skipped: {}", exc)
+            logger.debug("» prep dirty snapshot skipped: {}", exc)
+            pre_dirty = set()
+
+        try:
+            for step in _PREP_STEPS:
+                should = step.should_run()
+                if asyncio.iscoroutine(should):
+                    should = await should
+                if not should:
+                    logger.debug("» skipping {} (not applicable)", step.name)
+                    continue
+                logger.debug("» running {}...", step.name)
+                result = await step.run(opts)
+                results.append(result)
+                if result.dependencies_installed:
+                    logger.debug("» {}: dependencies installed", step.name)
+                elif result.issues:
+                    logger.warning("» {}: {}", step.name, result.issues[0])
+        finally:
+            try:
+                await _restore_prep_dirtied_files(pre_dirty)
+            except Exception as exc:
+                logger.debug("» prep restore skipped: {}", exc)
 
     elapsed_ms = round((time.perf_counter() - start) * 1000)
     logger.debug("» prep phase completed ({}ms)", elapsed_ms)

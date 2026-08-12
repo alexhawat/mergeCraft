@@ -56,6 +56,14 @@
 name: mergeCraft
 
 on:
+  # NOTE: no `issue_comment` / `pull_request_review_comment` triggers here, by
+  # design. This job runs under `pull_request_target` with repository secrets in
+  # scope, and a comment trigger would let any commenter hand the agent a prompt
+  # inside that context (issue #72 / D6). mergeCraft refuses comment-driven
+  # invocation under `pull_request_target` at runtime regardless — the
+  # `allow_pr_target_comments: 'true'` input exists only for workflows whose
+  # `if:` condition already restricts comment triggers to trusted authors. Use
+  # `workflow_dispatch` below for on-demand runs.
   pull_request_target:
     # Add every base branch that should be auto-reviewed. Globs work:
     # branches: [main, develop, "release-*"]
@@ -76,6 +84,11 @@ permissions:
   # Post the mergecraft / mergecraft-approval check-runs.
   checks: write
   statuses: write
+  # Uncomment TOGETHER WITH `sarif_upload: enabled` below to publish analyzer
+  # findings as code-scanning alerts (#39). Left off here so copying this
+  # template changes nothing until you decide to opt in; without the permission
+  # GitHub answers 403 and mergeCraft logs a warning rather than failing.
+  # security-events: write
   # Only needed if mergeCraft mints short-lived tokens via OIDC.
   id-token: write
 
@@ -195,7 +208,14 @@ jobs:
       # Same-repo guard: fork PRs must never receive repository secrets under
       # pull_request_target.
       IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
-      HAS_AUTH: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # #37 / W4 — the review step walks the configured chain, so any
+      # credential in the chain qualifies as "we can run". The Claude pair is
+      # listed first because the hardened template pins ``model: anthropic/
+      # claude-sonnet`` as the chain head; uncomment the other provider env
+      # vars below to extend the chain (and the gate) — the single
+      # ``uses:`` step walks them in the order `.mergecraft/config.yaml`
+      # declares under ``models:``.
+      HAS_AUTH: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' || secrets.OPENAI_API_KEY != '' || secrets.CODEX_AUTH_JSON != '' || secrets.GEMINI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -228,7 +248,7 @@ jobs:
           if [ "${{ env.IS_SAME_REPO }}" != "true" ]; then
             echo "::notice title=mergeCraft skipped::Fork PR — secrets are withheld, review skipped."
           else
-            echo "::notice title=mergeCraft skipped::Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY to enable reviews."
+            echo "::notice title=mergeCraft skipped::Set a credential for at least one provider in the chain (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / OPENAI_API_KEY / CODEX_AUTH_JSON / GEMINI_API_KEY) to enable reviews."
           fi
 
       # Composed in a step rather than inline in `with:` so the CI-context clause
@@ -294,13 +314,43 @@ jobs:
           # the only diagnostic is lost. 5 minutes of headroom lets it exit
           # cleanly and report failure instead.
           timeout: 25m
+          # #37 / W4 — a single `uses:` step walks the configured chain. The
+          # ``model:`` input is the chain head; the configured ``models:``
+          # list (in `.mergecraft/config.yaml`) is the tail. Uncredentialed
+          # providers are skipped with a warning; retryable failures advance.
+          # Set ``model_pin: enabled`` ONLY if you want to suppress the
+          # fallback (rare). See `examples/config.yaml` for the chain config.
           model: anthropic/claude-sonnet
+          # model_pin: enabled   # uncomment to suppress fallbacks (legacy semantics)
           push: disabled
           shell: disabled
           status_checks: enabled
+          # Trust-aware analyzer selection (#38). `auto` already resolves to this
+          # under `pull_request_target`, but stating it keeps the workflow honest
+          # about what it expects and survives any future change to `auto`.
+          # Only analyzers needing no secrets, no network and no PR-authored
+          # command construction run; the rest are skipped with a named reason in
+          # the Analyzers pre-merge row, never reported as failures.
+          analyzers: untrusted-only
+          # Optional (#39): publish the analyzer findings above as GitHub
+          # code-scanning alerts, so mechanical signal stays readable when the
+          # review narrative is thin or findings overflow the inline comment
+          # budget. Off by default. Uncomment this AND `security-events: write`
+          # in the `permissions:` block. Only findings from analyzers this run's
+          # trust tier admitted are uploaded, after secret redaction; CI log
+          # excerpts and agent narrative are never uploaded, and a rejected
+          # upload is logged rather than failing the review.
+          # sarif_upload: enabled
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Add a second provider's credentials here to extend the chain —
+          # the single ``uses:`` step above walks them in order. See the
+          # Custom OpenAI-compatible provider section in README.md and the
+          # multi-provider worked example for the env-var convention.
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: mergeCraft review incomplete (non-fatal)
         if: env.HAS_AUTH == 'true' && steps.mergecraft.outcome != 'success'
@@ -309,6 +359,23 @@ jobs:
 
       # Gate on the approval check-run rather than on the review step's exit code,
       # so agent infrastructure failures do not read as "changes requested".
+      #
+      # W8.4 (D13): the approval conclusion is computed structurally from the
+      # typed `Finding` list + run state + trust tier — narrative ("approved",
+      # "not approved") never enters the decision. The hardened enforce step
+      # treats anything other than `success` as blocking:
+      #
+      # - `failure` ⇒ review surfaced a blocker (Critical/Major finding) — block.
+      # - `neutral` ⇒ the run crashed / timed out / produced no findings, or
+      #   the trust tier is `untrusted` (fork PR / pull_request_target) — block.
+      #   `neutral` is the wire-shape that means "no permissive gate"; an
+      #   injected PR that suppresses its findings still surfaces `neutral`
+      #   because the structural decision reads the typed finding list.
+      # - `success` ⇒ review completed, no blockers, at least one finding — pass.
+      # - absent (no `mergecraft-approval` check posted at all, e.g. the
+      #   review step never ran) ⇒ still fail open. The required check
+      #   pattern relies on a posted check; if no check exists, the GitHub
+      #   branch-protection rule itself blocks the merge, not this step.
       - name: Fail when mergeCraft would not approve
         if: github.event_name == 'pull_request_target' && env.HAS_AUTH == 'true'
         env:
@@ -332,14 +399,18 @@ jobs:
             exit 0
           fi
           case "${conclusion}" in
+            success)
+              echo "mergeCraft approval: structural gate passed (no blockers in the typed Finding list)."
+              ;;
             failure)
-              echo "::error title=mergeCraft requested changes::mergecraft-approval failed — address the review feedback on this PR."
+              echo "::error title=mergeCraft requested changes::mergecraft-approval failed — the typed Finding list contains a Critical or Major finding."
               exit 1
               ;;
-            success)
-              echo "mergeCraft approval: no outstanding review feedback."
+            neutral)
+              echo "::error title=mergeCraft review incomplete::mergecraft-approval is 'neutral' — the run crashed, timed out, produced no findings, or ran on an untrusted tier. This is treated as blocking by W8 (D13)."
+              exit 1
               ;;
             *)
-              echo "::notice title=mergeCraft approval not posted::No mergecraft-approval check on ${HEAD_SHA}. Not blocking."
+              echo "::notice title=mergeCraft approval not posted::No mergecraft-approval check on ${HEAD_SHA}. Not blocking (fail-open for missing check — branch protection handles the missing required check)."
               ;;
           esac

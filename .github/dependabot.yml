@@ -12,3 +12,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # Agent CLI lockfile for Dockerfile / Dockerfile.analyzers (W7 / D7).
+  - package-ecosystem: npm
+    directory: /docker/agent-clis
+    schedule:
+      interval: weekly

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from mergecraft.prep.types import PrepResult
 
 RepoAccess = Literal["primary", "write", "read"]
 
@@ -62,6 +65,17 @@ class RepoToolState:
     commentable_lines_checkout_sha: str | None = None
     before_sha: str | None = None
     diff_coverage: Any = None
+    # Full-PR unified diff written by ``checkout_pr``. Retained on the state
+    # (not just returned to the agent as ``diffPath``) so end-of-run consumers
+    # — the merge evidence packet's blast-radius classification, #96 — can
+    # read the same authoritative patch the reviewer read.
+    diff_path: str | None = None
+    # Incremental review scope (C4): the commit mergeCraft last reviewed, the
+    # patch covering everything since it, and that patch's changed paths. All
+    # three stay ``None`` when no prior review is recoverable.
+    last_reviewed_sha: str | None = None
+    incremental_diff_path: str | None = None
+    incremental_changed_paths: list[str] | None = None
 
 
 @dataclass(slots=True)
@@ -79,6 +93,31 @@ class ReviewRecord:
 
 @dataclass(slots=True)
 class ApprovalRecord:
+    """Advisory record of what the agent asked ``create_pull_request_review``
+    to do.
+
+    ``would_approve`` is the agent's *self-assessment*, captured as a side
+    effect of the ``create_pull_request_review`` tool call. It is **never the
+    sole positive input** to the approval gate — that gate is computed
+    structurally by ``mergecraft.agents.gates.decide_approval`` from the typed
+    ``Finding`` list, the run's completion state, and the trust tier (D12).
+
+    W2 of the merge-evidence plan (#41) split this signal from the evidence
+    verdict: ``build_packet()`` translates the legacy ``ApprovalRecord`` into
+    the packet's ``self_assessment`` row, and the structural ``Decision``
+    lives in its own sibling field. The legacy ``tool_state.approval``
+    surface stays for backward compatibility with consumers that still
+    read ``would_approve`` directly; new code should consume the packet's
+    ``self_assessment`` row instead.
+
+    The field exists for the trajectory / merge-evidence plan (#41) so the
+    recorded "self-assessment" can be compared against the structural
+    conclusion after the fact. It is not consulted by ``report_status_checks``
+    or ``create_pull_request_review``'s wire-call layer — both are pinned to
+    structural inputs by W7.3 / W7.4 / W7.5 of the security-trust-boundary
+    plan (#75).
+    """
+
     would_approve: bool
     sha: str | None
 
@@ -94,7 +133,7 @@ class ReviewReplyRecord:
 class DependencyInstallationState:
     status: Literal["not_started", "in_progress", "completed", "failed"]
     promise: Any = None
-    results: list[Any] | None = None
+    results: list[PrepResult] | None = None
 
 
 @dataclass(slots=True)
@@ -116,6 +155,25 @@ class AnalyzerRunState:
     pre_merge_summary: str | None = None
     lockfile_digest: str | None = None
     verified_ids: set[str] = field(default_factory=set)
+
+
+@dataclass(slots=True)
+class CiEvidenceState:
+    """Evidence normalised from the consumer's *already-finished* CI (#36).
+
+    Kept separate from ``AnalyzerRunState`` on purpose: ``run_analyzers``
+    replaces its run state wholesale on every call, so anything merged into it
+    would silently vanish if the reviewing agent re-ran the analyzers after
+    reading CI. CI evidence outlives that.
+
+    ``findings`` holds ``Finding.model_dump()`` rows — the same dict shape
+    ``AnalyzerRunState.findings`` uses, so the packet's loader reads one shape.
+    ``substitutions`` records every gate outcome a declared CI check run
+    changed, so a reader can audit *why* a gate stopped saying ``unavailable``.
+    """
+
+    findings: list[dict[str, Any]] = field(default_factory=list)
+    substitutions: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -144,13 +202,49 @@ class ToolState:
     learnings_seed: str | None = None
     learnings_persist_attempted: bool = False
     learnings_review_delta: str | None = None
+    # D10 / W6.2 — provenance + quarantine gate for new learning entries.
+    # New entries land in a ``## Staging`` section by default; only entries
+    # whose provenance chain contains an ``OWNER``/``MEMBER``/``COLLABORATOR``
+    # author may be promoted, and promotion is opt-in via
+    # ``autopromote_learnings`` (D10, #74).
+    autopromote_learnings: bool = False
+    # Run identity (GitHub Actions run id) for provenance records.
+    run_id: str | None = None
+    # PR number the run is acting on (None for non-PR runs).
+    pr_number: int | None = None
+    # Author login of the triggerer / comment author (provenance source).
+    author: str | None = None
+    # GitHub ``author_association`` of the triggering comment / event.
+    author_association: str | None = None
+    # ``derive_trust_tier()``'s return value for this run (trusted|untrusted).
+    trust_tier: str | None = None
+    # When ``setup_script`` is skipped on an untrusted tier (W1.2), the reason
+    # string is recorded here for harness/tests and later RunOutcome mapping.
+    setup_script_skip_reason: str | None = None
+    # Former askpass path retained for bookkeeping only — ``setup_git`` shreds
+    # the on-disk helper immediately (auth is MCP ``http.extraHeader``; W2.2).
+    git_askpass_path: str | None = None
     xrepo_learnings_file_path: str | None = None
     xrepo_learnings_seed: str | None = None
     xrepo_learnings_persist_attempted: bool = False
     output: str | None = None
+    # Per-attempt ``AgentUsage`` token counts, appended once per run by
+    # ``main.py``. Despite what the merge-evidence plan assumed, this is *not*
+    # a tool-call log — the trajectory record (#43) keeps its own field below.
     usage_entries: list[Any] = field(default_factory=list)
+    # Every MCP tool call this run made, in order (#43, D8). Appended by
+    # ``mcp/server.py``'s ``tools/call`` handler — the single door every agent
+    # tool call goes through — and read at end of run by
+    # ``evidence/trajectory.py::build_trajectory_record``. Typed ``list[Any]``
+    # rather than ``list[ToolCallRecord]`` only to keep this module free of an
+    # import cycle back into ``evidence``.
+    tool_calls: list[Any] = field(default_factory=list)
     model: str | None = None
-    model_fallback: dict[str, str] | None = None
+    # W10.2 / #20 — requested vs executed model evidence (always populated on
+    # the live path so the packet can prove which model actually ran).
+    requested_model: str | None = None
+    fallback_index: int = 0
+    fallback_occurred: bool = False
     unselected_proxy_default: bool | None = None
     model_clamped: dict[str, str] | None = None
     sha_pinned: bool | None = None
@@ -159,6 +253,14 @@ class ToolState:
     agent_diagnostic: Any = None
     browser_daemon: Any = None
     analyzer_run: AnalyzerRunState | None = None
+    # Evidence normalised from the consumer's finished CI (#36). ``None`` until
+    # a CI source is actually read, so a run that consulted no CI records
+    # nothing rather than an empty section.
+    ci_evidence: CiEvidenceState | None = None
+    # True once ``run_static_checks`` has been called this session. Read by the
+    # verification tools (D14): an LLM judge may not evaluate a finding before
+    # the deterministic checks it is meant to supplement have had their turn.
+    static_checks_ran: bool = False
 
 
 def repo_key(owner: str, name: str) -> str:

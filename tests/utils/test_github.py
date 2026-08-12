@@ -6,7 +6,41 @@ import httpx
 import pytest
 
 from mergecraft.config.settings import default_settings
-from mergecraft.utils.github import GitHubClient, parse_repo_context, resolve_run_context_data
+from mergecraft.utils.github import (
+    DEFAULT_API_URL,
+    GitHubClient,
+    _default_api_base_url,
+    parse_repo_context,
+    resolve_run_context_data,
+)
+
+
+def test_default_api_base_url_falls_back_to_public_github(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W11 — ``_default_api_base_url`` defaults to api.github.com when unset."""
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    assert _default_api_base_url() == DEFAULT_API_URL
+
+
+def test_default_api_base_url_honours_github_api_url_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W11 / D6 — GHES and E2E mock point GitHubClient via ``GITHUB_API_URL``."""
+    monkeypatch.setenv("GITHUB_API_URL", "http://127.0.0.1:9/api/v3/")
+    assert _default_api_base_url() == "http://127.0.0.1:9/api/v3"
+
+
+@pytest.mark.asyncio
+async def test_github_client_uses_default_api_base_url_when_base_url_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_API_URL", "https://github.example.test/api/v3")
+    client = GitHubClient("t")
+    try:
+        assert client.base_url == "https://github.example.test/api/v3"
+    finally:
+        await client.aclose()
 
 
 def test_parse_repo_context(monkeypatch: pytest.MonkeyPatch) -> None:

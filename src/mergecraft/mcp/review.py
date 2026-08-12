@@ -8,9 +8,12 @@ import httpx
 from loguru import logger
 
 from mergecraft.mcp.comment import add_footer
+from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
+from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
 from mergecraft.review_taxonomy import stamp_finding_fingerprint
+from mergecraft.types import INCREMENTAL_REVIEW_MODE
 from mergecraft.utils.learnings import (
     ensure_learnings_review_delta,
     merge_learnings_delta_into_review_body,
@@ -39,6 +42,117 @@ def format_analyzer_inline_body(
 def enrich_analyzer_comment_body(body: str) -> str:
     """Return review comment bodies unchanged (formatting is upstream)."""
     return body
+
+
+_FRESH_PR_TRIGGERS: frozenset[str] = frozenset(
+    {"pull_request_opened", "pull_request_ready_for_review"}
+)
+
+
+def _is_rereview_trigger(trigger: str | None) -> bool:
+    """Return True iff the run's trigger is a re-review (not a fresh PR).
+
+    A re-review is any trigger that is **not** a fresh PR — synchronize,
+    review_requested, review_submitted, review_comment, issue_comment, or
+    similar. The trigger vocabulary is in
+    ``mergecraft.utils.payload.PayloadTrigger``; the two values that
+    name a fresh PR are the ones we exclude.
+
+    Args:
+        trigger: The trigger string from the run's payload event, or
+            ``None`` for non-GitHub / offline runs.
+
+    Returns:
+        True when the trigger is not a fresh PR. Returns False when
+        the trigger is unknown / unset — an unknown trigger is treated
+        as a fresh PR so we never surface the suggestion on a run
+        whose re-review status we cannot prove.
+    """
+    if not trigger:
+        return False
+    return trigger not in _FRESH_PR_TRIGGERS
+
+
+def _maybe_suggest_eval_add(ctx: ToolContext) -> None:
+    """Log a one-line suggestion to add the run to the eval bank (#44, W12.4).
+
+    Fires when:
+
+    - ``ctx.suggest_eval_add`` is True (opt-in via action input).
+    - The trust tier is ``trusted`` (the suggestion is never surfaced
+      on fork PRs or untrusted runs).
+    - The trigger is a re-review (not a fresh PR; fresh PRs do not
+      produce a *rejected / reverted* failure mode yet).
+    - The run produced no positive findings.
+
+    The function only logs — it never auto-adds. The eval bank is for
+    *operator review*, not auto-capture.
+    """
+    if not getattr(ctx, "suggest_eval_add", False):
+        return
+    if ctx.trust_tier != "trusted":
+        return
+    trigger = ctx.payload.event.trigger
+    if not _is_rereview_trigger(trigger):
+        return
+    # Positive signal: any analyzer finding attributed to the PR. The
+    # analyzer pipeline writes into ``tool_state.analyzer_run.findings``
+    # (a list of dicts); a missing or empty list means the run found
+    # nothing.
+    analyzer_run = getattr(ctx.tool_state, "analyzer_run", None)
+    positive_findings = bool(getattr(analyzer_run, "findings", None))
+    if positive_findings:
+        return
+    logger.info(
+        "» suggest_eval_add: re-review produced no positive findings; "
+        "consider capturing this run as a case via `mergecraft eval add` "
+        "(never auto-added; #44, W12.4)",
+    )
+
+
+async def _resolve_fixed_finding_threads(
+    ctx: ToolContext, *, pull_number: int, posted_bodies: list[str]
+) -> int:
+    """Close threads for findings the new commits fixed (C4).
+
+    Runs only on a re-review that knows which paths moved since the last reviewed
+    commit. A thread is closed when mergeCraft raised it, nobody else replied, its
+    file was touched by the new commits, and the review just posted did not raise
+    it again — i.e. the code the finding pointed at changed and the finding is
+    gone. Everything here is advisory: a failure logs and the review still stands.
+    """
+    if ctx.tool_state.selected_mode != INCREMENTAL_REVIEW_MODE:
+        return 0
+    primary = primary_repo_state(ctx.tool_state)
+    changed_paths = set(primary.incremental_changed_paths or ())
+    if not changed_paths:
+        return 0
+    current: set[str] = set()
+    for body in posted_bodies:
+        current |= finding_fingerprints_in(body)
+    try:
+        threads = await fetch_review_threads(ctx, pull_number)
+    except Exception as err:  # advisory cleanup; never fails a posted review
+        logger.info("finding resolution: listing review threads soft-failed: {}", err)
+        return 0
+    targets = resolvable_thread_ids(
+        threads, current_fingerprints=frozenset(current), changed_paths=changed_paths
+    )
+    resolved = 0
+    for thread_id in targets:
+        try:
+            await resolve_review_thread(ctx, thread_id)
+        except Exception as err:  # one bad thread must not stop the rest
+            logger.info("finding resolution: resolving thread {} soft-failed: {}", thread_id, err)
+            continue
+        resolved += 1
+    if resolved:
+        logger.info(
+            "resolved {} review thread(s) on PR #{} whose findings are gone from the new commits",
+            resolved,
+            pull_number,
+        )
+    return resolved
 
 
 def create_pull_request_review_tool(ctx: ToolContext):
@@ -75,7 +189,12 @@ def create_pull_request_review_tool(ctx: ToolContext):
                 }
 
         event = "COMMENT"
-        if approved and ctx.pr_approve_enabled:
+        if approved and ctx.pr_approve_enabled and ctx.trust_tier == "trusted":
+            # D14 — prApproveEnabled is inert for untrusted runs (fork PR /
+            # pull_request_target). One config knob, one inert path. The
+            # advisory ApprovalRecord is still written below (W8.3), so the
+            # trajectory/evidence work in the merge-evidence plan (#41) reads
+            # the agent's stored boolean after the fact.
             event = "APPROVE"
         elif request_changes:
             event = "REQUEST_CHANGES"
@@ -142,6 +261,16 @@ def create_pull_request_review_tool(ctx: ToolContext):
             node_id=str(result.get("node_id") or ""),
             reviewed_sha=payload.get("commit_id"),
         )
+        _maybe_suggest_eval_add(ctx)
+        # #41 / W2.1 — the agent's ``approved`` boolean is recorded here as
+        # the legacy ``ApprovalRecord`` and (separately, when the packet is
+        # built at the end of the run) as the packet's ``self_assessment``
+        # row. The two are populated from the same call but kept
+        # structurally distinct so the structural verdict (``Decision``)
+        # can never be derived from the agent's prose. The legacy field
+        # stays for backward compatibility with consumers that still
+        # read ``tool_state.approval.would_approve``; ``build_packet()``
+        # translates it into the packet's ``self_assessment`` row.
         ctx.tool_state.approval = ApprovalRecord(
             would_approve=approved,
             sha=payload.get("commit_id"),
@@ -158,6 +287,13 @@ def create_pull_request_review_tool(ctx: ToolContext):
         if approve_fallback:
             response["approveFallbackDueTo422"] = True
             response["requestedReviewState"] = "APPROVE"
+        resolved = await _resolve_fixed_finding_threads(
+            ctx,
+            pull_number=pull_number,
+            posted_bodies=[str(item.get("body") or "") for item in inline],
+        )
+        if resolved:
+            response["resolvedThreads"] = resolved
         return response
 
     return tool(

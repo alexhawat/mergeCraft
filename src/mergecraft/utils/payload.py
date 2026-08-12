@@ -21,9 +21,11 @@ from mergecraft.utils.time_parse import (
 )
 
 StatusChecksInput = Literal["disabled", "enabled"]
+SuggestEvalAddInput = Literal["disabled", "enabled"]
 ProgressCommentType = Literal["issue", "review"]
 
 COLLABORATOR_PERMISSIONS: frozenset[AuthorPermission] = frozenset({"admin", "maintain", "write"})
+TRUSTED_AUTHOR_ASSOCIATIONS: frozenset[str] = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
 PayloadTrigger = Literal[
     "pull_request_opened",
@@ -87,6 +89,10 @@ class JsonPayload(BaseModel):
     prompt: str
     model: str | None = None
     model_explicit: bool | None = Field(default=None, alias="modelExplicit")
+    # #37 / W4 / D8 — explicit-pin opt-in on the JSON payload surface.
+    # ``modelPin: true`` collapses the chain to ``[model]`` (preserves the
+    # legacy "use exactly this" semantics). Default absent ⇒ chain-preserving.
+    model_pin: bool | None = Field(default=None, alias="modelPin")
     triggerer: str | None = None
     base_instructions: str | None = Field(default=None, alias="baseInstructions")
     event_instructions: str | None = Field(default=None, alias="eventInstructions")
@@ -106,6 +112,7 @@ class ActionInputs(BaseModel):
     prompt: str | None = None
     prompt_file: str | None = None
     model: str | None = None
+    model_pin: StatusChecksInput | None = None
     timeout: str | None = None
     push: PushPermission | None = None
     shell: ShellPermission | None = None
@@ -113,14 +120,37 @@ class ActionInputs(BaseModel):
     cwd: str | None = None
     output_schema: str | None = None
     analyzers: str | None = None
+    suggest_eval_add: SuggestEvalAddInput | None = None
 
-    @field_validator("push", "shell", "status_checks", "analyzers", mode="before")
+    @field_validator(
+        "push",
+        "shell",
+        "status_checks",
+        "analyzers",
+        "model_pin",
+        mode="before",
+    )
     @classmethod
     def _empty_to_none(cls, value: object) -> object:
         if value == "" or value is None:
             return None
         if isinstance(value, str):
             return value.lower()
+        return value
+
+    @field_validator("suggest_eval_add", mode="before")
+    @classmethod
+    def _normalize_suggest_eval_add(cls, value: object) -> object:
+        """Map action.yml bool-ish defaults onto ``disabled`` / ``enabled`` (W12.4)."""
+        if value == "" or value is None:
+            return None
+        if isinstance(value, str):
+            low = value.lower().strip()
+            if low in {"false", "0", "no", "off", "disabled"}:
+                return "disabled"
+            if low in {"true", "1", "yes", "on", "enabled"}:
+                return "enabled"
+            return low
         return value
 
 
@@ -187,7 +217,85 @@ def _head_ref(pr: dict[str, Any]) -> str | None:
     return head.get("ref") if isinstance(head, dict) else None
 
 
-def resolve_native_event() -> dict[str, Any] | None:
+def _is_comment_event(event_name: str) -> bool:
+    return event_name in {"issue_comment", "pull_request_review_comment"}
+
+
+def _parse_allowlist(raw: str | None) -> tuple[str, ...]:
+    """Split a comma-separated allowlist into a tuple of stripped, lowercased names.
+
+    Empty / whitespace-only entries are dropped. Empty input → empty tuple, which
+    is the default (association gate only) — see W2.3.
+    """
+    if not raw:
+        return ()
+    names = [part.strip() for part in raw.split(",")]
+    return tuple(name for name in names if name)
+
+
+def _extract_comment(data: dict[str, Any]) -> dict[str, Any]:
+    comment = data.get("comment")
+    return comment if isinstance(comment, dict) else {}
+
+
+def _comment_association(data: dict[str, Any]) -> str | None:
+    """Read ``comment.author_association`` from the raw GitHub event payload.
+
+    Returns the raw string value (``"OWNER"`` / ``"NONE"`` / …) or ``None`` when
+    the field is absent or non-string. The body is never consulted — D5 forbids
+    inferring authorization from attacker-controlled text.
+    """
+    comment = _extract_comment(data)
+    raw = comment.get("author_association")
+    if isinstance(raw, str):
+        return raw
+    return None
+
+
+def _comment_login(data: dict[str, Any]) -> str | None:
+    """Read ``comment.user.login`` from the raw GitHub event payload, if present."""
+    comment = _extract_comment(data)
+    user = comment.get("user")
+    if isinstance(user, dict):
+        login = user.get("login")
+        if isinstance(login, str):
+            return login
+    return None
+
+
+def _allow_pr_target_comments_optin() -> bool:
+    """True when the workflow explicitly opts in to ``pull_request_target`` comment invocation.
+
+    D6: default is refuse; opt-in is a deliberate workflow-level choice.
+    """
+    raw = get_action_input("allow_pr_target_comments")
+    return raw.strip().lower() in {"true", "1", "yes", "on"}
+
+
+def _comment_invocation_allowed(
+    *, event_name: str, data: dict[str, Any], allowlist: tuple[str, ...] = ()
+) -> tuple[bool, str | None]:
+    """Authorize a comment-driven invocation.
+
+    Returns ``(True, association)`` when the comment is permitted to dispatch the
+    agent, ``(False, reason)`` otherwise. The reason is a short identifier
+    suitable for logging — never the comment body.
+    """
+    association = _comment_association(data)
+    if not association:
+        return False, "missing_author_association"
+    if event_name == "pull_request_target" and not _allow_pr_target_comments_optin():
+        return False, "pull_request_target_refused_default"
+    if association not in TRUSTED_AUTHOR_ASSOCIATIONS:
+        # Optional escape hatch: a maintainer-defined allowlist of extra logins.
+        # Empty default = association gate only.
+        login = _comment_login(data)
+        if not login or login.lower() not in {name.lower() for name in allowlist}:
+            return False, f"association={association}"
+    return True, association
+
+
+def resolve_native_event(*, allowlist: tuple[str, ...] = ()) -> dict[str, Any] | None:
     """Build a ``PayloadEvent``-shaped dict from the native GitHub Actions event.
 
     Reads ``GITHUB_EVENT_NAME`` + ``GITHUB_EVENT_PATH`` so a workflow that triggers
@@ -196,6 +304,13 @@ def resolve_native_event() -> dict[str, Any] | None:
     without the caller hand-building a ``~mergecraft`` JSON payload. Returns ``None``
     when there is no usable context, so callers fall back to the ``unknown``
     trigger — preserving prior behavior for local / non-Actions runs.
+
+    Authorization gate (D5, D6, W2.1-W2.4): for ``issue_comment`` and
+    ``pull_request_review_comment`` the comment's ``author_association`` must be
+    in ``TRUSTED_AUTHOR_ASSOCIATIONS`` (``OWNER`` / ``MEMBER`` / ``COLLABORATOR``)
+    or its login must appear in ``allowlist``. Under ``pull_request_target`` the
+    comment-driven path is refused unless the opt-in input is set. The refusal
+    is logged at warning level; the comment body is never logged.
     """
     event_name = os.environ.get("GITHUB_EVENT_NAME") or ""
     if not event_name:
@@ -204,6 +319,49 @@ def resolve_native_event() -> dict[str, Any] | None:
     if data is None:
         return None
     action = str(data.get("action") or "")
+
+    # Comment-driven invocation gate (D5, D6). Fires whenever the payload carries
+    # a ``comment`` field: the canonical GitHub events (``issue_comment`` /
+    # ``pull_request_review_comment``) plus the ``pull_request_target`` case where
+    # a workflow is configured to receive comment-shaped data under secrets-in-scope.
+    if isinstance(data.get("comment"), dict) and (
+        _is_comment_event(event_name) or event_name == "pull_request_target"
+    ):
+        allowed, reason = _comment_invocation_allowed(
+            event_name=event_name, data=data, allowlist=allowlist
+        )
+        if not allowed:
+            logger.warning("comment trigger refused: event={} reason={}", event_name, reason)
+            return None
+        # Authorization passed — dispatch as the comment event shape.
+        if event_name == "pull_request_review_comment":
+            pr = data.get("pull_request")
+            if not isinstance(pr, dict) or pr.get("number") is None:
+                return None
+            comment = _extract_comment(data)
+            return {
+                "trigger": "pull_request_review_comment_created",
+                "issue_number": int(pr["number"]),
+                "is_pr": True,
+                "branch": _head_ref(pr),
+                "comment_id": comment.get("id"),
+                "body": comment.get("body"),
+            }
+        # issue_comment (canonical) and pull_request_target + comment-shaped both
+        # surface as ``issue_comment_created`` so downstream dispatch treats them
+        # identically.
+        issue = data.get("issue")
+        if isinstance(issue, dict) and issue.get("number") is not None:
+            comment = _extract_comment(data)
+            return {
+                "trigger": "issue_comment_created",
+                "issue_number": int(issue["number"]),
+                "is_pr": issue.get("pull_request") is not None,
+                "title": issue.get("title"),
+                "comment_id": comment.get("id"),
+                "body": comment.get("body"),
+            }
+        return None
 
     if event_name in {"pull_request", "pull_request_target"}:
         pr = data.get("pull_request")
@@ -226,8 +384,7 @@ def resolve_native_event() -> dict[str, Any] | None:
         pr = data.get("pull_request")
         if not isinstance(pr, dict) or pr.get("number") is None:
             return None
-        comment = data.get("comment")
-        comment = comment if isinstance(comment, dict) else {}
+        comment = _extract_comment(data)
         return {
             "trigger": "pull_request_review_comment_created",
             "issue_number": int(pr["number"]),
@@ -241,8 +398,7 @@ def resolve_native_event() -> dict[str, Any] | None:
         issue = data.get("issue")
         if not isinstance(issue, dict) or issue.get("number") is None:
             return None
-        comment = data.get("comment")
-        comment = comment if isinstance(comment, dict) else {}
+        comment = _extract_comment(data)
         return {
             "trigger": "issue_comment_created",
             "issue_number": int(issue["number"]),
@@ -348,13 +504,50 @@ def resolve_non_prompt_inputs() -> ActionInputs:
     return ActionInputs.model_validate(
         {
             "model": get_action_input("model") or None,
+            "model_pin": get_action_input("model_pin") or None,
             "timeout": get_action_input("timeout") or None,
             "cwd": get_action_input("cwd") or None,
             "push": get_action_input("push") or None,
             "shell": get_action_input("shell") or None,
             "status_checks": get_action_input("status_checks") or None,
+            "suggest_eval_add": get_action_input("suggest_eval_add") or None,
         }
     )
+
+
+def resolve_custom_provider_env_inputs() -> None:
+    """Wire ``provider_base_url`` / ``provider_api_key_env`` into the singleton
+    custom-provider env vars (#71 / W3).
+
+    The ``provider_base_url`` action input maps directly to
+    ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL``. The ``provider_api_key_env``
+    input is the **name** of an env var that already holds the API key;
+    mergeCraft reads that env var's value and re-exports it under
+    ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` so the harness writers see one
+    consistent pair.
+
+    Convention 7: the resolved key value is never logged. The env-var name
+    is referenced symbolically; the value is forwarded silently from one
+    env var to another. The user wires the secret via ``env:`` in the
+    workflow (typically ``${{ secrets.MY_PROVIDER_API_KEY }}``) and never
+    inlines the value.
+
+    No-op when neither input is set. When only one is set, the existing
+    helper behaviour wins — a partial singleton pair is dropped.
+    """
+    base_url_input = get_action_input("provider_base_url")
+    api_key_env_input = get_action_input("provider_api_key_env")
+    if not base_url_input and not api_key_env_input:
+        return
+    if base_url_input:
+        os.environ["MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"] = base_url_input
+    if api_key_env_input:
+        # ``provider_api_key_env`` is the env-var *name* holding the key.
+        # The value of that env var becomes the singleton key. Convention 7:
+        # never log the value.
+        api_key_value = os.environ.get(api_key_env_input, "").strip()
+        if api_key_value:
+            os.environ["MERGECRAFT_CUSTOM_PROVIDER_API_KEY"] = api_key_value
 
 
 def _stricter_shell(
@@ -379,6 +572,11 @@ def resolve_payload(
     repo_settings: RepoSettings | None = None,
 ) -> dict[str, Any]:
     """Build the runtime payload from prompt input + action inputs + repo settings."""
+    # W3 / #71 — wire the ``provider_base_url`` and ``provider_api_key_env``
+    # action inputs into the singleton custom-provider env vars before any
+    # harness reads them. Convention 7: the resolved key value is forwarded
+    # silently between env vars and never logged.
+    resolve_custom_provider_env_inputs()
     settings = repo_settings or RepoSettings()
     if resolved_prompt_input is None:
         resolved_prompt_input = resolve_prompt_input()
@@ -395,7 +593,8 @@ def resolve_payload(
     raw_event = json_payload.event if json_payload else None
     if not is_payload_event(raw_event):
         # No explicit ~mergecraft event — derive it from the native GH Actions event.
-        raw_event = resolve_native_event()
+        allowlist = _parse_allowlist(settings.comment_invocation_allowlist)
+        raw_event = resolve_native_event(allowlist=allowlist)
     event = (
         PayloadEvent.model_validate(raw_event)
         if is_payload_event(raw_event)
@@ -423,8 +622,25 @@ def resolve_payload(
         "~mergecraft": True,
         "version": (json_payload.version if json_payload else None) or _package_version(),
         "model": model,
+        # #37 / W4 / D8 — a supplied ``model:`` input no longer means "suppress the
+        # chain". The supplied slug is the chain head; the configured tail follows
+        # unless the operator opts into pinning via ``model_pin: enabled`` (or
+        # ``.mergecraft/config.yaml``'s ``modelPin: true``).
+        #
+        # ``modelExplicit`` is kept for downstream consumers that still branch on
+        # it — it now reflects the explicit-pin opt-in only, not the bare
+        # presence of a ``model:`` input. ``modelHead`` is the new head-slug
+        # signal.
+        "modelHead": (json_payload.model if json_payload else None) or inputs.model or None,
         "modelExplicit": bool(
-            (json_payload.model_explicit if json_payload else None) or inputs.model
+            (json_payload.model_explicit if json_payload else None)
+            or (inputs.model and inputs.model_pin == "enabled")
+            or (settings.model and settings.model_pin)
+        ),
+        "modelPin": (
+            inputs.model_pin == "enabled"
+            or bool(json_payload.model_explicit if json_payload else None)
+            or settings.model_pin
         ),
         "prompt": prompt,
         "triggerer": triggerer,
@@ -444,6 +660,7 @@ def resolve_payload(
         "push": inputs.push or settings.push or "restricted",
         "shell": resolved_shell,
         "statusChecks": inputs.status_checks == "enabled",
+        "suggestEvalAdd": inputs.suggest_eval_add == "enabled",
         "proxyModel": None,
     }
 
@@ -467,6 +684,7 @@ def resolve_output_schema(raw: str | None = None) -> dict[str, Any] | None:
 
 __all__ = [
     "TIMEOUT_DISABLED",
+    "TRUSTED_AUTHOR_ASSOCIATIONS",
     "ActionInputs",
     "AuthorPermission",
     "JsonPayload",

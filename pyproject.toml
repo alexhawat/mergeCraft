@@ -39,6 +39,17 @@ mergecraft = "mergecraft.cli.app:main"
 harbor = [
     "harbor==0.20.0",
 ]
+# W8 / D6 — `tracing` extra behind which `logfire` and `opentelemetry-*` live.
+# Imports are lazy and guarded inside the sink factory; `make ci-resume` passes
+# with these uninstalled (convention 5). Exact pins + `uv.lock` committed
+# gate via `make lockcheck`.
+tracing = [
+    "logfire==4.40.0",
+    "opentelemetry-api==1.44.0",
+    "opentelemetry-sdk==1.44.0",
+    "opentelemetry-exporter-otlp-proto-http==1.44.0",
+    "opentelemetry-semantic-conventions==0.65b0",
+]
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.3.0",
@@ -140,7 +151,7 @@ ignore = [
 "src/mergecraft/mcp/**" = ["ASYNC221", "ASYNC230", "ASYNC240", "SIM105", "SIM102", "RUF001"]
 "src/mergecraft/ci/**" = ["ASYNC240", "RUF001"]
 "src/mergecraft/agents/**" = ["ASYNC221", "ASYNC230", "ASYNC240", "SIM105", "SIM102", "FLY002", "RUF001"]
-"src/mergecraft/cli/**" = ["T20", "ASYNC221", "ASYNC230", "ASYNC240"]
+"src/mergecraft/cli/**" = ["T20", "ASYNC221", "ASYNC230", "ASYNC240", "TC003"]
 "src/mergecraft/yes/**" = ["UP047"]
 "src/mergecraft/utils/learnings.py" = ["ASYNC240"]
 "src/mergecraft/utils/skills.py" = ["ASYNC240"]
@@ -190,15 +201,24 @@ xfail_strict = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
-    "integration: opt-in tests that need network or credentials",
+    "integration: opt-in tests that need network, credentials, or real binaries",
+    "live: real-provider / live-credential integration (scheduled + release precondition)",
 ]
 
 [tool.coverage.run]
 source = ["mergecraft"]
 branch = true
+omit = ["*/tests/*"]
 
 [tool.coverage.report]
-fail_under = 0
+fail_under = 65
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.bandit]
 exclude_dirs = ["tests", "scripts"]

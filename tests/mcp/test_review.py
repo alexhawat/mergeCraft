@@ -14,9 +14,13 @@ from mergecraft.mcp.context import (
     ToolContext,
 )
 from mergecraft.mcp.review import create_pull_request_review_tool
-from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
-from mergecraft.review_taxonomy import FINDING_MARKER_PREFIX, finding_fingerprint
+from mergecraft.review_taxonomy import (
+    FINDING_MARKER_PREFIX,
+    finding_fingerprint,
+    stamp_finding_fingerprint,
+)
 from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
@@ -122,6 +126,114 @@ async def test_approve_422_falls_back_to_comment_and_keeps_approval(tmp_path: Pa
     assert github.review_payloads[1]["event"] == "COMMENT"
     assert ctx.tool_state.approval is not None
     assert ctx.tool_state.approval.would_approve is True
+
+
+class _ThreadGitHub(_RecordingGitHub):
+    """Adds review-thread reads and resolve mutations to the recording client."""
+
+    def __init__(self, threads: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self._threads = threads
+        self.resolved: list[str] = []
+
+    async def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        if "resolveReviewThread" in query:
+            thread_id = str((variables or {})["threadId"])
+            self.resolved.append(thread_id)
+            return {"resolveReviewThread": {"thread": {"id": thread_id, "isResolved": True}}}
+        return {
+            "repository": {"pullRequest": {"reviewThreads": {"nodes": self._threads}}},
+        }
+
+
+def _stale_thread(body: str) -> dict[str, Any]:
+    return {
+        "id": "T-stale",
+        "isResolved": False,
+        "isOutdated": True,
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 11,
+                    "body": body,
+                    "author": {"login": "mergecraft"},
+                    "path": "src/app.py",
+                    "line": 3,
+                    "originalLine": 3,
+                    "createdAt": "2026-01-01T00:00:00Z",
+                }
+            ]
+        },
+    }
+
+
+def _incremental_ctx(github: GitHubClient, tmp_path: Path, changed: list[str]) -> ToolContext:
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    state.selected_mode = "IncrementalReview"
+    primary_repo_state(state).incremental_changed_paths = changed
+    return ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request_synchronize")),
+        github=github,
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=compute_modes("claude"),
+        tool_state=state,
+        mcp_server_url="",
+        tmpdir=str(tmp_path),
+    )
+
+
+@pytest.mark.asyncio
+async def test_rereview_resolves_threads_whose_findings_are_gone(tmp_path: Path) -> None:
+    stale = stamp_finding_fingerprint(path="src/app.py", body="Old finding.")
+    github = _ThreadGitHub([_stale_thread(stale)])
+    ctx = _incremental_ctx(github, tmp_path, ["src/app.py"])
+    spec = create_pull_request_review_tool(ctx)
+
+    result = await spec.execute(
+        {
+            "pull_number": 7,
+            "body": "re-review",
+            "comments": [{"path": "src/app.py", "line": 9, "body": "A different finding."}],
+        }
+    )
+
+    assert github.resolved == ["T-stale"]
+    assert '"resolvedThreads": 1' in result.content[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_rereview_keeps_threads_for_findings_it_raised_again(tmp_path: Path) -> None:
+    stale = stamp_finding_fingerprint(path="src/app.py", body="Old finding.")
+    github = _ThreadGitHub([_stale_thread(stale)])
+    ctx = _incremental_ctx(github, tmp_path, ["src/app.py"])
+    spec = create_pull_request_review_tool(ctx)
+
+    await spec.execute(
+        {
+            "pull_number": 7,
+            "body": "re-review",
+            "comments": [{"path": "src/app.py", "line": 3, "body": "Old finding."}],
+        }
+    )
+
+    assert github.resolved == []
+
+
+@pytest.mark.asyncio
+async def test_full_review_never_resolves_threads(tmp_path: Path) -> None:
+    stale = stamp_finding_fingerprint(path="src/app.py", body="Old finding.")
+    github = _ThreadGitHub([_stale_thread(stale)])
+    ctx = _incremental_ctx(github, tmp_path, ["src/app.py"])
+    ctx.tool_state.selected_mode = "Review"
+    spec = create_pull_request_review_tool(ctx)
+
+    await spec.execute({"pull_number": 7, "body": "first review"})
+
+    assert github.resolved == []
 
 
 async def test_suggestion_is_fenced_before_fingerprinting(ctx: ToolContext) -> None:

@@ -45,6 +45,7 @@ class ResolvedPayload:
     cwd: str | None = None
     generate_summary: bool = False
     status_checks: bool = False
+    suggest_eval_add: bool = False
     timeout: str | None = None
     prompt: str = ""
     xrepo: Any = None
@@ -67,7 +68,6 @@ class ToolContext:
     refresh_git_token: Callable[[str], Awaitable[str]] | None = None
     read_token: str | None = None
     xrepo: XrepoConfig | None = None
-    post_checkout_script: str | None = None
     prepush_script: str | None = None
     pr_approve_enabled: bool = False
     auto_merge_enabled: bool = False
@@ -80,11 +80,28 @@ class ToolContext:
     # `diff-review` path sets this True regardless, because there the config and
     # the working tree both belong to the operator who started the run.
     static_checks_enabled: bool = False
-    analyzers_mode: Literal["off", "auto", "full"] = "auto"
+    # #36 / D10 — repo-declared mapping from a mergeCraft gate name to the CI
+    # check-run name that proves it, and the workflow artifacts whose SARIF may
+    # be ingested. Both empty by default: with no declaration mergeCraft never
+    # reads the consumer's CI and never substitutes a gate outcome.
+    ci_gate_checks: dict[str, str] = field(default_factory=dict)
+    ci_sarif_artifacts: list[str] = field(default_factory=list)
+    analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto"
     trust_tier: Literal["trusted", "untrusted"] = "trusted"
     analyzers_settings_enabled: bool = True
+    # #39 / D13 — whether this run may upload analyzer findings to GitHub code
+    # scanning. Default False: with it unset nothing is built, nothing is
+    # posted, and the run makes no extra API call. Resolved once in `main.py`
+    # from the `sarif_upload` action input and `analyzers.sarifUpload`.
+    sarif_upload_enabled: bool = False
     run_id: int | None = None
     job_id: str | None = None
     oss: bool = False
     plan: AccountPlan = "unknown"
     resolved_model: str | None = None
+    # W12.4 — opt-in. When True, `create_pull_request_review` logs a
+    # `logger.info` suggestion to add the run to the eval bank when the
+    # run produced no positive findings, the trust tier is `trusted`,
+    # and the trigger is a re-review (not a fresh PR). Default False
+    # (no suggestion). mergeCraft never auto-adds (#44).
+    suggest_eval_add: bool = False

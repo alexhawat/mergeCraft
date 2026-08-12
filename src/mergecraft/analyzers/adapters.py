@@ -135,8 +135,14 @@ def run_adapter(
     tier: TrustTier = "trusted",
     base_ref: str | None = None,
     offline: bool = False,
+    allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
-    """Run one catalog analyzer and return normalized findings."""
+    """Run one catalog analyzer and return normalized findings.
+
+    ``allow_repo_binaries=False`` (set by the pipeline under ``shell:
+    disabled``) forbids ``resolve_analyzer()`` from preferring a binary the
+    repo provides, so only mergeCraft's pinned managed binary can run (#35).
+    """
     repo_root = repo_root.resolve()
     manifest = get_manifest(tool_id)
 
@@ -155,6 +161,7 @@ def run_adapter(
             changed_files=changed_files,
             base_ref=resolved_base,
             tier=tier,
+            allow_repo_binaries=allow_repo_binaries,
         )
 
     if tool_id in SUPPLY_CHAIN_DIFF_TOOLS:
@@ -172,6 +179,7 @@ def run_adapter(
             changed_files=changed_files,
             base_ref=resolved_base,
             tier=tier,
+            allow_repo_binaries=allow_repo_binaries,
         )
 
     if tool_id == "agentsec":
@@ -208,7 +216,12 @@ def run_adapter(
         logger.info("{}", reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
-    plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
+    plan = resolve_analyzer(
+        manifest=manifest,
+        repo_root=repo_root,
+        managed_available=True,
+        allow_repo_binaries=allow_repo_binaries,
+    )
     if plan.mode == "skip":
         logger.info("{}", plan.reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=plan.reason)
@@ -276,6 +289,11 @@ def run_adapter(
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     try:
+        raw = (
+            Path(outcome.output_path).read_text(encoding="utf-8")
+            if outcome.output_path
+            else outcome.output
+        )
         findings = parse_output_file(
             Path(outcome.output_path),
             manifest=manifest,
@@ -284,7 +302,16 @@ def run_adapter(
         if not findings and outcome.output.strip():
             findings = parse_output(outcome.output, manifest=manifest, repo_root=repo_root)
     except (ValueError, KeyError) as exc:
-        reason = f"skipped {tool_id}: failed to parse analyzer output ({exc})"
+        # Classify the failure: empty output means the analyzer never produced
+        # anything (sandbox unavailable outside CI), not that it emitted garbage
+        # we could not parse.
+        if not (raw or "").strip():
+            reason = (
+                f"skipped {tool_id}: no output (analyzer did not run — "
+                "likely sandbox unavailable outside CI)"
+            )
+        else:
+            reason = f"skipped {tool_id}: failed to parse analyzer output ({exc})"
         logger.info("{}", reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 

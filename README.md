@@ -1,264 +1,183 @@
+<!-- README-ideal.md — proposed README for alexhawat/mergeCraft.
+     Asset placeholders (logo, demo gif, screenshots) live under docs/assets/. -->
+
+<div align="center">
+
+<!-- TODO: add docs/assets/logo.svg (light/dark variants) -->
+<img src="docs/assets/logo.svg" alt="mergeCraft logo" width="120"/>
+
 # mergeCraft
 
-Standalone **BYOK** GitHub Action for AI-powered PR review — inspired by prior
-work including [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
+**AI-powered PR review as a standalone, BYOK GitHub Action.**
+No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 
-No proprietary SaaS account is required. Settings, learnings, and secrets
-come from your repo and GitHub Actions secrets — **you bring your own
-Claude subscription, API key, or other provider credential.**
+[![CI](https://github.com/alexhawat/mergeCraft/actions/workflows/ci.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/alexhawat/mergeCraft/actions/workflows/codeql.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/codeql.yml)
+[![Docker](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](pyproject.toml)
+[![Docs](https://img.shields.io/badge/docs-mergecraft.dev-blue)](https://alexhawat.github.io/mergeCraft/)
 
-## Requirements
+<!-- TODO: add docs/assets/demo.gif — a 30s screen capture: open PR → @mergecraft review → inline findings → approval check -->
+<img src="docs/assets/demo.gif" alt="mergeCraft reviewing a pull request" width="720"/>
 
-- Python **3.14+**
-- [uv](https://docs.astral.sh/uv/)
-- [GitHub CLI (`gh`)](https://cli.github.com), authenticated (`gh auth login`) — used by `mergecraft auth` and `mergecraft init`
-- A credential for at least one provider — see [Authentication](#authentication) below
+[Get started](#-get-started-in-3-steps) ·
+[Features](#-features) ·
+[Docs](https://alexhawat.github.io/mergeCraft/) ·
+[Review checks](REVIEW-CHECKS.md) ·
+[Contributing](CONTRIBUTING.md)
 
-## Get started in 3 steps
+</div>
 
-1. **Install and scaffold** in the repo you want reviewed (not yet published to
-   PyPI, so install straight from git):
+---
 
-   ```bash
-   uv tool install "git+https://github.com/alexhawat/mergeCraft@pre-0.0.1"
-   mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
-   ```
+## Why mergeCraft?
 
-   Working on mergeCraft itself instead? Clone it and run
-   `uv sync --extra dev && uv run mergecraft --help`.
+Hosted AI reviewers (CodeRabbit et al.) want your code on their servers and a
+per-seat subscription. mergeCraft is different:
 
-2. **Authenticate** — pick one:
+- **BYOK** — bring your own Claude Pro/Max or ChatGPT subscription, or an API
+  key. mergeCraft never talks to a proprietary backend; credentials and code
+  stay inside GitHub Actions and this repo's code.
+- **Evidence-first, not vibes-first** — deterministic analyzers and your repo's
+  own gates settle mechanically checkable facts; the LLM only judges what's
+  left, and a second read-only verifier re-reads every Critical/Major finding
+  before it's published.
+- **Fail-closed security** — untrusted contexts (fork PRs,
+  `pull_request_target`, unknown commenters) degrade to a safe tier instead of
+  running with secrets. Learnings memory is provenance-gated against prompt
+  injection.
+- **Zero lock-in** — one Docker action, one YAML workflow, MIT-licensed Python
+  you can read end to end.
 
-   ```bash
-   mergecraft auth claude   # use your Claude Pro/Max subscription (no per-token API billing)
-   # or
-   mergecraft auth codex    # use your ChatGPT subscription (ChatGPT Plus/Pro/Team/Enterprise)
-   ```
+Inspired by [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 
-   Either command saves the credential as a GitHub Actions secret in the current repo via `gh secret set`. No API key required.
+## ✨ Features
 
-3. **Commit and push** the scaffolded workflow, then trigger it by opening a PR, commenting `@mergecraft ...`, or running it manually from the Actions tab.
+| | |
+|---|---|
+| 🔍 **Deep PR review** | Correctness, risk, blast-radius and hygiene lenses; inline findings + a short narrative verdict |
+| 🧰 **Deterministic analyzers** | actionlint, zizmor, ShellCheck, Hadolint and more, auto-detected from changed paths — verified hits only, never guessed |
+| ✅ **Structural approval gate** | `mergecraft-approval` commit status is a pure function of typed findings — the agent's own "approved" can never outvote a blocker |
+| 🔁 **Model fallback chains** | Ordered `models:` list with per-slug `modelFallbacks:`; skips uncredentialed providers and retries past transient failures — `with: model:` becomes the chain head, not a kill-switch (see [Chain semantics](#chain-semantics--model)) |
+| 🧠 **Provenance-gated memory** | `.mergecraft/learnings.md` persists cross-run knowledge; fork-authored entries are quarantined in `## Staging` until a maintainer promotes them |
+| 🛡️ **Trust tiers** | Fork PRs and `pull_request_target` runs resolve to an untrusted tier: no secrets, no network, read-only analyzers |
+| 📡 **SARIF upload (opt-in)** | Publish analyzer findings to GitHub code scanning with one flag |
+| 📈 **Tracing (opt-in)** | Per-run span trees to local JSONL, Logfire, or any OTLP collector — with redaction |
+| 💻 **Offline mode** | `mergecraft diff-review` reviews local diffs or patch files, no PR required — `--json` for benchmarks |
+| 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in |
 
-That's it — no server, dashboard, or account to sign up for.
+## 🏗️ How it works
 
-## Authentication
-
-mergeCraft is BYOK: it never talks to a proprietary backend, only directly to
-the provider you configure. You can authenticate either with a **subscription**
-(no metered API billing) or a traditional **API key**.
-
-| Provider | Subscription (recommended) | API key |
-|----------|-----------------------------|---------|
-| Anthropic Claude | `mergecraft auth claude` → saves `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Claude Pro/Max) | `ANTHROPIC_API_KEY` secret |
-| OpenAI Codex | `mergecraft auth codex` → saves `CODEX_AUTH_JSON` from `codex login --device-auth` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` secret |
-| Google Gemini | `mergecraft auth gemini` → saves `GEMINI_API_KEY` from a pasted AI Studio key | `GEMINI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY` secret |
-| Cursor Cloud | `mergecraft auth cursor` → saves `CURSOR_API_KEY` from a pasted Cursor API key | `CURSOR_API_KEY` secret |
-
-Using a subscription means the GitHub Action authenticates as *you* through the
-official `claude` / `codex` CLIs — the same credential your local coding agent
-already uses — instead of paying per-token via a separate API key. Gemini uses
-the official `gemini` CLI with an API key from Google AI Studio. **Cursor Cloud**
-(issue #13 Phase A) runs a remote cloud agent via the Cursor API — there is no
-local `cursor` CLI harness in mergeCraft yet (Phase B deferred). Run the
-relevant `mergecraft auth ...` command from the repo you want reviewed; it
-detects the `origin` remote and stores the secret with `gh secret set`
-automatically (or prints the manual `Settings → Secrets` steps if `gh` isn't
-authenticated).
-
-Only set the env var(s) for the provider(s) you actually use — see the
-workflow example below, where the unused lines are commented out.
-
-**Codex subscription example** — set `CODEX_AUTH_JSON` and point the repo at a
-Codex-family model:
-
-```yaml
-# .mergecraft/config.yaml
-model: openai/gpt-codex
+```mermaid
+flowchart LR
+    A[PR opened / @mergecraft comment] --> B{Trust tier}
+    B -->|trusted| C[Full analyzer catalog]
+    B -->|fork / pr_target| D[Untrusted-only analyzers\nno secrets, no network]
+    C --> E[Review agent]
+    D --> E
+    E --> F[Repo gates\nstaticChecks / Makefile]
+    E --> G{Verifier agent\n2nd read-only pass}
+    F --> G
+    G -->|confirm / downgrade / drop| H[Typed Findings]
+    H --> I[Inline comments + narrative]
+    H --> J[mergecraft-approval\ncommit status]
+    H -.->|opt-in| K[SARIF → code scanning]
 ```
 
-```yaml
-# workflow env (subscription path)
-env:
-  CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+<details>
+<summary><b>Trust tiers & comment authorization</b> (click to expand)</summary>
+
+```mermaid
+flowchart TD
+    E[GitHub event] --> Q{Event type}
+    Q -->|pull_request, same repo| T1[trusted]
+    Q -->|pull_request from fork| T3[untrusted]
+    Q -->|pull_request_target| T3
+    Q -->|issue_comment / review_comment| Q2{author_association}
+    Q2 -->|OWNER / MEMBER / COLLABORATOR| T1
+    Q2 -->|CONTRIBUTOR / FIRST_TIME / NONE / missing| X[refused — no run]
 ```
 
-**OpenAI API key example** — set `OPENAI_API_KEY` and point the repo at any
-`openai/*` model (same Codex CLI harness as the subscription path):
+The authorization decision reads `comment.author_association` from the event
+payload — **never** the comment body — so writing `author_association: OWNER`
+into a comment changes nothing. Details:
+[Comment-trigger authorization](#comment-trigger-authorization).
 
-```yaml
-# .mergecraft/config.yaml
-model: openai/gpt
+</details>
+
+## 🚀 Get started in 3 steps
+
+> **Requirements:** Python 3.14+, [uv](https://docs.astral.sh/uv/),
+> an authenticated [GitHub CLI](https://cli.github.com), and one provider
+> credential.
+
+**1. Install and scaffold** (in the repo you want reviewed):
+
+```bash
+uv tool install "git+https://github.com/alexhawat/mergeCraft@pre-0.0.1"
+mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
-```yaml
-# workflow env (API key path)
-env:
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+**2. Authenticate** — use a subscription, no metered API billing:
+
+```bash
+mergecraft auth claude   # Claude Pro/Max
+# or
+mergecraft auth codex    # ChatGPT Plus/Pro/Team/Enterprise
 ```
 
-**Gemini API key example** — set `GEMINI_API_KEY` and point the repo at a
-curated `google/*` slug (`gemini-pro` → `google/gemini-3.1-pro-preview`,
-`gemini-flash` → `google/gemini-3.5-flash`):
+The credential is saved as a GitHub Actions secret via `gh secret set`.
 
-```yaml
-# .mergecraft/config.yaml
-model: google/gemini-3.1-pro-preview
-```
+**3. Commit, push, and trigger** — open a PR, comment `@mergecraft review`, or
+run the workflow manually. That's it: no server, dashboard, or account.
 
-```yaml
-# workflow env (API key path)
-env:
-  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-```
+## 📖 Examples
 
-**Cursor Cloud example** — set `CURSOR_API_KEY` and point the repo at
-`cursor/cloud-agent` (remote cloud agent; local Cursor CLI deferred):
-
-```yaml
-# .mergecraft/config.yaml
-model: cursor/cloud-agent
-```
-
-```yaml
-# workflow env (Cloud Agent API path)
-env:
-  CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
-```
-
-### Consumer workflow
+### Example 1 — auto-review every PR
 
 ```yaml
 # .github/workflows/mergecraft.yml
 name: mergeCraft
 on:
+  pull_request:
   workflow_dispatch:
-    inputs:
-      prompt:
-        type: string
-        description: Agent prompt
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
 
 jobs:
-  mergecraft:
+  review:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      id-token: write
     steps:
       - uses: actions/checkout@v5
-      - name: Run agent
-        uses: alexhawat/mergeCraft@pre-0.0.1
-        with:
-          prompt: ${{ inputs.prompt }}
+      - uses: alexhawat/mergeCraft@pre-0.0.1
         env:
-          # Claude — pick one:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}  # subscription (mergecraft auth claude)
-          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}           # or API key
-          # Codex / OpenAI — pick one (see Authentication above):
-          # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}               # subscription (mergecraft auth codex)
-          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}                 # API key + model: openai/gpt
-          # Gemini — API key (mergecraft auth gemini):
-          # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}                 # + model: google/gemini-3.1-pro-preview
-          # Cursor Cloud — API key (mergecraft auth cursor; local CLI deferred):
-          # CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}                 # + model: cursor/cloud-agent
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
-Ready-made workflow files live under [`examples/workflows/`](examples/workflows/):
+### Example 2 — hardened, review as a required check
 
-- [`mergecraft.yml`](examples/workflows/mergecraft.yml) — minimal getting-started
-  example (`pull_request`, comment triggers).
-- [`mergecraft-hardened.yml`](examples/workflows/mergecraft-hardened.yml) — use
-  this one when the review is a **required check** (`pull_request_target`,
-  wait-for-CI, approval enforcement).
+When the review gates merges, use `pull_request_target` with trust-aware
+restrictions — [`examples/workflows/mergecraft-hardened.yml`](examples/workflows/mergecraft-hardened.yml)
+ships wait-for-CI, same-repo guards, and an enforce step that flips a `neutral`
+approval check to blocking.
 
-Both are rendered from templates in `scripts/example_workflows/` (`make examples`
-to regenerate; CI fails on drift).
+### Example 3 — local review before you push
 
-### Where the workflow must live (`pull_request_target`)
-
-Under GitHub's Nov 2025 policy (**effective 2025-12-08**), a
-`pull_request_target` workflow is resolved from the repository's **default
-branch** — not from the PR's base branch. Three consequences:
-
-- The **default-branch copy runs for every PR**, whatever base branch the PR
-  targets.
-- A PR that **edits the workflow cannot review itself** with its own changes;
-  updates take effect on the **next** PR after merge.
-- If your **trunk is not the default branch**, a copy of the workflow on the
-  trunk is **inert**. It never runs, must be hand-mirrored onto the default
-  branch forever, and the two copies drift.
-
-This matters when `main` is a stub (for example, only `LICENSE`) while real work
-lands on another branch such as `pre-0.0.1`: keep
-`.github/workflows/mergecraft.yml` on **`main`** (or whichever branch GitHub
-lists as default), not only on the trunk. mergeCraft itself is an example —
-there is no **mergeCraft review** workflow under `.github/workflows/` yet (CI,
-release, Docker, and CodeQL workflows exist; only `mergecraft.yml` is missing),
-and the default branch does not match the development trunk.
-
-### `pull_request` vs `pull_request_target`
-
-| Trigger | When to use | Trade-off |
-|---------|-------------|-----------|
-| `pull_request` | The review job is **not** a required check | Simpler and safer — no repository secrets in scope for fork PRs |
-| `pull_request_target` | The review job **is** a required check | Runs with secrets; must never execute PR-authored code |
-
-GitHub **skips** `pull_request` workflows when `refs/pull/N/merge` cannot be
-built — i.e. whenever the PR has a **merge conflict**. If the review job is a
-required check, that leaves the check permanently missing and the PR
-unmergeable even after the conflict is fixed. `pull_request_target` still fires
-on `synchronize` in that state.
-
-The cost of `pull_request_target` is that it runs with repository secrets in
-scope, so the workflow must not execute PR-authored scripts or checkout untrusted
-code. Use same-repo guards, `push: disabled`, and `shell: disabled` in
-mergeCraft config. **If the review is not a required check, prefer plain
-`pull_request`.**
-
-### Pin parity across copies
-
-Many repos pin the action SHA in more than one place — the workflow, a Makefile
-variable for local `mergecraft diff-review`, a devcontainer, or docs. Gate those
-copies against each other in CI. The non-obvious part:
-
-> Read the workflow side from the **default branch**, not from the working tree:
->
-> ```bash
-> git show origin/main:.github/workflows/mergecraft.yml
-> ```
-
-Comparing a working-tree copy that never executes against a local pin verifies
-two values that do not matter, while the pin that actually runs goes unchecked.
-A SHA bumped only on the default branch stays invisible to a gate that reads the
-PR checkout.
-
-- **Bump order: default branch first, local pin second.** The gate compares
-  against the default branch, so reversing the order fails until the default
-  branch catches up.
-- The gate should **skip with a warning** when the default-branch ref is
-  unreachable (offline local runs) and **hard-fail under `CI`** — otherwise a
-  network hiccup turns the check into a decorative no-op.
-
-### Local config
-
-Create `.mergecraft/config.yaml` (see [`examples/config.yaml`](examples/config.yaml)):
-
-**Single model (legacy scalar):**
-
-```yaml
-model: anthropic/claude-sonnet
-push: restricted
-shell: restricted
-prApproveEnabled: false
-signedCommits: false
+```bash
+mergecraft diff-review                                   # uncommitted + branch changes vs origin/main
+mergecraft diff-review --diff changes.patch --dry-run    # inspect the prompt, no LLM call
+mergecraft diff-review --json findings.json              # machine-readable Finding[] for scoring
 ```
 
-**Ordered preference list** — try each entry in order; optional per-slug backups via
-`modelFallbacks`; runtime skips entries without credentials and advances on retryable
-provider failures:
+### Example 4 — multi-model with fallback
 
 ```yaml
+# .mergecraft/config.yaml
 models:
   - anthropic/claude-sonnet
   - openai/gpt-5.3-codex
@@ -268,111 +187,345 @@ modelFallbacks:
     - anthropic/claude-opus
 push: restricted
 shell: restricted
-prApproveEnabled: false
-signedCommits: false
-staticChecks:                 # mechanical gates the reviewer runs; optional
+staticChecks:
   - name: lint
     command: make lint
-# analyzers:                    # deterministic catalog tools (see REVIEW-CHECKS.md)
-#   enabled: true               # omit for auto-detect from changed paths
-#   inlineBudget: 8
-#   overrides:
-#     actionlint:
-#       enabled: true
 ```
 
-With no `staticChecks`, mergecraft discovers `lint` / `format-check` / `typecheck` / `ci-static` targets in your `Makefile` instead.
+Add `model: <slug>` to the workflow `with:` block to pick the **head** of
+the chain (default chain head is the first `models:` entry); the configured
+fallbacks are walked on credential miss or retryable failure. See
+[Chain semantics](#chain-semantics--model-37--w4) for the contract.
 
-**Analyzers** (actionlint, zizmor, ShellCheck, Hadolint in this release) run deterministically from YAML manifests when paths match — the reviewer calls `run_analyzers` early and places verified hits inline or in `### 🔧 Mechanical findings`. You can override enablement in `analyzers:`; editing the catalog remains possible but is not the headline workflow (D19).
+### Example 5 — SARIF upload to code scanning (opt-in)
 
-Learnings live in `.mergecraft/learnings.md` and are seeded/persisted across runs.
+Publish analyzer findings as GitHub code-scanning alerts — off by default,
+requires `security-events: write`:
 
-## What the review checks
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write   # required — without it GitHub answers 403
 
-[**REVIEW-CHECKS.md**](REVIEW-CHECKS.md) lists every check a mergecraft review applies, grouped — code lenses, mechanical gates, PR hygiene, how findings are graded and filtered, and what it deliberately never reports.
+jobs:
+  review:
+    steps:
+      - uses: alexhawat/mergeCraft@pre-0.0.1
+        with:
+          sarif_upload: enabled
+```
 
-## CLI
+Only findings admitted by the run's trust tier, `shell:` policy and
+`analyzers:` mode are uploaded, after secret redaction — agent narrative is
+never uploaded. Details: [docs/ANALYZERS.md](docs/ANALYZERS.md).
+
+Full config reference: [`examples/config.yaml`](examples/config.yaml).
+
+## 🔑 Authentication
+
+| Provider | Subscription (recommended) | API key |
+|----------|-----------------------------|---------|
+| Anthropic Claude | `mergecraft auth claude` → `CLAUDE_CODE_OAUTH_TOKEN` (Claude Pro/Max) | `ANTHROPIC_API_KEY` |
+| OpenAI Codex | `mergecraft auth codex` → `CODEX_AUTH_JSON` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` |
+| Google Gemini | `mergecraft auth gemini` → `GEMINI_API_KEY` (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` |
+| Nous Portal | — (API key) | `mergecraft auth nous` → `NOUS_API_KEY` (`nous/deepseek/deepseek-v4-flash`) |
+| Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → `TOKENHUB_API_KEY` (`tokenhub/hy3` + any TokenHub model) |
+| MiniMax | — (API key) | `mergecraft auth minimax` → `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` (`minimax/MiniMax-M3`; OpenAI-compatible, default `https://api.minimax.io/v1`) |
+| Cursor Cloud | `mergecraft auth cursor` → `CURSOR_API_KEY` | `CURSOR_API_KEY` |
+| Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](docs/TRACING.md) |
+
+Subscription auth runs the official `claude` / `codex` / `gemini` CLIs as *you*
+— the same credential your local coding agent uses. Only set env vars for
+providers you actually use.
+
+> **Codex on container runners:** Codex CLI's nested bubblewrap sandbox fails
+> inside namespaced containers. On an already-isolated ephemeral runner, pass
+> `codex_sandbox: danger-full-access`. mergeCraft never sets this itself —
+> its own `shell`/`push` controls remain the security boundary
+> ([issue #70](https://github.com/alexhawat/mergeCraft/issues/70)).
+
+### Custom OpenAI-compatible provider
+
+For any OpenAI-compatible endpoint (Nous Portal, Tencent TokenHub,
+MiniMax, OpenRouter, a self-hosted vLLM, etc.), mergeCraft exposes one
+mechanism that both harnesses consume. Issue
+[#71](https://github.com/alexhawat/mergeCraft/issues/71) closes on this
+surface — the **Codex half** is new in `v0.0.x`; the OpenCode half
+shipped earlier in PR
+[#79](https://github.com/alexhawat/mergeCraft/pull/79) and is
+regression-tested.
+
+#### Env-var convention
+
+| Form | Example | Provider id |
+|------|---------|-------------|
+| Singleton back-compat alias (PR #79 / D7) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `default` (or the active model's prefix when the model is `nous/...` or `tokenhub/...`) |
+| Indexed multi-provider | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1`, `_2`, `_3`, … | `provider_1`, `provider_2`, `provider_3`, … |
+
+Indexed env vars are operator-locked — both halves of each numeric pair
+must be set with non-empty values; partial pairs are silently dropped.
+Discovery enumerates every matching suffix, sorts by numeric `N`
+ascending, and preserves gaps (no renumbering). When any indexed pair is
+set, the singleton is ignored.
+
+#### Action inputs (`with:`)
+
+For the common single-provider case, two top-level `with:` inputs map
+onto the singleton env vars — no need to name them in `env:`:
+
+```yaml
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    model: default/your-model-id
+    provider_base_url: https://api.example.com/v1
+    provider_api_key_env: MY_PROVIDER_API_KEY   # the NAME of an env var, not the key value
+  env:
+    MY_PROVIDER_API_KEY: ${{ secrets.MY_PROVIDER_API_KEY }}  # wire the secret here
+```
+
+`provider_api_key_env` is the **env-var name** that holds the key;
+mergeCraft reads that env var's value and re-exports it as
+`MERGECRAFT_CUSTOM_PROVIDER_API_KEY`. The resolved key value is never
+inlined into the workflow file and never logged (convention 7). For
+multi-provider setups, fall back to the indexed env-var form below —
+`with:` cannot enumerate multiple providers.
+
+#### Worked example — Nous-hosted DeepSeek V4 Flash
+
+A raw pass-through slug reaches Nous's OpenAI-compatible endpoint via
+either harness:
+
+```yaml
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    model: nous/deepseek/deepseek-v4-flash  # raw pass-through slug
+  env:
+    NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}      # preset path — no MERGECRAFT_* needed
+```
+
+The model prefix `nous` resolves against `NOUS_API_KEY` (set above) and
+`https://inference-api.nousresearch.com/v1`. The harness then registers
+the provider, sets `enabled_providers = ["nous"]`, and serves the model.
+
+#### Multi-provider — Codex-side indexed pairs
+
+Two distinct OpenAI-compatible providers in one workflow (e.g. MiniMax
+and Nous alongside OpenAI):
+
+```yaml
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    model: provider_1/deepseek-v4-flash           # active provider_1
+  env:
+    MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1: https://inference-api.nousresearch.com/v1
+    MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1:  ${{ secrets.NOUS_API_KEY }}
+    MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_2: https://api.MiniMax.io/v1
+    MERGECRAFT_CUSTOM_PROVIDER_API_KEY_2:  ${{ secrets.MINIMAX_API_KEY }}
+```
+
+Codex writes the corresponding `config.toml`:
+
+```toml
+[model_providers.provider_1]
+name = "provider_1"
+base_url = "https://inference-api.nousresearch.com/v1"
+env_key = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1"
+wire_api = "responses"
+
+[model_providers.provider_2]
+name = "provider_2"
+base_url = "https://api.MiniMax.io/v1"
+env_key = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_2"
+wire_api = "responses"
+```
+
+The `env_key` field references the **env-var name**, not the resolved
+key value — convention 7. The harness reads the env var at exec time.
+
+#### Which harness handles which
+
+| Harness | Format written | Where it lives |
+|---------|----------------|----------------|
+| OpenCode | `provider.<id>.options.baseURL` / `.apiKey` (JSON) | `OPENCODE_CONFIG_CONTENT` (inline) and `OPENCODE_CONFIG` (file) |
+| Codex CLI 0.146 | `[model_providers.<id>]` with `base_url` / `env_key` / `wire_api = "responses"` (TOML) | `$CODEX_HOME/config.toml` |
+
+Both harnesses consume the same shared resolver
+(`src/mergecraft/agents/openai_compatible_gateways.py`), so the env-var
+contract is one — pass-through slugs (`<provider>/<model>`) route to
+the right harness via the existing chain logic. OpenAI-compatible
+models route to the OpenCode harness (no first-party Codex provider);
+"true" OpenAI models route to Codex.
+
+> PR [#79](https://github.com/alexhawat/mergeCraft/pull/79) shipped the
+> OpenCode side of this feature; the Codex side, the `with:` input
+> surface, and the env-var multi-provider extension all land together in
+> this release — see issue
+> [#71](https://github.com/alexhawat/mergeCraft/issues/71).
+
+### Chain semantics — `model:` (#37 / W4)
+
+The `with: model:` input is the **chain head**, not a chain kill-switch.
+The configured `models:` / `modelFallbacks:` tail is preserved and walked
+on credential miss or retryable failure. Issue
+[#37](https://github.com/alexhawat/mergeCraft/issues/37) closes on this.
+
+```yaml
+# .mergecraft/config.yaml — the configured chain
+models:
+  - anthropic/claude-sonnet
+  - openai/gpt-5.3-codex
+  - google/gemini-3.1-pro-preview
+modelFallbacks:
+  anthropic/claude-sonnet:
+    - anthropic/claude-opus
+```
+
+```yaml
+# .github/workflows/mergecraft.yml — a single ``uses:`` step walks the
+# chain. ``model:`` is the head; the configured tail follows.
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    model: anthropic/claude-sonnet        # ← chain head (your pick)
+    # model_pin: enabled                 # ← uncomment to collapse to one model
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+```
+
+Effective chain in the example above (with the operator-named head
+preserved as the first entry):
+
+```text
+[anthropic/claude-sonnet, anthropic/claude-opus,
+ openai/gpt-5.3-codex, google/gemini-3.1-pro-preview]
+```
+
+`MERGECRAFT_MODEL` (env var) follows the same rule: it joins as the head.
+
+#### Escape hatch — `model_pin: enabled`
+
+To restore the legacy "use exactly this model, suppress fallbacks"
+semantics, set `model_pin: enabled` on the `with:` block, or
+`modelPin: true` in `.mergecraft/config.yaml` (the action input wins):
+
+```yaml
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    model: anthropic/claude-sonnet
+    model_pin: enabled                 # ← chain collapses to [claude-sonnet]
+```
+
+#### Action parity with `models:`
+
+`models:` is the chain, `model:` is the head. `models:` alone (without
+`with: model:`) is supported and unchanged — the chain runs as configured.
+A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
+`if: HAS_OPENAI` → another) collapses to a single step.
+
+## 🧰 CLI
 
 | Command | Purpose |
 |---------|---------|
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` + example workflow |
-| `mergecraft auth claude` | Save a Claude Pro/Max subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) via `gh secret set` |
-| `mergecraft auth codex` | Save a ChatGPT subscription credential (`CODEX_AUTH_JSON`) via `gh secret set` |
-| `mergecraft auth gemini` | Save a Gemini API key (`GEMINI_API_KEY`) via `gh secret set` |
-| `mergecraft auth cursor` | Save a Cursor Cloud API key (`CURSOR_API_KEY`) via `gh secret set` |
-| `mergecraft models list` | List curated model slugs and whether local credentials are detected |
-| `mergecraft models set <slug> [<slug>…]` | Write an ordered `models:` preference list to `.mergecraft/config.yaml` |
-| `mergecraft models show` | Show effective model order (config + `MERGECRAFT_MODEL`) and which slug would win now |
+| `mergecraft auth <provider>` | Save a credential via `gh secret set` (`claude`, `codex`, `gemini`, `nous`, `tokenhub`, `cursor`, `logfire`) |
+| `mergecraft models list / set / show` | Curated slugs, ordered preference list, effective winner |
+| `mergecraft diff-review` | Offline local git/patch review (`--dry-run`, `--json`) |
 | `mergecraft watch --pr N` | Stream PR/issue timeline as JSONL |
-| `mergecraft diff-review` | Offline local git/patch review (no GitHub PR posting); optional `--json` for structured findings |
-| `mergecraft gha` | Action runtime entry (used by Docker Action) |
-| `mergecraft gha token [--post]` | Installation token mint / post write-back |
+| `mergecraft learnings active / staging / influence` | Audit memory entries and their provenance |
+| `mergecraft traces <run-id>` | Read back local tracing spans (re-redacted) |
+| `mergecraft config tracing` | Render resolved tracing state (token redacted) |
+| `mergecraft gha` | Action runtime entry (Docker action) |
 
-Bin: `mergecraft` (not the upstream `mergecraft` / `pf` names).
+## 🔒 Security model
 
-### Offline diff review
+- **BYOK by design** — credentials and repo content never leave GitHub
+  Actions / your machine and this repo's code.
+- **Comment triggers are authorized, not authenticated-by-content** — only
+  `OWNER`/`MEMBER`/`COLLABORATOR` associations can invoke; the body is never
+  consulted. Two opt-in knobs (`allow_pr_target_comments`,
+  `commentInvocationAllowlist`) each widen exactly one axis.
+- **Learnings are fail-closed** — entries land in `## Staging`; only
+  maintainer-associated authors promote to `## Active`, and active entries are
+  nonce-fenced before the model reads them.
+- **The approval check is structural** — `success` requires a completed trusted
+  run with no Critical/Major findings; `failure` on any blocker; `neutral` for
+  crashes, timeouts, and untrusted tiers. The agent's narrative approval is
+  advisory only.
+- **Analyzers under low trust run untrusted-only** — no secrets, no network, no
+  PR-authored command construction; exclusions are reported as named skips.
+- **Agent subprocess env is an explicit allowlist (W2)** — agent CLIs never
+  inherit the full process environment. Stripped by default: ``GIT_ASKPASS``,
+  ``GITHUB_TOKEN``/``GH_TOKEN``, ``ACTIONS_ID_TOKEN_*``, and every non-active
+  provider API key. Git authentication for agent operations is brokered
+  per-invocation via MCP git's ``http.extraHeader`` injection, not ambient
+  askpass. Retained askpass files (entrypoint bookkeeping only) live at
+  ``0o600`` inside a ``0o700`` credentials directory the agent cannot read.
+  Run temp dirs and registered leak-surface paths are removed on success and
+  failure; ``wipe_runner_leak_surface`` only unlinks mergeCraft-owned paths.
+- **Containment hardening (W3)** — ``safe.directory`` is scoped to
+  ``$GITHUB_WORKSPACE`` and registered cross-repo checkout roots (no wildcard).
+  Git hooks run only when ``shell: enabled``; ``restricted`` and ``disabled``
+  neutralize hooks via ``core.hooksPath``. ``cwd`` and MCP shell
+  ``working_directory`` must resolve inside allowed workspace roots. Agent CLI
+  subprocesses drop to the unprivileged ``mergecraft`` user via ``setpriv``
+  while the action entrypoint stays root for GitHub file commands.
+- **Network is outside the hard sandbox guarantee when ``unshare --net`` is
+  unavailable (W12.7)** — on CI hosts that support it, untrusted MCP shell
+  spawns with ``unshare --pid --net`` so the child has an empty network
+  namespace. Where that probe fails (macOS runners, restricted containers,
+  missing CAP_SYS_ADMIN), shell egress is not kernel-isolated; the W2
+  credential allowlist (no ambient ``GITHUB_TOKEN`` / provider keys / askpass)
+  remains the binding control. Trusted-tier shell does not force ``--net`` so
+  provider CLIs can still reach their APIs.
 
-```bash
-# Review uncommitted + branch changes vs origin/main (auto-detected base)
-uv run mergecraft diff-review
+Report vulnerabilities via [SECURITY.md](SECURITY.md). What a review does and
+never does: [REVIEW-CHECKS.md](REVIEW-CHECKS.md).
 
-# Explicit base / model / output file
-uv run mergecraft diff-review --base origin/main --model anthropic/claude-sonnet -o review.md
+## ⚙️ Workflow-placement gotchas (`pull_request_target`)
 
-# Review an existing patch without git
-uv run mergecraft diff-review --diff changes.patch --dry-run
+Under GitHub's Nov 2025 policy (effective 2025-12-08), `pull_request_target`
+workflows resolve from the **default branch** — so a PR that edits the workflow
+cannot review itself, and a copy on a non-default trunk is inert. If the review
+is **not** a required check, prefer plain `pull_request`. If you pin the action
+SHA in several places, gate them in CI — and read the workflow side from the
+default branch (`git show origin/main:.github/workflows/mergecraft.yml`).
+Full rationale in the collapsible sections of
+[docs](https://alexhawat.github.io/mergeCraft/).
 
-# Structured findings JSON (machine-readable Finding[] for benchmarks/scoring)
-uv run mergecraft diff-review --diff changes.patch --json findings.json
-```
+## 📚 Documentation
 
-`--dry-run` materializes the unified diff and prints the Review prompt without
-invoking an agent (no LLM keys required). With `--json`, `--dry-run` does not
-create the JSON file.
+| Doc | What it covers |
+|-----|----------------|
+| [REVIEW-CHECKS.md](REVIEW-CHECKS.md) | Every check a review applies — lenses, gates, grading, what it never reports |
+| [docs/ANALYZERS.md](docs/ANALYZERS.md) | Analyzer catalog, trust tiers, SARIF upload |
+| [docs/TRACING.md](docs/TRACING.md) | Opt-in span trees: JSONL, Logfire, OTLP |
+| [docs/REVIEW-DOCTRINE.md](docs/REVIEW-DOCTRINE.md) | Why mergeCraft makes the calls it makes |
+| [docs/evidence-packet.md](docs/evidence-packet.md) | Typed findings & merge evidence |
+| [docs/eval-bank.md](docs/eval-bank.md) | Eval replay and bench scoring |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contributor workflow (`make setup / lint / typecheck / test / ci`) |
 
-## Action inputs
+## 🗺️ Roadmap
 
-Same contract as upstream mergecraft: `prompt`, `prompt_file`, `timeout`, `model`,
-`cwd`, `push`, `shell`, `status_checks`, `output_schema`, `token` → output `result`.
-
-### Native event triggers
-
-The Action reads the native `GITHUB_EVENT_PATH` / `GITHUB_EVENT_NAME`, so
-workflows can trigger on `pull_request` (e.g. auto-review on open/sync),
-`issue_comment`, or `pull_request_review_comment` events and the agent gets PR
-context (number, branch, `is_pr`) automatically — no hand-built `~mergecraft` JSON
-payload required. With `status_checks: enabled`, PR runs always post the `mergecraft`
-and `mergecraft-approval` commit-status checks. The approval check has three
-outcomes: `success` when mergeCraft would approve, `failure` when it would not,
-and `neutral` when the review did not complete (agent crash, timeout, or no
-approval recorded). GitHub branch protection treats `neutral` as non-blocking by
-default — gate on `success`/`failure` explicitly in your enforce step if you
-require a completed review. An explicit `~mergecraft` payload event still takes
-precedence when provided.
+- [ ] PyPI release (`pip install merge-craft`)
+- [ ] GitHub Marketplace listing
+- [ ] Cursor local CLI harness (issue #13 Phase B)
+- [ ] Expanded analyzer catalog (opt-in long tail)
+- [ ] Published eval benchmarks
 
 ## Development
 
 ```bash
 make setup      # uv sync + pre-commit
-make lint       # ruff + loguru-only
+make lint       # ruff
 make typecheck  # mypy strict
 make test       # pytest
 make ci         # full gate
 ```
 
-Coding style and CI patterns are adapted from
-[sevn-bot/sevn@pre-0.0.1](https://github.com/sevn-bot/sevn/tree/pre-0.0.1)
-(Python 3.14, uv, loguru, Makefile-gated Ruff/mypy/pytest). This repo does
-**not** include a workflow that invokes `mergecraft/mergecraft`.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor workflow.
-
-## Security
-
-BYOK by design: your provider credentials and repo contents never leave
-GitHub Actions / your machine and this repo's own code. See
-[SECURITY.md](SECURITY.md) to report a vulnerability, and
-[REVIEW-CHECKS.md](REVIEW-CHECKS.md) for what a review does (and never does).
+Style and CI patterns adapted from
+[sevn-bot/sevn@pre-0.0.1](https://github.com/sevn-bot/sevn/tree/pre-0.0.1).
 
 ## License
 

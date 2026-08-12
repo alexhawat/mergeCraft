@@ -45,44 +45,59 @@ query($owner: String!, $repo: String!, $number: Int!) {
 """
 
 
+async def fetch_review_threads(
+    ctx: ToolContext, pull_number: int, *, include_resolved: bool = False
+) -> list[dict[str, Any]]:
+    """Return a PR's review threads, normalized for both the tool and callers in-process."""
+    data = await ctx.github.graphql(
+        _THREADS_QUERY,
+        {
+            "owner": ctx.repo.owner,
+            "repo": ctx.repo.name,
+            "number": pull_number,
+        },
+    )
+    nodes = ((data or {}).get("repository") or {}).get("pullRequest", {}).get(
+        "reviewThreads", {}
+    ).get("nodes") or []
+    threads: list[dict[str, Any]] = []
+    for node in nodes:
+        if node.get("isResolved") and not include_resolved:
+            continue
+        comments = [
+            {
+                "id": c.get("databaseId"),
+                "body": c.get("body"),
+                "author": (c.get("author") or {}).get("login"),
+                "path": c.get("path"),
+                "line": c.get("line") or c.get("originalLine"),
+                "createdAt": c.get("createdAt"),
+            }
+            for c in ((node.get("comments") or {}).get("nodes") or [])
+        ]
+        threads.append(
+            {
+                "threadId": node.get("id"),
+                "isResolved": node.get("isResolved"),
+                "isOutdated": node.get("isOutdated"),
+                "comments": comments,
+            }
+        )
+    return threads
+
+
+async def resolve_review_thread(ctx: ToolContext, thread_id: str) -> bool:
+    """Resolve one review thread; returns whether GitHub reports it resolved."""
+    data = await ctx.github.graphql(_RESOLVE_THREAD, {"threadId": thread_id})
+    thread = ((data or {}).get("resolveReviewThread") or {}).get("thread") or {}
+    return bool(thread.get("isResolved", True))
+
+
 def get_review_comments_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         pull_number = int(params["pull_number"])
         include_resolved = bool(params.get("include_resolved", False))
-        data = await ctx.github.graphql(
-            _THREADS_QUERY,
-            {
-                "owner": ctx.repo.owner,
-                "repo": ctx.repo.name,
-                "number": pull_number,
-            },
-        )
-        nodes = ((data or {}).get("repository") or {}).get("pullRequest", {}).get(
-            "reviewThreads", {}
-        ).get("nodes") or []
-        threads: list[dict[str, Any]] = []
-        for node in nodes:
-            if node.get("isResolved") and not include_resolved:
-                continue
-            comments = [
-                {
-                    "id": c.get("databaseId"),
-                    "body": c.get("body"),
-                    "author": (c.get("author") or {}).get("login"),
-                    "path": c.get("path"),
-                    "line": c.get("line") or c.get("originalLine"),
-                    "createdAt": c.get("createdAt"),
-                }
-                for c in ((node.get("comments") or {}).get("nodes") or [])
-            ]
-            threads.append(
-                {
-                    "threadId": node.get("id"),
-                    "isResolved": node.get("isResolved"),
-                    "isOutdated": node.get("isOutdated"),
-                    "comments": comments,
-                }
-            )
+        threads = await fetch_review_threads(ctx, pull_number, include_resolved=include_resolved)
         return {
             "pull_number": pull_number,
             "threads": threads,
@@ -146,13 +161,12 @@ def list_pull_request_reviews_tool(ctx: ToolContext):
 def resolve_review_thread_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         thread_id = str(params["thread_id"])
-        data = await ctx.github.graphql(_RESOLVE_THREAD, {"threadId": thread_id})
-        thread = ((data or {}).get("resolveReviewThread") or {}).get("thread") or {}
+        is_resolved = await resolve_review_thread(ctx, thread_id)
         ctx.tool_state.was_updated = True
         return {
             "success": True,
-            "threadId": thread.get("id", thread_id),
-            "isResolved": thread.get("isResolved", True),
+            "threadId": thread_id,
+            "isResolved": is_resolved,
         }
 
     return tool(

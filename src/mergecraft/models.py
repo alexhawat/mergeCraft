@@ -404,6 +404,80 @@ PROVIDERS: dict[str, ProviderConfig] = {
             },
         )
     ),
+    "nous": _provider(
+        ProviderConfig(
+            display_name="Nous Portal",
+            env_vars=("NOUS_API_KEY", "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"),
+            models={
+                "deepseek/deepseek-v4-flash": ModelDef(
+                    display_name="DeepSeek V4 Flash (Nous Portal)",
+                    description=(
+                        "DeepSeek V4 Flash via the Nous Portal OpenAI-compatible endpoint. "
+                        "Pass as nous/deepseek/deepseek-v4-flash for the portal model id."
+                    ),
+                    resolve="nous/deepseek/deepseek-v4-flash",
+                    preferred=True,
+                ),
+            },
+        )
+    ),
+    "tokenhub": _provider(
+        ProviderConfig(
+            display_name="Tencent TokenHub",
+            env_vars=("TOKENHUB_API_KEY",),
+            models={
+                "hy3": ModelDef(
+                    display_name="Hy3",
+                    description="Tencent Hunyuan Hy3 via TokenHub (OpenAI-compatible).",
+                    resolve="tokenhub/hy3",
+                    preferred=True,
+                ),
+                "deepseek-v4-flash": ModelDef(
+                    display_name="DeepSeek V4 Flash (TokenHub)",
+                    resolve="tokenhub/deepseek-v4-flash",
+                ),
+                "deepseek-v4-pro": ModelDef(
+                    display_name="DeepSeek V4 Pro (TokenHub)",
+                    resolve="tokenhub/deepseek-v4-pro",
+                ),
+                "glm-5.2": ModelDef(
+                    display_name="GLM 5.2 (TokenHub)",
+                    resolve="tokenhub/glm-5.2",
+                ),
+                "kimi-k3": ModelDef(
+                    display_name="Kimi K3 (TokenHub)",
+                    resolve="tokenhub/kimi-k3",
+                ),
+            },
+        )
+    ),
+    "minimax": _provider(
+        ProviderConfig(
+            display_name="MiniMax (OpenAI-compatible)",
+            # W6 (#34): MiniMax rides the D7 custom-provider helper. The
+            # singleton pair is the canonical operator surface; the
+            # ``env_vars`` tuple names the api-key env var so
+            # ``mergecraft models list`` and the credential gate can
+            # detect the operator's configuration. The indexed
+            # ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY_<N>`` form is also
+            # accepted by the helper and documented in the README.
+            env_vars=("MERGECRAFT_CUSTOM_PROVIDER_API_KEY",),
+            models={
+                "MiniMax-M3": ModelDef(
+                    display_name="MiniMax M3 (OpenAI-compatible)",
+                    description=(
+                        "MiniMax M3 via the MiniMax OpenAI-compatible endpoint "
+                        "(https://api.minimax.io/v1). Reachable through the existing "
+                        "custom-provider helper (D10 / option ii) — set "
+                        "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + "
+                        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY, or an indexed pair."
+                    ),
+                    resolve="minimax/MiniMax-M3",
+                    preferred=True,
+                ),
+            },
+        )
+    ),
     "openrouter": _provider(
         ProviderConfig(
             display_name="OpenRouter",

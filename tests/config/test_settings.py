@@ -22,13 +22,14 @@ def test_default_settings_match_upstream() -> None:
     assert settings.model is None
     assert settings.modes == []
     assert settings.setup_script is None
-    assert settings.post_checkout_script is None
+    assert not hasattr(settings, "post_checkout_script")
     assert settings.prepush_script is None
     assert settings.stop_script is None
     assert settings.push == "restricted"
     assert settings.shell == "restricted"
     assert settings.pr_approve_enabled is False
     assert settings.auto_merge_enabled is False
+    assert settings.blast_radius_override == {}
     assert settings.signed_commits is False
     assert settings.mode_instructions == {}
     assert settings.static_checks == []
@@ -146,6 +147,17 @@ def test_snake_and_camel_aliases(tmp_path: Path) -> None:
     assert settings.setup_script == "echo hi"
     assert settings.pr_approve_enabled is True
     assert settings.auto_merge_enabled is True
+
+
+def test_blast_radius_override_parses_per_category(tmp_path: Path) -> None:
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "blastRadiusOverride:\n  source_without_tests:\n    lane: high\n",
+        encoding="utf-8",
+    )
+    settings = load_repo_settings(cfg, root=tmp_path, load_learnings_files=False)
+    assert settings.blast_radius_override == {"source_without_tests": {"lane": "high"}}
+    assert settings.auto_merge_enabled is False
 
 
 def test_analyzers_block_parses_and_merges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

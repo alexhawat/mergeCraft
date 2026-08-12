@@ -252,13 +252,19 @@ def suppress_withdrawn_findings(
     learnings_text: str,
 ) -> list[Finding]:
     """Drop findings whose fingerprint appears under ``WITHDRAWN_FINDINGS_HEADING`` (D11)."""
-    withdrawn = _parse_withdrawn_fingerprints(learnings_text)
+    withdrawn = withdrawn_fingerprints(learnings_text)
     if not withdrawn:
         return findings
     return [finding for finding in findings if finding.fingerprint not in withdrawn]
 
 
-def _parse_withdrawn_fingerprints(learnings_text: str) -> frozenset[str]:
+def withdrawn_fingerprints(learnings_text: str) -> frozenset[str]:
+    """Return every finding fingerprint refuted under ``WITHDRAWN_FINDINGS_HEADING``.
+
+    Public because agent-finding verification (C6) skips a finding the author
+    already refuted, and it must read the same section, by the same rules, as
+    analyzer suppression does — a second parser would drift.
+    """
     if WITHDRAWN_FINDINGS_HEADING not in learnings_text:
         return frozenset()
     section = learnings_text.split(WITHDRAWN_FINDINGS_HEADING, 1)[1]
@@ -303,4 +309,5 @@ __all__ = [
     "parse_diff_scope",
     "scope_findings",
     "suppress_withdrawn_findings",
+    "withdrawn_fingerprints",
 ]

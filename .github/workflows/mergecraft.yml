@@ -1,65 +1,106 @@
-# mergeCraft PR review — hardened reference workflow.
+# mergeCraft PR review (BYOK; https://github.com/alexhawat/mergeCraft).
 #
-# Auto-reviews PRs on open / ready / new commits, posting inline comments plus a
-# summary, and (with `status_checks: enabled`) the `mergecraft` and
-# `mergecraft-approval` check-runs. The final step fails the job when
-# `mergecraft-approval` concluded "would not approve", so a branch ruleset can
-# require this job and block merges with outstanding review feedback.
+# === THIS IS THE mergeCraft REPO'S OWN CONSUMER WORKFLOW ===
+# Mirrored from https://raw.githubusercontent.com/sevn-bot/sevn/main/.github/workflows/mergecraft.yml
+# (the workflow that actually runs in sevn-bot/sevn). A reader should NOT
+# confuse the two:
+#   - sevn-bot/sevn/.github/workflows/mergecraft.yml — the live copy that runs
+#     in the sevn-bot/sevn repo.
+#   - THIS FILE — the mergeCraft repo's own self-review workflow, kept in
+#     sync with the sevn copy so the cascade shape stays consistent.
+# Edits land first here (and any future `MERGECRAFT_REF` Makefile rule in this
+# repo, when added), then mirror to the sevn copy.
 #
-# It ALWAYS fails open when the review cannot run — fork PR without secrets,
-# provider session limit, no approval posted. A required check that can go
-# permanently missing is a permanent merge block, which is worse than no gate.
+# Replaces the upstream pullfrog/pullfrog action AND CodeRabbit. Auto-reviews PRs
+# on open / ready / new commits, posting inline comments + a summary as
+# github-actions[bot], plus opt-in `mergecraft` / `mergecraft-approval` check-runs.
+# The enforce step below fails the job unless `mergecraft-approval` is a
+# confirmed "success" (outstanding feedback, no check posted at all, and an
+# unreachable check-runs API after retries all fail closed — see that step).
 #
-# ---------------------------------------------------------------------------
-# Trigger choice: pull_request_target vs pull_request
-# ---------------------------------------------------------------------------
-# This template uses `pull_request_target`. GitHub SKIPS `pull_request` workflows
-# when `refs/pull/N/merge` cannot be built — i.e. whenever the PR has a merge
-# conflict — which leaves a required check permanently missing and the PR
-# unmergeable even after the conflict is fixed. `pull_request_target` still fires
-# on `synchronize` in that state.
+# Provider priority: DeepSeek V4 Flash via the Nous Portal is primary; OpenAI
+# (Codex) is the one-shot fallback when Nous is absent or its review posts no
+# verdict. Claude is not used.
 #
-# The cost is that `pull_request_target` runs with repository secrets in scope, so
-# it MUST NOT execute PR-authored code. This workflow does not: the same-repo
-# guard below withholds secrets from fork PRs, and mergeCraft runs with
-# `push: disabled` / `shell: disabled` and reaches PR content through its own
-# `checkout_pr` + API layer.
+# Codex reviews previously posted mergecraft-approval=neutral because every tool
+# call failed with "MCP server 'mergecraft' was not ready for this step". Root
+# cause was in mergeCraft, not Codex: its MCP endpoint answered the
+# `notifications/initialized` NOTIFICATION with a JSON-RPC response object
+# carrying `"id": null`, which Codex's rmcp client cannot deserialize — the
+# transport worker quit fatally mid-handshake, so the server was never ready for
+# the rest of the session. Fixed upstream in alexhawat/mergeCraft#78 (the
+# endpoint now returns 202 with no body for notification-only POSTs).
 #
-# If your review job is NOT a required check, plain `pull_request` is simpler and
-# safer — use it.
+# DeepSeek V4 Flash runs through the Nous Portal OpenAI-compatible endpoint — the
+# same model sevn.bot's own runtime uses (DEFAULT_NOUS_INFERENCE_BASE_URL /
+# NOUS_PORTAL_DEEPSEEK_V4_FLASH_MODEL_ID in src/sevn/config/defaults.py). It
+# reaches mergeCraft's `opencode` harness, not the Codex one: mergeCraft routes
+# any model whose provider isn't anthropic/openai/google/cursor to opencode
+# (src/mergecraft/utils/agent_resolve.py resolve_runtime_agent()), and the Codex
+# harness cannot stand in because Codex 0.146 dropped `wire_api = "chat"`
+# ("no longer supported; set wire_api = \"responses\"") while Nous Portal serves
+# only chat-completions. Both blockers are fixed upstream in
+# alexhawat/mergeCraft#79 (closes #57 and #71): the image now installs
+# `opencode-ai`, and the harness registers a custom OpenAI-compatible provider
+# from MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + MERGECRAFT_CUSTOM_PROVIDER_API_KEY.
+# The provider id comes from the model prefix, so `nous/deepseek/deepseek-v4-flash`
+# registers provider `nous` serving `deepseek/deepseek-v4-flash`.
 #
-# ---------------------------------------------------------------------------
-# WHERE THIS FILE MUST LIVE
-# ---------------------------------------------------------------------------
-# Under GitHub's Nov 2025 policy (effective 2025-12-08), `pull_request_target`
-# definitions are resolved from the repository's DEFAULT BRANCH — not from the
-# PR's base branch. Consequences:
+# mergeCraft reads the native GITHUB_EVENT_PATH, so the workflow just passes a
+# prompt — no ~mergecraft JSON payload needed.
 #
-#   * The default-branch copy runs for every PR, whatever base it targets.
-#   * A PR that edits this file cannot review itself with its own changes; they
-#     take effect on the next PR after merge.
-#   * If your trunk is NOT the default branch (e.g. `main` is a stub and real
-#     work lands on a staging branch), keep this file ONLY on the default branch.
-#     A second copy on the trunk is inert, has to be hand-mirrored forever, and
-#     invites the two copies to drift.
+# Auth (same-repo only — forks skip):
+# - NOUS_API_KEY — Nous Portal API key — primary (DeepSeek V4 Flash)
+# - CODEX_AUTH_JSON — ChatGPT/Codex subscription (`mergecraft auth codex`) — fallback
+# - OPENAI_API_KEY — OpenAI API key (same Codex harness as CODEX_AUTH_JSON)
+# The job skips gracefully when none are set (e.g. fork PRs). Without
+# NOUS_API_KEY the primary is inert and Codex is the only reviewer; without
+# CODEX_AUTH_JSON / OPENAI_API_KEY, Nous is the only reviewer.
 #
-# If you also pin the action SHA somewhere else — a Makefile variable for local
-# review runs, a devcontainer, docs — gate the two against each other in CI, and
-# read the workflow side from the DEFAULT BRANCH (`git show origin/main:<path>`),
-# not from the working tree. Comparing a working-tree copy that never executes
-# against your Makefile checks two values that do not matter while the pin that
-# actually runs goes unverified. Bump order is then: default branch first, local
-# pin second — the gate compares against the default branch, so the reverse order
-# fails.
-# ---------------------------------------------------------------------------
-
-name: mergeCraft
+# Trigger: pull_request_target (not pull_request). GitHub skips pull_request
+# workflows when refs/pull/N/merge cannot be built (merge conflicts), which
+# leaves ruleset require-mergecraft-review with a permanently missing check.
+# pull_request_target always fires on synchronize even with merge conflicts.
+#
+# Workflow resolution (GitHub Nov 2025 policy, effective 2025-12-08): pull_request_target
+# definitions are read from the repository default branch (`main`), not the PR base.
+# Therefore a PR that edits this file cannot review itself with its own changes;
+# they take effect on the next PR after merge.
+#
+# The bootstrap `pull_request` trigger has been removed: running BOTH triggers made
+# each synchronize fire two runs that resolved to the SAME concurrency group (see
+# below) — with cancel-in-progress they cancelled each other, and a cancelled
+# `mergecraft review` is a non-success on the required check. Do not re-add it.
+#
+# Same-repo guard below keeps fork PRs from receiving secrets (prior pull_request
+# behavior). mergeCraft uses checkout_pr + API with push/shell disabled — no
+# PR-controlled scripts run in CI.
+#
+# Merge gate: ruleset `require-mergecraft-review` requires the **mergeCraft
+# review** job check only — not the raw `mergecraft` completion check (which goes
+# red on agent infra failures). The enforce step now fails closed on every
+# non-success `mergecraft-approval` outcome (no fail-open path remains).
+#
+# === ACTION PIN ===
+# The action is pinned to a FULL SHA on both review steps. This is MANDATORY,
+# not a preference: enforcement expects every `uses:` ref for third-party
+# actions to resolve to a full-length commit SHA. A branch ref like
+# `@pre-0.0.1` is rejected at action-resolution time before the review step
+# runs. When bumping the action in this repo, mirror the change to the
+# corresponding step in the sevn-side workflow so the two stay in sync. If a
+# future `MERGECRAFT_REF` parity rule is added to this repo's Makefile
+# (modelled on sevn's `make mergecraft-ref-check`), bump the action SHA and
+# `MERGECRAFT_REF` together there — a one-sided bump in this file is
+# invisible to that gate.
+# 2026-08-07: rolled back from 88c6f419 to 8d747f39 — Codex stdin hang regression. See PR #246.
+name: mergecraft
 
 on:
   pull_request_target:
-    # Add every base branch that should be auto-reviewed. Globs work:
-    # branches: [main, develop, "release-*"]
-    branches: [pre-0.0.1]
+    # `pre-*` glob keeps every release-staging branch (pre-0.0.1, pre-0.0.2, …)
+    # auto-reviewed without editing this list each cut (matches the old
+    # .coderabbit.yaml `pre-.*` coverage).
+    branches: [main, develop, test-pre, "pre-*"]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
@@ -70,35 +111,25 @@ on:
 
 permissions:
   contents: read
-  # Post the inline PR review + comments.
-  pull-requests: write
-  issues: write
-  # Post the mergecraft / mergecraft-approval check-runs.
-  checks: write
-  statuses: write
-  # Only needed if mergeCraft mints short-lived tokens via OIDC.
-  id-token: write
 
 concurrency:
-  # pull_request_target resolves github.ref to the default branch, so keying on
-  # github.ref would collapse every open PR into one group and they would cancel
-  # each other. Key on the PR number.
+  # pull_request_target resolves github.ref to the default branch; key on PR number
+  # so concurrent reviews do not cancel each other (GitHub Nov 2025 policy).
   group: mergecraft-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Hold the review until your own CI has finished on the PR head SHA, so the
-  # reviewer reads real lint/type/test outcomes instead of speculating about them.
+  # Hold the review until mergeCraft's own CI has finished on the PR head SHA, so the
+  # reviewer can read real lint/typecheck/test outcomes instead of guessing.
   # `needs:` cannot reference another workflow file, so this polls the check-runs
-  # API for the jobs named by CI_JOB_PREFIX.
+  # API for ci.yml's `Verify (…)` jobs.
   #
-  # Delete this job (and the `needs:` below) if you do not want reviews to wait.
-  #
-  # ALWAYS fails open (`exit 0` on every path): if the review job is required, a
-  # wait that could fail would turn a slow or absent CI run into a permanent merge
-  # block. Timing out just means the review proceeds without CI context.
+  # ALWAYS fail-open (`exit 0` on every path): mergecraft review is a required
+  # check, so a wait that could fail would convert a slow or absent CI run into a
+  # permanent merge block. Timing out just means the review proceeds without CI
+  # context, which is the pre-existing behavior.
   wait-for-ci:
-    name: mergeCraft wait for CI
+    name: mergecraft wait for CI
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -116,18 +147,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          # Name prefix of YOUR CI jobs. Set this to whatever your CI workflow
-          # calls its jobs, e.g. "build (" or "test (".
-          CI_JOB_PREFIX: "Verify ("
-          # Total budget. Set a little above your CI's usual wall time; keep it
-          # below this job's timeout-minutes.
+          # Total budget. ci.yml runs ~12-15 min; 20 leaves headroom without
+          # pinning a runner for the job's full 25.
           WAIT_BUDGET_SECONDS: "1200"
-          # If no matching job has appeared by then, assume CI is not running for
-          # this PR and stop waiting.
+          # If no Verify job has even appeared by then, assume CI is not running
+          # for this PR and stop waiting.
           APPEAR_BUDGET_SECONDS: "300"
         run: |
           set -uo pipefail
-          jq_verify="[.check_runs[]? | select(.name | startswith(\"${CI_JOB_PREFIX}\"))]"
+          # Selector for ci.yml's jobs — all of them are named "Verify (…)".
+          jq_verify='[.check_runs[]? | select(.name | startswith("Verify ("))]'
           started="$(date +%s)"
           state="timeout"
           failed_count=0
@@ -138,7 +167,7 @@ jobs:
             now="$(date +%s)"
             elapsed=$(( now - started ))
 
-            if runs="$(gh api --paginate "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" 2>/dev/null | jq -s '{check_runs: [.[].check_runs[]?]}')" ; then
+            if runs="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" 2>/dev/null)"; then
               total="$(printf '%s' "${runs}" | jq "${jq_verify} | length")"
               pending="$(printf '%s' "${runs}" | jq "${jq_verify} | map(select(.status != \"completed\")) | length")"
 
@@ -146,8 +175,8 @@ jobs:
                 state="complete"
                 failed_count="$(printf '%s' "${runs}" | jq "${jq_verify} | map(select(.conclusion != \"success\" and .conclusion != \"neutral\" and .conclusion != \"skipped\")) | length")"
                 failed_names="$(printf '%s' "${runs}" | jq -r "${jq_verify} | map(select(.conclusion != \"success\" and .conclusion != \"neutral\" and .conclusion != \"skipped\") | .name) | join(\", \")")"
-                # Any failing job carries the check_suite id the reviewer needs
-                # for get_check_suite_logs().
+                # Any failing Verify job carries the check_suite id the reviewer
+                # needs for get_check_suite_logs().
                 check_suite_id="$(printf '%s' "${runs}" | jq -r "${jq_verify} | map(select(.conclusion != \"success\" and .conclusion != \"neutral\" and .conclusion != \"skipped\") | .check_suite.id) | first // \"\"")"
                 break
               fi
@@ -175,14 +204,25 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
           echo "CI wait finished: state=${state} failed=${failed_count} suite=${check_suite_id:-none}"
           case "${state}" in
-            timeout) echo "::notice title=mergeCraft CI wait::CI did not finish within ${WAIT_BUDGET_SECONDS}s — reviewing without CI context." ;;
-            absent)  echo "::notice title=mergeCraft CI wait::No matching CI checks appeared for ${HEAD_SHA} — reviewing without CI context." ;;
+            timeout) echo "::notice title=mergecraft CI wait::CI did not finish within ${WAIT_BUDGET_SECONDS}s — reviewing without CI context." ;;
+            absent) echo "::notice title=mergecraft CI wait::No Verify checks appeared for ${HEAD_SHA} — reviewing without CI context." ;;
           esac
           exit 0
 
   review:
-    name: mergeCraft review
+    name: mergecraft review
     needs: wait-for-ci
+    # Write scopes stay on the review job only (zizmor excessive-permissions).
+    permissions:
+      contents: read
+      # Post inline PR review + comments.
+      pull-requests: write
+      issues: write
+      # Post mergecraft / mergecraft-approval check-runs.
+      checks: write
+      statuses: write
+      # mergeCraft can mint short-lived tokens via OIDC when configured.
+      id-token: write
     # `always()` keeps the required check reporting even if the (fail-open) wait
     # job errors out on a runner fault; a skipped wait job still skips the review,
     # because the draft/dispatch condition below is the same one it uses.
@@ -190,34 +230,38 @@ jobs:
       always() &&
       (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
-      # Same-repo guard: fork PRs must never receive repository secrets under
-      # pull_request_target.
       IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
-      HAS_AUTH: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Nous/DeepSeek primary; Codex fallback when Nous auth is absent or the
+      # Nous review does not post a mergecraft-approval verdict.
+      HAS_CODEX: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      HAS_NOUS: ${{ secrets.NOUS_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
-          # Persist the checkout token so mergeCraft's own git layer
+          # Persist the checkout token so the mergeCraft action's own git layer
           # (checkout_pr / git_fetch) can authenticate. Without it those git ops
-          # fail and the action marks its `mergecraft` self-status red even though
-          # the review completes via the API. Read-only escalation only: the
-          # action runs with push/shell disabled, so a persisted token cannot be
-          # used to push.
+          # fail and the action marks its `mergecraft` self-status check red even
+          # though the review completes via the GitHub API. Read-only escalation
+          # only: the action already sets ``push: disabled`` / ``shell: disabled``
+          # below, so a persisted token cannot be used to push.
           persist-credentials: true
 
       - name: Ensure PR base ref exists locally
         if: github.event_name == 'pull_request_target'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          base="${{ github.event.pull_request.base.ref }}"
+          base="${BASE_REF}"
           git fetch --no-tags origin "${base}:refs/remotes/origin/${base}"
-          # pull_request_target checks out the DEFAULT branch. When the PR targets
-          # that same branch, `git branch -f` fails because it is the active
-          # worktree — and origin/<base> is already fetched above.
+          # pull_request_target checks out the default branch (`main`). When the
+          # PR targets `main`, `git branch -f main …` fails because that branch
+          # is the active worktree — origin/main is already fetched above.
           if [ "$(git rev-parse --abbrev-ref HEAD)" != "${base}" ]; then
             git branch -f "${base}" "origin/${base}"
           fi
@@ -225,10 +269,10 @@ jobs:
       - name: Skip when provider auth is not configured
         if: env.HAS_AUTH != 'true'
         run: |
-          if [ "${{ env.IS_SAME_REPO }}" != "true" ]; then
-            echo "::notice title=mergeCraft skipped::Fork PR — secrets are withheld, review skipped."
+          if [ "${IS_SAME_REPO}" != "true" ]; then
+            echo "::notice title=mergecraft skipped::Fork PR — review skipped (same as before)."
           else
-            echo "::notice title=mergeCraft skipped::Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY to enable reviews."
+            echo "::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (mergecraft auth codex), OPENAI_API_KEY, or NOUS_API_KEY to enable mergeCraft reviews."
           fi
 
       # Composed in a step rather than inline in `with:` so the CI-context clause
@@ -252,18 +296,18 @@ jobs:
           if [ "${EVENT_NAME}" != "pull_request_target" ]; then
             text="${DISPATCH_PROMPT:-Review the current pull request.}"
           else
-            text="Review pull request #${PR_NUMBER}. Call checkout_pr first. For base-side file reads use origin/${BASE_REF}:path, not bare branch names. If prior mergeCraft threads are resolved and the latest commits address them, submit approved:true with a short summary. Focus on correctness, security, regressions, missing tests, and maintainability. Leave concise, actionable comments only for issues that should be addressed before merge."
-            # The action runs with `shell: disabled`, so the reviewer cannot run
+            # Codex presents mergeCraft MCP tools as mergecraft_. Naming the
+            # bare tool (checkout_pr) makes Codex request a GitHub *plugin* that is
+            # never installed in the Action image, then abort with
+            # mergecraft-approval=neutral (alexhawat/mergeCraft#40).
+            text="Review pull request #${PR_NUMBER}. First call the mergecraft MCP tool mergecraft_checkout_pr (the checkout_pr tool on the mergecraft MCP server — already configured). Do NOT install, request, or wait for any GitHub plugin. For base-side file reads use origin/${BASE_REF}:path, not bare branch names. If prior mergeCraft threads are resolved and the latest commits address them, submit approved:true with a short summary. Focus on correctness, security, regressions, missing tests, and maintainability. Leave concise, actionable comments only for issues that should be addressed before merge."
+            # The Action runs with `shell: disabled`, so the reviewer cannot run
             # lint/typecheck/tests itself. Hand it the CI outcome instead — and the
             # check_suite id, because no MCP tool can discover one.
             case "${CI_STATE}" in
               complete)
-                if [ "${CI_FAILED_COUNT}" -gt 0 ] 2>/dev/null; then
-                  if [ -n "${CI_CHECK_SUITE_ID}" ]; then
-                    text="${text} CI has finished on this head commit and ${CI_FAILED_COUNT} job(s) FAILED (${CI_FAILED_NAMES}). Call get_check_suite_logs with check_suite_id ${CI_CHECK_SUITE_ID} and ground your review in those failures — report the underlying defect, not the log line."
-                  else
-                    text="${text} CI has finished on this head commit and ${CI_FAILED_COUNT} job(s) FAILED (${CI_FAILED_NAMES}). get_check_suite_logs is unavailable (check_suite id unknown); still treat these mechanical failures as blocking and note the limitation."
-                  fi
+                if [ "${CI_FAILED_COUNT}" -gt 0 ] 2>/dev/null && [ -n "${CI_CHECK_SUITE_ID}" ]; then
+                  text="${text} CI has finished on this head commit and ${CI_FAILED_COUNT} job(s) FAILED (${CI_FAILED_NAMES}). Call mergecraft_get_check_suite_logs with check_suite_id ${CI_CHECK_SUITE_ID} and ground your review in those failures — report the underlying defect, not the log line."
                 else
                   text="${text} CI has finished green on this head commit, so lint, typecheck, and the full test suite already pass; do not speculate about mechanical failures those gates would have caught, and spend the review on logic, design, and missing coverage."
                 fi
@@ -279,67 +323,226 @@ jobs:
             echo "MERGECRAFT_PROMPT_EOF"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: mergeCraft PR review
-        if: env.HAS_AUTH == 'true'
-        id: mergecraft
-        continue-on-error: true
-        # Pin to a full-length commit SHA. Many orgs enforce Actions SHA pinning,
-        # which rejects a branch ref at action-resolution time — before the step
-        # runs. Keep this SHA equal to any other place you pin mergeCraft.
-        uses: alexhawat/mergeCraft@a7510af0ab4d7deb863c043e85f8e5365082f07d
-        with:
-          prompt: ${{ steps.prompt.outputs.text }}
-          # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
-          # first, the action never posts its `mergecraft` completion check and
-          # the only diagnostic is lost. 5 minutes of headroom lets it exit
-          # cleanly and report failure instead.
-          timeout: 25m
-          model: anthropic/claude-sonnet
-          push: disabled
-          shell: disabled
-          status_checks: enabled
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-
-      - name: mergeCraft review incomplete (non-fatal)
-        if: env.HAS_AUTH == 'true' && steps.mergecraft.outcome != 'success'
-        run: |
-          echo "::notice title=mergeCraft incomplete::Review step did not finish successfully (see its log). Approval enforcement skipped."
-
-      # Gate on the approval check-run rather than on the review step's exit code,
-      # so agent infrastructure failures do not read as "changes requested".
-      - name: Fail when mergeCraft would not approve
-        if: github.event_name == 'pull_request_target' && env.HAS_AUTH == 'true'
+      - name: Record mergecraft-approval baseline before the Nous review
+        id: approval_baseline
+        # The fallback below must judge THIS Nous attempt, not a verdict an
+        # earlier run left on the same head SHA (a re-run, or the enforce step's
+        # own retry loop). Capturing the newest check-run id first makes "did
+        # Nous post a verdict?" answerable by identity rather than by recency.
+        if: >-
+          env.HAS_NOUS == 'true' &&
+          env.HAS_CODEX == 'true' &&
+          github.event_name == 'pull_request_target'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          id=""
+          for attempt in $(seq 1 3); do
+            if id="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
+              --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
+              | sort_by(.completed_at // .started_at) | last | .id // ""')"; then
+              break
+            fi
+            echo "check-runs baseline query failed (attempt ${attempt}/3); retrying in 3s…" >&2
+            sleep 3
+          done
+          echo "baseline mergecraft-approval check-run: ${id:-none}"
+          echo "id=${id}" >> "${GITHUB_OUTPUT}"
+
+      - name: mergeCraft PR review (Nous DeepSeek V4 Flash)
+        if: env.HAS_NOUS == 'true'
+        id: mergecraft_nous
+        continue-on-error: true
+        # 2026-08-07: rolled back from 88c6f419 to 8d747f39 — Codex stdin hang regression. See PR #246.
+        uses: alexhawat/mergeCraft@8d747f39d3d36d889e0a85c2dcf691d1bdb91536 # pre-0.0.1
+        with:
+          prompt: ${{ steps.prompt.outputs.text }}
+          timeout: 25m
+          # Provider prefix `nous/` selects the opencode harness and names the
+          # provider registered from the MERGECRAFT_CUSTOM_PROVIDER_* env vars.
+          model: nous/deepseek/deepseek-v4-flash
+          push: disabled
+          shell: disabled
+          status_checks: enabled
+        env:
+          MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
+          MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
+
+      - name: Decide Codex fallback after Nous
+        id: fallback
+        # Deliberately NOT gated on steps.mergecraft_nous.outcome. The failure
+        # this fallback exists for — mergecraft-approval=neutral, the MCP
+        # handshake symptom — leaves the action exiting 0 while posting no
+        # usable verdict. Gating on a non-success outcome would skip the
+        # fallback in exactly that case and hand the enforce step a
+        # fail-closed no-verdict. Route on the verdict itself instead.
+        if: >-
+          env.HAS_NOUS == 'true' &&
+          env.HAS_CODEX == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASELINE_ID: ${{ steps.approval_baseline.outputs.id }}
+          NOUS_OUTCOME: ${{ steps.mergecraft_nous.outcome }}
+        run: |
+          set -euo pipefail
+          need="false"
+          if [ "${EVENT_NAME}" = "pull_request_target" ]; then
+            latest=""
+            for attempt in $(seq 1 3); do
+              if latest="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
+                --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
+                | sort_by(.completed_at // .started_at) | last
+                | "\(.id // "")|\(.conclusion // "")"')"; then
+                break
+              fi
+              echo "check-runs query failed (attempt ${attempt}/3); retrying in 3s…" >&2
+              sleep 3
+            done
+            id="${latest%%|*}"
+            conclusion="${latest#*|}"
+            # A verdict only counts when the check-run is NOT the one that was
+            # already there before this Nous attempt ran.
+            if [ -n "${id}" ] && [ "${id}" = "${BASELINE_ID}" ]; then
+              echo "mergecraft-approval ${id} predates this Nous attempt — treating as no verdict."
+              conclusion=""
+            fi
+            case "${conclusion}" in
+              failure|success)
+                echo "mergecraft-approval=${conclusion} — Nous review posted a verdict; not falling back to Codex."
+                ;;
+              *)
+                need="true"
+                echo "::notice title=mergecraft Codex fallback::Nous review posted no verdict (action outcome: ${NOUS_OUTCOME}); retrying with openai/gpt-codex."
+                ;;
+            esac
+          elif [ "${NOUS_OUTCOME}" != "success" ]; then
+            need="true"
+            echo "::notice title=mergecraft Codex fallback::Nous review failed; retrying with openai/gpt-codex."
+          fi
+          echo "need=${need}" >> "${GITHUB_OUTPUT}"
+
+      - name: mergeCraft PR review (Codex)
+        if: >-
+          env.HAS_CODEX == 'true' &&
+          (
+            env.HAS_NOUS != 'true' ||
+            steps.fallback.outputs.need == 'true'
+          )
+        id: mergecraft_codex
+        continue-on-error: true
+        # mergeCraft — full SHA pinned to the alexhawat/mergeCraft `pre-0.0.1` head.
+        # The pin is MANDATORY, not a preference: a branch ref like `@pre-0.0.1`
+        # is rejected at action-resolution time before the review step runs.
+        # Bump this SHA and the corresponding step in the sevn-side workflow
+        # together; if a future `MERGECRAFT_REF` parity rule is added to this
+        # repo's Makefile, bump that var in unison.
+        # 2026-08-07: rolled back from 88c6f419 to 8d747f39 — Codex stdin hang regression. See PR #246.
+        uses: alexhawat/mergeCraft@8d747f39d3d36d889e0a85c2dcf691d1bdb91536 # pre-0.0.1
+        with:
+          prompt: ${{ steps.prompt.outputs.text }}
+          # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
+          # first, the action never posts its `mergecraft` completion check and the
+          # only diagnostic is lost. Leaving 5 min of headroom lets it exit
+          # cleanly and report failure instead.
+          timeout: 25m
+          model: openai/gpt-codex
+          push: disabled
+          shell: disabled
+          status_checks: enabled
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: mergeCraft review incomplete (non-fatal)
+        if: >-
+          env.HAS_AUTH == 'true' &&
+          (
+            (
+              env.HAS_NOUS == 'true' &&
+              steps.mergecraft_nous.outcome != 'success' &&
+              steps.fallback.outputs.need != 'true'
+            ) ||
+            (
+              env.HAS_NOUS == 'true' &&
+              steps.fallback.outputs.need == 'true' &&
+              steps.mergecraft_codex.outcome != 'success'
+            ) ||
+            (
+              env.HAS_NOUS != 'true' &&
+              steps.mergecraft_codex.outcome != 'success'
+            )
+          )
+        run: |
+          echo "::notice title=mergecraft incomplete::Review step did not finish successfully (see its log — e.g. provider session limit or a runtime error). Approval enforcement below will fail closed on this."
+
+      - name: Fail when mergeCraft would not approve
+        # Gate directly on the `mergecraft-approval` check-run, decoupled from the
+        # review step's own exit code (which can be non-zero on a benign output
+        # hiccup even when the review + approval check posted fine). Runs on every
+        # PR where auth is present.
+        #
+        # FAIL CLOSED on every non-success outcome. PR #194 showed the review can
+        # fail outright (there, a bwrap sandbox namespace failure), posting no
+        # `mergecraft-approval` check at all — the prior version treated that
+        # ("no check posted") and a check-runs API
+        # outage identically as fail-open, so a PR could merge with zero review
+        # signal and nothing visibly red. The only passing outcome now is a
+        # definitive conclusion=success: a review that actually ran and approved.
+        # Retries below only smooth over a single transient API blip; once
+        # retries are exhausted without success, this step exits 1.
+        if: >-
+          github.event_name == 'pull_request_target' &&
+          env.HAS_AUTH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # The action posts a `mergecraft-approval` check-run on the PR head SHA:
+          # conclusion=success => no outstanding feedback; anything else (failure,
+          # no check posted at all, or the query itself failing after retries)
+          # means the review was never confirmed successful, so none of those
+          # paths may pass this gate.
           conclusion=""; queried=""
           for attempt in $(seq 1 5); do
             if conclusion="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
-                --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
-                      | sort_by(.completed_at // .started_at) | last | .conclusion // ""')"; then
+              --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
+              | sort_by(.completed_at // .started_at) | last | .conclusion // ""')"; then
               queried="yes"; break
             fi
             echo "check-runs query failed (attempt ${attempt}/5); retrying in 5s…" >&2
             sleep 5
           done
           if [ -z "${queried}" ]; then
-            echo "::warning title=mergeCraft approval unknown::Could not query check-runs for ${HEAD_SHA} after retries. Failing open."
-            exit 0
+            # FAIL CLOSED: an unreachable check-runs API after retries is not
+            # evidence a review ran and approved, so it cannot pass the gate.
+            # This deliberately accepts that a sustained GitHub API outage blocks
+            # merges on gated branches until the query succeeds (or someone
+            # re-runs the job) — "the review actually ran and approved" is the
+            # only condition that may pass, full stop.
+            echo "::error title=mergecraft approval unknown::Could not query check-runs for ${HEAD_SHA} after retries — cannot confirm mergecraft-approval. Failing closed."
+            exit 1
           fi
           case "${conclusion}" in
+            success)
+              echo "mergecraft approval: no outstanding review feedback."
+              ;;
             failure)
-              echo "::error title=mergeCraft requested changes::mergecraft-approval failed — address the review feedback on this PR."
+              echo "::error title=mergecraft requested changes::mergecraft-approval check failed — address the review feedback on this PR."
               exit 1
               ;;
-            success)
-              echo "mergeCraft approval: no outstanding review feedback."
-              ;;
             *)
-              echo "::notice title=mergeCraft approval not posted::No mergecraft-approval check on ${HEAD_SHA}. Not blocking."
+              # No mergecraft-approval check at all: the review failed to produce
+              # any verdict — e.g. PR #194, where a Codex sandbox crash left zero
+              # review signal. Fail closed rather than merge unreviewed.
+              echo "::error title=mergecraft review incomplete::No mergecraft-approval check on ${HEAD_SHA} — the review did not complete (see the review job's logs). Failing closed: this gate only passes once mergeCraft has actually reviewed and approved."
+              exit 1
               ;;
           esac

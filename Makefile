@@ -13,7 +13,8 @@ PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
-	examples example-workflows-check bench-review
+	examples example-workflows-check bench-review eval-gate \
+	test-integration test-integration-live coverage-gate npm-audit workflow-lint
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -63,6 +64,37 @@ test: ## Unit tests
 	$(PYTEST) tests -v --tb=short --strict-markers -m "not integration" $(PYTEST_XDIST) $(PYTEST_SPLIT) \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
 
+# W12.1 / #21 — integration suite joins PR CI. Existing ``@pytest.mark.integration``
+# tests self-skip without live secrets/binaries; the scheduled workflow injects
+# secrets so the same marker becomes the live-provider release precondition.
+# The ``live`` marker is registered for future narrowing by test-creator.
+test-integration: ## Integration tests (PR CI; self-skip without live secrets)
+	$(PYTEST) tests -v --tb=short --strict-markers -m "integration" $(PYTEST_XDIST) \
+		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+
+test-integration-live: ## Live-provider integration (scheduled / release precondition)
+	@if [ -z "$${ANTHROPIC_API_KEY}$${OPENAI_API_KEY}$${GEMINI_API_KEY}$${NOUS_API_KEY}" ] \
+	     && [ "$${MERGECRAFT_REQUIRE_LIVE:-}" != "1" ]; then \
+	  echo "skipped: no live credential — set provider secrets or MERGECRAFT_REQUIRE_LIVE=1"; \
+	  exit 0; \
+	fi
+	$(PYTEST) tests -v --tb=short --strict-markers -m "integration" $(PYTEST_XDIST) \
+		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+
+coverage-gate: ## Unit tests + coverage floors (global + critical paths)
+	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
+		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
+		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+	$(UV) run python scripts/check_coverage_floors.py coverage.json
+
+npm-audit: ## npm audit over docker/agent-clis lockfile (W12.3 / #27)
+	@command -v npm >/dev/null 2>&1 || { echo "npm not found on PATH" >&2; exit 2; }
+	cd docker/agent-clis && npm ci --ignore-scripts && npm audit --audit-level=high
+
+workflow-lint: ## actionlint + zizmor over .github/workflows (W12.3 / #27)
+	@chmod +x scripts/workflow_lint.sh
+	@./scripts/workflow_lint.sh
+
 security: ## Bandit (medium+) + dependency audit
 	$(BANDIT) -c pyproject.toml -ll -r src/mergecraft
 	@for attempt in 1 2 3; do \
@@ -106,13 +138,20 @@ ci-reset: ## Clear the ci-resume checkpoint (start the gate over)
 ci: ci-static security test ## Full gate
 	@echo "ci OK"
 
-bench-review: ## Run ReviewBench via Harbor (requires evals/reviewbench corpus)
-	@if [ ! -d evals/reviewbench ]; then \
-	  echo "ReviewBench corpus not present — frozen tasks live in sevn-bot/tripll#64"; \
+REVIEWBENCH_DIR ?= evals/reviewbench
+
+bench-review: ## Run ReviewBench via Harbor (set REVIEWBENCH_DIR to an external corpus)
+	@if [ ! -d "$(REVIEWBENCH_DIR)" ]; then \
+	  echo "ReviewBench corpus not present at '$(REVIEWBENCH_DIR)'."; \
+	  echo "The frozen corpus lives in sevn-bot/tripll (bench/review/) — point at it with:"; \
+	  echo "  make bench-review REVIEWBENCH_DIR=../tripll/bench/review"; \
 	  echo "See evals/README.md"; \
 	  exit 2; \
 	fi
-	$(UV) run --extra harbor harbor run -d evals/reviewbench --agent mergecraft.harbor.agent:MergecraftReviewAgent
+	$(UV) run --extra harbor harbor run -d "$(REVIEWBENCH_DIR)" --agent mergecraft.harbor.agent:MergecraftReviewAgent
+
+eval-gate: ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
+	$(UV) run mergecraft eval gate
 
 docker-build: ## Build action Docker image
 	docker build -t mergeCraft:local -f Dockerfile .

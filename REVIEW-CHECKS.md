@@ -26,6 +26,50 @@ A quick orientation before the lists:
 
 ---
 
+## Mechanical evidence — what counts (#41, W2.5)
+
+Mechanical evidence is what the merge-evidence packet calls **structural**
+— typed `Finding`s, deterministic gate outcomes, and CI check-suite
+results. It is the *only* category of evidence that can move the merge
+verdict; everything else is advisory. Concretely:
+
+- **Typed `Finding`s** — emitted by the analyzer catalog (`Finding` from
+  `mergecraft.analyzers.finding`, `extra="forbid"`). Each finding carries
+  `tool`, `rule_id`, `category`, `severity`, `confidence`, `path`,
+  `start_line`/`end_line`, `fingerprint`, `evidence: list[str]`,
+  `introduced_by_pr`, `source`, `cluster_id`. Findings are the
+  authoritative structural input to `decide_approval()`.
+- **`DeterministicCheck` rows** — one per declared `staticChecks` or
+  discovered Makefile target. Status is one of five: `passed`, `failed`,
+  `timed_out`, `unavailable`, `declared-but-cannot-run`. **Only
+  `failed`** is a negative finding; **only `passed`** is a positive
+  signal. The other three are honest skips, never silent passes.
+- **CI check-runs** — raw `check_suite` data from `mcp/check_runs.py`
+  plus the cluster/blame/flaky annotations from `src/mergecraft/ci/`.
+- **The agent's `approved` boolean** — **NOT** mechanical evidence. It
+  is recorded on the packet as `self_assessment` and is advisory only;
+  a self-assessment-only run cannot reach `auto_merge` (the #41 hard
+  rule, pinned by `tests/evidence/test_self_assessment.py`).
+
+What does *not* count as mechanical evidence, even when it appears in a
+check-run summary or in the agent's prose:
+
+- The agent's review narrative — `ApprovalRecord.would_approve`,
+  `result.output`, anything the model wrote.
+- PR title / body / comment text (even when fenced and unfenced by
+  trust tier) — see the `Trust tiers and contributor weight` section in
+  `docs/REVIEW-DOCTRINE.md`.
+- A "green" status with no underlying typed finding — `unavailable` /
+  `declared-but-cannot-run` / `timed_out` are explicit and visible; the
+  absence of evidence is itself evidence the verdict must surface.
+
+The merge-evidence packet's `decision` row is computed by
+`mergecraft.agents.gates.decide_approval(findings, *, run_succeeded,
+tier)` from these structural inputs. When the packet is given directly
+to `decide_approval(packet, …)`, the explicit `Decision` row on the
+packet wins over every other signal — including the recorded
+`self_assessment`.
+
 ## 1. Code correctness and risk
 
 The reviewer reads the whole diff itself, then picks the **lenses** the PR actually warrants and investigates each as a falsifiable question — optionally dispatching a `mergecraft-reviewer` subagent per lens so they run in parallel. Nothing here is a fixed pass; a docs-only diff gets none of it.
@@ -69,7 +113,7 @@ Your repo's own gate — unchanged from prior mergeCraft behavior:
 - **Discovered gates** — with nothing declared, mergecraft looks for `lint`, `format-check`, `typecheck`, and `ci-static` Makefile targets. Skipped when `make` is not installed.
 - **Nothing found** → skipped. mergecraft will **not** substitute a linter of its own (`except A, B:` is legal on Python 3.14 and a syntax error on 3.13 — version mismatch manufactures false positives).
 
-Each gate returns one of five statuses; only **`failed`** is a finding:
+Each gate returns one of six statuses; only **`failed`** is a finding:
 
 | Status | Meaning |
 |---|---|
@@ -78,8 +122,24 @@ Each gate returns one of five statuses; only **`failed`** is a finding:
 | `timed_out` | exceeded the per-gate timeout |
 | `unavailable` | executable not installed — judged nothing |
 | `declared-but-cannot-run` | gate is declared in config but this environment cannot execute it (for example `shell: disabled` on a pull-request event) — judged nothing, but the gate is visible instead of silently omitted |
+| `satisfied-by-ci` | the gate did not run here, but a check run your repo **declared** as proof of it passed on this commit — green, with the check run named |
 
 When `staticChecks` are configured but every gate is `unavailable` or `declared-but-cannot-run`, `run_static_checks` returns `ran: false` with an explicit reason and one row per configured gate so the **Mechanical gates** pre-merge row can report skipped instead of implying the repo has no gates.
+
+#### Reusing your CI as gate evidence (`ciEvidence`, #36)
+
+The Action image usually has no `make`, no repo venv, and none of your pinned toolchains — so a gate reports `unavailable` even when your own CI just proved it on the same commit. Declare the mapping and that finished CI stands in:
+
+```yaml
+ciEvidence:
+  gates:
+    lint: Verify (drift gates)   # <gate name>: <exact GitHub check-run name>
+```
+
+- **Declared only.** A check run merely *named* like a gate proves nothing — a pull request can add a workflow with any name it likes. With no `ciEvidence` block mergeCraft never reads your check runs at all.
+- **Only green substitutes.** A declared check run that passed rewrites that gate's row to `satisfied-by-ci`, replacing the `unavailable` row rather than adding a second one. A declared check run that **failed** leaves the honest row in place and is reported as a CI finding — the report never claims a green gate on red evidence.
+- **A gate that actually ran here always wins.** CI cannot overwrite a verdict mergeCraft produced against this diff.
+- **Best effort.** No head SHA, no declared mapping, or a GitHub API error → the gate report is exactly what it would have been without the feature.
 
 ### Catalog analyzers (`run_analyzers`)
 
@@ -96,7 +156,9 @@ Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif
 
 **Execution preference (D4):** `repo-native` → existing CI result → managed pinned binary → container → **skip with a named reason**. Skipped is skipped — never a finding, never a failed pre-merge row.
 
-**Trust tiers (D7):** `trusted` (same-repo PR, `workflow_dispatch`, offline `diff-review`) vs `untrusted` (fork PR / `pull_request_target` — no secrets, network deny-by-default, no PR-authored command construction; trusted-only manifests skip with reasons). `shell: disabled` withholds both gate and analyzer tools on PR events; offline `diff-review` runs analyzers at trusted tier without shell.
+**Trust tiers (D7):** `trusted` (same-repo PR, `workflow_dispatch`, offline `diff-review`) vs `untrusted` (fork PR / `pull_request_target` — no secrets, network deny-by-default, no PR-authored command construction; trusted-only manifests skip with reasons). Offline `diff-review` runs analyzers at trusted tier without shell.
+
+**`shell: disabled` (#35):** hardening the workflow no longer costs you the catalog. Repo-declared gates stay withheld — they run command strings the PR author controls — but mergeCraft's own **`managed` / `container` analyzers still run**, because their argv comes verbatim from a manifest mergeCraft ships and a repo-provided binary may not stand in for the pinned one. `repo-native` manifests are withheld, each with a named reason, since they exist to run the repo's own tool against the repo's own config. What a consumer sees on a `pull_request_target` + `shell: disabled` run: analyzer rows for the managed tools that matched the diff, `unavailable` rows naming why each other manifest was withheld, and the `staticChecks` gates reported as `declared-but-cannot-run`. The full runtime × shell × trust matrix is generated into [`docs/ANALYZERS.md`](docs/ANALYZERS.md).
 
 **Scoping (D6):** analyzers run on **head** by default; findings outside the diff hunks are dropped unless the path is an explicit exception (new file, dependency manifest, lockfile, workflow, migration). `introduced_by_pr: unknown` when no base run happened — never implied `true`.
 
@@ -136,6 +198,10 @@ To discover a `check_suite_id` for a commit, call `list_check_runs` with the PR 
 
 The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit; pushing a fix commit stays behind the existing `push` permission.
 
+**Recorded as evidence (#36).** Each clustered CI failure is also recorded as a `source: ci` finding on the run and carried into the [merge evidence packet](docs/REVIEW-DOCTRINE.md), keeping the blame verdict it was given: a failure attributed to this PR is `Major` / `introduced_by_pr: true`, while a flaky or pre-existing one is `Minor` / `introduced_by_pr: false`. Since every gate that consumes findings is monotone in blockers, that annotation is what makes "reported, not blamed" mechanical rather than a matter of wording — a flaky pipeline cannot block a clean pull request.
+
+**SARIF your CI already produced.** Naming artifacts under `ciEvidence.sarifArtifacts` lets the reviewer ingest their SARIF as CI findings through the same parser the analyzer catalog uses. Default is empty, in which case no artifact API call is made. Ingested results are reported at a non-blocking severity with `introduced_by_pr: unknown` — SARIF from another pipeline describes the tree, not this diff.
+
 Implementation: [`src/mergecraft/ci/intelligence.py`](src/mergecraft/ci/intelligence.py), [`src/mergecraft/ci/review.py`](src/mergecraft/ci/review.py), [`src/mergecraft/ci/cluster.py`](src/mergecraft/ci/cluster.py), [`src/mergecraft/mcp/ci_intelligence.py`](src/mergecraft/mcp/ci_intelligence.py), [`src/mergecraft/mcp/check_suite.py`](src/mergecraft/mcp/check_suite.py), [`src/mergecraft/mcp/check_runs.py`](src/mergecraft/mcp/check_runs.py).
 
 ## 3. Pull request hygiene
@@ -157,7 +223,7 @@ A flagged row here is fixed by editing the PR's title, body, or issue links — 
 Checks on the review process itself, so a review can't quietly skip half the PR:
 
 - The complete raw diff is read end-to-end, using the diff's table of contents as a coverage checklist.
-- Change-impact extraction (`impactPath`) is treated as an explicitly incomplete set of leads — never a substitute for reading the diff.
+- On a re-review, an incremental patch covering only the commits since mergeCraft's last review scopes what is new — the full diff still establishes coverage.
 - A first submission that missed regions gets a one-time nudge listing the unread ranges.
 - Understanding is never delegated: subagents supply lens investigations, but the primary reviewer synthesizes and re-verifies every finding.
 - **Trivially skippable** — a single-word doc typo, whitespace-only changes, comment-only changes, lockfile or generated-code regeneration, a mechanical rename, a low-risk dependency patch bump.
@@ -171,6 +237,15 @@ Checks on the review process itself, so a review can't quietly skip half the PR:
   - adding a new direct dependency
   - a "typo fix" in user-facing copy that changes meaning ("approved" → "denied")
   - a semantic one-liner buried in a formatting-only diff
+
+### Blast-radius merge lanes
+
+The packet's blast-radius classification is an evidence-weighted policy signal,
+not an instruction to merge. `low` means the change is eligible for the
+auto-merge lane after required checks pass, `medium` means assisted review, and
+`high` means automatic merge is forbidden. These semantics do not enable or
+disable auto-merge; `autoMergeEnabled` remains `false`, and Batch D (#46) owns
+the separate mapping from evidence outcomes to workflow actions.
 
 ## 5. Finding grading
 
@@ -189,6 +264,39 @@ The axes are also a sweep: a PR that writes persistent state with no Data Integr
 
 Values live in [`src/mergecraft/review_taxonomy.py`](src/mergecraft/review_taxonomy.py); a test asserts the prompt still names every one of them.
 
+### Verification before publication
+
+Every `Critical` / `Major` finding is a hypothesis until a second, read-only agent
+(`mergecraft-verifier`) has read the cited code. That applied to analyzer and CI findings from
+the start; it now applies to the findings the reviewing agent wrote itself, which is the source
+most likely to be wrong.
+
+Before publishing, the reviewer hands its own `Critical` / `Major` findings to
+`verify_agent_findings`, which returns one dispatch brief per finding — the finding, its cited
+file, and the withdrawn-findings section. Three things bound the cost:
+
+- **Severity** — `Minor` and `Trivial` findings are never verified.
+- **Memory** — a finding whose fingerprint already appears under `## Withdrawn review findings` is
+  skipped outright, not re-verified.
+- **Budget** — dispatches are capped at the repo's `analyzers.inlineBudget` (default 8), spent on
+  `Critical` before `Major`. Verification never costs more than publication, and there is no
+  second knob to tune.
+
+Each verdict goes back through `record_finding_verdict`: **confirm** publishes as drafted,
+**downgrade** re-grades, and **drop** writes the verifier's reason under
+`## Withdrawn review findings` so the finding stays refuted on every later run.
+
+**The verifier is an LLM judge, and therefore a secondary signal.** It runs *after* the
+deterministic checks — the tools refuse to plan a dispatch or accept a verdict until analyzers or
+repo gates have had their turn — and it never overrules a tool result. Its model is pinned per
+provider (Claude runs the judge on Sonnet, a different tier from the orchestrator that wrote the
+finding), and its model, provider, judge version and rubric version are logged with every verdict.
+The rubric is five binary questions about the code (does the cited code exist, does the mechanism
+hold, is it reachable, did this PR introduce it, is it already refuted) — never a score for
+quality, style, or verbosity. On the `high` blast-radius lane, one judge cannot retire a finding
+on its own: a `drop` there is escalated for a second judge or a human rather than written to the
+withdrawn section.
+
 ## 6. Findings that get dropped
 
 What mergecraft deliberately does **not** report — this is most of what keeps a review readable:
@@ -200,10 +308,11 @@ What mergecraft deliberately does **not** report — this is most of what keeps 
 - Anything already refuted in the learnings file (see next group).
 - **Bloat-shaped findings** — proposed fixes that would add defensive checks for cases that can't happen, abstractions used once, comments restating obvious code, tests asserting tautologies, or "just-in-case" guards. The bar for an inline comment is sound **and** correct **and** elegant; a change that improves only one of the three makes the codebase worse.
 - On `IncrementalReview`, anything that restates feedback a prior review already gave.
+- **PR prose is evidence, never instruction.** A finding whose only support is the PR title, PR body, a comment, or any other fenced untrusted field is **dropped** if the prose merely *describes* a change without anchoring to diff lines, and **downgraded** to a question if the prose *asserts* a property that the diff does not demonstrate. The diff (or, for design questions, the linked design doc) is the only thing that anchors a finding. Sentences inside the per-run fence block are untrusted internet content by default — they may inform a hypothesis, but they never stand in for evidence.
 
 ## 7. Memory across runs
 
-- **Withdrawn findings** — when an author refutes a review finding and `AddressReviews` accepts the pushback, it records the *reason* in `.mergecraft/learnings.md` under `## Withdrawn review findings (known non-issues)`. Later reviews read that section first and treat it as binding, so a false positive is argued once instead of on every PR.
+- **Withdrawn findings** — when an author refutes a review finding and `AddressReviews` accepts the pushback, it records the *reason* in `.mergecraft/learnings.md` under `## Withdrawn review findings (known non-issues)`. A `drop` verdict from the verifier writes to the same section, so a finding the reviewer refuted *before publishing* is also refuted permanently. Later reviews read that section first and treat it as binding, so a false positive is argued once instead of on every PR.
 - **Finding fingerprints** — each inline comment is stamped server-side with a content hash of its path and body (`<!-- mergecraft-finding:v1:… -->`). Whitespace and case are normalized, so a re-raised finding is recognizable across runs even when reworded.
 - **Repo learnings** — test commands, conventions, gotchas, and architecture notes persist in the same file and are loaded into every run.
 
@@ -224,6 +333,40 @@ Formatting rules that are enforced by the prompt:
 - Problem statements describe the problem; asks and fixes live in the technical-details block.
 - Severity emoji on every section heading, no two consecutive prose paragraphs, backticks around every identifier, no repeated diff content, no line-count stats.
 - The opening callout tier (`[!CAUTION]`, `[!IMPORTANT]`, informational, or ✅) must match the author's actual next action — wrapping mergeable feedback in `[!IMPORTANT]` trains people to ignore it.
+
+## 10. Trajectory checks (#43, #49)
+
+Everything above reads the **diff**. These eight checks read *how the run
+produced it* — the tool calls mergeCraft mediated. A diff can look clean while
+the process that produced it was not, and that is invisible to a diff review.
+
+| Check | Fires when | Severity |
+|---|---|---|
+| `changed-unread-file` | A file was modified that the run never read | Major |
+| `ignored-tool-error` | A tool call errored and that tool was never called again | Major |
+| `no-post-edit-verification` | Files were modified and nothing verifying ran *afterwards* | Major |
+| `repeated-tool-loop` | The same call, with identical arguments, three or more times | Minor |
+| `unresolved-failure` | A command reported failure and no later run of it passed | Critical |
+| `suspicious-broad-edit` | One run modified 25+ files | Minor |
+| `stale-assumption-after-failure` | A failed call was retried byte-identically with nothing read in between | Major |
+| `missing-completion-signal` | The run did work and never signalled completion | Minor |
+
+Each finding carries the severity above and a recommended action.
+
+**Silence on absent evidence.** mergeCraft only sees the calls it mediates, so a
+driver whose file reads never cross MCP produces a record with no reads — which
+is *unknown*, not *unread*. Every check that could fire on missing signal is
+gated on the record carrying that signal at all: `changed-unread-file` needs
+`read_coverage`, `missing-completion-signal` needs at least one recorded call. A
+check that fires on every run is noise, not a gate.
+
+**No second gate.** These are ordinary findings in the packet's finding list, so
+`decide_approval()` weighs them exactly like any other evidence — a `Critical`
+`unresolved-failure` blocks for the same reason a `Critical` analyzer finding
+does. There is no separate trajectory verdict.
+
+**They never crowd out code findings.** Inline slots go to code findings first;
+trajectory findings take only what is left and otherwise report in the body.
 
 ## 9. Address-reviews checks
 

@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
-# Craft-driven release: prepare release branch, wait for CI/CD artifacts, publish.
+# Craft prepare + publish gate. Image build / SBOM / scan / sign / promote live in
+# ci-cd.yml (build-once → digest → attest → retag). Dependabot (github-actions)
+# owns bumps of the pinned Craft / checkout SHAs below.
 name: Release
 
 on:
@@ -15,19 +17,65 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: write
-  packages: write
+# Least privilege: no top-level write; each job declares its own permissions.
+permissions: {}
 
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    uses: getsentry/craft/.github/workflows/release.yml@v2
-    with:
-      version: ${{ inputs.version }}
-      force: ${{ inputs.force && 'true' || 'false' }}
-      publish_repo: self
-    secrets: inherit
+  # W8.2 prepare — contents/issues only; named GITHUB_TOKEN via env (no blanket inherit).
+  prepare:
+    name: Prepare release branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      version: ${{ steps.craft.outputs.version }}
+      branch: ${{ steps.craft.outputs.branch }}
+      sha: ${{ steps.craft.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Prepare release (Craft)
+        id: craft
+        # Pin: getsentry/craft@v2 → 2.30.1; dependabot owns bumps.
+        uses: getsentry/craft@cd1e8294061fd970b40d98b77aaa109cb1e00e78 # v2
+        with:
+          version: ${{ inputs.version }}
+          force: ${{ inputs.force && 'true' || 'false' }}
+          publish_repo: self
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # W8.2 publish gate — read-only reminder that CI/CD signs digests before
+  # `craft publish` (PyPI + GHCR SHA→version retag via .craft.yml).
+  publish:
+    name: Publish gate
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Record prepared release
+        run: |
+          set -euo pipefail
+          cat <<EOF
+          Prepared version: ${{ needs.prepare.outputs.version }}
+          Release branch:   ${{ needs.prepare.outputs.branch }}
+          Release SHA:      ${{ needs.prepare.outputs.sha }}
+
+          Next: CI/CD on the release branch builds once, scans, cosign-signs,
+          and attests the image digests. After that is green, publish with:
+
+            craft publish ${{ needs.prepare.outputs.version }}
+
+          (or approve the publish issue Craft opened with publish_repo: self).
+          EOF

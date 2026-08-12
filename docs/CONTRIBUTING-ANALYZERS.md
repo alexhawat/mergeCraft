@@ -26,7 +26,7 @@ Add a new catalog tool with **one manifest YAML**, **one parser fixture**, and *
 | `parser` | Existing parser id (`sarif`, `ruff_json`, …) or `*_native` for inline adapters. |
 | `severity_map` | Maps **every** native severity the parser emits → review taxonomy. |
 | `default_enabled` | `false` for P1–P3 long tail; `auto` only with strong repo detection. |
-| `runtime` | `repo-native` → `managed` → `container` (D4). |
+| `runtime` | `repo-native` → `managed` → `container` (D4). **Also decides eligibility under `shell: disabled`** — see below. |
 | `trust` | `trusted` or `untrusted` (D7). |
 | `exclusive_group` | One winner per group unless repo overrides both (D13/C1). |
 | `declared_unavailable` | Honest skip reason when the tool cannot run yet (C6.4). |
@@ -50,6 +50,31 @@ severities (`Critical`, `Major`, `Minor`, `Trivial`). CI calls `severity_map_com
 - Managed binaries: pin `version`, `provenance[platform].url`, and `sha256`.
 - Untrusted fork PRs: no secret verification, no network unless allowlisted (D7/C2).
 - Container-only heavy tools: `runtime: container`, `default_enabled: false` (D18/C4).
+
+## Eligibility under `shell: disabled` (#35)
+
+Hardened consumers run `pull_request_target` with `shell: disabled`, meaning
+mergeCraft must execute nothing the PR could have written. Your manifest runs on
+that path **only if you declare `runtime: managed` or `runtime: container`**.
+There is no separate opt-in field: `runtime` is the declaration.
+
+What that commits you to:
+
+- **The argv in `command` is the whole command.** It is used verbatim. `{files}`
+  is the only PR-influenced token and it is constrained to paths inside the repo
+  root; `{trufflehog_config}` and `@catalog:` resolve to files mergeCraft ships.
+  If your tool needs a path or flag read out of repo config, it is `repo-native`.
+- **No repo-provided binary.** On this path `resolve_analyzer()` will not fall
+  back to `<repo>/.venv/bin/<tool>` or `<repo>/node_modules/.bin/<tool>`; only
+  the binary pinned by `version` + `provenance` runs. Pin them properly.
+- **`repo-native` is withheld, with a named reason** — not an error, and not
+  silence. That is correct for anything whose contract is "run the repo's tool
+  against the repo's config", which includes every type checker and linter that
+  reads a repo config file.
+
+`agentsec` is `repo-native` and is withheld here even though it runs in-process.
+Eligibility is read off the declared runtime and nothing else, so a manifest is
+never quietly more privileged than it declares.
 
 ## Exception list (bespoke Python allowed)
 

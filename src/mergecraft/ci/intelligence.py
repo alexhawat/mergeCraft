@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 import re
+import zipfile
+from io import BytesIO
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
     from mergecraft.ci.review import CiClusterReport, CiReviewStats
     from mergecraft.mcp.context import ToolContext
 
 _COMMAND_HINT = re.compile(r"(make\s+\S+|uv run\s+\S+|pytest[^\n]*)")
 _GITHUB_PROVIDER = GitHubActionsProvider()
+
+# A consumer's SARIF artifact is a zip; only these members are parsed.
+_SARIF_SUFFIXES = (".sarif", ".sarif.json")
 
 
 def provider_jobs_to_raw_failures(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -133,6 +142,69 @@ def intelligence_from_failures(
     return payload
 
 
+def _sarif_documents(archive: bytes) -> list[str]:
+    """Return every SARIF document inside an artifact zip."""
+    try:
+        with zipfile.ZipFile(BytesIO(archive)) as zf:
+            return [
+                zf.read(name).decode("utf-8", errors="replace")
+                for name in zf.namelist()
+                if name.lower().endswith(_SARIF_SUFFIXES)
+            ]
+    except (zipfile.BadZipFile, OSError, KeyError) as err:
+        logger.warning("ci evidence: unreadable SARIF artifact archive — {}", err)
+        return []
+
+
+async def collect_ci_sarif_findings(
+    ctx: ToolContext,
+    *,
+    check_suite_id: int,
+) -> list[Finding]:
+    """Ingest SARIF the consumer's CI already produced, for declared artifacts only.
+
+    Opt-in by construction: with no ``ciEvidence.sarifArtifacts`` declared this
+    makes no API call at all. Every failure is logged and swallowed — SARIF is a
+    supplementary evidence source and must never take a review down with it.
+    """
+    wanted = {name.strip() for name in ctx.ci_sarif_artifacts if name.strip()}
+    if not wanted:
+        return []
+
+    from mergecraft.ci.evidence import sarif_findings
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    repo_root = Path(primary_repo_state(ctx.tool_state).dir)
+    findings: list[Finding] = []
+    try:
+        payload = await ctx.github.get(
+            f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs",
+            params={"check_suite_id": check_suite_id, "per_page": 100},
+        )
+        runs = payload.get("workflow_runs") or [] if isinstance(payload, dict) else []
+        for run in runs:
+            run_id = run.get("id")
+            if not isinstance(run_id, int):
+                continue
+            artifacts = await ctx.github.list_workflow_run_artifacts(
+                ctx.repo.owner, ctx.repo.name, run_id
+            )
+            for artifact in artifacts:
+                name = str(artifact.get("name") or "")
+                artifact_id = artifact.get("id")
+                if name not in wanted or not isinstance(artifact_id, int):
+                    continue
+                archive = await ctx.github.download_artifact_zip(
+                    ctx.repo.owner, ctx.repo.name, artifact_id
+                )
+                for document in _sarif_documents(archive):
+                    findings.extend(sarif_findings(document, artifact=name, repo_root=repo_root))
+    except Exception as err:
+        logger.warning("ci evidence: SARIF artifact ingest failed — {}", err)
+        return findings
+    return findings
+
+
 async def run_ci_intelligence(
     ctx: ToolContext,
     *,
@@ -143,8 +215,21 @@ async def run_ci_intelligence(
     base_branch_status: str | None = None,
     fix_suggestions: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Fetch check-suite logs, analyze failures, and return review-ready CI intelligence."""
+    """Fetch check-suite logs, analyze failures, and return review-ready CI intelligence.
+
+    Also *records* what it derived (#36). Before this, the clustered findings
+    existed only inside the rendered markdown the agent pasted into its review —
+    nothing structural kept them, so the merge evidence packet could not see that
+    CI had failed at all. They are recorded carrying their blame annotations, so a
+    flaky failure stays ``Minor`` / ``introduced_by_pr="false"`` and cannot block
+    (D11).
+    """
+    from mergecraft.ci.evidence import record_ci_findings
     from mergecraft.ci.review import analyze_ci_failures
+
+    sarif = await collect_ci_sarif_findings(ctx, check_suite_id=check_suite_id)
+    if sarif:
+        record_ci_findings(ctx.tool_state, sarif)
 
     suite = await _GITHUB_PROVIDER.fetch_check_suite_logs(ctx, check_suite_id=check_suite_id)
     jobs = suite.get("jobs") or []
@@ -158,6 +243,7 @@ async def run_ci_intelligence(
             "section": "",
             "preMergeSummary": "",
             "comments": [],
+            "sarifFindingCount": len(sarif),
             "stats": {
                 "failureCount": 0,
                 "clusterCount": 0,
@@ -186,13 +272,17 @@ async def run_ci_intelligence(
         raw_failures=raw_failures,
         fix_suggestions=fix_suggestions,
     )
+    recorded = record_ci_findings(ctx.tool_state, [report.finding for report in reports])
     payload["available"] = True
     payload["checkSuiteId"] = check_suite_id
+    payload["recordedFindingCount"] = len(recorded) + len(sarif)
+    payload["sarifFindingCount"] = len(sarif)
     return payload
 
 
 __all__ = [
     "build_ci_intelligence_payload",
+    "collect_ci_sarif_findings",
     "intelligence_from_failures",
     "provider_jobs_to_raw_failures",
     "run_ci_intelligence",

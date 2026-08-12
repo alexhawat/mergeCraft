@@ -139,6 +139,116 @@ def filter_env(environ: dict[str, str] | None = None) -> dict[str, str]:
 EnvMode = str | dict[str, str]  # "restricted" | "inherit" | custom mapping
 
 
+# Names that must never appear in an agent subprocess environment (D2 / W2.1).
+ALWAYS_STRIP_FROM_AGENT_ENV: frozenset[str] = frozenset(
+    {
+        "GIT_ASKPASS",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    }
+)
+
+# Provider credential env vars — only the active agent's key is re-injected.
+PROVIDER_KEY_ENV_VARS: frozenset[str] = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "CURSOR_API_KEY",
+        "NOUS_API_KEY",
+        "TOKENHUB_API_KEY",
+        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CODEX_AUTH_JSON",
+    }
+)
+
+ACTIVE_PROVIDER_KEY_BY_AGENT: dict[str, str | None] = {
+    "claude": "ANTHROPIC_API_KEY",
+    "codex": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "opencode": None,
+}
+
+# Cloud BYOK env vars for Claude Code Bedrock / Vertex routing. Re-injected only
+# when the corresponding CLAUDE_CODE_USE_* flag (or model slug) selects that path.
+_BEDROCK_AGENT_ENV_VARS: tuple[str, ...] = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "BEDROCK_MODEL_ID",
+)
+_VERTEX_AGENT_ENV_VARS: tuple[str, ...] = (
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "VERTEX_SERVICE_ACCOUNT_JSON",
+    "GOOGLE_CLOUD_PROJECT",
+    "CLOUD_ML_PROJECT_ID",
+    "VERTEX_LOCATION",
+    "VERTEX_MODEL_ID",
+)
+
+
+def build_agent_env(agent_id: str, extras: dict[str, str] | None = None) -> dict[str, str]:
+    """Build an explicit allowlist env for agent CLI subprocesses (D2 / W2.1).
+
+    Starts from :func:`filter_env` (default-deny), strips credential-shaped
+    names, then re-injects only the active provider key for ``agent_id``.
+    """
+    env = filter_env()
+    for key in ALWAYS_STRIP_FROM_AGENT_ENV:
+        env.pop(key, None)
+    for key in PROVIDER_KEY_ENV_VARS:
+        env.pop(key, None)
+    for key in (*_BEDROCK_AGENT_ENV_VARS, *_VERTEX_AGENT_ENV_VARS):
+        env.pop(key, None)
+    active_key = ACTIVE_PROVIDER_KEY_BY_AGENT.get(agent_id)
+    if active_key:
+        raw = os.environ.get(active_key, "").strip()
+        if raw:
+            env[active_key] = raw
+        if agent_id == "gemini":
+            alt = os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY", "").strip()
+            if alt and not env.get("GEMINI_API_KEY"):
+                env["GEMINI_API_KEY"] = alt
+    # Claude accepts either an API key or a Claude Code OAuth token (README
+    # ``mergecraft auth claude`` path). Both are stripped above; restore OAuth
+    # when present so OAuth-only operators are not left with an empty child env.
+    if agent_id == "claude":
+        oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
+        if oauth:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
+    # Bedrock / Vertex BYOK for Claude *or* OpenCode: reinject when the USE
+    # flags are set (callers set them from model id / BEDROCK_MODEL_ID match).
+    use_bedrock = bool(
+        (extras or {}).get("CLAUDE_CODE_USE_BEDROCK")
+        or os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").strip()
+    )
+    use_vertex = bool(
+        (extras or {}).get("CLAUDE_CODE_USE_VERTEX")
+        or os.environ.get("CLAUDE_CODE_USE_VERTEX", "").strip()
+    )
+    if use_bedrock:
+        for key in _BEDROCK_AGENT_ENV_VARS:
+            raw = os.environ.get(key, "").strip()
+            if raw:
+                env[key] = raw
+    if use_vertex:
+        for key in _VERTEX_AGENT_ENV_VARS:
+            raw = os.environ.get(key, "").strip()
+            if raw:
+                env[key] = raw
+    if extras:
+        env.update(extras)
+    return env
+
+
 def resolve_env(mode: EnvMode | None = None) -> dict[str, str]:
     """Resolve env mode to an actual env mapping.
 

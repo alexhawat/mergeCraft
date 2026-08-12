@@ -15,6 +15,7 @@ from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.shared import AgentRunContext
 from mergecraft.analyzers.finding import (
     STRUCTURED_OUTPUT_REQUIRED_MSG,
+    Finding,
     findings_output_schema,
     parse_findings_payload,
     write_findings_json,
@@ -23,10 +24,11 @@ from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import RepoInfo
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.server import start_mcp_http_server
-from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.utils.agent_resolve import resolve_model, resolve_runtime_agent
+from mergecraft.utils.fence import Fence, render_untrusted
 from mergecraft.utils.github import GitHubClient
 from mergecraft.utils.instructions import resolve_instructions
 from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff, summarize_diff
@@ -41,6 +43,9 @@ class OfflineReviewResult:
     diff_path: str | None = None
     empty_diff: bool = False
     structured_output: str | None = None
+    # On-disk path of the run's merge evidence packet (#47 / #96), or None
+    # when no packet was produced (dry run, empty diff, emission failure).
+    evidence_packet_path: str | None = None
 
 
 def build_offline_review_prompt(
@@ -54,7 +59,9 @@ def build_offline_review_prompt(
     summary = summarize_diff(diff_path.read_text(encoding="utf-8"))
     base_line = f"Base ref: `{base_ref}`\n" if base_ref else "Base ref: (provided diff file)\n"
     extra_block = (
-        f"\n## Additional instructions\n\n{extra.strip()}\n" if extra and extra.strip() else ""
+        "\n## Additional instructions\n\n" + _render_offline_extra_block(extra) + "\n"
+        if extra and extra.strip()
+        else ""
     )
     if json_mode:
         step_four = (
@@ -92,6 +99,25 @@ def build_offline_review_prompt(
     )
 
 
+def _render_offline_extra_block(extra: str) -> str:
+    """Wrap the offline ``extra`` block in the per-run fence.
+
+    The block is operator-supplied via the CLI ``--prompt-extra`` flag, but
+    a fork PR can route a malicious comment string into it. Treat it as
+    untrusted (D8) and fence it; the W4.4 trust tier derivation is the
+    upstream caller's responsibility (CLI/Action sets ``author_association``
+    to ``NONE`` here so the fence is applied unconditionally).
+    """
+    fence = Fence()
+    return render_untrusted(
+        extra.strip(),
+        author="operator",
+        tier="untrusted",
+        label="offline_extra",
+        nonce=fence.nonce,
+    )
+
+
 def _finalize_structured_findings(
     result: OfflineReviewResult,
     json_path: Path,
@@ -106,6 +132,7 @@ def _finalize_structured_findings(
             success=False,
             error=STRUCTURED_OUTPUT_REQUIRED_MSG,
             diff_path=result.diff_path,
+            evidence_packet_path=result.evidence_packet_path,
         )
 
     try:
@@ -115,6 +142,7 @@ def _finalize_structured_findings(
             success=False,
             error=str(exc),
             diff_path=result.diff_path,
+            evidence_packet_path=result.evidence_packet_path,
         )
 
     try:
@@ -124,9 +152,113 @@ def _finalize_structured_findings(
             success=False,
             error=f"failed to write findings JSON: {exc}",
             diff_path=result.diff_path,
+            evidence_packet_path=result.evidence_packet_path,
         )
 
     return result
+
+
+def _offline_change_id(cwd: Path, materialization: DiffMaterialization) -> str:
+    """Return the ``change_id`` an offline review attests to.
+
+    There is no pull request, so the packet addresses the local working tree
+    and the base it was diffed against — enough for a human to reconstruct
+    what was reviewed.
+    """
+    base = materialization.base_ref or "patch"
+    return f"local/{cwd.name}@{base}"
+
+
+def _emit_offline_packet(
+    tool_context: ToolContext,
+    *,
+    cwd: Path,
+    materialization: DiffMaterialization,
+    run_succeeded: bool,
+    structured_output: str | None,
+    output_path: Path | None,
+) -> str | None:
+    """Emit the evidence packet for an offline review (#96).
+
+    The offline path holds the agent's findings in typed form (its
+    ``set_output`` payload), so they are merged into the packet on top of the
+    analyzer findings. A malformed payload is skipped rather than fatal — the
+    caller reports that error separately, and a packet with analyzer evidence
+    only still beats no packet.
+    """
+    from mergecraft.evidence.run_packet import emit_run_packet
+
+    extra: list[Finding] = []
+    if structured_output:
+        try:
+            # ``parse_findings_payload`` validates and then dumps back to dicts;
+            # the packet dedupes on ``Finding.fingerprint``, so re-type them.
+            extra = [
+                Finding.model_validate(row) for row in parse_findings_payload(structured_output)
+            ]
+        except ValueError as exc:
+            logger.debug("offline evidence packet: unparsable structured output — {}", exc)
+
+    written = emit_run_packet(
+        tool_context,
+        run_succeeded=run_succeeded,
+        change_id=_offline_change_id(cwd, materialization),
+        extra_findings=extra,
+        output_path=output_path,
+    )
+    return str(written) if written else None
+
+
+def _apply_tracing_cli_overrides(
+    tracing_cli: list[str] | None,
+) -> dict[str, str | None]:
+    """Translate ``diff-review`` tracing flags into ``MERGECRAFT_*`` env overrides.
+
+    The agent stream tracers resolve their sink from ``os.environ`` via
+    :func:`mergecraft.tracing.resolve.resolve_active_tracing`, so forwarding the
+    CLI flags as env overrides makes them win over any ``.env`` value already
+    set (CLI > env precedence). A flag that was not supplied is left untouched,
+    preserving the operator's ``.env`` setting. Returns the previous values so
+    the caller can restore them after the run.
+
+    Args:
+        tracing_cli (list[str] | None): CLI-style tokens from the ``diff-review``
+            command (``--tracing``, ``--no-tracing``, ``--tracing-to X``, …).
+
+    Returns:
+        dict[str, str | None]: The prior ``os.environ`` values for the keys we
+        touched (``None`` when the key was absent), for restoration.
+    """
+    if not tracing_cli:
+        return {}
+
+    overrides: dict[str, str] = {}
+    iterator = iter(tracing_cli)
+    for token in iterator:
+        if token in {"--tracing", "--no-tracing"}:
+            overrides["MERGECRAFT_TRACING"] = "true" if token == "--tracing" else "false"
+        elif token == "--tracing-to":
+            overrides["MERGECRAFT_TRACING_TO"] = next(iterator, "")
+        elif token == "--trace-dir":
+            overrides["MERGECRAFT_TRACE_DIR"] = str(next(iterator, ""))
+        elif token == "--logfire-token":
+            overrides["MERGECRAFT_LOGFIRE_TOKEN"] = next(iterator, "")
+        elif token == "--otel-endpoint":
+            overrides["MERGECRAFT_OTEL_ENDPOINT"] = next(iterator, "")
+        elif token.startswith("--tracing-to="):
+            overrides["MERGECRAFT_TRACING_TO"] = token.split("=", 1)[1]
+        elif token.startswith("--trace-dir="):
+            overrides["MERGECRAFT_TRACE_DIR"] = token.split("=", 1)[1]
+        elif token.startswith("--logfire-token="):
+            overrides["MERGECRAFT_LOGFIRE_TOKEN"] = token.split("=", 1)[1]
+        elif token.startswith("--otel-endpoint="):
+            overrides["MERGECRAFT_OTEL_ENDPOINT"] = token.split("=", 1)[1]
+
+    previous: dict[str, str | None] = {}
+    for key, value in overrides.items():
+        previous[key] = os.environ.get(key)
+        os.environ[key] = value
+    return previous
 
 
 async def run_offline_diff_review(
@@ -138,6 +270,8 @@ async def run_offline_diff_review(
     prompt_extra: str | None = None,
     dry_run: bool = False,
     json_path: Path | None = None,
+    evidence_packet_path: Path | None = None,
+    tracing_cli: list[str] | None = None,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
     cwd = cwd.resolve()
@@ -147,56 +281,72 @@ async def run_offline_diff_review(
             error=f"not a git repository: {cwd} (pass --diff for a standalone patch file)",
         )
 
+    # Forward the ``diff-review`` tracing flags as ``MERGECRAFT_*`` env
+    # overrides so the agent stream tracers (which resolve from
+    # ``os.environ``) honor CLI > env precedence. Restored in the ``finally``
+    # block so the override never leaks into the caller's environment.
+    tracing_env_previous = _apply_tracing_cli_overrides(tracing_cli)
+
     out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
     try:
         materialization = materialize_diff(cwd=cwd, out_dir=out_dir, base=base, diff_file=diff_file)
     except (OSError, RuntimeError) as exc:
         return OfflineReviewResult(success=False, error=str(exc))
 
-    if materialization.empty:
-        if json_path is not None:
-            try:
-                write_findings_json(json_path, [])
-            except OSError as exc:
-                return OfflineReviewResult(
-                    success=False,
-                    error=f"failed to write findings JSON: {exc}",
-                )
-        return OfflineReviewResult(
-            success=True,
-            output="no changes to review (empty diff).",
-            diff_path=str(materialization.path),
-            empty_diff=True,
+    try:
+        if materialization.empty:
+            if json_path is not None:
+                try:
+                    write_findings_json(json_path, [])
+                except OSError as exc:
+                    return OfflineReviewResult(
+                        success=False,
+                        error=f"failed to write findings JSON: {exc}",
+                    )
+            return OfflineReviewResult(
+                success=True,
+                output="no changes to review (empty diff).",
+                diff_path=str(materialization.path),
+                empty_diff=True,
+            )
+
+        output_schema = findings_output_schema() if json_path is not None else None
+        prompt = build_offline_review_prompt(
+            diff_path=materialization.path,
+            base_ref=materialization.base_ref,
+            extra=prompt_extra,
+            json_mode=output_schema is not None,
         )
 
-    output_schema = findings_output_schema() if json_path is not None else None
-    prompt = build_offline_review_prompt(
-        diff_path=materialization.path,
-        base_ref=materialization.base_ref,
-        extra=prompt_extra,
-        json_mode=output_schema is not None,
-    )
+        if dry_run:
+            return OfflineReviewResult(
+                success=True,
+                output=prompt,
+                diff_path=str(materialization.path),
+                empty_diff=False,
+            )
 
-    if dry_run:
-        return OfflineReviewResult(
-            success=True,
-            output=prompt,
-            diff_path=str(materialization.path),
-            empty_diff=False,
+        result = await _run_agent_review(
+            cwd=cwd,
+            materialization=materialization,
+            prompt=prompt,
+            model=model,
+            tmpdir=out_dir,
+            output_schema=output_schema,
+            evidence_packet_path=evidence_packet_path,
         )
+        if json_path is None:
+            return result
 
-    result = await _run_agent_review(
-        cwd=cwd,
-        materialization=materialization,
-        prompt=prompt,
-        model=model,
-        tmpdir=out_dir,
-        output_schema=output_schema,
-    )
-    if json_path is None:
-        return result
-
-    return _finalize_structured_findings(result, json_path)
+        return _finalize_structured_findings(result, json_path)
+    finally:
+        # Restore the operator's ``.env`` tracing vars so the ``diff-review``
+        # overrides never leak into the caller's environment.
+        for key, value in tracing_env_previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 async def _run_agent_review(
@@ -207,6 +357,7 @@ async def _run_agent_review(
     model: str | None,
     tmpdir: Path,
     output_schema: dict[str, Any] | None = None,
+    evidence_packet_path: Path | None = None,
 ) -> OfflineReviewResult:
     stop_mcp = None
     github: GitHubClient | None = None
@@ -215,6 +366,10 @@ async def _run_agent_review(
         # the prompt forbids them.
         github = GitHubClient(token="")
         tool_state = init_tool_state(owner="local", name=cwd.name, dir=str(cwd))
+        # Point the shared evidence seam at the patch this run reviewed, so the
+        # offline packet classifies blast radius from the same diff the agent
+        # read — exactly as the Action path does via ``checkout_pr``.
+        primary_repo_state(tool_state).diff_path = str(materialization.path)
         resolved_model = resolve_model(slug=model)
         agent = resolve_runtime_agent(model=resolved_model)
         modes = compute_modes(agent.name, signed_commits=False)
@@ -228,6 +383,7 @@ async def _run_agent_review(
             prompt=prompt,
             generate_summary=False,
             status_checks=False,
+            suggest_eval_add=False,
         )
         settings = load_repo_settings(root=cwd, load_learnings_files=False)
         tool_context = ToolContext(
@@ -258,6 +414,11 @@ async def _run_agent_review(
             analyzers_mode="auto",
             trust_tier="trusted",
             analyzers_settings_enabled=settings.analyzers.enabled,
+            suggest_eval_add=False,
+            # Carried so the evidence packet can attribute findings to the
+            # model that actually produced them (#96); previously unset, which
+            # left the packet's agent.model reading "(unresolved)".
+            resolved_model=resolved_model,
         )
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
@@ -294,6 +455,15 @@ async def _run_agent_review(
         result = await agent.run(run_ctx)
         structured_output = tool_state.output
         markdown_output = result.output
+        packet_path = await asyncio.to_thread(
+            _emit_offline_packet,
+            tool_context,
+            cwd=cwd,
+            materialization=materialization,
+            run_succeeded=result.success,
+            structured_output=structured_output,
+            output_path=evidence_packet_path,
+        )
         if not result.success:
             return OfflineReviewResult(
                 success=False,
@@ -301,12 +471,14 @@ async def _run_agent_review(
                 structured_output=structured_output,
                 error=result.error or "agent failed",
                 diff_path=str(materialization.path),
+                evidence_packet_path=packet_path,
             )
         return OfflineReviewResult(
             success=True,
             output=markdown_output,
             structured_output=structured_output,
             diff_path=str(materialization.path),
+            evidence_packet_path=packet_path,
         )
     except Exception as exc:
         logger.exception("offline diff-review failed")
