@@ -101,7 +101,7 @@ def test_cli_argv_redacted() -> None:
     redacted = redact_cli_argv(argv)
     assert "sk-secretvalue123" not in redacted
     assert "ghp_abc" not in redacted
-    assert "[REDACTED]" in redacted
+    assert "<redacted>" in redacted
     # The command shape survives.
     assert "mergecraft" in redacted
     assert "diff-review" in redacted

@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.agents._tool_attrs import emit_verb_subevent, enrich_tool_call_attrs
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
@@ -25,6 +24,17 @@ from mergecraft.agents.shared import (
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.tracing._tool_attrs import (
+    emit_verb_subevent,
+    enrich_tool_request,
+    enrich_tool_response,
+)
+from mergecraft.tracing.redaction import redact_tool_payload
+from mergecraft.tracing.tracer import (
+    ProviderLLMPair,
+    _close_provider_llm_pair,
+    _open_provider_llm_pair,
+)
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
@@ -345,9 +355,15 @@ def _gemini_stream_event_handler(
     emission through ``consume_stream``; the resulting ``AgentUsage``
     matches the legacy last-line parser.
     """
+    # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt, not two
+    # independent dicts keyed by the same id. Opening the provider span and
+    # the LLM span is atomic: they share a ``parent_span_id`` and both
+    # enter before the first event. The close path is symmetric: the inner
+    # ``llm.call`` span closes first (LIFO), then the outer
+    # ``provider.call`` span.
     open_tool_spans: dict[str, dict[str, Any]] = {}
-    open_llm_spans: dict[str, dict[str, Any]] = {}
-    open_provider_spans: dict[str, dict[str, Any]] = {}
+    open_pairs: dict[str, ProviderLLMPair | None] = {}
+    open_pair_bookkeeping: dict[str, dict[str, Any]] = {}
 
     def handler(
         accumulator: StreamSpanAccumulator,
@@ -380,30 +396,25 @@ def _gemini_stream_event_handler(
                 # attr. Opens on ``init`` and closes on the terminal
                 # ``result`` / ``error`` event; the ``llm.call`` span
                 # becomes its child so Logfire groups every Gemini
-                # chat-completions request under one row.
-                provider_span = tracer.start_span("provider.call")
-                provider_span.set_attribute("provider.id", "google_gemini")
-                provider_span.set_attribute("provider.transport_family", "chat_completions")
-                provider_span.set_attribute("model.id", model_id)
-                provider_span.set_attribute("gen_ai.system", "google")
-                provider_span.set_attribute("gen_ai.operation.name", "chat")
-                provider_span.__enter__()
-                span = tracer.start_span(
-                    "llm.call",
-                    parent_span_id=provider_span.span_id,
+                # chat-completions request under one row. W5 / H1 — open
+                # via the shared pair helper so the provider + llm attrs
+                # + ``__enter__`` are applied atomically; the resulting
+                # ``ProviderLLMPair`` is the single state unit per attempt.
+                pair = _open_provider_llm_pair(
+                    tracer,
+                    model_id=model_id,
+                    family="chat_completions",
+                    provider_id="google_gemini",
                 )
-                span.__enter__()
-                span.set_attribute("model.id", model_id)
-                span.set_attribute("model.event", "init")
-                span.set_attribute("gen_ai.operation.name", "chat")
-                span.set_attribute("gen_ai.request.model", model_id)
-                span.set_attribute("gen_ai.response.model", model_id)
-                open_provider_spans["default"] = {"span": provider_span}
-                open_llm_spans["default"] = {
-                    "span": span,
-                    "tokens_in": 0,
-                    "tokens_out": 0,
-                }
+                if pair is not None:
+                    pair.llm.set_attribute("model.id", model_id)
+                    pair.llm.set_attribute("model.event", "init")
+                    pair.llm.set_attribute("gen_ai.system", "google")
+                    pair.llm.set_attribute("gen_ai.operation.name", "chat")
+                    pair.llm.set_attribute("gen_ai.request.model", model_id)
+                    pair.llm.set_attribute("gen_ai.response.model", model_id)
+                open_pairs["default"] = pair
+                open_pair_bookkeeping["default"] = {"tokens_in": 0, "tokens_out": 0}
             return
 
         if event_type == "message":
@@ -431,13 +442,9 @@ def _gemini_stream_event_handler(
                 span.set_attribute("gen_ai.tool.call.id", tool_id)
                 tool_input = event.get("input")
                 if tool_input is not None:
-                    # T1 / D5 — request-side enrichment so Logfire's row
-                    # inspector surfaces the request shape (byte count,
-                    # input-key list, full input dict).
-                    enrich_tool_call_attrs(span, arguments=tool_input)
+                    # T1 / D5 / W4 — request-side enrichment via the shared helper.
+                    enrich_tool_request(span, arguments=tool_input)
                     span.set_attribute("tool.input", tool_input)
-                    from mergecraft.tracing.redaction import redact_tool_payload
-
                     span.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
                 open_tool_spans[tool_id] = {"span": span, "name": tool_name}
             return
@@ -450,15 +457,12 @@ def _gemini_stream_event_handler(
             span_obj = entry.get("span")
             if span_obj is not None:
                 tool_output = str(event.get("output") or "")
-                # T1 / D5 — response-side enrichment: exit_code, byte
-                # count, kind label, and the verbatim output for the row.
-                enrich_tool_call_attrs(span_obj, output=tool_output, exit_code="ok")
+                # T1 / D5 / W4 — response-side enrichment via the shared helper.
+                enrich_tool_response(span_obj, output=tool_output)
                 span_obj.set_attribute("tool.output", tool_output)
-                from mergecraft.tracing.redaction import redact_tool_payload
-
                 span_obj.set_attribute("gen_ai.tool.output", redact_tool_payload(tool_output))
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
+                # W4 / M6 — ``Span.close`` owns end-time + active-context reset.
+                span_obj.close()
                 # T1 / D5 — known-verb tools also emit a verb-specific
                 # child span (tool.browse for ``browser``, etc.) for
                 # finer-grained Logfire grouping. Fire-and-forget; no new
@@ -478,25 +482,24 @@ def _gemini_stream_event_handler(
             response = event.get("response")
             if isinstance(response, str) and response:
                 accumulator.set_output(response)
-            for entry in list(open_llm_spans.values()):
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    span_obj.set_attribute("cost.tokens_in", entry["tokens_in"])
-                    span_obj.set_attribute("cost.tokens_out", entry["tokens_out"])
-                    span_obj.set_attribute("gen_ai.usage.input_tokens", entry["tokens_in"])
-                    span_obj.set_attribute("gen_ai.usage.output_tokens", entry["tokens_out"])
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
-            open_llm_spans.clear()
-            # T2 / D10 — close the wrapping provider.call span after the
-            # inner llm.call span so the active-span stack unwinds
-            # inner-to-outer.
-            for entry in list(open_provider_spans.values()):
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
-            open_provider_spans.clear()
+            # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt owns the
+            # close discipline. Stamp cost + usage attrs on the inner llm
+            # span before closing so the per-message totals land on the row.
+            for key in list(open_pairs.keys()):
+                pair = open_pairs[key]
+                bookkeeping = open_pair_bookkeeping.get(key, {})
+                if pair is not None:
+                    pair.llm.set_attribute("cost.tokens_in", bookkeeping.get("tokens_in", 0))
+                    pair.llm.set_attribute("cost.tokens_out", bookkeeping.get("tokens_out", 0))
+                    pair.llm.set_attribute(
+                        "gen_ai.usage.input_tokens", bookkeeping.get("tokens_in", 0)
+                    )
+                    pair.llm.set_attribute(
+                        "gen_ai.usage.output_tokens", bookkeeping.get("tokens_out", 0)
+                    )
+            for key in list(open_pairs.keys()):
+                _close_provider_llm_pair(open_pairs.pop(key))
+            open_pair_bookkeeping.clear()
             return
 
         if event_type == "error":
@@ -508,22 +511,13 @@ def _gemini_stream_event_handler(
             for entry in list(open_tool_spans.values()):
                 span_obj = entry.get("span")
                 if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    span_obj.close()
             open_tool_spans.clear()
-            for entry in list(open_llm_spans.values()):
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
-            open_llm_spans.clear()
-            # T2 / D10 — close any wrapping provider.call span.
-            for entry in list(open_provider_spans.values()):
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
-            open_provider_spans.clear()
+            # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt; close
+            # via the shared helper to preserve the LIFO discipline.
+            for key in list(open_pairs.keys()):
+                _close_provider_llm_pair(open_pairs.pop(key))
+            open_pair_bookkeeping.clear()
             return
 
     def close_all() -> None:
@@ -533,19 +527,11 @@ def _gemini_stream_event_handler(
                 span_obj.ts_end_ns = time.time_ns()
                 span_obj.__exit__(None, None, None)
         open_tool_spans.clear()
-        for entry in list(open_llm_spans.values()):
-            span_obj = entry.get("span")
-            if span_obj is not None:
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
-        open_llm_spans.clear()
-        # T2 / D10 — provider.call spans wrap llm.call spans.
-        for entry in list(open_provider_spans.values()):
-            span_obj = entry.get("span")
-            if span_obj is not None:
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
-        open_provider_spans.clear()
+        # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt; the inner
+        # ``_close_provider_llm_pair`` enforces the LIFO close discipline.
+        for key in list(reversed(list(open_pairs.keys()))):
+            _close_provider_llm_pair(open_pairs.pop(key))
+        open_pair_bookkeeping.clear()
 
     return handler, close_all
 

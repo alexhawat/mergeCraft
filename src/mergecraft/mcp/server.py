@@ -67,6 +67,12 @@ from mergecraft.mcp.verification import (
     verify_agent_findings_tool,
 )
 from mergecraft.mcp.xrepo import checkout_repo_tool, list_repos_tool
+from mergecraft.tracing._tool_attrs import (
+    emit_verb_subevent,
+    enrich_tool_request,
+    enrich_tool_response,
+)
+from mergecraft.tracing.tracer import get_tracer_from_settings
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.process_group import kill_process_groups
 
@@ -301,45 +307,25 @@ def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> Fas
                     "error": {"code": -32601, "message": f"Unknown tool: {name}"},
                 }
             from mergecraft.config.settings import RepoSettings
-            from mergecraft.tracing.tracer import get_tracer_from_settings
 
             tracer = get_tracer_from_settings(RepoSettings())
             call_attrs: dict[str, Any] = {
                 "tool.name": name,
                 "tool.server": MERGECRAFT_MCP_NAME,
-                "tool.arguments": arguments,
-                "tool.argument_count": len(arguments),
-                "tool.argument_bytes": len(json.dumps(arguments, default=str)),
                 "gen_ai.operation.name": "execute_tool",
                 "gen_ai.tool.name": name,
                 "gen_ai.tool.call.id": _span_tool_call_id(),
             }
             with tracer.start_span("tool.call", attrs_source=lambda: dict(call_attrs)) as _span:
+                enrich_tool_request(_span, arguments=arguments)
                 try:
                     result = await tool.execute(arguments)
                 except Exception as exc:
                     _span.set_status("error", str(exc))
-                    _span.set_attribute("tool.exit_code", "error")
-                    _span.set_attribute("tool.error_class", type(exc).__name__)
-                    from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES
-                    from mergecraft.tracing.redaction import redact_tool_payload
-
-                    error_message = redact_tool_payload(str(exc))
-                    error_message = error_message[:TRACE_ATTRS_JSON_MAX_BYTES]
-                    _span.set_attribute("tool.error_message", error_message)
-                    # Keep the GenAI conventions attr wired so the GenAI
-                    # dashboard sees the row even on the failure path.
-                    _span.set_attribute("gen_ai.tool.output", error_message)
+                    enrich_tool_response(_span, output=None, error=exc)
                     _record_trajectory(tool_ctx, name, arguments, ok=False, error=str(exc))
                     raise
-                _span.set_attribute("tool.exit_code", "ok")
-                from mergecraft.agents._tool_attrs import (
-                    _classify_tool_result,
-                    emit_verb_subevent,
-                )
-
-                _span.set_attribute("tool.result_kind", _classify_tool_result(result))
-                _span.set_attribute("tool.result_bytes", len(json.dumps(result, default=str)))
+                enrich_tool_response(_span, output=result)
                 _record_trajectory(tool_ctx, name, arguments, ok=True, result=result)
                 # T1 / D5 — known-verb tools also emit a verb-specific child
                 # span (tool.browse for ``browser``, etc.) for finer-grained

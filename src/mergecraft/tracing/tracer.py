@@ -18,12 +18,16 @@ Depends: mergecraft.tracing.{event,sinks}, loguru
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 import uuid
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from loguru import logger
 
@@ -148,6 +152,7 @@ class Span:
     _attrs: dict[str, Any] = field(default_factory=dict)
     _exc: BaseException | None = None
     _context_token: Token[Span | NullSpan | None] | None = None
+    _closed: bool = False
 
     def __enter__(self) -> Span:
         """Start timing and make this span active."""
@@ -171,6 +176,61 @@ class Span:
         del exc_type, tb
         if exc is not None:
             self.record_exception(exc)
+        # W5 / L2 — ``Span.close`` is the single source of truth for
+        # emitting the TraceEvent and resetting the active ContextVar.
+        # ``__exit__`` delegates to it so the manually-built span path
+        # (which calls ``close`` without an ``__enter__``) and the
+        # ``with`` block path converge on the same emit + reset discipline.
+        self.close()
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Set or replace one span attribute.
+
+        Args:
+            key (str): Attribute key.
+            value (Any): JSON-compatible attribute value.
+        """
+        self._attrs[key] = value
+
+    def record_exception(self, exc: BaseException) -> None:
+        """Record an exception and mark the span failed.
+
+        Args:
+            exc (BaseException): Exception observed by the span.
+        """
+        self._exc = exc
+        self.set_status("error", str(exc) or type(exc).__name__)
+
+    def set_status(self, status: str, error: str | None = None) -> None:
+        """Set the span status and optional error message.
+
+        Args:
+            status (str): Status vocabulary value.
+            error (str | None, optional): Human-readable error. Defaults to None.
+        """
+        self.status = status
+        self.error = error
+
+    def close(self) -> None:
+        """End the span: stamp end time + emit the TraceEvent + reset the active ContextVar.
+
+        Callers that build a span outside a ``with`` block (the verb sub-event
+        emission, the ``provider_llm_pair`` helper, the HTTP wrapper close
+        sites) use this instead of poking ``ts_end_ns`` and ``__exit__``
+        directly. The active-context reset mirrors ``__exit__`` so a span
+        closed manually still pops its ContextVar frame.
+
+        Re-calling ``close()`` is a no-op — the dedicated ``_closed`` flag
+        tracks the close path independently of ``_context_token`` so the
+        manually-built span case (no ``__enter__``; ``_context_token`` is
+        still ``None`` on the first ``close``) emits its TraceEvent exactly
+        once. W5 / L2 — the prior implementation conflated the never-
+        entered and already-closed cases by gating on ``_context_token is
+        None`` alone, which silently dropped manually-built spans; the flag
+        keeps the contract that ``close()`` is idempotent and emits once.
+        """
+        if self._closed:
+            return
         self.ts_end_ns = time.time_ns()
 
         attrs: dict[str, Any] = {}
@@ -201,34 +261,7 @@ class Span:
         if self._context_token is not None:
             _ACTIVE_SPAN.reset(self._context_token)
             self._context_token = None
-
-    def set_attribute(self, key: str, value: Any) -> None:
-        """Set or replace one span attribute.
-
-        Args:
-            key (str): Attribute key.
-            value (Any): JSON-compatible attribute value.
-        """
-        self._attrs[key] = value
-
-    def record_exception(self, exc: BaseException) -> None:
-        """Record an exception and mark the span failed.
-
-        Args:
-            exc (BaseException): Exception observed by the span.
-        """
-        self._exc = exc
-        self.set_status("error", str(exc) or type(exc).__name__)
-
-    def set_status(self, status: str, error: str | None = None) -> None:
-        """Set the span status and optional error message.
-
-        Args:
-            status (str): Status vocabulary value.
-            error (str | None, optional): Human-readable error. Defaults to None.
-        """
-        self.status = status
-        self.error = error
+        self._closed = True
 
 
 class NullSpan:
@@ -249,6 +282,9 @@ class NullSpan:
         Args:
             *args (Any): Context-manager exception state.
         """
+
+    def close(self) -> None:
+        """No-op close (W4 / M6 — mirrors :meth:`Span.close`)."""
 
     def set_attribute(self, *args: Any) -> None:
         """Ignore an attribute update.
@@ -344,6 +380,173 @@ def _int_or_text(value: str | None) -> int | str | None:
         return value
 
 
+@dataclass(slots=True)
+class ProviderLLMPair:
+    """Handle for the ``provider.call`` parent + ``llm.call`` child pair (W4 H1).
+
+    Yielded by ``provider_llm_pair``. Both spans share a single ``parent_span_id``
+    chain (parent → child); the consumer can attach per-event attrs to either
+    span by calling ``set_attribute(...)`` directly. Close order is fixed:
+    the context manager closes the inner ``llm.call`` span first, then the
+    outer ``provider.call`` span, mirroring the LIFO discipline the driver
+    event handlers were already defending against (#56 D6).
+    """
+
+    provider: Span
+    llm: Span
+
+
+def _open_provider_llm_pair(
+    tracer: Tracer | NullTracer | None,
+    *,
+    model_id: str,
+    family: str,
+    provider_id: str,
+    parent_span_id: str | None = None,
+) -> ProviderLLMPair | None:
+    """Open a ``ProviderLLMPair`` and enter both spans.
+
+    Shared body for the ``provider_llm_pair`` context manager and the
+    streaming driver event handlers (W5 / H1). Returns ``None`` when
+    ``tracer`` is ``None`` / ``NullTracer`` so the disabled path is a
+    single-line guard at every call site.
+
+    Args:
+        tracer: The owning tracer. ``None`` / ``NullTracer`` is a no-op.
+        model_id: Model identifier attached to both spans.
+        family: Transport family (``"anthropic"`` / ``"chat_completions"`` /
+            ``"responses_api"``); becomes ``provider.transport_family``.
+        provider_id: Provider identifier; becomes ``provider.id``.
+        parent_span_id: Optional explicit parent span id.
+
+    Returns:
+        ProviderLLMPair | None: The open pair, or ``None`` when disabled.
+    """
+    if tracer is None or isinstance(tracer, NullTracer):
+        return None
+    provider_span = tracer.start_span("provider.call", parent_span_id=parent_span_id)
+    provider_span.set_attribute("provider.id", provider_id)
+    provider_span.set_attribute("provider.transport_family", family)
+    provider_span.set_attribute("model.id", model_id)
+    provider_span.set_attribute("gen_ai.system", provider_id)
+    provider_span.set_attribute("gen_ai.operation.name", "chat")
+    provider_span.ts_start_ns = time.time_ns()
+    provider_span.__enter__()
+    llm_span = tracer.start_span("llm.call", parent_span_id=provider_span.span_id)
+    llm_span.__enter__()
+    return ProviderLLMPair(provider=provider_span, llm=llm_span)
+
+
+def _close_provider_llm_pair(pair: ProviderLLMPair | None) -> None:
+    """Close a ``ProviderLLMPair`` opened by ``_open_provider_llm_pair``.
+
+    Closes the inner ``llm.call`` span first (LIFO) and the outer
+    ``provider.call`` span after — matching the close discipline the driver
+    event handlers were already defending against (#56 D6). ``None`` is a
+    no-op so the disabled path is a single-line guard.
+
+    Args:
+        pair: The pair returned by ``_open_provider_llm_pair``. ``None``
+            (disabled path) is accepted.
+    """
+    if pair is None:
+        return
+    pair.llm.close()
+    pair.provider.close()
+
+
+@contextlib.contextmanager
+def provider_llm_pair(
+    tracer: Tracer | NullTracer | None,
+    *,
+    model_id: str,
+    family: str,
+    provider_id: str,
+    parent_span_id: str | None = None,
+) -> Iterator[ProviderLLMPair | None]:
+    """Open a ``provider.call`` + ``llm.call`` pair under one context manager.
+
+    Unifies the open/close discipline that ``claude.py`` / ``codex.py`` /
+    ``gemini.py`` were each re-implementing (W4 H1). The provider span
+    carries ``provider.id`` / ``provider.transport_family`` / ``model.id`` /
+    ``gen_ai.system`` / ``gen_ai.operation.name`` so Logfire groups every
+    upstream API request under one row; the ``llm.call`` span becomes the
+    child the model-aware attrs (``model.event``, ``gen_ai.usage.*``) attach
+    to.
+
+    On exit the inner ``llm.call`` span closes first (LIFO) and the outer
+    ``provider.call`` span closes after — matching the close discipline the
+    driver event handlers were already defending against (#56 D6).
+
+    Args:
+        tracer: The owning tracer. ``None`` / ``NullTracer`` yields ``None``;
+            no spans open and no exceptions propagate. Callers can rely on
+            a single ``with`` line without a separate disabled check.
+        model_id: The model identifier attached to both spans (``model.id``
+            attr; the provider span's ``model.id`` is the canonical source).
+        family: Transport family string (``"anthropic"`` / ``"chat_completions"``
+            / ``"responses_api"``); becomes ``provider.transport_family``.
+        provider_id: Provider identifier (``"anthropic"`` / ``"openai_codex"``
+            / ``"google_gemini"``); becomes ``provider.id``.
+        parent_span_id: Optional explicit parent span id. Defaults to the
+            active span when it belongs to ``tracer``.
+
+    Yields:
+        ProviderLLMPair | None: The open pair of spans, or ``None`` when
+        ``tracer`` is ``None`` / ``NullTracer``.
+
+    Examples:
+        >>> from mergecraft.tracing import MemorySink, Tracer
+        >>> sink = MemorySink()
+        >>> tracer = Tracer(sink=sink, session_id="s", run_id="r")
+        >>> with provider_llm_pair(
+        ...     tracer, model_id="claude-sonnet-4", family="anthropic",
+        ...     provider_id="anthropic",
+        ... ) as pair:
+        ...     if pair is not None:
+        ...         pair.llm.set_attribute("model.event", "message_start")
+    """
+    pair = _open_provider_llm_pair(
+        tracer,
+        model_id=model_id,
+        family=family,
+        provider_id=provider_id,
+        parent_span_id=parent_span_id,
+    )
+    try:
+        yield pair
+    finally:
+        _close_provider_llm_pair(pair)
+
+
+def active_span_for(tracer: Tracer | NullTracer | None) -> Span | None:
+    """Return the currently active mergeCraft ``Span`` owned by ``tracer``.
+
+    Helper for the three sites that previously re-implemented this lookup:
+    the httpx sync/async ``_wrap_*_send`` active-span resolver and the
+    stream consumer's ``_resolve_active_span_for_otel_bridge``. Returns
+    ``None`` when no span is active, when the active span belongs to a
+    different tracer (the W5 W6 W3 multi-tracer tests catch this case),
+    when the active value is a ``NullSpan`` (tracing disabled), or when
+    ``tracer`` itself is ``None`` / ``NullTracer``.
+
+    Args:
+        tracer: The tracer that should own the active span. ``NullTracer``
+            and ``None`` are accepted and always return ``None``.
+
+    Returns:
+        Span | None: The active span when it belongs to ``tracer``; ``None`` otherwise.
+    """
+    if tracer is None:
+        return None
+    if isinstance(tracer, NullTracer):
+        return None
+    active = _ACTIVE_SPAN.get()
+    if isinstance(active, Span) and getattr(active, "tracer", None) is tracer:
+        return active
+    return None
+
+
 def resolve_session_id() -> str:
     """Resolve a stable session identifier or generate one.
 
@@ -437,7 +640,9 @@ __all__ = [
     "NullTracer",
     "Span",
     "Tracer",
+    "active_span_for",
     "get_tracer_from_settings",
+    "provider_llm_pair",
     "resolve_correlation_from_env",
     "resolve_session_id",
     "resolve_trace_id",

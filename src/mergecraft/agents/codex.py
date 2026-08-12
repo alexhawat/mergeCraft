@@ -7,13 +7,11 @@ import json
 import os
 import shutil
 import subprocess
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.agents._tool_attrs import emit_verb_subevent, enrich_tool_call_attrs
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
     CUSTOM_PROVIDER_BASE_URL_ENV,
@@ -33,6 +31,17 @@ from mergecraft.agents.shared import (
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.tracing._tool_attrs import (
+    emit_verb_subevent,
+    enrich_tool_request,
+    enrich_tool_response,
+)
+from mergecraft.tracing.redaction import redact_tool_payload
+from mergecraft.tracing.tracer import (
+    ProviderLLMPair,
+    _close_provider_llm_pair,
+    _open_provider_llm_pair,
+)
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
@@ -741,9 +750,15 @@ def _codex_stream_event_handler(
         authoritative final usage and close the thread's ``llm.call``
         span.
     """
+    # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt, not two
+    # independent dicts keyed by the same id. Opening the provider span and
+    # the LLM span is atomic: they share a ``parent_span_id`` and both
+    # enter before the first event. The close path is symmetric: the inner
+    # ``llm.call`` span closes first (LIFO), then the outer
+    # ``provider.call`` span.
     open_tool_spans: dict[str, dict[str, Any]] = {}
-    open_llm_spans: dict[str, dict[str, Any]] = {}
-    open_provider_spans: dict[str, dict[str, Any]] = {}
+    open_pairs: dict[str, ProviderLLMPair | None] = {}
+    open_pair_bookkeeping: dict[str, dict[str, Any]] = {}
 
     def handler(
         accumulator: StreamSpanAccumulator,
@@ -772,37 +787,32 @@ def _codex_stream_event_handler(
 
         if event_type == "thread.started":
             thread_id = str(event.get("thread_id") or "default")
-            if thread_id in open_llm_spans:
+            if thread_id in open_pairs:
                 return
             if tracer is not None:
                 # T2 / D10 — ``provider.call`` is a real span kind, not an
                 # attr. Opens on ``thread.started`` and closes on
                 # ``turn.completed``; the ``llm.call`` span becomes its
                 # child so Logfire groups every Responses API request under
-                # one row with the transport family on it.
-                provider_span = tracer.start_span("provider.call")
-                provider_span.set_attribute("provider.id", "openai_codex")
-                provider_span.set_attribute("provider.transport_family", "responses_api")
-                provider_span.set_attribute("model.id", model_id)
-                provider_span.set_attribute("gen_ai.system", "openai")
-                provider_span.set_attribute("gen_ai.operation.name", "chat")
-                provider_span.__enter__()
-                span = tracer.start_span(
-                    "llm.call",
-                    parent_span_id=provider_span.span_id,
+                # one row with the transport family on it. W5 / H1 — open
+                # via the shared pair helper so the provider + llm attrs
+                # + ``__enter__`` are applied atomically; the resulting
+                # ``ProviderLLMPair`` is the single state unit per attempt.
+                pair = _open_provider_llm_pair(
+                    tracer,
+                    model_id=model_id,
+                    family="responses_api",
+                    provider_id="openai_codex",
                 )
-                span.__enter__()
-                span.set_attribute("model.id", model_id)
-                span.set_attribute("model.event", "thread.started")
-                span.set_attribute("gen_ai.operation.name", "chat")
-                span.set_attribute("gen_ai.request.model", model_id)
-                span.set_attribute("gen_ai.response.model", model_id)
-                open_provider_spans[thread_id] = {"span": provider_span}
-                open_llm_spans[thread_id] = {
-                    "span": span,
-                    "tokens_in": 0,
-                    "tokens_out": 0,
-                }
+                if pair is not None:
+                    pair.llm.set_attribute("model.id", model_id)
+                    pair.llm.set_attribute("model.event", "thread.started")
+                    pair.llm.set_attribute("gen_ai.system", "openai")
+                    pair.llm.set_attribute("gen_ai.operation.name", "chat")
+                    pair.llm.set_attribute("gen_ai.request.model", model_id)
+                    pair.llm.set_attribute("gen_ai.response.model", model_id)
+                open_pairs[thread_id] = pair
+                open_pair_bookkeeping[thread_id] = {"tokens_in": 0, "tokens_out": 0}
             return
 
         if event_type == "item.started":
@@ -824,13 +834,14 @@ def _codex_stream_event_handler(
                 span.set_attribute("gen_ai.operation.name", "execute_tool")
                 span.set_attribute("gen_ai.tool.name", tool_name)
                 span.set_attribute("gen_ai.tool.call.id", tool_id)
-                # T1 / D5 — request-side enrichment is deferred to the
+                # T1 / D5 / W4 — request-side enrichment is deferred to the
                 # ``item.completed`` site because codex's
                 # ``item.started`` event does not carry the input payload
                 # — codex sends the input on the matching
                 # ``item.completed``. The close path below applies
-                # ``enrich_tool_call_attrs`` so the byte count + input
-                # representation still surface on the span.
+                # ``enrich_tool_request`` + ``enrich_tool_response`` so the
+                # byte count + input representation still surface on the
+                # span.
                 open_tool_spans[tool_id] = {"span": span, "name": tool_name}
             return
 
@@ -851,20 +862,15 @@ def _codex_stream_event_handler(
                     span_obj.set_attribute("gen_ai.tool.name", resolved_name)
                     tool_input = str(item.get("input") or "")
                     span_obj.set_attribute("tool.input", tool_input)
-                    from mergecraft.tracing.redaction import redact_tool_payload
-
                     span_obj.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
-                    # T1 / D5 — response-side enrichment on the close path:
-                    # codex emits tool_call + tool_result as sibling
-                    # ``item.completed`` events; the request side is
-                    # ``tool.input`` (string), the response side is the
-                    # synthesized exit_code/byte-count/kind set so Logfire
-                    # still has the request/response split on a single row.
-                    enrich_tool_call_attrs(
-                        span_obj, arguments=tool_input, output=tool_input, exit_code="ok"
-                    )
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    # T1 / D5 / W4 — request + response enrichment on the
+                    # close path. W4 / H2 — the split helpers mean each
+                    # call site is one obvious line; the prior codex
+                    # double-set bug (``arguments=tool_input,
+                    # output=tool_input``) is gone.
+                    enrich_tool_request(span_obj, arguments=tool_input)
+                    enrich_tool_response(span_obj, output=tool_input)
+                    span_obj.close()
                     # T1 / D5 — known-verb tools also emit a verb-specific
                     # child span (tool.browse for ``browser``, etc.) for
                     # finer-grained Logfire grouping. Fire-and-forget; no
@@ -897,47 +903,38 @@ def _codex_stream_event_handler(
             cost = event.get("total_cost_usd")
             if isinstance(cost, (int, float)) and usage is not None:
                 accumulator.cost_usd = float(cost)
-            for entry in list(open_llm_spans.values()):
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    span_obj.set_attribute("cost.tokens_in", entry["tokens_in"])
-                    span_obj.set_attribute("cost.tokens_out", entry["tokens_out"])
-                    span_obj.set_attribute("gen_ai.usage.input_tokens", entry["tokens_in"])
-                    span_obj.set_attribute("gen_ai.usage.output_tokens", entry["tokens_out"])
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
-            open_llm_spans.clear()
-            # T2 / D10 — close the wrapping provider.call span after the
-            # inner llm.call span so the active-span stack unwinds
-            # inner-to-outer.
-            for entry in list(open_provider_spans.values()):
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
-            open_provider_spans.clear()
+            # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt owns the
+            # close discipline (inner llm span first, outer provider span
+            # second). Stamp the cost + usage attrs on the inner llm span
+            # before closing so the per-message totals land on the row.
+            for key in list(open_pairs.keys()):
+                pair = open_pairs[key]
+                bookkeeping = open_pair_bookkeeping.get(key, {})
+                if pair is not None:
+                    pair.llm.set_attribute("cost.tokens_in", bookkeeping.get("tokens_in", 0))
+                    pair.llm.set_attribute("cost.tokens_out", bookkeeping.get("tokens_out", 0))
+                    pair.llm.set_attribute(
+                        "gen_ai.usage.input_tokens", bookkeeping.get("tokens_in", 0)
+                    )
+                    pair.llm.set_attribute(
+                        "gen_ai.usage.output_tokens", bookkeeping.get("tokens_out", 0)
+                    )
+            for key in list(open_pairs.keys()):
+                _close_provider_llm_pair(open_pairs.pop(key))
+            open_pair_bookkeeping.clear()
             return
 
     def close_all() -> None:
         for entry in list(open_tool_spans.values()):
             span_obj = entry.get("span")
             if span_obj is not None:
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
+                span_obj.close()
         open_tool_spans.clear()
-        for entry in list(open_llm_spans.values()):
-            span_obj = entry.get("span")
-            if span_obj is not None:
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
-        open_llm_spans.clear()
-        # T2 / D10 — provider.call spans wrap llm.call spans.
-        for entry in list(open_provider_spans.values()):
-            span_obj = entry.get("span")
-            if span_obj is not None:
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
-        open_provider_spans.clear()
+        # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt; the inner
+        # ``_close_provider_llm_pair`` enforces the LIFO close discipline.
+        for key in list(reversed(list(open_pairs.keys()))):
+            _close_provider_llm_pair(open_pairs.pop(key))
+        open_pair_bookkeeping.clear()
 
     return handler, close_all
 

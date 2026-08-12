@@ -35,6 +35,17 @@ def _resolve_tracer(tracer: Tracer | None) -> Tracer | None:
     Convention 9 / #56 D9 — the disabled path is a true no-op. Any wrapper
     that resolves ``NullTracer`` short-circuits to ``None`` so the
     instrumented httpx client's :meth:`send` runs unwrapped.
+
+    The review audit flagged a NullTracer asymmetry (Low 2 / W4 H6): a caller
+    passing ``tracer=None`` falls into the lazy ``get_tracer_from_settings``
+    branch which is silent on the no-op path. The fix treats both
+    ``None`` (caller passed None directly) and ``NullTracer`` (the disabled
+    surface ``get_tracer_from_settings`` returns) as the no-op sentinel —
+    the function returns ``None`` for either shape — and emits a single
+    ``debug`` log line when the resolver returns ``None`` so the silent loss
+    is no longer silent. The instrumented client does not raise; the
+    ``test_disabled_tracer_path_emits_no_http_span`` contract pins the
+    no-op behavior.
     """
     if tracer is not None:
         return tracer
@@ -49,7 +60,11 @@ def _resolve_tracer(tracer: Tracer | None) -> Tracer | None:
     except Exception as exc:
         logger.debug("instrument_httpx tracer resolution failed: {}", exc)
         return None
-    if isinstance(resolved, NullTracer):
+    if resolved is None or isinstance(resolved, NullTracer):
+        logger.debug(
+            "instrument_httpx resolving to no-op tracer (NullTracer or None); "
+            "http spans will not be emitted until a Tracer is wired"
+        )
         return None
     return resolved
 
@@ -146,8 +161,7 @@ def _close_http_span(
         span.record_exception(error)
     for key, value in attrs.items():
         span.set_attribute(key, value)
-    span.ts_end_ns = time.time_ns()
-    span.__exit__(None, None, None)
+    span.close()
 
 
 def _wrap_sync_send(client: Any, tracer: Tracer) -> None:
@@ -190,12 +204,9 @@ def _wrap_sync_send(client: Any, tracer: Tracer) -> None:
     client.send = send
 
     def _active() -> Any:
-        from mergecraft.tracing.tracer import _ACTIVE_SPAN, Span
+        from mergecraft.tracing.tracer import active_span_for
 
-        current = _ACTIVE_SPAN.get()
-        if isinstance(current, Span) and getattr(current, "tracer", None) is tracer:
-            return current
-        return None
+        return active_span_for(tracer)
 
     client._mergecraft_active_span = _active
 
@@ -243,12 +254,9 @@ def _wrap_async_send(client: Any, tracer: Tracer) -> None:
     client.send = send
 
     def _active() -> Any:
-        from mergecraft.tracing.tracer import _ACTIVE_SPAN, Span
+        from mergecraft.tracing.tracer import active_span_for
 
-        current = _ACTIVE_SPAN.get()
-        if isinstance(current, Span) and getattr(current, "tracer", None) is tracer:
-            return current
-        return None
+        return active_span_for(tracer)
 
     client._mergecraft_active_span = _active
 

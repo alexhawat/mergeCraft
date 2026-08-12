@@ -5,7 +5,9 @@ Builds on the existing helpers in :mod:`mergecraft.analyzers.redact` and
 tracing-specific additions are:
 
 1. A deny-key list — any attr whose key (case-insensitive) appears here has
-   its value replaced with the literal ``"[REDACTED]"``.
+   its value replaced with the canonical ``"<redacted>"`` sentinel
+   (W4 / H4 — was three different literals across this module, the
+   legacy analyzer redaction, and the tool-payload helper).
 2. The deny-value patterns ``ghp_*`` / ``sk-*`` already match inside
    :func:`mergecraft.analyzers.redact.redact_secrets`; this module applies
    the existing helper to every string value (recursively into nested
@@ -47,7 +49,7 @@ _CLI_SECRET_FLAG = re.compile(
 _CLI_SECRET_VALUE = re.compile(
     r"^(?:sk-|ghp_|gho_|ghu_|ghs_|ghr_|eyJ|AKIA|Bearer\s)", re.IGNORECASE
 )
-_REDACTED = "[REDACTED]"
+REDACTED = "<redacted>"  # canonical sentinel — H4 / W4: was three different sentinels
 
 # Inline URL redaction markers — T2 / PR D9. ``redact_url`` masks the
 # credential-bearing portion of a URL while preserving scheme/host/path so
@@ -58,8 +60,6 @@ _QUERY_TOKEN_KEYS = ("api_key", "access_token", "token", "key", "secret")
 _QUERY_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(_QUERY_TOKEN_KEYS) + r")=([^&\s]+)")
 _BEARER_RE = re.compile(r"(Bearer\s)[A-Za-z0-9._-]{16,}")
 _EMBEDDED_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(sk-|ghp_|eyJ)[A-Za-z0-9._-]{8,}")
-
-REDACTED = "<redacted>"
 
 DENY_KEYS: tuple[str, ...] = (
     "authorization",
@@ -73,8 +73,6 @@ DENY_KEYS: tuple[str, ...] = (
     "bearer_token",
     "auth_token",
 )
-
-_REDACTED = "[REDACTED]"
 
 
 def _redact_value(value: Any) -> Any:
@@ -97,7 +95,7 @@ def redact_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in attrs.items():
         if key.lower() in DENY_KEYS:
-            out[key] = _REDACTED
+            out[key] = REDACTED
             continue
         out[key] = _redact_value(value)
     return out
@@ -114,10 +112,10 @@ def redact_cli_argv(argv: list[str]) -> str:
     Preserves the command shape (flags, positional args, model names, paths) so
     an operator can see *which* command ran without exposing any credential. A
     flagged token (``--api-key``, ``GH_TOKEN=…``, etc.) has its value
-    replaced with ``[REDACTED]``; a bare bearer-shaped value
-    (``sk-…`` / ``ghp_…`` / ``eyJ…``) is masked wherever it appears; and the
-    shared substring matcher still catches any ``ghp_…`` / ``sk-…`` that
-    slips through.
+    replaced with the canonical :data:`REDACTED` sentinel (``"<redacted>"``);
+    a bare bearer-shaped value (``sk-…`` / ``ghp_…`` / ``eyJ…``) is masked
+    wherever it appears; and the shared substring matcher still catches any
+    ``ghp_…`` / ``sk-…`` that slips through.
 
     Args:
         argv (list[str]): The process argv (e.g. ``sys.argv``).
@@ -127,7 +125,7 @@ def redact_cli_argv(argv: list[str]) -> str:
 
     Examples:
         >>> redact_cli_argv(["mergecraft", "diff-review", "--api-key", "sk-abc123"])
-        'mergecraft diff-review --api-key [REDACTED]'
+        'mergecraft diff-review --api-key <redacted>'
     """
     if not argv:
         return ""
@@ -136,17 +134,17 @@ def redact_cli_argv(argv: list[str]) -> str:
         if "=" in token:
             key, _, val = token.partition("=")
             if _CLI_SECRET_FLAG.match(key):
-                masked.append(f"{key}={_REDACTED}")
+                masked.append(f"{key}={REDACTED}")
                 continue
             if _CLI_SECRET_VALUE.match(val):
-                masked.append(f"{key}={_REDACTED}")
+                masked.append(f"{key}={REDACTED}")
                 continue
         if _CLI_SECRET_FLAG.match(token) and index + 1 < len(argv):
             masked.append(token)
-            masked.append(_REDACTED)
+            masked.append(REDACTED)
             continue
         if _CLI_SECRET_VALUE.match(token):
-            masked.append(_REDACTED)
+            masked.append(REDACTED)
             continue
         masked.append(redact_secrets(token))
     return " ".join(masked)
@@ -202,17 +200,6 @@ def redact_url(url: str) -> str:
     return _EMBEDDED_TOKEN_RE.sub(REDACTED, url)
 
 
-__all__ = [
-    "DENY_KEYS",
-    "REDACTED",
-    "redact_attrs",
-    "redact_cli_argv",
-    "redact_event",
-    "redact_tool_payload",
-    "redact_url",
-]
-
-
 def redact_tool_payload(payload: Any) -> str:
     """Redact a tool input/output payload for safe attachment to a span (T1).
 
@@ -258,3 +245,14 @@ def redact_tool_payload(payload: Any) -> str:
     if len(text) > TRACE_ATTRS_JSON_MAX_BYTES:
         return "<truncated>"
     return text
+
+
+__all__ = [
+    "DENY_KEYS",
+    "REDACTED",
+    "redact_attrs",
+    "redact_cli_argv",
+    "redact_event",
+    "redact_tool_payload",
+    "redact_url",
+]

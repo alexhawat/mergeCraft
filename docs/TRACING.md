@@ -337,8 +337,10 @@ Every `tool.call` span carries the request/response byte counts,
 tree (D5: one enriched `tool.call` span, not sevn's `tool.invoke` /
 `tool.complete` split) so the existing `tool.name` / `tool.id` /
 `tool.server` / `gen_ai.*` attrs remain on the same row. The
-`src/mergecraft/agents/_tool_attrs.py` helper exposes
-`enrich_tool_call_attrs` + `emit_verb_subevent` so the three drivers
+`src/mergecraft/tracing/_tool_attrs.py` helpers expose the open-side
+`enrich_tool_request` and the close-side `enrich_tool_response`
+(W4 / M1 split the legacy single `enrich_tool_call_attrs` into two
+single-purpose calls), plus `emit_verb_subevent` so the three drivers
 (`claude` / `codex` / `gemini`) and the MCP `tools/call` handler all
 emit the same shape.
 
@@ -374,7 +376,7 @@ emit the same shape.
 Known-verb tools — `browser`, `search`, `read_file`, `write_file`,
 `run_code`, `load_tool` — also emit a verb-specific child span on the
 `tool_result` / `item.completed` close event. The mapping is the closed
-`KNOWN_VERB_TOOLS` dict in `src/mergecraft/agents/_tool_attrs.py`:
+`KNOWN_VERB_TOOLS` dict in `src/mergecraft/tracing/_tool_attrs.py`:
 
 | Tool name | Child span kind |
 |-----------|----------------|

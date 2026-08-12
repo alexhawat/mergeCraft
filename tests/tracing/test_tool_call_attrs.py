@@ -42,29 +42,26 @@ Two cross-cutting guarantees pin the new keys:
 
 These tests are RED against the post-T3 + post-T2 tree (the ``trace_id``
 plumbing and the ``provider.call`` parent are landed; T1.1 is the third
-polish PR). The implementation does not yet exist:
+polish PR). The implementation did not exist at RED-suite time:
 
-- ``src/mergecraft/mcp/server.py`` — ``call_attrs`` is not yet enriched
+- ``src/mergecraft/mcp/server.py`` — ``call_attrs`` was not yet enriched
   with ``tool.arguments`` / ``argument_count`` / ``argument_bytes`` /
   ``exit_code`` / ``result_kind`` / ``result_bytes``; the failure path
-  does not yet set ``tool.error_class``.
-- ``src/mergecraft/agents/claude.py`` — ``tool_result`` does not yet set
-  ``tool.exit_code`` / ``tool.output_bytes`` / ``tool.output_kind``.
-- ``src/mergecraft/agents/codex.py`` — ``item.completed`` does not yet
-  set ``tool.exit_code`` / ``tool.input_bytes`` / ``tool.input_keys``.
-- ``src/mergecraft/agents/gemini.py`` — ``tool_result`` does not yet set
-  ``tool.exit_code`` / ``tool.output_bytes`` / ``tool.output_kind``.
-- ``src/mergecraft/agents/_tool_attrs.py`` — the shared
-  ``KNOWN_VERB_TOOLS`` / ``emit_verb_subevent`` module is missing.
-- ``src/mergecraft/tracing/redaction.py`` — ``redact_tool_payload`` is
-  missing.
+  did not yet set ``tool.error_class``.
+- ``src/mergecraft/agents/{claude,codex,gemini}.py`` — driver tool
+  spans did not yet set ``tool.exit_code`` / input/output bytes /
+  ``result_kind``.
+- ``src/mergecraft/tracing/_tool_attrs.py`` — the shared
+  ``KNOWN_VERB_TOOLS`` / ``enrich_tool_request`` /
+  ``enrich_tool_response`` / ``emit_verb_subevent`` module was missing.
+- ``src/mergecraft/tracing/redaction.py`` — ``redact_tool_payload``
+  was missing.
 
-Acceptance (after T1.2 lands): **11 collected; 10 green; 1 xfailed**.
-Test 6 (``test_known_verb_tool_emits_verb_sub_event``) is the single
-xfail — emitting the verb-named child span (``tool.browse`` for
-``tool.name == "browser"``) is the defining T1.2 surface. The xfail
-marker is ``strict=False`` so an unsatisfied xfail never hard-fails the
-suite (the T1.2 impl wave is allowed to turn tests green on touch).
+Acceptance (as shipped): **11 collected; 11 green; 0 xfailed**. Test 6
+(``test_known_verb_tool_emits_verb_sub_event``) is the verb-named
+child-span (``tool.browse`` for ``tool.name == "browser"``) — was the
+sole T1.2 xfail at RED-suite time and was reconciled by the T1
+xfail-cleanup commit (``9021fd1``).
 """
 
 from __future__ import annotations
@@ -131,12 +128,12 @@ def test_mcp_tool_call_span_has_request_attrs(
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="mcp-success", run_id="mcp-success-run")
 
-    # The MCP handler binds ``get_tracer_from_settings`` via a lazy
+    # The MCP handler binds ``get_tracer_from_settings`` via a top-level
     # ``from mergecraft.tracing.tracer import get_tracer_from_settings``
-    # inside the request closure. Patch the canonical symbol so the
-    # returned tracer routes every emitted span onto our ``MemorySink``.
+    # import (W4 hoist). Patch the canonical symbol so the returned tracer
+    # routes every emitted span onto our ``MemorySink``.
     monkeypatch.setattr(
-        "mergecraft.tracing.tracer.get_tracer_from_settings",
+        "mergecraft.mcp.server.get_tracer_from_settings",
         lambda _settings: tracer,
     )
 
@@ -215,7 +212,7 @@ def test_mcp_tool_call_span_has_error_attrs(
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="mcp-error", run_id="mcp-error-run")
     monkeypatch.setattr(
-        "mergecraft.tracing.tracer.get_tracer_from_settings",
+        "mergecraft.mcp.server.get_tracer_from_settings",
         lambda _settings: tracer,
     )
 

@@ -41,7 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enrichment on the open/close sites they already emit from. New
   `src/mergecraft/agents/_tool_attrs.py` ships `KNOWN_VERB_TOOLS`,
   `enrich_tool_call_attrs`, `emit_verb_subevent`, and `_classify_tool_result`
-  so all three drivers + the MCP server share one source of truth. New
+  so all three drivers + the MCP server share one source of truth. The
+  `enrich_tool_call_attrs` helper landed in T1 as a single combined helper;
+  W4 split it into the open-side `enrich_tool_request` and close-side
+  `enrich_tool_response` (see the W4 `### Changed` entry below). New
   `mergecraft.tracing.redaction.redact_tool_payload(payload)` extends the
   existing D7 redaction boundary: stringifies non-str values via
   `json.dumps(default=str)`, caps at `TRACE_ATTRS_JSON_MAX_BYTES` (returning
@@ -84,6 +87,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Tracing: tool-call attribute helpers moved from `agents/_tool_attrs.py` to
+  `tracing/_tool_attrs.py` so the MCP package no longer reaches into agents
+  (W4 H3); the single `enrich_tool_call_attrs` helper split into the open-
+  side `enrich_tool_request` and the close-side `enrich_tool_response`
+  (W4 M1 — each call site is now one obvious line and the codex double-set
+  bug is fixed).
+- Tracing: three different redacted sentinels (`[REDACTED]`, `<redacted>`,
+  masked lines) collapsed to the single canonical `REDACTED = "<redacted>"`
+  literal in `tracing/redaction.py` (W4 H4).
+- Tracing: `tracing/tracer.py` gained `active_span_for` (W4 M4) and the
+  `Span.close()` method (W4 M6); new `provider_llm_pair` context manager
+  pairs a `provider.call` parent with its `llm.call` child on a shared
+  `parent_span_id` (W4 H1) — the three driver event handlers now store one
+  `ProviderLLMPair` per attempt instead of two independent span dicts
+  (W5 H1, M2).
+- Tracing: `tracing/http.py` short-circuits to a true no-op when the caller
+  passes `None` or a `NullTracer` (W4 H6).
+- Tracing: `agents/opencode.py` no longer constructs a `Tracer` whose result
+  was discarded (W4 H7).
 - Docker Action images pin base layers, `uv`, Node, `gh`, and agent CLIs by
   digest or lockfile so rebuilds are reproducible and Dependabot can bump
   every pinned artifact
