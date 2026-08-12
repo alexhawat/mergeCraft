@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
@@ -19,11 +19,29 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
 
+def loads_trivy_object(raw: str) -> dict[str, Any]:
+    """Parse trivy JSON, tolerating log lines that precede the object.
+
+    Trivy (and some CI sandboxes) can emit timestamped INFO lines before the
+    report. ``json.loads`` then treats the leading year (e.g. ``2026``) as a
+    complete value and raises ``Extra data`` at column 5.
+    """
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(raw):
+        if char != "{":
+            continue
+        try:
+            payload, _end = decoder.raw_decode(raw, index)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return cast("dict[str, Any]", payload)
+    msg = "trivy JSON output must be an object"
+    raise ValueError(msg)
+
+
 def parse_trivy_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> list[Finding]:
-    payload = json.loads(raw)
-    if not isinstance(payload, dict):
-        msg = "trivy JSON output must be an object"
-        raise ValueError(msg)
+    payload = loads_trivy_object(raw)
 
     category = taxonomy_category(manifest)
     findings: list[Finding] = []
@@ -82,4 +100,4 @@ def parse_trivy_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -
     return findings
 
 
-__all__ = ["parse_trivy_json"]
+__all__ = ["loads_trivy_object", "parse_trivy_json"]

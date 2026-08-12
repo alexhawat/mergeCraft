@@ -21,6 +21,7 @@ detect:
 command:
   - trivy
   - fs
+  - --quiet
   - --format
   - json
   - --scanners
