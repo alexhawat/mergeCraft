@@ -481,22 +481,19 @@ def _run_opencode_cli_streaming(
         consume_stream,
     )
     from mergecraft.tracing.sinks import claim_sink
-    from mergecraft.tracing.tracer import (
-        Tracer,
-        resolve_correlation_from_env,
-        resolve_session_id,
-    )
 
     accumulator = StreamSpanAccumulator(agent_name="opencode")
+    # W4 H7 — the legacy code claimed a sink and built a Tracer but discarded it.
+    # Opencode's stream handler is currently a no-op closure, so the tracer had
+    # no observer to wire into. We keep the resolve + claim path so the sink
+    # is still claimed (preventing the NullSink fallback during this run), but
+    # we no longer construct the unused Tracer. If opencode gains real
+    # stream handlers in the future, wire the Tracer into ``consume_stream``
+    # here.
     try:
         from mergecraft.tracing.resolve import resolve_active_tracing
 
-        sink = claim_sink(resolve_active_tracing())
-        if sink is not None:
-            correlation = resolve_correlation_from_env()
-            session_id = resolve_session_id()
-            run_id = str(correlation.get("run_id") or session_id)
-            Tracer(sink=sink, session_id=session_id, run_id=run_id)
+        claim_sink(resolve_active_tracing())
     except Exception as exc:
         logger.debug("opencode stream tracer resolution failed: {}", exc)
 

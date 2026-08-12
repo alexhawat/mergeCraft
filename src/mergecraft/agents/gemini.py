@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.agents._tool_attrs import emit_verb_subevent, enrich_tool_call_attrs
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
@@ -25,6 +24,12 @@ from mergecraft.agents.shared import (
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.tracing._tool_attrs import (
+    emit_verb_subevent,
+    enrich_tool_request,
+    enrich_tool_response,
+)
+from mergecraft.tracing.redaction import redact_tool_payload
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
@@ -431,13 +436,9 @@ def _gemini_stream_event_handler(
                 span.set_attribute("gen_ai.tool.call.id", tool_id)
                 tool_input = event.get("input")
                 if tool_input is not None:
-                    # T1 / D5 — request-side enrichment so Logfire's row
-                    # inspector surfaces the request shape (byte count,
-                    # input-key list, full input dict).
-                    enrich_tool_call_attrs(span, arguments=tool_input)
+                    # T1 / D5 / W4 — request-side enrichment via the shared helper.
+                    enrich_tool_request(span, arguments=tool_input)
                     span.set_attribute("tool.input", tool_input)
-                    from mergecraft.tracing.redaction import redact_tool_payload
-
                     span.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
                 open_tool_spans[tool_id] = {"span": span, "name": tool_name}
             return
@@ -450,15 +451,12 @@ def _gemini_stream_event_handler(
             span_obj = entry.get("span")
             if span_obj is not None:
                 tool_output = str(event.get("output") or "")
-                # T1 / D5 — response-side enrichment: exit_code, byte
-                # count, kind label, and the verbatim output for the row.
-                enrich_tool_call_attrs(span_obj, output=tool_output, exit_code="ok")
+                # T1 / D5 / W4 — response-side enrichment via the shared helper.
+                enrich_tool_response(span_obj, output=tool_output)
                 span_obj.set_attribute("tool.output", tool_output)
-                from mergecraft.tracing.redaction import redact_tool_payload
-
                 span_obj.set_attribute("gen_ai.tool.output", redact_tool_payload(tool_output))
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
+                # W4 / M6 — ``Span.close`` owns end-time + active-context reset.
+                span_obj.close()
                 # T1 / D5 — known-verb tools also emit a verb-specific
                 # child span (tool.browse for ``browser``, etc.) for
                 # finer-grained Logfire grouping. Fire-and-forget; no new
@@ -485,8 +483,8 @@ def _gemini_stream_event_handler(
                     span_obj.set_attribute("cost.tokens_out", entry["tokens_out"])
                     span_obj.set_attribute("gen_ai.usage.input_tokens", entry["tokens_in"])
                     span_obj.set_attribute("gen_ai.usage.output_tokens", entry["tokens_out"])
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    # W4 / M6 — ``Span.close`` owns end-time + active-context reset.
+                    span_obj.close()
             open_llm_spans.clear()
             # T2 / D10 — close the wrapping provider.call span after the
             # inner llm.call span so the active-span stack unwinds
@@ -494,8 +492,7 @@ def _gemini_stream_event_handler(
             for entry in list(open_provider_spans.values()):
                 span_obj = entry.get("span")
                 if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    span_obj.close()
             open_provider_spans.clear()
             return
 
@@ -508,21 +505,18 @@ def _gemini_stream_event_handler(
             for entry in list(open_tool_spans.values()):
                 span_obj = entry.get("span")
                 if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    span_obj.close()
             open_tool_spans.clear()
             for entry in list(open_llm_spans.values()):
                 span_obj = entry.get("span")
                 if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    span_obj.close()
             open_llm_spans.clear()
             # T2 / D10 — close any wrapping provider.call span.
             for entry in list(open_provider_spans.values()):
                 span_obj = entry.get("span")
                 if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    span_obj.close()
             open_provider_spans.clear()
             return
 

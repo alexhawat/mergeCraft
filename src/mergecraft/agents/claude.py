@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
-from mergecraft.agents._tool_attrs import emit_verb_subevent, enrich_tool_call_attrs
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
@@ -37,6 +36,12 @@ from mergecraft.agents.verifier import (
     VERIFIER_SYSTEM_PROMPT,
     pinned_judge_model,
 )
+from mergecraft.tracing._tool_attrs import (
+    emit_verb_subevent,
+    enrich_tool_request,
+    enrich_tool_response,
+)
+from mergecraft.tracing.redaction import redact_tool_payload
 from mergecraft.tracing.sinks import claim_sink
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.privilege import wrap_agent_command
@@ -336,18 +341,17 @@ def _claude_stream_event_handler(
             # spans — typical shape is one open span at a time. The
             # ``provider.call`` span wraps the ``llm.call`` span (D10) and
             # closes after the inner span closes so the active-span stack
-            # unwinds cleanly.
+            # unwinds cleanly. W4 / M6 — use ``Span.close`` so the
+            # end-time + active-context reset happens in one place.
             for entry in list(open_llm_spans.values()):
                 span_obj = entry.get("span")
                 if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    span_obj.close()
             open_llm_spans.clear()
             for entry in list(open_provider_spans.values()):
                 span_obj = entry.get("span")
                 if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    span_obj.close()
             open_provider_spans.clear()
             return
 
@@ -371,12 +375,7 @@ def _claude_stream_event_handler(
             span.set_attribute("gen_ai.operation.name", "execute_tool")
             span.set_attribute("gen_ai.tool.name", tool_name)
             span.set_attribute("gen_ai.tool.call.id", tool_id)
-            # T1 / D5 — request-side enrichment: byte counts + input-key list
-            # so Logfire's row inspector surfaces the request shape even when
-            # the driver carries the input as a dict (claude always does).
-            from mergecraft.tracing.redaction import redact_tool_payload
-
-            enrich_tool_call_attrs(span, arguments=tool_input)
+            enrich_tool_request(span, arguments=tool_input)
             span.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
             span.ts_start_ns = time.time_ns()
             span.__enter__()
@@ -405,14 +404,10 @@ def _claude_stream_event_handler(
             if span is not None:
                 output = event.get("content") or ""
                 span.ts_end_ns = time.time_ns()
-                # T1 / D5 — response-side enrichment: exit_code, byte
-                # count, kind label, and the verbatim output for the row.
-                enrich_tool_call_attrs(span, output=output, exit_code="ok")
+                enrich_tool_response(span, output=output)
                 span.set_attribute("tool.output", output)
-                from mergecraft.tracing.redaction import redact_tool_payload
-
                 span.set_attribute("gen_ai.tool.output", redact_tool_payload(output))
-                span.__exit__(None, None, None)
+                span.close()
                 # T1 / D5 — known-verb tools also emit a verb-specific child
                 # span (tool.browse for ``browser``, etc.) for finer-grained
                 # Logfire grouping. Fire-and-forget; no new bookkeeping.
@@ -460,22 +455,22 @@ def _claude_stream_event_handler(
             span = open_tool_spans.pop(tool_id)
             if span is not None:
                 if span._context_token is not None:
-                    span.__exit__(None, None, None)
+                    span.close()
         # Then llm.call spans, in reverse insertion order.
         for key in list(reversed(list(open_llm_spans.keys()))):
             entry = open_llm_spans.pop(key)
             span = entry.get("span") if isinstance(entry, dict) else None
             if span is not None and span._context_token is not None:
-                span.__exit__(None, None, None)
+                span.close()
         # T2 / D10 — provider.call spans wrap llm.call spans. Close after
         # the llm.call spans so the active-span stack unwinds inner-to-outer.
         for key in list(reversed(list(open_provider_spans.keys()))):
             entry = open_provider_spans.pop(key)
             span = entry.get("span") if isinstance(entry, dict) else None
             if span is not None and span._context_token is not None:
-                span.__exit__(None, None, None)
+                span.close()
         # Defensive: the streaming event order can leave ``_ACTIVE_SPAN``
-        # pointing at a closed span because individual ``__exit__`` calls
+        # pointing at a closed span because individual ``close`` calls
         # popped the wrong ContextVar frame. Clear the slot so the next
         # run starts from a known-clean state.
         active = _ACTIVE_SPAN.get()

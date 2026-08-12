@@ -84,6 +84,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Tracing: tool-call attribute helpers moved from `agents/_tool_attrs.py` to
+  `tracing/_tool_attrs.py` so the MCP package no longer reaches into agents,
+  and the single `enrich_tool_call_attrs` helper is split into the open-side
+  `enrich_tool_request` / close-side `enrich_tool_response` pair (each call
+  site is one obvious line, and the codex double-set bug is fixed). Three
+  different redacted sentinels (`[REDACTED]`, `<redacted>`, masked lines)
+  collapsed to the single canonical `REDACTED = "<redacted>"` literal in
+  `tracing/redaction.py`. `tracing/tracer.py` gained `active_span_for`
+  (W4 M4) and the `Span.close()` method (W4 M6); `tracing/http.py` short-
+  circuits to a true no-op when the caller passes `None` or a `NullTracer`
+  (W4 H6). `agents/opencode.py` no longer constructs a `Tracer` whose result
+  was discarded. New `provider_llm_pair` context manager pairs a
+  `provider.call` parent with its `llm.call` child on a shared
+  `parent_span_id` (W4 H1).
 - Docker Action images pin base layers, `uv`, Node, `gh`, and agent CLIs by
   digest or lockfile so rebuilds are reproducible and Dependabot can bump
   every pinned artifact

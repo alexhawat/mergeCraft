@@ -7,13 +7,11 @@ import json
 import os
 import shutil
 import subprocess
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.agents._tool_attrs import emit_verb_subevent, enrich_tool_call_attrs
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
     CUSTOM_PROVIDER_BASE_URL_ENV,
@@ -33,6 +31,12 @@ from mergecraft.agents.shared import (
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.tracing._tool_attrs import (
+    emit_verb_subevent,
+    enrich_tool_request,
+    enrich_tool_response,
+)
+from mergecraft.tracing.redaction import redact_tool_payload
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
@@ -851,20 +855,15 @@ def _codex_stream_event_handler(
                     span_obj.set_attribute("gen_ai.tool.name", resolved_name)
                     tool_input = str(item.get("input") or "")
                     span_obj.set_attribute("tool.input", tool_input)
-                    from mergecraft.tracing.redaction import redact_tool_payload
-
                     span_obj.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
-                    # T1 / D5 — response-side enrichment on the close path:
-                    # codex emits tool_call + tool_result as sibling
-                    # ``item.completed`` events; the request side is
-                    # ``tool.input`` (string), the response side is the
-                    # synthesized exit_code/byte-count/kind set so Logfire
-                    # still has the request/response split on a single row.
-                    enrich_tool_call_attrs(
-                        span_obj, arguments=tool_input, output=tool_input, exit_code="ok"
-                    )
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    # T1 / D5 / W4 — request + response enrichment on the
+                    # close path. W4 / H2 — the split helpers mean each
+                    # call site is one obvious line; the prior codex
+                    # double-set bug (``arguments=tool_input,
+                    # output=tool_input``) is gone.
+                    enrich_tool_request(span_obj, arguments=tool_input)
+                    enrich_tool_response(span_obj, output=tool_input)
+                    span_obj.close()
                     # T1 / D5 — known-verb tools also emit a verb-specific
                     # child span (tool.browse for ``browser``, etc.) for
                     # finer-grained Logfire grouping. Fire-and-forget; no
@@ -904,8 +903,8 @@ def _codex_stream_event_handler(
                     span_obj.set_attribute("cost.tokens_out", entry["tokens_out"])
                     span_obj.set_attribute("gen_ai.usage.input_tokens", entry["tokens_in"])
                     span_obj.set_attribute("gen_ai.usage.output_tokens", entry["tokens_out"])
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    # W4 / M6 — ``Span.close`` owns end-time + active-context reset.
+                    span_obj.close()
             open_llm_spans.clear()
             # T2 / D10 — close the wrapping provider.call span after the
             # inner llm.call span so the active-span stack unwinds
@@ -913,8 +912,7 @@ def _codex_stream_event_handler(
             for entry in list(open_provider_spans.values()):
                 span_obj = entry.get("span")
                 if span_obj is not None:
-                    span_obj.ts_end_ns = time.time_ns()
-                    span_obj.__exit__(None, None, None)
+                    span_obj.close()
             open_provider_spans.clear()
             return
 
@@ -922,21 +920,18 @@ def _codex_stream_event_handler(
         for entry in list(open_tool_spans.values()):
             span_obj = entry.get("span")
             if span_obj is not None:
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
+                span_obj.close()
         open_tool_spans.clear()
         for entry in list(open_llm_spans.values()):
             span_obj = entry.get("span")
             if span_obj is not None:
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
+                span_obj.close()
         open_llm_spans.clear()
         # T2 / D10 — provider.call spans wrap llm.call spans.
         for entry in list(open_provider_spans.values()):
             span_obj = entry.get("span")
             if span_obj is not None:
-                span_obj.ts_end_ns = time.time_ns()
-                span_obj.__exit__(None, None, None)
+                span_obj.close()
         open_provider_spans.clear()
 
     return handler, close_all
