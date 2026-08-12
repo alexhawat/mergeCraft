@@ -14,7 +14,7 @@ from mergecraft.analyzers.parsers.buf_native import parse_buf_breaking_json, par
 from mergecraft.analyzers.parsers.oasdiff_json import parse_oasdiff_json
 from mergecraft.analyzers.parsers.squawk_json import parse_squawk_json
 from mergecraft.analyzers.paths import safe_repo_relative_path
-from mergecraft.analyzers.registry import filter_changed_files_for_manifest, get_manifest
+from mergecraft.analyzers.registry import _matches_detect_patterns, get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, resolve_analyzer
 
 if TYPE_CHECKING:
@@ -25,6 +25,16 @@ TrustTier = Literal["trusted", "untrusted"]
 
 DIFFERENTIAL_CONTRACT_TOOLS: frozenset[str] = frozenset({"oasdiff", "squawk", "buf"})
 _FIXTURE_BASE_REF = "fixture-base"
+
+
+def _scope_changed_files(manifest: AnalyzerManifest, changed_files: list[str]) -> list[str]:
+    """Keep only paths matching this manifest's detect globs.
+
+    Uses ``_matches_detect_patterns`` directly so a stale import of
+    ``filter_changed_files_for_manifest`` cannot leak from tests that
+    monkeypatch the registry helper while ``contracts`` is first imported.
+    """
+    return [path for path in changed_files if _matches_detect_patterns(path, manifest.detect.files)]
 
 
 def _missing_base_skip_reason(tool_id: str, base_ref: str | None) -> str:
@@ -142,7 +152,7 @@ def _run_oasdiff(
     tier: TrustTier,
     allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
-    scoped = filter_changed_files_for_manifest(manifest, changed_files)
+    scoped = _scope_changed_files(manifest, changed_files)
     if not scoped:
         return AdapterRunResult(
             findings=[],
@@ -205,7 +215,7 @@ def _run_squawk(
     allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
     _ = base_ref
-    scoped = filter_changed_files_for_manifest(manifest, changed_files)
+    scoped = _scope_changed_files(manifest, changed_files)
     if not scoped:
         return AdapterRunResult(
             findings=[],
@@ -267,7 +277,7 @@ def _run_buf(
     tier: TrustTier,
     allow_repo_binaries: bool = True,
 ) -> AdapterRunResult:
-    scoped = filter_changed_files_for_manifest(manifest, changed_files)
+    scoped = _scope_changed_files(manifest, changed_files)
     if not scoped:
         return AdapterRunResult(
             findings=[],
