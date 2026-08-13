@@ -38,7 +38,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | **W5** | *(reconciled)* `tests/docs/test_distribution_checklist.py` — xfails dropped; real passes | — |
 | **W6** | *(reconciled)* `tests/ci/test_coverage_ratchet.py` — xfails dropped; real passes | — |
 | **W7** | *(reconciled)* `tests/tracing/test_otlp_collector_e2e.py` — xfails dropped; dump-backed cases pass when collector env is set | — |
-| **W8** | `tests/ci/test_ruff_advisory_families.py` | `green after W8:` |
+| **W8** | *(reconciled)* `tests/ci/test_ruff_advisory_families.py` — xfails dropped; real passes | — |
 | **W9** | `tests/evals/test_benchmark_publication.py` (except S5 helper pin) | `green after W9:` |
 
 ### Already green (regression pins — no xfail)
@@ -57,6 +57,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | `test_no_skips_when_no_secret_test_exists` | audit-escape meta-guard (matches `def test_*` names only; ignores its own helper strings) |
 | `tests/docs/test_distribution_checklist.py` (all seven cases) | W5 landed distribution checklist; xfails dropped |
 | `tests/ci/test_coverage_ratchet.py` (all four cases) | W6 landed coverage-gate in `make ci` + ratchet; xfails dropped |
+| `tests/ci/test_ruff_advisory_families.py` | W8 landed ERA enforce + drop + advisory CI; xfails dropped |
 | `test_yes_package_not_renamed_unless_d15_allows` | D15 default |
 | `test_s5_prompt_version_helper_is_available` | S5 (#145) merged |
 
@@ -158,12 +159,15 @@ fail loudly if that env is unset (no in-memory fallback). Without Docker,
 Named deliverables: `scripts/run_otlp_collector_e2e.py` (`main`), Make
 target `test-otlp-collector`.
 
-### W8 — ruff families (#146)
+### W8 — ruff families (#146) — green after W8 impl (`26fa772`) + xfail recon
 
 | Contract | Layer | Tests |
 |----------|-------|-------|
 | No family in both `select` and `ignore` | unit | `test_no_ruff_family_in_both_select_and_ignore` |
 | Remaining selected former-advisory family is enforced | unit | `test_remaining_selected_family_is_enforced` (parametrized; drop from `select` is allowed) |
+| Named Make target `lint-ruff-advisory` | unit | `test_makefile_defines_lint_ruff_advisory_target` |
+| Named `RUFF_ADVISORY_FAMILIES` default BLE,PTH,PERF,C901 | unit | `test_ruff_advisory_families_default_is_ble_pth_perf_c901` |
+| CI step is non-blocking | unit | `test_integration_yml_runs_lint_ruff_advisory_non_blocking` (**guard-deletion**) |
 
 D21: if enforcing a family requires `tests/` churn, stop and re-dispatch test-creator.
 
@@ -196,6 +200,7 @@ Do not invent metric values in tests. Named symbols: `compute_prompt_version`,
 | 2026-08-13 | W5 | `_W5` on six contracts in `tests/docs/test_distribution_checklist.py` | D15 yes/ pin was already unxfail'd; leave W6–W9 markers |
 | 2026-08-13 | W6 | `_W6` on four contracts in `tests/ci/test_coverage_ratchet.py` | parse `fail_under` from pyproject (70); leave W7–W9 markers |
 | 2026-08-13 | W7 | `_W7` on eight contracts in `tests/tracing/test_otlp_collector_e2e.py` | SHA-pin was already unxfail'd; named `run_otlp_collector_e2e` / `test-otlp-collector` pins added; leave W8–W9 markers |
+| 2026-08-13 | W8 | `_W8` on two contracts (17 parametrized cases) in `tests/ci/test_ruff_advisory_families.py` | Added `lint-ruff-advisory` / `RUFF_ADVISORY_FAMILIES` pins; leave W9 markers |
 
 ## Driving live / collector tests
 

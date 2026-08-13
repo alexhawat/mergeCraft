@@ -1,21 +1,22 @@
-"""W8 — blocking ``make lint`` must not select-and-ignore whole ruff families (#146)."""
+"""W8 — blocking ``make lint`` must not select-and-ignore whole ruff families (#146).
+
+W8 landed: ERA is enforced; 11 noisy families dropped from ``select``;
+BLE/PTH/PERF/C901 run only via non-blocking ``make lint-ruff-advisory``.
+"""
 
 from __future__ import annotations
 
+import re
 import subprocess
 import tomllib
 from pathlib import Path
 
 import pytest
 
-from tests.ci.workflow_support import REPO_ROOT
+from tests.ci.workflow_support import REPO_ROOT, load_workflow, read_text
 
-_W8 = pytest.mark.xfail(
-    reason="green after W8: enforce or drop advisory-only ruff families",
-    strict=False,
-)
-
-# Families listed as "Advisory-only — not blocking lint" in pyproject.toml today.
+# Families listed as "Advisory-only — not blocking lint" in pyproject.toml
+# before W8. Drop from ``select`` is an allowed outcome.
 _ADVISORY_FAMILIES = (
     "SLF",
     "BLE",
@@ -56,6 +57,8 @@ _SAMPLES: dict[str, str] = {
     + "\n    return 0\n",
 }
 
+_ADVISORY_DEFAULT = ("BLE", "PTH", "PERF", "C901")
+
 
 def _ruff_lists() -> tuple[list[str], list[str]]:
     data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -63,7 +66,6 @@ def _ruff_lists() -> tuple[list[str], list[str]]:
     return list(lint.get("select", [])), list(lint.get("ignore", []))
 
 
-@_W8
 def test_no_ruff_family_in_both_select_and_ignore() -> None:
     """Blocking ``make lint`` config: a family is enforced or absent, never both."""
     select, ignore = _ruff_lists()
@@ -94,10 +96,9 @@ def _ruff_reports(snippet: str, family: str, tmp_path: Path) -> bool:
     return proc.returncode != 0
 
 
-@_W8
 @pytest.mark.parametrize("family", _ADVISORY_FAMILIES)
 def test_remaining_selected_family_is_enforced(family: str, tmp_path: Path) -> None:
-    """If W8 keeps a former advisory family in ``select``, a sample violation must fail ruff.
+    """If a former advisory family stays in ``select``, a sample violation must fail ruff.
 
     Dropped families (absent from ``select``) are an allowed W8 outcome.
     """
@@ -109,3 +110,52 @@ def test_remaining_selected_family_is_enforced(family: str, tmp_path: Path) -> N
     assert _ruff_reports(snippet, family, tmp_path), (
         f"{family} is selected but the sample violation was not reported"
     )
+
+
+def test_makefile_defines_lint_ruff_advisory_target() -> None:
+    """Named deliverable: ``lint-ruff-advisory`` must exist and select advisory families."""
+    makefile = read_text("Makefile")
+    assert re.search(r"^lint-ruff-advisory:", makefile, re.MULTILINE), (
+        "Make target lint-ruff-advisory missing"
+    )
+    assert "lint-ruff-advisory" in makefile
+    recipe = re.search(
+        r"^lint-ruff-advisory:.*\n(?:\t.*\n)*",
+        makefile,
+        re.MULTILINE,
+    )
+    assert recipe is not None, "lint-ruff-advisory recipe missing"
+    assert "--select" in recipe.group(0)
+    assert "$(RUFF_ADVISORY_FAMILIES)" in recipe.group(0)
+
+
+def test_ruff_advisory_families_default_is_ble_pth_perf_c901() -> None:
+    """Named deliverable: ``RUFF_ADVISORY_FAMILIES`` defaults to the W8 advisory set."""
+    makefile = read_text("Makefile")
+    match = re.search(
+        r"^RUFF_ADVISORY_FAMILIES\s*\??=\s*(\S+)\s*$",
+        makefile,
+        re.MULTILINE,
+    )
+    assert match is not None, "RUFF_ADVISORY_FAMILIES assignment missing from Makefile"
+    families = tuple(part.strip() for part in match.group(1).split(",") if part.strip())
+    assert families == _ADVISORY_DEFAULT, (
+        f"RUFF_ADVISORY_FAMILIES default {families!r} != {_ADVISORY_DEFAULT!r}"
+    )
+
+
+def test_integration_yml_runs_lint_ruff_advisory_non_blocking() -> None:
+    """CI must invoke ``make lint-ruff-advisory`` with ``continue-on-error``."""
+    doc = load_workflow("integration.yml")
+    jobs = doc.get("jobs") or {}
+    found = False
+    for job in jobs.values():
+        for step in job.get("steps") or []:
+            run = str(step.get("run") or "")
+            if "lint-ruff-advisory" not in run:
+                continue
+            found = True
+            assert step.get("continue-on-error") is True, (
+                "lint-ruff-advisory CI step must be continue-on-error: true"
+            )
+    assert found, "integration.yml never runs make lint-ruff-advisory"
