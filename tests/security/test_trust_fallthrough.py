@@ -261,3 +261,82 @@ def test_every_caller_tolerates_untrusted_default(
     assert resolve_selection_tier(mode="auto", tier=tier) == "untrusted"
     assert resolve_selection_tier(mode="full", tier=tier) == "untrusted"
     assert resolve_selection_tier(mode="untrusted-only", tier=tier) == "untrusted"
+
+
+def test_issue_comment_trusted_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue_comment with OWNER author_association is trusted."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+    tier = derive_trust_tier(
+        event={
+            "comment": {"author_association": "OWNER"},
+        }
+    )
+    assert tier == "trusted"
+
+
+def test_issue_comment_trusted_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue_comment with MEMBER author_association is trusted."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+    tier = derive_trust_tier(
+        event={
+            "comment": {"author_association": "MEMBER"},
+        }
+    )
+    assert tier == "trusted"
+
+
+def test_issue_comment_trusted_collaborator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue_comment with COLLABORATOR author_association is trusted."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+    tier = derive_trust_tier(
+        event={
+            "comment": {"author_association": "COLLABORATOR"},
+        }
+    )
+    assert tier == "trusted"
+
+
+def test_issue_comment_contributor_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue_comment with a non-trusted author_association resolves to untrusted."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+    tier = derive_trust_tier(
+        event={
+            "comment": {"author_association": "CONTRIBUTOR"},
+        }
+    )
+    assert tier == "untrusted"
+
+
+def test_issue_comment_empty_comment_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue_comment with no comment dict resolves to untrusted."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+    tier = derive_trust_tier(event={"some": "payload"})
+    assert tier == "untrusted"
+
+
+def test_issue_comment_missing_association_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue_comment without author_association key resolves to untrusted."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+    tier = derive_trust_tier(event={"comment": {"body": "nice"}})
+    assert tier == "untrusted"
+
+
+def test_issue_comment_wrong_type_association_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue_comment with non-string author_association resolves to untrusted."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+    tier = derive_trust_tier(event={"comment": {"author_association": 42}})
+    assert tier == "untrusted"

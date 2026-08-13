@@ -23,6 +23,7 @@ from mergecraft.analyzers.trust import (
     resolve_analyzers_mode,
 )
 from mergecraft.evidence.run_packet import emit_run_packet
+from mergecraft.main_outcome import _classify_outcome, _publish_span_attrs
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
@@ -885,58 +886,25 @@ async def main() -> MainResult:
         # ``setup_failure_policy`` to the resolution.
         prep_reason = await _prep_failure_reason(tool_context)
         setup_reason = tool_state.setup_hook_failure or ""
-        setup_policy = settings.setup_failure_policy
-
-        if not result.success:
-            outcome = RunOutcome.failed
-            failure_reason = result.error
-        elif setup_reason and setup_policy == "fail":
-            # D10 ``fail`` — operator has declared the failure is unrecoverable.
-            outcome = RunOutcome.configuration_error
-            failure_reason = setup_reason
-            logger.warning(
-                "» setup script failure mapped run to configuration_error (fail policy): {}",
-                setup_reason,
-            )
-        elif setup_reason and setup_policy == "inconclusive":
-            # D5 / D10 default — under-provisioned tree is no-verdict.
-            outcome = RunOutcome.inconclusive
-            failure_reason = setup_reason
-            logger.warning("» setup script failure mapped run to inconclusive: {}", setup_reason)
-        elif prep_reason:
-            outcome = RunOutcome.inconclusive
-            failure_reason = prep_reason
-            logger.warning("» prep failure mapped run to inconclusive: {}", prep_reason)
-        else:
-            outcome = RunOutcome.passed
-            failure_reason = None
+        outcome, failure_reason = _classify_outcome(
+            result=result,
+            setup_reason=setup_reason,
+            setup_policy=settings.setup_failure_policy,
+            prep_reason=prep_reason,
+        )
 
         packet_path: str | None = None
         if tool_context:
-            from mergecraft.tracing.event import trace_attrs_for_mode
             from mergecraft.tracing.tracer import get_tracer_from_settings
 
             tracer = get_tracer_from_settings(settings)
-            # S5 (#145) — the run-dispatch span carries the mode name and its
-            # content-hash prompt version (the same row the packet records),
-            # so an archived trace row is attributable to the prompt that
-            # produced it. ``selected_mode`` is the mode the agent dispatched
-            # on, not the configured catalog (``ctx.modes``) — conflated, the
-            # span would advertise every catalog mode as having run this
-            # trace, mirroring the packet bug the same fix corrected. When no
-            # mode has been selected yet (an early-exit run), the dict is
-            # empty and the trace still emits.
             selected_mode_obj = next(
                 (m for m in tool_context.modes if m.name == tool_context.tool_state.selected_mode),
                 None,
             )
-            mode_attrs = trace_attrs_for_mode(selected_mode_obj) if selected_mode_obj else {}
             with tracer.start_span(
                 "mergecraft.publish",
-                attrs_source=lambda: {
-                    "run_succeeded": outcome is RunOutcome.passed,
-                    **mode_attrs,
-                },
+                attrs_source=lambda: _publish_span_attrs(outcome, selected_mode_obj),
             ) as _publish_span:
                 await persist_learnings(tool_context)
                 await report_status_checks(
