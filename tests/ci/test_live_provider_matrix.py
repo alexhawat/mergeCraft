@@ -1,14 +1,23 @@
 """W4 — nightly live-provider matrix YAML / Makefile contracts (R-F3).
 
-Live HTTP/CLI requests live in ``tests/integration/``. This module only
-parses workflow + Make + pytest config so a missing ``live`` selector or a
-silent ``exit 0`` skip cannot hide as an integration skip.
+Live HTTP/CLI requests live in ``tests/integration/``. This module pins
+workflow + Make + runner contracts so a missing ``live`` marker or a silent
+``exit 0`` skip cannot hide as an integration skip. Marker selection is
+``run_live_integration.LIVE_PYTEST_MARKER`` — not a Makefile ``live_selector``
+decoy.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import re
+from typing import Any
 
+from mergecraft.integrations.live_providers import (
+    DEFAULT_CREDENTIAL_SLUGS,
+    PROVIDER_SECRET_ENV,
+    missing_live_credentials,
+)
 from tests.ci.workflow_support import REPO_ROOT, job, load_workflow, read_text
 
 # This guard's own name contains the forbidden substring; skip it by identity.
@@ -26,8 +35,18 @@ def test_live_marker_registered_in_pytest_ini() -> None:
     )
 
 
-def test_test_integration_live_selects_live_marker() -> None:
-    """``make test-integration-live`` must select ``-m live``, not ``-m integration``."""
+def _load_script(name: str) -> Any:
+    path = REPO_ROOT / "scripts" / f"{name}.py"
+    assert path.is_file(), f"scripts/{name}.py missing"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _live_makefile_body() -> str:
     makefile = read_text("Makefile")
     match = re.search(
         r"^test-integration-live:.*?(?=\n(?:[a-zA-Z0-9_.-]+:|$))",
@@ -35,27 +54,76 @@ def test_test_integration_live_selects_live_marker() -> None:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, "test-integration-live target missing from Makefile"
-    body = match.group(0)
-    assert re.search(r'-m\s+"live"|-m\s+live|-m\s+"[^"]*\blive\b', body), (
-        f"test-integration-live does not select -m live:\n{body}"
+    return match.group(0)
+
+
+def test_test_integration_live_selects_live_marker() -> None:
+    """Live pytest selection is ``LIVE_PYTEST_MARKER`` on the runner, not Make decoy."""
+    runner = _load_script("run_live_integration")
+    assert runner.LIVE_PYTEST_MARKER == "live"
+    body = _live_makefile_body()
+    assert "run_live_integration.py" in body, (
+        f"test-integration-live must delegate to run_live_integration.py:\n{body}"
     )
-    assert '-m "integration"' not in body or "live" in body
+    assert "MERGECRAFT_LIVE_PYTEST_MARKER=live" in body
+    assert '-m "integration"' not in body or "not live" in body
 
 
 def test_missing_credential_fails_on_schedule() -> None:
     """D9 — a rotation outage must not ``exit 0`` with skipped: no live credential."""
-    makefile = read_text("Makefile")
-    match = re.search(
-        r"^test-integration-live:.*?(?=\n(?:[a-zA-Z0-9_.-]+:|$))",
-        makefile,
-        re.DOTALL | re.MULTILINE,
-    )
-    assert match is not None
-    body = match.group(0)
+    body = _live_makefile_body()
     assert "exit 0" not in body, (
         "test-integration-live still exits 0 when credentials are absent (R-F3 / D9)"
     )
     assert "MERGECRAFT_ALLOW_MISSING_LIVE_CREDS" in body or "exit 1" in body or "exit $$" in body
+    assert "run_live_integration.py" in body
+
+
+def test_live_pytest_marker_constant() -> None:
+    runner = _load_script("run_live_integration")
+    assert runner.LIVE_PYTEST_MARKER == "live"
+    assert callable(runner.main)
+
+
+def test_check_live_integration_contract_passes() -> None:
+    module = _load_script("check_live_integration_contract")
+    check = module.check_live_integration_contract
+    assert callable(check)
+    assert check() == 0
+
+
+def test_default_credential_slugs_and_github_required_set() -> None:
+    """Default sweep plus github matrix leg. Deleting github must fail."""
+    assert DEFAULT_CREDENTIAL_SLUGS == ("anthropic", "openai", "gemini", "nous")
+    for slug in DEFAULT_CREDENTIAL_SLUGS:
+        assert slug in PROVIDER_SECRET_ENV
+    assert PROVIDER_SECRET_ENV["github"] == "GITHUB_TOKEN"
+
+
+def test_missing_live_credentials_default_sweep(monkeypatch: Any) -> None:
+    for slug in DEFAULT_CREDENTIAL_SLUGS:
+        monkeypatch.delenv(PROVIDER_SECRET_ENV[slug], raising=False)
+    missing = missing_live_credentials()
+    assert missing == [PROVIDER_SECRET_ENV[slug] for slug in DEFAULT_CREDENTIAL_SLUGS]
+
+
+def test_missing_live_credentials_github_leg(monkeypatch: Any) -> None:
+    """Guard-deletion: github must resolve to ``GITHUB_TOKEN``."""
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert missing_live_credentials("github") == ["GITHUB_TOKEN"]
+
+
+def test_missing_live_credentials_unknown_provider() -> None:
+    assert missing_live_credentials("not-a-provider") == ["unknown provider 'not-a-provider'"]
+
+
+def test_run_live_integration_fails_loud_without_creds(monkeypatch: Any) -> None:
+    runner = _load_script("run_live_integration")
+    monkeypatch.delenv("MERGECRAFT_ALLOW_MISSING_LIVE_CREDS", raising=False)
+    monkeypatch.setenv("MERGECRAFT_LIVE_PROVIDER", "github")
+    monkeypatch.setenv("MERGECRAFT_LIVE_PYTEST_MARKER", runner.LIVE_PYTEST_MARKER)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert runner.main([]) == 1
 
 
 def test_suite_is_inert_on_pull_request() -> None:

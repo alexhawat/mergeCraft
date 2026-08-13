@@ -9,6 +9,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from tests.ci.workflow_support import REPO_ROOT, read_text
 
 
@@ -17,6 +19,30 @@ def _fail_under() -> float:
     data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     floor = data["tool"]["coverage"]["report"]["fail_under"]
     return float(floor)
+
+
+def _load_coverage_config() -> Any:
+    path = REPO_ROOT / "scripts" / "coverage_config.py"
+    assert path.is_file(), "scripts/coverage_config.py missing"
+    spec = importlib.util.spec_from_file_location("coverage_config", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_coverage_config_fail_under_matches_pyproject() -> None:
+    """Direct pin: ``coverage_config.fail_under_from_pyproject`` is the floor source."""
+    module = _load_coverage_config()
+    assert module.fail_under_from_pyproject(REPO_ROOT) == _fail_under()
+    assert module.repo_root() == REPO_ROOT
+
+
+def test_coverage_config_missing_pyproject_raises(tmp_path: Path) -> None:
+    module = _load_coverage_config()
+    with pytest.raises(FileNotFoundError):
+        module.fail_under_from_pyproject(tmp_path)
 
 
 def test_make_ci_graph_includes_coverage_gate() -> None:

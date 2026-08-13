@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -180,6 +181,20 @@ def test_make_target_invokes_collector_suite() -> None:
     assert "run_otlp_collector_e2e" in makefile, (
         "Make target must invoke scripts/run_otlp_collector_e2e.py"
     )
+
+
+def test_check_otlp_e2e_slices_passes() -> None:
+    """Direct pin: ``check_otlp_e2e_slices`` keeps harness tuples aligned with tests."""
+    path = REPO_ROOT / "scripts" / "check_otlp_e2e_slices.py"
+    assert path.is_file(), "scripts/check_otlp_e2e_slices.py missing"
+    spec = importlib.util.spec_from_file_location("check_otlp_e2e_slices", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    check = module.check_otlp_e2e_slices
+    assert callable(check)
+    assert check() == 0
 
 
 def test_run_otlp_collector_e2e_script_exports_main() -> None:

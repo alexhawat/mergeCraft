@@ -15,6 +15,10 @@ import httpx
 import pytest
 
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
+from mergecraft.integrations.live_providers import (
+    PROVIDER_SECRET_ENV,
+    missing_live_credentials,
+)
 
 pytestmark = [
     pytest.mark.integration,
@@ -168,20 +172,17 @@ def test_nous_minimal_completion() -> None:
 
 
 def test_missing_credential_fails_on_schedule() -> None:
-    """D9 — absent keys are a failure on the schedule path, not a skip."""
+    """D9 — absent keys are a failure on the schedule path, not a skip.
+
+    Guard-deletion: dropping ``github`` from ``PROVIDER_SECRET_ENV`` must fail
+    this test. Credential lookup goes through ``missing_live_credentials``.
+    """
     event = os.environ.get("GITHUB_EVENT_NAME", "schedule")
     if event == "pull_request":
         pytest.fail("live suite must not be collected on pull_request (convention 6)")
-    required = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "NOUS_API_KEY")
-    provider = os.environ.get("MERGECRAFT_LIVE_PROVIDER", "").strip().lower()
-    names = {
-        "anthropic": ("ANTHROPIC_API_KEY",),
-        "openai": ("OPENAI_API_KEY",),
-        "codex": ("OPENAI_API_KEY",),
-        "gemini": ("GEMINI_API_KEY",),
-        "nous": ("NOUS_API_KEY",),
-    }.get(provider, required)
-    missing = [name for name in names if not os.environ.get(name, "").strip()]
+    assert PROVIDER_SECRET_ENV["github"] == "GITHUB_TOKEN"
+    provider = os.environ.get("MERGECRAFT_LIVE_PROVIDER", "").strip().lower() or None
+    missing = missing_live_credentials(provider)
     assert not missing, f"missing live credentials on {event}: {missing} (D9)"
 
 

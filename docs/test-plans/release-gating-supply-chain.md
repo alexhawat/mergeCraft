@@ -96,7 +96,9 @@ Named deliverable: `scripts/check_trivyignore_expiry.py` (`check_trivyignore` or
 |----------|-------|----------|-------|
 | `live` marker registered | unit | pyproject | `test_live_marker_registered_in_pytest_ini` |
 | `test-integration-live` selects `-m live` | unit (Makefile) | not `-m integration` | `test_test_integration_live_selects_live_marker` |
-| Missing creds fail on schedule | unit + live | **no** `test_…_skips_when_no_secret`; Makefile must not `exit 0` | `test_missing_credential_fails_on_schedule` (both files) |
+| Missing creds fail on schedule | unit + live | **no** `test_…_skips_when_no_secret`; Makefile must not `exit 0`; live path calls `missing_live_credentials` (github → `GITHUB_TOKEN`) | `test_missing_credential_fails_on_schedule` (both files), `test_missing_live_credentials_*` |
+| Live marker is `LIVE_PYTEST_MARKER` | unit | **not** Makefile `live_selector` decoy | `test_test_integration_live_selects_live_marker`, `test_live_pytest_marker_constant` |
+| Named helpers | unit | `check_live_integration_contract`, `run_live_integration`, `DEFAULT_CREDENTIAL_SLUGS` | `test_check_live_integration_contract_passes`, `test_run_live_integration_fails_loud_without_creds`, `test_default_credential_slugs_and_github_required_set` |
 | Inert on `pull_request` | unit + live | YAML `if:` + env | `test_suite_is_inert_on_pull_request` |
 | Matrix `fail-fast: false` / one secret per leg | unit (YAML) | D10 | `test_live_matrix_fail_fast_false`, `test_each_matrix_leg_gets_only_its_own_provider_secret` |
 | One structured completion per provider | live | Anthropic / OpenAI / Gemini / Nous → `StreamSpanAccumulator` | `test_*_minimal_completion` |
@@ -136,7 +138,9 @@ file cannot match; a real `test_…_skips_when_no_secret` still fails.
 | Above floor+margin without bump fails (**guard-deletion**) | unit | `test_ratchet_fails_when_coverage_exceeds_floor_without_bump` |
 | Within margin passes | unit | `test_ratchet_passes_within_margin` |
 
-Named deliverable: `scripts/check_coverage_ratchet.py`. No README coverage-badge test (D13).
+Named deliverables: `scripts/check_coverage_ratchet.py`, `scripts/coverage_config.py`
+(`fail_under_from_pyproject`, `repo_root` — `test_coverage_config_*`). No README
+coverage-badge test (D13).
 
 Rationale (W6 recon): W6 bumped `[tool.coverage.report] fail_under` 65→70; the
 suite parses that floor from `pyproject.toml` instead of hard-coding 65 so
@@ -161,7 +165,8 @@ fail loudly if that env is unset (no in-memory fallback). Without Docker,
 `make test-otlp-collector` prints `skipped: no docker` and exits 0.
 
 Named deliverables: `scripts/run_otlp_collector_e2e.py` (`main`), Make
-target `test-otlp-collector`.
+target `test-otlp-collector`, `scripts/check_otlp_e2e_slices.py`
+(`check_otlp_e2e_slices` — `test_check_otlp_e2e_slices_passes`).
 
 ### W8 — ruff families (#146) — green after W8 impl (`26fa772`) + xfail recon
 
@@ -213,6 +218,7 @@ Do not invent metric values in tests. Named symbols: `compute_prompt_version`,
 | 2026-08-13 | W7 | `_W7` on eight contracts in `tests/tracing/test_otlp_collector_e2e.py` | SHA-pin was already unxfail'd; named `run_otlp_collector_e2e` / `test-otlp-collector` pins added; leave W8–W9 markers |
 | 2026-08-13 | W8 | `_W8` on two contracts (17 parametrized cases) in `tests/ci/test_ruff_advisory_families.py` | Added `lint-ruff-advisory` / `RUFF_ADVISORY_FAMILIES` pins; leave W9 markers |
 | 2026-08-13 | W9 | `_W9` on replay target, result-set pins, no-placeholder (S5 helper already plain) | **Landed:** `make eval-replay`, 10/10 structural replay, versioned result sets. **Spun out (D19):** README dated precision/recall/F1 — keep `spun out: W9` `strict=False`. Direct pins for `replay_bank`, `run_structural_replay`, `corpus_class_for`, `BenchmarkResultSet`, `write_result_set`. |
+| 2026-08-13 | Final post-pass | none (D19 README xfail kept) | Thermos R6: live schedule test uses `missing_live_credentials` + github guard; `LIVE_PYTEST_MARKER` replaces Makefile `live_selector` as load-bearing; direct tests for `check_live_integration_contract`, `check_otlp_e2e_slices`, `coverage_config`, `run_live_integration`, `DEFAULT_CREDENTIAL_SLUGS`. |
 
 ## Driving live / collector tests
 
