@@ -17,16 +17,19 @@ def test_readme_drops_ideal_and_todo_asset_comments() -> None:
     assert "TODO: add docs/assets/demo.gif" not in text
 
 
-def test_docs_badge_label_matches_live_github_pages_url() -> None:
-    """D14 — keep the live Pages URL; fix the badge label to match."""
+def test_docs_site_badge_and_links_are_gone() -> None:
+    """Superseded by the showcase-readiness plan's D5, 2026-08-13.
+
+    The GitHub Pages docs site was never published (no ``mkdocs.yml``, no Pages
+    workflow) — a badge and nav links pointing at it 404'd. D5 deletes the
+    badge and repoints every docs link at the in-repo ``docs/`` tree instead
+    of building the site. This replaces the older D14 assertion that the
+    badge must exist and point at ``_PAGES``.
+    """
     text = read_text("README.md")
-    assert _PAGES in text
+    assert _PAGES not in text
     assert "docs-mergecraft.dev" not in text
-    match = re.search(r"\[!\[Docs\]\((https://img\.shields\.io/badge/[^)]+)\)\]\(([^)]+)\)", text)
-    assert match is not None, "Docs badge missing from README"
-    label_url, href = match.group(1), match.group(2)
-    assert href.rstrip("/") == _PAGES.rstrip("/")
-    assert "mergecraft.dev" not in label_url or "github.io" in label_url
+    assert re.search(r"\[!\[Docs\]\(", text) is None, "Docs badge should be gone (D5)"
 
 
 def test_docs_assets_readme_names_required_binaries() -> None:

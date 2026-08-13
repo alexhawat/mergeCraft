@@ -1,7 +1,9 @@
 <div align="center">
 
-<!-- Asset pending: docs/assets/logo.svg — see docs/assets/README.md (D17) -->
-<img src="docs/assets/logo.svg" alt="mergeCraft logo" width="120"/>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/mark-dark.svg">
+  <img src="assets/brand/mark-light.svg" alt="mergeCraft logo" width="120"/>
+</picture>
 
 # mergeCraft
 
@@ -13,14 +15,10 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 [![Docker](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](pyproject.toml)
-[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://alexhawat.github.io/mergeCraft/)
-
-<!-- Asset pending: docs/assets/demo.gif — see docs/assets/README.md (D17) -->
-<img src="docs/assets/demo.gif" alt="mergeCraft reviewing a pull request" width="720"/>
 
 [Get started](#-get-started-in-3-steps) ·
 [Features](#-features) ·
-[Docs](https://alexhawat.github.io/mergeCraft/) ·
+[Docs](docs/) ·
 [Review checks](REVIEW-CHECKS.md) ·
 [Contributing](CONTRIBUTING.md)
 
@@ -63,6 +61,24 @@ Inspired by [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 | 📈 **Tracing (opt-in)** | Per-run span trees to local JSONL, Logfire, or any OTLP collector — with redaction |
 | 💻 **Offline mode** | `mergecraft diff-review` reviews local diffs or patch files, no PR required — `--json` for benchmarks |
 | 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in — benchmark numbers unpublished; run `make eval-replay` locally (see [evals/README.md](evals/README.md)) |
+
+## 🗂️ Repository layout
+
+One row per root-level directory, for anyone who has just cloned:
+
+| Path | What it is |
+|---|---|
+| `src/mergecraft/` | The Python package — reviewer, analyzers, agents, MCP server, CLI, Action entry |
+| `tests/` | Unit + integration suite |
+| `docs/` | Reference documentation (`ANALYZERS.md`, `TRACING.md`, `REVIEW-DOCTRINE.md`, …) |
+| `evals/` | Eval bank cases replayed by `mergecraft eval` |
+| `examples/` | Consumer-facing example workflows, generated and drift-checked |
+| `scripts/` | Repo tooling invoked from `make` (catalog check, coverage floors, doc generators) |
+| `docker/` | Agent CLI pinning for the Action image |
+| `get-installation-token/` | A small companion Action that mints a GitHub App installation token |
+| `assets/brand/` | Brand SVGs and the source logo build script (see [assets/brand/README.md](assets/brand/README.md)) |
+| `evidence/` | Committed CI debris awaiting removal — slated for deletion, do not add to it |
+| `action.yml` / `Dockerfile` | The GitHub Action surface |
 
 ## 🏗️ How it works
 
@@ -469,7 +485,7 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
   advisory only.
 - **Analyzers under low trust run untrusted-only** — no secrets, no network, no
   PR-authored command construction; exclusions are reported as named skips.
-- **Agent subprocess env is an explicit allowlist (W2)** — agent CLIs never
+- **Agent subprocess env is an explicit allowlist** — agent CLIs never
   inherit the full process environment. Stripped by default: ``GIT_ASKPASS``,
   ``GITHUB_TOKEN``/``GH_TOKEN``, ``ACTIONS_ID_TOKEN_*``, and every non-active
   provider API key. Git authentication for agent operations is brokered
@@ -478,7 +494,7 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
   ``0o600`` inside a ``0o700`` credentials directory the agent cannot read.
   Run temp dirs and registered leak-surface paths are removed on success and
   failure; ``wipe_runner_leak_surface`` only unlinks mergeCraft-owned paths.
-- **Containment hardening (W3)** — ``safe.directory`` is scoped to
+- **Containment hardening** — ``safe.directory`` is scoped to
   ``$GITHUB_WORKSPACE`` and registered cross-repo checkout roots (no wildcard).
   Git hooks run only when ``shell: enabled``; ``restricted`` and ``disabled``
   neutralize hooks via ``core.hooksPath``. ``cwd`` and MCP shell
@@ -546,7 +562,7 @@ they check out the default branch with no `ref:` and reach PR content through
 scope.
 
 Full rationale in the collapsible sections of
-[docs](https://alexhawat.github.io/mergeCraft/).
+[docs](docs/).
 
 ## 📚 Documentation
 

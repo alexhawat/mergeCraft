@@ -113,6 +113,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20", "RUF001", "TC001", "TC003"]
 "scripts/**" = ["T20"]
+# Standalone regeneration script (uv run --with fonttools python assets/brand/build_logo.py).
+"assets/brand/build_logo.py" = ["T20"]
 # Catalog prompts intentionally retain upstream emoji / typography.
 "src/mergecraft/modes.py" = ["RUF001", "TC003"]
 "src/mergecraft/modes/**" = ["RUF001", "TC003"]
