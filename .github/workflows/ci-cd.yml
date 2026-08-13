@@ -127,18 +127,16 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reject expired .trivyignore waivers
+        run: python3 scripts/check_trivyignore_expiry.py
       - name: Resolve scan gate
         id: gate
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF}" == refs/heads/release/* || "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "exit_code=1" >> "$GITHUB_OUTPUT"
-            echo "severity=CRITICAL,HIGH" >> "$GITHUB_OUTPUT"
-          else
-            # Advisory on main / pre-0.0.1 — report but do not fail the job.
-            echo "exit_code=0" >> "$GITHUB_OUTPUT"
-            echo "severity=CRITICAL,HIGH" >> "$GITHUB_OUTPUT"
-          fi
+          # Invariant: every ref that reaches sbom-scan can publish a digest (see
+          # build-images.if and promote.if) — all are blocking, not advisory.
+          echo "exit_code=1" >> "$GITHUB_OUTPUT"
+          echo "severity=CRITICAL,HIGH" >> "$GITHUB_OUTPUT"
       - name: SBOM slim (syft via anchore/sbom-action)
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
@@ -162,6 +160,7 @@ jobs:
           severity: ${{ steps.gate.outputs.severity }}
           exit-code: ${{ steps.gate.outputs.exit_code }}
           ignore-unfixed: true
+          trivyignores: .trivyignore
       - name: Trivy scan analyzers
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -171,6 +170,7 @@ jobs:
           severity: ${{ steps.gate.outputs.severity }}
           exit-code: ${{ steps.gate.outputs.exit_code }}
           ignore-unfixed: true
+          trivyignores: .trivyignore
       - name: Upload SBOM + scan reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
