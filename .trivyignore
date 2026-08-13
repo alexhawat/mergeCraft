@@ -1,0 +1,11 @@
+# mergeCraft image vulnerability waivers (D7)
+#
+# Every entry below a CVE id must include, in the preceding comment block:
+#   justification: <why the finding is accepted and what mitigates it>
+#   expiry: YYYY-MM-DD  (waivers must be renewed or removed before this date)
+#
+# CI runs scripts/check_trivyignore_expiry.py in sbom-scan and fails on expired
+# entries. See docs/supply-chain.md for the operator workflow.
+#
+# Baseline: operator must record HIGH/CRITICAL findings on the current pre-0.0.1
+# image before the blocking gate ships; add dated entries here or fix upstream.

@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Eval bank replay harness (`make eval-replay`) writes versioned result sets with
+  judge pins, rubric version, and S5 mode prompt versions; seeded corpus expanded
+  to ten human-labelled cases across correctness, security, cross-file, and
+  adversarial classes ([#140](https://github.com/alexhawat/mergeCraft/issues/140))
+- Ruff advisory families are no longer selected and ignored in blocking `make lint`:
+  ERA is enforced; noisy families are dropped; BLE, PTH, PERF, and C901 run as a
+  non-blocking `lint-ruff-advisory` CI step ([#146](https://github.com/alexhawat/mergeCraft/issues/146))
+- Coverage ratchet now runs from `make ci` via `coverage-gate`; measured coverage must
+  stay within `fail_under` and a fixed margin or the floor must be bumped deliberately
+  in `pyproject.toml` ([#142](https://github.com/alexhawat/mergeCraft/issues/142))
+- 0.0.1 distribution checklist: README prototype markers removed, docs badge label
+  aligned with GitHub Pages, operator runbook at `docs/distribution.md`, and prototype
+  residue (`meat_python_plus/`, `docs/meat-spike.md`) dropped from the tree ([#141](https://github.com/alexhawat/mergeCraft/issues/141))
+- CI/CD publish path now gates `build-images` on the Action-image E2E suite for the
+  exact release SHA via a reusable `e2e-gate` job (`workflow_call` on `e2e.yml`)
+- Image vulnerability scans now block promotion on every publish ref when Trivy reports
+  unwaived HIGH/CRITICAL findings; `.trivyignore` waivers require per-entry justification
+  and expiry (a CVE cannot inherit a neighbor's metadata)
+- `make ci` runs the unit suite once via `coverage-gate`; live integration selection
+  lives in `scripts/run_live_integration.py`; eval result sets pin `evals/cases` at
+  `HEAD:evals/cases`; OTLP collector image digest is single-sourced in
+  `scripts/otel_collector_image.txt`; PR integration excludes live and OTLP-docker tests
+
+### Fixed
+
+- Fixed: the nightly live-provider job now issues a real minimal request per provider
+  and asserts a structured completion. Previously it exported four provider keys but ran
+  only offline-shaped tests — three of the four keys had no consumer — and exited 0 with
+  "skipped" when credentials were absent, so a rotation outage looked like a pass
+- Fixed: OTLP tracing export now forwards `gen_ai.*` span attributes to real collectors;
+  CI and `make test-otlp-collector` gate merge with a digest-pinned
+  `otel/opentelemetry-collector` service ([#143](https://github.com/alexhawat/mergeCraft/issues/143))
+- Fixed: nightly GitHub live-integration matrix leg can post status checks (`statuses: write`)
+
 ### Security
 
 - Fixed: the agent privilege drop now fails closed. When the action image runs

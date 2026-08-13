@@ -316,14 +316,12 @@ def run_meat_harness(
     if not meat_binary.exists():
         logger.warning(
             "meat binary not found at {}; skipping reading-diff lens "
-            "(install meat_python_plus for `meat-py`, or "
-            "`go install meat.dev/cmd/meat@latest`).",
+            "(install with `go install meat.dev/cmd/meat@latest`).",
             meat_binary,
         )
         return _skip_result(
             raw_diff,
-            "skip: meat binary not found; install meat_python_plus (`meat-py`) "
-            "or `go install meat.dev/cmd/meat@latest`",
+            "skip: meat binary not found; install with `go install meat.dev/cmd/meat@latest`",
         )
 
     # The subprocess inherits the *process* env unchanged. The harness

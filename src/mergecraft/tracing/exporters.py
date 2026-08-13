@@ -531,6 +531,12 @@ class OTLPSink:
                 "status": event.status,
                 "duration_ms": max(0, (event.ts_end_ns - event.ts_start_ns) // 1_000_000),
             }
+            # Forward mergeCraft attrs (gen_ai.*, model.*, …) so OTLP export
+            # reaches real collectors — the in-memory recording processor is
+            # not a substitute for this boundary (#143 / W7).
+            for key, value in (event.attrs or {}).items():
+                if key not in attrs:
+                    attrs[key] = value
             # If attrs is the truncation marker, forward the marker as an
             # attribute so consumers see it (D8).
             if event.attrs.get("truncated") is True:

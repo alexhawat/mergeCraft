@@ -51,19 +51,46 @@ jobs:
         run: make npm-audit
       - name: actionlint + zizmor
         run: make workflow-lint
+      - name: Ruff advisory families (non-blocking)
+        continue-on-error: true
+        run: make lint-ruff-advisory
+
+  otlp-collector-e2e:
+    name: OTLP collector e2e (#143)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve collector image
+        # Pin: otel/opentelemetry-collector@sha256:1daa4312b48312dbae2d543e67b77e897dd5d9c48e7651d1416cdb417026ad06
+        # (canonical copy: scripts/otel_collector_image.txt)
+        run: echo "MERGECRAFT_OTEL_COLLECTOR_IMAGE=$(tr -d '\n' < scripts/otel_collector_image.txt)" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/bootstrap
+      - name: OTLP collector integration
+        run: make test-otlp-collector
 
   integration-live:
     name: Integration (nightly / live-provider)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      statuses: write
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [anthropic, openai, gemini, nous, github]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
-      - name: Live-provider integration (release precondition)
+      - name: Live-provider integration (${{ matrix.provider }})
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}
+          MERGECRAFT_LIVE_PROVIDER: ${{ matrix.provider }}
+          ANTHROPIC_API_KEY: ${{ matrix.provider == 'anthropic' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ matrix.provider == 'openai' && secrets.OPENAI_API_KEY || '' }}
+          GEMINI_API_KEY: ${{ matrix.provider == 'gemini' && secrets.GEMINI_API_KEY || '' }}
+          NOUS_API_KEY: ${{ matrix.provider == 'nous' && secrets.NOUS_API_KEY || '' }}
+          GITHUB_TOKEN: ${{ matrix.provider == 'github' && secrets.GITHUB_TOKEN || '' }}
         run: make test-integration-live

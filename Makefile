@@ -2,6 +2,8 @@
 
 UV ?= $(shell command -v uv 2>/dev/null || echo $(HOME)/.local/bin/uv)
 RUFF ?= $(UV) run ruff
+# Non-blocking advisory families (#146 / W8) — surfaced in CI via lint-ruff-advisory.
+RUFF_ADVISORY_FAMILIES ?= BLE,PTH,PERF,C901
 MYPY ?= $(UV) run mypy
 PYTEST ?= $(UV) run pytest
 MERGECRAFT_PYTEST_JOBS ?= auto
@@ -13,8 +15,9 @@ PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
-	examples example-workflows-check bench-review eval-gate \
-	test-integration test-integration-live coverage-gate npm-audit workflow-lint
+	examples example-workflows-check bench-review eval-gate eval-replay \
+	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
+	lint-ruff-advisory
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -45,6 +48,9 @@ lint: ## Ruff check + formatting + loguru-only
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
 
+lint-ruff-advisory: ## Ruff advisory families (non-blocking CI; #146)
+	$(RUFF) check src tests scripts --select $(RUFF_ADVISORY_FAMILIES)
+
 format: ## Auto-format with Ruff
 	$(RUFF) format src tests scripts
 	$(RUFF) check --fix src tests scripts
@@ -69,22 +75,23 @@ test: ## Unit tests
 # secrets so the same marker becomes the live-provider release precondition.
 # The ``live`` marker is registered for future narrowing by test-creator.
 test-integration: ## Integration tests (PR CI; self-skip without live secrets)
-	$(PYTEST) tests -v --tb=short --strict-markers -m "integration" $(PYTEST_XDIST) \
+	$(PYTEST) tests -v --tb=short --strict-markers -m "integration and not live" \
+		--ignore=tests/tracing/test_otlp_collector_e2e.py $(PYTEST_XDIST) \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
 
 test-integration-live: ## Live-provider integration (scheduled / release precondition)
-	@if [ -z "$${ANTHROPIC_API_KEY}$${OPENAI_API_KEY}$${GEMINI_API_KEY}$${NOUS_API_KEY}" ] \
-	     && [ "$${MERGECRAFT_REQUIRE_LIVE:-}" != "1" ]; then \
-	  echo "skipped: no live credential — set provider secrets or MERGECRAFT_REQUIRE_LIVE=1"; \
-	  exit 0; \
-	fi
-	$(PYTEST) tests -v --tb=short --strict-markers -m "integration" $(PYTEST_XDIST) \
-		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+	@live_selector='-m "live"'; \
+	MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/check_live_integration_contract.py || exit 1; \
+	MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/run_live_integration.py || exit 1
+
+test-otlp-collector: ## OTLP collector integration — spans must leave the process (#143)
+	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py
 
 coverage-gate: ## Unit tests + coverage floors (global + critical paths)
 	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
 		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+	$(UV) run python scripts/check_coverage_ratchet.py coverage.json
 	$(UV) run python scripts/check_coverage_floors.py coverage.json
 
 npm-audit: ## npm audit over docker/agent-clis lockfile (W12.3 / #27)
@@ -122,7 +129,7 @@ ci-static: lockcheck lint typecheck pyright catalog-check build example-workflow
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check build example-workflows-check security test
+CI_STEPS := lockcheck lint typecheck pyright catalog-check build example-workflows-check security coverage-gate
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)
@@ -135,7 +142,7 @@ ci-reset: ## Clear the ci-resume checkpoint (start the gate over)
 	@chmod +x scripts/ci_resume.sh 2>/dev/null || true
 	@./scripts/ci_resume.sh --reset
 
-ci: ci-static security test ## Full gate
+ci: ci-static security coverage-gate ## Full gate
 	@echo "ci OK"
 
 REVIEWBENCH_DIR ?= evals/reviewbench
@@ -152,6 +159,9 @@ bench-review: ## Run ReviewBench via Harbor (set REVIEWBENCH_DIR to an external 
 
 eval-gate: ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
 	$(UV) run mergecraft eval gate
+
+eval-replay: ## Replay eval bank; write versioned result set (operator-triggered; needs live keys for F1)
+	$(UV) run mergecraft eval replay-bank
 
 docker-build: ## Build action Docker image
 	docker build -t mergeCraft:local -f Dockerfile .

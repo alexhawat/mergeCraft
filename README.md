@@ -1,9 +1,6 @@
-<!-- README-ideal.md — proposed README for alexhawat/mergeCraft.
-     Asset placeholders (logo, demo gif, screenshots) live under docs/assets/. -->
-
 <div align="center">
 
-<!-- TODO: add docs/assets/logo.svg (light/dark variants) -->
+<!-- Asset pending: docs/assets/logo.svg — see docs/assets/README.md (D17) -->
 <img src="docs/assets/logo.svg" alt="mergeCraft logo" width="120"/>
 
 # mergeCraft
@@ -16,9 +13,9 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 [![Docker](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](pyproject.toml)
-[![Docs](https://img.shields.io/badge/docs-mergecraft.dev-blue)](https://alexhawat.github.io/mergeCraft/)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://alexhawat.github.io/mergeCraft/)
 
-<!-- TODO: add docs/assets/demo.gif — a 30s screen capture: open PR → @mergecraft review → inline findings → approval check -->
+<!-- Asset pending: docs/assets/demo.gif — see docs/assets/README.md (D17) -->
 <img src="docs/assets/demo.gif" alt="mergeCraft reviewing a pull request" width="720"/>
 
 [Get started](#-get-started-in-3-steps) ·
@@ -65,7 +62,7 @@ Inspired by [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 | 📡 **SARIF upload (opt-in)** | Publish analyzer findings to GitHub code scanning with one flag |
 | 📈 **Tracing (opt-in)** | Per-run span trees to local JSONL, Logfire, or any OTLP collector — with redaction |
 | 💻 **Offline mode** | `mergecraft diff-review` reviews local diffs or patch files, no PR required — `--json` for benchmarks |
-| 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in |
+| 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in — benchmark numbers unpublished; run `make eval-replay` locally (see [evals/README.md](evals/README.md)) |
 
 ## 🏗️ How it works
 
@@ -108,9 +105,12 @@ into a comment changes nothing. Details:
 
 ## 🚀 Get started in 3 steps
 
-> **Requirements:** Python 3.14+, [uv](https://docs.astral.sh/uv/),
-> an authenticated [GitHub CLI](https://cli.github.com), and one provider
-> credential.
+> **Requirements:** **Python 3.14+** (hard requirement for `uv tool install` — see
+> [pyproject.toml](pyproject.toml)), [uv](https://docs.astral.sh/uv/), an
+> authenticated [GitHub CLI](https://cli.github.com), and one provider credential.
+> **Without Python 3.14**, use the [Docker Action](#example-1--auto-review-every-pr)
+> (`alexhawat/mergeCraft@…`) — the container image ships a compatible runtime; no
+> local Python install needed ([`docs/distribution.md`](docs/distribution.md)).
 
 **1. Install and scaffold** (in the repo you want reviewed):
 
@@ -558,6 +558,7 @@ Full rationale in the collapsible sections of
 | [docs/REVIEW-DOCTRINE.md](docs/REVIEW-DOCTRINE.md) | Why mergeCraft makes the calls it makes |
 | [docs/evidence-packet.md](docs/evidence-packet.md) | Typed findings & merge evidence |
 | [docs/eval-bank.md](docs/eval-bank.md) | Eval replay and bench scoring |
+| [docs/distribution.md](docs/distribution.md) | 0.0.1 release checklist — PyPI, Marketplace, assets ([#141](https://github.com/alexhawat/mergeCraft/issues/141)) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributor workflow (`make setup / lint / typecheck / test / ci`) |
 
 ## 🗺️ Roadmap
@@ -566,7 +567,7 @@ Full rationale in the collapsible sections of
 - [ ] GitHub Marketplace listing
 - [ ] Cursor local CLI harness (issue #13 Phase B)
 - [ ] Expanded analyzer catalog (opt-in long tail)
-- [ ] Published eval benchmarks
+- [ ] Published eval benchmarks — **unpublished** (D19 partial: structural replay harness + versioned result sets landed in W9; precision/recall/F1 require an operator-triggered live run with ≥2 provider keys via `make eval-replay`)
 
 ## Development
 

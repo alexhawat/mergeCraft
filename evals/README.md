@@ -71,6 +71,44 @@ not replay verdicts: `replay_case()` is pure and takes the current decision as a
 signal is `mergecraft eval promote`, which turns a case into a permanent pytest
 that `make test` already runs.
 
+## Benchmark replay (W9)
+
+Operator-triggered replay writes a versioned result set under `evals/results/`.
+It is **not** wired into PR CI — live provider runs cost quota and need secrets.
+
+```bash
+make eval-replay
+# or: mergecraft eval replay-bank --json
+```
+
+Each result set records:
+
+- `rubric_version` (`VERIFIER_RUBRIC_VERSION`)
+- `judge_pins` per provider (default: Claude + OpenAI)
+- S5 `mode_prompt_versions` for every built-in mode
+- `corpus_commit` (git SHA of the case files)
+- structural decision-replay pass rate across the bank
+
+Finding-location **precision / recall / F1** and false-positives-per-run are
+written only when a live run completes across ≥2 configured providers. With
+missing API keys the harness records `skipped: no live credential` and omits
+those metrics — do not fabricate a table in the README.
+
+### Seeded corpus (human-labelled, W9.0)
+
+| Class | Count | Case ids |
+|---|---:|---|
+| Correctness | 3 | `issue-75-crashed-run-not-permissive`, `bench-correctness-off-by-one`, `bench-correctness-null-guard` |
+| Security | 3 | `issue-75-narrative-approval`, `issue-75-untrusted-never-approves`, `bench-security-hardcoded-token` |
+| Cross-file breakage | 2 | `bench-crossfile-api-signature`, `bench-crossfile-export-removed` |
+| Adversarial / no-op | 2 | `bench-adversarial-clean-diff`, `bench-adversarial-minor-only` |
+
+Ground truth is the human-labelled corpus above. LLM-as-judge scoring is a
+separate measured component when live runs are enabled.
+
+Provider set defaults to **Claude + OpenAI**; estimate ~10–30 tokens per case for
+a minimal live probe. Full diff-review runs are operator-triggered, not PR CI.
+
 ## Harbor agent
 
 Batch B ships a Harbor agent at `mergecraft.harbor.agent:MergecraftReviewAgent`.
