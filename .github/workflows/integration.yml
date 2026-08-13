@@ -51,6 +51,9 @@ jobs:
         run: make npm-audit
       - name: actionlint + zizmor
         run: make workflow-lint
+      - name: Ruff advisory families (non-blocking)
+        continue-on-error: true
+        run: make lint-ruff-advisory
 
   otlp-collector-e2e:
     name: OTLP collector e2e (#143)

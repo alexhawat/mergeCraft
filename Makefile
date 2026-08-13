@@ -2,6 +2,8 @@
 
 UV ?= $(shell command -v uv 2>/dev/null || echo $(HOME)/.local/bin/uv)
 RUFF ?= $(UV) run ruff
+# Non-blocking advisory families (#146 / W8) — surfaced in CI via lint-ruff-advisory.
+RUFF_ADVISORY_FAMILIES ?= BLE,PTH,PERF,C901
 MYPY ?= $(UV) run mypy
 PYTEST ?= $(UV) run pytest
 MERGECRAFT_PYTEST_JOBS ?= auto
@@ -14,7 +16,8 @@ PRE_COMMIT ?= $(UV) run pre-commit
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	examples example-workflows-check bench-review eval-gate \
-	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint
+	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
+	lint-ruff-advisory
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -44,6 +47,9 @@ lint: ## Ruff check + formatting + loguru-only
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
+
+lint-ruff-advisory: ## Ruff advisory families (non-blocking CI; #146)
+	$(RUFF) check src tests scripts --select $(RUFF_ADVISORY_FAMILIES)
 
 format: ## Auto-format with Ruff
 	$(RUFF) format src tests scripts

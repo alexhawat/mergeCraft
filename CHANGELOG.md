@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Ruff advisory families are no longer selected and ignored in blocking `make lint`:
+  ERA is enforced; noisy families are dropped; BLE, PTH, PERF, and C901 run as a
+  non-blocking `lint-ruff-advisory` CI step ([#146](https://github.com/alexhawat/mergeCraft/issues/146))
 - Coverage ratchet now runs from `make ci` via `coverage-gate`; measured coverage must
   stay within `fail_under` and a fixed margin or the floor must be bumped deliberately
   in `pyproject.toml` ([#142](https://github.com/alexhawat/mergeCraft/issues/142))
