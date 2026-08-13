@@ -84,6 +84,13 @@ def _patch_resolve_for_capture(
 
     monkeypatch.setattr(main_mod, "resolve_instructions", _patched_resolve)
     monkeypatch.setattr(instructions_mod, "resolve_instructions", _patched_resolve)
+    # S1/S3/S5 split (commit 4e8f420+): the inner-loop ``resolve_instructions``
+    # call now lives in ``mergecraft.main_agent``. Patch that binding too so the
+    # fallback retry (which loops through ``_run_agent_once``) is captured by
+    # the test's wrapper.
+    from mergecraft import main_agent as main_agent_mod
+
+    monkeypatch.setattr(main_agent_mod, "resolve_instructions", _patched_resolve)
     return captured
 
 

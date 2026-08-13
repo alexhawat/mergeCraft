@@ -321,6 +321,23 @@ async def run_main_for_test(
         "_first_runnable_in_chain",
         lambda chain: chain[0] if chain else None,
     )
+    # S1/S3/S5 split (commit 4e8f420+): the model-chain helpers moved to
+    # ``main_models`` / ``main_agent`` modules. The harness must patch those
+    # modules' bindings too, otherwise monkeypatch on ``main_mod`` only rebinds
+    # the orchestrator's reference and the helpers continue calling the real
+    # ``resolve_model`` / ``resolve_runtime_agent`` / ``_first_runnable_in_chain``.
+    from mergecraft import main_agent as main_agent_mod
+    from mergecraft import main_models as main_models_mod
+
+    monkeypatch.setattr(main_models_mod, "resolve_model", lambda slug=None, **kwargs: slug)
+    monkeypatch.setattr(main_models_mod, "resolve_runtime_agent", _fake_resolve_runtime_agent)
+    monkeypatch.setattr(
+        main_models_mod,
+        "_first_runnable_in_chain",
+        lambda chain: chain[0] if chain else None,
+    )
+    monkeypatch.setattr(main_agent_mod, "resolve_model", lambda slug=None, **kwargs: slug)
+    monkeypatch.setattr(main_agent_mod, "resolve_runtime_agent", _fake_resolve_runtime_agent)
 
     def _fake_start_mcp(tool_context: Any, **_kwargs: Any) -> tuple[str, Any]:
         events.append("start_mcp_http_server")
