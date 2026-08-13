@@ -331,19 +331,31 @@ def test_event_trust_analyzers_matrix(
 
 
 @pytest.mark.parametrize(
-    ("event", "expected_tier"),
+    ("event", "event_payload", "expected_tier"),
     [
-        ("pull_request_target", "untrusted"),
-        ("workflow_dispatch", "trusted"),
-        ("pull_request", "trusted"),
+        ("pull_request_target", {"pull_request": {}}, "untrusted"),
+        ("workflow_dispatch", {"action": "workflow_dispatch"}, "trusted"),
+        (
+            "pull_request",
+            {"pull_request": {"head": {"repo": {"fork": False}}}},
+            "trusted",
+        ),
     ],
 )
 def test_event_axis_derives_the_expected_tier(
-    monkeypatch: pytest.MonkeyPatch, event: str, expected_tier: str
+    monkeypatch: pytest.MonkeyPatch,
+    event: str,
+    event_payload: dict[str, Any],
+    expected_tier: str,
 ) -> None:
-    """Pin the event -> tier edge the matrix's tier axis stands on."""
+    """Pin the event -> tier edge the matrix's tier axis stands on.
+
+    ``pull_request`` uses a well-formed same-repo shape (``fork is False``):
+    an empty ``pull_request`` dict now fails closed to ``untrusted`` (the
+    empty-dict case is pinned by the S4.1 regression suite).
+    """
     monkeypatch.setenv("GITHUB_EVENT_NAME", event)
-    assert derive_trust_tier(event={"pull_request": {}}, shell="restricted") == expected_tier
+    assert derive_trust_tier(event=event_payload, shell="restricted") == expected_tier
 
 
 def test_offline_event_is_trusted() -> None:

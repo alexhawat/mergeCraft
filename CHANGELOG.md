@@ -23,8 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed: `derive_trust_tier` now returns `untrusted` for unrecognized or
   malformed GitHub event shapes instead of defaulting to `trusted`.
   Previously an unknown event type received the most permissive tier. The
-  events that must stay trusted (`workflow_dispatch`, `pull_request_target`,
-  fork / same-repo `pull_request`) have explicit branches and are unaffected.
+  `pull_request` dict branch is gated on `GITHUB_EVENT_NAME == "pull_request"`
+  and only a same-repo shape (`fork is False`) earns the trusted tier; an
+  unknown event name with a PR-shaped payload, or a `pull_request` payload
+  with missing or wrong-typed nested fields, fails closed to `untrusted`.
   Comment / schedule / `workflow_call` / `workflow_run` / `merge_group` /
   `push` / `release` / empty `GITHUB_EVENT_NAME` all resolve to `untrusted`.
   (#144)

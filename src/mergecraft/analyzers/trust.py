@@ -78,22 +78,24 @@ def derive_trust_tier(
     if event_name == "pull_request_target":
         return "untrusted"
 
-    pull_request = event.get("pull_request")
-    if isinstance(pull_request, dict):
-        head = pull_request.get("head")
-        if isinstance(head, dict):
-            repo = head.get("repo")
-            if isinstance(repo, dict) and repo.get("fork") is True:
-                return "untrusted"
-        return "trusted"
+    if event_name == "pull_request":
+        pull_request = event.get("pull_request")
+        if isinstance(pull_request, dict):
+            head = pull_request.get("head")
+            if isinstance(head, dict):
+                repo = head.get("repo")
+                if isinstance(repo, dict) and repo.get("fork") is False:
+                    return "trusted"
+        return "untrusted"
 
     # Fail closed (#144): an unrecognised event shape is more restricted, never
     # more permissive. Convention 5 / D7 — matches ``UNKNOWN_MODE_FALLBACK``
     # above. Comment / schedule / workflow_call / workflow_run / merge_group /
     # push / release / empty ``GITHUB_EVENT_NAME`` all land here and resolve to
-    # ``untrusted``; events that must stay trusted (``workflow_dispatch``,
-    # ``pull_request_target``, fork / same-repo ``pull_request``) have explicit
-    # branches above.
+    # ``untrusted``. The events with explicit branches — ``workflow_dispatch``
+    # (trusted), ``pull_request_target`` (untrusted), and same-repo
+    # ``pull_request`` (trusted via the gated branch above) — never fall
+    # through to this default.
     return "untrusted"
 
 

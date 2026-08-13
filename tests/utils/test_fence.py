@@ -247,7 +247,7 @@ def test_untrusted_text_appears_only_inside_fence() -> None:
 # ── W3.5 — fence carries author + trust tier. ───────────────────────────────
 
 
-def test_fence_carries_author_and_trust_tier() -> None:
+def test_fence_carries_author_and_trust_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     """The fence block names its author login and the trust tier
     (`derive_trust_tier`'s return value) so a reviewer can weight it
     per `docs/REVIEW-DOCTRINE.md` (D7 last clause)."""
@@ -261,6 +261,7 @@ def test_fence_carries_author_and_trust_tier() -> None:
             "head": {"repo": {"fork": True}},
         },
     }
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     tier = derive_trust_tier(fork_event)
     assert tier == "untrusted", (
         "test fixture drifted: fork head must derive `untrusted`; check analyzers/trust.py:30-58"

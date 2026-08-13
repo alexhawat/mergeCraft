@@ -218,7 +218,7 @@ def _event_for(trust: str) -> dict[str, Any] | None:
     raise AssertionError(msg)
 
 
-def test_meat_is_inert_on_untrusted_tier(tmp_path: Path) -> None:
+def test_meat_is_inert_on_untrusted_tier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``derive_trust_tier()`` returning ``untrusted`` → harness not invoked.
 
     Even when the binary is on PATH and the opt-in flag is set, the
@@ -227,6 +227,7 @@ def test_meat_is_inert_on_untrusted_tier(tmp_path: Path) -> None:
     the load-bearing security test for the spike batch.
     """
     # Sanity-check the fixture: this branch of D7 is what the plan locks.
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     assert derive_trust_tier(_event_for("untrusted")) == "untrusted"
 
     # Place a real-sounding fake so a bug in the trust gate would

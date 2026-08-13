@@ -7,14 +7,15 @@ including the empty event, an unrecognised ``GITHUB_EVENT_NAME``, and a
 malformed payload missing the keys the recognised branches read.
 
 This suite pins the **post-flip** contract: the fall-through resolves to
-``"untrusted"`` in every case the prior default silently trusted. The four
-regression pins keep the recognised branches locked down so the flip cannot
-move them by accident. The caller-tolerance test enumerates the single
-production call site (``main.py``'s ``derive_trust_tier``) and asserts the
-downstream helpers consume the untrusted result without raising.
-
-The four RED tests will go green in PR S4.2 (wave-runner implementation
-wave); the four regression pins must stay green throughout.
+``"untrusted"`` in every case the prior default silently trusted. The PR-shaped
+``pull_request`` branch is gated on ``GITHUB_EVENT_NAME == "pull_request"`` and
+only a same-repo shape (``fork is False``) earns the trusted tier; unknown
+event names, and ``pull_request`` payloads with missing or wrong-typed nested
+fields, all fail closed to ``"untrusted"``. The regression pins keep the
+recognised branches locked down so the flip cannot move them by accident. The
+caller-tolerance test enumerates the single production call site (``main.py``'s
+``derive_trust_tier``) and asserts the downstream helpers consume the untrusted
+result without raising.
 """
 
 from __future__ import annotations
@@ -78,6 +79,79 @@ def test_empty_event_name_is_untrusted(
     """
     monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
     tier = derive_trust_tier(event={"some": "payload"})
+    assert tier == "untrusted"
+
+
+def test_unknown_event_name_with_pr_shaped_payload_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S4.1 — an unrecognised event name with a PR-shaped payload stays untrusted.
+
+    The P1 regression: the ``pull_request`` dict branch is gated on
+    ``GITHUB_EVENT_NAME == "pull_request"``, so an arbitrary event name cannot
+    reach the same-repo ``"trusted"`` return by smuggling a PR-shaped payload.
+    """
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "totally_unrecognised_event")
+    tier = derive_trust_tier(event={"pull_request": {"head": {"repo": {"fork": False}}}})
+    assert tier == "untrusted"
+
+
+def test_pull_request_empty_dict_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S4.1 — ``pull_request`` with an empty dict resolves to ``"untrusted"``.
+
+    The P1 regression: a ``pull_request`` whose ``head`` is missing used to
+    fall out of the nested lookups and hit the permissive ``return "trusted"``.
+    Only ``fork is False`` earns the trusted tier now.
+    """
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    tier = derive_trust_tier(event={"pull_request": {}})
+    assert tier == "untrusted"
+
+
+def test_pull_request_missing_head_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S4.1 — ``pull_request`` with a non-dict ``head`` resolves to ``"untrusted"``."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    tier = derive_trust_tier(event={"pull_request": {"head": "not-a-dict"}})
+    assert tier == "untrusted"
+
+
+def test_pull_request_missing_repo_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S4.1 — ``pull_request.head`` with a non-dict ``repo`` resolves to ``"untrusted"``."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    tier = derive_trust_tier(event={"pull_request": {"head": {"repo": "not-a-dict"}}})
+    assert tier == "untrusted"
+
+
+def test_pull_request_missing_fork_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S4.1 — ``pull_request.head.repo`` without ``fork`` resolves to ``"untrusted"``.
+
+    The P1 regression: a missing ``fork`` key used to fall through to the
+    permissive ``return "trusted"``; only an explicit ``fork is False``
+    (same-repo) earns the trusted tier.
+    """
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    tier = derive_trust_tier(event={"pull_request": {"head": {"repo": {}}}})
+    assert tier == "untrusted"
+
+
+def test_pull_request_wrong_typed_fork_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S4.1 — a wrong-typed ``fork`` value resolves to ``"untrusted"``.
+
+    ``fork`` is compared with ``is False``, so a truthy or non-boolean value
+    cannot accidentally land on the same-repo trusted branch.
+    """
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    tier = derive_trust_tier(event={"pull_request": {"head": {"repo": {"fork": "false"}}}})
     assert tier == "untrusted"
 
 
