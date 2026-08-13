@@ -101,8 +101,7 @@ RUN uv sync --frozen --no-dev \
     && sed -i '/uv_cache\.json/d' \
         /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/RECORD \
     && rm -rf /root/.cache/uv /tmp/* \
-    && { command -v setpriv >/dev/null && getent passwd mergecraft >/dev/null; } \
-    || { echo "FATAL: privilege drop unavailable (setpriv or mergecraft user missing)"; exit 1; }
+    && { command -v setpriv >/dev/null && getent passwd mergecraft >/dev/null || { echo "FATAL: privilege drop unavailable (setpriv or mergecraft user missing)"; exit 1; }; } \
 
 COPY docker-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

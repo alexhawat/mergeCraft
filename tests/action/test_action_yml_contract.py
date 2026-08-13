@@ -142,15 +142,12 @@ class TestDocumentedDefaultsMatchRuntime:
         from mergecraft.utils.time_parse import resolve_timeout_ms
 
         assert resolve_timeout_ms(None) is None, "unset must defer to the caller's fallback"
-        # S1/S3/S5 split (commit 4e8f420+): the 1h fallback moved out of
-        # ``main.py`` into ``main_models._resolve_run_budget``. The orchestrator
-        # delegates to that helper, so the documented default's runtime anchor
-        # now lives next to the budget resolver.
-        main_models_source = (_REPO_ROOT / "src" / "mergecraft" / "main_models.py").read_text(
-            encoding="utf-8"
-        )
-        assert "3_600_000" in main_models_source, (
-            "main_models.py lost its 1h fallback — the documented default has no runtime anchor"
+        # S1/S3/S5 merge: the 1h fallback is inline in the merged base
+        # ``main.py`` (``main()``). The documented default's runtime anchor
+        # lives there, so keep it in sync with the ``action.yml`` prose.
+        main_source = (_REPO_ROOT / "src" / "mergecraft" / "main.py").read_text(encoding="utf-8")
+        assert "3_600_000" in main_source, (
+            "main.py lost its 1h fallback — the documented default has no runtime anchor"
         )
 
     def test_status_checks_default_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:

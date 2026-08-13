@@ -323,23 +323,7 @@ async def run_main_for_test(
     # ``mergecraft.utils.agent_resolve`` and calls it at the orchestrator level,
     # so rebinding only the helper modules below would leave the real agent
     # resolver live — the run would then drive the real opencode CLI and hang.
-    # The S1/S3/S5 split (commits fd3d623 / 4e8f420+) moved the model-chain
-    # call sites out of ``main.py`` into ``main_models`` / ``main_agent``; those
-    # modules' bindings are patched in lock-step below so the harness works
-    # against either structure.
     monkeypatch.setattr(main_mod, "resolve_runtime_agent", _fake_resolve_runtime_agent)
-    from mergecraft import main_agent as main_agent_mod
-    from mergecraft import main_models as main_models_mod
-
-    monkeypatch.setattr(main_models_mod, "resolve_model", lambda slug=None, **kwargs: slug)
-    monkeypatch.setattr(main_models_mod, "resolve_runtime_agent", _fake_resolve_runtime_agent)
-    monkeypatch.setattr(
-        main_models_mod,
-        "_first_runnable_in_chain",
-        lambda chain: chain[0] if chain else None,
-    )
-    monkeypatch.setattr(main_agent_mod, "resolve_model", lambda slug=None, **kwargs: slug)
-    monkeypatch.setattr(main_agent_mod, "resolve_runtime_agent", _fake_resolve_runtime_agent)
 
     def _fake_start_mcp(tool_context: Any, **_kwargs: Any) -> tuple[str, Any]:
         events.append("start_mcp_http_server")
