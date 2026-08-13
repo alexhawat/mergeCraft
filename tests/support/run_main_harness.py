@@ -134,12 +134,33 @@ class MainRunRecord:
 
 @dataclass(slots=True)
 class _FakeShellProc:
-    """Async stand-in for the setup-script subprocess."""
+    """Async stand-in for the setup-script subprocess.
+
+    The S1.2 bounded-setup code path requires ``proc.pid`` (used for the
+    process-group registration / kill) and ``proc.kill()`` (no-op — the
+    fake is local, not a real subprocess). Real-process tests
+    (``test_setup_script_grandchildren_are_reaped``,
+    ``test_hanging_setup_script_is_killed_at_deadline``) drive the
+    helper directly without the harness.
+    """
 
     returncode: int = 0
+    _pid: int = 0  # synthetic; ``register_process_group`` accepts any int
+    _stdout: bytes = b""
+    _stderr: bytes = b""
+    _delay_s: float = 0.0
 
     async def communicate(self) -> tuple[bytes, bytes]:
-        return b"", b""
+        if self._delay_s > 0:
+            await asyncio.sleep(self._delay_s)
+        return self._stdout, self._stderr
+
+    @property
+    def pid(self) -> int:
+        return self._pid
+
+    async def kill(self) -> None:  # pragma: no cover — harness-only
+        """No-op — the fake never receives a real signal."""
 
 
 def _strip_run_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -161,6 +182,9 @@ async def run_main_for_test(
     agents_by_slug: dict[str, FakeAgent] | None = None,
     prep_failure: str | None = None,
     setup_script_rc: int = 0,
+    setup_script_stdout: bytes = b"",
+    setup_script_stderr: bytes = b"",
+    setup_script_delay_s: float = 0.0,
     packet_path: Path | None = None,
     cleanup_tmpdir: bool = True,
     prompt: str = "review the diff",
@@ -261,10 +285,21 @@ async def run_main_for_test(
 
     monkeypatch.setattr(main_mod, "derive_trust_tier", _derive_trust_tier)
 
+    fake_pid_counter = {"n": 0}
+
     async def _fake_setup_script(_command: str, **_kwargs: Any) -> _FakeShellProc:
         events.append("setup_script")
         setup_script_commands.append(_command)
-        return _FakeShellProc(returncode=setup_script_rc)
+        # Synthetic PID so the harness's process-group registration
+        # doesn't collide across tests (the active-set is global).
+        fake_pid_counter["n"] += 1
+        return _FakeShellProc(
+            returncode=setup_script_rc,
+            _pid=10_000_000 + fake_pid_counter["n"],
+            _stdout=setup_script_stdout,
+            _stderr=setup_script_stderr,
+            _delay_s=setup_script_delay_s,
+        )
 
     monkeypatch.setattr(asyncio, "create_subprocess_shell", _fake_setup_script)
 
@@ -296,6 +331,11 @@ async def run_main_for_test(
 
     def _fake_start_installation(tool_context: Any) -> None:
         events.append("start_installation")
+        # N2 — also capture the tool_context on the install path so the
+        # skip-path tests (which return before ``start_mcp_http_server``)
+        # can still inspect ``tool_state.setup_hook_failure`` and the
+        # related surfaces via ``rec.tool_context``.
+        ctx_holder.append(tool_context)
         if prep_failure is not None:
             tool_context.tool_state.dependency_installation = DependencyInstallationState(
                 status="failed",
@@ -322,22 +362,34 @@ async def run_main_for_test(
 
     monkeypatch.setattr(main_mod, "finalize_agent_result", _fake_finalize)
 
-    async def _fake_persist_learnings(_ctx: Any) -> None:
-        return None
+    async def _fake_persist_learnings(ctx: Any) -> None:
+        # N2 — capture the tool_context on the publish-side call so the
+        # skip-path tests (which return before ``start_mcp_http_server``
+        # and ``start_installation``) can still inspect ``tool_context``.
+        if ctx is not None:
+            ctx_holder.append(ctx)
 
     monkeypatch.setattr(main_mod, "persist_learnings", _fake_persist_learnings)
 
-    async def _fake_report_status(_ctx: Any, **kwargs: Any) -> None:
+    async def _fake_report_status(ctx: Any, **kwargs: Any) -> None:
+        # N2 — same rationale as ``_fake_persist_learnings``: capture
+        # tool_context from the first publish-side call so the skip path
+        # surfaces ``rec.tool_context`` to the test.
+        if ctx is not None:
+            ctx_holder.append(ctx)
         report_status_calls.append(kwargs)
 
     monkeypatch.setattr(main_mod, "report_status_checks", _fake_report_status)
 
-    async def _fake_sarif(_ctx: Any) -> None:
-        return None
+    async def _fake_sarif(ctx: Any) -> None:
+        if ctx is not None:
+            ctx_holder.append(ctx)
 
     monkeypatch.setattr(main_mod, "report_sarif_upload", _fake_sarif)
 
-    def _fake_emit_packet(_ctx: Any, **_kwargs: Any) -> Path | None:
+    def _fake_emit_packet(ctx: Any, **_kwargs: Any) -> Path | None:
+        if ctx is not None:
+            ctx_holder.append(ctx)
         return packet_path
 
     monkeypatch.setattr(main_mod, "emit_run_packet", _fake_emit_packet)

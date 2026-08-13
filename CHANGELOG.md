@@ -84,6 +84,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integration gate in PR CI (`make test-integration`, coverage floors,
   `npm audit` on agent CLIs, actionlint/zizmor) plus a secrets-gated live
   integration job as a release precondition
+- `fix(setup): bound `setupScript` execution and fail closed on its failure` (S1) —
+  three new action inputs land:
+  `setupFailurePolicy` (`inconclusive` (default) | `fail` | `warn`) and
+  `setupTimeout` (default `10m`, duration grammar `5m` / `30s` / `1h`). A
+  trusted-tier `setupScript` now runs as a session leader with
+  `asyncio.wait_for` over its `communicate()`; a timeout TERM → grace → KILLs
+  the whole process tree via the existing `utils/process_group.kill_process_group`
+  helper (no second kill path). A failed or timed-out setup script maps the
+  run to `RunOutcome.inconclusive` (D5) under the default policy, never
+  silently `passed`. The trust check at `main.py:368` still precedes every
+  subprocess spawn (convention 8); untrusted tiers continue to skip the
+  script. Setup-script elapsed time is deducted from the agent deadline
+  (F6) so a slow install cannot silently extend the run budget. Setup
+  stderr reaching the prompt or `result` output is passed through
+  `analyzers.redact.redact_secrets` first (convention 7). `RunOutcome`
+  stays at its closed six-value taxonomy (convention 6); S1 adds producers
+  of `inconclusive`, never a seventh outcome.
 
 ### Changed
 

@@ -221,6 +221,11 @@ class ToolState:
     # When ``setup_script`` is skipped on an untrusted tier (W1.2), the reason
     # string is recorded here for harness/tests and later RunOutcome mapping.
     setup_script_skip_reason: str | None = None
+    # S1 / D5 / D6 / F6 — when a trusted-tier ``setup_script`` exits non-zero
+    # or hits the configured timeout, the redacted reason is recorded here so
+    # ``main.py`` can wire it into the agent prompt at both call sites and
+    # into the outcome resolution path. Empty string = no failure.
+    setup_hook_failure: str = ""
     # Former askpass path retained for bookkeeping only — ``setup_git`` shreds
     # the on-disk helper immediately (auth is MCP ``http.extraHeader``; W2.2).
     git_askpass_path: str | None = None

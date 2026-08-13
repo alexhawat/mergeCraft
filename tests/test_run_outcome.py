@@ -207,7 +207,12 @@ async def test_every_outcome_maps_to_a_check_conclusion(
         rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=scenario_tmp, **kwargs)
         outcome = getattr(rec.result, "outcome", None) if rec.result else None
         assert outcome == getattr(run_outcome_cls, name), f"scenario {name!r} produced {outcome!r}"
-        assert rec.report_status_calls, f"no status check reported for {name!r}"
+        assert rec.report_status_calls, (
+            f"no status check reported for {name!r} — every outcome must produce a "
+            f"completion check (W5.1). The S1 review follow-up restored this for "
+            f"the bad-``timeout`` scenario by deferring validation until after "
+            f"``tool_context`` is built."
+        )
         conclusion = rec.report_status_calls[-1].get("conclusion")
         assert conclusion in valid_conclusions, (
             f"outcome {name} mapped to invalid conclusion {conclusion!r}"
