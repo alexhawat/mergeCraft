@@ -184,6 +184,41 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
     return RunOutcome.infra_error
 
 
+def _short_circuit_setup_failure(
+    setup_hook_failure: str,
+    setup_failure_policy: str,
+) -> tuple[str, _ConfigurationError | str | None]:
+    """Decide whether a trusted-tier ``setup_script`` failure short-circuits the run (S1 / D10).
+
+    Returns a 2-tuple ``(action, payload)`` consumed by :func:`main`:
+
+    - ``("abort", _ConfigurationError(reason))`` — ``fail`` policy. Raise the
+      exception so the outer handler maps the run to ``configuration_error``
+      while still calling ``report_status_checks`` and ``persist_learnings``.
+    - ``("skip_agent", reason)`` — ``inconclusive`` policy. The agent loop
+      must NOT run (no review/mutation tools); ``main`` returns a
+      ``MainResult(outcome=RunOutcome.inconclusive)`` after running the
+      publish block.
+    - ``("continue", None)`` — no failure, ``warn`` policy, or otherwise. The
+      agent loop proceeds.
+
+    The ``fail`` branch raises rather than returning ``RunOutcome`` directly
+    so the operator gets the existing configuration-error semantics (same
+    path as invalid action-input values). The ``inconclusive`` branch uses a
+    sentinel return so ``main`` can run the publish block — skipping that
+    would leave the run without a status check.
+    """
+    if not setup_hook_failure:
+        return ("continue", None)
+    if setup_failure_policy == "fail":
+        return ("abort", _ConfigurationError(setup_hook_failure))
+    if setup_failure_policy == "inconclusive":
+        return ("skip_agent", setup_hook_failure)
+    # ``warn`` and any other value fall through; the late outcome block at
+    # the bottom of ``main`` handles them.
+    return ("continue", None)
+
+
 async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
     """Return a reason string when review-relevant dependency prep failed (W6.1).
 
@@ -560,19 +595,65 @@ async def main() -> MainResult:
                 logger.warning("» {}", setup_script_skip_reason)
         setup_elapsed_s = time.monotonic() - setup_started_at
 
-        # S1 review / F4 follow-up — the ``fail`` policy means "the
-        # operator has declared the failure is unrecoverable; the run
-        # aborts". The agent must NOT run when setup failed under
-        # ``fail`` — it may already post reviews, push branches, or make
-        # other external mutations before the late outcome resolution
-        # could decide the run is a ``configuration_error``. Short-circuit
-        # here, *before* the agent loop.
-        if setup_hook_failure and settings.setup_failure_policy == "fail":
+        # S1 review / F4 + S1 review / N2 — the policy decides whether a
+        # trusted-tier ``setup_script`` failure short-circuits *before* the
+        # agent loop. ``fail`` aborts (existing F4 behaviour); ``inconclusive``
+        # (N2 fix) skips the agent and runs the publish block with outcome
+        # ``inconclusive`` so no review/mutation tool is invoked; ``warn``
+        # falls through to the late outcome block at the bottom of ``main``.
+        # Pre-N2 the ``inconclusive`` branch ran the agent first and only
+        # then rewrote the outcome — letting the agent post reviews / push
+        # branches on an under-provisioned tree.
+        sc_action, sc_payload = _short_circuit_setup_failure(
+            setup_hook_failure, settings.setup_failure_policy
+        )
+        if sc_action == "abort":
+            assert isinstance(sc_payload, _ConfigurationError)
             logger.warning(
                 "» setup script failure under fail policy — aborting before agent runs: {}",
                 setup_hook_failure,
             )
-            raise _ConfigurationError(setup_hook_failure)
+            raise sc_payload
+        if sc_action == "skip_agent":
+            assert isinstance(sc_payload, str)
+            skip_reason = sc_payload
+            logger.warning(
+                "» setup script failure under inconclusive policy — skipping agent "
+                "loop to honour no-verdict: {}",
+                skip_reason,
+            )
+            skip_outcome = RunOutcome.inconclusive
+            skip_packet_path: str | None = None
+            if tool_context:
+                from mergecraft.tracing.tracer import get_tracer_from_settings
+
+                tracer = get_tracer_from_settings(settings)
+                with tracer.start_span(
+                    "mergecraft.publish",
+                    attrs_source=lambda: {"run_succeeded": False},
+                ) as _skip_publish_span:
+                    await persist_learnings(tool_context)
+                    await report_status_checks(
+                        tool_context,
+                        run_succeeded=run_succeeded_for_outcome(skip_outcome),
+                        failure_reason=skip_reason,
+                        conclusion=RUN_OUTCOME_CONCLUSION[skip_outcome],
+                    )
+                    # #39 — opt-in, off by default. Never reaches the wire when
+                    # ``sarif_upload`` is unset.
+                    await report_sarif_upload(tool_context)
+                    written = await asyncio.to_thread(
+                        emit_run_packet,
+                        tool_context,
+                        run_succeeded=skip_outcome is RunOutcome.passed,
+                    )
+                    skip_packet_path = str(written) if written else None
+            return MainResult(
+                success=False,
+                error=skip_reason,
+                evidence_packet_path=skip_packet_path,
+                outcome=skip_outcome,
+            )
 
         # ``tool_context``, ``modes``, ``output_schema``, ``ctx_payload``,
         # ``analyzers_mode`` and ``sarif_upload_enabled`` were all built

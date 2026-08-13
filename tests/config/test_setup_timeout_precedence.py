@@ -13,7 +13,7 @@ when the previous layer is unset.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import pytest
 
 from mergecraft.action.inputs import (
     DEFAULT_SETUP_TIMEOUT_S,
@@ -21,9 +21,6 @@ from mergecraft.action.inputs import (
     resolve_setup_timeout_s,
 )
 from mergecraft.config.settings import RepoSettings
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def _settings_with(**overrides: object) -> RepoSettings:
@@ -134,10 +131,60 @@ def test_resolver_returns_parsed_seconds_for_set(monkeypatch: pytest.MonkeyPatch
     assert resolve_setup_timeout_s() == 300
 
 
+def test_resolver_returns_none_for_empty_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S1 review / N1 — empty-string ``INPUT_SETUP_TIMEOUT`` (the new action
+    metadata default) is treated as unset.
+
+    Pre-N1, ``action.yml`` shipped with ``default: "10m"``. GitHub Actions
+    always injects the default as the env var, so ``INPUT_SETUP_TIMEOUT``
+    was never unset on a real run — ``resolve_setup_timeout_s()``
+    returned ``600`` and ``apply_setup_overrides`` always clobbered the
+    YAML value. The N1 fix flips ``action.yml`` to ``default: ""``;
+    this test pins the resolver side: an empty string is treated as
+    unset (``None``), so the YAML layer can win.
+    """
+    monkeypatch.setenv("INPUT_SETUP_TIMEOUT", "")
+    assert resolve_setup_timeout_s() is None, (
+        "empty INPUT_SETUP_TIMEOUT (the new action.yml default) must "
+        "resolve as None so apply_setup_overrides preserves YAML — "
+        "pre-N1 returned the default 600 and silently overwrote YAML"
+    )
+
+
+def test_apply_setup_overrides_preserves_yaml_for_empty_action_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """S1 review / N1 — YAML wins when ``INPUT_SETUP_TIMEOUT`` is the
+    empty action-metadata default.
+
+    Same shape as :func:`test_yaml_survives_when_input_unset` but with
+    the empty-string path that the new ``action.yml`` ships. The two
+    are observationally equivalent (``_read_input`` collapses ``""``
+    to ``None``), but pinning them separately documents that the empty
+    string is the *normal* "Action input unset" state going forward —
+    not the historical "user explicitly set INPUT_SETUP_TIMEOUT='\"\"' "
+    edge case.
+    """
+    del tmp_path
+    monkeypatch.setenv("INPUT_SETUP_TIMEOUT", "")
+
+    settings = _settings_with(setup_timeout_s=30)
+    assert settings.setup_timeout_s == 30, "fixture: YAML must start at 30s"
+
+    merged = apply_setup_overrides(settings)
+
+    assert isinstance(merged, RepoSettings)
+    assert merged.setup_timeout_s == 30, (
+        f"YAML `setup_timeout_s: 30` must survive when INPUT_SETUP_TIMEOUT "
+        f"is the empty action-metadata default — pre-N1 returned 600 from "
+        f"the action.yml default and silently overwrote YAML; "
+        f"got {merged.setup_timeout_s}s"
+    )
+
+
 def test_resolver_raises_for_unparseable(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unparseable values still fail closed (the run is a ``configuration_error``)."""
     monkeypatch.setenv("INPUT_SETUP_TIMEOUT", "not-a-duration")
-    import pytest
 
     with pytest.raises(ValueError, match="invalid setup_timeout"):
         resolve_setup_timeout_s()
@@ -190,13 +237,67 @@ def test_camelcase_setup_timeout_alias_is_accepted() -> None:
     )
 
 
+def test_setup_timeout_zero_rejected() -> None:
+    """S1 review / N3 — ``setup_timeout_s: 0`` must fail closed.
+
+    The pre-fix ``int`` field accepted ``0``. ``asyncio.wait_for(..., timeout<=0)``
+    raises immediately and the prior ``except TimeoutError`` arm mapped
+    that to ``inconclusive`` setup timeout — which is a runtime outcome,
+    not a configuration error. The fix constrains the field with
+    ``gt=0`` so Pydantic rejects the misconfiguration at the parse
+    layer, before the run starts.
+    """
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        RepoSettings.model_validate({"setup_timeout_s": 0})
+
+
+def test_setup_timeout_negative_rejected() -> None:
+    """S1 review / N3 — ``setup_timeout_s: -1`` must fail closed.
+
+    Symmetric to ``test_setup_timeout_zero_rejected``. A negative budget
+    is also a misconfiguration; ``gt=0`` rejects it.
+    """
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        RepoSettings.model_validate({"setup_timeout_s": -1})
+
+
+def test_setup_timeout_zero_rejected_via_camelcase_alias() -> None:
+    """S1 review / N3 — ``setupTimeout: 0`` must fail closed (camelCase path).
+
+    Operators write the camelCase alias in YAML; the validation has to
+    apply through the alias, not just the snake_case path.
+    """
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        RepoSettings.model_validate({"setupTimeout": 0})
+
+
+def test_setup_timeout_negative_rejected_via_camelcase_alias() -> None:
+    """S1 review / N3 — ``setupTimeout: -1`` must fail closed (camelCase path)."""
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        RepoSettings.model_validate({"setupTimeout": -1})
+
+
 __all__ = [
     "test_action_input_wins_over_yaml",
     "test_apply_setup_overrides_passthrough_for_non_reposettings",
+    "test_apply_setup_overrides_preserves_yaml_for_empty_action_default",
     "test_camelcase_setup_timeout_alias_is_accepted",
     "test_default_applies_when_neither_is_set",
     "test_resolver_raises_for_unparseable",
+    "test_resolver_returns_none_for_empty_default",
     "test_resolver_returns_none_for_unset",
     "test_resolver_returns_parsed_seconds_for_set",
+    "test_setup_timeout_negative_rejected",
+    "test_setup_timeout_negative_rejected_via_camelcase_alias",
+    "test_setup_timeout_zero_rejected",
+    "test_setup_timeout_zero_rejected_via_camelcase_alias",
     "test_yaml_survives_when_input_unset",
 ]

@@ -195,23 +195,23 @@ async def test_skip_reason_reaches_prompt(monkeypatch: pytest.MonkeyPatch, tmp_p
 async def test_both_call_sites_pass_the_reason(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
-    """F1 / D6 structural pin — **the prompt built by both call paths**
-    contains the failure reason.
+    """S1 review / N2 — under the default ``inconclusive`` policy the
+    agent loop is skipped before either ``resolve_instructions`` call
+    site fires.
 
-    The plan mandates that the prompt built by both the primary path
-    (``main.py:500``) and the retry/fallback path (``main.py:560``) carries
-    the reason. Today both call sites hardcode ``setup_hook_failure=""``;
-    S1.2 fixes both.
+    The pre-N2 contract was that the prompt built by both the primary
+    path (``main.py`` ~line 630) and the retry/fallback path (~line 680)
+    carried the failure reason. The N2 fix makes the "fail first,
+    rewrite outcome later" shape impossible: the agent does not run,
+    so no prompt is built on this path. The failure reason reaches the
+    consumer via ``report_status_checks`` (the publish block) and
+    ``MainResult.error``, not the prompt.
 
-    The assertion is on the *built prompt*, NOT on the absence of `""` in
-    the source. A source-grep is structural-only and the wave-verifier will
-    reject it.
-
-    The test drives a model chain (``models=["claude", "opencode"]``) so
-    both call sites fire — the primary at ``main.py:500`` and the
-    fallback at ``main.py:560`` (which is only reached when
-    ``attempt_agent_id != agent_id``). The harness's
-    ``agents_by_slug`` maps each slug to a ``FakeAgent``.
+    This test pins the new contract: ``resolve_instructions`` is never
+    called, and ``head_agent`` / ``fallback_agent`` are never invoked.
+    The harness's :class:`FakeAgent` records each invocation in
+    ``agent.calls``; the model's :func:`resolve_instructions` patch
+    records every call in ``captured["all_full"]``. Both must be empty.
     """
     from mergecraft.agents.shared import AgentResult
 
@@ -221,9 +221,6 @@ async def test_both_call_sites_pass_the_reason(
     trusted_payload: dict[str, object] = {"action": "workflow_dispatch"}
     head_agent = FakeAgent(
         name="claude",
-        # ``retryable=True`` so the production chain advances to the fallback
-        # slug; the test's whole point is to exercise both ``resolve_instructions``
-        # call sites, which only happens when ``attempt_agent_id != agent_id``.
         result=AgentResult(success=False, error="primary failed", metadata={"retryable": True}),
     )
     fallback_agent = FakeAgent(
@@ -244,30 +241,42 @@ async def test_both_call_sites_pass_the_reason(
     )
     assert rec.result is not None
 
-    # Both call sites in main.py:500 / :560 call resolve_instructions once
-    # each. Today both hardcode setup_hook_failure="" — so the captured
-    # prompts will NOT contain "SETUP HOOK FAILED" in either case.
-    # After S1.2, both must.
-    assert captured["all_full"], "resolve_instructions was never called by main()"
-    assert len(captured["all_full"]) >= 2, (
-        f"F1 structural pin: expected both main.py:500 and :560 to call "
-        f"resolve_instructions; got {len(captured['all_full'])} calls — "
-        f"the fallback path was not exercised"
+    # N2: neither agent was invoked, and no prompt was built — the
+    # short-circuit returns before ``resolve_instructions`` runs.
+    assert head_agent.calls == [], (
+        f"N2 violated: head agent ran {len(head_agent.calls)} times under "
+        f"the default inconclusive policy — must be 0"
     )
-    # Both surfaces must carry the SETUP HOOK FAILED paragraph at every
-    # call site — the drivers only send ``instructions.system`` so a
-    # surface-only-in-``full`` test would let the regression pass.
-    for surface_name, surface_key in (("full", "all_full"), ("system", "all_system")):
-        failure_paragraph_count = sum(
-            1 for prompt in captured[surface_key] if "SETUP HOOK FAILED" in prompt
-        )
-        assert failure_paragraph_count == len(captured[surface_key]), (
-            f"F1 / D6 wiring on {surface_name!r}: only "
-            f"{failure_paragraph_count}/{len(captured[surface_key])} built "
-            f"prompts carried the SETUP HOOK FAILED paragraph — at least one "
-            f'call site is still hardcoding setup_hook_failure="" '
-            f"(main.py:500 or :560) or the section is missing from system"
-        )
+    assert fallback_agent.calls == [], (
+        f"N2 violated: fallback agent ran {len(fallback_agent.calls)} times "
+        f"under the default inconclusive policy — must be 0"
+    )
+    assert captured["all_full"] == [], (
+        f"N2 violated: resolve_instructions was called under the default "
+        f"inconclusive policy; the agent-side prompt path is still "
+        f"reachable. Calls: {captured['all_full']!r}"
+    )
+    # The failure reason still reaches the consumer via the publish
+    # block. The harness records every ``report_status_checks`` call —
+    # the failure_reason field carries the redacted setup-script failure
+    # text the operator sees on the status check.
+    assert rec.report_status_calls, (
+        "N2 violated: report_status_checks was not called — the publish "
+        "block must run even on the skip path so the consumer-facing "
+        "status check carries the failure reason"
+    )
+    last_failure_reason = str(rec.report_status_calls[-1].get("failure_reason") or "")
+    assert "setup script failed" in last_failure_reason, (
+        "N2 violated: the surfaced failure reason did not match the "
+        f"expected setup_script failure text: {last_failure_reason!r}"
+    )
+    # And the outcome is ``inconclusive`` — the documented contract.
+    outcome = getattr(rec.result, "outcome", None)
+    from mergecraft.run_outcome import RunOutcome
+
+    assert outcome is RunOutcome.inconclusive, (
+        f"N2 violated: outcome must be inconclusive; got {outcome!r}"
+    )
 
 
 # ── Regression pins (must pass today) ─────────────────────────────────────────
