@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Coverage ratchet now runs from `make ci` via `coverage-gate`; measured coverage must
+  stay within `fail_under` and a fixed margin or the floor must be bumped deliberately
+  in `pyproject.toml` ([#142](https://github.com/alexhawat/mergeCraft/issues/142))
 - 0.0.1 distribution checklist: README prototype markers removed, docs badge label
   aligned with GitHub Pages, operator runbook at `docs/distribution.md`, and prototype
   residue (`meat_python_plus/`, `docs/meat-spike.md`) dropped from the tree ([#141](https://github.com/alexhawat/mergeCraft/issues/141))

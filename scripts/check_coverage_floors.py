@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 # Global line-coverage floor (coverage.py ``fail_under`` mirrors this).
-GLOBAL_LINE_FLOOR = 65.0
+GLOBAL_LINE_FLOOR = 70.0
 
 # Critical-path floors (line %, branch %). Values are ratchet floors just
 # under the 2026-08-11 measured baseline so decreases fail the gate.

@@ -112,6 +112,7 @@ coverage-gate: ## Unit tests + coverage floors (global + critical paths)
 	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
 		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+	$(UV) run python scripts/check_coverage_ratchet.py coverage.json
 	$(UV) run python scripts/check_coverage_floors.py coverage.json
 
 npm-audit: ## npm audit over docker/agent-clis lockfile (W12.3 / #27)
@@ -149,7 +150,7 @@ ci-static: lockcheck lint typecheck pyright catalog-check build example-workflow
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check build example-workflows-check security test
+CI_STEPS := lockcheck lint typecheck pyright catalog-check build example-workflows-check security test coverage-gate
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)
@@ -162,7 +163,7 @@ ci-reset: ## Clear the ci-resume checkpoint (start the gate over)
 	@chmod +x scripts/ci_resume.sh 2>/dev/null || true
 	@./scripts/ci_resume.sh --reset
 
-ci: ci-static security test ## Full gate
+ci: ci-static security test coverage-gate ## Full gate
 	@echo "ci OK"
 
 REVIEWBENCH_DIR ?= evals/reviewbench
