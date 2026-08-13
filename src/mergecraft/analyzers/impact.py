@@ -1,8 +1,9 @@
-"""Change-impact extraction from a diff — declaration-level reference leads.
+"""Change-impact extraction from a diff - declaration-level reference leads.
 
 Given a formatted PR diff and the checked-out files, produces a structured
-artifact (``impactPath``) listing every declaration the diff touches, grouped
-by language and ranked by severity. Default off behind ``analyzers.impact``.
+artifact (``impactPath``) listing every declaration the diff *actually touches*
+(within hunk ranges), grouped by language, with cross-file references.
+Default off behind ``analyzers.impact``.
 
 Design decisions documented at
 ``.ignorelocal/waves/evidence/s6-design-decisions.md``.
@@ -13,12 +14,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
-# Language → extension → declaration patterns (multiline regex).
-# Covers the 8 languages in the shipped ast-grep catalog (python, javascript,
-# typescript, go, java, rust, c, cpp).  Patterns look for the declaration
-# *headline* on its own line — class/function/interface definitions.
 _LANG_PATTERNS: dict[str, dict[str, list[re.Pattern[str]]]] = {
     "Python": {
         ".py": [
@@ -78,9 +76,7 @@ _LANG_PATTERNS: dict[str, dict[str, list[re.Pattern[str]]]] = {
         ],
     },
     "C/C++": {
-        ".c": [
-            re.compile(r"^(?:\w+\s+)+\s*(?P<name>[a-zA-Z_]\w*)\s*\(", re.MULTILINE),
-        ],
+        ".c": [re.compile(r"^(?:\w+\s+)+\s*(?P<name>[a-zA-Z_]\w*)\s*\(", re.MULTILINE)],
         ".h": [
             re.compile(r"^(?:\w+\s+)+\s*(?P<name>[a-zA-Z_]\w*)\s*\(", re.MULTILINE),
             re.compile(
@@ -99,26 +95,46 @@ _LANG_PATTERNS: dict[str, dict[str, list[re.Pattern[str]]]] = {
             re.compile(r"^(?:\w+\s+)+\s*(?P<name>[a-zA-Z_]\w*)\s*\(", re.MULTILINE),
             re.compile(r"^class\s+(?P<name>[a-zA-Z_]\w*)", re.MULTILINE),
         ],
-        ".cxx": [
-            re.compile(r"^(?:\w+\s+)+\s*(?P<name>[a-zA-Z_]\w*)\s*\(", re.MULTILINE),
-        ],
+        ".cxx": [re.compile(r"^(?:\w+\s+)+\s*(?P<name>[a-zA-Z_]\w*)\s*\(", re.MULTILINE)],
     },
 }
 
-
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<to>.+)$", re.MULTILINE)
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@")
 
-# Q3 design cap: 24 declarations per review, 8 references per decl.
+
 _MAX_DECLARATIONS: int = 24
 _MAX_REFS: int = 8
 
 
 def _changed_paths(diff_text: str) -> list[str]:
-    """Return the post-image paths named by a unified diff, in first-seen order."""
     seen: dict[str, None] = {}
     for match in _DIFF_FILE_RE.finditer(diff_text):
         seen.setdefault(match.group("to"), None)
     return list(seen)
+
+
+def _parse_hunks(diff_text: str) -> dict[str, list[tuple[int, int]]]:
+    hunks: dict[str, list[tuple[int, int]]] = {}
+    current_file: str | None = None
+    for line in diff_text.splitlines():
+        file_match = _DIFF_FILE_RE.match(line)
+        if file_match:
+            current_file = file_match.group("to")
+            continue
+        if current_file is None:
+            continue
+        hunk_match = _HUNK_RE.match(line)
+        if hunk_match:
+            start = int(hunk_match.group("start"))
+            count = int(hunk_match.group("count") or "1")
+            end = start + max(count, 1) - 1
+            hunks.setdefault(current_file, []).append((start, end))
+    return hunks
+
+
+def _intersects_hunks(line_no: int, hunk_ranges: list[tuple[int, int]]) -> bool:
+    return any(start <= line_no <= end for start, end in hunk_ranges)
 
 
 def _extension(path: str) -> str:
@@ -127,12 +143,6 @@ def _extension(path: str) -> str:
 
 
 def _find_declarations(path: str, cwd: str) -> list[dict[str, object]]:
-    """Extract declaration names from *path* (relative to *cwd*).
-
-    Returns ``[{"name": str, "language": str, "line": int}, …]``
-    sorted by file order. Empty when the file has no recognised extension
-    or is not on disk.
-    """
     full = os.path.join(cwd, path)
     if not os.path.isfile(full):
         return []
@@ -140,7 +150,6 @@ def _find_declarations(path: str, cwd: str) -> list[dict[str, object]]:
         text = Path(full).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
-
     ext = _extension(path)
     results: list[dict[str, object]] = []
     seen_names: set[str] = set()
@@ -151,33 +160,75 @@ def _find_declarations(path: str, cwd: str) -> list[dict[str, object]]:
                 name = match.group("name")
                 if name and name not in seen_names:
                     seen_names.add(name)
-                    # Approximate line number from match position
                     line = text[: match.start()].count("\n") + 1
                     results.append({"name": name, "language": lang, "line": line})
     return results
 
 
-def extract_impact(diff_text: str, cwd: str) -> dict[str, object]:
-    """Extract impact data from *diff_text* and files checked out at *cwd*.
+def _find_references(
+    symbol: str,
+    cwd: str,
+    *,
+    exclude_file: str | None = None,
+    max_refs: int = 8,
+) -> list[dict[str, object]]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "grep", "-nw", "--no-color", "-e", symbol],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except FileNotFoundError, subprocess.TimeoutExpired, OSError:
+        return []
+    if result.returncode not in {0, 1}:
+        return []
+    refs: list[dict[str, object]] = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        parts = line.split(":", 2)
+        if len(parts) < 2:
+            continue
+        ref_file = parts[0]
+        if exclude_file and ref_file == exclude_file:
+            continue
+        try:
+            ref_line = int(parts[1])
+        except ValueError, IndexError:
+            continue
+        refs.append({"file": ref_file, "line": ref_line})
+        if len(refs) >= max_refs:
+            break
+    return refs
 
-    Returns ``{"impactPath": […], "truncated": bool, "totalDeclarations": int}``.
-    """
+
+def extract_impact(diff_text: str, cwd: str) -> dict[str, object]:
+    hunks = _parse_hunks(diff_text)
     rows: list[dict[str, object]] = []
     for fp in _changed_paths(diff_text):
+        file_hunks = hunks.get(fp)
+        if not file_hunks:
+            continue
         decls = _find_declarations(fp, cwd)
         for d in decls:
+            line_val = d["line"]
+            assert isinstance(line_val, int)
+            if not _intersects_hunks(line_val, file_hunks):
+                continue
+            name_val = d["name"]
+            assert isinstance(name_val, str)
+            refs = _find_references(name_val, cwd, exclude_file=fp)
             rows.append(
                 {
                     "file": fp,
                     "declaration": d["name"],
                     "language": d["language"],
                     "line": d["line"],
+                    "references": refs,
                 }
             )
-
-    # Sort: language → file → line
     rows.sort(key=lambda r: (r["language"], r["file"], r["line"]))
-
     capped = rows[:_MAX_DECLARATIONS]
     return {
         "impactPath": capped,
@@ -192,19 +243,12 @@ def write_impact(
     tmpdir: str,
     pull_number: int | str,
 ) -> dict[str, object] | None:
-    """Write the impact-path JSON artifact to disk.
-
-    Returns ``None`` when there are zero declarations, so the caller omits
-    the ``impactPath`` key entirely (same convention as ``incrementalDiffPath``).
-    """
     data = extract_impact(diff_text, cwd)
     rows = data.get("impactPath", [])
     if not rows:
         return None
-
     path = str(Path(tmpdir) / f"pr-{pull_number}-impact.json")
     Path(path).write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
-
     return {
         "impactPath": path,
         "impactTruncated": data["truncated"],
