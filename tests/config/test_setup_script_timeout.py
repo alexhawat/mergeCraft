@@ -117,6 +117,13 @@ async def test_setup_timeout_exceeding_run_budget_raises_configuration_error(
     instead of the ``inconclusive`` / ``configuration_error`` the setup
     policy was supposed to produce. The fix reserves agent budget by
     raising ``_ConfigurationError`` at setup-timeout resolution.
+
+    The S1 review follow-up wires ``setup_timeout`` through
+    :func:`mergecraft.action.inputs.apply_setup_overrides`, so this test
+    sets ``INPUT_SETUP_TIMEOUT`` *and* ``INPUT_TIMEOUT`` to pin the
+    equal-deadline guard explicitly — the YAML side no longer
+    accidentally collides with the default ``10m`` after the precedence
+    fix lands.
     """
     from mergecraft.agents.shared import AgentResult
 
@@ -125,19 +132,20 @@ async def test_setup_timeout_exceeding_run_budget_raises_configuration_error(
         result=AgentResult(success=True, output="must-not-run"),
     )
 
-    # Equal deadlines — ``setup_timeout`` consumes the whole run budget.
+    # Action input wins: ``INPUT_SETUP_TIMEOUT: 30m`` is strictly larger
+    # than the run budget ``INPUT_TIMEOUT: 60s`` — the equal-deadline /
+    # exceeds-deadline guard in ``main.py`` must fire and short-circuit
+    # before the agent loop.
     rec = await run_main_for_test(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
         settings=RepoSettings(
             setup_script="./anything-here",
-            # ``setup_timeout`` is set explicitly to 10 m; the run budget
-            # below matches it — covering the equal-deadline edge.
-            setup_timeout_s=10,
         ),
         env={
             "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
-            "INPUT_TIMEOUT": "10m",
+            "INPUT_SETUP_TIMEOUT": "30m",
+            "INPUT_TIMEOUT": "60s",
         },
         event_name=_TRUSTED_EVENT,
         event_payload=_TRUSTED_PAYLOAD,
@@ -148,7 +156,7 @@ async def test_setup_timeout_exceeding_run_budget_raises_configuration_error(
     # before the agent loop.
     assert sentinel_agent.calls == [], (
         f"F3 follow-up violated: agent ran {len(sentinel_agent.calls)} "
-        f"times despite setup_timeout == run timeout — the validation "
+        f"times despite setup_timeout > run timeout — the validation "
         f"must short-circuit before the agent loop, not after."
     )
     outcome = getattr(rec.result, "outcome", None)

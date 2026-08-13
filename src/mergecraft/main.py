@@ -187,9 +187,19 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
 async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
     """Return a reason string when review-relevant dependency prep failed (W6.1).
 
-    Awaits an in-progress install before inspecting status. Trusted-tier
-    ``setup_script`` failures are intentionally *not* included here — they
-    stay warn-only by policy (see ``docs/config-failure-policy.md``).
+    Awaits an in-progress install before inspecting status.
+
+    Trusted-tier ``setup_script`` failures are **not** included here. They
+    resolve through ``setup_failure_policy`` (S1 / D10 — closed vocabulary
+    ``inconclusive`` | ``fail`` | ``warn``) at the post-run outcome block
+    in :func:`main` — see :data:`mergecraft.action.inputs.SetupFailurePolicy`
+    and ``docs/config-failure-policy.md``. This helper only emits a reason
+    string; the ``fail`` policy short-circuits at the run-time guard above
+    (so this branch never sees a ``fail``-mapped outcome). The ``warn`` and
+    ``inconclusive`` policies carry their own resolution text via
+    ``tool_state.setup_hook_failure`` and are deliberately kept off this
+    helper's path so prep and setup failure reasons stay distinguishable
+    to the operator.
     """
     state = tool_context.tool_state.dependency_installation
     if state is None:

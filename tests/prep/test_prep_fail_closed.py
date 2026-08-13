@@ -114,3 +114,47 @@ async def test_agent_result_failure_still_maps_to_failed(
     rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=tmp_path, agent=agent)
     assert rec.result is not None
     assert not rec.result.success
+
+
+def test_prep_failure_reason_docstring_describes_three_value_policy() -> None:
+    """S1 review follow-up — ``_prep_failure_reason`` docstring must reflect
+    the current 3-value ``SetupFailurePolicy``.
+
+    The pre-fix docstring claimed setup failures "stay warn-only by policy".
+    That language predates the ``inconclusive`` default (D5 / D10) and the
+    ``fail`` short-circuit — operators reading the helper's contract got a
+    misleading picture of how trusted-tier setup failures are resolved.
+
+    Assert the docstring mentions all three policy values and disowns the
+    legacy "warn-only" phrasing. The check is on the *contract surface* —
+    the helper's behaviour is unchanged, only its documentation moves.
+    """
+    import inspect
+
+    from mergecraft.main import _prep_failure_reason
+
+    doc = inspect.getdoc(_prep_failure_reason) or ""
+    assert doc, "_prep_failure_reason must carry a docstring"
+
+    # Must mention each of the three closed-vocabulary values.
+    for value in ("inconclusive", "fail", "warn"):
+        assert value in doc, (
+            f"_prep_failure_reason docstring must mention the {value!r} "
+            f"policy value (SetupFailurePolicy vocabulary); got:\n{doc}"
+        )
+
+    # Must not carry the stale warn-only phrasing.
+    lowered = doc.lower()
+    for stale in ("warn-only", "warn only", "stay warn", "stay-warn"):
+        assert stale not in lowered, (
+            f"_prep_failure_reason docstring still uses stale {stale!r} "
+            f"phrasing — setup_failure_policy is now 3-valued "
+            f"(inconclusive | fail | warn), not warn-only:\n{doc}"
+        )
+
+    # Reference back to the canonical authority so the doc does not
+    # silently drift again.
+    assert "SetupFailurePolicy" in doc or "setup_failure_policy" in doc, (
+        f"_prep_failure_reason docstring should reference the canonical "
+        f"SetupFailurePolicy name so future drift is detectable; got:\n{doc}"
+    )

@@ -168,6 +168,15 @@ inputs:
       timeout. Reusing ``resolve_timeout_ms`` — the same parser the ``timeout``
       input uses. Default ``10m`` applies even when ``timeout`` is unset or
       ``--notimeout``; setup never consumes the whole run budget.
+
+      Note: ``setupTimeout`` must be strictly less than ``timeout`` (or the
+      run aborts as ``configuration_error``). Equal / larger budgets would let
+      the setup script eat the whole run deadline; the agent is then given
+      ≈1 ms and a setup timeout surfaces as ``timed_out`` instead of the
+      ``inconclusive`` / ``configuration_error`` the setup policy was supposed
+      to produce. Lower ``setupTimeout`` or raise ``timeout`` to satisfy the
+      guard — see ``docs/config-failure-policy.md`` for the runtime reason
+      text.
     required: false
     default: "10m"
 

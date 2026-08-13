@@ -77,6 +77,29 @@ setup runs as a session leader (`start_new_session=True`), so a TERM →
 grace → KILL on the deadline reaches the **whole** process tree — the
 script's own children and grandchildren are reaped, not just the leader.
 
+### Configuration guards
+
+The Action validates combinations at setup time and fails closed as
+`RunOutcome.configuration_error` *before* the agent runs. The most
+common one bites operators who set `timeout: 10m` (the default)
+together with their own `setupScript`:
+
+- **`setupTimeout` must be strictly less than `timeout`.** Equal
+  budgets let the setup script eat the whole run deadline; the agent
+  is then given ≈1 ms and a setup timeout surfaces as
+  `RunOutcome.timed_out` instead of the `inconclusive` /
+  `configuration_error` the setup policy was supposed to produce. The
+  guard fires before the setup subprocess spawns and reports a runtime
+  reason along the lines of:
+
+  > setup_timeout (X s) must be less than the run timeout (Y s) so a
+  > failed setup script is not masked as an agent timeout
+
+  Workaround: lower `setupTimeout` (e.g. `5m` with a `10m` run timeout)
+  or raise `timeout`. Operators who explicitly opt in via `setupFailurePolicy`
+  still need a non-zero agent budget — this guard is independent of the
+  policy.
+
 ### Redaction (convention 7)
 
 Setup-script stderr that surfaces to the agent prompt **or** the `result`
@@ -109,5 +132,10 @@ knows the setup did not run.
    today's continue-on-failure behaviour back, or fix the script.
 7. Setup script hangs → it is killed at the `setupTimeout` deadline (default
    10 m) along with any children. Bump `setupTimeout` for slow installs.
-8. Prep install failed → treat the check conclusion as inconclusive/neutral
+8. Setup timeout ≥ run timeout → `configuration_error` — lower
+   `setupTimeout` or raise `timeout` (see the Configuration guards note
+   above). Equal deadlines are the most common landmine because the
+   default `setupTimeout` (`10m`) and a `timeout: 10m` Action input
+   collide exactly.
+9. Prep install failed → treat the check conclusion as inconclusive/neutral
    and re-run after fixing the install error.
