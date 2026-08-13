@@ -179,6 +179,12 @@ class AnalyzersSettings(BaseModel):
     # before the upload can succeed. The `sarif_upload` action input overrides
     # this in both directions when it is set (`resolve_sarif_upload_enabled`).
     sarif_upload: bool = Field(default=False, alias="sarifUpload")
+    # #94 / S6 — change-impact extraction (impactPath), default off.
+    # Produces a declaration-level reference-lead table for the diff at
+    # review time. Off by default until the eval-bank corpus (#140) measures
+    # its cost-to-benefit ratio (see S6 design at
+    # .ignorelocal/waves/issues-setup-container-hygiene-wave-plan.md).
+    impact: bool = Field(default=False, alias="impact")
 
 
 # D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.

@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `feat(analyzers): add change-impact extraction (impactPath) for review prompts` — new
+  `analyzers.impact` setting (default off) enables declaration-level reference-lead
+  extraction from the diff. When enabled and the diff touches files with recognised
+  extensions, `checkout_pr` returns an `impactPath` JSON file listing every declaration
+  the diff touches, grouped by language, capped at 24 declarations. Defaults to off
+  pending eval-bank measurement. (#94)
 - `feat(findings): carry unresolved review findings past the merge` — a merged PR
   keeps its inline comments forever but nobody re-opens one, so findings the
   author never fixed or rebutted were lost to attention. `mergecraft findings
