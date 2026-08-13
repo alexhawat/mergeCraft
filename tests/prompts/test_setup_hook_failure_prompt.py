@@ -218,6 +218,7 @@ async def test_both_call_sites_pass_the_reason(
         settings=RepoSettings(
             setup_script="./broken-setup.sh",
             models=["claude", "opencode"],
+            setup_failure_policy="warn",  # must be "warn" so the short-circuit does not intercept
         ),
         event_name=trusted_event,
         event_payload=trusted_payload,

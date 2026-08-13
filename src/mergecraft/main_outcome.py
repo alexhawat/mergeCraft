@@ -16,23 +16,21 @@ from mergecraft.run_outcome import RunOutcome
 from mergecraft.tracing.event import trace_attrs_for_mode
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from mergecraft.action.inputs import SetupFailurePolicy
     from mergecraft.agents.shared import AgentResult
     from mergecraft.modes import Mode
 
 
-def _publish_span_attrs(outcome: RunOutcome, modes: Sequence[Mode]) -> dict[str, Any]:
+def _publish_span_attrs(outcome: RunOutcome, mode: Mode | None) -> dict[str, Any]:
     """Build the attrs dict the ``mergecraft.publish`` span emits.
 
-    #145 contract: every mode's prompt version reaches the trace attrs so
-    a Logfire/OTel row carries the prompt name and version of the
-    dispatched mode, even when the prompt text changes later.
+    #145 contract: the selected mode's prompt version reaches the trace
+    so a Logfire/OTel row carries the prompt name and version of the
+    mode that actually ran, even when the prompt text changes later.
     """
-    return {"run_succeeded": outcome is RunOutcome.passed} | {
-        k: v for m in modes for k, v in trace_attrs_for_mode(m).items()
-    }
+    return {"run_succeeded": outcome is RunOutcome.passed} | (
+        trace_attrs_for_mode(mode) if mode else {}
+    )
 
 
 def _classify_outcome(

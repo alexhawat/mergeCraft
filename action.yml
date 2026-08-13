@@ -159,7 +159,7 @@ inputs:
       values fail closed as ``configuration_error`` (this is a security/runtime
       surface — ``extra="forbid"`` semantics).
     required: false
-    default: "inconclusive"
+    default: ""
   setup_timeout:
     description: >-
       S1 / F6 — maximum wall-clock duration for ``setupScript`` (e.g. ``5m``,
@@ -169,7 +169,7 @@ inputs:
       input uses. Default ``10m`` applies even when ``timeout`` is unset or
       ``--notimeout``; setup never consumes the whole run budget.
     required: false
-    default: "10m"
+    default: ""
 
 outputs:
   result:

@@ -19,7 +19,7 @@ from loguru import logger
 from mergecraft.action.inputs import apply_setup_overrides, apply_tracing_overrides
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
-from mergecraft.agents.shared import AgentRunContext
+from mergecraft.agents.shared import AgentResult, AgentRunContext
 from mergecraft.analyzers.redact import install_loguru_redaction_filter
 from mergecraft.analyzers.trust import derive_trust_tier
 from mergecraft.evidence.run_packet import emit_run_packet
@@ -87,6 +87,7 @@ from mergecraft.utils.workspace import (
 if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.modes import Mode
 
 
 __all__ = ["MainResult", "RunOutcome", "_AgentTimeoutError", "_ConfigurationError", "main"]
@@ -325,7 +326,7 @@ async def _run_publish_span_block(
     tracer = get_tracer_from_settings(settings)
     with tracer.start_span(
         "mergecraft.publish",
-        attrs_source=lambda: _publish_span_attrs(outcome, tool_state.modes),
+        attrs_source=lambda: _publish_span_attrs(outcome, _selected_mode(tool_state, tool_context)),
     ):
         await persist_learnings(tool_context)
         await report_status_checks(
@@ -344,6 +345,23 @@ async def _run_publish_span_block(
             emit_run_packet, tool_context, run_succeeded=outcome is RunOutcome.passed
         )
         return str(written) if written else None
+
+
+def _selected_mode(tool_state: ToolState, tool_context: ToolContext) -> Mode | None:
+    """Return the ``Mode`` object matching ``selected_mode``, or ``None``.
+
+    The mode catalog lives on ``tool_context.modes``; the selected mode
+    name lives on ``tool_state.selected_mode``. When the agent did not
+    dispatch (short-circuit or crash) there is no selected mode, and the
+    trace attrs simply omit mode-specific keys.
+    """
+    selected_name = tool_state.selected_mode
+    if not selected_name:
+        return None
+    for m in tool_context.modes:
+        if m.name == selected_name:
+            return m
+    return None
 
 
 def _build_main_result(
@@ -542,6 +560,33 @@ async def main() -> MainResult:
         agent_timeout_ms, deadline_log = _compute_agent_deadline(timeout_ms, setup_elapsed_s)
         if deadline_log:
             logger.info(deadline_log)
+
+        # S1 / D10 — a trusted-tier setup failure under the ``inconclusive`` /
+        # ``fail`` policy short-circuits *before* agent dispatch: a Review agent
+        # must not run (and possibly submit a GitHub review) when the outcome
+        # is already decided. Only ``warn`` proceeds to the agent, which is
+        # why the existing post-run ``_classify_outcome`` keeps its final say
+        # for the ``warn`` / no-failure path.
+        if setup_hook_failure and settings.setup_failure_policy != "warn":
+            policy = settings.setup_failure_policy
+            outcome = (
+                RunOutcome.configuration_error if policy == "fail" else RunOutcome.inconclusive
+            )
+            logger.warning(
+                "» setup script failure short-circuits run before agent dispatch ({} policy): {}",
+                policy,
+                setup_hook_failure,
+            )
+            packet_path = await _run_publish_span_block(
+                tool_context, tool_state, settings, outcome, setup_hook_failure
+            )
+            no_run_result = AgentResult(
+                success=False,
+                error=setup_hook_failure,
+            )
+            return _build_main_result(
+                outcome, setup_hook_failure, packet_path, no_run_result, tool_state
+            )
 
         winning_slug, result = await _run_agent_with_timeout(
             _AgentRunArgs(
