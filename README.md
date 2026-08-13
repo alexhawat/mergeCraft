@@ -504,10 +504,19 @@ effective 2025-12-08). Three consequences:
 
 If the review is **not** a required check, prefer plain `pull_request` — simpler,
 and no secrets in scope. The case for accepting `pull_request_target` is narrower
-than it looks: GitHub skips `pull_request` runs when `refs/pull/N/merge` cannot
-be built (any conflicted PR), which leaves a *required* check permanently
-missing and the PR unmergeable even after the conflict is resolved.
-`pull_request_target` still fires on `synchronize` in that state.
+than it looks: GitHub cannot build `refs/pull/N/merge` for a conflicted PR, so
+`pull_request` runs are skipped and a *required* review check sits unreported
+for as long as the conflict lasts. `pull_request_target` still fires on
+`synchronize` in that state, so the review lands — and its verdict is visible —
+while the PR is still conflicted.
+
+That is the whole of the benefit, and it is worth stating plainly: pushing the
+conflict fix to the PR branch fires `synchronize` and clears a `pull_request`
+check too, so the gap is the conflicted window, not a permanent block. It
+outlasts the conflict only when the conflict disappears *without* a push to the
+head branch — the base moved, say — because nothing then re-triggers the run.
+A conflicted PR is unmergeable on its own account anyway, so weigh this against
+running with secrets in scope rather than treating it as decisive.
 
 If you pin the action SHA in more than one place, gate the copies against each
 other in CI — and read the workflow side from the **default branch**

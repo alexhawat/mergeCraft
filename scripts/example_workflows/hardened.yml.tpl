@@ -15,9 +15,16 @@
 # ---------------------------------------------------------------------------
 # This template uses `pull_request_target`. GitHub SKIPS `pull_request` workflows
 # when `refs/pull/N/merge` cannot be built — i.e. whenever the PR has a merge
-# conflict — which leaves a required check permanently missing and the PR
-# unmergeable even after the conflict is fixed. `pull_request_target` still fires
-# on `synchronize` in that state.
+# conflict — so a required review check sits unreported for as long as the
+# conflict lasts. `pull_request_target` still fires on `synchronize` in that
+# state, so the review lands while the PR is still conflicted.
+#
+# Do not over-read that. Pushing the conflict fix to the PR branch fires
+# `synchronize` and clears a `pull_request` check too, so the gap is the
+# conflicted window, not a permanent block; it outlasts the conflict only when
+# the conflict disappears WITHOUT a push to the head branch (the base moved),
+# because nothing then re-triggers the run. A conflicted PR is unmergeable on
+# its own account anyway. Weigh this against running with secrets in scope.
 #
 # The cost is that `pull_request_target` runs with repository secrets in scope, so
 # it MUST NOT execute PR-authored code. This workflow does not: the same-repo
