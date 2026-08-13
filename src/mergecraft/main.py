@@ -91,13 +91,12 @@ if TYPE_CHECKING:
 
 __all__ = ["MainResult", "RunOutcome", "_AgentTimeoutError", "_ConfigurationError", "main"]
 
-# Backwards-compat re-exports — the S1/S3/S5 helper split (commit 4e8f420+)
-# moved ``resolve_model`` / ``resolve_runtime_agent`` / ``_first_runnable_in_chain``
-# into ``main_models`` and ``main_agent``. ``main.py`` does not call them
-# directly, but the test harness (``tests/support/run_main_harness.py``)
-# monkeypatches them through ``mergecraft.main``, so we re-bind the names
-# here as a stable patch surface. The helper modules own the actual call
-# sites; the harness patches both modules in lock-step.
+# Backwards-compat re-export — the S1/S3/S5 helper split (commit 4e8f420+)
+# moved ``_first_runnable_in_chain`` into ``main_models``. ``main.py`` does
+# not call it directly, but the test harness (``tests/support/run_main_harness.py``)
+# monkeypatches ``mergecraft.main._first_runnable_in_chain`` to drive the
+# harness single-slug fast-path, so we re-bind the name here as a stable
+# patch surface. The helper module owns the actual call sites.
 from mergecraft.main_models import _first_runnable_in_chain  # noqa: F401
 
 

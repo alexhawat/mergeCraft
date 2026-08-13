@@ -315,12 +315,14 @@ async def run_main_for_test(
             return agent_map[model]
         return default_agent
 
-    monkeypatch.setattr(main_mod, "resolve_runtime_agent", _fake_resolve_runtime_agent)
     monkeypatch.setattr(
-        main_mod,
-        "_first_runnable_in_chain",
-        lambda chain: chain[0] if chain else None,
+        main_mod, "_first_runnable_in_chain", lambda chain: chain[0] if chain else None
     )
+    # ``resolve_runtime_agent`` is no longer imported into ``mergecraft.main`` —
+    # the call sites moved to ``main_models`` / ``main_agent`` in commit fd3d623.
+    # The patches at the bottom of this function rebind those modules' bindings
+    # in lock-step, so no main-side patch is needed (and any such patch raises
+    # ``AttributeError`` because the attribute does not exist on ``main_mod``).
     # S1/S3/S5 split (commit 4e8f420+): the model-chain helpers moved to
     # ``main_models`` / ``main_agent`` modules. The harness must patch those
     # modules' bindings too, otherwise monkeypatch on ``main_mod`` only rebinds

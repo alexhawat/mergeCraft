@@ -182,6 +182,13 @@ async def test_setup_script_stderr_is_redacted_before_surfacing(
     # Also patch the module-level reference in case resolve_instructions is
     # imported into other modules at collection time.
     monkeypatch.setattr(instructions_mod, "resolve_instructions", _patched_resolve)
+    # S1/S3/S5 split (commit 4e8f420+): the inner-loop ``resolve_instructions``
+    # call now lives in ``mergecraft.main_agent``. Patch that binding too so
+    # the fallback retry path (which loops through ``_run_agent_once``) is
+    # captured by the test's wrapper.
+    from mergecraft import main_agent as main_agent_mod
+
+    monkeypatch.setattr(main_agent_mod, "resolve_instructions", _patched_resolve)
 
     rec = await run_main_for_test(
         monkeypatch=monkeypatch,
