@@ -154,9 +154,46 @@ def test_apply_setup_overrides_passthrough_for_non_reposettings() -> None:
     assert apply_setup_overrides(sentinel) is sentinel
 
 
+def test_camelcase_setup_timeout_alias_is_accepted() -> None:
+    """S1 follow-up — YAML uses camelCase keys (``setupTimeout``).
+
+    Every other operator-facing field on ``RepoSettings`` already
+    declares ``Field(default=..., alias="camelCaseName")`` so a typical
+    ``.mergecraft/config.yaml`` round-trips without surprises; the
+    ``setupTimeout`` field was added in the previous round without an
+    alias, and ``RepoSettings`` is ``extra="forbid"`` — an operator who
+    writes ``setupTimeout: 30`` in YAML got ``ValidationError: Extra
+    inputs are not permitted``. The fix wires the camelCase alias to
+    the field, matching the convention used by ``setupFailurePolicy``,
+    ``stopScript``, ``prApproveEnabled``, etc.
+
+    Construct three ``RepoSettings`` payloads — camelCase, snake_case,
+    neither — and assert each resolves to the expected
+    ``setup_timeout_s`` value (30, 30, 600).
+    """
+    from_pydantic_yaml = RepoSettings.model_validate({"setupTimeout": 30})
+    assert from_pydantic_yaml.setup_timeout_s == 30, (
+        f"camelCase `setupTimeout: 30` must populate setup_timeout_s; "
+        f"got {from_pydantic_yaml.setup_timeout_s}"
+    )
+
+    from_snake_case = RepoSettings.model_validate({"setup_timeout_s": 30})
+    assert from_snake_case.setup_timeout_s == 30, (
+        f"snake_case `setup_timeout_s: 30` must still populate the field "
+        f"(populate_by_name=True); got {from_snake_case.setup_timeout_s}"
+    )
+
+    from_default = RepoSettings()
+    assert from_default.setup_timeout_s == 600, (
+        f"default must remain 600s when neither layer overrides it; "
+        f"got {from_default.setup_timeout_s}"
+    )
+
+
 __all__ = [
     "test_action_input_wins_over_yaml",
     "test_apply_setup_overrides_passthrough_for_non_reposettings",
+    "test_camelcase_setup_timeout_alias_is_accepted",
     "test_default_applies_when_neither_is_set",
     "test_resolver_raises_for_unparseable",
     "test_resolver_returns_none_for_unset",

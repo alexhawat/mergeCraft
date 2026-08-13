@@ -489,35 +489,30 @@ async def main() -> MainResult:
             octokit=github,
         )
 
-        # S1 / F6 — wall-clock budget for ``setup_script``. Two constraints: setup
-        # must not consume the whole run budget, and a ``--notimeout`` run must
-        # not make setup unbounded. The action-input resolver already bounds
-        # the upper end (``DEFAULT_SETUP_TIMEOUT_S`` = 10 m); we additionally
-        # cap it against the agent deadline computed below so a fast agent
-        # deadline shrinks the setup budget proportionally.
-        setup_timeout_s = settings.setup_timeout_s
-        if timeout_ms is not None and timeout_ms > 0:
-            setup_timeout_s = min(setup_timeout_s, timeout_ms // 1000)
-
-        # S1 review / F3 follow-up — equal-or-larger setup budgets let the
+        # S1 / F6 — wall-clock budget for ``setup_script``. The action-input
+        # resolver already bounds the upper end (``DEFAULT_SETUP_TIMEOUT_S``
+        # = 10 m); the *only* cross-budget constraint is that
+        # ``setup_timeout_s`` be strictly less than the run timeout, so a
+        # failed setup script cannot be masked by an agent timeout
+        # (S1 review / F3 follow-up — equal-or-larger setup budgets let the
         # setup script consume the entire run deadline, after which the
         # agent budget is clamped to ~1 ms and the failure surfaces as
         # ``_AgentTimeoutError`` (``timed_out``) instead of the
         # ``configuration_error`` / ``inconclusive`` the setup policy was
-        # supposed to produce. Reserve a non-zero agent budget so a setup
-        # timeout can never be masked by an agent timeout. Only check
-        # when a setup script is actually configured — without one the
-        # ``setup_timeout_s`` cap is irrelevant.
+        # supposed to produce). Only check when a setup script is actually
+        # configured and a run timeout is in scope.
+        configured_setup_timeout_s = settings.setup_timeout_s
         if (
             settings.setup_script
             and timeout_ms is not None
-            and setup_timeout_s * 1000 >= timeout_ms
+            and configured_setup_timeout_s * 1000 >= timeout_ms
         ):
             raise _ConfigurationError(
-                f"setup_timeout ({setup_timeout_s}s) must be less than the run "
+                f"setup_timeout ({configured_setup_timeout_s}s) must be less than the run "
                 f"timeout ({timeout_ms // 1000}s) so a failed setup script is not "
                 f"masked as an agent timeout"
             )
+        setup_timeout_s = configured_setup_timeout_s
 
         setup_script_skip_reason = ""
         setup_hook_failure = ""
