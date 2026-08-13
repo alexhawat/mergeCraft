@@ -35,6 +35,12 @@ jobs:
       - name: make ci
         run: make ci
 
+  e2e-gate:
+    name: Action-image E2E (release gate)
+    needs: verify
+    uses: ./.github/workflows/e2e.yml
+    secrets: inherit
+
   build-dist:
     name: Build Python dist
     needs: verify
@@ -58,7 +64,7 @@ jobs:
   # W8.3 — build once; push immutable SHA tags only; capture digests for promote.
   build-images:
     name: Build GHCR images (once)
-    needs: verify
+    needs: [verify, e2e-gate]
     if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
