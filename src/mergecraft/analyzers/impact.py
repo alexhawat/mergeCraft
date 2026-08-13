@@ -20,8 +20,8 @@ from pathlib import Path
 _LANG_PATTERNS: dict[str, dict[str, list[re.Pattern[str]]]] = {
     "Python": {
         ".py": [
-            re.compile(r"^def\s+(?P<name>[a-zA-Z_]\w*)\s*\(", re.MULTILINE),
-            re.compile(r"^class\s+(?P<name>[a-zA-Z_]\w*)\s*[(:]", re.MULTILINE),
+            re.compile(r"^[ \t]*def\s+(?P<name>[a-zA-Z_]\w*)\s*\(", re.MULTILINE),
+            re.compile(r"^[ \t]*class\s+(?P<name>[a-zA-Z_]\w*)\s*[(:]", re.MULTILINE),
         ],
     },
     "JavaScript/TypeScript": {
@@ -40,9 +40,30 @@ _LANG_PATTERNS: dict[str, dict[str, list[re.Pattern[str]]]] = {
             re.compile(
                 r"^(?:export\s+)?(?:async\s+)?function\s+(?P<name>[a-zA-Z_$\w]+)", re.MULTILINE
             ),
-            re.compile(r"^class\s+(?P<name>[a-zA-Z_$\w]+)", re.MULTILINE),
-            re.compile(r"^interface\s+(?P<name>[a-zA-Z_$\w]+)", re.MULTILINE),
-            re.compile(r"^type\s+(?P<name>[a-zA-Z_$\w]+)\s*=", re.MULTILINE),
+            re.compile(
+                r"^(?:export\s+)?(?:default\s+)?class\s+(?P<name>[a-zA-Z_$\w]+)", re.MULTILINE
+            ),
+            re.compile(
+                r"^(?:export\s+)?(?:default\s+)?interface\s+(?P<name>[a-zA-Z_$\w]+)", re.MULTILINE
+            ),
+            re.compile(r"^(?:export\s+)?type\s+(?P<name>[a-zA-Z_$\w]+)\s*=", re.MULTILINE),
+            re.compile(
+                r"^(?:export\s+)?(?:const|let|var)\s+(?P<name>[a-zA-Z_$\w]+)\s*[=(:)]", re.MULTILINE
+            ),
+            re.compile(r"^enum\s+(?P<name>[a-zA-Z_$\w]+)", re.MULTILINE),
+        ],
+        ".tsx": [
+            re.compile(r"^function\s+(?P<name>[a-zA-Z_$\w]+)", re.MULTILINE),
+            re.compile(
+                r"^(?:export\s+)?(?:async\s+)?function\s+(?P<name>[a-zA-Z_$\w]+)", re.MULTILINE
+            ),
+            re.compile(
+                r"^(?:export\s+)?(?:default\s+)?class\s+(?P<name>[a-zA-Z_$\w]+)", re.MULTILINE
+            ),
+            re.compile(
+                r"^(?:export\s+)?(?:default\s+)?interface\s+(?P<name>[a-zA-Z_$\w]+)", re.MULTILINE
+            ),
+            re.compile(r"^(?:export\s+)?type\s+(?P<name>[a-zA-Z_$\w]+)\s*=", re.MULTILINE),
             re.compile(
                 r"^(?:export\s+)?(?:const|let|var)\s+(?P<name>[a-zA-Z_$\w]+)\s*[=(:)]", re.MULTILINE
             ),
@@ -52,6 +73,7 @@ _LANG_PATTERNS: dict[str, dict[str, list[re.Pattern[str]]]] = {
     "Go": {
         ".go": [
             re.compile(r"^func\s+(?P<name>[a-zA-Z_]\w+)\s*\(", re.MULTILINE),
+            re.compile(r"^func\s+\([^)]*\)\s+(?P<name>[a-zA-Z_]\w+)\s*\(", re.MULTILINE),
             re.compile(r"^type\s+(?P<name>[a-zA-Z_]\w+)\s+(?:struct|interface)\b", re.MULTILINE),
         ],
     },
@@ -174,7 +196,7 @@ def _find_references(
 ) -> list[dict[str, object]]:
     try:
         result = subprocess.run(
-            ["git", "-C", cwd, "grep", "-nw", "--no-color", "-e", symbol],
+            ["git", "-C", cwd, "grep", "-nw", "-F", "--no-color", "-e", symbol],
             capture_output=True,
             text=True,
             timeout=15,
@@ -205,35 +227,42 @@ def _find_references(
 
 def extract_impact(diff_text: str, cwd: str) -> dict[str, object]:
     hunks = _parse_hunks(diff_text)
-    rows: list[dict[str, object]] = []
+    candidates: list[dict[str, object]] = []
     for fp in _changed_paths(diff_text):
         file_hunks = hunks.get(fp)
         if not file_hunks:
             continue
-        decls = _find_declarations(fp, cwd)
-        for d in decls:
+        for d in _find_declarations(fp, cwd):
             line_val = d["line"]
             assert isinstance(line_val, int)
             if not _intersects_hunks(line_val, file_hunks):
                 continue
-            name_val = d["name"]
-            assert isinstance(name_val, str)
-            refs = _find_references(name_val, cwd, exclude_file=fp)
-            rows.append(
-                {
-                    "file": fp,
-                    "declaration": d["name"],
-                    "language": d["language"],
-                    "line": d["line"],
-                    "references": refs,
-                }
+            candidates.append(
+                {"file": fp, "name": d["name"], "language": d["language"], "line": d["line"]}
             )
-    rows.sort(key=lambda r: (r["language"], r["file"], r["line"]))
-    capped = rows[:_MAX_DECLARATIONS]
+    total = len(candidates)
+    candidates.sort(key=lambda r: (r["language"], r["file"], r["line"]))
+    capped = candidates[:_MAX_DECLARATIONS]
+    rows: list[dict[str, object]] = []
+    for c in capped:
+        name_val = c["name"]
+        assert isinstance(name_val, str)
+        fp_val = c["file"]
+        assert isinstance(fp_val, str)
+        refs = _find_references(name_val, cwd, exclude_file=fp_val)
+        rows.append(
+            {
+                "file": c["file"],
+                "declaration": c["name"],
+                "language": c["language"],
+                "line": c["line"],
+                "references": refs,
+            }
+        )
     return {
-        "impactPath": capped,
-        "truncated": len(rows) > _MAX_DECLARATIONS,
-        "totalDeclarations": len(rows),
+        "impactPath": rows,
+        "truncated": total > _MAX_DECLARATIONS,
+        "totalDeclarations": total,
     }
 
 

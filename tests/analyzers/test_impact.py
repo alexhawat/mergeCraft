@@ -76,8 +76,8 @@ def test_extract_impact_returns_declarations_within_hunks() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "src"
         src.mkdir()
-        # existing_func @ line 1, new_func @ line 5. Hunk range 1-4.
-        txt = "def existing_func():\n    pass\n\n\ndef new_func():\n    return 42\n"
+        # existing_func @ line 1, new_func @ line 7. Hunk range 1-4.
+        txt = "def existing_func():\n    pass\n\n\n\n\ndef new_func():\n    return 42\n"
         (src / "example.py").write_text(txt)
         result = extract_impact(_SAMPLE_DIFF, tmp)
         rows = result["impactPath"]
