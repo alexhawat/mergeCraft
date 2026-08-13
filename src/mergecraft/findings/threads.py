@@ -25,8 +25,10 @@ from typing import TYPE_CHECKING, Any, Final
 if TYPE_CHECKING:
     from mergecraft.utils.github import GitHubClient
 
-# GitHub caps both connections at 100; comments are held at 20 because a thread
-# that long is a conversation, and the selection rules only need its authors.
+# GitHub caps both connections at 100. Comments are read to that cap and their
+# totalCount is kept: a human reply hiding past the cap would otherwise make an
+# answered conversation look unanswered, which is how a sweep files an issue
+# over somebody's explicit "not an issue".
 THREADS_QUERY: Final[str] = """
 query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
@@ -37,7 +39,8 @@ query($owner: String!, $repo: String!, $number: Int!) {
           id
           isResolved
           isOutdated
-          comments(first: 20) {
+          comments(first: 100) {
+            totalCount
             nodes {
               databaseId
               body
@@ -107,6 +110,8 @@ async def fetch_review_threads(
     for node in nodes:
         if node.get("isResolved") and not include_resolved:
             continue
+        comment_connection = node.get("comments") or {}
+        comment_nodes = comment_connection.get("nodes") or []
         comments = [
             {
                 "id": c.get("databaseId"),
@@ -117,14 +122,16 @@ async def fetch_review_threads(
                 "url": c.get("url"),
                 "createdAt": c.get("createdAt"),
             }
-            for c in ((node.get("comments") or {}).get("nodes") or [])
+            for c in comment_nodes
         ]
+        comment_total = int(comment_connection.get("totalCount") or len(comment_nodes))
         threads.append(
             {
                 "threadId": node.get("id"),
                 "isResolved": node.get("isResolved"),
                 "isOutdated": node.get("isOutdated"),
                 "comments": comments,
+                "commentsTruncated": comment_total > len(comment_nodes),
             }
         )
     return ReviewThreadPage(

@@ -33,6 +33,13 @@ from mergecraft.review_taxonomy import (
 _MARKER_RE: Final[re.Pattern[str]] = re.compile(
     r"<!-- (?:pullfrog|mergecraft)-finding:v1:[0-9a-f]+ -->"
 )
+# The dedupe key is scoped to the pull request, not just the finding. A finding
+# reintroduced by a later PR is a regression and deserves its own issue; keying
+# on the fingerprint alone would let a long-closed issue silently suppress it.
+CARRYOVER_MARKER_PREFIX: Final[str] = "<!-- mergecraft-carryover:v1:"
+_CARRYOVER_RE: Final[re.Pattern[str]] = re.compile(
+    r"<!-- mergecraft-carryover:v1:(\d+):([0-9a-f]+) -->"
+)
 _SENTENCE_END_RE: Final[re.Pattern[str]] = re.compile(r"(?<=[.!?])\s")
 # Backticks and asterisks only: `_` carries meaning inside the identifiers these
 # findings quote, and stripping it turns `setup_timeout_s` into `setuptimeouts`.
@@ -84,11 +91,25 @@ def strip_marker(body: str) -> str:
     return _MARKER_RE.sub("", body or "").strip()
 
 
+def carryover_key(*, pull_number: int, fingerprint: str) -> str:
+    """Return the dedupe identity for one finding on one pull request."""
+    return f"{pull_number}:{fingerprint}"
+
+
+def carryover_keys_in(text: str) -> frozenset[str]:
+    """Return every carryover key recorded in ``text``."""
+    return frozenset(f"{pr}:{fp}" for pr, fp in _CARRYOVER_RE.findall(text or ""))
+
+
 def _fingerprint_for(*, path: str, body: str) -> str:
     """Return the thread's stamped fingerprint, or derive one from its content.
 
-    Deriving matches what ``stamp_finding_fingerprint`` would have produced, so
-    a comment predating fingerprints gets the same identity it would have had.
+    Deriving uses the same hash as ``stamp_finding_fingerprint`` so a comment
+    predating fingerprints still gets a stable, deterministic identity. It is
+    not guaranteed to equal what a fresh stamp of the same finding would
+    produce — the derivation hashes whatever the posted comment ended up
+    containing, trailer text included — which is enough for dedupe, since both
+    sides of the comparison derive it the same way.
     """
     stamped = sorted(finding_fingerprints_in(body))
     if stamped:
@@ -111,12 +132,16 @@ def carryover_findings(
     - mergeCraft raised it — the root comment carries a finding fingerprint or
       the review footer. Human review threads belong to their humans;
     - nobody else spoke in it, unless ``include_answered`` — a human reply means
-      the finding already got an answer, and re-filing it overrules that answer.
+      the finding already got an answer, and re-filing it overrules that answer;
+    - its comments were read in full, unless ``include_answered``. A thread
+      longer than one page might hold a human reply past the cap, and a sweep
+      that cannot see every reply cannot claim nobody answered.
 
     Args:
         threads: Threads in the shape :func:`fetch_review_threads` returns.
         include_resolved: Keep threads the author resolved.
-        include_answered: Keep threads a human replied to.
+        include_answered: Keep threads a human replied to, and threads whose
+            comment list was truncated.
 
     Returns:
         Findings in input order. Empty when nothing qualifies.
@@ -139,7 +164,7 @@ def carryover_findings(
             for c in comments[1:]
             if not is_mergecraft_comment(str(c.get("body") or ""))
         ]
-        if answered_by and not include_answered:
+        if not include_answered and (answered_by or thread.get("commentsTruncated")):
             continue
 
         path = str(root.get("path") or "")
@@ -199,10 +224,13 @@ def issue_title(finding: CarryoverFinding, *, pull_number: int) -> str:
 
 
 def issue_body(finding: CarryoverFinding, *, pull_number: int) -> str:
-    """Return the issue body for ``finding``, carrying its fingerprint forward.
+    """Return the issue body for ``finding``, carrying its identity forward.
 
-    The trailing marker is what makes the sweep idempotent: a later run reads it
-    back out of the filed issue and skips the finding instead of re-filing it.
+    Two trailing markers. The carryover key is what makes the sweep idempotent:
+    a later run reads it back out of the filed issue and skips this finding on
+    this pull request, while leaving the same finding free to be filed again if
+    a later pull request reintroduces it. The bare finding fingerprint is kept
+    alongside it so anything already reading finding markers still sees one.
     """
     lines = [
         f"Carried over from #{pull_number}. mergeCraft raised this inline and the "
@@ -234,15 +262,19 @@ def issue_body(finding: CarryoverFinding, *, pull_number: int) -> str:
         "",
         "---",
         "",
+        f"{CARRYOVER_MARKER_PREFIX}{pull_number}:{finding.fingerprint} -->",
         f"{FINDING_MARKER_PREFIX}{finding.fingerprint} -->",
     ]
     return "\n".join(lines)
 
 
 __all__ = [
+    "CARRYOVER_MARKER_PREFIX",
     "DEFAULT_LABEL",
     "CarryoverFinding",
     "carryover_findings",
+    "carryover_key",
+    "carryover_keys_in",
     "issue_body",
     "issue_title",
     "strip_marker",

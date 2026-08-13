@@ -30,10 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   findings carryover --pr N --apply` files one issue each, labelled
   `mergecraft-carryover`. Only unresolved, mergeCraft-raised, human-unanswered
   threads carry over; `--include-resolved` / `--include-answered` widen that.
-  Re-running is a no-op — every filed issue embeds the finding fingerprint and
-  each sweep reads those back first — so
-  `.github/workflows/findings-carryover.yml` can run it on every merged PR.
-  See [`docs/findings-carryover.md`](docs/findings-carryover.md).
+  Re-running is a no-op — every filed issue embeds a PR-scoped carryover key and
+  each sweep reads those back first, so a finding reintroduced by a later PR
+  still files as the regression it is. `.github/workflows/findings-carryover.yml`
+  runs it on every merged PR, dry unless the `CARRYOVER_AUTO_APPLY` repository
+  variable is set. See [`docs/findings-carryover.md`](docs/findings-carryover.md).
 - `feat(tracing): enrich tool.call attrs to carry invoke + complete + verb sub-event info` —
   every `tool.call` span carries the request/response byte counts, `exit_code`,
   error class/message, and input-key list. Known-verb tools (`browser`,

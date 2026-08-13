@@ -8,9 +8,22 @@
 # the reviewer already stamps, which is also what makes re-runs a no-op.
 #
 # Safety: this workflow never checks out or executes pull request code. It runs
-# on `pull_request_target`, whose default checkout ref is the *base* branch, and
-# the PR number reaches the CLI through `env:` rather than a `run:`
-# interpolation. The sweep itself only reads the GitHub API and writes issues.
+# on `pull_request_target`, whose checkout is the repository's *default* branch
+# (see the same note in mergecraft.yml), and the PR number reaches the CLI
+# through `env:` rather than a `run:` interpolation. The sweep itself only reads
+# the GitHub API and writes issues.
+#
+# That checkout has a deployment consequence: the sweep runs whatever build of
+# the CLI is on the default branch when the pull request closes, so
+# `mergecraft findings` must already be merged to the default branch for a run
+# to do anything. Until then the step fails loudly rather than silently no-op.
+#
+# Writes are opt-in. Set the `CARRYOVER_AUTO_APPLY` repository variable to
+# `true` to let merges file issues; with it unset the automatic path runs as a
+# dry run and only logs what it would file. The default is off because the
+# sweep's "unresolved" signal is only as good as the reviewer's thread
+# retirement, which does not yet reliably resolve threads it has satisfied —
+# see docs/findings-carryover.md.
 name: Findings carryover
 
 on:
@@ -57,11 +70,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
-          # Automatic runs always write; manual runs write only when asked.
-          APPLY: ${{ github.event_name == 'pull_request_target' || inputs.apply }}
+          # Merges write only once the repo opts in; manual runs write on request.
+          APPLY: >-
+            ${{ (github.event_name == 'pull_request_target'
+                 && vars.CARRYOVER_AUTO_APPLY == 'true')
+                || inputs.apply }}
         run: |
           if [ "$APPLY" = "true" ]; then
             uv run mergecraft findings carryover --pr "$PR_NUMBER" --apply
           else
+            echo "::notice title=carryover dry run::CARRYOVER_AUTO_APPLY is not set; listing only."
             uv run mergecraft findings carryover --pr "$PR_NUMBER"
           fi

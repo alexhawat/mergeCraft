@@ -22,7 +22,12 @@ from mergecraft.findings.select import (
     carryover_findings,
     issue_title,
 )
-from mergecraft.findings.sweep import CarryoverPlan, apply_carryover, plan_carryover
+from mergecraft.findings.sweep import (
+    CarryoverOutcome,
+    CarryoverPlan,
+    apply_carryover,
+    plan_carryover,
+)
 from mergecraft.findings.threads import fetch_review_threads
 from mergecraft.utils.github import GitHubClient, parse_repo_context
 from mergecraft.utils.token import get_job_token
@@ -184,7 +189,7 @@ def carryover(
     """File one issue per unresolved mergeCraft finding. Dry run unless ``--apply``."""
     owner, name = _resolve_repo(repo)
 
-    async def _run() -> dict[str, Any]:
+    async def _run() -> tuple[CarryoverPlan, CarryoverOutcome | None]:
         client = _client()
         try:
             plan = await plan_carryover(
@@ -197,42 +202,55 @@ def carryover(
                 include_answered=include_answered,
             )
             if not apply:
-                return {"applied": False, "plan": plan, "filed": []}
-            filed = await apply_carryover(client, owner, name, plan, label=label)
-            return {"applied": True, "plan": plan, "filed": filed}
+                return plan, None
+            return plan, await apply_carryover(client, owner, name, plan, label=label)
         finally:
             await client.aclose()
 
-    result = asyncio.run(_run())
-    plan: CarryoverPlan = result["plan"]
+    try:
+        plan, outcome = asyncio.run(_run())
+    except ValueError as exc:  # truncated read — filing it would drop findings
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
 
     if json_output:
         typer.echo(
             json.dumps(
                 {
-                    "applied": result["applied"],
+                    "applied": outcome is not None,
                     "pull_number": plan.pull_number,
                     "truncated": plan.truncated,
                     "to_file": [_finding_payload(f) for f in plan.to_file],
                     "already_filed": [_finding_payload(f) for f in plan.already_filed],
-                    "filed": [issue.model_dump(mode="json") for issue in result["filed"]],
+                    "filed": [
+                        i.model_dump(mode="json") for i in (outcome.filed if outcome else [])
+                    ],
+                    "failed": [
+                        f.model_dump(mode="json") for f in (outcome.failed if outcome else [])
+                    ],
                 },
                 indent=2,
             )
         )
-        return
-
-    if not result["applied"]:
+    elif outcome is None:
         _print_plan(plan)
-        return
-
-    filed = result["filed"]
-    if not filed:
+    elif not outcome.filed and not outcome.failed:
         console.print(f"Nothing to carry over from #{plan.pull_number}.")
-        return
-    console.print(f"[green]Filed {len(filed)} issue(s) from #{plan.pull_number}:[/green]")
-    for issue in filed:
-        console.print(f"  • #{issue.number} {issue.title}", markup=False)
+    else:
+        if outcome.filed:
+            console.print(
+                f"[green]Filed {len(outcome.filed)} issue(s) from #{plan.pull_number}:[/green]"
+            )
+            for issue in outcome.filed:
+                console.print(f"  • #{issue.number} {issue.title}", markup=False)
+        for failure in outcome.failed:
+            console.print(f"[red]Could not file:[/red] {failure.title}", markup=False)
+
+    # A partial write must not look like success: the closing event that
+    # triggered the sweep does not fire again, so an unfiled finding is lost
+    # unless the run is visibly red.
+    if outcome is not None and outcome.failed:
+        raise typer.Exit(1)
 
 
 __all__ = ["app"]

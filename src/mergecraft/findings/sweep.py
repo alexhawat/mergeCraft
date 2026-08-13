@@ -5,13 +5,16 @@ and testable without a GitHub client. This layer adds exactly two concerns the
 pure layer cannot have: reading the pull request, and not filing the same
 finding twice.
 
-Idempotence is carried by the finding fingerprint, not by run bookkeeping. Every
-issue this module files embeds the marker in its body, and every run reads the
-markers back out of already-filed issues first. Re-running the sweep on the same
-pull request is therefore a no-op, which is what makes it safe to attach to a
-workflow trigger that can fire more than once.
+Idempotence is carried by the carryover key — the pull request number plus the
+finding fingerprint — not by run bookkeeping. Every issue this module files
+embeds that key in its body, and every run reads the keys back out of
+already-filed issues first. Re-running the sweep on the same pull request is
+therefore a no-op, which is what makes it safe to attach to a workflow trigger
+that can fire more than once, while the same finding reintroduced by a *later*
+pull request still files: that is a regression, not a duplicate.
 
 Exports:
+    CarryoverOutcome: What a sweep filed, and what it could not.
     CarryoverPlan: What a sweep would file, and what it would skip.
     FiledIssue: One issue the sweep created.
     apply_carryover: File the planned issues.
@@ -30,11 +33,12 @@ from mergecraft.findings.select import (
     DEFAULT_LABEL,
     CarryoverFinding,
     carryover_findings,
+    carryover_key,
+    carryover_keys_in,
     issue_body,
     issue_title,
 )
 from mergecraft.findings.threads import fetch_review_threads
-from mergecraft.review_resolution import finding_fingerprints_in
 
 if TYPE_CHECKING:
     from mergecraft.utils.github import GitHubClient
@@ -63,6 +67,35 @@ class FiledIssue(BaseModel):
     fingerprint: str
 
 
+class FailedIssue(BaseModel):
+    """One issue the sweep could not create.
+
+    Attributes:
+        title: Title the sweep tried to file.
+        fingerprint: Finding identity that stayed unfiled.
+        error: Stringified transport or API error.
+    """
+
+    title: str
+    fingerprint: str
+    error: str
+
+
+class CarryoverOutcome(BaseModel):
+    """The result of a write pass.
+
+    Attributes:
+        pull_number: The pull request swept.
+        filed: Issues created, in plan order.
+        failed: Findings that could not be filed. Non-empty means the sweep did
+            not do its job, and the caller must not report success.
+    """
+
+    pull_number: int
+    filed: list[FiledIssue] = Field(default_factory=list)
+    failed: list[FailedIssue] = Field(default_factory=list)
+
+
 class CarryoverPlan(BaseModel):
     """What a sweep of one pull request would do.
 
@@ -79,14 +112,14 @@ class CarryoverPlan(BaseModel):
     truncated: bool = False
 
 
-async def filed_fingerprints(
+async def filed_carryover_keys(
     github: GitHubClient,
     owner: str,
     repo: str,
     *,
     label: str = DEFAULT_LABEL,
 ) -> frozenset[str]:
-    """Return every finding fingerprint already recorded on a carryover issue.
+    """Return every carryover key already recorded on a filed issue.
 
     Reads the label directly rather than the search index: search is eventually
     consistent, and a stale miss here files a duplicate issue.
@@ -98,8 +131,8 @@ async def filed_fingerprints(
         label: Label the sweep applies to the issues it files.
 
     Returns:
-        Fingerprints found in open and closed carryover issues. A closed issue
-        still counts — the finding was dealt with, not lost.
+        Keys found in open and closed carryover issues. A closed issue still
+        counts — that finding was dealt with on that pull request, not lost.
     """
     seen: set[str] = set()
     for page in range(1, _MAX_ISSUE_PAGES + 1):
@@ -114,7 +147,7 @@ async def filed_fingerprints(
             },
         )
         for issue in issues:
-            seen |= finding_fingerprints_in(str(issue.get("body") or ""))
+            seen |= carryover_keys_in(str(issue.get("body") or ""))
         if len(issues) < _ISSUE_PAGE_SIZE:
             break
     return frozenset(seen)
@@ -161,18 +194,21 @@ async def plan_carryover(
         include_resolved=include_resolved,
         include_answered=include_answered,
     )
-    known = await filed_fingerprints(github, owner, repo, label=label) if findings else frozenset()
+    known = (
+        await filed_carryover_keys(github, owner, repo, label=label) if findings else frozenset()
+    )
 
     to_file: list[CarryoverFinding] = []
     already: list[CarryoverFinding] = []
     planned: set[str] = set()
     for finding in findings:
+        key = carryover_key(pull_number=pull_number, fingerprint=finding.fingerprint)
         # `planned` also guards the within-run case: two threads whose text and
         # path match normalize to one fingerprint, and one issue is the point.
-        if finding.fingerprint in known or finding.fingerprint in planned:
+        if key in known or key in planned:
             already.append(finding)
             continue
-        planned.add(finding.fingerprint)
+        planned.add(key)
         to_file.append(finding)
 
     return CarryoverPlan(
@@ -211,8 +247,13 @@ async def apply_carryover(
     plan: CarryoverPlan,
     *,
     label: str = DEFAULT_LABEL,
-) -> list[FiledIssue]:
+) -> CarryoverOutcome:
     """File one issue per finding in ``plan.to_file``.
+
+    Refuses to write a plan built from a truncated read. Filing the visible
+    findings and exiting clean would leave the rest behind while making the
+    sweep look complete, and the closing event that triggered it does not fire
+    again to correct that.
 
     Args:
         github: Authenticated client.
@@ -222,14 +263,26 @@ async def apply_carryover(
         label: Label applied to each filed issue.
 
     Returns:
-        The issues created, in plan order. One failure does not strand the rest;
-        failures are logged and omitted from the return value.
+        A :class:`CarryoverOutcome`. One failure does not strand the rest —
+        every remaining finding is still attempted — but each failure is
+        recorded so the caller can exit nonzero instead of reporting success.
+
+    Raises:
+        ValueError: The plan is truncated, so filing it would silently drop
+            findings the read never saw.
     """
+    if plan.truncated:
+        msg = (
+            f"refusing to file a partial sweep: PR #{plan.pull_number} has more "
+            "review threads than one page holds, so some findings were never read"
+        )
+        raise ValueError(msg)
     if not plan.to_file:
-        return []
+        return CarryoverOutcome(pull_number=plan.pull_number)
     await _ensure_label(github, owner, repo, label)
 
     filed: list[FiledIssue] = []
+    failed: list[FailedIssue] = []
     for finding in plan.to_file:
         title = issue_title(finding, pull_number=plan.pull_number)
         try:
@@ -242,6 +295,7 @@ async def apply_carryover(
             )
         except httpx.HTTPError as exc:
             logger.warning("carryover: could not file {!r} — {}", title, exc)
+            failed.append(FailedIssue(title=title, fingerprint=finding.fingerprint, error=str(exc)))
             continue
         filed.append(
             FiledIssue(
@@ -251,15 +305,17 @@ async def apply_carryover(
                 fingerprint=finding.fingerprint,
             )
         )
-    return filed
+    return CarryoverOutcome(pull_number=plan.pull_number, filed=filed, failed=failed)
 
 
 __all__ = [
     "LABEL_COLOR",
     "LABEL_DESCRIPTION",
+    "CarryoverOutcome",
     "CarryoverPlan",
+    "FailedIssue",
     "FiledIssue",
     "apply_carryover",
-    "filed_fingerprints",
+    "filed_carryover_keys",
     "plan_carryover",
 ]

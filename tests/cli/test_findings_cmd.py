@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import httpx
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -160,3 +161,27 @@ def test_missing_token_exits_cleanly(monkeypatch: MonkeyPatch) -> None:
     result = runner.invoke(app, ["findings", "export", "--pr", "7", "--repo", "o/r"])
 
     assert result.exit_code == 2
+
+
+def test_carryover_exits_nonzero_when_a_finding_could_not_be_filed(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A silent partial write would strand findings: the close event never retries."""
+    _patch(monkeypatch)
+
+    async def _boom(self: object, owner: str, repo: str, **kwargs: Any) -> dict[str, Any]:
+        request = httpx.Request("POST", "https://api.github.com/x")
+        raise httpx.HTTPStatusError(
+            "boom", request=request, response=httpx.Response(500, request=request)
+        )
+
+    monkeypatch.setattr(_FakeClient, "create_issue", _boom)
+
+    result = runner.invoke(
+        app, ["findings", "carryover", "--pr", "7", "--repo", "o/r", "--apply", "--json"]
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["filed"] == []
+    assert len(payload["failed"]) == 1

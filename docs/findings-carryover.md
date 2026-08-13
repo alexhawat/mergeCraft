@@ -40,6 +40,7 @@ A thread carries over only when all of these hold:
 | mergeCraft raised it | Human review threads belong to the humans who wrote them. Detected by the finding fingerprint, or the review footer on comments predating fingerprints. |
 | It is still unresolved | A resolved thread is a finding the author already dealt with. `--include-resolved` overrides. |
 | No human replied | A reply means somebody already ruled on the finding; re-filing it overrules them. `--include-answered` overrides. |
+| Its comments were read in full | A thread longer than one page could hide a human reply past the cap, and a sweep that cannot see every reply cannot claim nobody answered. `--include-answered` overrides. |
 
 The bar is deliberately high. A carryover issue nobody wanted is worse than a
 finding that stays on the PR, because the first teaches maintainers to ignore
@@ -51,19 +52,42 @@ says so.
 
 ## Why re-running is safe
 
-Idempotence rides on the fingerprint, not on run bookkeeping. Every filed issue
-embeds `<!-- mergecraft-finding:v1:… -->` in its body, and every sweep reads
-those markers back out of the `mergecraft-carryover` label first — open **and**
-closed issues, because a closed one means the finding was handled, not lost.
+Idempotence rides on the **carryover key** — the pull request number plus the
+finding fingerprint — not on run bookkeeping. Every filed issue embeds
+`<!-- mergecraft-carryover:v1:<pr>:<fingerprint> -->` in its body, and every
+sweep reads those keys back out of the `mergecraft-carryover` label first —
+open **and** closed issues, because a closed one means that finding was handled
+on that pull request, not lost.
 
 Sweeping the same pull request twice therefore files nothing the second time,
-which is what makes it safe on a trigger that can fire more than once. The label
-is created up front rather than assumed: GitHub silently drops unknown labels
-for actors without push access, and a dropped label would break the next run's
-dedupe read and file duplicates forever.
+which is what makes it safe on a trigger that can fire more than once.
 
-Findings that predate fingerprints get one derived from path and body — the same
-value `stamp_finding_fingerprint` would have produced — so they dedupe too.
+The key is scoped to the pull request on purpose. If the same finding is
+reintroduced by a *later* pull request, that is a regression and deserves its
+own issue; keying on the fingerprint alone would let a long-closed issue
+silently suppress it. Issues also carry a bare `mergecraft-finding` marker
+alongside the key, so anything already reading finding markers still sees one.
+
+The label is created up front rather than assumed: GitHub silently drops unknown
+labels for actors without push access, and a dropped label would break the next
+run's dedupe read and file duplicates forever.
+
+Findings that predate fingerprints get one derived from path and body. It is a
+stable, deterministic identity — enough for dedupe, since both sides derive it
+the same way — but not necessarily equal to what a fresh stamp of the same
+finding would produce, because the derivation hashes whatever the posted comment
+ended up containing.
+
+## When the sweep refuses to write
+
+Two cases where a partial write would be worse than no write, because the
+closing event that triggered the sweep does not fire again to correct it:
+
+- **More threads than one page holds.** `--apply` refuses the whole plan rather
+  than filing page one and exiting clean, which would bury everything past it.
+- **An issue that could not be created.** The remaining findings are still
+  attempted, but the failures are reported and the command exits non-zero, so
+  the run is visibly red instead of falsely green.
 
 ## Automation
 
@@ -71,9 +95,19 @@ value `stamp_finding_fingerprint` would have produced — so they dedupe too.
 `pull_request_target: [closed]`, gated to merged pull requests. A pull request
 closed without merging was abandoned, and its findings went with it.
 
-The workflow never checks out or executes pull request code: `pull_request_target`
-checks out the base branch, and the PR number reaches the CLI through `env:`
-rather than a `run:` interpolation. It needs `issues: write`.
+**Writes are opt-in.** Set the `CARRYOVER_AUTO_APPLY` repository variable to
+`true` to let merges file issues. With it unset, the automatic path runs as a
+dry run and only logs what it would file — see the known gap below for why that
+is the default.
+
+The workflow never checks out or executes pull request code, and the PR number
+reaches the CLI through `env:` rather than a `run:` interpolation. It needs
+`issues: write`.
+
+Note that `pull_request_target` checks out the repository's **default** branch,
+not the pull request's base branch. The sweep therefore runs whatever build of
+the CLI is on the default branch when the pull request closes, so
+`mergecraft findings` must already be merged there for a run to do anything.
 
 `workflow_dispatch` backfills pull requests that closed before the workflow
 existed. Manual runs are dry by default; tick **apply** to file.
@@ -87,4 +121,6 @@ findings the new commits addressed, and on PR #161 all thirteen threads were
 left open, including eight the final review explicitly declared addressed.
 
 Until that retirement step is fixed, a sweep carries over findings that were
-already fixed. Review the dry run before enabling `--apply` on a repository.
+already fixed. That is why `CARRYOVER_AUTO_APPLY` defaults to off and the
+automatic path is a dry run: review what the sweep would file on your own
+repository before letting merges write.

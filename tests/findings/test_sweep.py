@@ -7,9 +7,10 @@ from typing import Any
 import httpx
 import pytest
 
+from mergecraft.findings.select import carryover_key
 from mergecraft.findings.sweep import (
     apply_carryover,
-    filed_fingerprints,
+    filed_carryover_keys,
     plan_carryover,
 )
 from mergecraft.findings.threads import fetch_review_threads
@@ -19,6 +20,7 @@ from mergecraft.review_taxonomy import stamp_finding_fingerprint
 _PATH = "src/app.py"
 _BODY = stamp_finding_fingerprint(path=_PATH, body="Missing timeout on the retry loop.")
 _FP = next(iter(finding_fingerprints_in(_BODY)))
+_KEY = f"<!-- mergecraft-carryover:v1:7:{_FP} -->"
 _OTHER = stamp_finding_fingerprint(path=_PATH, body="Unchecked index access.")
 _OTHER_FP = next(iter(finding_fingerprints_in(_OTHER)))
 
@@ -148,9 +150,7 @@ async def test_plan_files_a_finding_that_has_no_issue_yet() -> None:
 
 
 async def test_plan_skips_a_finding_an_existing_issue_already_carries() -> None:
-    github = FakeGitHub(
-        issues=[{"number": 5, "body": f"old\n\n<!-- mergecraft-finding:v1:{_FP} -->"}]
-    )
+    github = FakeGitHub(issues=[{"number": 5, "body": f"old\n\n{_KEY}"}])
 
     plan = await plan_carryover(github, "o", "r", 7)  # type: ignore[arg-type]
 
@@ -160,9 +160,7 @@ async def test_plan_skips_a_finding_an_existing_issue_already_carries() -> None:
 
 async def test_a_closed_carryover_issue_still_counts_as_filed() -> None:
     """The finding was dealt with, not lost — re-filing it would be noise."""
-    github = FakeGitHub(
-        issues=[{"number": 5, "state": "closed", "body": f"<!-- mergecraft-finding:v1:{_FP} -->"}]
-    )
+    github = FakeGitHub(issues=[{"number": 5, "state": "closed", "body": _KEY}])
 
     plan = await plan_carryover(github, "o", "r", 7)  # type: ignore[arg-type]
 
@@ -192,9 +190,10 @@ async def test_apply_files_one_labelled_issue_carrying_the_fingerprint() -> None
     github = FakeGitHub()
     plan = await plan_carryover(github, "o", "r", 7)  # type: ignore[arg-type]
 
-    filed = await apply_carryover(github, "o", "r", plan)  # type: ignore[arg-type]
+    outcome = await apply_carryover(github, "o", "r", plan)  # type: ignore[arg-type]
 
-    assert [issue.fingerprint for issue in filed] == [_FP]
+    assert [issue.fingerprint for issue in outcome.filed] == [_FP]
+    assert outcome.failed == []
     assert github.labels_created == ["mergecraft-carryover"]
     created = github.created[0]
     assert created["labels"] == ["mergecraft-carryover"]
@@ -219,7 +218,8 @@ async def test_apply_writes_nothing_when_the_plan_is_empty() -> None:
     github = FakeGitHub(threads=[])
     plan = await plan_carryover(github, "o", "r", 7)  # type: ignore[arg-type]
 
-    assert await apply_carryover(github, "o", "r", plan) == []  # type: ignore[arg-type]
+    outcome = await apply_carryover(github, "o", "r", plan)  # type: ignore[arg-type]
+    assert outcome.filed == []
     assert github.labels_created == []
 
 
@@ -232,7 +232,8 @@ async def test_an_existing_label_is_not_an_error() -> None:
 
     github.create_label = _conflict  # type: ignore[method-assign]
 
-    assert len(await apply_carryover(github, "o", "r", plan)) == 1  # type: ignore[arg-type]
+    outcome = await apply_carryover(github, "o", "r", plan)  # type: ignore[arg-type]
+    assert len(outcome.filed) == 1
 
 
 async def test_a_label_failure_that_is_not_a_conflict_surfaces() -> None:
@@ -256,13 +257,47 @@ async def test_one_unfilable_finding_does_not_strand_the_rest() -> None:
     plan = await plan_carryover(github, "o", "r", 7)  # type: ignore[arg-type]
     assert {f.fingerprint for f in plan.to_file} == {_FP, _OTHER_FP}
 
-    assert await apply_carryover(github, "o", "r", plan) == []  # type: ignore[arg-type]
+    outcome = await apply_carryover(github, "o", "r", plan)  # type: ignore[arg-type]
+
+    assert outcome.filed == []
+    assert {f.fingerprint for f in outcome.failed} == {_FP, _OTHER_FP}
 
 
-async def test_fingerprint_read_stops_paginating_on_a_short_page() -> None:
-    github = FakeGitHub(issues=[{"number": 5, "body": f"<!-- mergecraft-finding:v1:{_FP} -->"}])
+async def test_carryover_key_read_stops_paginating_on_a_short_page() -> None:
+    github = FakeGitHub(issues=[{"number": 5, "body": _KEY}])
 
-    found = await filed_fingerprints(github, "o", "r")  # type: ignore[arg-type]
+    found = await filed_carryover_keys(github, "o", "r")  # type: ignore[arg-type]
 
-    assert found == frozenset({_FP})
+    assert found == frozenset({carryover_key(pull_number=7, fingerprint=_FP)})
     assert len(github.issue_pages) == 1
+
+
+async def test_a_finding_reintroduced_by_a_later_pr_files_again() -> None:
+    """Repo-global dedupe would swallow the regression; the key is PR-scoped."""
+    github = FakeGitHub(issues=[{"number": 5, "state": "closed", "body": _KEY}])
+
+    plan = await plan_carryover(github, "o", "r", 9)  # type: ignore[arg-type]
+
+    assert [f.fingerprint for f in plan.to_file] == [_FP]
+
+
+async def test_apply_refuses_to_file_a_truncated_plan() -> None:
+    """Filing page one and exiting clean would bury everything past it."""
+    github = FakeGitHub(threads=[_graphql_thread()], total_count=150)
+    plan = await plan_carryover(github, "o", "r", 7)  # type: ignore[arg-type]
+    assert plan.truncated is True
+
+    with pytest.raises(ValueError, match="partial sweep"):
+        await apply_carryover(github, "o", "r", plan)  # type: ignore[arg-type]
+
+    assert github.created == []
+
+
+async def test_a_thread_with_unread_comments_is_not_swept() -> None:
+    """A human reply past the comment cap must not read as 'nobody answered'."""
+    thread = _graphql_thread()
+    thread["comments"]["totalCount"] = 40
+
+    plan = await plan_carryover(FakeGitHub(threads=[thread]), "o", "r", 7)  # type: ignore[arg-type]
+
+    assert plan.to_file == []

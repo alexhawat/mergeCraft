@@ -7,6 +7,8 @@ from typing import Any
 from mergecraft.findings.select import (
     CarryoverFinding,
     carryover_findings,
+    carryover_key,
+    carryover_keys_in,
     issue_body,
     issue_title,
     strip_marker,
@@ -188,3 +190,27 @@ def test_issue_body_flags_an_outdated_anchor_and_human_replies() -> None:
 
     assert "outdated" in body
     assert "`alex`" in body
+
+
+def test_a_thread_with_unread_comments_is_skipped_by_default() -> None:
+    """Truncated comments mean a human reply could be hiding past the cap."""
+    threads = [_thread() | {"commentsTruncated": True}]
+
+    assert carryover_findings(threads) == []
+    assert len(carryover_findings(threads, include_answered=True)) == 1
+
+
+def test_issue_body_carries_a_pr_scoped_key_and_a_bare_fingerprint() -> None:
+    finding = carryover_findings([_thread()])[0]
+
+    body = issue_body(finding, pull_number=161)
+
+    assert carryover_keys_in(body) == frozenset({carryover_key(pull_number=161, fingerprint=_FP)})
+    assert finding_fingerprints_in(body) == frozenset({_FP})
+
+
+def test_carryover_keys_are_scoped_per_pull_request() -> None:
+    same = carryover_key(pull_number=7, fingerprint=_FP)
+
+    assert same != carryover_key(pull_number=8, fingerprint=_FP)
+    assert carryover_keys_in("nothing here") == frozenset()
