@@ -229,20 +229,7 @@ async def main() -> MainResult:
         job_token = get_job_token()
         github = GitHubClient(job_token)
         run_context = await resolve_run_context_data(github)
-        # S1 / D10 — apply the action-input setup overrides (policy + timeout)
-        # early so the resolved ``settings`` carries the right
-        # ``setup_timeout_s`` before the setup-script block runs. Any
-        # ``ValueError`` is captured into ``setup_override_error`` and
-        # re-raised *after* ``tool_context`` is constructed so the outer
-        # handler can still reach ``report_status_checks`` (S1 review
-        # follow-up — restoring the completion-check reporting for the
-        # ``configuration_error`` outcome).
         settings = apply_tracing_overrides(run_context.repo_settings)
-        setup_override_error: str | None = None
-        try:
-            settings = apply_setup_overrides(settings)
-        except ValueError as exc:
-            setup_override_error = str(exc)
 
         github_event = read_github_event()
         trust_tier = derive_trust_tier(event=github_event)
@@ -292,16 +279,15 @@ async def main() -> MainResult:
 
         # Resolve the run deadline up front so the setup-script budget can
         # be capped against it (S1 / F6 — setup must never consume the
-        # whole run budget). Invalid input already fails closed as
-        # ``configuration_error`` below; this block only does the math.
+        # whole run budget). Invalid input is captured into a sentinel
+        # ``timeout_error``; the actual ``_ConfigurationError`` raise is
+        # deferred until AFTER ``tool_context`` is constructed so the
+        # outer handler can still call ``report_status_checks`` for the
+        # ``configuration_error`` outcome (S1 review / NEW1+NEW2 —
+        # building the reporting context first, then validating, prevents
+        # setup from running on bad inputs while preserving completion-
+        # check reporting).
         timeout_raw = payload.get("timeout")
-        # Resolve ``timeout_ms`` up front so the setup-script timeout cap
-        # (S1 / F6) and the agent-deadline math below can see it. A bad
-        # ``timeout`` input is captured into ``timeout_error`` and re-raised
-        # after ``tool_context`` is built so the outer handler can still
-        # reach ``report_status_checks`` (S1 review follow-up — restoring
-        # completion-check reporting for the ``configuration_error``
-        # outcome).
         timeout_ms: int | None
         timeout_error: str | None = None
         if timeout_raw == TIMEOUT_DISABLED:
@@ -400,6 +386,88 @@ async def main() -> MainResult:
         tool_state.fallback_index = 0
         tool_state.fallback_occurred = False
 
+        # S1 review / F3+F4 follow-up — build ``tool_context`` BEFORE the
+        # equal-deadline guard and the fail-policy short-circuit so the
+        # outer handler can still call ``report_status_checks`` when those
+        # guards raise ``_ConfigurationError``. The MCP server URL is
+        # blank here; ``start_mcp_http_server`` later fills it in.
+        modes = [
+            *compute_modes(agent_id, settings.signed_commits),
+            *_custom_modes(settings.modes),
+        ]
+        output_schema = resolve_output_schema()
+
+        ctx_payload = _payload_to_ctx(payload)
+        analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
+        sarif_upload_enabled = resolve_sarif_upload_enabled(
+            action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
+            repo_setting=settings.analyzers.sarif_upload,
+        )
+        tool_context = ToolContext(
+            agent_id=agent_id,
+            repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
+            payload=ctx_payload,
+            github=github,
+            github_installation_token=token_ref.mcp_token,
+            git_token=token_ref.git_token,
+            api_token=run_context.api_token,
+            modes=modes,
+            tool_state=tool_state,
+            mcp_server_url="",
+            tmpdir=tmpdir,
+            refresh_git_token=token_ref.refresh_git_token,
+            read_token=token_ref.read_token,
+            xrepo=payload.get("xrepo"),
+            prepush_script=settings.prepush_script,
+            pr_approve_enabled=settings.pr_approve_enabled,
+            auto_merge_enabled=settings.auto_merge_enabled,
+            signed_commits=settings.signed_commits,
+            mode_instructions=settings.mode_instructions,
+            static_checks=[
+                StaticCheckConfig(
+                    name=check.name,
+                    command=check.command,
+                    suffixes=tuple(check.suffixes),
+                )
+                for check in settings.static_checks
+            ],
+            static_checks_enabled=(
+                ctx_payload.shell != "disabled" and allow_repo_command_overrides(trust_tier)
+            ),
+            ci_gate_checks=dict(settings.ci_evidence.gates),
+            ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
+            analyzers_mode=analyzers_mode,
+            trust_tier=trust_tier,
+            analyzers_settings_enabled=settings.analyzers.enabled,
+            sarif_upload_enabled=sarif_upload_enabled,
+            run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
+            job_id=os.environ.get("GITHUB_JOB"),
+            oss=run_context.oss,
+            plan="unknown",
+            resolved_model=resolved_model,
+            suggest_eval_add=bool(payload.get("suggestEvalAdd")),
+        )
+
+        # S1 review / NEW1 — apply the action-input setup overrides
+        # (policy + timeout) NOW, after ``tool_context`` is built (so the
+        # outer handler can still call ``report_status_checks`` for the
+        # ``configuration_error`` outcome) but BEFORE ``setup_git`` /
+        # ``asyncio.create_subprocess_shell`` (so a bad value never
+        # triggers the setup script to run). A bad value raises
+        # ``ValueError`` which is re-raised as ``_ConfigurationError``.
+        try:
+            settings = apply_setup_overrides(settings)
+        except ValueError as exc:
+            raise _ConfigurationError(str(exc)) from None
+
+        # S1 review / NEW1 — re-raise the captured bad-``timeout``
+        # sentinel now that ``tool_context`` exists. The input parsing
+        # already classified the input as bad earlier; this block only
+        # fires the guard so a ``--notimeout`` / unset input still
+        # resolves to ``None`` / ``3_600_000`` without firing.
+        if timeout_error is not None:
+            raise _ConfigurationError(timeout_error) from None
+
         await asyncio.to_thread(
             setup_git,
             git_token=token_ref.git_token,
@@ -462,7 +530,14 @@ async def main() -> MainResult:
                     setup_hook_failure = f"setup script timed out after {setup_timeout_s}s"
                 else:
                     if proc.returncode != 0:
-                        detail = redact_secrets((err or b"").decode(errors="replace")[:500])
+                        # S1 review / NEW3 — redact the full stderr text
+                        # BEFORE truncating to 500 chars. Truncating first
+                        # can lop a ``ghp_…`` token below the redactor's
+                        # pattern minimum length, leaving a partial prefix
+                        # in the prompt — redaction must run on the whole
+                        # input so the pattern matches and the slice is
+                        # taken from the *redacted* output.
+                        detail = redact_secrets((err or b"").decode(errors="replace"))[:500]
                         setup_hook_failure = (
                             f"setup script failed (exit {proc.returncode}): {detail}"
                         )
@@ -494,73 +569,12 @@ async def main() -> MainResult:
             )
             raise _ConfigurationError(setup_hook_failure)
 
-        modes = [
-            *compute_modes(agent_id, settings.signed_commits),
-            *_custom_modes(settings.modes),
-        ]
-        output_schema = resolve_output_schema()
-
-        ctx_payload = _payload_to_ctx(payload)
-        analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
-        sarif_upload_enabled = resolve_sarif_upload_enabled(
-            action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
-            repo_setting=settings.analyzers.sarif_upload,
-        )
-        tool_context = ToolContext(
-            agent_id=agent_id,
-            repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
-            payload=ctx_payload,
-            github=github,
-            github_installation_token=token_ref.mcp_token,
-            git_token=token_ref.git_token,
-            api_token=run_context.api_token,
-            modes=modes,
-            tool_state=tool_state,
-            mcp_server_url="",
-            tmpdir=tmpdir,
-            refresh_git_token=token_ref.refresh_git_token,
-            read_token=token_ref.read_token,
-            xrepo=payload.get("xrepo"),
-            prepush_script=settings.prepush_script,
-            pr_approve_enabled=settings.pr_approve_enabled,
-            auto_merge_enabled=settings.auto_merge_enabled,
-            signed_commits=settings.signed_commits,
-            mode_instructions=settings.mode_instructions,
-            static_checks=[
-                StaticCheckConfig(
-                    name=check.name,
-                    command=check.command,
-                    suffixes=tuple(check.suffixes),
-                )
-                for check in settings.static_checks
-            ],
-            static_checks_enabled=(
-                ctx_payload.shell != "disabled" and allow_repo_command_overrides(trust_tier)
-            ),
-            ci_gate_checks=dict(settings.ci_evidence.gates),
-            ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
-            analyzers_mode=analyzers_mode,
-            trust_tier=trust_tier,
-            analyzers_settings_enabled=settings.analyzers.enabled,
-            sarif_upload_enabled=sarif_upload_enabled,
-            run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
-            job_id=os.environ.get("GITHUB_JOB"),
-            oss=run_context.oss,
-            plan="unknown",
-            resolved_model=resolved_model,
-            suggest_eval_add=bool(payload.get("suggestEvalAdd")),
-        )
-
-        # S1 review / F2 follow-up — fail-closed config validation is
-        # deferred until ``tool_context`` is built so the outer handler
-        # can reach ``report_status_checks`` for the ``configuration_error``
-        # outcome. The sentinel errors were captured at the early
-        # validation sites (``apply_setup_overrides`` and ``timeout``
-        # parsing); re-raise them now.
-        if setup_override_error is not None:
-            raise _ConfigurationError(setup_override_error) from None
-        if timeout_error is not None:
-            raise _ConfigurationError(timeout_error) from None
+        # ``tool_context``, ``modes``, ``output_schema``, ``ctx_payload``,
+        # ``analyzers_mode`` and ``sarif_upload_enabled`` were all built
+        # earlier — before the F3 equal-deadline guard and the F4
+        # fail-policy short-circuit — so the outer handler can still call
+        # ``report_status_checks`` when those guards raise
+        # ``_ConfigurationError``. The MCP server URL is filled in below.
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
         tool_context.mcp_server_url = mcp_url

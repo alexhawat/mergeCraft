@@ -218,6 +218,19 @@ async def test_policy_fail_aborts_before_agent_runs(
     assert outcome is RunOutcome.configuration_error, (
         f"setupFailurePolicy=fail must yield configuration_error; got {outcome!r}"
     )
+    # S1 review / NEW2 — the F4 fail-policy short-circuit raises while
+    # ``tool_context`` is already built. The outer handler therefore has
+    # a context to call ``report_status_checks`` on, and the harness
+    # records that call.
+    assert rec.report_status_calls, (
+        f"NEW2 violated: F4 fail-policy guard raised but the outer "
+        f"handler did not call report_status_checks — tool_context was "
+        f"None when the guard raised; report_status_calls={rec.report_status_calls!r}"
+    )
+    last = rec.report_status_calls[-1]
+    assert last.get("failure_reason"), (
+        f"NEW2 violated: report_status_checks was called without a failure_reason; got {last!r}"
+    )
 
 
 async def test_invalid_policy_value_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -247,6 +260,153 @@ async def test_invalid_policy_value_fails_closed(monkeypatch: pytest.MonkeyPatch
         f"invalid setupFailurePolicy must fail closed; got {outcome!r}"
     )
     assert not rec.result.success
+
+
+async def test_invalid_setup_failure_policy_does_not_spawn_setup_script(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """S1 review / NEW1 — invalid ``setupFailurePolicy`` rejects BEFORE setup runs.
+
+    The prior fix captured the ``ValueError`` into a sentinel and re-raised
+    it after ``tool_state`` was constructed — that meant the setup script
+    could still start executing and run for up to its full budget before
+    the configuration error fired. This test pins the NEW1 fix:
+    ``apply_setup_overrides`` (and the other input validators) now raise
+    ``_ConfigurationError`` *before* ``asyncio.create_subprocess_shell`` is
+    ever called for the setup script.
+
+    The test uses the harness's own monkeypatch on
+    ``asyncio.create_subprocess_shell`` and asserts ``rec.setup_script_commands``
+    is empty — no subprocess was spawned, regardless of how the policy
+    string would otherwise have routed the run.
+    """
+    import asyncio
+
+    spawn_calls: list[tuple[str, object]] = []
+    real_create_subprocess_shell = asyncio.create_subprocess_shell
+
+    async def _counting_create_subprocess_shell(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        # Record the call site so the assertion can prove the
+        # configuration-error guard fired *before* the spawn, not after.
+        spawn_calls.append((str(args[0]) if args else "", kwargs))
+        return await real_create_subprocess_shell(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_shell", _counting_create_subprocess_shell)
+
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(setup_script="echo would-have-run"),
+        env={
+            "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
+            "INPUT_SETUP_FAILURE_POLICY": "bogus",
+        },
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        setup_script_rc=1,
+    )
+    assert rec.result is not None
+    # The harness records each call to ``asyncio.create_subprocess_shell``
+    # on ``rec.setup_script_commands``. The NEW1 fix means the invalid
+    # policy raises ``_ConfigurationError`` *before* the setup block runs.
+    assert rec.setup_script_commands == [], (
+        f"NEW1 violated: setup_script was spawned despite an invalid "
+        f"setup_failure_policy; spawn_calls={spawn_calls!r}, "
+        f"setup_script_commands={rec.setup_script_commands!r}"
+    )
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome is RunOutcome.configuration_error, (
+        f"invalid setupFailurePolicy must fail closed as configuration_error; got {outcome!r}"
+    )
+
+
+async def test_invalid_setup_timeout_does_not_spawn_setup_script(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """S1 review / NEW1 — invalid ``INPUT_SETUP_TIMEOUT`` rejects BEFORE setup runs.
+
+    Same contract as ``test_invalid_setup_failure_policy_does_not_spawn_setup_script``
+    but for the ``setup_timeout`` input: an unparseable duration must fail
+    closed *before* the setup script is spawned. The fix moves
+    ``apply_setup_overrides`` (and the timeout parsing in
+    ``main.py``) above ``setup_git`` and the ``asyncio.create_subprocess_shell``
+    call.
+    """
+    import asyncio
+
+    spawn_calls: list[tuple[str, object]] = []
+    real_create_subprocess_shell = asyncio.create_subprocess_shell
+
+    async def _counting_create_subprocess_shell(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        spawn_calls.append((str(args[0]) if args else "", kwargs))
+        return await real_create_subprocess_shell(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_shell", _counting_create_subprocess_shell)
+
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(setup_script="echo would-have-run"),
+        env={
+            "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
+            "INPUT_SETUP_TIMEOUT": "not-a-duration",
+        },
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        setup_script_rc=1,
+    )
+    assert rec.result is not None
+    assert rec.setup_script_commands == [], (
+        f"NEW1 violated: setup_script was spawned despite an invalid "
+        f"setup_timeout; spawn_calls={spawn_calls!r}"
+    )
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome is RunOutcome.configuration_error, (
+        f"invalid INPUT_SETUP_TIMEOUT must fail closed as configuration_error; got {outcome!r}"
+    )
+
+
+async def test_invalid_run_timeout_does_not_spawn_setup_script(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """S1 review / NEW1 — invalid ``INPUT_TIMEOUT`` rejects BEFORE setup runs.
+
+    Third member of the NEW1 family. The action-input ``timeout`` parses
+    through ``resolve_timeout_ms``; an unparseable value must raise
+    ``_ConfigurationError`` immediately, before the setup script starts.
+    """
+    import asyncio
+
+    spawn_calls: list[tuple[str, object]] = []
+    real_create_subprocess_shell = asyncio.create_subprocess_shell
+
+    async def _counting_create_subprocess_shell(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        spawn_calls.append((str(args[0]) if args else "", kwargs))
+        return await real_create_subprocess_shell(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_shell", _counting_create_subprocess_shell)
+
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(setup_script="echo would-have-run"),
+        env={
+            "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
+            "INPUT_TIMEOUT": "not-a-duration",
+        },
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        setup_script_rc=1,
+    )
+    assert rec.result is not None
+    assert rec.setup_script_commands == [], (
+        f"NEW1 violated: setup_script was spawned despite an invalid "
+        f"run timeout; spawn_calls={spawn_calls!r}"
+    )
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome is RunOutcome.configuration_error, (
+        f"invalid INPUT_TIMEOUT must fail closed as configuration_error; got {outcome!r}"
+    )
 
 
 __all__ = [

@@ -155,6 +155,21 @@ async def test_setup_timeout_exceeding_run_budget_raises_configuration_error(
     assert outcome is RunOutcome.configuration_error, (
         f"setup_timeout >= run timeout must fail closed as configuration_error; got {outcome!r}"
     )
+    # S1 review / NEW2 — the F3 equal-deadline guard raises while
+    # ``tool_context`` is already built (the NEW2 fix moves the
+    # ``ToolContext(...)`` construction above this guard). The outer
+    # handler therefore has a context to call ``report_status_checks``
+    # on, and the harness records that call. The run must end with at
+    # least one status-check call carrying the failure reason.
+    assert rec.report_status_calls, (
+        f"NEW2 violated: F3 equal-deadline guard raised but the outer "
+        f"handler did not call report_status_checks — tool_context was "
+        f"None when the guard raised; report_status_calls={rec.report_status_calls!r}"
+    )
+    last = rec.report_status_calls[-1]
+    assert last.get("failure_reason"), (
+        f"NEW2 violated: report_status_checks was called without a failure_reason; got {last!r}"
+    )
 
 
 async def test_timed_out_setup_script_yields_inconclusive(

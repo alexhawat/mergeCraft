@@ -212,6 +212,87 @@ async def test_setup_script_stderr_is_redacted_before_surfacing(
     assert outcome is RunOutcome.inconclusive, f"expected inconclusive (D5), got {outcome!r}"
 
 
+async def test_redaction_runs_before_truncation(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """S1 review / NEW3 — secrets straddling the 500-char truncation are still redacted.
+
+    The prior implementation truncated ``stderr`` to 500 chars *before*
+    passing it through ``redact_secrets``. That meant a token whose body
+    crosses the 500-char boundary was sliced to a short prefix — below
+    the redactor's pattern minimum — and the redactor no longer recognized
+    it as a token, leaking a guessable prefix into the agent prompt.
+
+    This test plants a ``ghp_`` token straddling the 500-char boundary
+    and asserts that:
+
+      1. The full planted token itself never appears in the prompt.
+      2. No short prefix of the planted token survives — the redactor's
+         pattern matches ``gh[pousr]_[A-Za-z0-9_]{20,}`` so a residual
+         ``ghp_<1-19-char body>`` substring is the exact shape the
+         prior [:500]-first code path produced.
+
+    Note: the redaction marker itself (``[REDACTED]``) may be sliced by
+    the 500-char cap on the *redacted* output — that is correct, because
+    the marker is shorter than the planted token and the truncation
+    cannot leak token bytes regardless of where the marker lands.
+    """
+    planted_token = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+    # 480 chars of padding so the token straddles the 500-char slice
+    # boundary: bytes 480-516 hold the token, only the first 20 chars of
+    # the token survive the [:500] truncation in the buggy code path.
+    padding = "x" * 480
+    stderr_body = (f"npm ERR! payload: {padding}\n{planted_token}\n").encode()
+    assert len(stderr_body) > 500, "test fixture must exceed the 500-char slice"
+
+    captured: dict[str, str] = {}
+
+    import mergecraft.main as main_mod
+    import mergecraft.utils.instructions as instructions_mod
+
+    real_resolve = instructions_mod.resolve_instructions
+
+    def _patched_resolve(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        result = real_resolve(*args, **kwargs)
+        captured["system"] = getattr(result, "system", "")
+        captured["full"] = getattr(result, "full", "")
+        return result
+
+    monkeypatch.setattr(main_mod, "resolve_instructions", _patched_resolve)
+    monkeypatch.setattr(instructions_mod, "resolve_instructions", _patched_resolve)
+
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(setup_script="failing-with-straddling-token"),
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        setup_script_rc=1,
+        setup_script_stderr=stderr_body,
+    )
+    assert rec.result is not None
+    prompt = captured.get("system", "")
+    assert prompt, "resolve_instructions was not invoked by main() during the run"
+    # The full planted token must never appear in the system surface —
+    # the prompt branch that reaches the runtime drivers.
+    assert planted_token not in prompt, (
+        f"NEW3 violated: the planted GitHub PAT crossed the 500-char "
+        f"boundary in stderr and surfaced verbatim in the system-role "
+        f"prompt; the slice happened before redaction. "
+        f"Prompt excerpt: {prompt[:1200]!r}"
+    )
+    # No prefix of the planted token past the literal ``ghp_`` should
+    # remain. The redactor's pattern matches ``gh[pousr]_[A-Za-z0-9_]{20,}``,
+    # so a partial token below 20 chars of body is a regression — that
+    # is the exact scenario the prior [:500]-first code path produced.
+    import re
+
+    suspicious = re.search(r"ghp_[A-Za-z0-9_]{1,19}(?![A-Za-z0-9_])", prompt)
+    assert suspicious is None, (
+        f"NEW3 violated: a short prefix of the planted token survived "
+        f"truncation — got {suspicious.group(0)!r} in the prompt excerpt: "
+        f"{prompt[:1200]!r}"
+    )
+
+
 # ── Regression pins (must pass today) ─────────────────────────────────────────
 
 
