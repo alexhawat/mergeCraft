@@ -172,3 +172,90 @@ def test_extract_impact_missing_file_does_not_crash() -> None:
     result = extract_impact(diff, "/tmp/nonexistent")
     assert result["totalDeclarations"] == 0
     assert result["impactPath"] == []
+
+
+def test_cross_file_references_include_usages_in_git_repo(tmp_path: Path) -> None:
+    """A real git repo: usages of a changed declaration in other files appear.
+
+    Guards the ``git grep`` subprocess path (path:line:content parsing,
+    exclude_file filtering, and the -w word match). The declaration file
+    itself is excluded; cross-file usages are kept."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "dev@example.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "config", "user.name", "Dev"], cwd=repo, check=True, capture_output=True)
+
+    (repo / "src").mkdir()
+    (repo / "src" / "app.py").write_text("def changed():\n    return True\n")
+    (repo / "src" / "consumer.py").write_text("from app import changed\nresult = changed()\n")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+    diff = """diff --git a/src/app.py b/src/app.py
+index a..b 100644
+--- a/src/app.py
++++ b/src/app.py
+@@ -1 +1,2 @@
+ def changed():
++    return True
+"""
+
+    result = extract_impact(diff, str(repo))
+    rows = result["impactPath"]
+    app_row = next(r for r in rows if r["file"] == "src/app.py")
+    assert app_row["declaration"] == "changed"
+    ref_files = [ref["file"] for ref in app_row["references"]]
+    assert "src/consumer.py" in ref_files, f"expected consumer.py ref in {ref_files}"
+    assert "src/app.py" not in ref_files, "declaration file must be excluded from references"
+    ref = next(ref for ref in app_row["references"] if ref["file"] == "src/consumer.py")
+    assert ref["line"] == 1, f"expected line 1 (from app import changed) but got {ref}"
+    ref_lines = [ref["line"] for ref in app_row["references"] if ref["file"] == "src/consumer.py"]
+    assert 1 in ref_lines, f"expected import usage (line 1) in {ref_lines}"
+    assert 2 in ref_lines, f"expected call usage (line 2) in {ref_lines}"
+
+
+def test_cross_file_references_word_match_excludes_substrings(tmp_path: Path) -> None:
+    """-w word match: a declaration name must not match inside a longer identifier."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "dev@example.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "config", "user.name", "Dev"], cwd=repo, check=True, capture_output=True)
+
+    (repo / "src").mkdir()
+    (repo / "src" / "app.py").write_text("def run():\n    return 1\n")
+    (repo / "src" / "runner.py").write_text("def runner():\n    return run()\n")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+    diff = """diff --git a/src/app.py b/src/app.py
+index a..b 100644
+--- a/src/app.py
++++ b/src/app.py
+@@ -1 +1,2 @@
+ def run():
++    return 1
+"""
+
+    result = extract_impact(diff, str(repo))
+    rows = result["impactPath"]
+    app_row = next(r for r in rows if r["file"] == "src/app.py")
+    assert app_row["declaration"] == "run"
+    # "runner" contains "run" but -w must exclude it; only "return run()" matches.
+    ref_lines = [ref["line"] for ref in app_row["references"]]
+    assert ref_lines == [2], f"expected only the exact-symbol reference at line 2, got {ref_lines}"
