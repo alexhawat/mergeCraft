@@ -8,14 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT, job, load_workflow, read_text
-
-_W3 = pytest.mark.xfail(
-    reason="green after W3: blocking trivy on promoting refs + .trivyignore expiry",
-    strict=False,
-)
 
 _CVE = re.compile(r"^CVE-\d{4}-\d+\b", re.MULTILINE)
 _EXPIRY = re.compile(r"expir(?:y|es|ation)\s*[:=]\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
@@ -41,7 +34,6 @@ def test_promote_still_fires_on_main_and_pre_001() -> None:
     assert "refs/heads/pre-0.0.1" in condition
 
 
-@_W3
 def test_scan_gate_blocks_every_ref_that_can_publish() -> None:
     """D6 — ``exit_code=1`` unconditional, or the blocking set includes main + pre-0.0.1."""
     script = _scan_gate_script()
@@ -54,7 +46,6 @@ def test_scan_gate_blocks_every_ref_that_can_publish() -> None:
     )
 
 
-@_W3
 def test_trivyignore_exists_with_required_header_schema() -> None:
     """D7 — checked-in ``.trivyignore`` requires CVE + justification + expiry per entry."""
     path = REPO_ROOT / ".trivyignore"
@@ -83,7 +74,6 @@ def _load_expiry_checker() -> Any:
     return module
 
 
-@_W3
 def test_expiry_checker_fails_on_past_dated_entry(tmp_path: Path) -> None:
     """Guard-deletion: a past-dated ``.trivyignore`` entry must fail the checker."""
     module = _load_expiry_checker()
@@ -98,7 +88,6 @@ def test_expiry_checker_fails_on_past_dated_entry(tmp_path: Path) -> None:
     assert rc != 0, "past-dated .trivyignore entry was accepted (expiry guard deleted?)"
 
 
-@_W3
 def test_expiry_checker_accepts_future_dated_entry(tmp_path: Path) -> None:
     """Happy path: a future expiry is not an error."""
     module = _load_expiry_checker()
@@ -115,7 +104,6 @@ def test_expiry_checker_accepts_future_dated_entry(tmp_path: Path) -> None:
     assert rc == 0
 
 
-@_W3
 def test_trivyignore_schema_rejects_entry_without_justification_or_expiry(tmp_path: Path) -> None:
     """Edge: a bare CVE line without justification + expiry is invalid."""
     module = _load_expiry_checker()
@@ -127,7 +115,6 @@ def test_trivyignore_schema_rejects_entry_without_justification_or_expiry(tmp_pa
     assert rc != 0
 
 
-@_W3
 def test_waiver_docs_exist() -> None:
     """Operators must have a documented path to waive a finding (D7)."""
     supply = REPO_ROOT / "docs" / "supply-chain.md"

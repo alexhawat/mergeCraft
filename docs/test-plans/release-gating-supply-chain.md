@@ -33,7 +33,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | Plan wave | Test files | Marker reason prefix |
 |-----------|------------|----------------------|
 | **W2** | *(reconciled)* `tests/ci/test_e2e_release_gate.py` — xfails dropped; real passes | — |
-| **W3** | `tests/ci/test_trivy_scan_gate.py` (except promote-on-main pin) | `green after W3:` |
+| **W3** | *(reconciled)* `tests/ci/test_trivy_scan_gate.py` — xfails dropped; real passes | — |
 | **W4** | `tests/ci/test_live_provider_matrix.py` (selector / fail-loud / matrix); `tests/integration/test_live_providers.py`; `tests/integration/test_github_integration.py` | `green after W4:` |
 | **W5** | `tests/docs/test_distribution_checklist.py` (except D15 yes/ pin) | `green after W5:` |
 | **W6** | `tests/ci/test_coverage_ratchet.py` | `green after W6:` |
@@ -48,6 +48,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | `tests/ci/test_e2e_release_gate.py` (all eight cases) | W2 landed `workflow_call` + `e2e-gate`; xfails dropped |
 | `test_touched_workflows_third_party_uses_are_sha_pinned` | convention 2 already holds |
 | `test_w7_touched_workflows_remain_sha_pinned` | same |
+| `tests/ci/test_trivy_scan_gate.py` (all seven cases) | W3 landed blocking scan + `.trivyignore` expiry; xfails dropped |
 | `test_promote_still_fires_on_main_and_pre_001` | D6 must not strip `:latest` publish |
 | `test_live_marker_registered_in_pytest_ini` | `live` marker already in `pyproject.toml` |
 | `test_suite_is_inert_on_pull_request` (YAML) | `integration-live` already skips `pull_request` |
@@ -68,7 +69,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | `build-dist` does not need `e2e-gate` | unit | D11 | `test_build_dist_does_not_need_e2e_gate` |
 | third-party `uses:` 40-hex SHA | unit | tag pins | `test_touched_workflows_third_party_uses_are_sha_pinned` |
 
-### W3 — blocking scan + expiring waivers (R-F2)
+### W3 — blocking scan + expiring waivers (R-F2) — green after W3 impl (`3088ffe`) + xfail recon
 
 | Contract | Layer | Coverage | Tests |
 |----------|-------|----------|-------|
@@ -171,6 +172,7 @@ Do not invent metric values in tests. Named symbols: `compute_prompt_version`,
 | Date | Impl wave | Markers removed | Notes |
 |------|-----------|-----------------|-------|
 | 2026-08-13 | W2 | `_W2` on six contracts in `tests/ci/test_e2e_release_gate.py` | SHA-pin cases were already unxfail'd; leave W3–W9 markers |
+| 2026-08-13 | W3 | `_W3` on six contracts in `tests/ci/test_trivy_scan_gate.py` | Promote-on-main pin was already unxfail'd; leave W4–W9 markers |
 
 ## Driving live / collector tests
 
