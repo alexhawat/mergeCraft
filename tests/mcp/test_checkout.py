@@ -198,6 +198,7 @@ def _ctx_for(
     *,
     mode: str,
     trust_tier: Literal["trusted", "untrusted"] = "trusted",
+    analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto",
 ) -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=str(repo))
     state.selected_mode = mode
@@ -211,6 +212,7 @@ def _ctx_for(
         git_token="",
         api_token="",
         trust_tier=trust_tier,
+        analyzers_mode=analyzers_mode,
         modes=compute_modes("claude"),
         tool_state=state,
         mcp_server_url="",
@@ -354,6 +356,26 @@ async def test_impact_path_omitted_for_untrusted_checkout_without_sandbox(
     monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda repo_root: "ast-grep")
     github = _StubGitHub(head_sha=head_sha, reviews=[])
     ctx = _ctx_for(repo, github, tmp_path, mode="Review", trust_tier="untrusted")
+
+    payload = await _checkout(ctx)
+
+    assert "impactPath" not in payload
+
+
+@pytest.mark.asyncio
+async def test_impact_path_omitted_when_operator_disables_analyzers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The operator's effective analyzer policy (analyzers: off) must win over
+    whatever a PR sets in its own analyzers.impact — a PR cannot self-enable
+    ast-grep execution once the operator has switched analyzers off."""
+    from mergecraft.mcp import checkout as checkout_module
+
+    repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda repo_root: "ast-grep")
+    github = _StubGitHub(head_sha=head_sha, reviews=[])
+    ctx = _ctx_for(repo, github, tmp_path, mode="Review", analyzers_mode="off")
 
     payload = await _checkout(ctx)
 
