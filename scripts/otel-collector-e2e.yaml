@@ -8,7 +8,10 @@ receivers:
 
 exporters:
   file:
-    path: /tmp/spans.json
+    # Directory mount (not a single-file bind): the image runs as uid 10001 and
+    # the file exporter may write a sibling temp file then rename.
+    path: /var/lib/otelcol/out/spans.json
+    format: json
 
 service:
   pipelines:

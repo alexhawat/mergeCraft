@@ -23,6 +23,8 @@ from typing import Final
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OTLP_COLLECTOR_IMAGE_FILE = REPO_ROOT / "scripts" / "otel_collector_image.txt"
 CONTAINER_NAME = "mergecraft-otel-collector-e2e"
+COLLECTOR_DUMP_MOUNT = "/var/lib/otelcol/out"
+COLLECTOR_DUMP_BASENAME = "spans.json"
 
 # Keep in sync with tests/tracing/test_otlp_collector_e2e.py (pre-seed contract slice).
 OTLP_PRE_SEED_TESTS: Final[tuple[str, ...]] = (
@@ -64,11 +66,38 @@ def _run_quiet(cmd: list[str], *, env: dict[str, str] | None = None) -> None:
     subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
 
 
-def _start_collector(*, image: str, dump_path: Path, endpoint: str) -> None:
+def _container_running() -> bool:
+    result = subprocess.run(
+        ["docker", "inspect", "-f", "{{.State.Running}}", CONTAINER_NAME],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip().lower() == "true"
+
+
+def _collector_logs() -> str:
+    result = subprocess.run(
+        ["docker", "logs", CONTAINER_NAME],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return f"{result.stdout}{result.stderr}"
+
+
+def _prepare_dump_dir(dump_dir: Path) -> Path:
+    """Host dir bind-mounted into the collector (uid 10001 must be able to write)."""
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    dump_path = dump_dir / COLLECTOR_DUMP_BASENAME
+    dump_path.touch()
+    dump_dir.chmod(0o777)
+    dump_path.chmod(0o666)
+    return dump_path
+
+
+def _start_collector(*, image: str, dump_dir: Path) -> None:
     _run_quiet(["docker", "rm", "-f", CONTAINER_NAME])
-    dump_path.parent.mkdir(parents=True, exist_ok=True)
-    if not dump_path.exists():
-        dump_path.touch()
     _run(
         [
             "docker",
@@ -81,7 +110,7 @@ def _start_collector(*, image: str, dump_path: Path, endpoint: str) -> None:
             "-v",
             f"{COLLECTOR_CONFIG}:/etc/otelcol/config.yaml:ro",
             "-v",
-            f"{dump_path}:/tmp/spans.json",
+            f"{dump_dir}:{COLLECTOR_DUMP_MOUNT}",
             image,
             "--config",
             "/etc/otelcol/config.yaml",
@@ -91,12 +120,27 @@ def _start_collector(*, image: str, dump_path: Path, endpoint: str) -> None:
     host = "127.0.0.1"
     port = 4318
     while time.time() < deadline:
+        if not _container_running():
+            raise RuntimeError(
+                f"collector exited before opening {host}:{port}:\n{_collector_logs()}"
+            )
         try:
             with socket.create_connection((host, port), timeout=1.0):
                 return
         except OSError:
             time.sleep(0.5)
-    raise RuntimeError(f"collector did not become ready on {host}:{port}")
+    raise RuntimeError(f"collector did not become ready on {host}:{port}:\n{_collector_logs()}")
+
+
+def _wait_for_dump(dump_path: Path, *, timeout: float = 20.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if dump_path.is_file() and dump_path.stat().st_size > 0:
+            return
+        if not _container_running():
+            raise RuntimeError(f"collector exited before writing dump:\n{_collector_logs()}")
+        time.sleep(0.25)
+    raise RuntimeError(f"collector dump stayed empty:\n{_collector_logs()}")
 
 
 def _stop_collector() -> None:
@@ -182,23 +226,29 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.get("MERGECRAFT_OTEL_ENDPOINT", "http://127.0.0.1:4318/v1/traces"),
     )
     with tempfile.TemporaryDirectory(prefix="mergecraft-otel-e2e-") as tmp:
-        dump_path = Path(tmp) / "spans.json"
-        dump_path.touch()
+        dump_dir = Path(tmp)
+        dump_path = _prepare_dump_dir(dump_dir)
         env = os.environ.copy()
         env["MERGECRAFT_OTEL_COLLECTOR_DUMP"] = str(dump_path)
         env["OTEL_EXPORTER_OTLP_ENDPOINT"] = endpoint
         env["MERGECRAFT_OTEL_ENDPOINT"] = endpoint
         try:
-            _start_collector(image=args.collector_image, dump_path=dump_path, endpoint=endpoint)
+            _start_collector(image=args.collector_image, dump_dir=dump_dir)
             _run(
                 [sys.executable, "-m", "pytest", *pytest_args, "-k", pre_seed_tests],
                 env=env,
             )
+            if not _container_running():
+                raise RuntimeError(f"collector exited during pre-seed tests:\n{_collector_logs()}")
             _seed_spans(endpoint=endpoint)
+            _wait_for_dump(dump_path)
             _run(
                 [sys.executable, "-m", "pytest", *pytest_args, "-k", post_seed_tests],
                 env=env,
             )
+        except Exception:
+            sys.stderr.write(_collector_logs())
+            raise
         finally:
             _stop_collector()
     return 0
