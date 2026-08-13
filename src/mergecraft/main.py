@@ -446,6 +446,7 @@ async def main() -> MainResult:
             *compute_modes(agent_id, settings.signed_commits),
             *_custom_modes(settings.modes),
         ]
+        tool_state.modes = modes
         output_schema = resolve_output_schema()
 
         ctx_payload = _payload_to_ctx(payload)
@@ -786,6 +787,7 @@ async def main() -> MainResult:
                 )
                 tool_context.agent_id = attempt_agent_id
                 tool_context.modes = attempt_modes
+                tool_state.modes = attempt_modes
                 tool_context.resolved_model = attempt_model
                 logger.info(
                     "» model chain advanced to agent={} model={}",
