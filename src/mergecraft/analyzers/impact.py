@@ -24,9 +24,12 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from mergecraft.analyzers.manifest import TrustTier
 
 _CATALOG_DECL_DIR = Path(__file__).resolve().parent / "catalog" / "impact-declarations"
 
@@ -99,23 +102,55 @@ def _run_ast_grep(
     rule_path: Path,
     files: list[str],
     cwd: str,
+    *,
+    tier: TrustTier,
 ) -> list[dict[str, Any]]:
-    try:
-        result = subprocess.run(
-            [binary, "scan", "--json", "-r", str(rule_path), *files],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
-        msg = f"ast-grep invocation failed ({rule_path.name}): {exc}"
-        raise _ExtractionFailed(msg) from exc
-    if result.returncode != 0:
-        msg = f"ast-grep exited {result.returncode} ({rule_path.name}): {result.stderr.strip()}"
+    """Run one ast-grep declaration scan through the shared sandbox/trust path.
+
+    ast-grep parses PR-authored source with a native parser, so it gets the same
+    isolation (D7) and env-scrubbing every other analyzer gets against untrusted
+    checkouts — never a bare ``subprocess.run`` with the parent environment.
+    Fails closed: if sandbox isolation is required (untrusted tier) and
+    unavailable, this raises rather than falling back to unsandboxed execution.
+    """
+    from mergecraft.analyzers.registry import get_manifest
+    from mergecraft.analyzers.resolve import AnalyzerPlan
+    from mergecraft.analyzers.run import run_plan
+    from mergecraft.analyzers.sandbox import plan_sandbox
+    from mergecraft.analyzers.trust import build_analyzer_env
+
+    manifest = get_manifest("ast-grep")
+    repo_root = Path(cwd)
+    scratch_dir = repo_root / ".mergecraft" / "analyzer-scratch" / "ast-grep-impact"
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+
+    sandbox_decision = plan_sandbox(
+        manifest=manifest, tier=tier, repo_root=repo_root, scratch_dir=scratch_dir
+    )
+    if not sandbox_decision.can_run:
+        msg = sandbox_decision.skip_reason or f"ast-grep sandbox unavailable ({rule_path.name})"
         raise _ExtractionFailed(msg)
+
+    env = build_analyzer_env(tier=tier, event=None)
+    plan = AnalyzerPlan(
+        manifest_id="ast-grep-impact",
+        mode="managed",
+        argv=(binary, "scan", "--json", "-r", str(rule_path), *files),
+        cwd=repo_root,
+        env=env,
+        timeout_s=30,
+    )
+    outcome = run_plan(plan, sandbox_context=sandbox_decision.context)
+    if outcome.status != "passed":
+        msg = f"ast-grep {outcome.status} ({rule_path.name}): {outcome.output}"
+        raise _ExtractionFailed(msg)
+    raw = (
+        Path(outcome.output_path).read_text(encoding="utf-8")
+        if outcome.output_path
+        else outcome.output
+    )
     try:
-        matches = json.loads(result.stdout or "[]")
+        matches = json.loads(raw or "[]")
     except json.JSONDecodeError as exc:
         msg = f"ast-grep produced unparsable output ({rule_path.name}): {exc}"
         raise _ExtractionFailed(msg) from exc
@@ -126,6 +161,8 @@ def _find_declarations_batch(
     paths: list[str],
     cwd: str,
     ast_grep_binary: str,
+    *,
+    tier: TrustTier,
 ) -> dict[str, list[dict[str, object]]]:
     """Extract declaration-node candidates for every path, grouped by ast-grep rule.
 
@@ -147,7 +184,7 @@ def _find_declarations_batch(
     results: dict[str, list[dict[str, object]]] = {fp: [] for fp in paths}
     for rule_name, files in groups.items():
         rule_path = _CATALOG_DECL_DIR / rule_name
-        matches = _run_ast_grep(ast_grep_binary, rule_path, files, cwd)
+        matches = _run_ast_grep(ast_grep_binary, rule_path, files, cwd, tier=tier)
         label = labels[rule_name]
         for m in matches:
             name_mv = m.get("metaVariables", {}).get("single", {}).get("NAME")
@@ -207,11 +244,16 @@ def extract_impact(
     cwd: str,
     *,
     ast_grep_binary: str = "ast-grep",
+    tier: TrustTier = "untrusted",
 ) -> dict[str, object] | None:
     """Extract the change-impact artifact, or ``None`` if extraction failed outright.
 
     ``None`` means "we could not reliably determine this" — the caller must omit
-    the artifact entirely rather than publish a partial/misleading one.
+    the artifact entirely rather than publish a partial/misleading one. ``tier``
+    gates ast-grep's execution sandbox (D7) — it must reflect the *actual* trust
+    tier of this checkout (fork PR vs. same-repo), never a value read from the
+    checkout itself, since the checkout's own ``.mergecraft/config.yaml`` is
+    attacker-controlled on an untrusted PR. Defaults to the safer "untrusted".
     """
     hunks = _parse_hunks(diff_text)
     relevant_files = [fp for fp in _changed_paths(diff_text) if fp in hunks]
@@ -219,7 +261,7 @@ def extract_impact(
         return {"impactPath": [], "truncated": False, "totalDeclarations": 0}
 
     try:
-        decls_by_file = _find_declarations_batch(relevant_files, cwd, ast_grep_binary)
+        decls_by_file = _find_declarations_batch(relevant_files, cwd, ast_grep_binary, tier=tier)
 
         candidates: list[dict[str, object]] = []
         for fp in relevant_files:
@@ -272,8 +314,9 @@ def write_impact(
     pull_number: int | str,
     *,
     ast_grep_binary: str = "ast-grep",
+    tier: TrustTier = "untrusted",
 ) -> dict[str, object] | None:
-    data = extract_impact(diff_text, cwd, ast_grep_binary=ast_grep_binary)
+    data = extract_impact(diff_text, cwd, ast_grep_binary=ast_grep_binary, tier=tier)
     if data is None:
         return None
     rows = data.get("impactPath", [])

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -191,7 +191,14 @@ def _exists(path: str) -> bool:
     return Path(path).is_file()
 
 
-def _ctx_for(repo: Path, github: GitHubClient, tmp_path: Path, *, mode: str) -> ToolContext:
+def _ctx_for(
+    repo: Path,
+    github: GitHubClient,
+    tmp_path: Path,
+    *,
+    mode: str,
+    trust_tier: Literal["trusted", "untrusted"] = "trusted",
+) -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=str(repo))
     state.selected_mode = mode
     (tmp_path / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -203,6 +210,7 @@ def _ctx_for(repo: Path, github: GitHubClient, tmp_path: Path, *, mode: str) -> 
         github_installation_token="",
         git_token="",
         api_token="",
+        trust_tier=trust_tier,
         modes=compute_modes("claude"),
         tool_state=state,
         mcp_server_url="",
@@ -325,6 +333,27 @@ async def test_impact_path_omitted_when_ast_grep_binary_unavailable(
     monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda repo_root: None)
     github = _StubGitHub(head_sha=head_sha, reviews=[])
     ctx = _ctx_for(repo, github, tmp_path, mode="Review")
+
+    payload = await _checkout(ctx)
+
+    assert "impactPath" not in payload
+
+
+@pytest.mark.asyncio
+async def test_impact_path_omitted_for_untrusted_checkout_without_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fork PR (untrusted trust tier) enabling analyzers.impact in its own
+    checked-out config must not get ast-grep run unsandboxed against its own
+    source — outside CI there is no sandbox isolation available, so the
+    artifact is suppressed rather than executed without isolation (D7)."""
+    from mergecraft.mcp import checkout as checkout_module
+
+    repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda repo_root: "ast-grep")
+    github = _StubGitHub(head_sha=head_sha, reviews=[])
+    ctx = _ctx_for(repo, github, tmp_path, mode="Review", trust_tier="untrusted")
 
     payload = await _checkout(ctx)
 

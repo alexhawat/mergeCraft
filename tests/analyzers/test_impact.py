@@ -131,7 +131,7 @@ def test_extract_impact_returns_declarations_within_hunks(tmp_path: Path) -> Non
     # existing_func @ line 1, new_func @ line 7. Hunk range 1-4.
     txt = "def existing_func():\n    pass\n\n\n\n\ndef new_func():\n    return 42\n"
     _write_and_commit(repo, {"src/example.py": txt})
-    result = extract_impact(_SAMPLE_DIFF, str(repo))
+    result = extract_impact(_SAMPLE_DIFF, str(repo), tier="trusted")
     assert result is not None
     rows = result["impactPath"]
     decl_names = [r["declaration"] for r in rows if r["file"] == "src/example.py"]
@@ -155,7 +155,7 @@ index a..b 100644
     repo = _git_repo(tmp_path)
     txt = "def stale():\n    pass\n\n\ndef unchanged():\n    pass\n\n\ndef updated():\n    return 42\n\n\ndef changed():\n    return True\n"
     _write_and_commit(repo, {"src/app.py": txt})
-    result = extract_impact(diff, str(repo))
+    result = extract_impact(diff, str(repo), tier="trusted")
     assert result is not None
     decl_names = {r["declaration"] for r in result["impactPath"]}
     assert "changed" in decl_names
@@ -188,7 +188,7 @@ def test_write_impact_writes_json_when_nonempty(tmp_path: Path) -> None:
         "+    pass",
     ]
     diff = "\n".join(diff_parts)
-    written = write_impact(diff, str(repo), str(tmp_path), 42)
+    written = write_impact(diff, str(repo), str(tmp_path), 42, tier="trusted")
     assert written is not None
     assert written["impactPath"].endswith("pr-42-impact.json")
     assert written["impactDeclarationCount"] == 1
@@ -214,7 +214,7 @@ def test_extract_impact_respects_max_declarations(tmp_path: Path) -> None:
         files[f"src/mod_{i}.py"] = f"def func_{i}():\n    pass\n"
     _write_and_commit(repo, files)
     diff = "\n".join(diff_parts)
-    result = extract_impact(diff, str(repo))
+    result = extract_impact(diff, str(repo), tier="trusted")
     assert result is not None
     assert result["truncated"] is True
     assert len(result["impactPath"]) == _MAX_DECLARATIONS
@@ -253,7 +253,7 @@ index a..b 100644
 +    return True
 """
 
-    result = extract_impact(diff, str(repo))
+    result = extract_impact(diff, str(repo), tier="trusted")
     assert result is not None
     rows = result["impactPath"]
     app_row = next(r for r in rows if r["file"] == "src/app.py")
@@ -287,7 +287,7 @@ index a..b 100644
 +    return 1
 """
 
-    result = extract_impact(diff, str(repo))
+    result = extract_impact(diff, str(repo), tier="trusted")
     assert result is not None
     rows = result["impactPath"]
     app_row = next(r for r in rows if r["file"] == "src/app.py")
@@ -312,7 +312,7 @@ index a..b 100644
  def shared():
 +    return 1
 """
-    result = extract_impact(diff, str(repo))
+    result = extract_impact(diff, str(repo), tier="trusted")
     assert result is not None
     app_row = next(r for r in result["impactPath"] if r["file"] == "src/app.py")
     assert app_row["referencesTruncated"] is True
@@ -327,7 +327,7 @@ def test_extract_impact_returns_none_when_repo_unavailable_for_references() -> N
         src = Path(tmp) / "src"
         src.mkdir()
         (src / "example.py").write_text("def existing_func():\n    pass\n")
-        result = extract_impact(_SAMPLE_DIFF, tmp)
+        result = extract_impact(_SAMPLE_DIFF, tmp, tier="trusted")
         assert result is None
 
 
@@ -336,14 +336,17 @@ def test_write_impact_omits_key_when_reference_lookup_fails() -> None:
         src = Path(tmp) / "src"
         src.mkdir()
         (src / "example.py").write_text("def existing_func():\n    pass\n")
-        assert write_impact(_SAMPLE_DIFF, tmp, tmp, 7) is None
+        assert write_impact(_SAMPLE_DIFF, tmp, tmp, 7, tier="trusted") is None
 
 
 def test_extract_impact_returns_none_when_ast_grep_binary_missing(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path)
     _write_and_commit(repo, {"src/example.py": "def existing_func():\n    pass\n"})
     result = extract_impact(
-        _SAMPLE_DIFF, str(repo), ast_grep_binary="/nonexistent/ast-grep-binary-xyz"
+        _SAMPLE_DIFF,
+        str(repo),
+        ast_grep_binary="/nonexistent/ast-grep-binary-xyz",
+        tier="trusted",
     )
     assert result is None
 
@@ -412,7 +415,24 @@ def test_declaration_extraction_covers_representative_forms(
     repo = _git_repo(tmp_path)
     _write_and_commit(repo, {relpath: content})
     diff = _added_file_diff(relpath, content)
-    result = extract_impact(diff, str(repo))
+    result = extract_impact(diff, str(repo), tier="trusted")
     assert result is not None
     names = {r["declaration"] for r in result["impactPath"]}
     assert expected <= names, f"missing {expected - names} for {relpath}: got {names}"
+
+
+def test_extract_impact_fails_closed_for_untrusted_tier_without_sandbox(tmp_path: Path) -> None:
+    """A fork PR (untrusted tier) has no sandbox isolation available outside CI,
+    so ast-grep must not fall back to running unsandboxed against
+    attacker-controlled source — the whole artifact is suppressed rather than
+    silently executing without isolation (D7 / review finding)."""
+    repo = _git_repo(tmp_path)
+    _write_and_commit(repo, {"src/example.py": "def existing_func():\n    pass\n"})
+    result = extract_impact(_SAMPLE_DIFF, str(repo), tier="untrusted")
+    assert result is None
+
+
+def test_write_impact_omits_key_for_untrusted_tier_without_sandbox(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path)
+    _write_and_commit(repo, {"src/example.py": "def existing_func():\n    pass\n"})
+    assert write_impact(_SAMPLE_DIFF, str(repo), str(tmp_path), 7, tier="untrusted") is None

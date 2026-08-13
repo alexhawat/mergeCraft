@@ -264,6 +264,11 @@ def checkout_pr_tool(ctx: ToolContext):
         # S6 #94 — impact-path extraction (default off behind analyzers.impact).
         # Emitted only when enabled; returns None (-> no key) when the diff
         # has zero declarations, matching the incrementalDiffPath convention.
+        # The impact.impact toggle is read from the PR's own checkout (fine —
+        # repo config is safe to *read* regardless of trust tier), but ast-grep
+        # execution itself is gated on ctx.trust_tier inside write_impact, which
+        # fails closed (omits impactPath) when sandbox isolation for an
+        # untrusted checkout isn't available (D7).
         try:
             repo_root = Path(cwd)
             settings_obj = load_repo_settings(root=repo_root, load_learnings_files=False)
@@ -276,7 +281,12 @@ def checkout_pr_tool(ctx: ToolContext):
                     )
                 else:
                     impact_result = write_impact(
-                        diff, cwd, temp, pull_number, ast_grep_binary=ast_grep_binary
+                        diff,
+                        cwd,
+                        temp,
+                        pull_number,
+                        ast_grep_binary=ast_grep_binary,
+                        tier=ctx.trust_tier,
                     )
                     if impact_result is not None:
                         result["impactPath"] = impact_result["impactPath"]
