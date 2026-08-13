@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   aborts as `configuration_error` instead of silently executing the agent as
   root — previously that degradation was logged at `debug` and the review
   continued. The image build now asserts both are present.
+- Fixed: the privilege drop also rejects the resolved user when its UID/GID is
+  0 — the username is not the security boundary, so `MERGECRAFT_AGENT_USER=root`
+  (or any user mapped to uid 0) can no longer silently run the agent as root
+- Fixed: `prepare_workspace_for_agent` is now guarded at its `main()` call site,
+  so a missing/UID-0 agent user surfaces as `RunOutcome.configuration_error`
+  instead of escaping as an uncaught traceback
 - Trust tier is derived before any repo-controlled git setup or `setupScript`;
   untrusted events skip operator scripts instead of running them first
 - Agent CLI subprocesses receive an explicit credential allowlist — no ambient

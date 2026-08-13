@@ -2,9 +2,12 @@
 
 When the action image runs as root the agent subprocess must drop to the
 unprivileged ``mergecraft`` user via ``setpriv``. If the boundary is missing
-(``setpriv`` not on PATH, or the user not in the passwd database) the run
-aborts as a configuration error rather than silently executing the agent as
-root — that fallback is the F4' defect and it must not regress.
+(``setpriv`` not on PATH, the user not in the passwd database, or the resolved
+user has UID/GID 0) the run aborts as a configuration error rather than
+silently executing the agent as root — that fallback is the F4' defect and it
+must not regress. UID/GID 0 is the security boundary, not the username: a
+configured user that happens to resolve to ``root`` would still spawn the
+agent as root.
 """
 
 from __future__ import annotations
@@ -49,7 +52,10 @@ def wrap_agent_command(cmd: list[str]) -> list[str]:
 
     Fails closed with ``main._ConfigurationError`` if ``setpriv`` or the agent
     user is unavailable — never silently returns the unwrapped command (the
-    F4' fail-open default this contract replaces).
+    F4' fail-open default this contract replaces). Resolves the user record via
+    ``pwd.getpwnam`` and additionally rejects UID/GID 0 — the username is not
+    the security boundary; a configured user that happens to resolve to ``root``
+    would still spawn the agent as root, defeating the privilege drop.
     """
     if os.getuid() != 0:
         return list(cmd)
@@ -67,18 +73,8 @@ def wrap_agent_command(cmd: list[str]) -> list[str]:
     try:
         import pwd
 
-        pwd.getpwnam(user)
-    except (ImportError, KeyError) as exc:
-        if isinstance(exc, KeyError):
-            logger.error(
-                "agent user {!r} is not in /etc/passwd; refusing to run the agent "
-                "subprocess as root — Dockerfile must useradd this uid before shipping",
-                user,
-            )
-            raise _raise_configuration_error(
-                f"agent user {user!r} does not exist in /etc/passwd inside the action "
-                f"image; the privilege drop cannot land and the run cannot proceed as root"
-            ) from exc
+        entry = pwd.getpwnam(user)
+    except ImportError as exc:
         # ``ImportError`` on a non-POSIX platform — the action image is Linux,
         # so this branch cannot fire there; surface as a config error rather than
         # silently continuing, since it would otherwise look identical to the
@@ -87,6 +83,29 @@ def wrap_agent_command(cmd: list[str]) -> list[str]:
         raise _raise_configuration_error(
             f"pwd module unavailable; cannot verify agent user {user!r} on this platform"
         ) from exc
+    except KeyError as exc:
+        logger.error(
+            "agent user {!r} is not in /etc/passwd; refusing to run the agent "
+            "subprocess as root — Dockerfile must useradd this uid before shipping",
+            user,
+        )
+        raise _raise_configuration_error(
+            f"agent user {user!r} does not exist in /etc/passwd inside the action "
+            f"image; the privilege drop cannot land and the run cannot proceed as root"
+        ) from exc
+    if entry.pw_uid == 0 or entry.pw_gid == 0:
+        logger.error(
+            "agent user {!r} resolves to uid={} gid={}; refusing to run the agent "
+            "subprocess as root — privilege drop requires a non-zero uid/gid",
+            entry.pw_name,
+            entry.pw_uid,
+            entry.pw_gid,
+        )
+        raise _raise_configuration_error(
+            f"agent user {entry.pw_name!r} resolves to uid={entry.pw_uid} gid={entry.pw_gid} "
+            f"inside the action image; the privilege drop cannot land onto a root account "
+            f"and the run cannot proceed"
+        )
     return ["setpriv", f"--reuid={user}", f"--regid={user}", "--init-groups", *cmd]
 
 
@@ -98,7 +117,10 @@ def prepare_workspace_for_agent(workspace: str) -> None:
     ``pwd`` module **is** importable but the user genuinely does not exist, the
     run fails closed as a configuration error — the previous
     ``except (ImportError, KeyError): return`` collapsed the two and let a
-    missing user pass silently.
+    missing user pass silently. Resolves the user record and additionally
+    rejects UID/GID 0: a configured user that maps to ``root`` would still
+    leave the chown at uid 0, which is not the privilege drop this helper
+    exists to perform.
     """
     if os.getuid() != 0:
         return
@@ -120,6 +142,19 @@ def prepare_workspace_for_agent(workspace: str) -> None:
             f"agent user {user!r} does not exist in /etc/passwd inside the action image; "
             f"prepare_workspace_for_agent cannot chown {workspace!r} for the privilege drop"
         ) from exc
+    if pw.pw_uid == 0 or pw.pw_gid == 0:
+        logger.error(
+            "agent user {!r} resolves to uid={} gid={}; refusing to chown the workspace "
+            "for a root account — privilege drop requires a non-zero uid/gid",
+            pw.pw_name,
+            pw.pw_uid,
+            pw.pw_gid,
+        )
+        raise _raise_configuration_error(
+            f"agent user {pw.pw_name!r} resolves to uid={pw.pw_uid} gid={pw.pw_gid} "
+            f"inside the action image; prepare_workspace_for_agent cannot chown "
+            f"{workspace!r} onto a root account"
+        )
     target = workspace.strip()
     if not target:
         return

@@ -211,7 +211,19 @@ async def main() -> MainResult:
     ensure_github_workspace_registered()
     workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
     if workspace:
-        prepare_workspace_for_agent(workspace)
+        # Guard the workspace prep at its call site so a missing/UID-0 agent
+        # user surfaces as a structured ``RunOutcome.configuration_error``
+        # rather than escaping as an uncaught traceback. The outer ``try/except``
+        # below is reached only after this block returns, so we route through
+        # the same classification the outer handler would have used.
+        try:
+            prepare_workspace_for_agent(workspace)
+        except _ConfigurationError as exc:
+            return MainResult(
+                success=False,
+                error=str(exc),
+                outcome=_classify_error_outcome(exc),
+            )
     stop_mcp = None
     github: GitHubClient | None = None
     token_ref = None

@@ -209,6 +209,66 @@ def test_failure_is_logged_at_error_not_debug(
 
 
 # ---------------------------------------------------------------------------
+# UID 0 reject — fail closed when the resolved user has UID/GID 0
+# ---------------------------------------------------------------------------
+
+
+def test_root_user_rejected_by_uid_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``pwd.getpwnam`` returning ``pw_uid=0``/``pw_gid=0`` is a fail-open hole:
+    ``setpriv --reuid=root`` would run the agent as root, defeating the drop.
+    The username is not the security boundary — the UID is — so a record whose
+    ``pw_name`` is anything (including ``root``) but whose ``pw_uid`` is 0
+    must be rejected with a message that names the UID, not just "user missing".
+    """
+    _force_root(monkeypatch)
+    monkeypatch.setattr(
+        shutil, "which", lambda name: "/usr/bin/setpriv" if name == "setpriv" else None
+    )
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: _FakePwnam(name, pw_uid=0, pw_gid=0))
+
+    with pytest.raises(_ConfigurationError, match="uid=0"):
+        privilege.wrap_agent_command(["claude", "--help"])
+
+
+def test_zero_uid_rejected_even_when_username_is_not_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configured user named anything but ``root`` that happens to resolve to
+    UID 0 must still be rejected. The username is a hint; the UID is the
+    boundary. Without this check, a misconfigured image that maps e.g.
+    ``reviewer`` to ``uid=0`` would silently run the agent as root.
+    """
+    _force_root(monkeypatch)
+    monkeypatch.setattr(
+        shutil, "which", lambda name: "/usr/bin/setpriv" if name == "setpriv" else None
+    )
+    monkeypatch.setattr(pwd, "getpwnam", lambda _name: _FakePwnam("notroot", pw_uid=0, pw_gid=0))
+
+    with pytest.raises(_ConfigurationError, match="notroot"):
+        privilege.wrap_agent_command(["claude", "--help"])
+
+
+def test_zero_uid_rejected_in_prepare_workspace_too(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The same UID 0 check must guard ``prepare_workspace_for_agent`` —
+    otherwise the chown helper would silently ``chown -R … 0:0 …`` and the
+    agent process would land on a root-owned workspace. The guard at the wrap
+    site is not enough; both call sites must fail closed.
+    """
+    _force_root(monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: _FakePwnam(name, pw_uid=0, pw_gid=0))
+
+    with pytest.raises(_ConfigurationError, match="uid=0"):
+        privilege.prepare_workspace_for_agent(str(workspace))
+
+
+# ---------------------------------------------------------------------------
 # prepare_workspace_for_agent
 # ---------------------------------------------------------------------------
 
