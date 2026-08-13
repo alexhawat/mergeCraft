@@ -80,6 +80,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tracer spans are now capped at `MAX_SPANS_PER_RUN` (10,000) per run — once a
+  run hits the ceiling, further spans stop reaching the configured sink and a
+  single `warning` is logged, instead of the trace tree growing unbounded on a
+  runaway (#56)
+- Direct unit tests for `Tracer` / `Span` / `NullTracer` and the JSONL,
+  redacting, and OTLP sinks (`tests/tracing/test_tracer.py`,
+  `tests/tracing/test_exporters.py`), previously only exercised transitively
+  through other tracing test modules
 - `feat(findings): carry unresolved review findings past the merge` — a merged PR
   keeps its inline comments forever but nobody re-opens one, so findings the
   author never fixed or rebutted were lost to attention. `mergecraft findings

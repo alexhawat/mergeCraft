@@ -222,6 +222,42 @@ never uploaded. Details: [docs/ANALYZERS.md](docs/ANALYZERS.md).
 
 Full config reference: [`examples/config.yaml`](examples/config.yaml).
 
+### Example 6 — Tracing with Logfire (opt-in)
+
+Every run can emit a per-request span tree — to local JSONL, to
+[Logfire](https://logfire.pydantic.dev/), or to any OTLP collector — off by
+default:
+
+```yaml
+- uses: alexhawat/mergeCraft@pre-0.0.1
+  with:
+    tracing: enabled
+    tracing-to: logfire
+  env:
+    LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
+```
+
+One `trace_id` groups every span from a run into a single tree, so a
+Logfire trace view of a real review reads top to bottom as:
+
+```
+mergecraft.run
+└── agent.attempt          (per fallback entry: model.id, status, ...)
+    ├── provider.call      (once per upstream API request)
+    │   ├── http.client.request
+    │   └── llm.call       (model.id, cost.*, gen_ai.usage.*)
+    └── tool.call           (tool.name, tool.server)
+```
+
+`gen_ai.*` attrs on `llm.call` / `provider.call` follow the GenAI
+semantic-convention keys, so Logfire's built-in AI panels group and render
+them without extra config. Full config schema, the redaction guarantee, and
+the payload/span-count caps: [docs/TRACING.md](docs/TRACING.md).
+
+<!-- Asset pending: a screenshot of this trace tree for a real review,
+committed under assets/ and linked here — operator-captured, see the
+issues-showcase-readiness wave plan (PR G5 / D7). -->
+
 ## 🔑 Authentication
 
 | Provider | Subscription (recommended) | API key |
