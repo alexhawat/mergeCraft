@@ -29,7 +29,7 @@ import pytest
 
 from mergecraft.config.settings import RepoSettings
 from mergecraft.run_outcome import RunOutcome
-from tests.support.run_main_harness import run_main_for_test
+from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
 _TRUSTED_EVENT = "workflow_dispatch"
 _TRUSTED_PAYLOAD: dict[str, object] = {"action": "workflow_dispatch"}
@@ -102,6 +102,59 @@ def test_hanging_setup_script_is_killed_at_deadline(tmp_path: Path) -> None:
             os.kill(proc.pid, signal.SIGKILL)
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=1)
+
+
+async def test_setup_timeout_exceeding_run_budget_raises_configuration_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """S1 review / F3 follow-up — a ``setup_timeout`` that consumes the
+    entire (or exceeds the) run budget must fail closed as
+    ``configuration_error``, before the setup script runs.
+
+    Equal deadlines let the setup script eat the whole budget; the agent
+    budget is then clamped to ~1 ms and the eventual
+    ``_AgentTimeoutError`` masks the setup failure as ``timed_out``
+    instead of the ``inconclusive`` / ``configuration_error`` the setup
+    policy was supposed to produce. The fix reserves agent budget by
+    raising ``_ConfigurationError`` at setup-timeout resolution.
+    """
+    from mergecraft.agents.shared import AgentResult
+
+    sentinel_agent = FakeAgent(
+        name="claude",
+        result=AgentResult(success=True, output="must-not-run"),
+    )
+
+    # Equal deadlines — ``setup_timeout`` consumes the whole run budget.
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(
+            setup_script="./anything-here",
+            # ``setup_timeout`` is set explicitly to 10 m; the run budget
+            # below matches it — covering the equal-deadline edge.
+            setup_timeout_s=10,
+        ),
+        env={
+            "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
+            "INPUT_TIMEOUT": "10m",
+        },
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        agents_by_slug={"claude": sentinel_agent},
+    )
+    assert rec.result is not None
+    # The agent must NEVER have been invoked — the validation runs
+    # before the agent loop.
+    assert sentinel_agent.calls == [], (
+        f"F3 follow-up violated: agent ran {len(sentinel_agent.calls)} "
+        f"times despite setup_timeout == run timeout — the validation "
+        f"must short-circuit before the agent loop, not after."
+    )
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome is RunOutcome.configuration_error, (
+        f"setup_timeout >= run timeout must fail closed as configuration_error; got {outcome!r}"
+    )
 
 
 async def test_timed_out_setup_script_yields_inconclusive(
@@ -253,6 +306,11 @@ async def test_setup_timeout_is_deducted_from_the_run_budget(
         env={
             "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
             "INPUT_TIMEOUT": f"{int(full_budget_s)}s",
+            # Pin a setup budget shorter than the run budget so the S1
+            # review follow-up ``setup_timeout < timeout`` guard accepts
+            # the configuration — this test is about *deduction*, not
+            # about the equal-deadline edge (covered separately).
+            "INPUT_SETUP_TIMEOUT": "5s",
         },
         event_name=_TRUSTED_EVENT,
         event_payload=_TRUSTED_PAYLOAD,
@@ -288,6 +346,7 @@ async def test_setup_timeout_is_deducted_from_the_run_budget(
 __all__ = [
     "test_hanging_setup_script_is_killed_at_deadline",
     "test_setup_script_grandchildren_are_reaped",
+    "test_setup_timeout_exceeding_run_budget_raises_configuration_error",
     "test_setup_timeout_is_deducted_from_the_run_budget",
     "test_timed_out_setup_script_yields_inconclusive",
 ]

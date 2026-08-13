@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from mergecraft.config.settings import RepoSettings
 from mergecraft.run_outcome import RunOutcome
-from tests.support.run_main_harness import run_main_for_test
+from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
 if TYPE_CHECKING:
     import pytest
@@ -116,6 +116,11 @@ async def test_policy_warn_reproduces_legacy_continue(
     def _patched_resolve(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
         result = real_resolve(*args, **kwargs)
         captured["full"] = getattr(result, "full", "")
+        # S1 review follow-up — capture the surface the runtime drivers
+        # actually send to the model (``instructions.system``) so the
+        # test asserts on the field that reaches the agent, not the
+        # structurally-dead ``full`` field.
+        captured["system"] = getattr(result, "system", "")
         if kwargs.get("setup_hook_failure"):
             captured["setup_hook_failure"] = str(kwargs["setup_hook_failure"])
         return result
@@ -144,19 +149,74 @@ async def test_policy_warn_reproduces_legacy_continue(
     assert outcome is RunOutcome.passed, (
         f"D10 `warn` policy: outcome must be `passed` (run continues); got {outcome!r}"
     )
-    # AND the prompt carries the failure text — D6 wiring.
+    # AND the prompt carries the failure text — D6 wiring. The driver
+    # only sends ``instructions.system``, so assert on that surface too.
     assert captured.get("setup_hook_failure"), (
         "setup_hook_failure was never passed to resolve_instructions — "
         "main.py:500 / :560 still hardcode the empty string (D6 violation)"
     )
-    prompt = captured["full"]
-    assert "SETUP HOOK FAILED" in prompt, (
-        "warn path must still inject the SETUP HOOK FAILED section so the "
-        "agent knows its environment may be under-provisioned (D6)"
+    for surface_name, surface_key in (("full", "full"), ("system", "system")):
+        prompt = captured[surface_key]
+        assert "SETUP HOOK FAILED" in prompt, (
+            f"warn path must inject the SETUP HOOK FAILED section on the "
+            f"{surface_name!r} surface so the agent knows its environment "
+            f"may be under-provisioned (D6) — drivers only read system"
+        )
+        assert captured["setup_hook_failure"] in prompt, (
+            f"setup_hook_failure value did not reach the {surface_name!r} "
+            f"surface; captured={captured['setup_hook_failure']!r}"
+        )
+
+
+async def test_policy_fail_aborts_before_agent_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """S1 review / F4 follow-up — ``setupFailurePolicy: fail`` must abort the
+    run *before* the agent executes.
+
+    Today the ``fail`` policy is enforced only in the post-run outcome
+    resolution block — after the agent runs. The agent may already have
+    posted reviews, pushed branches, or made other external mutations by
+    the time the run is mapped to ``configuration_error``. The S1 review
+    flagged this as violating the documented "run aborts" semantics. The
+    fix raises ``_ConfigurationError`` immediately after the setup-script
+    block (before the agent loop) when the policy is ``fail`` and setup
+    failed.
+    """
+    from mergecraft.agents.shared import AgentResult
+
+    sentinel_agent = FakeAgent(
+        name="claude",
+        result=AgentResult(success=True, output="must-not-run"),
     )
-    assert captured["setup_hook_failure"] in prompt, (
-        f"setup_hook_failure value did not reach the prompt body; "
-        f"captured={captured['setup_hook_failure']!r}"
+
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(setup_script="./broken-setup.sh"),
+        env={
+            "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
+            "INPUT_SETUP_FAILURE_POLICY": "fail",
+        },
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        setup_script_rc=1,
+        agents_by_slug={"claude": sentinel_agent},
+    )
+    assert rec.result is not None
+    # The agent must NEVER have been invoked — its only purpose in this
+    # test is to record invocations so the assertion can prove the
+    # short-circuit is in place.
+    assert sentinel_agent.calls == [], (
+        f"F4 follow-up violated: agent ran {len(sentinel_agent.calls)} "
+        f"times under setupFailurePolicy=fail — must be 0. The fail policy "
+        f"must abort before the agent loop, not after."
+    )
+    # The outcome should still be configuration_error so the operator's
+    # intent is preserved.
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome is RunOutcome.configuration_error, (
+        f"setupFailurePolicy=fail must yield configuration_error; got {outcome!r}"
     )
 
 
@@ -192,6 +252,7 @@ async def test_invalid_policy_value_fails_closed(monkeypatch: pytest.MonkeyPatch
 __all__ = [
     "test_invalid_policy_value_fails_closed",
     "test_policy_defaults_to_inconclusive",
+    "test_policy_fail_aborts_before_agent_runs",
     "test_policy_fail_yields_configuration_error",
     "test_policy_warn_reproduces_legacy_continue",
 ]

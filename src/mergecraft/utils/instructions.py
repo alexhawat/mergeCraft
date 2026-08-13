@@ -667,9 +667,19 @@ Trust the tools — do not repeatedly verify after successful operations. Except
 
     event_blob = "\n\n---\n\n".join(p for p in (event_title, event_metadata) if p)
 
+    # S1 / F1 + F3 follow-up — drivers (claude, codex, opencode, gemini)
+    # send only ``instructions.system`` and ``instructions.user`` to the
+    # model; the ``full`` / ``extra`` fields are *not* consumed. Mirror the
+    # setup-failure and setup-skip paragraphs into ``system`` so the notice
+    # actually reaches the agent — they were rendered as siblings of the
+    # SYSTEM block in ``raw_full`` above (where the unit tests exercise
+    # them), but that path is structurally dead in production.
+    setup_notice = setup_failure or setup_skip
+    system_with_setup_notice = f"{setup_notice}\n\n{system}" if setup_notice else system
+
     return ResolvedInstructions(
         full=raw_full.strip(),
-        system=system,
+        system=system_with_setup_notice,
         user=user,
         event_instructions=event_instructions,
         event=event_blob,

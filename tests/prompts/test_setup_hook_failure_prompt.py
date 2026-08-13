@@ -65,10 +65,18 @@ def _patch_resolve_for_capture(
     """Patch ``resolve_instructions`` to capture the rendered prompt.
 
     Returns a dict the test can read; ``captured["full"]`` holds the
-    last-rendered ``ResolvedInstructions.full``, ``captured["all_full"]``
-    is a list of every prompt built (primary + retry paths).
+    last-rendered ``ResolvedInstructions.full``, ``captured["system"]``
+    holds ``ResolvedInstructions.system`` (the field the runtime
+    drivers actually send), and ``captured["all_full"]`` /
+    ``captured["all_system"]`` are lists of every prompt built
+    (primary + retry paths).
     """
-    captured: dict[str, Any] = {"full": "", "all_full": []}
+    captured: dict[str, Any] = {
+        "full": "",
+        "system": "",
+        "all_full": [],
+        "all_system": [],
+    }
 
     import mergecraft.main as main_mod
     import mergecraft.utils.instructions as instructions_mod
@@ -78,8 +86,11 @@ def _patch_resolve_for_capture(
     def _patched_resolve(*args: Any, **kwargs: Any) -> Any:
         result = real_resolve(*args, **kwargs)
         full = getattr(result, "full", "")
+        system = getattr(result, "system", "")
         captured["full"] = full
+        captured["system"] = system
         captured["all_full"].append(full)
+        captured["all_system"].append(system)
         return result
 
     monkeypatch.setattr(main_mod, "resolve_instructions", _patched_resolve)
@@ -100,6 +111,11 @@ def test_setup_hook_failure_branch_is_reachable() -> None:
 
     The test calls the function directly with the param, which makes the
     branch render today (the param is real). This pins the rendered shape.
+
+    S1 review follow-up — the prompt branch must appear in
+    ``ResolvedInstructions.system`` too, because that is the only field the
+    runtime drivers (claude, codex, opencode, gemini) send to the model.
+    ``full`` is structurally dead in production.
     """
     resolved = resolve_instructions(
         payload=_basic_payload(),
@@ -109,14 +125,18 @@ def test_setup_hook_failure_branch_is_reachable() -> None:
         setup_hook_failure="setup script failed (exit 1): boom",
     )
     prompt = resolved.full
-    assert "SETUP HOOK FAILED" in prompt, (
-        "F1 violation: setup_hook_failure did not render the prompt branch "
-        "at instructions.py:454-458 — the param is accepted but the branch "
-        "is not being emitted, or the section heading was renamed"
-    )
-    assert "setup script failed (exit 1): boom" in prompt, (
-        "setup_hook_failure text must reach the prompt body verbatim so the agent knows what failed"
-    )
+    system = resolved.system
+    for surface_name, surface in (("full", prompt), ("system", system)):
+        assert "SETUP HOOK FAILED" in surface, (
+            f"F1 violation: setup_hook_failure did not render the prompt branch "
+            f"on the {surface_name!r} surface — drivers only read "
+            f"instructions.system, so a missing section there means the agent "
+            f"never learns about the failure"
+        )
+        assert "setup script failed (exit 1): boom" in surface, (
+            f"{surface_name!r}: setup_hook_failure text must reach the prompt "
+            f"verbatim so the agent knows what failed"
+        )
 
 
 async def test_skip_reason_reaches_prompt(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
@@ -160,11 +180,16 @@ async def test_skip_reason_reaches_prompt(monkeypatch: pytest.MonkeyPatch, tmp_p
     )
     # The skip paragraph should be a distinct, named section — not a bare
     # paragraph mid-prompt — so the agent can tell it apart from the
-    # setup-failure paragraph.
-    assert "SETUP SCRIPT SKIPPED" in prompt, (
-        "skip reason must surface in a clearly-named section, mirroring the "
-        "SETUP HOOK FAILED section's structural pattern"
-    )
+    # setup-failure paragraph. S1 review follow-up: also assert on
+    # ``instructions.system`` because that is the surface the drivers
+    # actually send to the model.
+    for surface_name, surface in (("full", prompt), ("system", captured["system"])):
+        assert "SETUP SCRIPT SKIPPED" in surface, (
+            f"F3 violation: setup_script_skip_reason did not render on the "
+            f"{surface_name!r} surface — drivers only read instructions.system "
+            f"so a missing section there means the agent never learns the "
+            f"script was skipped"
+        )
 
 
 async def test_both_call_sites_pass_the_reason(
@@ -229,15 +254,20 @@ async def test_both_call_sites_pass_the_reason(
         f"resolve_instructions; got {len(captured['all_full'])} calls — "
         f"the fallback path was not exercised"
     )
-    failure_paragraph_count = sum(
-        1 for prompt in captured["all_full"] if "SETUP HOOK FAILED" in prompt
-    )
-    assert failure_paragraph_count == len(captured["all_full"]), (
-        f"F1 / D6 wiring: only {failure_paragraph_count}/"
-        f"{len(captured['all_full'])} built prompts carried the SETUP HOOK "
-        f"FAILED paragraph — at least one call site is still hardcoding "
-        f'setup_hook_failure="" (main.py:500 or :560)'
-    )
+    # Both surfaces must carry the SETUP HOOK FAILED paragraph at every
+    # call site — the drivers only send ``instructions.system`` so a
+    # surface-only-in-``full`` test would let the regression pass.
+    for surface_name, surface_key in (("full", "all_full"), ("system", "all_system")):
+        failure_paragraph_count = sum(
+            1 for prompt in captured[surface_key] if "SETUP HOOK FAILED" in prompt
+        )
+        assert failure_paragraph_count == len(captured[surface_key]), (
+            f"F1 / D6 wiring on {surface_name!r}: only "
+            f"{failure_paragraph_count}/{len(captured[surface_key])} built "
+            f"prompts carried the SETUP HOOK FAILED paragraph — at least one "
+            f'call site is still hardcoding setup_hook_failure="" '
+            f"(main.py:500 or :560) or the section is missing from system"
+        )
 
 
 # ── Regression pins (must pass today) ─────────────────────────────────────────
@@ -262,6 +292,10 @@ def test_setup_hook_failure_empty_omits_branch() -> None:
         "empty setup_hook_failure must not inject the failure branch — the "
         "no-failure baseline is the regression pin"
     )
+    assert "SETUP HOOK FAILED" not in resolved.system, (
+        "empty setup_hook_failure must not inject the failure branch into "
+        "system either — drivers only read system"
+    )
 
 
 def test_skip_reason_absent_omits_branch() -> None:
@@ -281,6 +315,10 @@ def test_skip_reason_absent_omits_branch() -> None:
     assert "SETUP SCRIPT SKIPPED" not in resolved.full, (
         "absent setup_script_skip_reason must not inject the skip branch — "
         "the no-skip baseline is the regression pin"
+    )
+    assert "SETUP SCRIPT SKIPPED" not in resolved.system, (
+        "absent setup_script_skip_reason must not inject the skip branch "
+        "into system either — drivers only read system"
     )
 
 

@@ -229,17 +229,20 @@ async def main() -> MainResult:
         job_token = get_job_token()
         github = GitHubClient(job_token)
         run_context = await resolve_run_context_data(github)
-        # S1 / D10 — apply the action-input setup overrides (policy + timeout).
-        # ``apply_setup_overrides`` resolves ``INPUT_SETUP_FAILURE_POLICY`` and
-        # ``INPUT_SETUP_TIMEOUT`` and raises ``ValueError`` on bad input. We
-        # translate that into ``_ConfigurationError`` here so the outer
-        # ``except Exception`` block at line ~803 maps it to
-        # ``RunOutcome.configuration_error`` *after* ``tool_context`` is set up
-        # (so ``report_status_checks`` still fires).
+        # S1 / D10 — apply the action-input setup overrides (policy + timeout)
+        # early so the resolved ``settings`` carries the right
+        # ``setup_timeout_s`` before the setup-script block runs. Any
+        # ``ValueError`` is captured into ``setup_override_error`` and
+        # re-raised *after* ``tool_context`` is constructed so the outer
+        # handler can still reach ``report_status_checks`` (S1 review
+        # follow-up — restoring the completion-check reporting for the
+        # ``configuration_error`` outcome).
+        settings = apply_tracing_overrides(run_context.repo_settings)
+        setup_override_error: str | None = None
         try:
-            settings = apply_setup_overrides(apply_tracing_overrides(run_context.repo_settings))
+            settings = apply_setup_overrides(settings)
         except ValueError as exc:
-            raise _ConfigurationError(str(exc)) from None
+            setup_override_error = str(exc)
 
         github_event = read_github_event()
         trust_tier = derive_trust_tier(event=github_event)
@@ -292,18 +295,27 @@ async def main() -> MainResult:
         # whole run budget). Invalid input already fails closed as
         # ``configuration_error`` below; this block only does the math.
         timeout_raw = payload.get("timeout")
+        # Resolve ``timeout_ms`` up front so the setup-script timeout cap
+        # (S1 / F6) and the agent-deadline math below can see it. A bad
+        # ``timeout`` input is captured into ``timeout_error`` and re-raised
+        # after ``tool_context`` is built so the outer handler can still
+        # reach ``report_status_checks`` (S1 review follow-up — restoring
+        # completion-check reporting for the ``configuration_error``
+        # outcome).
         timeout_ms: int | None
+        timeout_error: str | None = None
         if timeout_raw == TIMEOUT_DISABLED:
             timeout_ms = None
         elif timeout_raw:
             usable = resolve_timeout_ms(timeout_raw)
             if usable is None:
-                msg = (
+                timeout_ms = None
+                timeout_error = (
                     f'invalid timeout "{timeout_raw}" '
                     "(use a duration like 10m/1h or --notimeout to disable)"
                 )
-                raise _ConfigurationError(msg)
-            timeout_ms = usable
+            else:
+                timeout_ms = usable
         else:
             timeout_ms = 3_600_000
 
@@ -409,6 +421,26 @@ async def main() -> MainResult:
         if timeout_ms is not None and timeout_ms > 0:
             setup_timeout_s = min(setup_timeout_s, timeout_ms // 1000)
 
+        # S1 review / F3 follow-up — equal-or-larger setup budgets let the
+        # setup script consume the entire run deadline, after which the
+        # agent budget is clamped to ~1 ms and the failure surfaces as
+        # ``_AgentTimeoutError`` (``timed_out``) instead of the
+        # ``configuration_error`` / ``inconclusive`` the setup policy was
+        # supposed to produce. Reserve a non-zero agent budget so a setup
+        # timeout can never be masked by an agent timeout. Only check
+        # when a setup script is actually configured — without one the
+        # ``setup_timeout_s`` cap is irrelevant.
+        if (
+            settings.setup_script
+            and timeout_ms is not None
+            and setup_timeout_s * 1000 >= timeout_ms
+        ):
+            raise _ConfigurationError(
+                f"setup_timeout ({setup_timeout_s}s) must be less than the run "
+                f"timeout ({timeout_ms // 1000}s) so a failed setup script is not "
+                f"masked as an agent timeout"
+            )
+
         setup_script_skip_reason = ""
         setup_hook_failure = ""
         setup_started_at = time.monotonic()
@@ -447,6 +479,20 @@ async def main() -> MainResult:
                 tool_state.setup_script_skip_reason = setup_script_skip_reason
                 logger.warning("» {}", setup_script_skip_reason)
         setup_elapsed_s = time.monotonic() - setup_started_at
+
+        # S1 review / F4 follow-up — the ``fail`` policy means "the
+        # operator has declared the failure is unrecoverable; the run
+        # aborts". The agent must NOT run when setup failed under
+        # ``fail`` — it may already post reviews, push branches, or make
+        # other external mutations before the late outcome resolution
+        # could decide the run is a ``configuration_error``. Short-circuit
+        # here, *before* the agent loop.
+        if setup_hook_failure and settings.setup_failure_policy == "fail":
+            logger.warning(
+                "» setup script failure under fail policy — aborting before agent runs: {}",
+                setup_hook_failure,
+            )
+            raise _ConfigurationError(setup_hook_failure)
 
         modes = [
             *compute_modes(agent_id, settings.signed_commits),
@@ -504,6 +550,17 @@ async def main() -> MainResult:
             resolved_model=resolved_model,
             suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         )
+
+        # S1 review / F2 follow-up — fail-closed config validation is
+        # deferred until ``tool_context`` is built so the outer handler
+        # can reach ``report_status_checks`` for the ``configuration_error``
+        # outcome. The sentinel errors were captured at the early
+        # validation sites (``apply_setup_overrides`` and ``timeout``
+        # parsing); re-raise them now.
+        if setup_override_error is not None:
+            raise _ConfigurationError(setup_override_error) from None
+        if timeout_error is not None:
+            raise _ConfigurationError(timeout_error) from None
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
         tool_context.mcp_server_url = mcp_url

@@ -139,6 +139,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unparseable Action `timeout` input fails closed as `configuration_error`
   (keep `--notimeout` to disable); dependency-install failure maps the run to
   `inconclusive` rather than a silent continue
+- Changed: unknown keys in optional-feature config blocks (`staticChecks`,
+  `ciEvidence`, custom mode definitions, tracing sink entries) are now
+  configuration errors instead of being silently ignored — the one-release
+  warning shim has ended. Security and runtime blocks were already strict.
+  A syntactically broken `.mergecraft/config.yaml` still falls back to
+  defaults.
 - Tracing `enabled` is tri-state (`true` / `false` / unset); Action
   `tracing` input no longer collapses unset to false, and is wired into the
   live Action path (input > env > YAML > default)
