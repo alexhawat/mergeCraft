@@ -233,6 +233,8 @@ async def test_both_call_sites_pass_the_reason(
         settings=RepoSettings(
             setup_script="./broken-setup.sh",
             models=["claude", "opencode"],
+            # Default ``setup_failure_policy`` is ``inconclusive`` — the
+            # short-circuit must intercept before ``resolve_instructions``.
         ),
         event_name=trusted_event,
         event_payload=trusted_payload,

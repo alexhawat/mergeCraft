@@ -88,6 +88,19 @@ def derive_trust_tier(
                     return "trusted"
         return "untrusted"
 
+    if event_name == "issue_comment":
+        # ``resolve_native_event`` already authorises comment-driven runs by
+        # author association (OWNER / MEMBER / COLLABORATOR).  Mirror that
+        # gate here so a maintainer's ``issue_comment`` earns the trusted tier
+        # (setup_script, secrets, approve tool) rather than falling through
+        # to the fail-closed ``untrusted`` default.
+        comment = event.get("comment")
+        if isinstance(comment, dict):
+            association = comment.get("author_association", "")
+            if isinstance(association, str) and association in {"OWNER", "MEMBER", "COLLABORATOR"}:
+                return "trusted"
+        return "untrusted"
+
     # Fail closed (#144): an unrecognised event shape is more restricted, never
     # more permissive. Convention 5 / D7 — matches ``UNKNOWN_MODE_FALLBACK``
     # above. Comment / schedule / workflow_call / workflow_run / merge_group /

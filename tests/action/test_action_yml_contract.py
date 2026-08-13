@@ -142,6 +142,9 @@ class TestDocumentedDefaultsMatchRuntime:
         from mergecraft.utils.time_parse import resolve_timeout_ms
 
         assert resolve_timeout_ms(None) is None, "unset must defer to the caller's fallback"
+        # S1/S3/S5 merge: the 1h fallback is inline in the merged base
+        # ``main.py`` (``main()``). The documented default's runtime anchor
+        # lives there, so keep it in sync with the ``action.yml`` prose.
         main_source = (_REPO_ROOT / "src" / "mergecraft" / "main.py").read_text(encoding="utf-8")
         assert "3_600_000" in main_source, (
             "main.py lost its 1h fallback — the documented default has no runtime anchor"
@@ -154,6 +157,78 @@ class TestDocumentedDefaultsMatchRuntime:
 
         inputs = resolve_non_prompt_inputs()
         assert (inputs.status_checks == "enabled") is False
+
+    def test_setup_timeout_unset_preserves_yaml_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """S1 review — unset ``setup_timeout`` input must not clobber a YAML value.
+
+        Precedence is action input > YAML ``setup_timeout_s`` > default (10m).
+        An unset ``INPUT_SETUP_TIMEOUT`` must resolve to ``None`` so
+        ``apply_setup_overrides`` leaves the YAML-layer value alone — the old
+        resolver returned the 600 s default unconditionally, always overwriting
+        a YAML-configured timeout.
+        """
+        from mergecraft.action.inputs import apply_setup_overrides, resolve_setup_timeout_s
+        from mergecraft.config.settings import RepoSettings
+
+        monkeypatch.delenv("INPUT_SETUP_TIMEOUT", raising=False)
+        assert resolve_setup_timeout_s() is None, (
+            "unset INPUT_SETUP_TIMEOUT must resolve to None (defer to YAML/default)"
+        )
+
+        yaml_value = 300
+        settings = RepoSettings(setup_timeout_s=yaml_value)
+        updated = apply_setup_overrides(settings)
+        assert updated.setup_timeout_s == yaml_value, (
+            "YAML-configured setup_timeout_s must survive an unset action input"
+        )
+
+    def test_setup_timeout_input_wins_over_yaml(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """S1 review — an explicit action input wins over the YAML value."""
+        from mergecraft.action.inputs import apply_setup_overrides
+        from mergecraft.config.settings import RepoSettings
+
+        monkeypatch.setenv("INPUT_SETUP_TIMEOUT", "2m")
+        settings = RepoSettings(setup_timeout_s=300)
+        updated = apply_setup_overrides(settings)
+        assert updated.setup_timeout_s == 120, "explicit action input must override the YAML value"
+
+    def test_declared_action_defaults_defer_to_runtime(
+        self, action_yml: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """S1 review — the declared Action defaults must not defeat YAML precedence.
+
+        ``action.yml`` declares ``default: ""`` for ``setup_timeout`` and
+        ``setup_failure_policy`` so ``INPUT_SETUP_TIMEOUT`` /
+        ``INPUT_SETUP_FAILURE_POLICY`` are absent when the operator does not
+        set them. Feeding the declared defaults through ``apply_setup_overrides``
+        must leave the ``RepoSettings`` values alone (no clobber to the runtime
+        default, no override of a YAML value).
+        """
+        from mergecraft.action.inputs import apply_setup_overrides
+        from mergecraft.config.settings import RepoSettings
+
+        for name, env_var in (
+            ("setup_timeout", "INPUT_SETUP_TIMEOUT"),
+            ("setup_failure_policy", "INPUT_SETUP_FAILURE_POLICY"),
+        ):
+            spec = action_yml["inputs"][name]
+            assert spec.get("default", "") == "", (
+                f"{name}: Action default must be empty so YAML precedence survives"
+            )
+            monkeypatch.setenv(env_var, str(spec.get("default", "")))
+
+        # ``_read_input`` treats empty as unset — a YAML value survives.
+        settings = RepoSettings(setup_timeout_s=300, setup_failure_policy="fail")
+        updated = apply_setup_overrides(settings)
+        assert updated.setup_timeout_s == 300
+        assert updated.setup_failure_policy == "fail"
+
+        # And the runtime defaults still apply for a bare settings object.
+        bare = apply_setup_overrides(RepoSettings())
+        assert bare.setup_timeout_s == 600
+        assert bare.setup_failure_policy == "inconclusive"
 
     def test_token_input_is_not_confused_with_logfire_token(
         self, monkeypatch: pytest.MonkeyPatch

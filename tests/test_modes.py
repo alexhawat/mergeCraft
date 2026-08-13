@@ -265,27 +265,45 @@ def test_prompt_version_changes_when_prompt_text_changes() -> None:
 
 
 def test_prompt_version_appears_in_evidence_packet() -> None:
-    """Every mode's version reaches the run's evidence packet (#145).
+    """The selected mode's version reaches the run's evidence packet (#145).
 
     The packet is the audit artifact for one merge; without a prompt version
     on it, an archived verdict cannot be attributed to the prompt that
-    produced it. The version reaches the packet through ``ModePromptVersion``
-    rows — one per mode that ran, each carrying the matching version.
+    produced it. Only the mode that actually ran appears in the packet.
     """
-    from mergecraft.evidence.packet import ModePromptVersion
+    from mergecraft.evidence.run_packet import _mode_prompt_versions, _selected_modes
+    from mergecraft.mcp.context import RepoIdentity, ResolvedPayload, ToolContext
+    from mergecraft.mcp.tool_state import ToolState
+    from mergecraft.utils.github import GitHubClient
 
     modes = compute_modes("opencode")
-    rows = [ModePromptVersion(mode_name=m.name, prompt_version=m.version) for m in modes]
+    review_mode = next(m for m in modes if m.name == "Review")
 
-    # Every mode yields exactly one row.
-    assert len(rows) == len(modes)
-    assert {row.mode_name for row in rows} == {m.name for m in modes}
+    # Homemade ToolContext with the specific mode in its catalog.
+    ctx = ToolContext(
+        agent_id="opencode",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(),
+        github=GitHubClient(token=""),
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=list(modes),
+        tool_state=ToolState(repos={}, primary_repo_key="acme/demo"),
+        mcp_server_url="",
+        tmpdir="",
+    )
 
-    # Each row's version equals the mode's version — the contract that
-    # makes the packet attributable to the prompt that produced it.
-    by_name = {row.mode_name: row.prompt_version for row in rows}
-    for m in modes:
-        assert by_name[m.name] == m.version, m.name
+    # Selected mode present → exactly one row with matching version.
+    state = ToolState(repos={}, primary_repo_key="acme/demo", selected_mode="Review")
+    rows = _mode_prompt_versions(_selected_modes(state, ctx))
+    assert len(rows) == 1
+    assert rows[0].mode_name == "Review"
+    assert rows[0].prompt_version == review_mode.version
+
+    # No selected mode → empty list.
+    no_mode = ToolState(repos={}, primary_repo_key="acme/demo")
+    assert _mode_prompt_versions(_selected_modes(no_mode, ctx)) == []
 
 
 def test_prompt_version_appears_in_trace_attrs() -> None:
@@ -300,6 +318,43 @@ def test_prompt_version_appears_in_trace_attrs() -> None:
     attrs = trace_attrs_for_mode(review_mode)
     assert attrs.get("mergecraft.mode.name") == "Review"
     assert attrs.get("mergecraft.mode.prompt_version") == review_mode.version
+
+
+def test_publish_span_attrs_source_emits_mode_attrs_end_to_end() -> None:
+    """Regression pin: ``_publish_span_attrs`` spreads ``trace_attrs_for_mode``
+    over the selected mode (#145 + post-#145 wiring).
+
+    The audit found that ``trace_attrs_for_mode`` was unit-tested but never
+    wired into production; the helper silently returned its dict into the
+    void. This test guards against a re-introduction of that gap by
+    exercising the module-scope ``_publish_span_attrs`` helper that
+    ``main.py`` invokes for the ``mergecraft.publish`` span. Both
+    ``run_succeeded`` and at least one set of per-mode attrs must be
+    present — a future refactor that drops the spread (e.g. shrinks to
+    ``{"run_succeeded": ...}``) fails this test loudly.
+    """
+    from mergecraft.main_outcome import _publish_span_attrs
+    from mergecraft.run_outcome import RunOutcome
+
+    review_mode = next(m for m in compute_modes("opencode") if m.name == "Review")
+
+    emitted = _publish_span_attrs(RunOutcome.passed, review_mode)
+
+    assert emitted.get("run_succeeded") is True
+    assert emitted.get("mergecraft.mode.name") == "Review"
+    assert emitted.get("mergecraft.mode.prompt_version") == review_mode.version
+
+
+def test_publish_span_attrs_none_mode_yields_no_mode_attrs() -> None:
+    """When no mode was selected, ``_publish_span_attrs`` omits mode keys."""
+    from mergecraft.main_outcome import _publish_span_attrs
+    from mergecraft.run_outcome import RunOutcome
+
+    emitted = _publish_span_attrs(RunOutcome.configuration_error, None)
+
+    assert emitted.get("run_succeeded") is False
+    assert "mergecraft.mode.name" not in emitted
+    assert "mergecraft.mode.prompt_version" not in emitted
 
 
 def test_all_modes_still_resolve_by_name() -> None:
@@ -370,6 +425,13 @@ def test_custom_modes_from_config_still_merge() -> None:
     assert custom[0].name == "MyMode"
     assert custom[0].description == "a custom mode"
     assert custom[0].prompt == "do the thing"
+
+    # Audit pin: a non-empty custom prompt must get the same content-hash
+    # version as a built-in would — the evidence packet must attribute the
+    # verdict to the consumer-supplied prompt exactly like a built-in.
+    from mergecraft.modes import compute_prompt_version
+
+    assert custom[0].version == compute_prompt_version("do the thing")
 
     # Built-ins still resolve alongside the custom mode.
     combined_names = [m.name for m in (*compute_modes("opencode"), *custom)]

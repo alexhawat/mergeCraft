@@ -233,6 +233,53 @@ async def test_policy_fail_aborts_before_agent_runs(
     )
 
 
+async def test_setup_failure_shortcircuits_before_agent_dispatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """S1 review — ``inconclusive``/``fail`` setup failure must not run the agent.
+
+    A Review agent must never be dispatched (and thus cannot submit a GitHub
+    review) when the outcome is already decided by the setup failure policy.
+    Only ``warn`` proceeds to the agent.
+    """
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(setup_script="./broken-setup.sh"),
+        env={
+            "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
+            "INPUT_SETUP_FAILURE_POLICY": "fail",
+        },
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        setup_script_rc=1,
+    )
+    assert rec.result is not None
+    assert rec.result.outcome is RunOutcome.configuration_error
+    assert rec.agent_runs == [], (
+        f"agent must not be dispatched on a fail-policy setup failure; ran {rec.agent_runs!r}"
+    )
+
+
+async def test_setup_failure_inconclusive_shortcircuits_before_agent_dispatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """S1 review — the default ``inconclusive`` policy also short-circuits."""
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(setup_script="./broken-setup.sh"),
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        setup_script_rc=1,
+    )
+    assert rec.result is not None
+    assert rec.result.outcome is RunOutcome.inconclusive
+    assert rec.agent_runs == [], (
+        f"agent must not be dispatched on an inconclusive setup failure; ran {rec.agent_runs!r}"
+    )
+
+
 async def test_invalid_policy_value_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Unknown ``setupFailurePolicy`` value is a ``configuration_error``.
 
@@ -607,4 +654,6 @@ __all__ = [
     "test_policy_fail_aborts_before_agent_runs",
     "test_policy_fail_yields_configuration_error",
     "test_policy_warn_reproduces_legacy_continue",
+    "test_setup_failure_inconclusive_shortcircuits_before_agent_dispatch",
+    "test_setup_failure_shortcircuits_before_agent_dispatch",
 ]

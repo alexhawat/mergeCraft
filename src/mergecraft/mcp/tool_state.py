@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 if TYPE_CHECKING:
+    from mergecraft.modes import Mode
     from mergecraft.prep.types import PrepResult
 
 RepoAccess = Literal["primary", "write", "read"]
@@ -183,6 +184,13 @@ class ToolState:
     prepush_failure_count: int = 0
     background_processes: dict[str, BackgroundProcess] = field(default_factory=dict)
     selected_mode: str | None = None
+    # Built-in + custom ``Mode`` objects resolved at ``main()`` time
+    # (#145). ``main()`` stamps the resolved list here so the publish-span
+    # ``attrs_source`` can spread ``trace_attrs_for_mode(m)`` per mode
+    # without re-computing the renderer at span-close time. ``None`` is
+    # intentional only for tests that build ``ToolState`` directly; the
+    # live path always sets this.
+    modes: list[Mode] = field(default_factory=list)
     review: ReviewRecord | None = None
     approval: ApprovalRecord | None = None
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)

@@ -315,12 +315,15 @@ async def run_main_for_test(
             return agent_map[model]
         return default_agent
 
-    monkeypatch.setattr(main_mod, "resolve_runtime_agent", _fake_resolve_runtime_agent)
     monkeypatch.setattr(
-        main_mod,
-        "_first_runnable_in_chain",
-        lambda chain: chain[0] if chain else None,
+        main_mod, "_first_runnable_in_chain", lambda chain: chain[0] if chain else None
     )
+    # ``resolve_runtime_agent`` must be patched on ``main_mod`` itself: the
+    # merged base ``main.py`` imports it by value from
+    # ``mergecraft.utils.agent_resolve`` and calls it at the orchestrator level,
+    # so rebinding only the helper modules below would leave the real agent
+    # resolver live — the run would then drive the real opencode CLI and hang.
+    monkeypatch.setattr(main_mod, "resolve_runtime_agent", _fake_resolve_runtime_agent)
 
     def _fake_start_mcp(tool_context: Any, **_kwargs: Any) -> tuple[str, Any]:
         events.append("start_mcp_http_server")
