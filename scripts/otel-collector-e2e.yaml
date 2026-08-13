@@ -1,0 +1,17 @@
+# OTLP collector config for mergeCraft e2e tracing tests (W7 / #143).
+# Receives OTLP/HTTP on :4318 and appends exported spans to a host-mounted file.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  file:
+    path: /tmp/spans.json
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [file]

@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and asserts a structured completion. Previously it exported four provider keys but ran
   only offline-shaped tests — three of the four keys had no consumer — and exited 0 with
   "skipped" when credentials were absent, so a rotation outage looked like a pass
+- Fixed: OTLP tracing export now forwards `gen_ai.*` span attributes to real collectors;
+  CI and `make test-otlp-collector` gate merge with a digest-pinned
+  `otel/opentelemetry-collector` service ([#143](https://github.com/alexhawat/mergeCraft/issues/143))
 
 ### Security
 

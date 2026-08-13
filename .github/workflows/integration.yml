@@ -52,6 +52,20 @@ jobs:
       - name: actionlint + zizmor
         run: make workflow-lint
 
+  otlp-collector-e2e:
+    name: OTLP collector e2e (#143)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Digest-pinned collector image (convention 2) — also referenced by make test-otlp-collector.
+      MERGECRAFT_OTEL_COLLECTOR_IMAGE: otel/opentelemetry-collector@sha256:1daa4312b48312dbae2d543e67b77e897dd5d9c48e7651d1416cdb417026ad06
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: OTLP collector integration
+        run: make test-otlp-collector
+
   integration-live:
     name: Integration (nightly / live-provider)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

@@ -14,7 +14,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	examples example-workflows-check bench-review eval-gate \
-	test-integration test-integration-live coverage-gate npm-audit workflow-lint
+	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -107,6 +107,9 @@ test-integration-live: ## Live-provider integration (scheduled / release precond
 	esac; \
 	$(PYTEST) $$live_paths -v --tb=short --strict-markers -m "live" $(PYTEST_XDIST) \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+
+test-otlp-collector: ## OTLP collector integration — spans must leave the process (#143)
+	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py
 
 coverage-gate: ## Unit tests + coverage floors (global + critical paths)
 	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
