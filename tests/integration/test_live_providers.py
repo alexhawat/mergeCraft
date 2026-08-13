@@ -19,10 +19,6 @@ from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_st
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.live,
-    pytest.mark.xfail(
-        reason="green after W4: nightly matrix issues one structured request per provider",
-        strict=False,
-    ),
 ]
 
 _MAX_OUTPUT_TOKENS = 16

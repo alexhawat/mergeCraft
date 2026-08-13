@@ -12,10 +12,6 @@ from mergecraft.utils.github import GitHubClient
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.live,
-    pytest.mark.xfail(
-        reason="green after W4: GitHub checkout + status-check roundtrip",
-        strict=False,
-    ),
 ]
 
 

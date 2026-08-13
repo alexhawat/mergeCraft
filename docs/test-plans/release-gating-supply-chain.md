@@ -34,7 +34,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 |-----------|------------|----------------------|
 | **W2** | *(reconciled)* `tests/ci/test_e2e_release_gate.py` — xfails dropped; real passes | — |
 | **W3** | *(reconciled)* `tests/ci/test_trivy_scan_gate.py` — xfails dropped; real passes | — |
-| **W4** | `tests/ci/test_live_provider_matrix.py` (selector / fail-loud / matrix); `tests/integration/test_live_providers.py`; `tests/integration/test_github_integration.py` | `green after W4:` |
+| **W4** | *(reconciled)* `tests/ci/test_live_provider_matrix.py` — xfails dropped; real passes. Live HTTP stays `@pytest.mark.live` (fail-loud, not skip-when-no-secret) | — |
 | **W5** | `tests/docs/test_distribution_checklist.py` (except D15 yes/ pin) | `green after W5:` |
 | **W6** | `tests/ci/test_coverage_ratchet.py` | `green after W6:` |
 | **W7** | `tests/tracing/test_otlp_collector_e2e.py` (except SHA-pin) | `green after W7:` |
@@ -52,7 +52,8 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | `test_promote_still_fires_on_main_and_pre_001` | D6 must not strip `:latest` publish |
 | `test_live_marker_registered_in_pytest_ini` | `live` marker already in `pyproject.toml` |
 | `test_suite_is_inert_on_pull_request` (YAML) | `integration-live` already skips `pull_request` |
-| `test_no_skips_when_no_secret_test_exists` | audit-escape meta-guard |
+| `tests/ci/test_live_provider_matrix.py` (all seven cases) | W4 landed `-m live` + D9 fail-loud Makefile + per-provider matrix; xfails dropped |
+| `test_no_skips_when_no_secret_test_exists` | audit-escape meta-guard (matches `def test_*` names only; ignores its own helper strings) |
 | `test_yes_package_not_renamed_unless_d15_allows` | D15 default |
 | `test_s5_prompt_version_helper_is_available` | S5 (#145) merged |
 
@@ -81,7 +82,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 
 Named deliverable: `scripts/check_trivyignore_expiry.py` (`check_trivyignore` or `main`).
 
-### W4 — live provider matrix (R-F3)
+### W4 — live provider matrix (R-F3) — green after W4 impl (`5dd7a63`) + xfail recon
 
 | Contract | Layer | Coverage | Tests |
 |----------|-------|----------|-------|
@@ -98,9 +99,14 @@ Named deliverable: `scripts/check_trivyignore_expiry.py` (`check_trivyignore` or
 Live tests carry `@pytest.mark.live` **and** `@pytest.mark.integration` so
 `make test` (`-m "not integration"`) does not call providers. Missing keys
 `pytest.fail` — they do not skip. Live responses are not written to fixtures.
+W4 xfail markers are dropped; YAML/Make contracts pass in `make test`. Live
+HTTP remains fail-loud on the nightly schedule (D9). Executor recorded
+`skipped: no live credential` in the **wave report only** — not as a skip
+in the suite.
 
-**Authoring note:** live-gate env was not used while writing this suite
-(`skipped: no live credential` for execution; tests still authored).
+Rationale (W4 recon): `test_no_skips_when_no_secret_test_exists` scans
+`def test_*` names and skips its own identity so helper strings in this
+file cannot match; a real `test_…_skips_when_no_secret` still fails.
 
 ### W5 — 0.0.1 distribution checklist (#141)
 
@@ -173,6 +179,7 @@ Do not invent metric values in tests. Named symbols: `compute_prompt_version`,
 |------|-----------|-----------------|-------|
 | 2026-08-13 | W2 | `_W2` on six contracts in `tests/ci/test_e2e_release_gate.py` | SHA-pin cases were already unxfail'd; leave W3–W9 markers |
 | 2026-08-13 | W3 | `_W3` on six contracts in `tests/ci/test_trivy_scan_gate.py` | Promote-on-main pin was already unxfail'd; leave W4–W9 markers |
+| 2026-08-13 | W4 | `_W4` on four YAML/Make contracts; module xfails on `test_live_providers.py` + `test_github_integration.py` | Live HTTP stays `@pytest.mark.live` (fail-loud D9); leave W5–W9 markers |
 
 ## Driving live / collector tests
 

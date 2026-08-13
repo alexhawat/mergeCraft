@@ -9,14 +9,11 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT, job, load_workflow, read_text
 
-_W4 = pytest.mark.xfail(
-    reason="green after W4: live marker selector + fail-loud missing creds + matrix",
-    strict=False,
-)
+# This guard's own name contains the forbidden substring; skip it by identity.
+_AUDIT_GUARD_NAME = "test_no_skips_when_no_secret_test_exists"
+_TEST_DEF = re.compile(r"^def (test_\w+)\s*\(", re.MULTILINE)
 
 
 def test_live_marker_registered_in_pytest_ini() -> None:
@@ -29,7 +26,6 @@ def test_live_marker_registered_in_pytest_ini() -> None:
     )
 
 
-@_W4
 def test_test_integration_live_selects_live_marker() -> None:
     """``make test-integration-live`` must select ``-m live``, not ``-m integration``."""
     makefile = read_text("Makefile")
@@ -46,7 +42,6 @@ def test_test_integration_live_selects_live_marker() -> None:
     assert '-m "integration"' not in body or "live" in body
 
 
-@_W4
 def test_missing_credential_fails_on_schedule() -> None:
     """D9 — a rotation outage must not ``exit 0`` with skipped: no live credential."""
     makefile = read_text("Makefile")
@@ -74,7 +69,6 @@ def test_suite_is_inert_on_pull_request() -> None:
     assert "workflow_dispatch" in condition
 
 
-@_W4
 def test_live_matrix_fail_fast_false() -> None:
     """D10 — one provider outage must not mask the others."""
     live = job(load_workflow("integration.yml"), "integration-live")
@@ -82,7 +76,6 @@ def test_live_matrix_fail_fast_false() -> None:
     assert strategy.get("fail-fast") is False, f"fail-fast must be false: {strategy}"
 
 
-@_W4
 def test_each_matrix_leg_gets_only_its_own_provider_secret() -> None:
     """Each matrix leg receives only that provider's secret (D10)."""
     live = job(load_workflow("integration.yml"), "integration-live")
@@ -114,6 +107,11 @@ def test_no_skips_when_no_secret_test_exists() -> None:
     offenders: list[str] = []
     for path in root.rglob("test_*.py"):
         text = path.read_text(encoding="utf-8")
-        if "skips_when_no_secret" in text or "skip_when_no_secret" in text:
-            offenders.append(str(path.relative_to(REPO_ROOT)))
+        for match in _TEST_DEF.finditer(text):
+            name = match.group(1)
+            if name == _AUDIT_GUARD_NAME:
+                continue
+            if "skips_when_no_secret" in name or "skip_when_no_secret" in name:
+                rel = path.relative_to(REPO_ROOT)
+                offenders.append(f"{rel}::{name}")
     assert not offenders, f"permissive skip-when-no-secret tests: {offenders}"
