@@ -657,12 +657,30 @@ async def main() -> MainResult:
 
         packet_path: str | None = None
         if tool_context:
+            from mergecraft.tracing.event import trace_attrs_for_mode
             from mergecraft.tracing.tracer import get_tracer_from_settings
 
             tracer = get_tracer_from_settings(settings)
+            # S5 (#145) — the run-dispatch span carries the mode name and its
+            # content-hash prompt version (the same row the packet records),
+            # so an archived trace row is attributable to the prompt that
+            # produced it. ``selected_mode`` is the mode the agent dispatched
+            # on, not the configured catalog (``ctx.modes``) — conflated, the
+            # span would advertise every catalog mode as having run this
+            # trace, mirroring the packet bug the same fix corrected. When no
+            # mode has been selected yet (an early-exit run), the dict is
+            # empty and the trace still emits.
+            selected_mode_obj = next(
+                (m for m in tool_context.modes if m.name == tool_context.tool_state.selected_mode),
+                None,
+            )
+            mode_attrs = trace_attrs_for_mode(selected_mode_obj) if selected_mode_obj else {}
             with tracer.start_span(
                 "mergecraft.publish",
-                attrs_source=lambda: {"run_succeeded": outcome is RunOutcome.passed},
+                attrs_source=lambda: {
+                    "run_succeeded": outcome is RunOutcome.passed,
+                    **mode_attrs,
+                },
             ) as _publish_span:
                 await persist_learnings(tool_context)
                 await report_status_checks(

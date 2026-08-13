@@ -33,7 +33,9 @@ from typing import TYPE_CHECKING, Final
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
+
+    from mergecraft.config.settings import ModeDefinition
 
 # Per-mode modules — each carries ``NAME`` / ``DESCRIPTION`` / ``TEMPLATE``.
 from mergecraft.modes import (
@@ -207,7 +209,7 @@ def compute_modes(agent_id: AgentId, signed_commits: bool = False) -> list[Mode]
     return result
 
 
-def _custom_modes(defs: object) -> list[Mode]:
+def _custom_modes(defs: Sequence[ModeDefinition]) -> list[Mode]:
     """Project ``settings.modes`` (a list of :class:`ModeDefinition`) into Mode objects.
 
     Moved from ``src/mergecraft/main.py`` so the modes package owns the
@@ -215,12 +217,16 @@ def _custom_modes(defs: object) -> list[Mode]:
     from here. Custom modes have empty ``version`` — they are not pinned
     by content hash because the source-of-truth is the consumer's config,
     not a built-in file in this repo.
-    """
-    from mergecraft.config.settings import ModeDefinition
 
+    The argument is typed ``Sequence[ModeDefinition]`` so the merge contract
+    is total at static-analysis time; callers that pass ``None`` or a
+    non-iterable will fail loudly at the boundary instead of raising an
+    ``AttributeError`` mid-iteration. ``ModeDefinition`` is imported only
+    under :data:`TYPE_CHECKING` to avoid a runtime import cycle through
+    :mod:`mergecraft.config.settings`.
+    """
     out: list[Mode] = []
-    for d in defs:  # type: ignore[union-attr]
-        assert isinstance(d, ModeDefinition)
+    for d in defs:
         prompt = d.prompt or None
         version = compute_prompt_version(prompt) if prompt else ""
         out.append(Mode(name=d.name, description=d.description, prompt=prompt, version=version))

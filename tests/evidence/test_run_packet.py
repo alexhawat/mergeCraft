@@ -19,6 +19,7 @@ import pytest
 from mergecraft.analyzers.finding import make_finding
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION
 from mergecraft.evidence.run_packet import (
+    build_run_packet,
     changed_paths_from_diff,
     classify_run_blast_radius,
     emit_run_packet,
@@ -362,3 +363,47 @@ class TestBlastRadiusFromDiff:
     def test_changed_paths_are_deduplicated_and_sorted(self) -> None:
         paths = changed_paths_from_diff(_MIGRATION_DIFF)
         assert paths == sorted(set(paths))
+
+
+class TestModePromptVersions:
+    """S5 (#145) — the packet names the prompt that produced its verdict, not the catalog.
+
+    The catalog (``ctx.modes``) carries every available mode; ``state.selected_mode``
+    is the one the agent actually dispatched on. The packet must record the latter
+    so an archived verdict is attributable to the prompt that produced it. These
+    tests pin both branches so the catalog-vs-selected confusion the review found
+    cannot regress.
+    """
+
+    def test_run_packet_emits_only_selected_mode(self, tmp_path: Path) -> None:
+        """A run that selected ``Review`` records exactly one row, on the Review mode."""
+        ctx = _make_ctx(tmp_path)
+        # ``_make_ctx`` seeds a full ``compute_modes(...)`` catalog; mark just
+        # the Review mode as dispatched. ``build_run_packet`` must ignore
+        # every other mode in the catalog.
+        ctx.tool_state.selected_mode = "Review"
+        packet = build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
+
+        versions = packet.mode_prompt_versions
+        assert versions is not None
+        assert len(versions) == 1, (
+            f"expected one ModePromptVersion row, got {len(versions)} — "
+            "ctx.modes (catalog) leaked into mode_prompt_versions"
+        )
+        only = versions[0]
+        assert only.mode_name == "Review"
+        # The version should match the catalog's Review mode version, not be
+        # the empty string for "unknown catalog entry".
+        expected_version = next(m.version for m in ctx.modes if m.name == "Review")
+        assert only.prompt_version == expected_version
+
+    def test_run_packet_no_selected_mode_yields_empty_field(self, tmp_path: Path) -> None:
+        """A run with no selected mode emits an empty ``mode_prompt_versions`` list."""
+        ctx = _make_ctx(tmp_path)
+        assert ctx.tool_state.selected_mode is None  # _make_ctx leaves it unset
+        packet = build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
+
+        # An empty sequence is normalised to ``None`` at the packet wire
+        # boundary (``build_packet`` and the existing schema contract); this
+        # matches what the pre-S5 envelope returns when no mode ran.
+        assert packet.mode_prompt_versions is None or (len(packet.mode_prompt_versions) == 0)
