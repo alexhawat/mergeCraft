@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Image vulnerability scans now block promotion on every publish ref when Trivy reports
   unwaived HIGH/CRITICAL findings; `.trivyignore` waivers require justification and
   expiry dates enforced by `scripts/check_trivyignore_expiry.py`
+- `make ci` runs the unit suite once via `coverage-gate`; live integration selection
+  lives in `scripts/run_live_integration.py`; eval result sets pin `evals/cases` at
+  `HEAD:evals/cases`; OTLP collector image digest is single-sourced in
+  `scripts/otel_collector_image.txt`; PR integration excludes live and OTLP-docker tests
 
 ### Fixed
 
@@ -37,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed: OTLP tracing export now forwards `gen_ai.*` span attributes to real collectors;
   CI and `make test-otlp-collector` gate merge with a digest-pinned
   `otel/opentelemetry-collector` service ([#143](https://github.com/alexhawat/mergeCraft/issues/143))
+- Fixed: nightly GitHub live-integration matrix leg can post status checks (`statuses: write`)
 
 ### Security
 

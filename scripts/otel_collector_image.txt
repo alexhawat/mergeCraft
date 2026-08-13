@@ -1,0 +1,1 @@
+otel/opentelemetry-collector@sha256:1daa4312b48312dbae2d543e67b77e897dd5d9c48e7651d1416cdb417026ad06

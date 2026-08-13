@@ -545,9 +545,8 @@ def replay_bank_cmd(
 
     Structural replay is deterministic and keyless — every replayable case is
     re-decided by the current ``decide_approval`` gate. Finding-location
-    precision/recall/F1 against live providers requires operator credentials;
-    when fewer than two provider keys are present the run records
-    ``skipped: no live credential`` and omits those metrics.
+    precision/recall/F1 against live providers is a separate future path and is
+    not recorded by structural replay.
     """
     bank_dir = _bank_dir(bank)
     out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
@@ -563,8 +562,6 @@ def replay_bank_cmd(
         console.print(f"  regression: {result.metrics.cases_regression}")
         console.print(f"  blocked   : {result.metrics.cases_blocked}")
         console.print(f"  pass rate : {result.metrics.decision_replay_pass_rate:.2%}")
-        if result.metrics.skipped_reason:
-            console.print(f"  [yellow]{result.metrics.skipped_reason}[/yellow]")
         console.print(f"  corpus @  : {result.pins.corpus_commit[:12]}")
         console.print(f"  rubric    : {result.pins.rubric_version}")
 

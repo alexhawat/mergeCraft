@@ -2,7 +2,8 @@
 """Start a real OTLP collector, seed spans, and run the W7 e2e pytest module.
 
 Used by ``make test-otlp-collector``. Requires Docker and the ``[tracing]`` extra.
-When Docker is unavailable, exits 0 after printing ``skipped: no docker`` so CI
+When Docker is unavailable locally, exits 0 after printing ``skipped: no docker``.
+In CI (``CI`` or ``GITHUB_ACTIONS``), exits 1 unless ``MERGECRAFT_ALLOW_NO_DOCKER=1``.
 operators can distinguish a harness miss from a contract failure.
 """
 
@@ -17,14 +18,38 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Final
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_COLLECTOR_IMAGE = (
-    "otel/opentelemetry-collector"
-    "@sha256:1daa4312b48312dbae2d543e67b77e897dd5d9c48e7651d1416cdb417026ad06"
-)
-COLLECTOR_CONFIG = REPO_ROOT / "scripts" / "otel-collector-e2e.yaml"
+OTLP_COLLECTOR_IMAGE_FILE = REPO_ROOT / "scripts" / "otel_collector_image.txt"
 CONTAINER_NAME = "mergecraft-otel-collector-e2e"
+
+# Keep in sync with tests/tracing/test_otlp_collector_e2e.py (pre-seed contract slice).
+OTLP_PRE_SEED_TESTS: Final[tuple[str, ...]] = (
+    "test_wrong_exporter_endpoint_fails_the_job",
+    "test_tracing_disabled_is_true_noop_no_collector_traffic",
+    "test_env_cli_yaml_precedence_resolves_to_live_sink",
+    "test_unguarded_set_tracer_provider_swallow_would_fail_the_job",
+    "test_collector_image_is_digest_pinned_in_ci",
+    "test_make_target_invokes_collector_suite",
+    "test_w7_touched_workflows_remain_sha_pinned",
+)
+
+OTLP_POST_SEED_TESTS: Final[tuple[str, ...]] = (
+    "test_spans_arrive_at_real_collector_with_gen_ai_attributes",
+    "test_one_trace_per_run_holds_against_the_collector",
+)
+
+
+def _default_collector_image() -> str:
+    return OTLP_COLLECTOR_IMAGE_FILE.read_text(encoding="utf-8").strip()
+
+
+def _pytest_k(names: tuple[str, ...]) -> str:
+    return " or ".join(names)
+
+
+COLLECTOR_CONFIG = REPO_ROOT / "scripts" / "otel-collector-e2e.yaml"
 
 
 def _docker_available() -> bool:
@@ -124,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--collector-image",
-        default=os.environ.get("MERGECRAFT_OTEL_COLLECTOR_IMAGE", DEFAULT_COLLECTOR_IMAGE),
+        default=os.environ.get("MERGECRAFT_OTEL_COLLECTOR_IMAGE", _default_collector_image()),
     )
     args = parser.parse_args(argv)
     pytest_args = [
@@ -133,23 +158,24 @@ def main(argv: list[str] | None = None) -> int:
         "--tb=short",
         "--runxfail",
     ]
-    pre_seed_tests = (
-        "test_wrong_exporter_endpoint_fails_the_job or "
-        "test_tracing_disabled_is_true_noop_no_collector_traffic or "
-        "test_env_cli_yaml_precedence_resolves_to_live_sink or "
-        "test_unguarded_set_tracer_provider_swallow_would_fail_the_job or "
-        "test_collector_image_is_digest_pinned_in_ci or "
-        "test_make_target_invokes_collector_suite or "
-        "test_w7_touched_workflows_remain_sha_pinned"
-    )
-    post_seed_tests = (
-        "test_spans_arrive_at_real_collector_with_gen_ai_attributes or "
-        "test_one_trace_per_run_holds_against_the_collector"
-    )
+    pre_seed_tests = _pytest_k(OTLP_PRE_SEED_TESTS)
+    post_seed_tests = _pytest_k(OTLP_POST_SEED_TESTS)
 
     if not _docker_available():
         print("skipped: no docker", file=sys.stderr)
+        if os.environ.get("MERGECRAFT_ALLOW_NO_DOCKER") == "1":
+            return 0
+        if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+            return 1
         return 0
+
+    slice_rc = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "check_otlp_e2e_slices.py")],
+        cwd=REPO_ROOT,
+        check=False,
+    ).returncode
+    if slice_rc != 0:
+        return slice_rc
 
     endpoint = os.environ.get(
         "OTEL_EXPORTER_OTLP_ENDPOINT",

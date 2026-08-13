@@ -2,24 +2,20 @@
 
 The eval bank's per-case replay is pure and keyless — :func:`replay_case`
 recomputes verdicts from recorded evidence via :func:`decide_approval`. This
-module runs that structural replay across the whole bank, pins judge/rubric/
-prompt versions (S5), and optionally records finding-location metrics when live
-provider credentials are present.
-
-Live provider runs are **operator-triggered** (``make eval-replay``), not
-PR CI — they cost quota and need secrets.
+module runs that structural replay across the whole bank and pins judge/rubric/
+prompt versions (S5). Live provider finding-location metrics (precision/recall/F1)
+are a separate future publication path — not populated by ``run_structural_replay``.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from mergecraft.agents.verifier import VERIFIER_RUBRIC_VERSION, judge_pin
 from mergecraft.evals.store import (
@@ -38,11 +34,12 @@ DEFAULT_RESULTS_DIR: Final[Path] = Path("evals/results")
 # Providers the benchmark names by default (W9.0: ≥2 providers).
 DEFAULT_BENCHMARK_PROVIDERS: Final[tuple[str, ...]] = ("claude", "openai")
 
-_PROVIDER_ENV: Final[dict[str, str]] = {
-    "claude": "ANTHROPIC_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-}
+_CORPUS_ID_PREFIX: Final[tuple[tuple[str, str], ...]] = (
+    ("bench-adversarial", "adversarial_noop"),
+    ("bench-crossfile", "cross_file"),
+    ("bench-security", "security"),
+    ("bench-correctness", "correctness"),
+)
 
 
 class CaseReplayRow(BaseModel):
@@ -71,7 +68,7 @@ class VersionPins(BaseModel):
 
 
 class BenchmarkMetrics(BaseModel):
-    """Metrics from structural replay and (optionally) live provider runs."""
+    """Metrics from structural replay of the eval bank."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -81,14 +78,6 @@ class BenchmarkMetrics(BaseModel):
     cases_regression: int
     cases_blocked: int
     decision_replay_pass_rate: float
-    precision: float | None = None
-    recall: float | None = None
-    f1: float | None = None
-    false_positives_per_run: float | None = None
-    live_providers_requested: list[str] = Field(default_factory=list)
-    live_providers_run: list[str] = Field(default_factory=list)
-    live_run: bool = False
-    skipped_reason: str | None = None
 
 
 class BenchmarkResultSet(BaseModel):
@@ -105,13 +94,14 @@ class BenchmarkResultSet(BaseModel):
 def corpus_class_for(case: Case) -> str:
     """Map a case id/category to the W9.0 corpus bucket."""
     case_id = case.id
-    if case_id.startswith("bench-adversarial") or case.category == "false_positive":
+    for prefix, bucket in _CORPUS_ID_PREFIX:
+        if case_id.startswith(prefix):
+            return bucket
+    if case.category == "false_positive":
         return "adversarial_noop"
-    if case_id.startswith("bench-crossfile"):
-        return "cross_file"
-    if case_id.startswith("bench-security") or ("untrusted" in case_id or "narrative" in case_id):
+    if "untrusted" in case_id or "narrative" in case_id:
         return "security"
-    if case_id.startswith("bench-correctness") or "crashed" in case_id:
+    if "crashed" in case_id:
         return "correctness"
     if case.category in {"missed_finding", "rejected", "reverted"}:
         return "correctness"
@@ -130,6 +120,19 @@ def _git_head_sha() -> str:
         return "unknown"
 
 
+def _git_corpus_commit() -> str:
+    """Pin the eval case tree, not bare HEAD (reproducible corpus snapshot)."""
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "HEAD:evals/cases"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return out.strip()
+    except OSError, subprocess.CalledProcessError:
+        return _git_head_sha()
+
+
 def _mode_prompt_versions() -> dict[str, str]:
     return {mode.name: mode.version for mode in modes}
 
@@ -140,15 +143,6 @@ def _judge_pins(providers: tuple[str, ...]) -> dict[str, dict[str, Any]]:
         pin = judge_pin(provider=provider)
         pins[provider] = pin.model_dump(mode="json")
     return pins
-
-
-def _providers_with_credentials(providers: tuple[str, ...]) -> list[str]:
-    ready: list[str] = []
-    for provider in providers:
-        env_key = _PROVIDER_ENV.get(provider)
-        if env_key and os.environ.get(env_key):
-            ready.append(provider)
-    return ready
 
 
 def run_structural_replay(
@@ -187,11 +181,6 @@ def run_structural_replay(
     total = len(cases)
     pass_rate = (passed / replayable_count) if replayable_count else 0.0
 
-    ready_providers = _providers_with_credentials(providers)
-    skipped_reason: str | None = None
-    if len(ready_providers) < 2:
-        skipped_reason = "skipped: no live credential"
-
     metrics = BenchmarkMetrics(
         cases_total=total,
         cases_replayable=replayable_count,
@@ -199,17 +188,13 @@ def run_structural_replay(
         cases_regression=regression,
         cases_blocked=blocked,
         decision_replay_pass_rate=pass_rate,
-        live_providers_requested=list(providers),
-        live_providers_run=ready_providers,
-        live_run=False,
-        skipped_reason=skipped_reason,
     )
 
     pins = VersionPins(
         rubric_version=VERIFIER_RUBRIC_VERSION,
         judge_pins=_judge_pins(providers),
         mode_prompt_versions=_mode_prompt_versions(),
-        corpus_commit=_git_head_sha(),
+        corpus_commit=_git_corpus_commit(),
         recorded_at=datetime.now(UTC),
     )
 

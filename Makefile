@@ -75,44 +75,14 @@ test: ## Unit tests
 # secrets so the same marker becomes the live-provider release precondition.
 # The ``live`` marker is registered for future narrowing by test-creator.
 test-integration: ## Integration tests (PR CI; self-skip without live secrets)
-	$(PYTEST) tests -v --tb=short --strict-markers -m "integration" $(PYTEST_XDIST) \
+	$(PYTEST) tests -v --tb=short --strict-markers -m "integration and not live" \
+		--ignore=tests/tracing/test_otlp_collector_e2e.py $(PYTEST_XDIST) \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
 
 test-integration-live: ## Live-provider integration (scheduled / release precondition)
-	@provider="$${MERGECRAFT_LIVE_PROVIDER:-}"; \
-	if [ "$${MERGECRAFT_ALLOW_MISSING_LIVE_CREDS:-}" != "1" ]; then \
-	  missing=""; \
-	  case "$$provider" in \
-	    anthropic) [ -z "$${ANTHROPIC_API_KEY:-}" ] && missing="ANTHROPIC_API_KEY" ;; \
-	    openai|codex) [ -z "$${OPENAI_API_KEY:-}" ] && missing="OPENAI_API_KEY" ;; \
-	    gemini) [ -z "$${GEMINI_API_KEY:-}" ] && missing="GEMINI_API_KEY" ;; \
-	    nous) [ -z "$${NOUS_API_KEY:-}" ] && missing="NOUS_API_KEY" ;; \
-	    github) [ -z "$${GITHUB_TOKEN:-}" ] && missing="GITHUB_TOKEN" ;; \
-	    *) \
-	      for key in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY NOUS_API_KEY; do \
-	        eval "val=\$$$$key"; \
-	        [ -z "$$val" ] && missing="$$missing $$key"; \
-	      done ;; \
-	  esac; \
-	  if [ -n "$$missing" ]; then \
-	    echo "missing live credentials:$$missing (set secrets or MERGECRAFT_ALLOW_MISSING_LIVE_CREDS=1 for local)"; \
-	    exit 1; \
-	  fi; \
-	fi; \
-	contract="tests/integration/test_live_providers.py::test_missing_credential_fails_on_schedule \
-	 tests/integration/test_live_providers.py::test_suite_is_inert_on_pull_request \
-	 tests/integration/test_live_providers.py::test_response_shape_matches_stream_consumer_contract \
-	 tests/integration/test_live_providers.py::test_live_request_is_token_bounded"; \
-	case "$$provider" in \
-	  anthropic) live_paths="$$contract tests/integration/test_live_providers.py::test_anthropic_minimal_completion" ;; \
-	  openai|codex) live_paths="$$contract tests/integration/test_live_providers.py::test_openai_codex_minimal_completion" ;; \
-	  gemini) live_paths="$$contract tests/integration/test_live_providers.py::test_gemini_minimal_completion" ;; \
-	  nous) live_paths="$$contract tests/integration/test_live_providers.py::test_nous_minimal_completion" ;; \
-	  github) live_paths="$$contract tests/integration/test_github_integration.py::test_checkout_and_status_check_roundtrip" ;; \
-	  *) live_paths="tests/integration" ;; \
-	esac; \
-	$(PYTEST) $$live_paths -v --tb=short --strict-markers -m "live" $(PYTEST_XDIST) \
-		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+	@live_selector='-m "live"'; \
+	MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/check_live_integration_contract.py || exit 1; \
+	MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/run_live_integration.py || exit 1
 
 test-otlp-collector: ## OTLP collector integration — spans must leave the process (#143)
 	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py
@@ -159,7 +129,7 @@ ci-static: lockcheck lint typecheck pyright catalog-check build example-workflow
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check build example-workflows-check security test coverage-gate
+CI_STEPS := lockcheck lint typecheck pyright catalog-check build example-workflows-check security coverage-gate
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)
@@ -172,7 +142,7 @@ ci-reset: ## Clear the ci-resume checkpoint (start the gate over)
 	@chmod +x scripts/ci_resume.sh 2>/dev/null || true
 	@./scripts/ci_resume.sh --reset
 
-ci: ci-static security test coverage-gate ## Full gate
+ci: ci-static security coverage-gate ## Full gate
 	@echo "ci OK"
 
 REVIEWBENCH_DIR ?= evals/reviewbench

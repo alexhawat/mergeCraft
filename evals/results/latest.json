@@ -87,21 +87,10 @@
     "cases_regression": 0,
     "cases_replayable": 10,
     "cases_total": 10,
-    "decision_replay_pass_rate": 1.0,
-    "f1": null,
-    "false_positives_per_run": null,
-    "live_providers_requested": [
-      "claude",
-      "openai"
-    ],
-    "live_providers_run": [],
-    "live_run": false,
-    "precision": null,
-    "recall": null,
-    "skipped_reason": "skipped: no live credential"
+    "decision_replay_pass_rate": 1.0
   },
   "pins": {
-    "corpus_commit": "823e0eb302cd712c4f398e56ddc0b8e5fd42384e",
+    "corpus_commit": "5a16cd8487547ee13585688f7f623579e4d5487b",
     "judge_pins": {
       "claude": {
         "judge_version": "1.0.0",
@@ -128,7 +117,7 @@
       "Review": "569a84876e1e",
       "Task": "ef49457aebfc"
     },
-    "recorded_at": "2026-08-13T17:16:46.748866Z",
+    "recorded_at": "2026-08-13T18:00:05.539306Z",
     "rubric_version": "1.0.0"
   },
   "schema_version": "1.0.0"

@@ -64,9 +64,13 @@ class NullSink:
     def emit(self, kind: str, attrs_source: Callable[[], dict[str, Any]]) -> None:
         """No-op. ``attrs_source`` is intentionally never called (W1.11)."""
 
-    def write(self, event: TraceEvent | str, attrs_source: Any = None) -> None:
-        """No-op write — kept for parity with the sink protocol."""
-        if isinstance(event, str):
+    def write(
+        self,
+        event: TraceEvent | str,
+        attrs_source: Callable[[], dict[str, Any]] | None = None,
+    ) -> None:
+        """No-op write — accepts emit-style calls from disabled-path tests."""
+        if isinstance(event, str) and attrs_source is not None:
             self.emit(event, attrs_source)
 
 

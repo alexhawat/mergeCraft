@@ -10,9 +10,9 @@ deliberate commit, not an automatic rewrite.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
-import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -21,22 +21,15 @@ from typing import Any
 DEFAULT_MARGIN = 5.0
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
-
-
-def _floor_from_pyproject(repo_root: Path | None = None) -> float:
-    root = repo_root or _repo_root()
-    pyproject = root / "pyproject.toml"
-    if not pyproject.is_file():
-        msg = f"pyproject.toml missing: {pyproject}"
-        raise FileNotFoundError(msg)
-    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    floor = data.get("tool", {}).get("coverage", {}).get("report", {}).get("fail_under")
-    if floor is None:
-        msg = "pyproject.toml missing [tool.coverage.report] fail_under"
-        raise KeyError(msg)
-    return float(floor)
+def _fail_under_from_pyproject(repo_root: Path | None = None) -> float:
+    cfg_path = Path(__file__).resolve().parent / "coverage_config.py"
+    spec = importlib.util.spec_from_file_location("coverage_config", cfg_path)
+    if spec is None or spec.loader is None:
+        msg = f"could not load coverage config: {cfg_path}"
+        raise ImportError(msg)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.fail_under_from_pyproject(repo_root)
 
 
 def _percent_covered(report: Path) -> float:
@@ -56,7 +49,7 @@ def check_coverage_ratchet(
 ) -> int:
     """Return 0 when coverage is within ``[floor, floor + margin]``; 1 otherwise."""
     report_path = Path(report)
-    resolved_floor = floor if floor is not None else _floor_from_pyproject(repo_root)
+    resolved_floor = floor if floor is not None else _fail_under_from_pyproject(repo_root)
     measured = _percent_covered(report_path)
     ceiling = resolved_floor + margin
     failures: list[str] = []
@@ -70,8 +63,7 @@ def check_coverage_ratchet(
         failures.append(
             f"line coverage {measured:.2f}% exceeds floor {resolved_floor:.2f}% "
             f"by more than {margin:.2f} points (ceiling {ceiling:.2f}%) — "
-            "bump fail_under in pyproject.toml and check_coverage_floors.py "
-            "GLOBAL_LINE_FLOOR in a deliberate commit"
+            "bump fail_under in pyproject.toml in a deliberate commit"
         )
 
     if failures:
