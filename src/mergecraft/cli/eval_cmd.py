@@ -29,6 +29,11 @@ import typer
 from pydantic import ValidationError
 from rich.console import Console
 
+from mergecraft.evals.benchmark import (
+    DEFAULT_BENCHMARK_PROVIDERS,
+    DEFAULT_RESULTS_DIR,
+    replay_bank,
+)
 from mergecraft.evals.scoring import (
     DEFAULT_LINE_SLACK,
     format_report,
@@ -508,6 +513,60 @@ def _read_json_or_jsonl(path: Path) -> Any:
         if not rows:
             raise
         return rows
+
+
+# ── replay-bank ────────────────────────────────────────────────────────
+
+
+@app.command("replay-bank")
+def replay_bank_cmd(
+    bank: Path | None = typer.Option(
+        None,
+        "--bank",
+        help="Bank directory (default: evals/cases/).",
+    ),
+    results_dir: Path | None = typer.Option(
+        None,
+        "--results-dir",
+        help="Directory for result sets (default: evals/results/).",
+    ),
+    provider: list[str] = typer.Option(
+        list(DEFAULT_BENCHMARK_PROVIDERS),
+        "--provider",
+        help="Providers to pin in the result set (repeatable; default claude+openai).",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the result set as JSON on stdout.",
+    ),
+) -> None:
+    """Replay the eval bank and write a versioned benchmark result set (#140).
+
+    Structural replay is deterministic and keyless — every replayable case is
+    re-decided by the current ``decide_approval`` gate. Finding-location
+    precision/recall/F1 against live providers requires operator credentials;
+    when fewer than two provider keys are present the run records
+    ``skipped: no live credential`` and omits those metrics.
+    """
+    bank_dir = _bank_dir(bank)
+    out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
+    providers = tuple(provider) if provider else DEFAULT_BENCHMARK_PROVIDERS
+    result, path = replay_bank(bank_dir, results_dir=out_dir, providers=providers)
+    if json_output:
+        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+    else:
+        console.print(f"[green]benchmark result set[/green] → {path}")
+        console.print(f"  cases     : {result.metrics.cases_total}")
+        console.print(f"  replayable: {result.metrics.cases_replayable}")
+        console.print(f"  passed    : {result.metrics.cases_passed}")
+        console.print(f"  regression: {result.metrics.cases_regression}")
+        console.print(f"  blocked   : {result.metrics.cases_blocked}")
+        console.print(f"  pass rate : {result.metrics.decision_replay_pass_rate:.2%}")
+        if result.metrics.skipped_reason:
+            console.print(f"  [yellow]{result.metrics.skipped_reason}[/yellow]")
+        console.print(f"  corpus @  : {result.pins.corpus_commit[:12]}")
+        console.print(f"  rubric    : {result.pins.rubric_version}")
 
 
 # ── gate ───────────────────────────────────────────────────────────────

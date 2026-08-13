@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Eval bank replay harness (`make eval-replay`) writes versioned result sets with
+  judge pins, rubric version, and S5 mode prompt versions; seeded corpus expanded
+  to ten human-labelled cases across correctness, security, cross-file, and
+  adversarial classes ([#140](https://github.com/alexhawat/mergeCraft/issues/140))
 - Ruff advisory families are no longer selected and ignored in blocking `make lint`:
   ERA is enforced; noisy families are dropped; BLE, PTH, PERF, and C901 run as a
   non-blocking `lint-ruff-advisory` CI step ([#146](https://github.com/alexhawat/mergeCraft/issues/146))

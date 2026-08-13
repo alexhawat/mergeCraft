@@ -62,7 +62,7 @@ Inspired by [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 | 📡 **SARIF upload (opt-in)** | Publish analyzer findings to GitHub code scanning with one flag |
 | 📈 **Tracing (opt-in)** | Per-run span trees to local JSONL, Logfire, or any OTLP collector — with redaction |
 | 💻 **Offline mode** | `mergecraft diff-review` reviews local diffs or patch files, no PR required — `--json` for benchmarks |
-| 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in |
+| 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in — benchmark numbers unpublished; run `make eval-replay` locally (see [evals/README.md](evals/README.md)) |
 
 ## 🏗️ How it works
 
@@ -567,7 +567,7 @@ Full rationale in the collapsible sections of
 - [ ] GitHub Marketplace listing
 - [ ] Cursor local CLI harness (issue #13 Phase B)
 - [ ] Expanded analyzer catalog (opt-in long tail)
-- [ ] Published eval benchmarks
+- [ ] Published eval benchmarks — **unpublished** (D19 partial: structural replay harness + versioned result sets landed in W9; precision/recall/F1 require an operator-triggered live run with ≥2 provider keys via `make eval-replay`)
 
 ## Development
 
