@@ -189,21 +189,22 @@ def resolve_setup_failure_policy() -> SetupFailurePolicy | None:
     raise ValueError(msg)
 
 
-def resolve_setup_timeout_s() -> int:
+def resolve_setup_timeout_s() -> int | None:
     """Resolve ``INPUT_SETUP_TIMEOUT`` (F6) to a positive number of seconds.
 
     Reuses :func:`mergecraft.utils.time_parse.resolve_timeout_ms` so the same
     duration grammar (``10m``, ``1h``, ``30s``) covers both inputs.
 
-    Returns :data:`DEFAULT_SETUP_TIMEOUT_S` when the input is unset. Raises
-    ``ValueError`` for unparseable / non-positive values — the run fails closed
-    as ``RunOutcome.configuration_error`` before the agent starts.
+    Returns ``None`` when the input is unset so the YAML-layer value (if any)
+    survives — precedence is action input > YAML ``setup_timeout_s`` > default.
+    Raises ``ValueError`` for unparseable / non-positive values — the run fails
+    closed as ``RunOutcome.configuration_error`` before the agent starts.
     """
     from mergecraft.utils.time_parse import resolve_timeout_ms
 
     raw = _read_input("INPUT_SETUP_TIMEOUT")
     if raw is None:
-        return DEFAULT_SETUP_TIMEOUT_S
+        return None
     parsed = resolve_timeout_ms(raw)
     if parsed is None:
         msg = f"invalid setup_timeout: {raw!r} (use a duration like 10m / 30s / 1h)"
@@ -236,7 +237,8 @@ def apply_setup_overrides(settings: Any) -> Any:
     update: dict[str, Any] = {}
     if policy is not None:
         update["setup_failure_policy"] = policy
-    update["setup_timeout_s"] = timeout_s
+    if timeout_s is not None:
+        update["setup_timeout_s"] = timeout_s
     return settings.model_copy(update=update)
 
 

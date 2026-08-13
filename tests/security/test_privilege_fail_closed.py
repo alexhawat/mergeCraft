@@ -19,6 +19,7 @@ production-side test hook (convention 10).
 
 from __future__ import annotations
 
+import asyncio
 import os
 import pwd
 import shutil
@@ -259,6 +260,37 @@ def test_abort_maps_to_configuration_error_outcome() -> None:
     GitHub check conclusion is ``neutral`` rather than an uncaught crash."""
     outcome = _classify_error_outcome(_ConfigurationError("setpriv unavailable"))
     assert outcome is RunOutcome.configuration_error
+
+
+def test_main_missing_agent_user_fails_closed_as_configuration_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """End-to-end — a missing agent user surfaces as ``configuration_error``.
+
+    The S2 contract must hold for the *secondary* path
+    (``prepare_workspace_for_agent`` in ``main()``), not only the
+    ``wrap_agent_command`` wrap site. Driving ``main()`` with a missing user
+    must yield a classified ``MainResult`` (``RunOutcome.configuration_error``)
+    — not an uncaught exception escaping ``main()`` entirely, which would
+    crash ``cli/gha_cmd.py:gha_root`` unclassified.
+    """
+    from mergecraft.main import main
+
+    # Pretend we're root in the action image with a missing agent user.
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+
+    def _raise_keyerror(_name: str) -> _FakePwnam:
+        raise KeyError(_name)
+
+    monkeypatch.setattr(pwd, "getpwnam", _raise_keyerror)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(workspace))
+
+    result = asyncio.run(main())
+    assert result.success is False
+    assert result.outcome is RunOutcome.configuration_error
+    assert "mergecraft" in (result.error or "")
 
 
 # ---------------------------------------------------------------------------

@@ -376,15 +376,18 @@ async def main() -> MainResult:
     install_loguru_redaction_filter()
     normalize_env()
     ensure_github_workspace_registered()
-    workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
-    if workspace:
-        prepare_workspace_for_agent(workspace)
-
     stop_mcp = None
     github: GitHubClient | None = None
     token_ref = None
     tool_context: ToolContext | None = None
     try:
+        workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
+        if workspace:
+            # S2 — a missing agent user fails closed as ``_ConfigurationError``.
+            # Must be inside the ``try`` so the outer catch classifies it as
+            # ``RunOutcome.configuration_error`` instead of crashing unclassified.
+            prepare_workspace_for_agent(workspace)
+
         resolved_prompt = resolve_prompt_input()
         github = GitHubClient(get_job_token())
         run_context = await resolve_run_context_data(github)

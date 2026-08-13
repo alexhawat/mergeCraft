@@ -161,6 +161,42 @@ class TestDocumentedDefaultsMatchRuntime:
         inputs = resolve_non_prompt_inputs()
         assert (inputs.status_checks == "enabled") is False
 
+    def test_setup_timeout_unset_preserves_yaml_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """S1 review — unset ``setup_timeout`` input must not clobber a YAML value.
+
+        Precedence is action input > YAML ``setup_timeout_s`` > default (10m).
+        An unset ``INPUT_SETUP_TIMEOUT`` must resolve to ``None`` so
+        ``apply_setup_overrides`` leaves the YAML-layer value alone — the old
+        resolver returned the 600 s default unconditionally, always overwriting
+        a YAML-configured timeout.
+        """
+        from mergecraft.action.inputs import apply_setup_overrides, resolve_setup_timeout_s
+        from mergecraft.config.settings import RepoSettings
+
+        monkeypatch.delenv("INPUT_SETUP_TIMEOUT", raising=False)
+        assert resolve_setup_timeout_s() is None, (
+            "unset INPUT_SETUP_TIMEOUT must resolve to None (defer to YAML/default)"
+        )
+
+        yaml_value = 300
+        settings = RepoSettings(setup_timeout_s=yaml_value)
+        updated = apply_setup_overrides(settings)
+        assert updated.setup_timeout_s == yaml_value, (
+            "YAML-configured setup_timeout_s must survive an unset action input"
+        )
+
+    def test_setup_timeout_input_wins_over_yaml(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """S1 review — an explicit action input wins over the YAML value."""
+        from mergecraft.action.inputs import apply_setup_overrides
+        from mergecraft.config.settings import RepoSettings
+
+        monkeypatch.setenv("INPUT_SETUP_TIMEOUT", "2m")
+        settings = RepoSettings(setup_timeout_s=300)
+        updated = apply_setup_overrides(settings)
+        assert updated.setup_timeout_s == 120, "explicit action input must override the YAML value"
+
     def test_token_input_is_not_confused_with_logfire_token(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
