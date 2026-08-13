@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -15,20 +16,29 @@ from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
 from tests.analyzers.support import import_module
 
+if TYPE_CHECKING:
+    import pytest
+
 
 def test_missing_github_event_defaults_untrusted() -> None:
     trust = import_module("mergecraft.analyzers.trust")
     assert trust.derive_trust_tier(event=None, shell="restricted") == "untrusted"
 
 
-def test_same_repo_pull_request_is_trusted(same_repo_event: dict[str, object]) -> None:
+def test_same_repo_pull_request_is_trusted(
+    monkeypatch: pytest.MonkeyPatch, same_repo_event: dict[str, object]
+) -> None:
     trust = import_module("mergecraft.analyzers.trust")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     tier = trust.derive_trust_tier(event=same_repo_event, shell="restricted")
     assert tier == "trusted"
 
 
-def test_fork_pull_request_is_untrusted(fork_pr_event: dict[str, object]) -> None:
+def test_fork_pull_request_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch, fork_pr_event: dict[str, object]
+) -> None:
     trust = import_module("mergecraft.analyzers.trust")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     tier = trust.derive_trust_tier(event=fork_pr_event, shell="restricted")
     assert tier == "untrusted"
 
@@ -88,8 +98,11 @@ def test_shell_disabled_keeps_the_analyzer_surface(tmp_path: Path) -> None:
     assert trust.analyzers_enabled(ctx) is True
 
 
-def test_w0_probe_event_shape_matches_trusted(same_repo_event: dict[str, object]) -> None:
+def test_w0_probe_event_shape_matches_trusted(
+    monkeypatch: pytest.MonkeyPatch, same_repo_event: dict[str, object]
+) -> None:
     """W0.4 probe: ``pull_request`` same-repo PR #1, ``fork=false``."""
     trust = import_module("mergecraft.analyzers.trust")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     assert same_repo_event["pull_request"]["head"]["repo"]["fork"] is False  # type: ignore[index]
     assert trust.derive_trust_tier(event=same_repo_event, shell="restricted") == "trusted"

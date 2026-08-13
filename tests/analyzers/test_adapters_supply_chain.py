@@ -117,12 +117,15 @@ def test_trufflehog_never_emits_secret_value(adapter_fixture_repo: Path) -> None
             assert PLANTED_AWS_SECRET not in cleaned
 
 
-def test_trufflehog_verification_off_on_fork(adapter_fixture_repo: Path) -> None:
+def test_trufflehog_verification_off_on_fork(
+    adapter_fixture_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     tool_id = "trufflehog"
     if tool_id not in _catalog_ids():
         pytest.fail(f"{tool_id} manifest missing from catalog")
 
     trust = import_module("mergecraft.analyzers.trust")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     tier = trust.derive_trust_tier(FORK_PULL_REQUEST_EVENT)
     assert tier == "untrusted"
 
