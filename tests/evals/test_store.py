@@ -112,7 +112,7 @@ def test_case_schema_rejects_invalid_trust_tier() -> None:
 def test_case_extra_forbid_invariant_documented() -> None:
     """The model config advertises ``extra="forbid"``.
 
-    The cross-file contract in ``docs/test-plans/cross-file-deps.md``
+    The cross-file contract in ``docs/dev/test-plans/cross-file-deps.md``
     pins this as the invariant that protects the security plan's
     contract from silent drift.
     """

@@ -1,8 +1,7 @@
 """Seed and persist local learnings files (no mergecraft.com API).
 
-W6 adds the provenance record type, the quarantine + staging flow, and
-the opt-in auto-promote flag (D10 of
-`.ignorelocal/waves/issues-security-trust-boundary-wave-plan.md`).
+This module adds the provenance record type, the quarantine + staging
+flow, and the opt-in auto-promote flag.
 
 The wire format chosen for the provenance record is a structured HTML
 comment block (``<!-- provenance: run_id=... pr_number=... ... -->``)

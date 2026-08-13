@@ -115,5 +115,5 @@ After W2 lands `mergecraft.utils.meat_harness`:
   fixture stays in lockstep with the production code — same drift
   guard `tests/utils/test_fence.py:264` uses.
 - No `src/` or production-doc edits in this wave; the test plan lives
-  at `docs/test-plans/issues-meat-reading-diff.md` and is **not**
+  at `docs/dev/test-plans/issues-meat-reading-diff.md` and is **not**
   gitignored (verified via `git check-ignore`).

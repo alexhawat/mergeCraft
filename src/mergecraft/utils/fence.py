@@ -1,11 +1,10 @@
 """Nonce-fenced envelope renderer for untrusted PR and comment text (#73).
 
-Port of `.claude/skills/github-issue-triage/scripts/envelope.py` (D7 of
-`.ignorelocal/waves/issues-security-trust-boundary-wave-plan.md`). Renders
+Port of `.claude/skills/github-issue-triage/scripts/envelope.py`. Renders
 the per-run fence around any text the model should treat as data, not
 instructions — PR title, PR body, review comments, issue comments,
-commit messages, patch headers (the closed D8 set), and the `extra`
-block on the offline diff-review path.
+commit messages, patch headers, and the `extra` block on the offline
+diff-review path.
 
 Fence shape:
 
