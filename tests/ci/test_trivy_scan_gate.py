@@ -53,14 +53,17 @@ def test_trivyignore_exists_with_required_header_schema() -> None:
     text = path.read_text(encoding="utf-8")
     assert "justification" in text.lower(), ".trivyignore header must document justification"
     assert "expir" in text.lower(), ".trivyignore header must document expiry"
-    cves = _CVE.findall(text)
-    if not cves:
-        return
-    for cve in cves:
-        block_start = text.find(cve)
-        window = text[max(0, block_start - 400) : block_start + 200]
+    prev_end = 0
+    found = False
+    for match in _CVE.finditer(text):
+        found = True
+        window = text[prev_end : match.end()]
+        prev_end = match.end()
+        cve = match.group(0)
         assert _JUSTIFICATION.search(window), f"{cve} missing justification"
         assert _EXPIRY.search(window), f"{cve} missing expiry date"
+    if not found:
+        return
 
 
 def _load_expiry_checker() -> Any:
@@ -104,15 +107,48 @@ def test_expiry_checker_accepts_future_dated_entry(tmp_path: Path) -> None:
     assert rc == 0
 
 
+def _run_expiry_checker(module: Any, path: Path) -> int:
+    check = getattr(module, "check_trivyignore", None) or getattr(module, "main", None)
+    assert callable(check), "expiry checker must export check_trivyignore or main"
+    return int(check([str(path)])) if check.__name__ == "main" else int(check(path))
+
+
 def test_trivyignore_schema_rejects_entry_without_justification_or_expiry(tmp_path: Path) -> None:
     """Edge: a bare CVE line without justification + expiry is invalid."""
     module = _load_expiry_checker()
     bare = tmp_path / ".trivyignore"
     bare.write_text("CVE-2024-0001\n", encoding="utf-8")
-    check = getattr(module, "check_trivyignore", None) or getattr(module, "main", None)
-    assert callable(check)
-    rc = int(check([str(bare)])) if check.__name__ == "main" else int(check(bare))
-    assert rc != 0
+    assert _run_expiry_checker(module, bare) != 0
+
+
+def test_expiry_checker_rejects_bare_cve_after_documented_neighbor(tmp_path: Path) -> None:
+    """A fully documented CVE must not lend justification/expiry to the next line."""
+    module = _load_expiry_checker()
+    today = datetime.now(tz=UTC).date()
+    future = today.replace(year=today.year + 1).isoformat()
+    adjacent = tmp_path / ".trivyignore"
+    adjacent.write_text(
+        f"# justification: acceptable, mitigated by X\n# expiry: {future}\n"
+        "CVE-2026-0001\nCVE-2026-0002\n",
+        encoding="utf-8",
+    )
+    assert _run_expiry_checker(module, adjacent) != 0
+
+
+def test_expiry_checker_accepts_two_separately_documented_entries(tmp_path: Path) -> None:
+    """Each CVE with its own comment block still passes."""
+    module = _load_expiry_checker()
+    today = datetime.now(tz=UTC).date()
+    future = today.replace(year=today.year + 1).isoformat()
+    paired = tmp_path / ".trivyignore"
+    paired.write_text(
+        f"# justification: first finding, mitigated by X\n# expiry: {future}\n"
+        "CVE-2026-0001\n"
+        f"# justification: second finding, mitigated by Y\n# expiry: {future}\n"
+        "CVE-2026-0002\n",
+        encoding="utf-8",
+    )
+    assert _run_expiry_checker(module, paired) == 0
 
 
 def test_waiver_docs_exist() -> None:

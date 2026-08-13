@@ -25,8 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD publish path now gates `build-images` on the Action-image E2E suite for the
   exact release SHA via a reusable `e2e-gate` job (`workflow_call` on `e2e.yml`)
 - Image vulnerability scans now block promotion on every publish ref when Trivy reports
-  unwaived HIGH/CRITICAL findings; `.trivyignore` waivers require justification and
-  expiry dates enforced by `scripts/check_trivyignore_expiry.py`
+  unwaived HIGH/CRITICAL findings; `.trivyignore` waivers require per-entry justification
+  and expiry (a CVE cannot inherit a neighbor's metadata)
 - `make ci` runs the unit suite once via `coverage-gate`; live integration selection
   lives in `scripts/run_live_integration.py`; eval result sets pin `evals/cases` at
   `HEAD:evals/cases`; OTLP collector image digest is single-sourced in

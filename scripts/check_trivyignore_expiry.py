@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Validate ``.trivyignore`` waiver entries (D7 / release-gating W3).
 
-Every ignored CVE must have a nearby ``justification:`` and ``expiry: YYYY-MM-DD``.
-Entries past their expiry date fail the check so waivers cannot silently rot.
+Every ignored CVE must have ``justification:`` and ``expiry: YYYY-MM-DD`` in its
+own preceding comment block (after the previous CVE, not a sliding character
+window). Entries past their expiry date fail the check so waivers cannot silently
+rot.
 """
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from pathlib import Path
 _CVE = re.compile(r"^CVE-\d{4}-\d+\b", re.MULTILINE)
 _EXPIRY = re.compile(r"expir(?:y|es|ation)\s*[:=]\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
 _JUSTIFICATION = re.compile(r"justification\s*[:=]\s*\S+", re.IGNORECASE)
-_CONTEXT_CHARS = 400
 
 
 def _parse_expiry(window: str) -> date | None:
@@ -36,10 +37,14 @@ def check_trivyignore(path: Path) -> int:
     today = datetime.now(tz=UTC).date()
     failures: list[str] = []
 
+    prev_end = 0
     for match in _CVE.finditer(text):
         cve = match.group(0)
-        start = max(0, match.start() - _CONTEXT_CHARS)
-        window = text[start : match.end() + 200]
+        # Metadata is scoped to this entry: after the previous CVE through this
+        # line. A lookbehind/lookahead character window would let a bare CVE
+        # inherit a neighbor's justification/expiry.
+        window = text[prev_end : match.end()]
+        prev_end = match.end()
 
         if not _JUSTIFICATION.search(window):
             failures.append(f"{cve}: missing justification")
