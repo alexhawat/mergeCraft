@@ -35,7 +35,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | **W2** | *(reconciled)* `tests/ci/test_e2e_release_gate.py` — xfails dropped; real passes | — |
 | **W3** | *(reconciled)* `tests/ci/test_trivy_scan_gate.py` — xfails dropped; real passes | — |
 | **W4** | *(reconciled)* `tests/ci/test_live_provider_matrix.py` — xfails dropped; real passes. Live HTTP stays `@pytest.mark.live` (fail-loud, not skip-when-no-secret) | — |
-| **W5** | `tests/docs/test_distribution_checklist.py` (except D15 yes/ pin) | `green after W5:` |
+| **W5** | *(reconciled)* `tests/docs/test_distribution_checklist.py` — xfails dropped; real passes | — |
 | **W6** | `tests/ci/test_coverage_ratchet.py` | `green after W6:` |
 | **W7** | `tests/tracing/test_otlp_collector_e2e.py` (except SHA-pin) | `green after W7:` |
 | **W8** | `tests/ci/test_ruff_advisory_families.py` | `green after W8:` |
@@ -54,6 +54,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | `test_suite_is_inert_on_pull_request` (YAML) | `integration-live` already skips `pull_request` |
 | `tests/ci/test_live_provider_matrix.py` (all seven cases) | W4 landed `-m live` + D9 fail-loud Makefile + per-provider matrix; xfails dropped |
 | `test_no_skips_when_no_secret_test_exists` | audit-escape meta-guard (matches `def test_*` names only; ignores its own helper strings) |
+| `tests/docs/test_distribution_checklist.py` (all seven cases) | W5 landed distribution checklist; xfails dropped |
 | `test_yes_package_not_renamed_unless_d15_allows` | D15 default |
 | `test_s5_prompt_version_helper_is_available` | S5 (#145) merged |
 
@@ -108,7 +109,7 @@ Rationale (W4 recon): `test_no_skips_when_no_secret_test_exists` scans
 `def test_*` names and skips its own identity so helper strings in this
 file cannot match; a real `test_…_skips_when_no_secret` still fails.
 
-### W5 — 0.0.1 distribution checklist (#141)
+### W5 — 0.0.1 distribution checklist (#141) — green after W5 impl (`b6f1b40`) + xfail recon
 
 | Contract | Layer | Tests |
 |----------|-------|-------|
@@ -180,6 +181,7 @@ Do not invent metric values in tests. Named symbols: `compute_prompt_version`,
 | 2026-08-13 | W2 | `_W2` on six contracts in `tests/ci/test_e2e_release_gate.py` | SHA-pin cases were already unxfail'd; leave W3–W9 markers |
 | 2026-08-13 | W3 | `_W3` on six contracts in `tests/ci/test_trivy_scan_gate.py` | Promote-on-main pin was already unxfail'd; leave W4–W9 markers |
 | 2026-08-13 | W4 | `_W4` on four YAML/Make contracts; module xfails on `test_live_providers.py` + `test_github_integration.py` | Live HTTP stays `@pytest.mark.live` (fail-loud D9); leave W5–W9 markers |
+| 2026-08-13 | W5 | `_W5` on six contracts in `tests/docs/test_distribution_checklist.py` | D15 yes/ pin was already unxfail'd; leave W6–W9 markers |
 
 ## Driving live / collector tests
 
