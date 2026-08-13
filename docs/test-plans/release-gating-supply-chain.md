@@ -36,7 +36,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | **W3** | *(reconciled)* `tests/ci/test_trivy_scan_gate.py` — xfails dropped; real passes | — |
 | **W4** | *(reconciled)* `tests/ci/test_live_provider_matrix.py` — xfails dropped; real passes. Live HTTP stays `@pytest.mark.live` (fail-loud, not skip-when-no-secret) | — |
 | **W5** | *(reconciled)* `tests/docs/test_distribution_checklist.py` — xfails dropped; real passes | — |
-| **W6** | `tests/ci/test_coverage_ratchet.py` | `green after W6:` |
+| **W6** | *(reconciled)* `tests/ci/test_coverage_ratchet.py` — xfails dropped; real passes | — |
 | **W7** | `tests/tracing/test_otlp_collector_e2e.py` (except SHA-pin) | `green after W7:` |
 | **W8** | `tests/ci/test_ruff_advisory_families.py` | `green after W8:` |
 | **W9** | `tests/evals/test_benchmark_publication.py` (except S5 helper pin) | `green after W9:` |
@@ -55,6 +55,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | `tests/ci/test_live_provider_matrix.py` (all seven cases) | W4 landed `-m live` + D9 fail-loud Makefile + per-provider matrix; xfails dropped |
 | `test_no_skips_when_no_secret_test_exists` | audit-escape meta-guard (matches `def test_*` names only; ignores its own helper strings) |
 | `tests/docs/test_distribution_checklist.py` (all seven cases) | W5 landed distribution checklist; xfails dropped |
+| `tests/ci/test_coverage_ratchet.py` (all four cases) | W6 landed coverage-gate in `make ci` + ratchet; xfails dropped |
 | `test_yes_package_not_renamed_unless_d15_allows` | D15 default |
 | `test_s5_prompt_version_helper_is_available` | S5 (#145) merged |
 
@@ -120,7 +121,7 @@ file cannot match; a real `test_…_skips_when_no_secret` still fails.
 | `src/mergecraft/yes/` not renamed (D15) | unit | `test_yes_package_not_renamed_unless_d15_allows` |
 | Python 3.14 + Docker path (D16) | unit | `test_python_314_requirement_documented` |
 
-### W6 — coverage ratchet in `make ci` (#142 rescoped)
+### W6 — coverage ratchet in `make ci` (#142 rescoped) — green after W6 impl (`bee8433`) + xfail recon
 
 | Contract | Layer | Tests |
 |----------|-------|-------|
@@ -130,6 +131,10 @@ file cannot match; a real `test_…_skips_when_no_secret` still fails.
 | Within margin passes | unit | `test_ratchet_passes_within_margin` |
 
 Named deliverable: `scripts/check_coverage_ratchet.py`. No README coverage-badge test (D13).
+
+Rationale (W6 recon): W6 bumped `[tool.coverage.report] fail_under` 65→70; the
+suite parses that floor from `pyproject.toml` instead of hard-coding 65 so
+the within-margin case stays inside `[floor, floor+margin]`.
 
 ### W7 — real OTLP collector (#143)
 
@@ -182,6 +187,7 @@ Do not invent metric values in tests. Named symbols: `compute_prompt_version`,
 | 2026-08-13 | W3 | `_W3` on six contracts in `tests/ci/test_trivy_scan_gate.py` | Promote-on-main pin was already unxfail'd; leave W4–W9 markers |
 | 2026-08-13 | W4 | `_W4` on four YAML/Make contracts; module xfails on `test_live_providers.py` + `test_github_integration.py` | Live HTTP stays `@pytest.mark.live` (fail-loud D9); leave W5–W9 markers |
 | 2026-08-13 | W5 | `_W5` on six contracts in `tests/docs/test_distribution_checklist.py` | D15 yes/ pin was already unxfail'd; leave W6–W9 markers |
+| 2026-08-13 | W6 | `_W6` on four contracts in `tests/ci/test_coverage_ratchet.py` | parse `fail_under` from pyproject (70); leave W7–W9 markers |
 
 ## Driving live / collector tests
 

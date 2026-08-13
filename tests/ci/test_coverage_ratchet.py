@@ -5,20 +5,20 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT, read_text
 
-_W6 = pytest.mark.xfail(
-    reason="green after W6: coverage ratchet + coverage-gate in make ci",
-    strict=False,
-)
+
+def _fail_under() -> float:
+    """Load the live floor so tests track ``pyproject.toml``, not a stale literal."""
+    data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    floor = data["tool"]["coverage"]["report"]["fail_under"]
+    return float(floor)
 
 
-@_W6
 def test_make_ci_graph_includes_coverage_gate() -> None:
     """Producer → consumer: ``make ci`` / ``CI_STEPS`` must invoke ``coverage-gate``."""
     makefile = read_text("Makefile")
@@ -55,39 +55,37 @@ def _coverage_json(tmp_path: Path, percent: float) -> Path:
     return path
 
 
-@_W6
+def _run_ratchet(check: Any, report: Path, **kwargs: Any) -> int:
+    if check.__name__ == "main":
+        return int(check([str(report)]))
+    return int(check(report, **kwargs))
+
+
 def test_ratchet_fails_when_coverage_drops_below_floor(tmp_path: Path) -> None:
     module = _load_ratchet()
     check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
     assert callable(check)
-    report = _coverage_json(tmp_path, 10.0)
-    rc = int(check([str(report)])) if check.__name__ == "main" else int(check(report, floor=65.0))
+    floor = _fail_under()
+    report = _coverage_json(tmp_path, max(0.0, floor - 60.0))
+    rc = _run_ratchet(check, report)
     assert rc != 0, "ratchet accepted coverage below the floor"
 
 
-@_W6
 def test_ratchet_fails_when_coverage_exceeds_floor_without_bump(tmp_path: Path) -> None:
     """Guard-deletion: a large rise without bumping the floor must fail."""
     module = _load_ratchet()
     check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
     assert callable(check)
     report = _coverage_json(tmp_path, 99.0)
-    if check.__name__ == "main":
-        rc = int(check([str(report)]))
-    else:
-        rc = int(check(report, floor=65.0, margin=5.0))
+    rc = _run_ratchet(check, report, margin=5.0)
     assert rc != 0, "ratchet accepted coverage far above the floor without a bump commit"
 
 
-@_W6
 def test_ratchet_passes_within_margin(tmp_path: Path) -> None:
     module = _load_ratchet()
     check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
     assert callable(check)
-    report = _coverage_json(tmp_path, 66.0)
-    rc = (
-        int(check([str(report)]))
-        if check.__name__ == "main"
-        else int(check(report, floor=65.0, margin=5.0))
-    )
+    floor = _fail_under()
+    report = _coverage_json(tmp_path, floor + 1.0)
+    rc = _run_ratchet(check, report, margin=5.0)
     assert rc == 0
