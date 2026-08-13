@@ -170,6 +170,55 @@ async def test_configuration_error_outcome_on_bad_timeout(
     assert getattr(rec.result, "outcome", None) == run_outcome_cls.configuration_error
 
 
+async def test_configuration_error_outcome_on_uid_zero_agent_user(
+    run_outcome_cls: Any, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """N2 — ``prepare_workspace_for_agent`` runs ahead of the outer
+    ``try/except`` in ``main()``. Without an explicit guard the missing-user /
+    UID-0 failure escapes as an uncaught traceback instead of landing in
+    ``RunOutcome.configuration_error``. Drives the real ``main()`` with the
+    agent user resolving to UID/GID 0 and asserts the structured outcome plus
+    a clean (non-raised) return.
+    """
+    import os as _os
+    import pwd as _pwd
+
+    import mergecraft.utils.privilege as privilege_mod
+
+    # Force the root path so ``prepare_workspace_for_agent`` is exercised and
+    # patch ``pwd.getpwnam`` so the agent user resolves to UID/GID 0 — the
+    # hole the N1 fix plugs.
+    monkeypatch.setattr(_os, "getuid", lambda: 0)
+    monkeypatch.setattr(
+        privilege_mod.pwd if hasattr(privilege_mod, "pwd") else _pwd,
+        "getpwnam",
+        lambda _name: type(
+            "_Pw",
+            (),
+            {"pw_name": "root", "pw_uid": 0, "pw_gid": 0},
+        )(),
+    )
+
+    rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    # The exception must NOT escape ``main()`` — the bug fixed in N2 was that
+    # the call ran outside the outer handler.
+    assert rec.raised is None, (
+        f"_ConfigurationError escaped main(): {rec.raised!r}; main() must guard "
+        f"prepare_workspace_for_agent at its call site"
+    )
+    assert rec.result is not None
+    assert not rec.result.success
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome == run_outcome_cls.configuration_error, (
+        f"UID-0 agent user mapped to {outcome!r}; must be configuration_error so "
+        f"the GitHub check concludes neutral rather than crashing the runner"
+    )
+    # Structured failure reason — the operator needs to know *what* failed,
+    # not just that it failed.
+    assert rec.result.error, "structured failure reason must be carried on MainResult.error"
+
+
 async def test_inconclusive_outcome_on_prep_failure(
     run_outcome_cls: Any, monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
