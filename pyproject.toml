@@ -54,7 +54,7 @@ dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.3.0",
     "pytest-xdist==3.8.0",
-    "ruff==0.16.0",
+    "ruff==0.16.2",
     "mypy==1.20.2",
     "pre-commit==4.6.0",
     "bandit[toml]==1.9.4",
@@ -113,6 +113,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20", "RUF001", "TC001", "TC003"]
 "scripts/**" = ["T20"]
+"docker/e2e/**" = ["T20"]
 # Catalog prompts intentionally retain upstream emoji / typography.
 "src/mergecraft/modes.py" = ["RUF001", "TC003"]
 "src/mergecraft/modes/**" = ["RUF001", "TC003"]
