@@ -214,10 +214,16 @@ def _custom_modes(defs: Sequence[ModeDefinition]) -> list[Mode]:
 
     Moved from ``src/mergecraft/main.py`` so the modes package owns the
     built-in ↔ custom merge contract. ``main.py`` now imports this helper
-    from here. Custom modes get the same content-hash ``version`` as
-    built-ins — an evidence packet can attribute the verdict to the
-    consumer-supplied prompt exactly like a built-in. Empty prompts yield
-    empty ``version`` so the contract is total.
+    from here. Custom modes have empty ``version`` — they are not pinned
+    by content hash because the source-of-truth is the consumer's config,
+    not a built-in file in this repo.
+
+    The argument is typed ``Sequence[ModeDefinition]`` so the merge contract
+    is total at static-analysis time; callers that pass ``None`` or a
+    non-iterable will fail loudly at the boundary instead of raising an
+    ``AttributeError`` mid-iteration. ``ModeDefinition`` is imported only
+    under :data:`TYPE_CHECKING` to avoid a runtime import cycle through
+    :mod:`mergecraft.config.settings`.
     """
     out: list[Mode] = []
     for d in defs:

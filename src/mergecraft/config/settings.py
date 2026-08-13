@@ -320,7 +320,7 @@ class RepoSettings(BaseModel):
     # run deadline. Resolved from ``INPUT_SETUP_TIMEOUT`` via
     # ``action.inputs.apply_setup_overrides`` so the same parser the
     # ``timeout`` input uses covers both.
-    setup_timeout_s: int = 600
+    setup_timeout_s: int = Field(default=600, alias="setupTimeout", gt=0)
     push: PushPermission = "restricted"
     shell: ShellPermission = "restricted"
     pr_approve_enabled: bool = Field(default=False, alias="prApproveEnabled")

@@ -17,9 +17,16 @@
 # ---------------------------------------------------------------------------
 # This template uses `pull_request_target`. GitHub SKIPS `pull_request` workflows
 # when `refs/pull/N/merge` cannot be built — i.e. whenever the PR has a merge
-# conflict — which leaves a required check permanently missing and the PR
-# unmergeable even after the conflict is fixed. `pull_request_target` still fires
-# on `synchronize` in that state.
+# conflict — so a required review check sits unreported for as long as the
+# conflict lasts. `pull_request_target` still fires on `synchronize` in that
+# state, so the review lands while the PR is still conflicted.
+#
+# Do not over-read that. Pushing the conflict fix to the PR branch fires
+# `synchronize` and clears a `pull_request` check too, so the gap is the
+# conflicted window, not a permanent block; it outlasts the conflict only when
+# the conflict disappears WITHOUT a push to the head branch (the base moved),
+# because nothing then re-triggers the run. A conflicted PR is unmergeable on
+# its own account anyway. Weigh this against running with secrets in scope.
 #
 # The cost is that `pull_request_target` runs with repository secrets in scope, so
 # it MUST NOT execute PR-authored code. This workflow does not: the same-repo
@@ -200,6 +207,15 @@ jobs:
       HAS_AUTH: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
 
     steps:
+      # No `ref:` here, deliberately. Under pull_request_target this checks out
+      # the DEFAULT BRANCH — trusted code — and mergeCraft reaches PR content
+      # through its own `checkout_pr` + API layer instead. Do not "fix" this by
+      # adding `ref: ${{ github.event.pull_request.head.sha }}`,
+      # `refs/pull/N/merge`, or `repository: <head repo>`: that is the classic
+      # pwn-request, and since actions/checkout v7 (GA 2026-06-18, backported to
+      # all supported majors 2026-07-20) it hard-fails on fork PRs unless you
+      # pass `allow-unsafe-pr-checkout`. If you find yourself reaching for that
+      # flag under pull_request_target, switch to `pull_request` instead.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0

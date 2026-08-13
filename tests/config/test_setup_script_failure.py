@@ -140,16 +140,24 @@ async def test_setup_failure_reason_recorded_on_result_output(
 async def test_setup_script_stderr_is_redacted_before_surfacing(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """Convention 7 — secrets in setup-script stderr never reach the prompt
-    or the ``result`` output.
+    """Convention 7 — secrets in setup-script stderr never reach the
+    consumer-facing surfaces.
 
     The harness drives a trusted-tier setup with a stderr body carrying
     planted GitHub / OpenAI tokens. After the run:
+
       * ``tool_state.setup_hook_failure`` (set by the impl wave) must not
         contain the raw token bytes;
-      * the agent prompt — captured from the live ``resolve_instructions``
-        invocation that ``main()`` made — must not contain the raw bytes.
-    The ``result`` payload is exercised by test 3 above.
+      * ``report_status_checks`` (the consumer-facing surface under N2 —
+        the agent prompt is no longer built under the default
+        ``inconclusive`` policy) must not contain the raw bytes.
+
+    S1 review / N2 — under the default ``inconclusive`` policy the
+    agent loop is skipped before ``resolve_instructions`` is called,
+    so this test no longer pins the prompt surface (the prompt is
+    never built on this path). The redactor's surface is the failure
+    reason that lands in ``tool_state.setup_hook_failure`` and the
+    ``failure_reason`` carried into ``report_status_checks``.
     """
     planted_ghp = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
     planted_sk = "sk-abcdefghijklmnopqrstuv1234567890"
@@ -158,37 +166,6 @@ async def test_setup_script_stderr_is_redacted_before_surfacing(
         f"npm ERR! token leaked: {planted_ghp}\n"
         f"npm ERR! openai key: {planted_sk}\n"
     ).encode()
-
-    captured: dict[str, str] = {}
-
-    # Resolve via the undecorated function if present; otherwise call through.
-    # We import once and patch the module attribute the impl actually uses.
-    import mergecraft.main as main_mod
-    import mergecraft.utils.instructions as instructions_mod
-
-    real_resolve = instructions_mod.resolve_instructions
-
-    def _patched_resolve(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
-        result = real_resolve(*args, **kwargs)
-        captured["full"] = getattr(result, "full", "")
-        # ``setup_hook_failure`` is NOT a ToolState field yet; the impl wave
-        # adds it. Pass the value through as a kwarg override so we exercise
-        # the call site that S1.2 wires at ``main.py:500, :560``.
-        if kwargs.get("setup_hook_failure"):
-            captured["setup_hook_failure"] = str(kwargs["setup_hook_failure"])
-        return result
-
-    monkeypatch.setattr(main_mod, "resolve_instructions", _patched_resolve)
-    # Also patch the module-level reference in case resolve_instructions is
-    # imported into other modules at collection time.
-    monkeypatch.setattr(instructions_mod, "resolve_instructions", _patched_resolve)
-    # S1/S3/S5 split (commit 4e8f420+): the inner-loop ``resolve_instructions``
-    # call now lives in ``mergecraft.main_agent``. Patch that binding too so
-    # the fallback retry path (which loops through ``_run_agent_once``) is
-    # captured by the test's wrapper.
-    from mergecraft import main_agent as main_agent_mod
-
-    monkeypatch.setattr(main_agent_mod, "resolve_instructions", _patched_resolve)
 
     rec = await run_main_for_test(
         monkeypatch=monkeypatch,
@@ -200,23 +177,107 @@ async def test_setup_script_stderr_is_redacted_before_surfacing(
         setup_script_stderr=stderr_body,
     )
     assert rec.result is not None
-    # The captured prompt is what the agent would have seen — assert on it.
-    assert captured.get("full"), "resolve_instructions was not invoked by main() during the run"
-    prompt = captured["full"]
-    assert planted_ghp not in prompt, (
-        "GitHub PAT from setup-script stderr leaked into the agent prompt — convention 7 violation"
+    # (1) The agent never ran — that's the N2 contract. No prompt was
+    # built, so the prompt-surface assertions are gone.
+    assert rec.tool_context is not None
+    surfaced_failure = rec.tool_context.tool_state.setup_hook_failure or ""
+    assert planted_ghp not in surfaced_failure, (
+        "GitHub PAT from setup-script stderr leaked into the surfaced "
+        f"setup_hook_failure: {surfaced_failure!r}"
     )
-    assert planted_sk not in prompt, (
-        "OpenAI key from setup-script stderr leaked into the agent prompt — convention 7 violation"
+    assert planted_sk not in surfaced_failure, (
+        "OpenAI key from setup-script stderr leaked into the surfaced "
+        f"setup_hook_failure: {surfaced_failure!r}"
     )
-    assert "[REDACTED]" in prompt or "[REDACT" in prompt, (
-        f"redaction marker missing from prompt — expected at least one "
-        f"[REDACTED] marker in a setup-failure paragraph: {prompt[:600]!r}"
+    assert "[REDACTED]" in surfaced_failure or "[REDACT" in surfaced_failure, (
+        f"redaction marker missing from surfaced setup_hook_failure; "
+        f"expected at least one [REDACTED] marker: {surfaced_failure!r}"
     )
-    # The run-level outcome is still ``inconclusive`` (D5) — redaction does
-    # not change the outcome bucket.
+    # (2) The same applies to the consumer-facing status check — the
+    # failure_reason that ``report_status_checks`` receives is the
+    # same redacted string. The harness records every call.
+    for call in rec.report_status_calls:
+        reported_failure = str(call.get("failure_reason") or "")
+        assert planted_ghp not in reported_failure, (
+            f"GitHub PAT leaked into report_status_checks failure_reason: {call!r}"
+        )
+        assert planted_sk not in reported_failure, (
+            f"OpenAI key leaked into report_status_checks failure_reason: {call!r}"
+        )
+    # (3) The run-level outcome is still ``inconclusive`` (D5) — redaction
+    # does not change the outcome bucket.
     outcome = getattr(rec.result, "outcome", None)
     assert outcome is RunOutcome.inconclusive, f"expected inconclusive (D5), got {outcome!r}"
+
+
+async def test_redaction_runs_before_truncation(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """S1 review / NEW3 — secrets straddling the 500-char truncation are still redacted.
+
+    The prior implementation truncated ``stderr`` to 500 chars *before*
+    passing it through ``redact_secrets``. That meant a token whose body
+    crosses the 500-char boundary was sliced to a short prefix — below
+    the redactor's pattern minimum — and the redactor no longer recognized
+    it as a token, leaking a guessable prefix into the surfaced failure.
+
+    This test plants a ``ghp_`` token straddling the 500-char boundary
+    and asserts that:
+
+      1. The full planted token itself never appears in the surfaced
+         failure.
+      2. No short prefix of the planted token survives — the redactor's
+         pattern matches ``gh[pousr]_[A-Za-z0-9_]{20,}`` so a residual
+         ``ghp_<1-19-char body>`` substring is the exact shape the
+         prior [:500]-first code path produced.
+
+    S1 review / N2 — the assertion surface shifts from the agent prompt
+    (which is no longer built under the default ``inconclusive`` policy)
+    to the surfaced failure stored on ``tool_state.setup_hook_failure``
+    and forwarded into ``report_status_checks``.
+    """
+    planted_token = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+    # 480 chars of padding so the token straddles the 500-char slice
+    # boundary: bytes 480-516 hold the token, only the first 20 chars of
+    # the token survive the [:500] truncation in the buggy code path.
+    padding = "x" * 480
+    stderr_body = (f"npm ERR! payload: {padding}\n{planted_token}\n").encode()
+    assert len(stderr_body) > 500, "test fixture must exceed the 500-char slice"
+
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(setup_script="failing-with-straddling-token"),
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        setup_script_rc=1,
+        setup_script_stderr=stderr_body,
+    )
+    assert rec.result is not None
+    assert rec.tool_context is not None
+    surfaced_failure = rec.tool_context.tool_state.setup_hook_failure or ""
+    assert surfaced_failure, (
+        "setup_hook_failure was not recorded — the truncated-and-redacted "
+        "stderr should have surfaced on tool_state"
+    )
+    # The full planted token must never appear in the surfaced failure —
+    # the consumer-facing surface the operator and the status check see.
+    assert planted_token not in surfaced_failure, (
+        f"NEW3 violated: the planted GitHub PAT crossed the 500-char "
+        f"boundary in stderr and surfaced verbatim in setup_hook_failure; "
+        f"the slice happened before redaction. Surfaced failure excerpt: "
+        f"{surfaced_failure[:1200]!r}"
+    )
+    # No prefix of the planted token past the literal ``ghp_`` should
+    # remain. The redactor's pattern matches ``gh[pousr]_[A-Za-z0-9_]{20,}``,
+    # so a partial token below 20 chars of body is a regression — that
+    # is the exact scenario the prior [:500]-first code path produced.
+    import re
+
+    suspicious = re.search(r"ghp_[A-Za-z0-9_]{1,19}(?![A-Za-z0-9_])", surfaced_failure)
+    assert suspicious is None, (
+        f"NEW3 violated: a short prefix of the planted token survived "
+        f"truncation — got {suspicious.group(0)!r} in the surfaced failure: "
+        f"{surfaced_failure[:1200]!r}"
+    )
 
 
 # ── Regression pins (must pass today) ─────────────────────────────────────────

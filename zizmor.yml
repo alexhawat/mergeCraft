@@ -15,3 +15,9 @@ rules:
       - auto-close-fixed-issues.yml
       # Delegates to a SHA-pinned Craft reusable workflow; no PR-head checkout.
       - changelog-preview.yml
+      # Sweeps a merged PR's unresolved findings into issues. Needs base-repo
+      # privileges (`issues: write`) that a fork's `pull_request` token cannot
+      # have. Checks out the base branch — never the PR head — and the PR
+      # number reaches the CLI via `env:`, not a `run:` interpolation.
+      # Authorization = the merge itself.
+      - findings-carryover.yml

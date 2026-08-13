@@ -318,16 +318,16 @@ async def run_main_for_test(
     monkeypatch.setattr(
         main_mod, "_first_runnable_in_chain", lambda chain: chain[0] if chain else None
     )
-    # ``resolve_runtime_agent`` is no longer imported into ``mergecraft.main`` —
-    # the call sites moved to ``main_models`` / ``main_agent`` in commit fd3d623.
-    # The patches at the bottom of this function rebind those modules' bindings
-    # in lock-step, so no main-side patch is needed (and any such patch raises
-    # ``AttributeError`` because the attribute does not exist on ``main_mod``).
-    # S1/S3/S5 split (commit 4e8f420+): the model-chain helpers moved to
-    # ``main_models`` / ``main_agent`` modules. The harness must patch those
-    # modules' bindings too, otherwise monkeypatch on ``main_mod`` only rebinds
-    # the orchestrator's reference and the helpers continue calling the real
-    # ``resolve_model`` / ``resolve_runtime_agent`` / ``_first_runnable_in_chain``.
+    # ``resolve_runtime_agent`` must be patched on ``main_mod`` itself: the
+    # merged base ``main.py`` imports it by value from
+    # ``mergecraft.utils.agent_resolve`` and calls it at the orchestrator level,
+    # so rebinding only the helper modules below would leave the real agent
+    # resolver live — the run would then drive the real opencode CLI and hang.
+    # The S1/S3/S5 split (commits fd3d623 / 4e8f420+) moved the model-chain
+    # call sites out of ``main.py`` into ``main_models`` / ``main_agent``; those
+    # modules' bindings are patched in lock-step below so the harness works
+    # against either structure.
+    monkeypatch.setattr(main_mod, "resolve_runtime_agent", _fake_resolve_runtime_agent)
     from mergecraft import main_agent as main_agent_mod
     from mergecraft import main_models as main_models_mod
 
@@ -350,6 +350,11 @@ async def run_main_for_test(
 
     def _fake_start_installation(tool_context: Any) -> None:
         events.append("start_installation")
+        # N2 — also capture the tool_context on the install path so the
+        # skip-path tests (which return before ``start_mcp_http_server``)
+        # can still inspect ``tool_state.setup_hook_failure`` and the
+        # related surfaces via ``rec.tool_context``.
+        ctx_holder.append(tool_context)
         if prep_failure is not None:
             tool_context.tool_state.dependency_installation = DependencyInstallationState(
                 status="failed",
@@ -376,22 +381,34 @@ async def run_main_for_test(
 
     monkeypatch.setattr(main_mod, "finalize_agent_result", _fake_finalize)
 
-    async def _fake_persist_learnings(_ctx: Any) -> None:
-        return None
+    async def _fake_persist_learnings(ctx: Any) -> None:
+        # N2 — capture the tool_context on the publish-side call so the
+        # skip-path tests (which return before ``start_mcp_http_server``
+        # and ``start_installation``) can still inspect ``tool_context``.
+        if ctx is not None:
+            ctx_holder.append(ctx)
 
     monkeypatch.setattr(main_mod, "persist_learnings", _fake_persist_learnings)
 
-    async def _fake_report_status(_ctx: Any, **kwargs: Any) -> None:
+    async def _fake_report_status(ctx: Any, **kwargs: Any) -> None:
+        # N2 — same rationale as ``_fake_persist_learnings``: capture
+        # tool_context from the first publish-side call so the skip path
+        # surfaces ``rec.tool_context`` to the test.
+        if ctx is not None:
+            ctx_holder.append(ctx)
         report_status_calls.append(kwargs)
 
     monkeypatch.setattr(main_mod, "report_status_checks", _fake_report_status)
 
-    async def _fake_sarif(_ctx: Any) -> None:
-        return None
+    async def _fake_sarif(ctx: Any) -> None:
+        if ctx is not None:
+            ctx_holder.append(ctx)
 
     monkeypatch.setattr(main_mod, "report_sarif_upload", _fake_sarif)
 
-    def _fake_emit_packet(_ctx: Any, **_kwargs: Any) -> Path | None:
+    def _fake_emit_packet(ctx: Any, **_kwargs: Any) -> Path | None:
+        if ctx is not None:
+            ctx_holder.append(ctx)
         return packet_path
 
     monkeypatch.setattr(main_mod, "emit_run_packet", _fake_emit_packet)

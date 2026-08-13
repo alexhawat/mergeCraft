@@ -271,22 +271,39 @@ def test_prompt_version_appears_in_evidence_packet() -> None:
     on it, an archived verdict cannot be attributed to the prompt that
     produced it. Only the mode that actually ran appears in the packet.
     """
-    from mergecraft.evidence.run_packet import _mode_prompt_versions
+    from mergecraft.evidence.run_packet import _mode_prompt_versions, _selected_modes
+    from mergecraft.mcp.context import RepoIdentity, ResolvedPayload, ToolContext
     from mergecraft.mcp.tool_state import ToolState
+    from mergecraft.utils.github import GitHubClient
 
     modes = compute_modes("opencode")
     review_mode = next(m for m in modes if m.name == "Review")
 
+    # Homemade ToolContext with the specific mode in its catalog.
+    ctx = ToolContext(
+        agent_id="opencode",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(),
+        github=GitHubClient(token=""),
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=list(modes),
+        tool_state=ToolState(repos={}, primary_repo_key="acme/demo"),
+        mcp_server_url="",
+        tmpdir="",
+    )
+
     # Selected mode present → exactly one row with matching version.
     state = ToolState(repos={}, primary_repo_key="acme/demo", selected_mode="Review")
-    rows = _mode_prompt_versions(state, modes)
+    rows = _mode_prompt_versions(_selected_modes(state, ctx))
     assert len(rows) == 1
     assert rows[0].mode_name == "Review"
     assert rows[0].prompt_version == review_mode.version
 
     # No selected mode → empty list.
     no_mode = ToolState(repos={}, primary_repo_key="acme/demo")
-    assert _mode_prompt_versions(no_mode, modes) == []
+    assert _mode_prompt_versions(_selected_modes(no_mode, ctx)) == []
 
 
 def test_prompt_version_appears_in_trace_attrs() -> None:
@@ -305,7 +322,7 @@ def test_prompt_version_appears_in_trace_attrs() -> None:
 
 def test_publish_span_attrs_source_emits_mode_attrs_end_to_end() -> None:
     """Regression pin: ``_publish_span_attrs`` spreads ``trace_attrs_for_mode``
-    over every mode in the supplied ``modes`` sequence (#145 + post-#145 wiring).
+    over the selected mode (#145 + post-#145 wiring).
 
     The audit found that ``trace_attrs_for_mode`` was unit-tested but never
     wired into production; the helper silently returned its dict into the
@@ -316,7 +333,7 @@ def test_publish_span_attrs_source_emits_mode_attrs_end_to_end() -> None:
     present — a future refactor that drops the spread (e.g. shrinks to
     ``{"run_succeeded": ...}``) fails this test loudly.
     """
-    from mergecraft.main import _publish_span_attrs
+    from mergecraft.main_outcome import _publish_span_attrs
     from mergecraft.run_outcome import RunOutcome
 
     review_mode = next(m for m in compute_modes("opencode") if m.name == "Review")
@@ -330,7 +347,7 @@ def test_publish_span_attrs_source_emits_mode_attrs_end_to_end() -> None:
 
 def test_publish_span_attrs_none_mode_yields_no_mode_attrs() -> None:
     """When no mode was selected, ``_publish_span_attrs`` omits mode keys."""
-    from mergecraft.main import _publish_span_attrs
+    from mergecraft.main_outcome import _publish_span_attrs
     from mergecraft.run_outcome import RunOutcome
 
     emitted = _publish_span_attrs(RunOutcome.configuration_error, None)

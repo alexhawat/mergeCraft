@@ -189,20 +189,24 @@ def resolve_setup_failure_policy() -> SetupFailurePolicy | None:
     raise ValueError(msg)
 
 
+_INPUT_SETUP_TIMEOUT = "INPUT_SETUP_TIMEOUT"
+
+
 def resolve_setup_timeout_s() -> int | None:
     """Resolve ``INPUT_SETUP_TIMEOUT`` (F6) to a positive number of seconds.
 
     Reuses :func:`mergecraft.utils.time_parse.resolve_timeout_ms` so the same
     duration grammar (``10m``, ``1h``, ``30s``) covers both inputs.
 
-    Returns ``None`` when the input is unset so the YAML-layer value (if any)
-    survives — precedence is action input > YAML ``setup_timeout_s`` > default.
-    Raises ``ValueError`` for unparseable / non-positive values — the run fails
+    Returns ``None`` when the input is unset so callers can distinguish
+    "defer to the next precedence layer" (YAML ``setup_timeout_s``, then
+    :data:`DEFAULT_SETUP_TIMEOUT_S`) from an explicit value. Raises
+    ``ValueError`` for unparseable / non-positive values — the run fails
     closed as ``RunOutcome.configuration_error`` before the agent starts.
     """
     from mergecraft.utils.time_parse import resolve_timeout_ms
 
-    raw = _read_input("INPUT_SETUP_TIMEOUT")
+    raw = _read_input(_INPUT_SETUP_TIMEOUT)
     if raw is None:
         return None
     parsed = resolve_timeout_ms(raw)
@@ -221,7 +225,13 @@ def apply_setup_overrides(settings: Any) -> Any:
 
     Precedence: action input (``INPUT_SETUP_FAILURE_POLICY`` /
     ``INPUT_SETUP_TIMEOUT``) > YAML ``setup_failure_policy`` /
-    ``setup_timeout`` block > default (``inconclusive``, ``10m``).
+    ``setupTimeout`` block > default (``inconclusive``, ``10m``).
+
+    Each layer only writes a field when the previous layer is unset — so an
+    operator who configures ``setup_timeout_s: 30`` in YAML keeps the 30 s
+    budget unless they also set ``INPUT_SETUP_TIMEOUT`` on the Action path.
+    Returning the original ``settings`` unchanged when no Action input is
+    set keeps the YAML → default precedence intact.
 
     Invalid values from the action input raise before the run starts — the
     outer catch maps them to ``RunOutcome.configuration_error``.
@@ -239,6 +249,8 @@ def apply_setup_overrides(settings: Any) -> Any:
         update["setup_failure_policy"] = policy
     if timeout_s is not None:
         update["setup_timeout_s"] = timeout_s
+    if not update:
+        return settings
     return settings.model_copy(update=update)
 
 

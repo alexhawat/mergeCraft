@@ -29,7 +29,7 @@ import pytest
 
 from mergecraft.config.settings import RepoSettings
 from mergecraft.run_outcome import RunOutcome
-from tests.support.run_main_harness import run_main_for_test
+from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
 _TRUSTED_EVENT = "workflow_dispatch"
 _TRUSTED_PAYLOAD: dict[str, object] = {"action": "workflow_dispatch"}
@@ -102,6 +102,153 @@ def test_hanging_setup_script_is_killed_at_deadline(tmp_path: Path) -> None:
             os.kill(proc.pid, signal.SIGKILL)
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=1)
+
+
+async def test_setup_timeout_exceeding_run_budget_raises_configuration_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """S1 review / F3 follow-up — a ``setup_timeout`` that consumes the
+    entire (or exceeds the) run budget must fail closed as
+    ``configuration_error``, before the setup script runs.
+
+    Equal deadlines let the setup script eat the whole budget; the agent
+    budget is then clamped to ~1 ms and the eventual
+    ``_AgentTimeoutError`` masks the setup failure as ``timed_out``
+    instead of the ``inconclusive`` / ``configuration_error`` the setup
+    policy was supposed to produce. The fix reserves agent budget by
+    raising ``_ConfigurationError`` at setup-timeout resolution.
+
+    The S1 review follow-up wires ``setup_timeout`` through
+    :func:`mergecraft.action.inputs.apply_setup_overrides`, so this test
+    sets ``INPUT_SETUP_TIMEOUT`` *and* ``INPUT_TIMEOUT`` to pin the
+    equal-deadline guard explicitly — the YAML side no longer
+    accidentally collides with the default ``10m`` after the precedence
+    fix lands.
+    """
+    from mergecraft.agents.shared import AgentResult
+
+    sentinel_agent = FakeAgent(
+        name="claude",
+        result=AgentResult(success=True, output="must-not-run"),
+    )
+
+    # Action input wins: ``INPUT_SETUP_TIMEOUT: 30m`` is strictly larger
+    # than the run budget ``INPUT_TIMEOUT: 60s`` — the equal-deadline /
+    # exceeds-deadline guard in ``main.py`` must fire and short-circuit
+    # before the agent loop.
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(
+            setup_script="./anything-here",
+        ),
+        env={
+            "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
+            "INPUT_SETUP_TIMEOUT": "30m",
+            "INPUT_TIMEOUT": "60s",
+        },
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        agents_by_slug={"claude": sentinel_agent},
+    )
+    assert rec.result is not None
+    # The agent must NEVER have been invoked — the validation runs
+    # before the agent loop.
+    assert sentinel_agent.calls == [], (
+        f"F3 follow-up violated: agent ran {len(sentinel_agent.calls)} "
+        f"times despite setup_timeout > run timeout — the validation "
+        f"must short-circuit before the agent loop, not after."
+    )
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome is RunOutcome.configuration_error, (
+        f"setup_timeout >= run timeout must fail closed as configuration_error; got {outcome!r}"
+    )
+    # S1 review / NEW2 — the F3 equal-deadline guard raises while
+    # ``tool_context`` is already built (the NEW2 fix moves the
+    # ``ToolContext(...)`` construction above this guard). The outer
+    # handler therefore has a context to call ``report_status_checks``
+    # on, and the harness records that call. The run must end with at
+    # least one status-check call carrying the failure reason.
+    assert rec.report_status_calls, (
+        f"NEW2 violated: F3 equal-deadline guard raised but the outer "
+        f"handler did not call report_status_checks — tool_context was "
+        f"None when the guard raised; report_status_calls={rec.report_status_calls!r}"
+    )
+    last = rec.report_status_calls[-1]
+    assert last.get("failure_reason"), (
+        f"NEW2 violated: report_status_checks was called without a failure_reason; got {last!r}"
+    )
+
+
+async def test_setup_timeout_error_message_reports_configured_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """S1 follow-up — the equal-deadline guard's error message must surface
+    the value the operator actually configured, not a value the resolver
+    silently min-capped against the run timeout.
+
+    Pre-fix, ``main.py`` did
+    ``setup_timeout_s = min(setup_timeout_s, timeout_ms // 1000)`` *before*
+    the guard, so a 45-minute setup against a 30-minute run surfaced as
+    ``setup_timeout (1800s) must be less than the run timeout (1800s)`` —
+    equal, unintuitive, and unactionable for an operator staring at their
+    YAML / Action input. The min-cap was also dead code: it only fired on
+    the ``>= timeout`` case, which the guard immediately rejected anyway.
+    Post-fix the min-cap is gone, the configured value reaches the message,
+    and the dead branch is removed (see the matching comment block in
+    ``main.py``).
+
+    Here ``INPUT_SETUP_TIMEOUT: 45m`` (= 2700s) is *configured* but is
+    larger than ``INPUT_TIMEOUT: 30m`` (= 1800s). The guard fires; the
+    message must say ``setup_timeout (2700s)``, not ``(1800s)``.
+    """
+    from mergecraft.agents.shared import AgentResult
+
+    sentinel_agent = FakeAgent(
+        name="claude",
+        result=AgentResult(success=True, output="must-not-run"),
+    )
+
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(
+            setup_script="./anything-here",
+        ),
+        env={
+            "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
+            "INPUT_SETUP_TIMEOUT": "45m",
+            "INPUT_TIMEOUT": "30m",
+        },
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        agents_by_slug={"claude": sentinel_agent},
+    )
+    assert rec.result is not None
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome is RunOutcome.configuration_error, (
+        f"45m setup vs 30m run must fail closed as configuration_error; got {outcome!r}"
+    )
+    assert sentinel_agent.calls == [], "agent must not run when the guard rejects the configuration"
+    # The message must surface the value the operator actually configured
+    # (2700s for ``45m``), NOT a silently-min-capped value (which would be
+    # 1800s for ``30m`` and read as "equal deadline" — the very thing the
+    # cap was hiding).
+    last = rec.report_status_calls[-1]
+    reason = str(last.get("failure_reason") or "")
+    assert "setup_timeout (2700s)" in reason, (
+        f"S1 follow-up violated: the guard's message must report the "
+        f"operator-configured value (2700s for 45m), not a silently-min-"
+        f"capped value; got {reason!r}"
+    )
+    assert "setup_timeout (1800s)" not in reason, (
+        f"S1 follow-up violated: the guard's message must NOT report the "
+        f"min-capped value (1800s for 30m); got {reason!r}"
+    )
+    assert "run timeout (1800s)" in reason, (
+        f"the run timeout half of the message must reflect the configured "
+        f"INPUT_TIMEOUT (30m = 1800s); got {reason!r}"
+    )
 
 
 async def test_timed_out_setup_script_yields_inconclusive(
@@ -253,6 +400,11 @@ async def test_setup_timeout_is_deducted_from_the_run_budget(
         env={
             "GITHUB_EVENT_NAME": _TRUSTED_EVENT,
             "INPUT_TIMEOUT": f"{int(full_budget_s)}s",
+            # Pin a setup budget shorter than the run budget so the S1
+            # review follow-up ``setup_timeout < timeout`` guard accepts
+            # the configuration — this test is about *deduction*, not
+            # about the equal-deadline edge (covered separately).
+            "INPUT_SETUP_TIMEOUT": "5s",
         },
         event_name=_TRUSTED_EVENT,
         event_payload=_TRUSTED_PAYLOAD,
@@ -288,6 +440,8 @@ async def test_setup_timeout_is_deducted_from_the_run_budget(
 __all__ = [
     "test_hanging_setup_script_is_killed_at_deadline",
     "test_setup_script_grandchildren_are_reaped",
+    "test_setup_timeout_error_message_reports_configured_value",
+    "test_setup_timeout_exceeding_run_budget_raises_configuration_error",
     "test_setup_timeout_is_deducted_from_the_run_budget",
     "test_timed_out_setup_script_yields_inconclusive",
 ]

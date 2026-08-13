@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   aborts as `configuration_error` instead of silently executing the agent as
   root — previously that degradation was logged at `debug` and the review
   continued. The image build now asserts both are present.
+- Fixed: the privilege drop also rejects the resolved user when its UID/GID is
+  0 — the username is not the security boundary, so `MERGECRAFT_AGENT_USER=root`
+  (or any user mapped to uid 0) can no longer silently run the agent as root
+- Fixed: `prepare_workspace_for_agent` is now guarded at its `main()` call site,
+  so a missing/UID-0 agent user surfaces as `RunOutcome.configuration_error`
+  instead of escaping as an uncaught traceback
 - Trust tier is derived before any repo-controlled git setup or `setupScript`;
   untrusted events skip operator scripts instead of running them first
 - Agent CLI subprocesses receive an explicit credential allowlist — no ambient
@@ -28,14 +34,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed: `derive_trust_tier` now returns `untrusted` for unrecognized or
   malformed GitHub event shapes instead of defaulting to `trusted`.
   Previously an unknown event type received the most permissive tier. The
-  events that must stay trusted (`workflow_dispatch`, `pull_request_target`,
-  fork / same-repo `pull_request`) have explicit branches and are unaffected.
+  `pull_request` dict branch is gated on `GITHUB_EVENT_NAME == "pull_request"`
+  and only a same-repo shape (`fork is False`) earns the trusted tier; an
+  unknown event name with a PR-shaped payload, or a `pull_request` payload
+  with missing or wrong-typed nested fields, fails closed to `untrusted`.
   Comment / schedule / `workflow_call` / `workflow_run` / `merge_group` /
   `push` / `release` / empty `GITHUB_EVENT_NAME` all resolve to `untrusted`.
   (#144)
 
 ### Added
 
+- `feat(findings): carry unresolved review findings past the merge` — a merged PR
+  keeps its inline comments forever but nobody re-opens one, so findings the
+  author never fixed or rebutted were lost to attention. `mergecraft findings
+  export --pr N` prints them (read-only, JSON or markdown) and `mergecraft
+  findings carryover --pr N --apply` files one issue each, labelled
+  `mergecraft-carryover`. Only unresolved, mergeCraft-raised, human-unanswered
+  threads carry over; `--include-resolved` / `--include-answered` widen that.
+  Re-running is a no-op — every filed issue embeds a PR-scoped carryover key and
+  each sweep reads those back first, so a finding reintroduced by a later PR
+  still files as the regression it is. `.github/workflows/findings-carryover.yml`
+  runs it on every merged PR, dry unless the `CARRYOVER_AUTO_APPLY` repository
+  variable is set. See [`docs/findings-carryover.md`](docs/findings-carryover.md).
 - `feat(tracing): enrich tool.call attrs to carry invoke + complete + verb sub-event info` —
   every `tool.call` span carries the request/response byte counts, `exit_code`,
   error class/message, and input-key list. Known-verb tools (`browser`,

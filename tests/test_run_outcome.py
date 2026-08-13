@@ -170,6 +170,55 @@ async def test_configuration_error_outcome_on_bad_timeout(
     assert getattr(rec.result, "outcome", None) == run_outcome_cls.configuration_error
 
 
+async def test_configuration_error_outcome_on_uid_zero_agent_user(
+    run_outcome_cls: Any, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """N2 — ``prepare_workspace_for_agent`` runs ahead of the outer
+    ``try/except`` in ``main()``. Without an explicit guard the missing-user /
+    UID-0 failure escapes as an uncaught traceback instead of landing in
+    ``RunOutcome.configuration_error``. Drives the real ``main()`` with the
+    agent user resolving to UID/GID 0 and asserts the structured outcome plus
+    a clean (non-raised) return.
+    """
+    import os as _os
+    import pwd as _pwd
+
+    import mergecraft.utils.privilege as privilege_mod
+
+    # Force the root path so ``prepare_workspace_for_agent`` is exercised and
+    # patch ``pwd.getpwnam`` so the agent user resolves to UID/GID 0 — the
+    # hole the N1 fix plugs.
+    monkeypatch.setattr(_os, "getuid", lambda: 0)
+    monkeypatch.setattr(
+        privilege_mod.pwd if hasattr(privilege_mod, "pwd") else _pwd,
+        "getpwnam",
+        lambda _name: type(
+            "_Pw",
+            (),
+            {"pw_name": "root", "pw_uid": 0, "pw_gid": 0},
+        )(),
+    )
+
+    rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    # The exception must NOT escape ``main()`` — the bug fixed in N2 was that
+    # the call ran outside the outer handler.
+    assert rec.raised is None, (
+        f"_ConfigurationError escaped main(): {rec.raised!r}; main() must guard "
+        f"prepare_workspace_for_agent at its call site"
+    )
+    assert rec.result is not None
+    assert not rec.result.success
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome == run_outcome_cls.configuration_error, (
+        f"UID-0 agent user mapped to {outcome!r}; must be configuration_error so "
+        f"the GitHub check concludes neutral rather than crashing the runner"
+    )
+    # Structured failure reason — the operator needs to know *what* failed,
+    # not just that it failed.
+    assert rec.result.error, "structured failure reason must be carried on MainResult.error"
+
+
 async def test_inconclusive_outcome_on_prep_failure(
     run_outcome_cls: Any, monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -193,12 +242,6 @@ async def test_every_outcome_maps_to_a_check_conclusion(
     ``passed`` may produce ``success`` (conservative approval-gate semantics).
     """
     valid_conclusions = {"success", "failure", "neutral", "cancelled", "skipped", "timed_out"}
-    # S1 / F6: ``configuration_error`` from a bad ``INPUT_TIMEOUT`` is the one
-    # scenario that does NOT generate a status check call. The run deadline is
-    # resolved up front (so the setup-script budget can be capped against it),
-    # which means a bad ``INPUT_TIMEOUT`` fails before ``tool_context`` is
-    # created and the ``except Exception`` handler cannot reach
-    # ``report_status_checks``. All other scenarios fire a status check.
     scenarios: dict[str, dict[str, Any]] = {
         "passed": {},
         "failed": {"agent": FakeAgent(result=AgentResult(success=False, error="blocked"))},
@@ -213,14 +256,18 @@ async def test_every_outcome_maps_to_a_check_conclusion(
         rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=scenario_tmp, **kwargs)
         outcome = getattr(rec.result, "outcome", None) if rec.result else None
         assert outcome == getattr(run_outcome_cls, name), f"scenario {name!r} produced {outcome!r}"
-        if name != "configuration_error":
-            assert rec.report_status_calls, f"no status check reported for {name!r}"
-            conclusion = rec.report_status_calls[-1].get("conclusion")
-            assert conclusion in valid_conclusions, (
-                f"outcome {name} mapped to invalid conclusion {conclusion!r}"
-            )
-            if name != "passed":
-                assert conclusion != "success", f"non-passed outcome {name} reported success"
+        assert rec.report_status_calls, (
+            f"no status check reported for {name!r} — every outcome must produce a "
+            f"completion check (W5.1). The S1 review follow-up restored this for "
+            f"the bad-``timeout`` scenario by deferring validation until after "
+            f"``tool_context`` is built."
+        )
+        conclusion = rec.report_status_calls[-1].get("conclusion")
+        assert conclusion in valid_conclusions, (
+            f"outcome {name} mapped to invalid conclusion {conclusion!r}"
+        )
+        if name != "passed":
+            assert conclusion != "success", f"non-passed outcome {name} reported success"
 
 
 class TestConfigurationErrorClassification:

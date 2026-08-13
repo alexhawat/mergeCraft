@@ -1,18 +1,13 @@
-"""Main orchestration — local-config BYOK runtime (no mergecraft.com).
-
-The orchestrator stays thin: every non-trivial helper lives in a dedicated
-``main_*.py`` module (``main_models``, ``main_setup``, ``main_agent``,
-``main_outcome``) so this file holds only the top-level flow plus the
-small handful of main-scoped helpers that have no other natural home.
-"""
+"""Main orchestration — local-config BYOK runtime (no mergecraft.com)."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import os
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+import time
+from dataclasses import dataclass, replace
+from typing import Any
 
 from loguru import logger
 
@@ -20,36 +15,29 @@ from mergecraft.action.inputs import apply_setup_overrides, apply_tracing_overri
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult, AgentRunContext
-from mergecraft.analyzers.redact import install_loguru_redaction_filter
-from mergecraft.analyzers.trust import derive_trust_tier
+from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_secrets
+from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
+from mergecraft.analyzers.trust import (
+    allow_repo_command_overrides,
+    derive_trust_tier,
+    resolve_analyzers_mode,
+)
 from mergecraft.evidence.run_packet import emit_run_packet
-
-# Re-exports keep every legacy import path working; the bodies live in
-# dedicated ``main_*.py`` modules so the orchestrator stays under the
-# 1k-line ceiling.
-from mergecraft.main_agent import (
-    _AgentRunArgs,
-    _AgentTimeoutError,
-    _build_tool_context,
-    _run_agent_with_timeout,
-)
-from mergecraft.main_models import (
-    _ConfigurationError,
-    _resolve_agent_model,
-    _resolve_run_budget,
-)
-from mergecraft.main_outcome import _classify_outcome, _publish_span_attrs
-from mergecraft.main_setup import _compute_agent_deadline, _run_setup_script
+from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
-from mergecraft.mcp.tool_state import ProgressComment, ToolState, init_tool_state
+from mergecraft.mcp.tool_state import ProgressComment, init_tool_state
 from mergecraft.modes import _custom_modes, compute_modes
+from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
 from mergecraft.utils.agent_resolve import (
     ModelFallbackPolicyError,
     effective_model_chain,
+    pick_runnable_slug_from_chain,
     promote_model_evidence,
     resolve_model,
+    resolve_runtime_agent,
+    run_with_model_chain,
 )
 from mergecraft.utils.code_scanning import report_sarif_upload
 from mergecraft.utils.git_setup import (
@@ -68,12 +56,19 @@ from mergecraft.utils.learnings import (
 from mergecraft.utils.log import bind_run_context
 from mergecraft.utils.normalize_env import normalize_env
 from mergecraft.utils.payload import (
+    TIMEOUT_DISABLED,
     read_github_event,
     resolve_output_schema,
     resolve_payload,
     resolve_prompt_input,
+    resolve_timeout_ms,
 )
 from mergecraft.utils.privilege import prepare_workspace_for_agent
+from mergecraft.utils.process_group import (
+    kill_process_group,
+    register_process_group,
+    unregister_process_group,
+)
 from mergecraft.utils.secrets import set_env_allowlist
 from mergecraft.utils.skills import install_bundled_skills
 from mergecraft.utils.status_checks import report_status_checks
@@ -83,22 +78,6 @@ from mergecraft.utils.workspace import (
     ensure_github_workspace_registered,
     resolve_allowed_working_directory,
 )
-
-if TYPE_CHECKING:
-    from mergecraft.config.settings import RepoSettings
-    from mergecraft.mcp.context import ToolContext
-    from mergecraft.modes import Mode
-
-
-__all__ = ["MainResult", "RunOutcome", "_AgentTimeoutError", "_ConfigurationError", "main"]
-
-# Backwards-compat re-export — the S1/S3/S5 helper split (commit 4e8f420+)
-# moved ``_first_runnable_in_chain`` into ``main_models``. ``main.py`` does
-# not call it directly, but the test harness (``tests/support/run_main_harness.py``)
-# monkeypatches ``mergecraft.main._first_runnable_in_chain`` to drive the
-# harness single-slug fast-path, so we re-bind the name here as a stable
-# patch surface. The helper module owns the actual call sites.
-from mergecraft.main_models import _first_runnable_in_chain  # noqa: F401
 
 
 @dataclass(slots=True)
@@ -115,6 +94,67 @@ class MainResult:
     # ``None`` only for call sites that predate W5 (tests constructing a
     # ``MainResult`` directly); every real ``main()`` return path sets it.
     outcome: RunOutcome | None = None
+
+
+def _first_runnable_in_chain(chain: list[str]) -> str:
+    """Harness-patchable one-arg facade over :func:`pick_runnable_slug_from_chain`.
+
+    ``allow_fallback`` lives on the function object (not a module global) so the
+    harness can still replace this symbol with ``lambda chain: …`` while
+    ``main`` stamps the policy before calling.
+    """
+    allow = bool(getattr(_first_runnable_in_chain, "allow_fallback", True))
+    return pick_runnable_slug_from_chain(chain, allow_fallback=allow)
+
+
+_first_runnable_in_chain.allow_fallback = True  # type: ignore[attr-defined]
+
+
+def _payload_to_ctx(payload: dict[str, Any]) -> ResolvedPayload:
+    event_val = payload.get("event")
+    raw_event: dict[str, Any] = event_val if isinstance(event_val, dict) else {}
+    event = PayloadEvent(
+        trigger=str(raw_event.get("trigger") or "unknown"),
+        issue_number=raw_event.get("issue_number"),
+        is_pr=bool(raw_event.get("is_pr")),
+        branch=raw_event.get("branch"),
+        title=raw_event.get("title"),
+        body=raw_event.get("body"),
+    )
+    return ResolvedPayload(
+        event=event,
+        shell=payload.get("shell") or "restricted",
+        push=payload.get("push") or "restricted",
+        triggerer=payload.get("triggerer"),
+        model=payload.get("model"),
+        cwd=payload.get("cwd"),
+        generate_summary=bool(payload.get("generateSummary")),
+        status_checks=bool(payload.get("statusChecks")),
+        suggest_eval_add=bool(payload.get("suggestEvalAdd")),
+        timeout=payload.get("timeout"),
+        prompt=str(payload.get("prompt") or ""),
+        xrepo=payload.get("xrepo"),
+        extra=payload,
+    )
+
+
+class _AgentTimeoutError(RuntimeError):
+    """Marks the ``asyncio.wait_for`` timeout path (D3/W5.2).
+
+    A plain ``RuntimeError`` would be indistinguishable from any other agent
+    crash once it reaches the outer catch-all; this subclass lets
+    ``_classify_error_outcome`` tag it ``RunOutcome.timed_out`` instead of
+    the generic ``infra_error`` default.
+    """
+
+
+class _ConfigurationError(RuntimeError):
+    """Marks fail-closed configuration errors (D4/W6.3).
+
+    Raised for unparseable Action inputs (e.g. ``timeout``) so the outer
+    handler can tag ``RunOutcome.configuration_error`` without confusing
+    them with infra crashes.
+    """
 
 
 def _classify_error_outcome(error: BaseException) -> RunOutcome:
@@ -137,14 +177,57 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
     return RunOutcome.infra_error
 
 
+def _short_circuit_setup_failure(
+    setup_hook_failure: str,
+    setup_failure_policy: str,
+) -> tuple[str, _ConfigurationError | str | None]:
+    """Decide whether a trusted-tier ``setup_script`` failure short-circuits the run (S1 / D10).
+
+    Returns a 2-tuple ``(action, payload)`` consumed by :func:`main`:
+
+    - ``("abort", _ConfigurationError(reason))`` — ``fail`` policy. Raise the
+      exception so the outer handler maps the run to ``configuration_error``
+      while still calling ``report_status_checks`` and ``persist_learnings``.
+    - ``("skip_agent", reason)`` — ``inconclusive`` policy. The agent loop
+      must NOT run (no review/mutation tools); ``main`` returns a
+      ``MainResult(outcome=RunOutcome.inconclusive)`` after running the
+      publish block.
+    - ``("continue", None)`` — no failure, ``warn`` policy, or otherwise. The
+      agent loop proceeds.
+
+    The ``fail`` branch raises rather than returning ``RunOutcome`` directly
+    so the operator gets the existing configuration-error semantics (same
+    path as invalid action-input values). The ``inconclusive`` branch uses a
+    sentinel return so ``main`` can run the publish block — skipping that
+    would leave the run without a status check.
+    """
+    if not setup_hook_failure:
+        return ("continue", None)
+    if setup_failure_policy == "fail":
+        return ("abort", _ConfigurationError(setup_hook_failure))
+    if setup_failure_policy == "inconclusive":
+        return ("skip_agent", setup_hook_failure)
+    # ``warn`` and any other value fall through; the late outcome block at
+    # the bottom of ``main`` handles them.
+    return ("continue", None)
+
+
 async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
     """Return a reason string when review-relevant dependency prep failed (W6.1).
 
     Awaits an in-progress install before inspecting status.
-    Trusted-tier ``setup_script`` failures live in :func:`main`'s outcome
-    resolver and never reach this helper — that path is policy-driven
-    (configurable via ``setup_failure_policy``), while dependency-prep
-    failure is a fixed-shape ``inconclusive`` mapping.
+
+    Trusted-tier ``setup_script`` failures are **not** included here. They
+    resolve through ``setup_failure_policy`` (S1 / D10 — closed vocabulary
+    ``inconclusive`` | ``fail`` | ``warn``) at the post-run outcome block
+    in :func:`main` — see :data:`mergecraft.action.inputs.SetupFailurePolicy`
+    and ``docs/config-failure-policy.md``. This helper only emits a reason
+    string; the ``fail`` policy short-circuits at the run-time guard above
+    (so this branch never sees a ``fail``-mapped outcome). The ``warn`` and
+    ``inconclusive`` policies carry their own resolution text via
+    ``tool_state.setup_hook_failure`` and are deliberately kept off this
+    helper's path so prep and setup failure reasons stay distinguishable
+    to the operator.
     """
     state = tool_context.tool_state.dependency_installation
     if state is None:
@@ -165,272 +248,69 @@ async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
     return "dependency installation failed"
 
 
-def _extract_pr_number(github_event: Any) -> int | str | None:
-    """Pull the PR number off the GitHub event payload (PR or issue-shaped)."""
-    if not isinstance(github_event, dict):
-        return None
-    pr = github_event.get("pull_request")
-    if isinstance(pr, dict) and pr.get("number") is not None:
-        number = pr["number"]
-        return number if isinstance(number, (int, str)) else None
-    issue = github_event.get("issue")
-    if (
-        isinstance(issue, dict)
-        and isinstance(issue.get("pull_request"), dict)
-        and issue.get("number") is not None
-    ):
-        number = issue["number"]
-        return number if isinstance(number, (int, str)) else None
-    return None
-
-
-def _build_progress_comment(resolved_prompt: Any) -> ProgressComment | None:
-    """Promote a resolved prompt's progress comment to a ``ProgressComment``."""
-    if isinstance(resolved_prompt, str) or resolved_prompt.progress_comment is None:
-        return None
-    return ProgressComment(
-        id=resolved_prompt.progress_comment.id,
-        type=resolved_prompt.progress_comment.type,
-    )
-
-
-def _resolve_model_chain_inputs(
-    payload: dict[str, Any], settings: RepoSettings
-) -> tuple[bool, str | None, list[str], Any]:
-    """Resolve ``model_pin`` / ``model_head`` / ``chain_for_decision`` (W4/D8)."""
-    payload_model = payload.get("model")
-    # ``model_pin`` opts into the legacy "use exactly this model" semantics
-    # when True: ``model:`` collapses the chain to a single entry. Default
-    # is chain-preserving — the supplied ``model:`` becomes the head of the
-    # effective chain. ``modelExplicit`` is a back-compat alias for the
-    # legacy pin signal.
-    model_pin = bool(payload.get("modelPin") or payload.get("modelExplicit"))
-    model_head = payload.get("modelHead") or (
-        payload_model if isinstance(payload_model, str) else None
-    )
-    chain_for_decision = effective_model_chain(settings=settings, head=model_head, pin=model_pin)
-    return model_pin, model_head, chain_for_decision, payload_model
-
-
-def _stamp_requested_model(
-    tool_state: ToolState,
-    payload_model: Any,
-    chain_for_decision: list[str],
-    selected_slug: str | None,
-    resolved_model: str | None,
-    payload: dict[str, Any],
-) -> None:
-    """Stamp the requested-vs-executed model evidence onto ``tool_state`` (W10.2)."""
-    proxy_model: Any = payload.get("proxyModel")
-    payload_model_value: Any = payload.get("model")
-    chosen = proxy_model or resolved_model or payload_model_value
-    tool_state.model = chosen if isinstance(chosen, str) else None
-    if chain_for_decision:
-        tool_state.requested_model = chain_for_decision[0]
-    elif selected_slug:
-        tool_state.requested_model = selected_slug
-    elif isinstance(payload_model, str) and payload_model.strip():
-        tool_state.requested_model = payload_model.strip()
-    else:
-        tool_state.requested_model = tool_state.model
-    tool_state.fallback_index = 0
-    tool_state.fallback_occurred = False
-
-
-async def _seed_learnings(
-    tool_state: ToolState, settings: RepoSettings, tmpdir: str, payload: dict[str, object]
-) -> None:
-    """Seed the run's learnings + xrepo-learnings files (best-effort)."""
-    try:
-        learnings_path = await seed_learnings_file(tmpdir=tmpdir, current=settings.learnings)
-        tool_state.learnings_file_path = learnings_path
-        tool_state.learnings_seed = (settings.learnings or "").strip()
-        # D10 / W6.5 — wire the opt-in auto-promote flag from
-        # ``RepoSettings`` into ``tool_state`` so ``persist_learnings``
-        # honors it. Default is fail-closed (staging only); setting
-        # ``autopromoteLearnings: true`` restores legacy behaviour for
-        # trusted maintainer authors (see ``utils/learnings.py``).
-        tool_state.autopromote_learnings = settings.autopromote_learnings
-        logger.info(
-            "» learnings seeded at {} (existing={})",
-            learnings_path,
-            "yes" if settings.learnings else "no",
-        )
-    except Exception as exc:
-        logger.warning("» learnings seed failed: {} — continuing without learnings file", exc)
-
-    if payload.get("xrepo"):
-        try:
-            xrepo_path = await seed_xrepo_learnings_file(
-                tmpdir=tmpdir, current=settings.xrepo_learnings
-            )
-            tool_state.xrepo_learnings_file_path = xrepo_path
-            tool_state.xrepo_learnings_seed = (settings.xrepo_learnings or "").strip()
-        except Exception as exc:
-            logger.warning("» xrepo learnings seed failed: {}", exc)
-
-
-def _promote_winning_slug(
-    winning_slug: str,
-    result: Any,
-    chain_for_decision: list[str],
-    tool_state: ToolState,
-    tool_context: ToolContext,
-    payload: dict[str, object],
-) -> str | None:
-    """Stamp the winning model + requested/executed evidence onto ``tool_state``.
-
-    W10.2/W10.3 — single promotion path; chain stamps metadata in
-    ``_attach_model_evidence``, single-slug defaults to index 0.
-    """
-    resolved_model = resolve_model(slug=winning_slug, respect_env_override=False)
-    tool_context.resolved_model = resolved_model
-    meta = getattr(result, "metadata", None) or {}
-    requested_meta = meta.get("requested_model")
-    requested = (
-        requested_meta.strip()
-        if isinstance(requested_meta, str) and requested_meta.strip()
-        else (chain_for_decision[0] if chain_for_decision else tool_state.requested_model)
-    )
-    fallback_raw = meta.get("fallback_index")
-    fallback_index = fallback_raw if isinstance(fallback_raw, int) else 0
-    executed = payload.get("proxyModel") or resolved_model or winning_slug
-    promote_model_evidence(
-        tool_state,
-        requested_model=requested,
-        executed_model=executed if isinstance(executed, str) else winning_slug,
-        fallback_index=fallback_index,
-    )
-    return resolved_model
-
-
-async def _run_publish_span_block(
-    tool_context: ToolContext,
-    tool_state: ToolState,
-    settings: RepoSettings,
-    outcome: RunOutcome,
-    failure_reason: str | None,
-) -> str | None:
-    """Run the ``mergecraft.publish`` span block — evidence emission.
-
-    Returns the packet path (or ``None`` if no ``tool_context`` is set up
-    yet — the catch-all path). The ``attrs_source`` lambda is required by
-    the tracer API (``Callable[[], dict[str, Any]] | None`` in
-    ``tracing/tracer.py``); the helper it delegates to
-    (``_publish_span_attrs``) is what ``#145`` contract reads.
-    """
-    from mergecraft.tracing.tracer import get_tracer_from_settings
-
-    if tool_context is None:
-        return None
-    tracer = get_tracer_from_settings(settings)
-    with tracer.start_span(
-        "mergecraft.publish",
-        attrs_source=lambda: _publish_span_attrs(outcome, _selected_mode(tool_state, tool_context)),
-    ):
-        await persist_learnings(tool_context)
-        await report_status_checks(
-            tool_context,
-            run_succeeded=run_succeeded_for_outcome(outcome),
-            failure_reason=failure_reason,
-            conclusion=RUN_OUTCOME_CONCLUSION[outcome],
-        )
-        # #39 — opt-in, off by default, and never a gate: with
-        # `sarif_upload` unset this returns before making any request.
-        await report_sarif_upload(tool_context)
-        # Emit the merge evidence packet last, so it records the run's
-        # final state. A blocked or failed run is exactly when the
-        # evidence matters most, so this runs on both branches below.
-        written = await asyncio.to_thread(
-            emit_run_packet, tool_context, run_succeeded=outcome is RunOutcome.passed
-        )
-        return str(written) if written else None
-
-
-def _selected_mode(tool_state: ToolState, tool_context: ToolContext) -> Mode | None:
-    """Return the ``Mode`` object matching ``selected_mode``, or ``None``.
-
-    The mode catalog lives on ``tool_context.modes``; the selected mode
-    name lives on ``tool_state.selected_mode``. When the agent did not
-    dispatch (short-circuit or crash) there is no selected mode, and the
-    trace attrs simply omit mode-specific keys.
-    """
-    selected_name = tool_state.selected_mode
-    if not selected_name:
-        return None
-    for m in tool_context.modes:
-        if m.name == selected_name:
-            return m
-    return None
-
-
-def _build_main_result(
-    outcome: RunOutcome,
-    failure_reason: str | None,
-    packet_path: str | None,
-    result: Any,
-    tool_state: ToolState,
-) -> MainResult:
-    """Build the ``MainResult`` returned to the caller (passed / failed)."""
-    if outcome is not RunOutcome.passed:
-        return MainResult(
-            success=False,
-            error=failure_reason or getattr(result, "error", None) or "agent execution failed",
-            evidence_packet_path=packet_path,
-            outcome=outcome,
-        )
-    output = tool_state.output or getattr(result, "output", None)
-    return MainResult(
-        success=True,
-        output=output,
-        result=output,
-        evidence_packet_path=packet_path,
-        outcome=outcome,
-    )
-
-
 async def main() -> MainResult:
     """Run the mergecraft action flow using local ``.mergecraft/config.yaml``."""
     install_loguru_redaction_filter()
     normalize_env()
     ensure_github_workspace_registered()
+    workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
+    if workspace:
+        # Guard the workspace prep at its call site so a missing/UID-0 agent
+        # user surfaces as a structured ``RunOutcome.configuration_error``
+        # rather than escaping as an uncaught traceback. The outer ``try/except``
+        # below is reached only after this block returns, so we route through
+        # the same classification the outer handler would have used.
+        try:
+            prepare_workspace_for_agent(workspace)
+        except _ConfigurationError as exc:
+            return MainResult(
+                success=False,
+                error=str(exc),
+                outcome=_classify_error_outcome(exc),
+            )
     stop_mcp = None
     github: GitHubClient | None = None
     token_ref = None
     tool_context: ToolContext | None = None
+    tmpdir: str | None = None
+
     try:
-        workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
-        if workspace:
-            # S2 — a missing agent user fails closed as ``_ConfigurationError``.
-            # Must be inside the ``try`` so the outer catch classifies it as
-            # ``RunOutcome.configuration_error`` instead of crashing unclassified.
-            prepare_workspace_for_agent(workspace)
-
         resolved_prompt = resolve_prompt_input()
-        github = GitHubClient(get_job_token())
+        job_token = get_job_token()
+        github = GitHubClient(job_token)
         run_context = await resolve_run_context_data(github)
-
-        # S1 / D10 — apply the action-input setup overrides (policy + timeout).
-        # ``apply_setup_overrides`` resolves ``INPUT_SETUP_FAILURE_POLICY`` and
-        # ``INPUT_SETUP_TIMEOUT`` and raises ``ValueError`` on bad input. We
-        # translate that into ``_ConfigurationError`` here so the outer catch
-        # maps it to ``RunOutcome.configuration_error`` *after* ``tool_context``
-        # is set up (so ``report_status_checks`` still fires).
-        try:
-            settings = apply_setup_overrides(apply_tracing_overrides(run_context.repo_settings))
-        except ValueError as exc:
-            raise _ConfigurationError(str(exc)) from None
+        settings = apply_tracing_overrides(run_context.repo_settings)
 
         github_event = read_github_event()
         trust_tier = derive_trust_tier(event=github_event)
+
+        pr_number: int | str | None = None
+        if isinstance(github_event, dict):
+            pr = github_event.get("pull_request")
+            if isinstance(pr, dict) and pr.get("number") is not None:
+                pr_number = pr["number"]
+            else:
+                issue = github_event.get("issue")
+                if (
+                    isinstance(issue, dict)
+                    and isinstance(issue.get("pull_request"), dict)
+                    and issue.get("number") is not None
+                ):
+                    pr_number = issue["number"]
         bind_run_context(
             run_id=os.environ.get("GITHUB_RUN_ID"),
             repo=f"{run_context.repo.owner}/{run_context.repo.name}",
-            pr=_extract_pr_number(github_event),
+            pr=pr_number,
             phase="setup",
         )
 
-        progress = _build_progress_comment(resolved_prompt)
+        progress = None
+        if not isinstance(resolved_prompt, str) and resolved_prompt.progress_comment:
+            progress = ProgressComment(
+                id=resolved_prompt.progress_comment.id,
+                type=resolved_prompt.progress_comment.type,
+            )
+
         tool_state = init_tool_state(
             owner=run_context.repo.owner,
             name=run_context.repo.name,
@@ -446,10 +326,37 @@ async def main() -> MainResult:
         payload = resolve_payload(resolved_prompt, settings)
         tool_state.model = payload.get("model")
         tool_state.oss = run_context.oss
+
+        # Resolve the run deadline up front so the setup-script budget can
+        # be capped against it (S1 / F6 — setup must never consume the
+        # whole run budget). Invalid input is captured into a sentinel
+        # ``timeout_error``; the actual ``_ConfigurationError`` raise is
+        # deferred until AFTER ``tool_context`` is constructed so the
+        # outer handler can still call ``report_status_checks`` for the
+        # ``configuration_error`` outcome (S1 review / NEW1+NEW2 —
+        # building the reporting context first, then validating, prevents
+        # setup from running on bad inputs while preserving completion-
+        # check reporting).
         timeout_raw = payload.get("timeout")
-        timeout_ms, setup_timeout_s = _resolve_run_budget(payload, settings)
+        timeout_ms: int | None
+        timeout_error: str | None = None
+        if timeout_raw == TIMEOUT_DISABLED:
+            timeout_ms = None
+        elif timeout_raw:
+            usable = resolve_timeout_ms(timeout_raw)
+            if usable is None:
+                timeout_ms = None
+                timeout_error = (
+                    f'invalid timeout "{timeout_raw}" '
+                    "(use a duration like 10m/1h or --notimeout to disable)"
+                )
+            else:
+                timeout_ms = usable
+        else:
+            timeout_ms = 3_600_000
 
         wipe_runner_leak_surface()
+
         if payload.get("shell") != "enabled":
             os.environ.pop("ACTIONS_ID_TOKEN_REQUEST_URL", None)
             os.environ.pop("ACTIONS_ID_TOKEN_REQUEST_TOKEN", None)
@@ -457,6 +364,7 @@ async def main() -> MainResult:
         token_ref = await resolve_tokens(
             push=payload.get("push") or "restricted", xrepo=payload.get("xrepo")
         )
+        # Prefer MCP token for API calls
         await github.aclose()
         github = GitHubClient(token_ref.mcp_token)
 
@@ -466,16 +374,149 @@ async def main() -> MainResult:
             if os.getcwd() != resolved_cwd:
                 os.chdir(resolved_cwd)
 
-        model_pin, model_head, chain_for_decision, payload_model = _resolve_model_chain_inputs(
-            payload, settings
+        payload_model = payload.get("model")
+        # #37 / W4 / D8 — ``model_pin`` opts into the legacy "use exactly this
+        # model" semantics: when True, ``model:`` collapses the chain to a
+        # single entry. Default is chain-preserving — the supplied ``model:``
+        # becomes the head of the effective chain and the configured ``models:``
+        # tail follows. ``modelExplicit`` is retained as a back-compat alias
+        # for the legacy pin signal so any consumer that branched on it still
+        # behaves the same.
+        model_pin = bool(
+            payload.get("modelPin") or payload.get("modelExplicit")  # legacy alias
         )
-        selected_slug, resolved_model, agent, use_model_chain = _resolve_agent_model(
-            model_head, model_pin, chain_for_decision, settings
+        model_head = payload.get("modelHead") or (
+            payload_model if isinstance(payload_model, str) else None
         )
+        chain_for_decision = effective_model_chain(
+            settings=settings, head=model_head, pin=model_pin
+        )
+        # ``use_model_chain`` is true whenever an effective chain has more
+        # than one entry OR the operator asked for the chain explicitly. The
+        # legacy ``not model_explicit`` short-circuit is gone — a supplied
+        # ``model:`` no longer disables the chain.
+        use_model_chain = len(chain_for_decision) > 1 or (
+            bool(chain_for_decision) and model_head is not None and not model_pin
+        )
+        selected_slug: str | None
+
+        if use_model_chain:
+            _first_runnable_in_chain.allow_fallback = settings.allow_fallback  # type: ignore[attr-defined]
+            selected_slug = _first_runnable_in_chain(chain_for_decision)
+            if not selected_slug:
+                msg = (
+                    "no runnable model slug in chain — configure credentials for at least one entry"
+                )
+                raise RuntimeError(msg)
+            resolved_model = resolve_model(slug=selected_slug, respect_env_override=False)
+        else:
+            # Single-entry chain (or pin opt-in). The chain is collapsed to
+            # exactly ``[model_head]`` when pinned; otherwise it is just the
+            # first configured entry. Honour ``respect_env_override=False``
+            # when the operator named a model explicitly — the action input
+            # already wins.
+            only_slug = (
+                model_head if model_pin else (chain_for_decision[0] if chain_for_decision else None)
+            )
+            resolved_model = resolve_model(slug=only_slug, respect_env_override=False)
+            selected_slug = only_slug
+        agent = resolve_runtime_agent(model=resolved_model)
         agent_id = agent.name
-        _stamp_requested_model(
-            tool_state, payload_model, chain_for_decision, selected_slug, resolved_model, payload
+        tool_state.model = payload.get("proxyModel") or resolved_model or payload.get("model")
+        # W10.2 — record the chain head as the requested model so the packet
+        # can prove requested vs executed even when selection skipped ahead.
+        if chain_for_decision:
+            tool_state.requested_model = chain_for_decision[0]
+        elif selected_slug:
+            tool_state.requested_model = selected_slug
+        elif isinstance(payload_model, str) and payload_model.strip():
+            tool_state.requested_model = payload_model.strip()
+        else:
+            tool_state.requested_model = tool_state.model
+        tool_state.fallback_index = 0
+        tool_state.fallback_occurred = False
+
+        # S1 review / F3+F4 follow-up — build ``tool_context`` BEFORE the
+        # equal-deadline guard and the fail-policy short-circuit so the
+        # outer handler can still call ``report_status_checks`` when those
+        # guards raise ``_ConfigurationError``. The MCP server URL is
+        # blank here; ``start_mcp_http_server`` later fills it in.
+        modes = [
+            *compute_modes(agent_id, settings.signed_commits),
+            *_custom_modes(settings.modes),
+        ]
+        output_schema = resolve_output_schema()
+
+        ctx_payload = _payload_to_ctx(payload)
+        analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
+        sarif_upload_enabled = resolve_sarif_upload_enabled(
+            action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
+            repo_setting=settings.analyzers.sarif_upload,
         )
+        tool_context = ToolContext(
+            agent_id=agent_id,
+            repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
+            payload=ctx_payload,
+            github=github,
+            github_installation_token=token_ref.mcp_token,
+            git_token=token_ref.git_token,
+            api_token=run_context.api_token,
+            modes=modes,
+            tool_state=tool_state,
+            mcp_server_url="",
+            tmpdir=tmpdir,
+            refresh_git_token=token_ref.refresh_git_token,
+            read_token=token_ref.read_token,
+            xrepo=payload.get("xrepo"),
+            prepush_script=settings.prepush_script,
+            pr_approve_enabled=settings.pr_approve_enabled,
+            auto_merge_enabled=settings.auto_merge_enabled,
+            signed_commits=settings.signed_commits,
+            mode_instructions=settings.mode_instructions,
+            static_checks=[
+                StaticCheckConfig(
+                    name=check.name,
+                    command=check.command,
+                    suffixes=tuple(check.suffixes),
+                )
+                for check in settings.static_checks
+            ],
+            static_checks_enabled=(
+                ctx_payload.shell != "disabled" and allow_repo_command_overrides(trust_tier)
+            ),
+            ci_gate_checks=dict(settings.ci_evidence.gates),
+            ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
+            analyzers_mode=analyzers_mode,
+            trust_tier=trust_tier,
+            analyzers_settings_enabled=settings.analyzers.enabled,
+            sarif_upload_enabled=sarif_upload_enabled,
+            run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
+            job_id=os.environ.get("GITHUB_JOB"),
+            oss=run_context.oss,
+            plan="unknown",
+            resolved_model=resolved_model,
+            suggest_eval_add=bool(payload.get("suggestEvalAdd")),
+        )
+
+        # S1 review / NEW1 — apply the action-input setup overrides
+        # (policy + timeout) NOW, after ``tool_context`` is built (so the
+        # outer handler can still call ``report_status_checks`` for the
+        # ``configuration_error`` outcome) but BEFORE ``setup_git`` /
+        # ``asyncio.create_subprocess_shell`` (so a bad value never
+        # triggers the setup script to run). A bad value raises
+        # ``ValueError`` which is re-raised as ``_ConfigurationError``.
+        try:
+            settings = apply_setup_overrides(settings)
+        except ValueError as exc:
+            raise _ConfigurationError(str(exc)) from None
+
+        # S1 review / NEW1 — re-raise the captured bad-``timeout``
+        # sentinel now that ``tool_context`` exists. The input parsing
+        # already classified the input as bad earlier; this block only
+        # fires the guard so a ``--notimeout`` / unset input still
+        # resolves to ``None`` / ``3_600_000`` without firing.
+        if timeout_error is not None:
+            raise _ConfigurationError(timeout_error) from None
 
         await asyncio.to_thread(
             setup_git,
@@ -488,39 +529,181 @@ async def main() -> MainResult:
             octokit=github,
         )
 
-        event_name = os.environ.get("GITHUB_EVENT_NAME", "unknown")
-        setup_hook_failure, setup_script_skip_reason, setup_elapsed_s = await _run_setup_script(
-            tool_state, settings, trust_tier, event_name, setup_timeout_s
-        )
+        # S1 / F6 — wall-clock budget for ``setup_script``. The action-input
+        # resolver already bounds the upper end (``DEFAULT_SETUP_TIMEOUT_S``
+        # = 10 m); the *only* cross-budget constraint is that
+        # ``setup_timeout_s`` be strictly less than the run timeout, so a
+        # failed setup script cannot be masked by an agent timeout
+        # (S1 review / F3 follow-up — equal-or-larger setup budgets let the
+        # setup script consume the entire run deadline, after which the
+        # agent budget is clamped to ~1 ms and the failure surfaces as
+        # ``_AgentTimeoutError`` (``timed_out``) instead of the
+        # ``configuration_error`` / ``inconclusive`` the setup policy was
+        # supposed to produce). Only check when a setup script is actually
+        # configured and a run timeout is in scope.
+        configured_setup_timeout_s = settings.setup_timeout_s
+        if (
+            settings.setup_script
+            and timeout_ms is not None
+            and configured_setup_timeout_s * 1000 >= timeout_ms
+        ):
+            raise _ConfigurationError(
+                f"setup_timeout ({configured_setup_timeout_s}s) must be less than the run "
+                f"timeout ({timeout_ms // 1000}s) so a failed setup script is not "
+                f"masked as an agent timeout"
+            )
+        setup_timeout_s = configured_setup_timeout_s
 
-        modes = [
-            *compute_modes(agent_id, settings.signed_commits),
-            *_custom_modes(settings.modes),
-        ]
-        tool_state.modes = modes
-        output_schema = resolve_output_schema()
+        setup_script_skip_reason = ""
+        setup_hook_failure = ""
+        setup_started_at = time.monotonic()
+        if settings.setup_script:
+            if trust_tier == "trusted":
+                logger.info("» running setup script")
+                proc = await asyncio.create_subprocess_shell(
+                    settings.setup_script,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,  # F6 — session leader so killpg reaches grandchildren
+                )
+                register_process_group(proc.pid)
+                try:
+                    _out, err = await asyncio.wait_for(proc.communicate(), timeout=setup_timeout_s)
+                except TimeoutError:
+                    # F6 — TERM → grace → KILL the whole tree (convention 9).
+                    kill_process_group(proc.pid)
+                    setup_hook_failure = f"setup script timed out after {setup_timeout_s}s"
+                else:
+                    if proc.returncode != 0:
+                        # S1 review / NEW3 — redact the full stderr text
+                        # BEFORE truncating to 500 chars. Truncating first
+                        # can lop a ``ghp_…`` token below the redactor's
+                        # pattern minimum length, leaving a partial prefix
+                        # in the prompt — redaction must run on the whole
+                        # input so the pattern matches and the slice is
+                        # taken from the *redacted* output.
+                        detail = redact_secrets((err or b"").decode(errors="replace"))[:500]
+                        setup_hook_failure = (
+                            f"setup script failed (exit {proc.returncode}): {detail}"
+                        )
+                finally:
+                    unregister_process_group(proc.pid)
+                if setup_hook_failure:
+                    tool_state.setup_hook_failure = setup_hook_failure
+                    logger.warning("» {}", setup_hook_failure)
+            else:
+                event_name = os.environ.get("GITHUB_EVENT_NAME", "unknown")
+                setup_script_skip_reason = (
+                    f"skipped setup_script on untrusted tier ({event_name} event)"
+                )
+                tool_state.setup_script_skip_reason = setup_script_skip_reason
+                logger.warning("» {}", setup_script_skip_reason)
+        setup_elapsed_s = time.monotonic() - setup_started_at
 
-        tool_context = _build_tool_context(
-            payload=payload,
-            settings=settings,
-            run_context=run_context,
-            agent_id=agent_id,
-            github=github,
-            token_ref=token_ref,
-            modes=modes,
-            tool_state=tool_state,
-            tmpdir=tmpdir,
-            trust_tier=trust_tier,
-            resolved_model=resolved_model,
+        # S1 review / F4 + S1 review / N2 — the policy decides whether a
+        # trusted-tier ``setup_script`` failure short-circuits *before* the
+        # agent loop. ``fail`` aborts (existing F4 behaviour); ``inconclusive``
+        # (N2 fix) skips the agent and runs the publish block with outcome
+        # ``inconclusive`` so no review/mutation tool is invoked; ``warn``
+        # falls through to the late outcome block at the bottom of ``main``.
+        # Pre-N2 the ``inconclusive`` branch ran the agent first and only
+        # then rewrote the outcome — letting the agent post reviews / push
+        # branches on an under-provisioned tree.
+        sc_action, sc_payload = _short_circuit_setup_failure(
+            setup_hook_failure, settings.setup_failure_policy
         )
+        if sc_action == "abort":
+            assert isinstance(sc_payload, _ConfigurationError)
+            logger.warning(
+                "» setup script failure under fail policy — aborting before agent runs: {}",
+                setup_hook_failure,
+            )
+            raise sc_payload
+        if sc_action == "skip_agent":
+            assert isinstance(sc_payload, str)
+            skip_reason = sc_payload
+            logger.warning(
+                "» setup script failure under inconclusive policy — skipping agent "
+                "loop to honour no-verdict: {}",
+                skip_reason,
+            )
+            skip_outcome = RunOutcome.inconclusive
+            skip_packet_path: str | None = None
+            if tool_context:
+                from mergecraft.tracing.tracer import get_tracer_from_settings
+
+                tracer = get_tracer_from_settings(settings)
+                with tracer.start_span(
+                    "mergecraft.publish",
+                    attrs_source=lambda: {"run_succeeded": False},
+                ) as _skip_publish_span:
+                    await persist_learnings(tool_context)
+                    await report_status_checks(
+                        tool_context,
+                        run_succeeded=run_succeeded_for_outcome(skip_outcome),
+                        failure_reason=skip_reason,
+                        conclusion=RUN_OUTCOME_CONCLUSION[skip_outcome],
+                    )
+                    # #39 — opt-in, off by default. Never reaches the wire when
+                    # ``sarif_upload`` is unset.
+                    await report_sarif_upload(tool_context)
+                    written = await asyncio.to_thread(
+                        emit_run_packet,
+                        tool_context,
+                        run_succeeded=skip_outcome is RunOutcome.passed,
+                    )
+                    skip_packet_path = str(written) if written else None
+            return MainResult(
+                success=False,
+                error=skip_reason,
+                evidence_packet_path=skip_packet_path,
+                outcome=skip_outcome,
+            )
+
+        # ``tool_context``, ``modes``, ``output_schema``, ``ctx_payload``,
+        # ``analyzers_mode`` and ``sarif_upload_enabled`` were all built
+        # earlier — before the F3 equal-deadline guard and the F4
+        # fail-policy short-circuit — so the outer handler can still call
+        # ``report_status_checks`` when those guards raise
+        # ``_ConfigurationError``. The MCP server URL is filled in below.
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
         tool_context.mcp_server_url = mcp_url
         logger.info("» MCP server started at {}", mcp_url)
+
         subagent_denied = subagent_denied_tool_names(tool_context, output_schema)
-        await _seed_learnings(tool_state, settings, tmpdir, payload)
+
+        try:
+            learnings_path = await seed_learnings_file(tmpdir=tmpdir, current=settings.learnings)
+            tool_state.learnings_file_path = learnings_path
+            tool_state.learnings_seed = (settings.learnings or "").strip()
+            # D10 / W6.5 — wire the opt-in auto-promote flag from
+            # ``RepoSettings`` into ``tool_state`` so ``persist_learnings``
+            # honors it. Default is fail-closed (staging only); setting
+            # ``autopromoteLearnings: true`` restores legacy behaviour for
+            # trusted maintainer authors (see ``utils/learnings.py``).
+            tool_state.autopromote_learnings = settings.autopromote_learnings
+            logger.info(
+                "» learnings seeded at {} (existing={})",
+                learnings_path,
+                "yes" if settings.learnings else "no",
+            )
+        except Exception as exc:
+            logger.warning("» learnings seed failed: {} — continuing without learnings file", exc)
+
+        if payload.get("xrepo"):
+            try:
+                xrepo_path = await seed_xrepo_learnings_file(
+                    tmpdir=tmpdir, current=settings.xrepo_learnings
+                )
+                tool_state.xrepo_learnings_file_path = xrepo_path
+                tool_state.xrepo_learnings_seed = (settings.xrepo_learnings or "").strip()
+            except Exception as exc:
+                logger.warning("» xrepo learnings seed failed: {}", exc)
+
         start_installation(tool_context)
 
+        # Install bundled skills into a fake HOME under tmpdir
         skills_home = os.path.join(tmpdir, "home")
         os.makedirs(skills_home, exist_ok=True)
         try:
@@ -557,62 +740,125 @@ async def main() -> MainResult:
             stop_script=settings.stop_script,
         )
 
-        agent_timeout_ms, deadline_log = _compute_agent_deadline(timeout_ms, setup_elapsed_s)
-        if deadline_log:
-            logger.info(deadline_log)
+        # ``timeout_ms`` and ``timeout_raw`` are resolved up front (just
+        # after ``payload = resolve_payload(...)``) so the setup-script
+        # budget can be capped against the run deadline (S1 / F6). The
+        # ``--notimeout`` / ``none`` escape and the fail-closed validation
+        # both happen there; this block just spends the resolved values.
 
-        # S1 / D10 — a trusted-tier setup failure under the ``inconclusive`` /
-        # ``fail`` policy short-circuits *before* agent dispatch: a Review agent
-        # must not run (and possibly submit a GitHub review) when the outcome
-        # is already decided. Only ``warn`` proceeds to the agent, which is
-        # why the existing post-run ``_classify_outcome`` keeps its final say
-        # for the ``warn`` / no-failure path.
-        if setup_hook_failure and settings.setup_failure_policy != "warn":
-            policy = settings.setup_failure_policy
-            outcome = (
-                RunOutcome.configuration_error if policy == "fail" else RunOutcome.inconclusive
-            )
-            logger.warning(
-                "» setup script failure short-circuits run before agent dispatch ({} policy): {}",
-                policy,
-                setup_hook_failure,
-            )
-            packet_path = await _run_publish_span_block(
-                tool_context, tool_state, settings, outcome, setup_hook_failure
-            )
-            no_run_result = AgentResult(
-                success=False,
-                error=setup_hook_failure,
-            )
-            return _build_main_result(
-                outcome, setup_hook_failure, packet_path, no_run_result, tool_state
-            )
+        async def _run_agent_once(slug: str) -> AgentResult:
+            attempt_model = resolve_model(slug=slug, respect_env_override=False)
+            attempt_agent = resolve_runtime_agent(model=attempt_model)
+            attempt_agent_id = attempt_agent.name
 
-        winning_slug, result = await _run_agent_with_timeout(
-            _AgentRunArgs(
-                agent=agent,
-                agent_id=agent_id,
-                selected_slug=selected_slug,
-                use_model_chain=use_model_chain,
-                settings=settings,
-                model_head=model_head,
-                model_pin=model_pin,
-                run_ctx=run_ctx,
-                payload=payload,
-                run_context=run_context,
-                output_schema=output_schema,
-                tool_state=tool_state,
-                tool_context=tool_context,
-                setup_hook_failure=setup_hook_failure,
-                setup_script_skip_reason=setup_script_skip_reason,
-            ),
-            agent_timeout_ms,
-            timeout_raw,
-        )
+            if attempt_agent_id == agent_id:
+                attempt_ctx = replace(run_ctx, resolved_model=attempt_model)
+            else:
+                attempt_modes = [
+                    *compute_modes(attempt_agent_id, settings.signed_commits),
+                    *_custom_modes(settings.modes),
+                ]
+                attempt_instructions = resolve_instructions(
+                    payload=payload,
+                    repo=run_context.repo,
+                    modes=attempt_modes,
+                    agent_id=attempt_agent_id,
+                    output_schema=output_schema,
+                    signed_commits=settings.signed_commits,
+                    learnings_file_path=tool_state.learnings_file_path,
+                    learnings_headings=settings.learnings_headings,
+                    setup_hook_failure=setup_hook_failure,
+                    setup_script_skip_reason=setup_script_skip_reason,
+                    xrepo_brief=settings.xrepo_brief,
+                    xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
+                    xrepo_learnings_headings=settings.xrepo_learnings_headings,
+                )
+                attempt_denied = subagent_denied_tool_names(
+                    replace(tool_context, agent_id=attempt_agent_id),
+                    output_schema,
+                )
+                attempt_ctx = replace(
+                    run_ctx,
+                    resolved_model=attempt_model,
+                    instructions=attempt_instructions,
+                    subagent_denied_tools=attempt_denied,
+                )
+                tool_context.agent_id = attempt_agent_id
+                tool_context.modes = attempt_modes
+                tool_context.resolved_model = attempt_model
+                logger.info(
+                    "» model chain advanced to agent={} model={}",
+                    attempt_agent_id,
+                    attempt_model or "(auto)",
+                )
+            return await attempt_agent.run(attempt_ctx)
+
+        async def _execute_agent() -> tuple[str | None, AgentResult]:
+            if use_model_chain:
+                winning_slug, chain_result = await run_with_model_chain(
+                    settings=settings,
+                    run_once=_run_agent_once,
+                    head=model_head,
+                    pin=model_pin,
+                )
+                return winning_slug, chain_result
+            return selected_slug, await agent.run(run_ctx)
+
+        agent_task = asyncio.create_task(_execute_agent())
+
+        # S1 / F6 — deduct the setup-script elapsed time from the agent
+        # deadline. A slow setup must NOT silently extend the total run
+        # deadline. ``setup_elapsed_s`` is the wall-clock duration measured
+        # by the bounded setup block above; ``timeout_ms`` is the
+        # pre-deduction run budget.
+        agent_timeout_ms: int | None
+        if timeout_ms is None:
+            agent_timeout_ms = None
+        else:
+            agent_timeout_ms = max(1, int(timeout_ms - setup_elapsed_s * 1000))
+            if agent_timeout_ms != timeout_ms:
+                logger.info(
+                    "» deducted setup elapsed {:.2f}s from agent deadline ({}s -> {}s)",
+                    setup_elapsed_s,
+                    timeout_ms / 1000,
+                    agent_timeout_ms / 1000,
+                )
+
+        if agent_timeout_ms is None:
+            winning_slug, result = await agent_task
+        else:
+            try:
+                winning_slug, result = await asyncio.wait_for(
+                    agent_task, timeout=agent_timeout_ms / 1000.0
+                )
+            except TimeoutError:
+                agent_task.cancel()
+                from mergecraft.utils.process_group import kill_all_active_process_groups
+
+                kill_all_active_process_groups()
+                msg = f"agent run timed out after {timeout_raw or '1h'}"
+                raise _AgentTimeoutError(msg) from None
 
         if winning_slug:
-            resolved_model = _promote_winning_slug(
-                winning_slug, result, chain_for_decision, tool_state, tool_context, payload
+            resolved_model = resolve_model(slug=winning_slug, respect_env_override=False)
+            tool_context.resolved_model = resolved_model
+            # W10.2/W10.3 — single promotion path; chain stamps metadata in
+            # ``_attach_model_evidence``, single-slug defaults to index 0.
+            meta = result.metadata or {}
+            requested_meta = meta.get("requested_model")
+            requested = (
+                requested_meta.strip()
+                if isinstance(requested_meta, str) and requested_meta.strip()
+                else (chain_for_decision[0] if chain_for_decision else tool_state.requested_model)
+            )
+            fallback_raw = meta.get("fallback_index")
+            fallback_index = fallback_raw if isinstance(fallback_raw, int) else 0
+            executed = payload.get("proxyModel") or resolved_model or winning_slug
+            promote_model_evidence(
+                tool_state,
+                requested_model=requested,
+                executed_model=executed if isinstance(executed, str) else winning_slug,
+                fallback_index=fallback_index,
             )
 
         if result.usage:
@@ -630,21 +876,102 @@ async def main() -> MainResult:
         except Exception as exc:
             logger.debug("post-run finalize skipped: {}", exc)
 
-        # D3/W5.2 + W6.1 + S1/D5/D10 — agent failure wins over prep / setup_script
-        # failure; ``_classify_outcome`` maps the side-channels to the right
-        # ``RunOutcome`` bucket.
+        # D3/W5.2 + W6.1 + S1/D5/D10 — a completed run is ``passed`` / ``failed``,
+        # ``inconclusive`` when review-relevant dependency prep failed OR a
+        # trusted-tier ``setup_script`` failed under the default policy, or
+        # ``configuration_error`` when the operator opted into ``fail``. Agent
+        # failure wins over both prep and setup-script failure (the agent
+        # genuinely couldn't do its job). S1 also adds D10's
+        # ``setup_failure_policy`` to the resolution.
         prep_reason = await _prep_failure_reason(tool_context)
-        outcome, failure_reason = _classify_outcome(
-            result=result,
-            setup_reason=tool_state.setup_hook_failure or "",
-            setup_policy=settings.setup_failure_policy,
-            prep_reason=prep_reason,
-        )
+        setup_reason = tool_state.setup_hook_failure or ""
+        setup_policy = settings.setup_failure_policy
 
-        packet_path = await _run_publish_span_block(
-            tool_context, tool_state, settings, outcome, failure_reason
+        if not result.success:
+            outcome = RunOutcome.failed
+            failure_reason = result.error
+        elif setup_reason and setup_policy == "fail":
+            # D10 ``fail`` — operator has declared the failure is unrecoverable.
+            outcome = RunOutcome.configuration_error
+            failure_reason = setup_reason
+            logger.warning(
+                "» setup script failure mapped run to configuration_error (fail policy): {}",
+                setup_reason,
+            )
+        elif setup_reason and setup_policy == "inconclusive":
+            # D5 / D10 default — under-provisioned tree is no-verdict.
+            outcome = RunOutcome.inconclusive
+            failure_reason = setup_reason
+            logger.warning("» setup script failure mapped run to inconclusive: {}", setup_reason)
+        elif prep_reason:
+            outcome = RunOutcome.inconclusive
+            failure_reason = prep_reason
+            logger.warning("» prep failure mapped run to inconclusive: {}", prep_reason)
+        else:
+            outcome = RunOutcome.passed
+            failure_reason = None
+
+        packet_path: str | None = None
+        if tool_context:
+            from mergecraft.tracing.event import trace_attrs_for_mode
+            from mergecraft.tracing.tracer import get_tracer_from_settings
+
+            tracer = get_tracer_from_settings(settings)
+            # S5 (#145) — the run-dispatch span carries the mode name and its
+            # content-hash prompt version (the same row the packet records),
+            # so an archived trace row is attributable to the prompt that
+            # produced it. ``selected_mode`` is the mode the agent dispatched
+            # on, not the configured catalog (``ctx.modes``) — conflated, the
+            # span would advertise every catalog mode as having run this
+            # trace, mirroring the packet bug the same fix corrected. When no
+            # mode has been selected yet (an early-exit run), the dict is
+            # empty and the trace still emits.
+            selected_mode_obj = next(
+                (m for m in tool_context.modes if m.name == tool_context.tool_state.selected_mode),
+                None,
+            )
+            mode_attrs = trace_attrs_for_mode(selected_mode_obj) if selected_mode_obj else {}
+            with tracer.start_span(
+                "mergecraft.publish",
+                attrs_source=lambda: {
+                    "run_succeeded": outcome is RunOutcome.passed,
+                    **mode_attrs,
+                },
+            ) as _publish_span:
+                await persist_learnings(tool_context)
+                await report_status_checks(
+                    tool_context,
+                    run_succeeded=run_succeeded_for_outcome(outcome),
+                    failure_reason=failure_reason,
+                    conclusion=RUN_OUTCOME_CONCLUSION[outcome],
+                )
+                # #39 — opt-in, off by default, and never a gate: with
+                # `sarif_upload` unset this returns before making any request.
+                await report_sarif_upload(tool_context)
+                # Emit the merge evidence packet last, so it records the run's
+                # final state. A blocked or failed run is exactly when the
+                # evidence matters most, so this runs on both branches below.
+                written = await asyncio.to_thread(
+                    emit_run_packet, tool_context, run_succeeded=outcome is RunOutcome.passed
+                )
+                packet_path = str(written) if written else None
+
+        if outcome is not RunOutcome.passed:
+            return MainResult(
+                success=False,
+                error=failure_reason or result.error or "agent execution failed",
+                evidence_packet_path=packet_path,
+                outcome=outcome,
+            )
+
+        output = tool_state.output or result.output
+        return MainResult(
+            success=True,
+            output=output,
+            result=output,
+            evidence_packet_path=packet_path,
+            outcome=outcome,
         )
-        return _build_main_result(outcome, failure_reason, packet_path, result, tool_state)
 
     except Exception as error:
         error_message = str(error) if error else "unknown error occurred"
@@ -662,6 +989,7 @@ async def main() -> MainResult:
             except Exception:
                 pass
         return MainResult(success=False, error=error_message, outcome=error_outcome)
+
     finally:
         if stop_mcp is not None:
             with contextlib.suppress(Exception):
@@ -676,5 +1004,4 @@ async def main() -> MainResult:
                 await github.aclose()
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+__all__ = ["MainResult", "RunOutcome", "main"]
