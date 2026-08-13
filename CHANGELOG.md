@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 0.0.1 distribution checklist: README prototype markers removed, docs badge label
+  aligned with GitHub Pages, operator runbook at `docs/distribution.md`, and prototype
+  residue (`meat_python_plus/`, `docs/meat-spike.md`) dropped from the tree ([#141](https://github.com/alexhawat/mergeCraft/issues/141))
 - CI/CD publish path now gates `build-images` on the Action-image E2E suite for the
   exact release SHA via a reusable `e2e-gate` job (`workflow_call` on `e2e.yml`)
 - Image vulnerability scans now block promotion on every publish ref when Trivy reports
