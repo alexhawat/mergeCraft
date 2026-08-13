@@ -279,6 +279,29 @@ class GitHubClient:
             )
         )
 
+    async def list_issues(
+        self,
+        owner: str,
+        repo: str,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        return _as_list(await self.get(f"/repos/{owner}/{repo}/issues", **kwargs))
+
+    async def create_label(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        name: str,
+        color: str = "ededed",
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a repository label; raises 422 when it already exists."""
+        payload: dict[str, Any] = {"name": name, "color": color}
+        if description is not None:
+            payload["description"] = description
+        return _as_dict(await self.post(f"/repos/{owner}/{repo}/labels", json=payload))
+
     async def add_labels(
         self,
         owner: str,

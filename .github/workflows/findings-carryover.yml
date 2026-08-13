@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: MIT
+# Files an issue for every mergeCraft review finding that a closing pull request
+# leaves unresolved.
+#
+# A merged PR keeps its inline comments forever, but nobody re-opens a merged
+# PR — so a finding the author neither fixed nor rebutted is lost to attention.
+# This sweep turns each survivor into an issue keyed by the finding fingerprint
+# the reviewer already stamps, which is also what makes re-runs a no-op.
+#
+# Safety: this workflow never checks out or executes pull request code. It runs
+# on `pull_request_target`, whose default checkout ref is the *base* branch, and
+# the PR number reaches the CLI through `env:` rather than a `run:`
+# interpolation. The sweep itself only reads the GitHub API and writes issues.
+name: Findings carryover
+
+on:
+  pull_request_target:
+    types: [closed]
+  # Manual backfill for pull requests that closed before this workflow existed.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to sweep
+        required: true
+        type: number
+      apply:
+        description: File the issues (unchecked = dry run)
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: findings-carryover-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: false
+
+jobs:
+  carryover:
+    name: Carry unresolved findings into issues
+    # Merged PRs only on the automatic trigger: a PR closed without merging was
+    # abandoned, and its findings went with it. Manual dispatch has no such gate.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+
+      - name: Sweep unresolved findings
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          # Automatic runs always write; manual runs write only when asked.
+          APPLY: ${{ github.event_name == 'pull_request_target' || inputs.apply }}
+        run: |
+          if [ "$APPLY" = "true" ]; then
+            uv run mergecraft findings carryover --pr "$PR_NUMBER" --apply
+          else
+            uv run mergecraft findings carryover --pr "$PR_NUMBER"
+          fi

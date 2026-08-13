@@ -11,6 +11,7 @@ the MCP layer does the network calls.
 
 Exports:
     finding_fingerprints_in: Extract finding identities from comment text.
+    is_mergecraft_comment: Whether a comment body was written by the reviewer.
     resolvable_thread_ids: Pick threads a re-review has evidently resolved.
 """
 
@@ -30,7 +31,12 @@ def finding_fingerprints_in(text: str) -> frozenset[str]:
     return frozenset(_FINDING_MARKER_RE.findall(text or ""))
 
 
-def _is_mergecraft_comment(body: str) -> bool:
+def is_mergecraft_comment(body: str) -> bool:
+    """Return whether ``body`` was written by mergeCraft rather than a human.
+
+    A stamped finding fingerprint is the strong signal; the review footer covers
+    comments posted before fingerprints existed.
+    """
     return bool(_FINDING_MARKER_RE.search(body or "")) or _FOOTER_MARKER in (body or "")
 
 
@@ -71,7 +77,7 @@ def resolvable_thread_ids(
         comments = list(thread.get("comments") or [])
         if not comments:
             continue
-        if not all(_is_mergecraft_comment(str(c.get("body") or "")) for c in comments):
+        if not all(is_mergecraft_comment(str(c.get("body") or "")) for c in comments):
             continue
         fingerprints: set[str] = set()
         paths: set[str] = set()
@@ -90,4 +96,4 @@ def resolvable_thread_ids(
     return resolvable
 
 
-__all__ = ["finding_fingerprints_in", "resolvable_thread_ids"]
+__all__ = ["finding_fingerprints_in", "is_mergecraft_comment", "resolvable_thread_ids"]
