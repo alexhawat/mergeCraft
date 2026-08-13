@@ -1,9 +1,8 @@
 """W2 — E2E reusable workflow must gate ``build-images`` (R-F1).
 
 YAML-parse contracts only: these tests do not require a live GitHub Actions run.
-Cross-wave reds use non-strict xfail until W2 lands the ``workflow_call`` +
-``e2e-gate`` graph. SHA-pin assertions are live today and must stay green if
-the reusable conversion is deleted or a tag pin sneaks in.
+W2 landed the ``workflow_call`` + ``e2e-gate`` graph; these are real passes.
+SHA-pin assertions must stay green if a tag pin sneaks in.
 """
 
 from __future__ import annotations
@@ -18,12 +17,7 @@ from tests.ci.workflow_support import (
     workflow_on,
 )
 
-_W2 = pytest.mark.xfail(
-    reason="green after W2: E2E reusable workflow gates build-images", strict=False
-)
 
-
-@_W2
 def test_e2e_yml_on_includes_workflow_call() -> None:
     """D4 — ``e2e.yml`` is reusable; ``on:`` includes ``workflow_call``."""
     on_block = workflow_on(load_workflow("e2e.yml"))
@@ -33,7 +27,6 @@ def test_e2e_yml_on_includes_workflow_call() -> None:
         assert trigger in on_block, f"e2e.yml dropped existing trigger {trigger!r}"
 
 
-@_W2
 def test_ci_cd_has_e2e_gate_job() -> None:
     """``ci-cd.yml`` calls the reusable E2E workflow after ``verify``."""
     gate = job(load_workflow("ci-cd.yml"), "e2e-gate")
@@ -42,7 +35,6 @@ def test_ci_cd_has_e2e_gate_job() -> None:
     assert uses == "./.github/workflows/e2e.yml", f"e2e-gate uses: {uses!r}"
 
 
-@_W2
 def test_e2e_gate_passes_secrets_not_as_inputs() -> None:
     """Convention 3 — secrets travel via ``secrets:``, never ``with:`` / inputs."""
     gate = job(load_workflow("ci-cd.yml"), "e2e-gate")
@@ -57,7 +49,6 @@ def test_e2e_gate_passes_secrets_not_as_inputs() -> None:
     assert not secretish, f"secrets must not appear as workflow inputs: {secretish}"
 
 
-@_W2
 def test_build_images_needs_e2e_gate() -> None:
     """D5 — an unproven SHA must not produce a pushed digest."""
     needs = as_list(job(load_workflow("ci-cd.yml"), "build-images").get("needs"))
@@ -65,14 +56,12 @@ def test_build_images_needs_e2e_gate() -> None:
     assert "verify" in needs, f"build-images.needs dropped verify: {needs}"
 
 
-@_W2
 def test_removing_e2e_gate_from_build_images_needs_fails() -> None:
     """Guard-deletion: dropping ``e2e-gate`` from ``build-images.needs`` fails this test."""
     needs = as_list(job(load_workflow("ci-cd.yml"), "build-images").get("needs"))
     assert "e2e-gate" in needs, "e2e-gate was removed from build-images.needs (R-F1 regression)"
 
 
-@_W2
 def test_build_dist_does_not_need_e2e_gate() -> None:
     """D11 — sdist/wheel is not gated on Action-image E2E."""
     dist = job(load_workflow("ci-cd.yml"), "build-dist")

@@ -32,7 +32,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 
 | Plan wave | Test files | Marker reason prefix |
 |-----------|------------|----------------------|
-| **W2** | `tests/ci/test_e2e_release_gate.py` (except SHA-pin) | `green after W2:` |
+| **W2** | *(reconciled)* `tests/ci/test_e2e_release_gate.py` — xfails dropped; real passes | — |
 | **W3** | `tests/ci/test_trivy_scan_gate.py` (except promote-on-main pin) | `green after W3:` |
 | **W4** | `tests/ci/test_live_provider_matrix.py` (selector / fail-loud / matrix); `tests/integration/test_live_providers.py`; `tests/integration/test_github_integration.py` | `green after W4:` |
 | **W5** | `tests/docs/test_distribution_checklist.py` (except D15 yes/ pin) | `green after W5:` |
@@ -45,6 +45,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 
 | Test | Why it can pass on W1 HEAD |
 |------|----------------------------|
+| `tests/ci/test_e2e_release_gate.py` (all eight cases) | W2 landed `workflow_call` + `e2e-gate`; xfails dropped |
 | `test_touched_workflows_third_party_uses_are_sha_pinned` | convention 2 already holds |
 | `test_w7_touched_workflows_remain_sha_pinned` | same |
 | `test_promote_still_fires_on_main_and_pre_001` | D6 must not strip `:latest` publish |
@@ -56,7 +57,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 
 ## Contract → coverage matrix
 
-### W2 — E2E gates published images (R-F1)
+### W2 — E2E gates published images (R-F1) — green after W2 impl (`b47abef`) + xfail recon
 
 | Contract | Layer | Happy / edge / error | Tests |
 |----------|-------|----------------------|-------|
@@ -169,7 +170,7 @@ Do not invent metric values in tests. Named symbols: `compute_prompt_version`,
 
 | Date | Impl wave | Markers removed | Notes |
 |------|-----------|-----------------|-------|
-| *(none yet)* | | | W1-RED authored |
+| 2026-08-13 | W2 | `_W2` on six contracts in `tests/ci/test_e2e_release_gate.py` | SHA-pin cases were already unxfail'd; leave W3–W9 markers |
 
 ## Driving live / collector tests
 
