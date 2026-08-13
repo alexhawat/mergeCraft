@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unwaived HIGH/CRITICAL findings; `.trivyignore` waivers require justification and
   expiry dates enforced by `scripts/check_trivyignore_expiry.py`
 
+### Fixed
+
+- Fixed: the nightly live-provider job now issues a real minimal request per provider
+  and asserts a structured completion. Previously it exported four provider keys but ran
+  only offline-shaped tests — three of the four keys had no consumer — and exited 0 with
+  "skipped" when credentials were absent, so a rotation outage looked like a pass
+
 ### Security
 
 - Fixed: the agent privilege drop now fails closed. When the action image runs

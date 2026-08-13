@@ -73,12 +73,39 @@ test-integration: ## Integration tests (PR CI; self-skip without live secrets)
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
 
 test-integration-live: ## Live-provider integration (scheduled / release precondition)
-	@if [ -z "$${ANTHROPIC_API_KEY}$${OPENAI_API_KEY}$${GEMINI_API_KEY}$${NOUS_API_KEY}" ] \
-	     && [ "$${MERGECRAFT_REQUIRE_LIVE:-}" != "1" ]; then \
-	  echo "skipped: no live credential — set provider secrets or MERGECRAFT_REQUIRE_LIVE=1"; \
-	  exit 0; \
-	fi
-	$(PYTEST) tests -v --tb=short --strict-markers -m "integration" $(PYTEST_XDIST) \
+	@provider="$${MERGECRAFT_LIVE_PROVIDER:-}"; \
+	if [ "$${MERGECRAFT_ALLOW_MISSING_LIVE_CREDS:-}" != "1" ]; then \
+	  missing=""; \
+	  case "$$provider" in \
+	    anthropic) [ -z "$${ANTHROPIC_API_KEY:-}" ] && missing="ANTHROPIC_API_KEY" ;; \
+	    openai|codex) [ -z "$${OPENAI_API_KEY:-}" ] && missing="OPENAI_API_KEY" ;; \
+	    gemini) [ -z "$${GEMINI_API_KEY:-}" ] && missing="GEMINI_API_KEY" ;; \
+	    nous) [ -z "$${NOUS_API_KEY:-}" ] && missing="NOUS_API_KEY" ;; \
+	    github) [ -z "$${GITHUB_TOKEN:-}" ] && missing="GITHUB_TOKEN" ;; \
+	    *) \
+	      for key in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY NOUS_API_KEY; do \
+	        eval "val=\$$$$key"; \
+	        [ -z "$$val" ] && missing="$$missing $$key"; \
+	      done ;; \
+	  esac; \
+	  if [ -n "$$missing" ]; then \
+	    echo "missing live credentials:$$missing (set secrets or MERGECRAFT_ALLOW_MISSING_LIVE_CREDS=1 for local)"; \
+	    exit 1; \
+	  fi; \
+	fi; \
+	contract="tests/integration/test_live_providers.py::test_missing_credential_fails_on_schedule \
+	 tests/integration/test_live_providers.py::test_suite_is_inert_on_pull_request \
+	 tests/integration/test_live_providers.py::test_response_shape_matches_stream_consumer_contract \
+	 tests/integration/test_live_providers.py::test_live_request_is_token_bounded"; \
+	case "$$provider" in \
+	  anthropic) live_paths="$$contract tests/integration/test_live_providers.py::test_anthropic_minimal_completion" ;; \
+	  openai|codex) live_paths="$$contract tests/integration/test_live_providers.py::test_openai_codex_minimal_completion" ;; \
+	  gemini) live_paths="$$contract tests/integration/test_live_providers.py::test_gemini_minimal_completion" ;; \
+	  nous) live_paths="$$contract tests/integration/test_live_providers.py::test_nous_minimal_completion" ;; \
+	  github) live_paths="$$contract tests/integration/test_github_integration.py::test_checkout_and_status_check_roundtrip" ;; \
+	  *) live_paths="tests/integration" ;; \
+	esac; \
+	$(PYTEST) $$live_paths -v --tb=short --strict-markers -m "live" $(PYTEST_XDIST) \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
 
 coverage-gate: ## Unit tests + coverage floors (global + critical paths)

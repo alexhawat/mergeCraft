@@ -57,13 +57,18 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [anthropic, openai, gemini, nous, github]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
-      - name: Live-provider integration (release precondition)
+      - name: Live-provider integration (${{ matrix.provider }})
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}
+          MERGECRAFT_LIVE_PROVIDER: ${{ matrix.provider }}
+          ANTHROPIC_API_KEY: ${{ matrix.provider == 'anthropic' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ matrix.provider == 'openai' && secrets.OPENAI_API_KEY || '' }}
+          GEMINI_API_KEY: ${{ matrix.provider == 'gemini' && secrets.GEMINI_API_KEY || '' }}
+          NOUS_API_KEY: ${{ matrix.provider == 'nous' && secrets.NOUS_API_KEY || '' }}
         run: make test-integration-live
