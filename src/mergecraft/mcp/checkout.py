@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.analyzers.impact import write_impact
+from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.mcp.git import _git_env, _run_git
 from mergecraft.mcp.shared import execute, tool
@@ -268,18 +268,27 @@ def checkout_pr_tool(ctx: ToolContext):
             repo_root = Path(cwd)
             settings_obj = load_repo_settings(root=repo_root, load_learnings_files=False)
             if settings_obj.analyzers.impact:
-                impact_result = write_impact(diff, cwd, temp, pull_number)
-                if impact_result is not None:
-                    result["impactPath"] = impact_result["impactPath"]
-                    result["impactTruncated"] = impact_result["impactTruncated"]
-                    result["impactDeclarationCount"] = impact_result["impactDeclarationCount"]
+                ast_grep_binary = resolve_ast_grep_binary(repo_root)
+                if ast_grep_binary is None:
                     logger.info(
-                        "impactPath for PR #{} -> {} ({} declarations, truncated={})",
+                        "impactPath skipped for PR #{}: managed ast-grep binary unavailable",
                         pull_number,
-                        impact_result["impactPath"],
-                        impact_result["impactDeclarationCount"],
-                        impact_result["impactTruncated"],
                     )
+                else:
+                    impact_result = write_impact(
+                        diff, cwd, temp, pull_number, ast_grep_binary=ast_grep_binary
+                    )
+                    if impact_result is not None:
+                        result["impactPath"] = impact_result["impactPath"]
+                        result["impactTruncated"] = impact_result["impactTruncated"]
+                        result["impactDeclarationCount"] = impact_result["impactDeclarationCount"]
+                        logger.info(
+                            "impactPath for PR #{} -> {} ({} declarations, truncated={})",
+                            pull_number,
+                            impact_result["impactPath"],
+                            impact_result["impactDeclarationCount"],
+                            impact_result["impactTruncated"],
+                        )
         except Exception as imp_err:
             logger.info("impact extraction soft-failed: {}", imp_err)
 

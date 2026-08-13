@@ -67,6 +67,10 @@ dev = [
     "pytest-randomly==4.1.0",
     "pytest-split==0.11.0",
     "types-aiofiles==25.1.0.20251011",
+    # Pinned to the version in analyzers/catalog/ast-grep.yaml so dev/test
+    # runs exercise the same declaration-node kinds as the managed binary
+    # impact.py resolves at review time.
+    "ast-grep-cli==0.44.1",
 ]
 
 [tool.hatch.build.targets.wheel]

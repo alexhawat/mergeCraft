@@ -1,0 +1,24 @@
+id: impact-decl-cpp
+language: cpp
+rule:
+  any:
+    - kind: function_definition
+      has:
+        field: declarator
+        has: { field: declarator, pattern: $NAME }
+    - kind: declaration
+      has:
+        field: declarator
+        has: { field: declarator, pattern: $NAME }
+    - kind: field_declaration
+      has:
+        field: declarator
+        has: { field: declarator, pattern: $NAME }
+    - kind: class_specifier
+      has: { field: name, pattern: $NAME }
+    - kind: struct_specifier
+      has: { field: name, pattern: $NAME }
+    - kind: union_specifier
+      has: { field: name, pattern: $NAME }
+    - kind: enum_specifier
+      has: { field: name, pattern: $NAME }

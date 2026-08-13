@@ -1,0 +1,14 @@
+id: impact-decl-java
+language: java
+rule:
+  any:
+    - kind: class_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: interface_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: enum_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: method_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: constructor_declaration
+      has: { field: name, pattern: $NAME }
