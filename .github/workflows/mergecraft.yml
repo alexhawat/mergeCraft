@@ -58,9 +58,18 @@
 # CODEX_AUTH_JSON / OPENAI_API_KEY, Nous is the only reviewer.
 #
 # Trigger: pull_request_target (not pull_request). GitHub skips pull_request
-# workflows when refs/pull/N/merge cannot be built (merge conflicts), which
-# leaves ruleset require-mergecraft-review with a permanently missing check.
-# pull_request_target always fires on synchronize even with merge conflicts.
+# workflows when refs/pull/N/merge cannot be built (merge conflicts), so the
+# ruleset check require-mergecraft-review sits unreported for as long as the
+# conflict lasts. pull_request_target always fires on synchronize even with
+# merge conflicts, so the review still lands while the PR is conflicted.
+#
+# That gap is the conflicted window, not a permanent block: pushing the conflict
+# fix to the PR branch fires synchronize and would clear a pull_request check
+# too. It outlasts the conflict only when the conflict disappears WITHOUT a push
+# to the head branch (the base moved), because nothing then re-triggers the run.
+# A conflicted PR is unmergeable on its own account anyway, so weigh this
+# against running with repository secrets in scope rather than treating it as
+# decisive. Full rationale: README "Workflow-placement gotchas".
 #
 # Workflow resolution (GitHub Nov 2025 policy, effective 2025-12-08): pull_request_target
 # definitions are read from the repository default branch (`main`), not the PR base.
