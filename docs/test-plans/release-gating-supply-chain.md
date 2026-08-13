@@ -3,8 +3,8 @@
 Wave plan: `.ignorelocal/issues-release-gating-supply-chain-wave-plan.md`
 Worktree: `mergecraft-rls-gating-supply-chain` @ `feat/rls-gating-supply-chain`
 Authoring wave: **W1-RED** (entire suite for plan waves W2–W9; implementation
-waves turn it green). S5 (#145) has landed — W9 xfails are `green after W9`,
-not a D19 spin-out.
+waves turn it green). S5 (#145) has landed. W9 harness is green; live
+precision/recall/F1 in README is **D19 spun out** (`spun out: W9`, `strict=False`).
 
 ## Locked decisions (D-table rows that bind this suite)
 
@@ -23,7 +23,7 @@ not a D19 spin-out.
 | **D16** | Python `>=3.14` stays hard | `test_python_314_requirement_documented` |
 | **D17** | Assets named, not invented | `test_docs_assets_readme_names_required_binaries` |
 | **D18** | Structured completion, not HTTP 200 | `tests/integration/test_live_providers.py` + `StreamSpanAccumulator` |
-| **D19** | W9 spin-out | unused (S5 landed); xfails stay `green after W9` |
+| **D19** | W9 spin-out | `test_readme_eval_claim_adjacent_to_dated_metrics_and_corpus_commit` stays `spun out: W9` until live F1 is published; harness xfails dropped |
 
 ## xfail / RED schedule
 
@@ -39,7 +39,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | **W6** | *(reconciled)* `tests/ci/test_coverage_ratchet.py` — xfails dropped; real passes | — |
 | **W7** | *(reconciled)* `tests/tracing/test_otlp_collector_e2e.py` — xfails dropped; dump-backed cases pass when collector env is set | — |
 | **W8** | *(reconciled)* `tests/ci/test_ruff_advisory_families.py` — xfails dropped; real passes | — |
-| **W9** | `tests/evals/test_benchmark_publication.py` (except S5 helper pin) | `green after W9:` |
+| **W9** | *(harness reconciled)* `tests/evals/test_benchmark_publication.py` — replay/result-set/placeholder/S5 + named symbols are real passes. README dated metrics remain `spun out: W9` | `spun out: W9` (README live F1 only) |
 
 ### Already green (regression pins — no xfail)
 
@@ -60,6 +60,10 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | `tests/ci/test_ruff_advisory_families.py` | W8 landed ERA enforce + drop + advisory CI; xfails dropped |
 | `test_yes_package_not_renamed_unless_d15_allows` | D15 default |
 | `test_s5_prompt_version_helper_is_available` | S5 (#145) merged |
+| `test_replay_target_or_job_exists_and_is_documented` | W9 `make eval-replay` landed |
+| `test_result_set_records_judge_pins_rubric_and_prompt_versions` | W9 versioned result sets under `evals/results/` |
+| `test_published_metrics_are_not_placeholders` | README honest stub (no TBD/lorem table) |
+| `corpus_class_for` / `BenchmarkResultSet` / `run_structural_replay` / `write_result_set` / `replay_bank` | W9 recon: direct symbol pins |
 
 ## Contract → coverage matrix
 
@@ -171,18 +175,25 @@ target `test-otlp-collector`.
 
 D21: if enforcing a family requires `tests/` churn, stop and re-dispatch test-creator.
 
-### W9 — published benchmark numbers (#140)
+### W9 — published benchmark numbers (#140) — harness green; README live F1 spun out (D19)
 
-| Contract | Layer | Tests |
-|----------|-------|-------|
-| README eval claim adjacent to dated precision/recall/F1 + FP-rate + corpus commit | unit | `test_readme_eval_claim_adjacent_to_dated_metrics_and_corpus_commit` |
-| Replay target/job documented | unit | `test_replay_target_or_job_exists_and_is_documented` |
-| Result set records `JudgePin`, `VERIFIER_RUBRIC_VERSION`, S5 `compute_prompt_version` | unit | `test_result_set_records_judge_pins_rubric_and_prompt_versions` |
-| No placeholder numbers | unit | `test_published_metrics_are_not_placeholders` |
-| S5 helper present | unit | `test_s5_prompt_version_helper_is_available` (plain) |
+| Contract | Layer | Tests | Status |
+|----------|-------|-------|--------|
+| README eval claim adjacent to dated precision/recall/F1 + FP-rate + corpus commit | unit | `test_readme_eval_claim_adjacent_to_dated_metrics_and_corpus_commit` | **xfail** `spun out: W9` — live run not executed |
+| Replay target/job documented | unit | `test_replay_target_or_job_exists_and_is_documented` | green |
+| Result set records `JudgePin`, `VERIFIER_RUBRIC_VERSION`, S5 `compute_prompt_version` | unit | `test_result_set_records_judge_pins_rubric_and_prompt_versions` | green |
+| No placeholder numbers | unit | `test_published_metrics_are_not_placeholders` | green |
+| S5 helper present | unit | `test_s5_prompt_version_helper_is_available` (plain) | green |
+| `corpus_class_for` buckets | unit | `test_corpus_class_for_maps_id_and_category` | green (W9 recon) |
+| `BenchmarkResultSet` wire shape + `extra="forbid"` | unit | `test_benchmark_result_set_wire_shape_and_rejects_extra_fields` | green (W9 recon) |
+| `run_structural_replay` empty bank / corpus class | unit | `test_run_structural_replay_empty_bank_returns_empty_result_set`, `test_run_structural_replay_records_corpus_class_per_case` | green (W9 recon) |
+| `write_result_set` JSON + `latest.json` | unit | `test_write_result_set_persists_json_and_latest_mirror` | green (W9 recon) |
+| `replay_bank` writes + returns pair | unit | `test_replay_bank_writes_result_set_and_returns_pair` | green (W9 recon) |
 
 Do not invent metric values in tests. Named symbols: `compute_prompt_version`,
-`JudgePin`, `judge_pin`, `VERIFIER_RUBRIC_VERSION`.
+`JudgePin`, `judge_pin`, `VERIFIER_RUBRIC_VERSION`, `replay_bank`,
+`run_structural_replay`, `corpus_class_for`, `BenchmarkResultSet`,
+`write_result_set`.
 
 ## Helpers
 
@@ -201,6 +212,7 @@ Do not invent metric values in tests. Named symbols: `compute_prompt_version`,
 | 2026-08-13 | W6 | `_W6` on four contracts in `tests/ci/test_coverage_ratchet.py` | parse `fail_under` from pyproject (70); leave W7–W9 markers |
 | 2026-08-13 | W7 | `_W7` on eight contracts in `tests/tracing/test_otlp_collector_e2e.py` | SHA-pin was already unxfail'd; named `run_otlp_collector_e2e` / `test-otlp-collector` pins added; leave W8–W9 markers |
 | 2026-08-13 | W8 | `_W8` on two contracts (17 parametrized cases) in `tests/ci/test_ruff_advisory_families.py` | Added `lint-ruff-advisory` / `RUFF_ADVISORY_FAMILIES` pins; leave W9 markers |
+| 2026-08-13 | W9 | `_W9` on replay target, result-set pins, no-placeholder (S5 helper already plain) | **Landed:** `make eval-replay`, 10/10 structural replay, versioned result sets. **Spun out (D19):** README dated precision/recall/F1 — keep `spun out: W9` `strict=False`. Direct pins for `replay_bank`, `run_structural_replay`, `corpus_class_for`, `BenchmarkResultSet`, `write_result_set`. |
 
 ## Driving live / collector tests
 
