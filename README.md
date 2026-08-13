@@ -485,12 +485,43 @@ never does: [REVIEW-CHECKS.md](REVIEW-CHECKS.md).
 
 ## ⚙️ Workflow-placement gotchas (`pull_request_target`)
 
-Under GitHub's Nov 2025 policy (effective 2025-12-08), `pull_request_target`
-workflows resolve from the **default branch** — so a PR that edits the workflow
-cannot review itself, and a copy on a non-default trunk is inert. If the review
-is **not** a required check, prefer plain `pull_request`. If you pin the action
-SHA in several places, gate them in CI — and read the workflow side from the
-default branch (`git show origin/main:.github/workflows/mergecraft.yml`).
+GitHub resolves `pull_request_target` workflows from the **default branch** —
+the workflow file *and* the checked-out commit, whatever base the PR targets
+([Nov 2025 policy](https://github.blog/changelog/2025-11-07-actions-pull_request_target-and-environment-branch-protections-changes/),
+effective 2025-12-08). Three consequences:
+
+- **A copy on a non-default trunk is inert.** If `main` is a stub and real work
+  lands on a staging branch, this workflow still has to live on `main`.
+- **`GITHUB_REF` / `GITHUB_SHA` point at the default branch**, not the PR base —
+  so a bare `actions/checkout` lands on default-branch tip and
+  `.mergecraft/config.yaml` is read from there. Environment branch-protection
+  rules also now evaluate against the default branch; update environment
+  filters if you gate secrets that way.
+- **A PR that edits this workflow is still reviewed — by the default-branch
+  copy.** Its own edits apply to the *next* PR, after merge. (That much was
+  always true of `pull_request_target`; what Nov 2025 changed is base branch →
+  default branch.)
+
+If the review is **not** a required check, prefer plain `pull_request` — simpler,
+and no secrets in scope. The case for accepting `pull_request_target` is narrower
+than it looks: GitHub skips `pull_request` runs when `refs/pull/N/merge` cannot
+be built (any conflicted PR), which leaves a *required* check permanently
+missing and the PR unmergeable even after the conflict is resolved.
+`pull_request_target` still fires on `synchronize` in that state.
+
+If you pin the action SHA in more than one place, gate the copies against each
+other in CI — and read the workflow side from the **default branch**
+(`git show origin/main:.github/workflows/mergecraft.yml`), not the working tree.
+Bump order is default branch first, local pin second.
+
+Since [June 2026](https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/)
+`actions/checkout` refuses to check out fork PR code under `pull_request_target`
+unless you pass `allow-unsafe-pr-checkout` (v7 GA 2026-06-18, backported to all
+supported majors 2026-07-20). mergeCraft's shipped workflows are unaffected —
+they check out the default branch with no `ref:` and reach PR content through
+`checkout_pr` and the API, never by executing PR-authored code with secrets in
+scope.
+
 Full rationale in the collapsible sections of
 [docs](https://alexhawat.github.io/mergeCraft/).
 

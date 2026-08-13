@@ -218,6 +218,15 @@ jobs:
       HAS_AUTH: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' || secrets.OPENAI_API_KEY != '' || secrets.CODEX_AUTH_JSON != '' || secrets.GEMINI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
 
     steps:
+      # No `ref:` here, deliberately. Under pull_request_target this checks out
+      # the DEFAULT BRANCH — trusted code — and mergeCraft reaches PR content
+      # through its own `checkout_pr` + API layer instead. Do not "fix" this by
+      # adding `ref: ${{ github.event.pull_request.head.sha }}`,
+      # `refs/pull/N/merge`, or `repository: <head repo>`: that is the classic
+      # pwn-request, and since actions/checkout v7 (GA 2026-06-18, backported to
+      # all supported majors 2026-07-20) it hard-fails on fork PRs unless you
+      # pass `allow-unsafe-pr-checkout`. If you find yourself reaching for that
+      # flag under pull_request_target, switch to `pull_request` instead.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
