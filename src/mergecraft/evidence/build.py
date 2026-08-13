@@ -21,6 +21,7 @@ from mergecraft.evidence.packet import (
     Decision,
     DeterministicCheck,
     MergeEvidencePacket,
+    ModePromptVersion,
     SelfAssessment,
 )
 from mergecraft.evidence.trajectory import TrajectoryRecord
@@ -157,6 +158,7 @@ def build_packet(
     provider: str | None = None,
     fallback_index: int = 0,
     fallback_occurred: bool = False,
+    mode_prompt_versions: list[ModePromptVersion] | None = None,
 ) -> MergeEvidencePacket:
     """Assemble a :class:`MergeEvidencePacket` from structured sources.
 
@@ -177,6 +179,12 @@ def build_packet(
 
     W10 (#20) records ``requested_model`` / ``executed_model`` / ``provider``
     / ``fallback_index`` / ``fallback_occurred`` on ``agent`` unconditionally.
+
+    S5 (#145) records ``mode_prompt_versions`` — one row per mode that
+    ran, carrying the mode name and its prompt version. Mirrors the
+    ``JudgePin`` pattern for the verifier (see
+    ``mergecraft.agents.verifier.JudgePin``) so an archived verdict can be
+    read against the prompt that produced it.
 
     ``blast_radius`` and ``evals``) remain optional. Batch B populates
     ``blast_radius`` with a typed ``BlastRadiusClassification``; Batches C / E
@@ -228,6 +236,7 @@ def build_packet(
         decision=decision,
         blast_radius=blast_radius,
         trajectory=_coerce_trajectory(trajectory),
+        mode_prompt_versions=list(mode_prompt_versions) if mode_prompt_versions else None,
     )
 
     # ``trajectory`` now lands as a sibling field (Batch C, #43). The rest --
