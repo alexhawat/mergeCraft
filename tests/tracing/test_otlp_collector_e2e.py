@@ -4,18 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import pytest
 from tests.ci.workflow_support import REPO_ROOT, assert_third_party_uses_sha_pinned, read_text
-
-_W7 = pytest.mark.xfail(
-    reason="green after W7: OTLP collector e2e (spans leave the process)",
-    strict=False,
-)
 
 _GEN_AI_ATTRS = (
     "gen_ai.operation.name",
@@ -47,7 +41,6 @@ def _load_dump() -> Any:
 
 
 @pytest.mark.integration
-@_W7
 def test_spans_arrive_at_real_collector_with_gen_ai_attributes() -> None:
     dump = _load_dump()
     blob = json.dumps(dump)
@@ -57,7 +50,6 @@ def test_spans_arrive_at_real_collector_with_gen_ai_attributes() -> None:
 
 
 @pytest.mark.integration
-@_W7
 def test_one_trace_per_run_holds_against_the_collector() -> None:
     dump = _load_dump()
     ids: set[str] = set()
@@ -79,7 +71,6 @@ def test_one_trace_per_run_holds_against_the_collector() -> None:
 
 
 @pytest.mark.integration
-@_W7
 def test_env_cli_yaml_precedence_resolves_to_live_sink() -> None:
     endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") or os.environ.get(
         "MERGECRAFT_OTEL_ENDPOINT", ""
@@ -106,7 +97,6 @@ def test_env_cli_yaml_precedence_resolves_to_live_sink() -> None:
 
 
 @pytest.mark.integration
-@_W7
 def test_wrong_exporter_endpoint_fails_the_job() -> None:
     """Guard-deletion: exporting only to a closed port must not produce a collector dump."""
     from mergecraft.config import RepoSettings
@@ -145,7 +135,6 @@ def test_wrong_exporter_endpoint_fails_the_job() -> None:
         )
 
 
-@_W7
 def test_unguarded_set_tracer_provider_swallow_would_fail_the_job() -> None:
     source = (REPO_ROOT / "src" / "mergecraft" / "tracing" / "exporters.py").read_text(
         encoding="utf-8"
@@ -157,7 +146,6 @@ def test_unguarded_set_tracer_provider_swallow_would_fail_the_job() -> None:
 
 
 @pytest.mark.integration
-@_W7
 def test_tracing_disabled_is_true_noop_no_collector_traffic() -> None:
     from mergecraft.config import RepoSettings
     from mergecraft.tracing import sink_factory
@@ -176,7 +164,6 @@ def test_tracing_disabled_is_true_noop_no_collector_traffic() -> None:
         assert after == before, "disabled tracing sent traffic to the collector"
 
 
-@_W7
 def test_collector_image_is_digest_pinned_in_ci() -> None:
     haystack = "\n".join(
         path.read_text(encoding="utf-8")
@@ -187,10 +174,22 @@ def test_collector_image_is_digest_pinned_in_ci() -> None:
     assert "@sha256:" in haystack[idx : idx + 500]
 
 
-@_W7
 def test_make_target_invokes_collector_suite() -> None:
     makefile = read_text("Makefile")
-    assert re.search(r"otlp|collector", makefile, re.IGNORECASE)
+    assert "test-otlp-collector" in makefile, "Make target test-otlp-collector missing"
+    assert "run_otlp_collector_e2e" in makefile, (
+        "Make target must invoke scripts/run_otlp_collector_e2e.py"
+    )
+
+
+def test_run_otlp_collector_e2e_script_exports_main() -> None:
+    """Named deliverable: scripts/run_otlp_collector_e2e.py (main)."""
+    path = REPO_ROOT / "scripts" / "run_otlp_collector_e2e.py"
+    assert path.is_file(), "scripts/run_otlp_collector_e2e.py missing"
+    source = path.read_text(encoding="utf-8")
+    assert "def main" in source
+    assert "test-otlp-collector" in source or "test_otlp_collector" in source
+    assert "MERGECRAFT_OTEL_COLLECTOR_DUMP" in source
 
 
 def test_w7_touched_workflows_remain_sha_pinned() -> None:

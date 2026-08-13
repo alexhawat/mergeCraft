@@ -37,7 +37,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 | **W4** | *(reconciled)* `tests/ci/test_live_provider_matrix.py` — xfails dropped; real passes. Live HTTP stays `@pytest.mark.live` (fail-loud, not skip-when-no-secret) | — |
 | **W5** | *(reconciled)* `tests/docs/test_distribution_checklist.py` — xfails dropped; real passes | — |
 | **W6** | *(reconciled)* `tests/ci/test_coverage_ratchet.py` — xfails dropped; real passes | — |
-| **W7** | `tests/tracing/test_otlp_collector_e2e.py` (except SHA-pin) | `green after W7:` |
+| **W7** | *(reconciled)* `tests/tracing/test_otlp_collector_e2e.py` — xfails dropped; dump-backed cases pass when collector env is set | — |
 | **W8** | `tests/ci/test_ruff_advisory_families.py` | `green after W8:` |
 | **W9** | `tests/evals/test_benchmark_publication.py` (except S5 helper pin) | `green after W9:` |
 
@@ -47,6 +47,7 @@ All cross-wave markers are **non-strict** (`strict=False`). The repo sets
 |------|----------------------------|
 | `tests/ci/test_e2e_release_gate.py` (all eight cases) | W2 landed `workflow_call` + `e2e-gate`; xfails dropped |
 | `test_touched_workflows_third_party_uses_are_sha_pinned` | convention 2 already holds |
+| `tests/tracing/test_otlp_collector_e2e.py` (unit + Makefile/script pins) | W7 landed collector CI; xfails dropped |
 | `test_w7_touched_workflows_remain_sha_pinned` | same |
 | `tests/ci/test_trivy_scan_gate.py` (all seven cases) | W3 landed blocking scan + `.trivyignore` expiry; xfails dropped |
 | `test_promote_still_fires_on_main_and_pre_001` | D6 must not strip `:latest` publish |
@@ -136,7 +137,7 @@ Rationale (W6 recon): W6 bumped `[tool.coverage.report] fail_under` 65→70; the
 suite parses that floor from `pyproject.toml` instead of hard-coding 65 so
 the within-margin case stays inside `[floor, floor+margin]`.
 
-### W7 — real OTLP collector (#143)
+### W7 — real OTLP collector (#143) — green after W7 impl (`e2aa104`) + xfail recon
 
 | Contract | Layer | Tests |
 |----------|-------|-------|
@@ -147,9 +148,15 @@ the within-margin case stays inside `[floor, floor+margin]`.
 | Unguarded `set_tracer_provider` swallow | unit (source) | `test_unguarded_set_tracer_provider_swallow_would_fail_the_job` |
 | Tracing disabled is a no-op | integration | `test_tracing_disabled_is_true_noop_no_collector_traffic` |
 | Collector image digest-pinned; Make target exists | unit | `test_collector_image_is_digest_pinned_in_ci`, `test_make_target_invokes_collector_suite` |
+| Named harness `run_otlp_collector_e2e` / `test-otlp-collector` | unit | `test_run_otlp_collector_e2e_script_exports_main`, `test_make_target_invokes_collector_suite` |
 
 These tests assert on `MERGECRAFT_OTEL_COLLECTOR_DUMP`, not
-`MemorySink` / `_RecordingSpanProcessor`.
+`MemorySink` / `_RecordingSpanProcessor`. Dump-backed integration cases
+fail loudly if that env is unset (no in-memory fallback). Without Docker,
+`make test-otlp-collector` prints `skipped: no docker` and exits 0.
+
+Named deliverables: `scripts/run_otlp_collector_e2e.py` (`main`), Make
+target `test-otlp-collector`.
 
 ### W8 — ruff families (#146)
 
@@ -188,6 +195,7 @@ Do not invent metric values in tests. Named symbols: `compute_prompt_version`,
 | 2026-08-13 | W4 | `_W4` on four YAML/Make contracts; module xfails on `test_live_providers.py` + `test_github_integration.py` | Live HTTP stays `@pytest.mark.live` (fail-loud D9); leave W5–W9 markers |
 | 2026-08-13 | W5 | `_W5` on six contracts in `tests/docs/test_distribution_checklist.py` | D15 yes/ pin was already unxfail'd; leave W6–W9 markers |
 | 2026-08-13 | W6 | `_W6` on four contracts in `tests/ci/test_coverage_ratchet.py` | parse `fail_under` from pyproject (70); leave W7–W9 markers |
+| 2026-08-13 | W7 | `_W7` on eight contracts in `tests/tracing/test_otlp_collector_e2e.py` | SHA-pin was already unxfail'd; named `run_otlp_collector_e2e` / `test-otlp-collector` pins added; leave W8–W9 markers |
 
 ## Driving live / collector tests
 
