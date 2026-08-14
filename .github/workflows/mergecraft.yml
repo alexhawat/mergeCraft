@@ -103,7 +103,8 @@
 # invisible to that gate.
 # 2026-08-07: rolled back from 88c6f419 to 8d747f39 — Codex stdin hang regression. See PR #246.
 # 2026-08-14: re-bumped to 0ab5388 (pre-0.0.1 tip), then to f951af0 (#186: action.yml
-# load-breaking secrets.* expression in description text) — see the per-step comments below.
+# load-breaking secrets.* expression in description text), then to a1c10ef (#190: setpriv
+# never resets $HOME) — see the per-step comments below.
 name: mergecraft
 
 on:
@@ -384,7 +385,15 @@ jobs:
         # pinning past 0ab5388, self-review included. Fixed in #186; f951af0 is #186 merged
         # into pre-0.0.1. See tests/action/test_action_yml_contract.py::TestActionYmlHygiene
         # ::test_no_secrets_expression_in_manifest_text for the regression guard.
-        uses: alexhawat/mergeCraft@f951af0553e934530ee69e6a1c8a641b602ca5c3 # pre-0.0.1
+        # 2026-08-14 (yet later same day): re-bumped a third time to a1c10ef. f951af0's
+        # action.yml *loaded* fine but the agent subprocess itself failed post-privilege-drop:
+        # setpriv never resets $HOME, so the unprivileged mergecraft user inherited GitHub's
+        # /github/home mount it doesn't own, and opencode/Codex both hit EACCES writing
+        # dotfiles on startup. Fixed in #190 (src/mergecraft/utils/privilege.py,
+        # agent_subprocess_env); a1c10ef is #190 merged into pre-0.0.1. Lesson for whoever
+        # bumps this next: landing a fix on pre-0.0.1/main does NOT update this pin — it is a
+        # literal SHA and must be re-bumped explicitly every time, even right after a sync PR.
+        uses: alexhawat/mergeCraft@a1c10ef85c23afbd06f1bca7d2b371a32c3c5b21 # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: 25m
@@ -470,10 +479,11 @@ jobs:
         # together; if a future `MERGECRAFT_REF` parity rule is added to this
         # repo's Makefile, bump that var in unison.
         # 2026-08-07: rolled back from 88c6f419 to 8d747f39 — Codex stdin hang regression. See PR #246.
-        # 2026-08-14: re-bumped to pre-0.0.1 tip (0ab5388), then again to f951af0 (#186:
-        # action.yml load-breaking `${{ secrets.X }}` in description text) — see the matching
-        # comment on the Nous step above for why.
-        uses: alexhawat/mergeCraft@f951af0553e934530ee69e6a1c8a641b602ca5c3 # pre-0.0.1
+        # 2026-08-14: re-bumped to pre-0.0.1 tip (0ab5388), then to f951af0 (#186: action.yml
+        # load-breaking `${{ secrets.X }}` in description text), then to a1c10ef (#190:
+        # setpriv never resets $HOME, agent subprocess EACCES post-privilege-drop) — see the
+        # matching comment on the Nous step above for why.
+        uses: alexhawat/mergeCraft@a1c10ef85c23afbd06f1bca7d2b371a32c3c5b21 # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
