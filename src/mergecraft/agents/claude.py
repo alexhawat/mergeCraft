@@ -49,7 +49,7 @@ from mergecraft.tracing.tracer import (
     _open_provider_llm_pair,
 )
 from mergecraft.types import MERGECRAFT_MCP_NAME
-from mergecraft.utils.privilege import wrap_agent_command
+from mergecraft.utils.privilege import prepare_workspace_for_agent, wrap_agent_command
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
@@ -86,6 +86,13 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
         ),
         encoding="utf-8",
     )
+    # write_mcp_config runs in the root orchestrator, before the privilege
+    # drop wraps the actual claude subprocess in setpriv — a plain mkdir()
+    # here creates config_dir owned by root even though ctx.tmpdir itself is
+    # already chowned to the agent user, since ownership of a newly created
+    # directory follows the creating process's uid, not the parent's (same
+    # bug class as codex.py's $CODEX_HOME).
+    prepare_workspace_for_agent(str(config_dir))
     return str(config_path)
 
 
