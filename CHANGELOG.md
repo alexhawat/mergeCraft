@@ -42,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CI and `make test-otlp-collector` gate merge with a digest-pinned
   `otel/opentelemetry-collector` service ([#143](https://github.com/alexhawat/mergeCraft/issues/143))
 - Fixed: nightly GitHub live-integration matrix leg can post status checks (`statuses: write`)
+- Fixed: `README.md` no longer references the nonexistent `docs/assets/logo.svg` /
+  `docs/assets/demo.gif`; the hero mark now renders from tracked `assets/brand/`
+  SVGs via a light/dark `<picture>` element, and `assets/brand/` (13 SVGs, the
+  source JPG, and `build_logo.py`) is tracked in git for the first time
+
+### Removed
+
+- Dropped the `docs-mergecraft.dev` badge and every `alexhawat.github.io/mergeCraft`
+  link from `README.md` — the GitHub Pages docs site was never published and the
+  badge/links 404'd. Docs links now point at the in-repo `docs/` tree
 
 ### Security
 

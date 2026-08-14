@@ -60,17 +60,14 @@ Docker `:latest` promotion:
 2. Point at `alexhawat/mergeCraft` and the release tag (`v0.0.1`).
 3. Use the Docker action entry (`action.yml` + `ghcr.io/alexhawat/mergecraft` image).
 4. Categories: **Code review**, **Continuous integration**.
-5. Link docs: `https://alexhawat.github.io/mergeCraft/`, `REVIEW-CHECKS.md`, `docs/ANALYZERS.md`.
+5. Link docs: `docs/`, `REVIEW-CHECKS.md`, `docs/ANALYZERS.md`.
 6. Note BYOK / no SaaS backend in the listing description (see README positioning).
 
 ### README assets
 
-Add operator-supplied binaries per [`docs/assets/README.md`](assets/README.md):
-
-- `docs/assets/logo.svg`
-- `docs/assets/demo.gif`
-
-Until both exist, keep the flagged `<img>` tags and HTML comments in `README.md`.
+The mark and wordmark are already tracked in [`assets/brand/`](../assets/brand/) — nothing
+to add there. The one binary still outstanding is the demo capture; see
+[`docs/assets/README.md`](assets/README.md) for what's needed and where it goes.
 
 ## Python version and Docker (D16)
 
