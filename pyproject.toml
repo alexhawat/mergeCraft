@@ -70,7 +70,7 @@ dev = [
     # Pinned to the version in analyzers/catalog/ast-grep.yaml so dev/test
     # runs exercise the same declaration-node kinds as the managed binary
     # impact.py resolves at review time.
-    "ast-grep-cli==0.44.1",
+    "ast-grep-cli==0.45.1",
 ]
 
 [tool.hatch.build.targets.wheel]
