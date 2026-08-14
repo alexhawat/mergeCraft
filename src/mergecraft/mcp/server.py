@@ -457,7 +457,7 @@ def start_mcp_http_server(
                 lambda: asyncio.ensure_future(_kill_background_processes(ctx), loop=loop)
             )
         except Exception as exc:
-            logger.debug("background-process kill scheduling failed: {}", exc)
+            logger.warning("background-process kill scheduling failed: {}", exc)
         server.should_exit = True
         thread.join(timeout=5)
 

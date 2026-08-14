@@ -65,7 +65,7 @@ def _hook_revs(pre_commit_text: str) -> dict[str, str]:
     """Return {repo_url: rev} for every hook repo in `.pre-commit-config.yaml`."""
     data = yaml.safe_load(pre_commit_text)
     revs: dict[str, str] = {}
-    for repo in data.get("repos", []):
+    for repo in data.get("repos") or []:
         url = repo.get("repo")
         rev = repo.get("rev")
         if url and rev:

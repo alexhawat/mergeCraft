@@ -55,7 +55,7 @@ def detect_sandbox_method() -> SandboxMethod:
             _detected_sandbox = "unshare"
             return "unshare"
     except Exception as exc:
-        logger.debug("unshare probe failed: {}", exc)
+        logger.warning("unshare probe failed: {}", exc)
     try:
         result = subprocess.run(
             ["sudo", "unshare", "--pid", "--fork", "--mount-proc", "true"],
@@ -67,7 +67,7 @@ def detect_sandbox_method() -> SandboxMethod:
             _detected_sandbox = "sudo-unshare"
             return "sudo-unshare"
     except Exception as exc:
-        logger.debug("sudo-unshare probe failed: {}", exc)
+        logger.warning("sudo-unshare probe failed: {}", exc)
     _detected_sandbox = "none"
     logger.info("PID namespace isolation not available")
     return "none"
