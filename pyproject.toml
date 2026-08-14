@@ -67,6 +67,10 @@ dev = [
     "pytest-randomly==4.1.0",
     "pytest-split==0.11.0",
     "types-aiofiles==25.1.0.20251011",
+    # Pinned to the version in analyzers/catalog/ast-grep.yaml so dev/test
+    # runs exercise the same declaration-node kinds as the managed binary
+    # impact.py resolves at review time.
+    "ast-grep-cli==0.44.1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -113,6 +117,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20", "RUF001", "TC001", "TC003"]
 "scripts/**" = ["T20"]
+# Standalone regeneration script (uv run --with fonttools==4.63.0 python assets/brand/build_logo.py).
+"assets/brand/build_logo.py" = ["T20"]
 # Catalog prompts intentionally retain upstream emoji / typography.
 "src/mergecraft/modes.py" = ["RUF001", "TC003"]
 "src/mergecraft/modes/**" = ["RUF001", "TC003"]

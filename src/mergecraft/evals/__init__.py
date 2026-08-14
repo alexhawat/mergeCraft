@@ -10,7 +10,7 @@ author/runs/PR metadata that the audit tooling expects.
 
 The case schema is markdown + YAML front matter; the front matter is
 validated by ``LearningProvenance.extra="forbid"`` (the locked invariant
-from ``docs/test-plans/cross-file-deps.md``), so the same parser logic
+from ``docs/dev/test-plans/cross-file-deps.md``), so the same parser logic
 that guards the learnings file guards the eval bank.
 
 This module is the **pure core**. The CLI in ``mergecraft.cli.eval_cmd``

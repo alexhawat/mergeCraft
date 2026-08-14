@@ -1,22 +1,19 @@
 """Subprocess boundary for the optional Meat reading-diff lens (#60 spike).
 
-Wave plan: ``.ignorelocal/waves/issues-meat-reading-diff-wave-plan.md``
-Worktree: ``mergecraft-meat-a-spike`` @ ``wave/meat-a-spike``
-
-This module is the W2 prototype pinned by the W1 RED suite
-(``tests/utils/test_meat_harness.py``). It is a pure boundary: a single
-function :func:`run_meat_harness` that takes a unified diff, invokes
+This module is a pure boundary pinned by
+``tests/utils/test_meat_harness.py``: a single function
+:func:`run_meat_harness` that takes a unified diff, invokes
 ``meat -json`` as a subprocess with a bounded timeout, parses the
 result, and returns a typed record. The raw diff is **always** retained
-on the result (D8). Trust gate, opt-in flag, shell-disabled, and
-missing-binary skip are enforced inside the harness (D7, D13) so every
+on the result. Trust gate, opt-in flag, shell-disabled, and
+missing-binary skip are enforced inside the harness so every
 future caller inherits them — they are not the caller's responsibility.
 
 The reading diff is a **lossy** LLM transformation of attacker-controllable
 input. It is supplementary context only; the raw diff is the gating
-surface (D8, convention 6). The harness itself does not render the
-reading diff into a prompt — that is W4's job, gated by the trust tier
-and the opt-in flag again at the integration seam.
+surface. The harness itself does not render the
+reading diff into a prompt — that happens at the integration seam,
+gated by the trust tier and the opt-in flag again.
 
 Design constraints (locked in this plan):
 

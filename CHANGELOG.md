@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Dropped `evidence/` from the tree — it held regenerable verifier/tool-run
+  output, not project history; `/evidence/` is now gitignored so local runs
+  keep writing there without re-entering the index
+- `meat_python_plus/`'s prior removal from trunk is now backed by an archive
+  branch: all 56 files are preserved at `archive/meat-python-plus`
+  (`39db421af2a6afbd8c17bea1533117fb4f3c7f42`) for anyone who needs the
+  prototype's history
+
+### Changed
+
+- `docs/test-plans/` moved to `docs/dev/test-plans/`, keeping engineering
+  history out of the top-level docs a reader browses
+
 ### Changed
 
 - Eval bank replay harness (`make eval-replay`) writes versioned result sets with
@@ -42,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CI and `make test-otlp-collector` gate merge with a digest-pinned
   `otel/opentelemetry-collector` service ([#143](https://github.com/alexhawat/mergeCraft/issues/143))
 - Fixed: nightly GitHub live-integration matrix leg can post status checks (`statuses: write`)
+- Fixed: `README.md` no longer references the nonexistent `docs/assets/logo.svg` /
+  `docs/assets/demo.gif`; the hero mark now renders from tracked `assets/brand/`
+  SVGs via a light/dark `<picture>` element, and `assets/brand/` (13 SVGs, the
+  source JPG, and `build_logo.py`) is tracked in git for the first time
+
+### Removed
+
+- Dropped the `docs-mergecraft.dev` badge and every `alexhawat.github.io/mergeCraft`
+  link from `README.md` — the GitHub Pages docs site was never published and the
+  badge/links 404'd. Docs links now point at the in-repo `docs/` tree
 
 ### Security
 
@@ -88,6 +113,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redacting, and OTLP sinks (`tests/tracing/test_tracer.py`,
   `tests/tracing/test_exporters.py`), previously only exercised transitively
   through other tracing test modules
+- `feat(analyzers): add change-impact extraction (impactPath) for review prompts` — new
+  `analyzers.impact` setting (default off) enables declaration-level reference-lead
+  extraction from the diff. When enabled and the diff touches files with recognised
+  extensions, `checkout_pr` returns an `impactPath` JSON file listing every declaration
+  the diff touches, grouped by language, capped at 24 declarations. Defaults to off
+  pending eval-bank measurement. (#94)
 - `feat(findings): carry unresolved review findings past the merge` — a merged PR
   keeps its inline comments forever but nobody re-opens one, so findings the
   author never fixed or rebutted were lost to attention. `mergecraft findings

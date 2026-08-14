@@ -102,6 +102,7 @@
 # `MERGECRAFT_REF` together there — a one-sided bump in this file is
 # invisible to that gate.
 # 2026-08-07: rolled back from 88c6f419 to 8d747f39 — Codex stdin hang regression. See PR #246.
+# 2026-08-14: re-bumped to 0ab5388 (pre-0.0.1 tip) — see the per-step comments below for why.
 name: mergecraft
 
 on:
@@ -366,7 +367,16 @@ jobs:
         id: mergecraft_nous
         continue-on-error: true
         # 2026-08-07: rolled back from 88c6f419 to 8d747f39 — Codex stdin hang regression. See PR #246.
-        uses: alexhawat/mergeCraft@8d747f39d3d36d889e0a85c2dcf691d1bdb91536 # pre-0.0.1
+        # 2026-08-14: re-bumped to pre-0.0.1 tip (0ab5388). The stale 8d747f39 pin predates
+        # a git-tool fix (src/mergecraft/mcp/git.py — tolerate a redundant subcommand in
+        # args[0] instead of erroring) that self-review PRs were tripping over, crashing
+        # the review before it could post a mergecraft-approval verdict at all. The Codex
+        # stdin-hang class of bug this pin originally dodged was traced to blocking I/O in
+        # the Codex driver; 889c1f0 (`feat(agents): migrate codex driver to streaming NDJSON
+        # read loop`) replaced that read path months ago, well before this SHA. Watch the
+        # first few post-bump runs' Codex step for a hang regardless — revert to a known-good
+        # SHA between 8d747f39 and here if one appears.
+        uses: alexhawat/mergeCraft@0ab538803bae60eaf83ee070532670e215249f14 # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: 25m
@@ -452,7 +462,9 @@ jobs:
         # together; if a future `MERGECRAFT_REF` parity rule is added to this
         # repo's Makefile, bump that var in unison.
         # 2026-08-07: rolled back from 88c6f419 to 8d747f39 — Codex stdin hang regression. See PR #246.
-        uses: alexhawat/mergeCraft@8d747f39d3d36d889e0a85c2dcf691d1bdb91536 # pre-0.0.1
+        # 2026-08-14: re-bumped to pre-0.0.1 tip (0ab5388) — see the matching comment on the
+        # Nous step above for why.
+        uses: alexhawat/mergeCraft@0ab538803bae60eaf83ee070532670e215249f14 # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job

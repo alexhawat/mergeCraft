@@ -10,7 +10,7 @@ Contracts:
 - W10.3: a fallback emits a structured warning visible to operators.
 
 Interpretation pinned for the impl wave (recorded in
-``docs/test-plans/production-readiness.md``): the fields land on
+``docs/dev/test-plans/production-readiness.md``): the fields land on
 ``AgentMetadata`` as ``requested_model`` / ``executed_model`` / ``provider`` /
 ``fallback_index`` / ``fallback_occurred``.
 """

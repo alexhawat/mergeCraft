@@ -15,7 +15,7 @@ triggers (bad-``timeout`` → ``configuration_error``, prep failure →
 ``test_configuration_error_outcome_on_workspace_path_escape`` (W3/W5 path).
 
 Interpretation pinned for the impl wave (recorded in
-``docs/test-plans/production-readiness.md``): the enum lives at
+``docs/dev/test-plans/production-readiness.md``): the enum lives at
 ``mergecraft.main.RunOutcome`` (re-exported from wherever it is defined) and
 ``MainResult.outcome`` carries it.
 """
