@@ -1,3 +1,33 @@
+# TODO(action-yml-hygiene): the semgrep-format `action-yml-description-
+# expression` rule added to `semgrep-default-rules.yml` (guarding against
+# literal `${{` inside action.yml `description:` text — see c498e82) is
+# intentionally NOT duplicated here, for two independent reasons found while
+# investigating this file:
+#
+# 1. Mechanical: `pattern.py` invokes ast-grep's default ruleset via
+#    `-r <RULE_FILE>`, which ast-grep restricts to exactly one rule per file
+#    ("Scan the codebase with the single rule located at RULE_FILE" — no
+#    `---`-joined multi-rule support behind `-r`; that only exists behind
+#    `--inline-rules`, which `pattern.py` doesn't build for ast-grep today).
+# 2. Reachability (found investigating, not this task's target): this file
+#    is *currently dead code* via the product's normal selection path.
+#    `registry.detect_enabled()` only lets the `ast-grep` manifest enter
+#    detection when `pattern.pattern_tool_enabled("ast-grep", ...)` is
+#    True, which is exactly `pattern.has_astgrep_config(repo_root)` — i.e.
+#    only when the *consumer repo* already ships its own `sgconfig.yml`.
+#    But `resolve_astgrep_ruleset()` falls back to *this* default file only
+#    when that same `sgconfig.yml` is ABSENT. Those two conditions can't
+#    both hold, so `registry.detect_enabled()` never reaches this file in
+#    production — only a caller that invokes `pattern.resolve_astgrep_ruleset`
+#    directly (bypassing `registry`'s gate, as
+#    `tests/analyzers/test_adapters_pattern.py::test_pattern_scanner_catches_planted_sink`
+#    does) ever exercises it. Left as-is since fixing the gate is a platform
+#    change outside this task's scope; flagging so it isn't mistaken for
+#    working default coverage.
+#
+# Revisit both together: giving `pattern.py` a multi-rule default ruleset
+# path (e.g. `--inline-rules` with `---`-joined rule files) is only worth
+# doing once ast-grep's default-ruleset path is actually reachable.
 id: eval-call
 language: python
 rule:

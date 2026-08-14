@@ -11,3 +11,32 @@ rules:
     message: Avoid exec — code execution sink
     severity: ERROR
     languages: [python]
+  - id: action-yml-description-expression
+    # GitHub evaluates `${{ ... }}` wherever it lexically appears in an
+    # action's YAML manifest, including inside plain `description:` prose
+    # meant only as consumer-facing documentation — not just executable
+    # fields like `runs.env`/`outputs.*.value`/`with:`. An invalid-context
+    # reference there (e.g. `secrets.*` in a composite action's own metadata
+    # scope) fails the action's *load* step for every consumer, silently,
+    # until something pins past the offending commit. See c498e82
+    # (fix(action): stop action.yml description text from breaking as an
+    # expression) — the incident this rule guards against.
+    patterns:
+      - pattern: "description: $X"
+      - metavariable-regex:
+          metavariable: $X
+          regex: (?s).*\$\{\{.*
+    message: >-
+      literal `${{ }}` GitHub Actions expression syntax inside a
+      `description:` field. GitHub evaluates it lexically regardless of
+      field semantics — this almost certainly breaks action.yml load for
+      every consumer rather than doing what the prose intends. Reword the
+      description to name the secret/input without the `${{ }}` wrapper
+      (e.g. backtick-quoted prose), or interpolate it in the *consumer's*
+      workflow YAML instead of this manifest's own text. See c498e82.
+    severity: ERROR
+    languages: [yaml]
+    paths:
+      include:
+        - "action.yml"
+        - "action.yaml"

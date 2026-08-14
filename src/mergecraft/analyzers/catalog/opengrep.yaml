@@ -1,6 +1,6 @@
 id: opengrep
 category: security
-languages: ["python", "javascript", "typescript", "go", "java", "ruby", "rust"]
+languages: ["python", "javascript", "typescript", "go", "java", "ruby", "rust", "yaml"]
 detect:
   files:
     - "*.py"
@@ -11,6 +11,8 @@ detect:
     - "*.java"
     - "*.rb"
     - "*.rs"
+    - "action.yml"
+    - "action.yaml"
 command:
   - opengrep
   - scan
