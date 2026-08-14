@@ -72,3 +72,5 @@ tests/analyzers/fixtures/repo/.mergecraft/
 !/.mergecraft/learnings.md
 !/.mergecraft/xrepo-learnings.md
 !/.mergecraft/xrepo-brief.md
+
+/.agents

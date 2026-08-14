@@ -425,7 +425,22 @@ jobs:
         # initializing the Codex app-server). Fixed in #194 (prepare_workspace_for_agent()
         # chown as the last step); f5b070b is #194 merged into pre-0.0.1, synced to main
         # via #195. Lesson holds: re-bump this SHA explicitly, every time.
-        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        # 2026-08-14 (fifth bump, same day): re-bumped to 3bf6d7b — checkout_pr failed
+        # when re-run against a shared workspace within one job: a Nous review, then a
+        # Codex fallback, both call checkout_pr against the same /github/workspace, and
+        # the second call's fetch failed outright ("refusing to fetch into branch
+        # 'refs/heads/pr-<n>' checked out at '/github/workspace'"). Reproduced on both
+        # PR #201 and PR #202 — Nous timed out (Nous Portal flakiness, unrelated), the
+        # Codex fallback then hit this, and neither posted a mergecraft-approval verdict
+        # before running out of budget. Fixed in #204 (src/mergecraft/mcp/checkout.py —
+        # detach HEAD before the fetch). Unlike every prior bump above, this SHA is
+        # #204's own branch-tip commit, pinned before merge: #204 cannot review itself
+        # with its own fix (the same self-review limitation the top-of-file comment
+        # describes for mergecraft.yml edits), so bumping only after merge would need a
+        # second PR just to consume the first. 3bf6d7b survives merge intact — this repo
+        # merges PRs with a merge commit, never squash — so once #204 lands this pin is
+        # already correct; no follow-up bump needed.
+        uses: alexhawat/mergeCraft@3bf6d7bba38cfeb7966b78316bdc5a150c43ce0d # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: 25m
@@ -518,8 +533,10 @@ jobs:
         # load-breaking `${{ secrets.X }}` in description text), then to a1c10ef (#190:
         # setpriv never resets $HOME, agent subprocess EACCES post-privilege-drop), then to
         # f5b070b (#194: $CODEX_HOME/.gemini/.claude also created root-owned before the
-        # drop, same bug shape) — see the matching comment on the Nous step above for why.
-        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        # drop, same bug shape), then to 3bf6d7b (#204: checkout_pr fetch failure on a
+        # shared workspace when Nous falls back to Codex, fixed by detaching HEAD before
+        # the fetch) — see the matching comment on the Nous step above for why.
+        uses: alexhawat/mergeCraft@3bf6d7bba38cfeb7966b78316bdc5a150c43ce0d # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
