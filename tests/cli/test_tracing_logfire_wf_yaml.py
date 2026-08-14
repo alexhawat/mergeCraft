@@ -1396,3 +1396,164 @@ jobs:
           MERGECRAFT_TRACING_PROJECT: y
 """
     _assert_wired_semantics(good_yaml, step_identifiers=["job:review/step:0"])
+
+
+# ---------------------------------------------------------------------------
+# Round-5 regression tests -- support README Examples 1 and 6
+# ---------------------------------------------------------------------------
+# README Examples 1 (auto-review every PR) and 6 (Tracing with Logfire) both
+# use the *inline* ``- uses: alexhawat/mergeCraft@pre-0.0.1`` step form on
+# indented ``steps:`` lists, and Example 1 defines only ``env:`` on the step
+# (every ``action.yml`` input is optional). Round 3 of the self-review
+# raised these as blockers because the previous regex did not match the
+# inline form and ``_do`` had a "the mergeCraft action requires with:"
+# comment that was demonstrably wrong. These tests pin both fixes so a
+# later refactor can't silently regress them.
+
+
+# Example 1 (env-only) -- action step with only ``env:``, no ``with:``.
+EXAMPLE_1_ENV_ONLY_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: alexhawat/mergeCraft@pre-0.0.1
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+"""
+
+
+# Example 6 (Logfire tracing) -- inline form with both ``with:`` and ``env:``.
+# Note: this template omits any pre-existing ``tracing`` / ``tracing-to`` /
+# ``logfire-token`` keys so the wire path inserts cleanly without ``force``.
+EXAMPLE_6_INLINE_FORM_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: alexhawat/mergeCraft@pre-0.0.1
+        with:
+          prompt: ${{ steps.prompt.outputs.text }}
+          timeout: 25m
+          model: nous/deepseek/deepseek-v4-flash
+        env:
+          LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
+"""
+
+
+def test_apply_logfire_wiring_supports_inline_uses_form(tmp_path: Path) -> None:
+    """Inline ``- uses: alexhawat/mergeCraft@X`` (README Example 6) wires cleanly.
+
+    The previous regex ``^(?P<indent>[ \t]+)uses:`` required leading
+    whitespace before ``uses:`` and rejected the inline form where
+    ``-`` shares the line with ``uses:`` -- so exactly the workflows the
+    README tells operators to write failed with
+    "no ``uses: alexhawat/mergeCraft`` step found".
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, EXAMPLE_6_INLINE_FORM_TEMPLATE)
+    change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+    )
+    assert change.was_modified
+    new = change.new_text
+    parsed = yaml.safe_load(new)
+    step = parsed["jobs"]["trace"]["steps"][0]
+    assert step["with"]["tracing"] == "true"
+    assert step["with"]["tracing-to"] == "logfire"
+    assert step["with"]["logfire-token"] == "${{ secrets.LOGFIRE_TOKEN }}"
+    assert step["env"]["MERGECRAFT_TRACING_PROJECT"] == "${{ vars.LOGFIRE_PROJECT }}"
+    # The existing env line is preserved alongside the newly-injected one.
+    assert step["env"]["LOGFIRE_TOKEN"] == "${{ secrets.LOGFIRE_TOKEN }}"
+
+
+def test_apply_logfire_wiring_creates_with_block_when_missing(tmp_path: Path) -> None:
+    """A step with only ``env:`` (README Example 1) gets a synthesised ``with:``.
+
+    Every ``action.yml`` input is ``required: false``, and Example 1's
+    minimal step defines only ``env:`` on the action. The previous
+    ``_do`` returned silently because the ``with:`` insert was a no-op
+    *and* there was no existing ``with:`` to extend -- then
+    ``_assert_wired_semantics`` rejected the result with
+    "with: is None (not a mapping)".
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, EXAMPLE_1_ENV_ONLY_TEMPLATE)
+    change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="all",
+        force=False,
+    )
+    assert change.was_modified
+    new = change.new_text
+    parsed = yaml.safe_load(new)
+    # Find the mergeCraft step (skip the actions/checkout step above it).
+    mergecraft_step = next(
+        s
+        for s in parsed["jobs"]["review"]["steps"]
+        if str(s["uses"]).startswith("alexhawat/mergeCraft@")
+    )
+    assert mergecraft_step["with"]["tracing"] == "true"
+    assert mergecraft_step["with"]["tracing-to"] == "logfire"
+    assert mergecraft_step["with"]["logfire-token"] == "${{ secrets.LOGFIRE_TOKEN }}"
+    # The pre-existing env line is preserved.
+    assert (
+        mergecraft_step["env"]["CLAUDE_CODE_OAUTH_TOKEN"]
+        == "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
+    )
+    assert mergecraft_step["env"]["MERGECRAFT_TRACING_PROJECT"] == "${{ vars.LOGFIRE_PROJECT }}"
+
+
+def test_unwire_workflow_round_trip_on_inline_uses_form(tmp_path: Path) -> None:
+    """Wire -> unwire round trip on the inline form leaves no owned keys behind."""
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, EXAMPLE_6_INLINE_FORM_TEMPLATE)
+    wire_change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+    )
+    _write_workflow(workflow, wire_change.new_text)
+    remove_change = remove_logfire_wiring(
+        workflow_path=workflow,
+        step_selector="primary",
+    )
+    assert remove_change.was_modified
+    parsed = yaml.safe_load(remove_change.new_text)
+    mergecraft_step = next(
+        s
+        for s in parsed["jobs"]["trace"]["steps"]
+        if str(s["uses"]).startswith("alexhawat/mergeCraft@")
+    )
+    # Owned ``with:`` keys removed.
+    with_map = mergecraft_step.get("with") or {}
+    for key in OWNED_WITH_KEYS:
+        assert key not in with_map, f"{key} still present after unwire"
+    # Owned env key removed; pre-existing LOGFIRE_TOKEN preserved.
+    env_map = mergecraft_step.get("env") or {}
+    assert "MERGECRAFT_TRACING_PROJECT" not in env_map
+    assert env_map["LOGFIRE_TOKEN"] == "${{ secrets.LOGFIRE_TOKEN }}"

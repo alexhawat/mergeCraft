@@ -163,7 +163,18 @@ def _find_action_steps(text: str, action_uses: str = _ACTION_USES) -> list[tuple
     # Require ``@`` immediately after the action name. ``\b`` would also
     # match ``alexhawat/mergeCraft-fork``, ``alexhawat/mergecraft`` (lower-
     # cased), etc. -- a fork that we must not wire the Logfire token into.
-    uses_re = re.compile(r"^(?P<indent>[ \t]+)uses:[ \t]*" + re.escape(action_uses) + r"@")
+    # Match both step shapes documented by the README:
+    #   - multi-line form: ``- name: foo`` then ``  uses: alexhawat/mergeCraft@X``
+    #   - inline form:     ``- uses: alexhawat/mergeCraft@X``
+    # ``ws`` captures any leading whitespace; then the body indent is the
+    # whitespace between ``-`` and ``uses:`` (inline) or between line
+    # start and ``uses:`` (multi-line). ``inline_ws`` / ``multiline_ws``
+    # are mutually exclusive -- exactly one is set on a successful match.
+    uses_re = re.compile(
+        r"^(?P<ws>[ \t]*)"
+        r"(?:-(?P<inline>[ \t]+)|(?P<multiline>[ \t]+))"
+        r"uses:[ \t]*" + re.escape(action_uses) + r"@"
+    )
     cum: list[int] = []
     offset = 0
     for ln in lines:
@@ -175,7 +186,24 @@ def _find_action_steps(text: str, action_uses: str = _ACTION_USES) -> list[tuple
         m = uses_re.match(line)
         if m is None:
             continue
-        step_indent = len(m.group("indent"))
+        ws = m.group("ws")
+        # The body indent of the step -- the column ``with:`` / ``env:``
+        # siblings live at -- is the column of ``uses:`` itself (the
+        # siblings are written underneath at the same column).
+        #   - Multi-line form: ``ws`` + ``multiline`` holds all leading
+        #     whitespace before ``uses:``, so ``step_indent = len(ws) +
+        #     len(multiline)``.
+        #   - Inline form: ``ws`` holds the indent before ``-``,
+        #     ``inline`` holds the whitespace between ``-`` and
+        #     ``uses:``; ``uses:`` itself sits at column
+        #     ``len(ws) + 1 + len(inline)`` (one for the ``-`` plus the
+        #     whitespace consumed by ``inline``).
+        inline_ws = m.group("inline")
+        multiline_ws = m.group("multiline")
+        if inline_ws is not None:
+            step_indent = len(ws) + 1 + len(inline_ws)
+        else:
+            step_indent = len(ws) + len(multiline_ws)
         # Walk back to find the leading ``-`` list marker. In a GitHub Actions
         # workflow the leading ``-`` is at the same indent as the rest of the
         # step's body when ``-`` is on a line of its own (e.g. ``- name:``),
@@ -185,16 +213,25 @@ def _find_action_steps(text: str, action_uses: str = _ACTION_USES) -> list[tuple
         # the step's ``-`` marker OR a blank line that separates this step
         # from one above. The first ``-`` line we encounter while scanning
         # backward is the step's start.
+        #
+        # Inline form (``- uses: alexhawat/mergeCraft@X``) is special: the
+        # ``-`` *is* the matched line, so walking back would find the
+        # PREVIOUS step's ``-`` and silently include it in our block
+        # (which then fails the post-mutation YAML re-parse). Detect the
+        # inline form by checking ``m.group("inline")`` -- if set, the
+        # matched line is itself the step's start, so we skip the
+        # walk-back entirely.
         step_start = cum[i]
-        for j in range(i - 1, -1, -1):
-            cur = lines[j]
-            if not cur.strip():
-                # Blank line -- boundary.
-                break
-            stripped = cur.lstrip(" \t")
-            if stripped.startswith("-") and (len(stripped) == 1 or stripped[1] in " :"):
-                step_start = cum[j]
-                break
+        if m.group("inline") is None:
+            for j in range(i - 1, -1, -1):
+                cur = lines[j]
+                if not cur.strip():
+                    # Blank line -- boundary.
+                    break
+                stripped = cur.lstrip(" \t")
+                if stripped.startswith("-") and (len(stripped) == 1 or stripped[1] in " :"):
+                    step_start = cum[j]
+                    break
         # Walk forward to the end. A step terminates at the NEXT sibling
         # step marker -- a ``-`` line at indent <= the current step's
         # ``-`` indent (the step list indent). A ``-`` at deeper indent is
@@ -923,9 +960,17 @@ def apply_logfire_wiring(
             force=force,
             at_indent=step_indent,
         )
-        # The step *must* have a ``with:`` block at this point: the mergeCraft
-        # action requires it, and the prior mutation was a no-op only if it
-        # already existed. There is no concept of a step with no ``with:``.
+        # Every mergeCraft action input is ``required: false`` in
+        # ``action.yml``, so a valid step may omit ``with:`` entirely (the
+        # README's Example 1 -- auto-review every PR -- defines only
+        # ``env:`` on the step). When that's the case the prior ``with:``
+        # insert is a no-op *and* there's no existing ``with:`` block to
+        # extend, so we must create one -- symmetric with the ``env:``
+        # branch below -- or the post-mutation semantic check rejects the
+        # result (``with: is None``).
+        if not mod_with and _find_mapping_block(block2, "with", at_indent=step_indent) is None:
+            block2 = _create_with_block(block2, with_canonical, at_indent=step_indent)
+            mod_with = True
         block3, mod_env = _insert_owned_keys_into_block(
             block2,
             key="env",
@@ -947,6 +992,66 @@ def apply_logfire_wiring(
         mutate_one=_do,
         post_mutation_check=_assert_wired_semantics,
     )
+
+
+def _create_with_block(
+    block: str,
+    canonical: list[tuple[str, str]],
+    at_indent: int | None = None,
+) -> str:
+    """Insert a fresh ``with:`` block immediately after the ``uses:`` line.
+
+    Symmetric with ``_create_env_block`` but on the opposite side: when a
+    step has no ``with:`` mapping (every ``action.yml`` input is optional,
+    and the README's Example 1 defines only ``env:`` on the step), we have
+    to synthesise a ``with:`` block to host the three owned input keys
+    (``tracing``, ``tracing-to``, ``logfire-token``). Placement is after the
+    step's ``uses:`` line so the new block sits at the canonical sibling
+    position. Child indent falls back to ``at_indent + 2`` when ``env:``
+    is missing too (the common env-only case has ``env:`` so we mirror its
+    child indent); this keeps wire -> unwire symmetric on such files: the
+    wire writes at the observed indent, the unwire scans at the same
+    indent.
+
+    ``at_indent`` scopes the search for the existing ``env:`` mapping
+    line to the step's body indent -- prevents a literal ``env:`` line
+    inside a block scalar from being mistaken for the step's real ``env:``
+    mapping.
+    """
+    # Match both step shapes documented by the README -- multi-line
+    # ``- name: foo`` / ``  uses: ...`` and inline ``- uses: ...``. The
+    # ``(?P<uses_line>[^\n]*\n)`` capture preserves the whole ``uses:``
+    # line so we can insert immediately after it. The new ``with:`` key
+    # sits at the column of ``uses:`` itself (the body indent), which
+    # equals ``at_indent`` -- passed in by the caller rather than
+    # reconstructed from the regex (otherwise inline-vs-multiline
+    # disambiguation has to be repeated here).
+    uses_re = re.compile(
+        r"^(?P<ws>[ \t]*)(?:-(?P<inline>[ \t]+)|(?P<multiline>[ \t]+))"
+        r"uses:[ \t]*(?P<uses_line>[^\n]*\n)",
+        re.MULTILINE,
+    )
+    m = uses_re.search(block)
+    if m is None:
+        raise LogfireWorkflowError(
+            "could not locate the ``uses:`` line to attach a new ``with:`` block"
+        )
+    indent_str = " " * at_indent if at_indent is not None else ""
+    # Try to mirror the existing ``env:`` block's child indent so the new
+    # ``with:`` block matches the workflow's own style (e.g. 4-space
+    # indentation on workflows that opt into it). Fall back to
+    # ``at_indent + 2`` when ``env:`` is missing or has no children yet.
+    env_block = _find_mapping_block(block, "env", at_indent=at_indent)
+    if env_block is not None:
+        child_ws = _derive_child_indent(block, env_block[0], env_block[1], env_block[2])
+        child_indent = child_ws if child_ws is not None else indent_str + "  "
+    else:
+        child_indent = indent_str + "  "
+    insertion_lines = [f"{indent_str}with:"]
+    for key, value in canonical:
+        insertion_lines.append(f"{child_indent}{key}: {value}")
+    insertion = "\n".join(insertion_lines) + "\n"
+    return block[: m.end()] + insertion + block[m.end() :]
 
 
 def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | None = None) -> str:
@@ -983,14 +1088,20 @@ def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | N
         env_child_indent = child_ws if child_ws is not None else with_indent + "  "
         insertion = f"{with_indent}env:\n{env_child_indent}{canonical_key}: {canonical_value}\n"
         return block[:with_end] + insertion + block[with_end:]
-    # No ``with:`` -- fall back to inserting after ``uses:``.
-    uses_re = re.compile(r"^(?P<indent>[ \t]*)uses:[ \t]*\S+[^\n]*\n", re.MULTILINE)
+    # No ``with:`` -- fall back to inserting after ``uses:``. Match both
+    # step shapes documented by the README -- multi-line
+    # ``- name: foo`` / ``  uses: ...`` and inline ``- uses: ...``.
+    uses_re = re.compile(
+        r"^(?P<indent>[ \t]*)(?:-(?P<inline>[ \t]+)|(?P<multiline>[ \t]+))"
+        r"uses:[ \t]*(?P<uses_line>[^\n]*\n)",
+        re.MULTILINE,
+    )
     m = uses_re.search(block)
     if m is None:
         raise LogfireWorkflowError(
             "could not locate the ``uses:`` line to attach a new ``env:`` block"
         )
-    indent_str = m.group("indent")
+    indent_str = " " * at_indent if at_indent is not None else ""
     env_indent = indent_str + "  "
     insertion = f"{indent_str}env:\n{env_indent}{canonical_key}: {canonical_value}\n"
     return block[: m.end()] + insertion + block[m.end() :]
