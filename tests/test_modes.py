@@ -180,6 +180,21 @@ def test_review_mode_has_data_integrity_and_copy_lenses() -> None:
     assert "**copy vs code**" in prompt
 
 
+def test_review_mode_has_privilege_drop_ordering_lens() -> None:
+    """Regression pin: the privilege-drop-ordering lens survives edits.
+
+    mergeCraft shipped this exact bug shape against itself twice (root-owned
+    ``$HOME`` after ``setpriv``'s uid/gid drop, then root-owned
+    ``$CODEX_HOME``/``.gemini``/``.claude`` writes) before either was caught
+    by review. The lens exists precisely because nothing else in the starter
+    menu catches it reliably; a silent deletion should fail loudly here
+    rather than surface again only as a production incident.
+    """
+    prompt = next(m for m in modes if m.name == "Review").prompt or ""
+    assert "**privilege drop ordering**" in prompt
+    assert "prepare_workspace_for_agent" in prompt
+
+
 def test_mergecraft_reviewer_subagent_referenced() -> None:
     build = next(m for m in modes if m.name == "Build")
     review = next(m for m in modes if m.name == "Review")

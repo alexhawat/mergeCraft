@@ -116,7 +116,9 @@ def main() -> int:
             required = {"name", "head_sha", "status", "conclusion", "output"}
             missing = required - set(body)
             if missing:
-                print(f"FAIL: mergecraft check-run missing keys: {sorted(missing)}", file=sys.stderr)
+                print(
+                    f"FAIL: mergecraft check-run missing keys: {sorted(missing)}", file=sys.stderr
+                )
                 return 1
             if body.get("status") != "completed":
                 print(f"FAIL: mergecraft status={body.get('status')!r}", file=sys.stderr)

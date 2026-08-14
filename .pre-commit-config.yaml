@@ -1,7 +1,7 @@
 # Sync hook revisions with dev tooling (see pyproject.toml optional dev deps).
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.12
+    rev: v0.16.2
     hooks:
       - id: ruff
         args: [--fix]
@@ -23,6 +23,13 @@ repos:
         language: system
         pass_filenames: false
         files: ^src/mergecraft/.*\.py$
+
+      - id: mergecraft-action-yml-hygiene
+        name: action.yml hygiene (no ${{ }} in description text)
+        entry: uv run python scripts/check_action_yml_hygiene.py
+        language: system
+        pass_filenames: false
+        files: (^|/)action\.ya?ml$
 
       - id: conventional-commit
         name: Conventional Commits

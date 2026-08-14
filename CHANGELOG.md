@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The four silent `except Exception: pass` sites in `main.py`, `mcp/shell.py`
+  (x2), and `mcp/server.py` now log the swallowed exception via
+  `logger.warning` before continuing; the best-effort swallowing semantics
+  are unchanged, but the failure is no longer invisible at the default log
+  level
 - `main()` is now a thin orchestrator over `RunContext`-carried phase functions
   (`_setup_run`, `_resolve_credentials`, `_execute_agent`, `_finalize`), and the
   five worst analyzer hotspots (`resolve_analyzer`, `_exclusive_group_winner`,
@@ -55,6 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed: `.pre-commit-config.yaml`'s `ruff-pre-commit` hook was pinned three
+  minor versions behind `pyproject.toml`'s `ruff==` dev pin (`v0.15.12` vs.
+  `0.16.0`), so local hooks and CI could disagree on lint results. Both now
+  pin `0.16.2` (landing Dependabot #159), and a new `make hook-pins-check`
+  (wired into `make lint`) parses both files and fails the build on future
+  drift
 - Fixed: the nightly live-provider job now issues a real minimal request per provider
   and asserts a structured completion. Previously it exported four provider keys but ran
   only offline-shaped tests — three of the four keys had no consumer — and exited 0 with
@@ -111,6 +122,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tracer spans are now capped at `MAX_SPANS_PER_RUN` (10,000) per run — once a
+  run hits the ceiling, further spans stop reaching the configured sink and a
+  single `warning` is logged, instead of the trace tree growing unbounded on a
+  runaway (#56)
+- Direct unit tests for `Tracer` / `Span` / `NullTracer` and the JSONL,
+  redacting, and OTLP sinks (`tests/tracing/test_tracer.py`,
+  `tests/tracing/test_exporters.py`), previously only exercised transitively
+  through other tracing test modules
 - `feat(analyzers): add change-impact extraction (impactPath) for review prompts` — new
   `analyzers.impact` setting (default off) enables declaration-level reference-lead
   extraction from the diff. When enabled and the diff touches files with recognised
