@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Literal
 from mergecraft.analyzers.detect import _eslint_command_prefix, resolve_repo_tool
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
 _CATALOG_DIR = Path(__file__).resolve().parent / "catalog"
@@ -70,6 +72,183 @@ def detect_repo_tool(
     return True, resolution.path, resolution.version
 
 
+def _declared_unavailable_plan(manifest: AnalyzerManifest) -> AnalyzerPlan | None:
+    """Per-source resolver: a manifest the catalog itself marks unavailable."""
+    if not manifest.declared_unavailable:
+        return None
+    return AnalyzerPlan(
+        manifest_id=manifest.id,
+        mode="skip",
+        reason=f"skipped {manifest.id}: {manifest.declared_unavailable}",
+    )
+
+
+def _agentsec_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
+    """Per-source resolver: the ``agentsec`` special-case (mergeCraft's native engine)."""
+    if manifest.id != "agentsec":
+        return None
+    return AnalyzerPlan(
+        manifest_id=manifest.id,
+        mode="repo-native",
+        argv=("agentsec",),
+        cwd=repo_root,
+        timeout_s=manifest.timeout_s,
+        version_note="ran mergeCraft native agent-security policy engine",
+        config_note="native YAML rules",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _RepoToolState:
+    """Availability + provenance for the repo-native execution source."""
+
+    available: bool
+    tool_path: str | None
+    tool_version: str | None
+    config_note: str | None
+
+
+def _detect_repo_tool_state(
+    manifest: AnalyzerManifest,
+    repo_root: Path,
+    *,
+    repo_has_tool: bool | None,
+    repo_tool_path: str | None,
+    repo_tool_version: str | None,
+) -> tuple[_RepoToolState, AnalyzerPlan | None]:
+    """Resolve repo-native tool availability, or an early skip plan on detection failure.
+
+    Detection only runs when the caller left ``repo_has_tool`` unresolved
+    (``None``) — the "figure it out" default. An explicit caller-supplied
+    boolean (including ``allow_repo_binaries=False`` forcing it to
+    ``False``) skips detection entirely and is trusted as-is. On a failed
+    detection, type checkers and repo-native-only manifests skip
+    immediately with ``resolve_repo_tool``'s own reason — a distinct
+    message from the generic type-checker skip later in the ladder.
+    """
+    if repo_has_tool is not None:
+        return _RepoToolState(repo_has_tool, repo_tool_path, repo_tool_version, None), None
+
+    resolution, skip_reason = resolve_repo_tool(
+        manifest.id,
+        repo_root=repo_root,
+        command_binary=_repo_tool_binary(manifest),
+    )
+    if resolution is None:
+        if manifest.id in _TYPE_CHECKER_IDS:
+            return (
+                _RepoToolState(False, None, None, None),
+                AnalyzerPlan(manifest_id=manifest.id, mode="skip", reason=skip_reason),
+            )
+        if manifest.runtime == "repo-native" and skip_reason and skip_reason.startswith("skipped"):
+            return (
+                _RepoToolState(False, None, None, None),
+                AnalyzerPlan(manifest_id=manifest.id, mode="skip", reason=skip_reason),
+            )
+        return _RepoToolState(False, None, None, None), None
+
+    return (
+        _RepoToolState(
+            True,
+            repo_tool_path or resolution.path,
+            repo_tool_version or resolution.version,
+            resolution.config_note,
+        ),
+        None,
+    )
+
+
+def _repo_native_plan(
+    manifest: AnalyzerManifest, repo_root: Path, state: _RepoToolState
+) -> AnalyzerPlan | None:
+    """Per-source resolver: the repo's own binary, once availability is known."""
+    if not state.available:
+        return None
+    argv = tuple(manifest.command)
+    if manifest.id == "eslint":
+        prefix = _eslint_command_prefix(repo_root)
+        if len(prefix) == 2:
+            argv = (*prefix, *manifest.command[1:])
+        elif len(prefix) == 1:
+            argv = (prefix[0], *manifest.command[1:])
+    elif state.tool_path and argv and argv[0] == _repo_tool_binary(manifest):
+        argv = (state.tool_path, *argv[1:])
+    version_note = _format_version_note(
+        manifest, repo_tool_version=state.tool_version, config_note=state.config_note
+    )
+    return AnalyzerPlan(
+        manifest_id=manifest.id,
+        mode="repo-native",
+        argv=argv,
+        cwd=repo_root,
+        timeout_s=manifest.timeout_s,
+        version_note=version_note,
+        config_note=state.config_note,
+    )
+
+
+def _type_checker_missing_plan(manifest: AnalyzerManifest) -> AnalyzerPlan | None:
+    """Per-source resolver: type checkers are repo-native only (C3/D5) — no substitute."""
+    if manifest.id not in _TYPE_CHECKER_IDS:
+        return None
+    return AnalyzerPlan(
+        manifest_id=manifest.id,
+        mode="skip",
+        reason=(
+            f"skipped {manifest.id}: type checker not installed in the repo environment "
+            "(repo-native only — managed substitute forbidden, C3/D5)"
+        ),
+    )
+
+
+def _ci_result_plan(
+    manifest: AnalyzerManifest, repo_root: Path, ci_artifact_available: bool
+) -> AnalyzerPlan | None:
+    """Per-source resolver: a CI-produced artifact stands in for a local run."""
+    if not ci_artifact_available:
+        return None
+    return AnalyzerPlan(
+        manifest_id=manifest.id, mode="ci-result", cwd=repo_root, timeout_s=manifest.timeout_s
+    )
+
+
+def _managed_plan(
+    manifest: AnalyzerManifest,
+    repo_root: Path,
+    *,
+    managed_available: bool,
+    managed_version: str | None,
+) -> AnalyzerPlan | None:
+    """Per-source resolver: mergeCraft's own pinned binary."""
+    if not (managed_available and manifest.runtime in {"managed", "repo-native"}):
+        return None
+    version = managed_version or manifest.version
+    version_note = f"ran mergeCraft's pinned {manifest.id} {version}; your repo pins none"
+    return AnalyzerPlan(
+        manifest_id=manifest.id,
+        mode="managed",
+        argv=tuple(manifest.command),
+        cwd=repo_root,
+        timeout_s=manifest.timeout_s,
+        version_note=version_note,
+    )
+
+
+def _container_plan(
+    manifest: AnalyzerManifest, repo_root: Path, container_available: bool
+) -> AnalyzerPlan | None:
+    """Per-source resolver: a sandboxed container image, last resort before skip."""
+    if not (container_available and manifest.runtime == "container"):
+        return None
+    return AnalyzerPlan(
+        manifest_id=manifest.id,
+        mode="container",
+        argv=tuple(manifest.command),
+        cwd=repo_root,
+        timeout_s=manifest.timeout_s,
+    )
+
+
 def resolve_analyzer(
     *,
     manifest: AnalyzerManifest,
@@ -90,121 +269,49 @@ def resolve_analyzer(
     manifest regardless of declared ``runtime``. ``allow_repo_binaries=False``
     removes that step so only the pinned binary can run — what ``shell:
     disabled`` requires, since the working tree is then PR-authored (#35, D5).
+
+    The ladder is a small ordered dispatch of per-source resolvers —
+    declared-unavailable → agentsec special-case → repo-native →
+    type-checker-only-skip → managed → container — each either producing a
+    plan or yielding (``None``) to the next.
     """
     if not allow_repo_binaries:
         repo_has_tool = False
-    if manifest.declared_unavailable:
-        return AnalyzerPlan(
-            manifest_id=manifest.id,
-            mode="skip",
-            reason=f"skipped {manifest.id}: {manifest.declared_unavailable}",
-        )
 
-    if manifest.id == "agentsec":
-        return AnalyzerPlan(
-            manifest_id=manifest.id,
-            mode="repo-native",
-            argv=("agentsec",),
-            cwd=repo_root,
-            timeout_s=manifest.timeout_s,
-            version_note="ran mergeCraft native agent-security policy engine",
-            config_note="native YAML rules",
-        )
+    plan = _declared_unavailable_plan(manifest)
+    if plan is not None:
+        return plan
 
-    config_note: str | None = None
-    if repo_has_tool is None:
-        resolution, skip_reason = resolve_repo_tool(
-            manifest.id,
-            repo_root=repo_root,
-            command_binary=_repo_tool_binary(manifest),
-        )
-        if resolution is None:
-            if manifest.id in _TYPE_CHECKER_IDS:
-                return AnalyzerPlan(
-                    manifest_id=manifest.id,
-                    mode="skip",
-                    reason=skip_reason,
-                )
-            if (
-                manifest.runtime == "repo-native"
-                and skip_reason
-                and skip_reason.startswith("skipped")
-            ):
-                return AnalyzerPlan(
-                    manifest_id=manifest.id,
-                    mode="skip",
-                    reason=skip_reason,
-                )
-            repo_has_tool = False
-        else:
-            repo_has_tool = True
-            repo_tool_path = repo_tool_path or resolution.path
-            repo_tool_version = repo_tool_version or resolution.version
-            config_note = resolution.config_note
+    plan = _agentsec_plan(manifest, repo_root)
+    if plan is not None:
+        return plan
 
-    if repo_has_tool:
-        argv = tuple(manifest.command)
-        if manifest.id == "eslint":
-            prefix = _eslint_command_prefix(repo_root)
-            if len(prefix) == 2:
-                argv = (*prefix, *manifest.command[1:])
-            elif len(prefix) == 1:
-                argv = (prefix[0], *manifest.command[1:])
-        elif repo_tool_path and argv and argv[0] == _repo_tool_binary(manifest):
-            argv = (repo_tool_path, *argv[1:])
-        version_note = _format_version_note(
+    repo_tool_state, early_skip = _detect_repo_tool_state(
+        manifest,
+        repo_root,
+        repo_has_tool=repo_has_tool,
+        repo_tool_path=repo_tool_path,
+        repo_tool_version=repo_tool_version,
+    )
+    if early_skip is not None:
+        return early_skip
+
+    resolvers: tuple[Callable[[], AnalyzerPlan | None], ...] = (
+        lambda: _repo_native_plan(manifest, repo_root, repo_tool_state),
+        lambda: _type_checker_missing_plan(manifest),
+        lambda: _ci_result_plan(manifest, repo_root, ci_artifact_available),
+        lambda: _managed_plan(
             manifest,
-            repo_tool_version=repo_tool_version,
-            config_note=config_note,
-        )
-        return AnalyzerPlan(
-            manifest_id=manifest.id,
-            mode="repo-native",
-            argv=argv,
-            cwd=repo_root,
-            timeout_s=manifest.timeout_s,
-            version_note=version_note,
-            config_note=config_note,
-        )
-
-    if manifest.id in _TYPE_CHECKER_IDS:
-        return AnalyzerPlan(
-            manifest_id=manifest.id,
-            mode="skip",
-            reason=(
-                f"skipped {manifest.id}: type checker not installed in the repo environment "
-                "(repo-native only — managed substitute forbidden, C3/D5)"
-            ),
-        )
-
-    if ci_artifact_available:
-        return AnalyzerPlan(
-            manifest_id=manifest.id,
-            mode="ci-result",
-            cwd=repo_root,
-            timeout_s=manifest.timeout_s,
-        )
-
-    if managed_available and manifest.runtime in {"managed", "repo-native"}:
-        version = managed_version or manifest.version
-        version_note = f"ran mergeCraft's pinned {manifest.id} {version}; your repo pins none"
-        return AnalyzerPlan(
-            manifest_id=manifest.id,
-            mode="managed",
-            argv=tuple(manifest.command),
-            cwd=repo_root,
-            timeout_s=manifest.timeout_s,
-            version_note=version_note,
-        )
-
-    if container_available and manifest.runtime == "container":
-        return AnalyzerPlan(
-            manifest_id=manifest.id,
-            mode="container",
-            argv=tuple(manifest.command),
-            cwd=repo_root,
-            timeout_s=manifest.timeout_s,
-        )
+            repo_root,
+            managed_available=managed_available,
+            managed_version=managed_version,
+        ),
+        lambda: _container_plan(manifest, repo_root, container_available),
+    )
+    for resolver in resolvers:
+        plan = resolver()
+        if plan is not None:
+            return plan
 
     return AnalyzerPlan(
         manifest_id=manifest.id,
