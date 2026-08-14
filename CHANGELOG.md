@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `mergecraft tracing logfire wire-workflow` / `unwire-workflow` — surgical
+  YAML mutation of `.github/workflows/*.yml` to wire (or strip) the four
+  Logfire keys (`tracing: "true"`, `tracing-to: logfire`,
+  `logfire-token: ${{ secrets.LOGFIRE_TOKEN }}`,
+  `MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}`) on selected
+  steps. Comment-preserving line-based mutator; refuses forks with
+  similarly-named action names; supports both the multi-line
+  (`- name: ...` / `  uses: alexhawat/mergeCraft@X`) and the inline
+  (`- uses: alexhawat/mergeCraft@X`) step forms; creates a `with:` block
+  when absent (README Example 1 has no `with:`); public API under
+  `mergecraft.cli.tracing_logfire_wf_yaml.apply_logfire_wiring` /
+  `remove_logfire_wiring` / `render_workflow_diff`
+- `scripts/gen_reference_docs.py` regenerates README's `action.yml` input/output
+  tables and CLI command table from the live sources (never a subprocess — it
+  walks the live Typer `app` object) and splices them between HTML sentinel
+  comments; `make reference-docs-check` (wired into `make ci-static`) fails the
+  build on drift. Closes the audit in the issues-showcase-readiness wave plan
+  (PR G2): the README table documented 9 of 24 real `action.yml` inputs and
+  neither declared output anywhere
+
+### Fixed
+
+- `README.md`'s CLI table documented `mergecraft traces <run-id>`, but the real
+  registered command is `mergecraft traces show <run-id>` — the stale
+  invocation is now generated from the live CLI app instead of hand-maintained
+- `tracing_logfire_wf_yaml` `uses_re` regex now matches the inline
+  `- uses: alexhawat/mergeCraft@X` step form (used by README Examples 1 and
+  6) — previously the regex required leading whitespace before `uses:` and
+  silently rejected every workflow the README documents. The `_do` closure
+  now also synthesises a `with:` block when absent (symmetric with
+  `_create_env_block`) — every `action.yml` input is `required: false`, and
+  the comment claiming otherwise was wrong
+
+### Removed
+
 ## [0.1.0] — 2026-08-14
 
 Initial public release: mergeCraft is a standalone, BYOK GitHub Action for
