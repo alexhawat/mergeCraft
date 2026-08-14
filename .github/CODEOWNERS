@@ -1,3 +1,4 @@
 # Every path requires review from the owner before merge.
 # The ruleset "protect-main" enforces code-owner review on the default branch.
 * @alexhawat
+* @sevn-one
