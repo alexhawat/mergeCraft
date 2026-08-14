@@ -1,4 +1,4 @@
-# 0.0.1 distribution checklist
+# 0.1.0 distribution checklist
 
 Operator runbook for the agent-owned and operator-owned boxes in
 [#141](https://github.com/alexhawat/mergeCraft/issues/141). Release gating
@@ -33,21 +33,21 @@ PyPI distribution name is **`merge-craft`** (hyphen); import and CLI remain
 3. Release preconditions green on the release branch (live integration, E2E nightly,
    image SBOM + Trivy gate) — see [CONTRIBUTING.md](../CONTRIBUTING.md#releases-craft).
 
-**Cut and publish 0.0.1**
+**Cut and publish 0.1.0**
 
 ```bash
-craft prepare 0.0.1          # first release — explicit version, not `auto`
+craft prepare 0.1.0          # first release — explicit version, not `auto`
 # Wait for CI/CD on the release branch (build, scan, sign, attest, promote).
-craft publish 0.0.1          # uploads dist/* to PyPI + GitHub release per .craft.yml
+craft publish 0.1.0          # uploads dist/* to PyPI + GitHub release per .craft.yml
 ```
 
-Or dispatch **Release** (`.github/workflows/release.yml`) with `version: 0.0.1`,
-then `craft publish 0.0.1` after CI is green.
+Or dispatch **Release** (`.github/workflows/release.yml`) with `version: 0.1.0`,
+then `craft publish 0.1.0` after CI is green.
 
 Post-publish smoke:
 
 ```bash
-pip install merge-craft==0.0.1
+pip install merge-craft==0.1.0
 mergecraft --help
 ```
 
@@ -57,7 +57,7 @@ Marketplace is **not** automated by Craft. After the public GitHub release and
 Docker `:latest` promotion:
 
 1. Open [GitHub Marketplace new action](https://github.com/marketplace/actions/new).
-2. Point at `alexhawat/mergeCraft` and the release tag (`v0.0.1`).
+2. Point at `alexhawat/mergeCraft` and the release tag (`v0.1.0`).
 3. Use the Docker action entry (`action.yml` + `ghcr.io/alexhawat/mergecraft` image).
 4. Categories: **Code review**, **Continuous integration**.
 5. Link docs: `docs/`, `REVIEW-CHECKS.md`, `docs/ANALYZERS.md`.
@@ -82,7 +82,7 @@ runtime; no local Python install is required.
 |------|--------|
 | `src/mergecraft/yes/` | **Live** — async retry primitive (`mergecraft.yes.op`) used by `mergecraft watch`. Name is intentional; not renamed in this release (API surface). |
 
-## Prototype residue removed for 0.0.1
+## Prototype residue removed for 0.1.0
 
 - `docs/meat-spike.md` — spike write-up (issue #60 exploration).
 - `meat_python_plus/` — experimental Python port of [meat](https://github.com/boldsoftware/meat);

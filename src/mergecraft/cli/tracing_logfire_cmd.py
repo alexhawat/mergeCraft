@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import getpass
 import os
+from pathlib import Path
 from typing import NoReturn
 
 import typer
@@ -28,6 +29,13 @@ from mergecraft.cli.auth_cmd import (
     _set_gh_secret,
     _validate_logfire_token,
     _write_env_value,
+)
+from mergecraft.cli.tracing_logfire_wf_yaml import (
+    DEFAULT_WORKFLOW_RELATIVE_PATH,
+    LogfireWorkflowError,
+    apply_logfire_wiring,
+    remove_logfire_wiring,
+    render_workflow_diff,
 )
 
 # ``MERGECRAFT_TRACING_REGION`` selects the Logfire OTLP data region; it is
@@ -329,9 +337,194 @@ def logfire_disable(
     console.print("\n[bold]Logfire tracing disabled.[/bold]")
 
 
+# ---------------------------------------------------------------------------
+# Workflow wiring
+# ---------------------------------------------------------------------------
+#
+# These two subcommands surgically mutate ``.github/workflows/<file>`` to add
+# or remove the four YAML keys mergeCraft consumes when Logfire is wired into
+# the Action:
+#
+# - ``with.tracing: "true"``
+# - ``with.tracing-to: logfire``
+# - ``with.logfire-token: ${{ secrets.<secret> }}``
+# - ``env.MERGECRAFT_TRACING_PROJECT: ${{ vars.<project-var> }}``
+#
+# The mutator is regex-based, PyYAML only parses for dispatch + assertions.
+# Regex preserves all other YAML content (inline ``#`` comments, ``on:`` block,
+# bracketed multi-line strings) untouched on no-op edits. PyYAML's round-trip
+# would strip the documented ``#`` comments above the action step on re-dump;
+# see ``tracing_logfire_wf_yaml`` for the rationale.
+
+
+@logfire_app.command("wire-workflow")
+def logfire_wire_workflow(
+    workflow: Path = typer.Option(
+        Path(DEFAULT_WORKFLOW_RELATIVE_PATH),
+        "--workflow",
+        "-w",
+        help="Path to the consumer workflow YAML (default: .github/workflows/mergecraft.yml).",
+        exists=False,
+    ),
+    secret: str = typer.Option(
+        LOGFIRE_TOKEN_SECRET,
+        "--secret",
+        help=(
+            "Name of the GitHub Actions secret holding the Logfire write token "
+            "(default: LOGFIRE_TOKEN). Written into the ``with.logfire-token:`` "
+            "field as ``${{ secrets.<secret> }}`` — the literal secret value "
+            "never appears in the workflow file."
+        ),
+    ),
+    project_var: str = typer.Option(
+        "LOGFIRE_PROJECT",
+        "--project-var",
+        help=(
+            "Name of the GitHub Actions variable holding the Logfire project "
+            "label (default: LOGFIRE_PROJECT). Written into the action step's "
+            "``env.MERGECRAFT_TRACING_PROJECT:`` field as ``${{ vars.<project-var> }}``."
+        ),
+    ),
+    step: str = typer.Option(
+        "primary",
+        "--step",
+        help=(
+            "Which ``uses: alexhawat/mergecraft@…`` step to wire. "
+            "``primary`` (default) wires the first match; ``all`` wires every "
+            "match. Pass the step's ``id:`` attribute (or ``name:`` value) to "
+            "target a specific step exactly."
+        ),
+    ),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Write the change to disk. Default is dry-run — prints the unified diff and exits 0.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help=(
+            "Overwrite existing tracing-related keys whose values differ from "
+            "what would be written. Without ``--force``, an existing ``tracing:`` "
+            "or ``tracing-to:`` whose value does not match the canonical Logfire "
+            "wiring is left alone and the command exits 1."
+        ),
+    ),
+) -> None:
+    r"""Wire Logfire tracing into the consumer workflow.
+
+    Example::
+
+        mergecraft tracing logfire wire-workflow
+        mergecraft tracing logfire wire-workflow --workflow .github/workflows/ci.yml \
+            --secret LOGFIRE_TOKEN --project-var LOGFIRE_PROJECT --apply
+
+    Refuses to add an obvious mismatch (e.g. existing ``tracing-to: otel``)
+    unless ``--force`` is given. Dry-run by default; ``--apply`` writes.
+    """
+    if not secret:
+        _bail("--secret cannot be empty")
+    if not project_var:
+        _bail("--project-var cannot be empty")
+    try:
+        proposed = apply_logfire_wiring(
+            workflow_path=workflow,
+            secret_name=secret,
+            project_var_name=project_var,
+            step_selector=step,
+            force=force,
+        )
+    except LogfireWorkflowError as exc:
+        _bail(str(exc))
+
+    if proposed.was_modified:
+        diff_text = render_workflow_diff(workflow, proposed)
+        console.print(diff_text)
+    else:
+        console.print(f"[dim]{workflow} already wired for Logfire; no changes needed.[/dim]")
+
+    if not apply:
+        console.print("[dim]dry-run (re-run with --apply to write)[/dim]")
+        raise typer.Exit(0)
+
+    try:
+        workflow.write_text(proposed.new_text, encoding="utf-8")
+    except OSError as exc:
+        _bail(f"could not write {workflow}: {exc}")
+    console.print(f"[green]wrote[/green] {workflow}")
+
+
+@logfire_app.command("unwire-workflow")
+def logfire_unwire_workflow(
+    workflow: Path = typer.Option(
+        Path(DEFAULT_WORKFLOW_RELATIVE_PATH),
+        "--workflow",
+        "-w",
+        help="Path to the consumer workflow YAML (default: .github/workflows/mergecraft.yml).",
+        exists=False,
+    ),
+    step: str = typer.Option(
+        "primary",
+        "--step",
+        help=(
+            "Which ``uses: alexhawat/mergecraft@…`` step to unwire. "
+            "Same selectors as ``wire-workflow``: ``primary``, ``all``, or the "
+            "step's ``id:`` / ``name:``."
+        ),
+    ),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Write the change to disk. Default is dry-run.",
+    ),
+) -> None:
+    r"""Remove Logfire tracing wiring from the consumer workflow.
+
+    Strips the four keys this command owns (``with.tracing``,
+    ``with.tracing-to``, ``with.logfire-token``, and
+    ``env.MERGECRAFT_TRACING_PROJECT``) from every matched ``uses:`` step and
+    leaves all other YAML content untouched. Pair with
+    ``mergecraft tracing logfire disable`` to clear the local ``.env`` and the
+    GitHub Actions ``LOGFIRE_TOKEN`` secret symmetrically.
+
+    Dry-run by default; ``--apply`` writes.
+    """
+    try:
+        proposed = remove_logfire_wiring(
+            workflow_path=workflow,
+            step_selector=step,
+        )
+    except LogfireWorkflowError as exc:
+        _bail(str(exc))
+
+    if proposed.was_modified:
+        diff_text = render_workflow_diff(workflow, proposed)
+        console.print(diff_text)
+    else:
+        console.print(f"[dim]{workflow} had no Logfire wiring; no changes needed.[/dim]")
+
+    if not apply:
+        console.print("[dim]dry-run (re-run with --apply to write)[/dim]")
+        raise typer.Exit(0)
+
+    try:
+        workflow.write_text(proposed.new_text, encoding="utf-8")
+    except OSError as exc:
+        _bail(f"could not write {workflow}: {exc}")
+    console.print(f"[green]wrote[/green] {workflow}")
+
+
 def register(root: typer.Typer) -> None:
     """Attach the ``tracing`` Typer subapp to ``root``."""
     root.add_typer(app, name="tracing")
 
 
-__all__ = ["app", "logfire_app", "logfire_disable", "logfire_enable", "register"]
+__all__ = [
+    "app",
+    "logfire_app",
+    "logfire_disable",
+    "logfire_enable",
+    "logfire_unwire_workflow",
+    "logfire_wire_workflow",
+    "register",
+]

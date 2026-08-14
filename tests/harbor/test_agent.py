@@ -8,7 +8,16 @@ import pytest
 
 pytest.importorskip("harbor")
 
-from mergecraft.harbor.agent import MergecraftReviewAgent, _resolve_patch_path
+from mergecraft.harbor.agent import DEFAULT_INSTALL_REF, MergecraftReviewAgent, _resolve_patch_path
+
+
+def test_default_install_ref_pins_a_release_tag_not_a_moving_branch() -> None:
+    assert DEFAULT_INSTALL_REF.startswith("v"), (
+        f"DEFAULT_INSTALL_REF={DEFAULT_INSTALL_REF!r} must pin a release tag "
+        "(e.g. 'v0.1.0'), not a moving branch name like 'pre-0.0.1' — a "
+        "Harbor install with no MERGECRAFT_INSTALL_REF override should not "
+        "silently drift onto trunk."
+    )
 
 
 @pytest.mark.parametrize(

@@ -78,8 +78,10 @@ Add repository secrets for Craft publish: `TWINE_USERNAME`, `TWINE_PASSWORD`.
      `release/**` and `v*` tags); uploads `image-scan-reports`
    - cosign keyless-signs both digests and attaches build-provenance + SBOM
      attestations
-   - on `main` / `pre-0.0.1`, promotes `:latest` / `:analyzers` by **retagging
-     the same digests** (no second rebuild)
+   - on `main`, promotes `:latest` / `:analyzers` by **retagging the same
+     digests** (no second rebuild); on `pre-0.0.1`, promotes to `:rc` /
+     `:analyzers-rc` instead, so a pre-release build can never win the
+     `:latest` / `:analyzers` tags just by finishing later
 
 **Release preconditions** (must be green or an explicit documented skip before
 `craft publish`):

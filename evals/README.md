@@ -120,7 +120,7 @@ harbor run -d "<dataset>" --agent mergecraft.harbor.agent:MergecraftReviewAgent
 ```
 
 The agent installs mergecraft with `uv tool install git+https://github.com/alexhawat/mergeCraft@<ref>`
-(default ref `pre-0.0.1`; override with `MERGECRAFT_INSTALL_REF`) and runs
+(default ref `v0.1.0`; override with `MERGECRAFT_INSTALL_REF`) and runs
 `mergecraft diff-review --json` inside each task environment.
 
 Structured JSON output requires Batch A (`--json` on `diff-review`) — see

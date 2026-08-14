@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "merge-craft"
-version = "0.0.1"
+version = "0.1.0"
 description = "Standalone BYOK GitHub Action for AI-powered PR review (mergeCraft)"
 readme = "README.md"
 requires-python = ">=3.14"
