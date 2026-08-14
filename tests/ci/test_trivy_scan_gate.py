@@ -26,12 +26,81 @@ def _scan_gate_script() -> str:
     return match.group("script")
 
 
+def _step(job_dict: dict[str, Any], name: str) -> dict[str, Any]:
+    for step in job_dict.get("steps", []):
+        if step.get("name") == name:
+            return step
+    names = [step.get("name") for step in job_dict.get("steps", [])]
+    raise AssertionError(f"step {name!r} not found; have {names}")
+
+
 def test_promote_still_fires_on_main_and_pre_001() -> None:
-    """D6 — do not strip ``:latest`` from main/pre-0.0.1; tighten the scan instead."""
+    """D6 — the promote JOB (build → SBOM → scan → sign → attest) still runs
+    for both main and pre-0.0.1, so the scan gate stays blocking on both —
+    tighten which mutable TAG each branch gets instead (see
+    test_promote_latest_channel_is_main_only), not whether the job fires.
+    """
     promote = job(load_workflow("ci-cd.yml"), "promote")
     condition = str(promote.get("if", ""))
     assert "refs/heads/main" in condition
     assert "refs/heads/pre-0.0.1" in condition
+
+
+def test_promote_latest_channel_is_main_only() -> None:
+    """PR #201 — :latest/:analyzers must never come from pre-0.0.1.
+
+    Two unsynchronized pipelines (main's and pre-0.0.1's) racing for the same
+    mutable tag meant whichever finished last silently became the public
+    production image. pre-0.0.1 gets its own :rc / :analyzers-rc channel
+    instead — this pins that split so a regression that re-adds pre-0.0.1 to
+    the :latest/:analyzers steps (or drops it from the :rc/:analyzers-rc
+    steps) fails loudly.
+    """
+    promote = job(load_workflow("ci-cd.yml"), "promote")
+
+    latest = str(_step(promote, "Retag slim digest → :latest").get("if", ""))
+    assert "refs/heads/main" in latest
+    assert "refs/heads/pre-0.0.1" not in latest
+
+    analyzers = str(_step(promote, "Retag analyzers digest → :analyzers").get("if", ""))
+    assert "refs/heads/main" in analyzers
+    assert "refs/heads/pre-0.0.1" not in analyzers
+
+    rc = str(_step(promote, "Retag slim digest → :rc").get("if", ""))
+    assert "refs/heads/pre-0.0.1" in rc
+    assert "refs/heads/main" not in rc
+
+    analyzers_rc = str(_step(promote, "Retag analyzers digest → :analyzers-rc").get("if", ""))
+    assert "refs/heads/pre-0.0.1" in analyzers_rc
+    assert "refs/heads/main" not in analyzers_rc
+
+
+def test_docker_yml_never_pushes_to_the_registry() -> None:
+    """PR #201 follow-up (finding 6736461a / 661a2231) — docker.yml must be a
+    pure build-and-smoke-test workflow, never a second registry writer, on
+    any trigger.
+
+    ci-cd.yml's build-images/promote jobs are the sole publishers of the
+    canonical SHA tag and every mutable/channel tag. docker/build-push-action
+    adds buildx provenance by default, so two independent builds of the same
+    commit are not guaranteed the same digest — a second pusher here could
+    silently replace the SHA tag ci-cd.yml's sbom-scan/sign-attest jobs pull
+    BY NAME (not by the digest build-images actually captured), between two
+    workflows with no ordering guarantee (separate concurrency groups).
+    """
+    doc = load_workflow("docker.yml")
+    permissions = doc.get("permissions") or {}
+    assert "packages" not in permissions, (
+        "docker.yml must not declare packages: write — it never pushes"
+    )
+
+    build = job(doc, "build")
+    for step_name in ("Build slim", "Build analyzers"):
+        step = _step(build, step_name)
+        with_block = step.get("with") or {}
+        assert with_block.get("push") is False, f"{step_name!r} must set push: false"
+        tags = str(with_block.get("tags", ""))
+        assert "ghcr.io" not in tags, f"{step_name!r} still tags for the registry: {tags!r}"
 
 
 def test_scan_gate_blocks_every_ref_that_can_publish() -> None:
