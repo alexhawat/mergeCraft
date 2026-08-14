@@ -14,6 +14,7 @@ from loguru import logger
 from mergecraft.analyzers.redact import redact_analyzer_output
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from mergecraft.analyzers.resolve import AnalyzerPlan
@@ -110,10 +111,8 @@ def _command_string(argv: tuple[str, ...]) -> str:
     return shlex.join(argv)
 
 
-def run_plan(
-    plan: AnalyzerPlan, *, sandbox_context: SandboxContext | None = None
-) -> AnalyzerOutcome:
-    """Run one resolved plan. Never raises."""
+def _early_unavailable_outcome(plan: AnalyzerPlan) -> AnalyzerOutcome | None:
+    """Short-circuit outcomes that never touch a subprocess (skip / not-yet-runnable mode)."""
     if plan.mode == "skip":
         return AnalyzerOutcome(
             name=plan.manifest_id,
@@ -121,7 +120,6 @@ def run_plan(
             status="unavailable",
             output=plan.reason or f"skipped {plan.manifest_id}",
         )
-
     if plan.mode in {"ci-result", "managed", "container"} and not plan.argv:
         return AnalyzerOutcome(
             name=plan.manifest_id,
@@ -129,25 +127,39 @@ def run_plan(
             status="unavailable",
             output=f"{plan.mode} execution is not available in this wave",
         )
+    return None
 
-    cwd = plan.cwd
-    timeout_s = plan.timeout_s or CHECK_TIMEOUT_S
-    if sandbox_context is not None:
-        timeout_s = min(timeout_s, sandbox_context.timeout_s)
-    command = _command_string(plan.argv)
-    preexec_fn = None
+
+def _sandboxed_argv(
+    plan: AnalyzerPlan, sandbox_context: SandboxContext | None
+) -> tuple[list[str], Callable[[], None] | None]:
+    """Wrap ``plan.argv`` in an unshare/sudo-unshare sandbox when the context calls for one."""
     run_argv = list(plan.argv)
-    if sandbox_context is not None and sandbox_context.read_only_source and sys.platform != "win32":
-        preexec_fn = lambda: _sandbox_preexec(sandbox_context)  # noqa: E731
-        from mergecraft.mcp.shell import detect_sandbox_method
+    if sandbox_context is None or not sandbox_context.read_only_source or sys.platform == "win32":
+        return run_argv, None
+    preexec_fn = lambda: _sandbox_preexec(sandbox_context)  # noqa: E731
+    from mergecraft.mcp.shell import detect_sandbox_method
 
-        method = detect_sandbox_method()
-        if method == "unshare":
-            run_argv = ["unshare", "--pid", "--fork", "--mount-proc", *plan.argv]
-        elif method == "sudo-unshare":
-            run_argv = ["sudo", "unshare", "--pid", "--fork", "--mount-proc", *plan.argv]
+    method = detect_sandbox_method()
+    if method == "unshare":
+        run_argv = ["unshare", "--pid", "--fork", "--mount-proc", *plan.argv]
+    elif method == "sudo-unshare":
+        run_argv = ["sudo", "unshare", "--pid", "--fork", "--mount-proc", *plan.argv]
+    return run_argv, preexec_fn
+
+
+def _run_subprocess(
+    run_argv: list[str],
+    *,
+    plan: AnalyzerPlan,
+    cwd: Path | None,
+    timeout_s: int,
+    preexec_fn: Callable[[], None] | None,
+    command: str,
+) -> subprocess.CompletedProcess[str] | AnalyzerOutcome:
+    """Run the analyzer subprocess; a caught timeout/OSError becomes a terminal outcome."""
     try:
-        completed = subprocess.run(
+        return subprocess.run(
             run_argv,
             cwd=cwd,
             capture_output=True,
@@ -174,6 +186,11 @@ def run_plan(
             output=f"not installed in this environment: {exc}",
         )
 
+
+def _outcome_from_completed(
+    completed: subprocess.CompletedProcess[str], *, plan: AnalyzerPlan, command: str
+) -> AnalyzerOutcome:
+    """Combine stdout/stderr, redact, persist to disk, and build the final outcome."""
     raw_stdout = (completed.stdout or "").strip()
     raw_stderr = (completed.stderr or "").strip()
     raw_for_parser = raw_stdout or raw_stderr
@@ -195,6 +212,29 @@ def run_plan(
         exit_code=completed.returncode,
         output_path=output_path,
     )
+
+
+def run_plan(
+    plan: AnalyzerPlan, *, sandbox_context: SandboxContext | None = None
+) -> AnalyzerOutcome:
+    """Run one resolved plan. Never raises."""
+    early = _early_unavailable_outcome(plan)
+    if early is not None:
+        return early
+
+    cwd = plan.cwd
+    timeout_s = plan.timeout_s or CHECK_TIMEOUT_S
+    if sandbox_context is not None:
+        timeout_s = min(timeout_s, sandbox_context.timeout_s)
+    command = _command_string(plan.argv)
+    run_argv, preexec_fn = _sandboxed_argv(plan, sandbox_context)
+
+    result = _run_subprocess(
+        run_argv, plan=plan, cwd=cwd, timeout_s=timeout_s, preexec_fn=preexec_fn, command=command
+    )
+    if isinstance(result, AnalyzerOutcome):
+        return result
+    return _outcome_from_completed(result, plan=plan, command=command)
 
 
 def run_plans(

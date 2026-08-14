@@ -502,6 +502,17 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     codex_home = _codex_home(ctx)
     env = build_agent_env("codex", {"CODEX_HOME": str(codex_home)})
     _setup_codex_auth(ctx, codex_home=codex_home)
+    # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
+    # (config.toml, mergecraft-instructions.md, auth.json) while this process
+    # still runs as root. wrap_agent_command()'s setpriv drops the actual
+    # codex subprocess to the unprivileged agent user, but never touches
+    # directory ownership — without this, $CODEX_HOME stays root-owned and
+    # Codex's own PATH-alias bootstrap (writing under $CODEX_HOME) fails
+    # closed with "Permission denied (os error 13)". Chown last, after every
+    # root-owned write above has landed.
+    from mergecraft.utils.privilege import prepare_workspace_for_agent
+
+    prepare_workspace_for_agent(str(codex_home))
     return env
 
 

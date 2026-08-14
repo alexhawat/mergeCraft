@@ -24,6 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The four silent `except Exception: pass` sites in `main.py`, `mcp/shell.py`
+  (x2), and `mcp/server.py` now log the swallowed exception via
+  `logger.warning` before continuing; the best-effort swallowing semantics
+  are unchanged, but the failure is no longer invisible at the default log
+  level
+- `main()` is now a thin orchestrator over `RunContext`-carried phase functions
+  (`_setup_run`, `_resolve_credentials`, `_execute_agent`, `_finalize`), and the
+  five worst analyzer hotspots (`resolve_analyzer`, `_exclusive_group_winner`,
+  `run_plan`, `_run_osv_scan`, `detect_enabled`) are split into small named
+  helpers. Pure refactor — no user-visible behaviour change; the new `max-
+  complexity = 15` `ruff --select C901` gate now passes on the whole tree.
 - Eval bank replay harness (`make eval-replay`) writes versioned result sets with
   judge pins, rubric version, and S5 mode prompt versions; seeded corpus expanded
   to ten human-labelled cases across correctness, security, cross-file, and
@@ -49,6 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed: `.pre-commit-config.yaml`'s `ruff-pre-commit` hook was pinned three
+  minor versions behind `pyproject.toml`'s `ruff==` dev pin (`v0.15.12` vs.
+  `0.16.0`), so local hooks and CI could disagree on lint results. Both now
+  pin `0.16.2` (landing Dependabot #159), and a new `make hook-pins-check`
+  (wired into `make lint`) parses both files and fails the build on future
+  drift
 - Fixed: the nightly live-provider job now issues a real minimal request per provider
   and asserts a structured completion. Previously it exported four provider keys but ran
   only offline-shaped tests — three of the four keys had no consumer — and exited 0 with

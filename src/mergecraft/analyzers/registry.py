@@ -113,6 +113,60 @@ def _auto_manifest_enabled(manifest: AnalyzerManifest, repo_root: Path) -> bool:
     return manifest_config_present(manifest.id, repo_root)
 
 
+def _explicit_override_winner(
+    candidates: list[AnalyzerManifest], explicit: list[str]
+) -> AnalyzerManifest | None:
+    """Tie-break rule: an operator's explicit ``enabled: true`` override wins outright.
+
+    Ties among multiple explicit overrides in the same exclusive group fall
+    through to the alphabetical rule (via ``sorted(...)[0]``), same as the
+    final catch-all — an explicit override just narrows the candidate pool
+    first.
+    """
+    explicit_in_group = [m for m in candidates if m.id in explicit]
+    if len(explicit_in_group) == 1:
+        return explicit_in_group[0]
+    if len(explicit_in_group) > 1:
+        return sorted(explicit_in_group, key=lambda m: m.id)[0]
+    return None
+
+
+def _preference_order_winner(
+    candidates: list[AnalyzerManifest], preference: tuple[str, ...]
+) -> AnalyzerManifest | None:
+    """Tie-break rule: the first candidate matching an ordered id-preference list."""
+    for preferred in preference:
+        for manifest in candidates:
+            if manifest.id == preferred:
+                return manifest
+    return None
+
+
+def _group_preference_order(
+    group: str,
+    *,
+    repo_root: Path,
+    settings: dict[str, Any],
+) -> tuple[str, ...]:
+    """The id-preference order for one exclusive group, or ``()`` if it has none."""
+    if group == "python-lint":
+        return _PYTHON_LINT_PREFERENCE
+    if group == "python-typecheck":
+        return _PYTHON_TYPECHECK_PREFERENCE
+    if group == "js-lint":
+        intent = detect_js_linter_intent(repo_root)
+        return (intent,) if intent is not None else ()
+    if group == PATTERN_EXCLUSIVE_GROUP:
+        backend = pattern_backend_from_settings(repo_root, settings)
+        return (backend, "semgrep", "opengrep", "ast-grep")
+    return ()
+
+
+def _alphabetical_winner(candidates: list[AnalyzerManifest]) -> AnalyzerManifest:
+    """Tie-break rule: last resort — alphabetically first id, for a deterministic pick."""
+    return sorted(candidates, key=lambda m: m.id)[0]
+
+
 def _exclusive_group_winner(
     group: str,
     candidates: list[AnalyzerManifest],
@@ -120,42 +174,90 @@ def _exclusive_group_winner(
     repo_root: Path,
     settings: dict[str, Any],
 ) -> AnalyzerManifest:
+    """Pick one manifest per exclusive group via an ordered chain of named tie-break rules."""
     overrides = (settings.get("analyzers") or {}).get("overrides") or {}
     explicit = [
         manifest_id
         for manifest_id, override in overrides.items()
         if isinstance(override, dict) and override.get("enabled") is True
     ]
-    explicit_in_group = [m for m in candidates if m.id in explicit]
-    if len(explicit_in_group) == 1:
-        return explicit_in_group[0]
-    if len(explicit_in_group) > 1:
-        return sorted(explicit_in_group, key=lambda m: m.id)[0]
+    winner = _explicit_override_winner(candidates, explicit)
+    if winner is not None:
+        return winner
 
-    if group == "python-lint":
-        for preferred in _PYTHON_LINT_PREFERENCE:
-            for manifest in candidates:
-                if manifest.id == preferred:
-                    return manifest
-    if group == "python-typecheck":
-        for preferred in _PYTHON_TYPECHECK_PREFERENCE:
-            for manifest in candidates:
-                if manifest.id == preferred:
-                    return manifest
-    if group == "js-lint":
-        intent = detect_js_linter_intent(repo_root)
-        if intent is not None:
-            for manifest in candidates:
-                if manifest.id == intent:
-                    return manifest
-    if group == PATTERN_EXCLUSIVE_GROUP:
-        backend = pattern_backend_from_settings(repo_root, settings)
-        preference = (backend, "semgrep", "opengrep", "ast-grep")
-        for preferred in preference:
-            for manifest in candidates:
-                if manifest.id == preferred:
-                    return manifest
-    return sorted(candidates, key=lambda m: m.id)[0]
+    preference = _group_preference_order(group, repo_root=repo_root, settings=settings)
+    winner = _preference_order_winner(candidates, preference)
+    if winner is not None:
+        return winner
+
+    return _alphabetical_winner(candidates)
+
+
+def _manifest_is_candidate(
+    manifest: AnalyzerManifest,
+    *,
+    repo_root: Path,
+    changed_files: list[str],
+    settings: dict[str, Any],
+) -> bool:
+    """Per-detector evaluation: does this manifest apply to the current diff/config?
+
+    Four independent gates, all of which must pass: the pattern-backend
+    exclusive group's own enablement, the settings override, the
+    ``detect.files`` glob match against the diff, and (only when nothing
+    else decided it) the ``default_enabled: auto`` repo-config heuristic.
+    """
+    if manifest.exclusive_group == PATTERN_EXCLUSIVE_GROUP and not pattern_tool_enabled(
+        manifest.id, repo_root=repo_root, settings=settings
+    ):
+        return False
+    enabled = _settings_enabled(manifest, settings)
+    if enabled is False:
+        return False
+    if not _detect_matches(manifest, changed_files):
+        return False
+    return not (
+        enabled is None
+        and manifest.default_enabled == "auto"
+        and not _auto_manifest_enabled(manifest, repo_root)
+    )
+
+
+def _group_candidates(
+    candidates: list[AnalyzerManifest],
+) -> tuple[list[AnalyzerManifest], dict[str, list[AnalyzerManifest]]]:
+    """Split out ungrouped candidates (selected outright) from exclusive-group members."""
+    grouped: dict[str, list[AnalyzerManifest]] = {}
+    selected: list[AnalyzerManifest] = []
+    for manifest in candidates:
+        group = manifest.exclusive_group
+        if not group:
+            selected.append(manifest)
+            continue
+        grouped.setdefault(group, []).append(manifest)
+    return selected, grouped
+
+
+def _resolve_group_members(
+    group: str,
+    members: list[AnalyzerManifest],
+    *,
+    repo_root: Path,
+    settings: dict[str, Any],
+    explicit: set[str],
+) -> list[AnalyzerManifest]:
+    """Per-detector evaluation for one exclusive group.
+
+    Multiple explicit operator overrides in the same group all survive
+    (sorted for determinism); a single explicit override wins outright;
+    otherwise fall back to ``_exclusive_group_winner``'s tie-break chain.
+    """
+    explicit_members = [m for m in members if m.id in explicit]
+    if len(explicit_members) > 1:
+        return sorted(explicit_members, key=lambda m: m.id)
+    if len(explicit_members) == 1:
+        return explicit_members
+    return [_exclusive_group_winner(group, members, repo_root=repo_root, settings=settings)]
 
 
 def detect_enabled(
@@ -167,34 +269,15 @@ def detect_enabled(
     """Return analyzers enabled for this diff, honoring detection and config overrides."""
     repo_root = repo_root.resolve()
     settings = settings_overrides or {}
-    candidates: list[AnalyzerManifest] = []
+    candidates = [
+        manifest
+        for manifest in load_catalog()
+        if _manifest_is_candidate(
+            manifest, repo_root=repo_root, changed_files=changed_files, settings=settings
+        )
+    ]
 
-    for manifest in load_catalog():
-        if manifest.exclusive_group == PATTERN_EXCLUSIVE_GROUP and not pattern_tool_enabled(
-            manifest.id, repo_root=repo_root, settings=settings
-        ):
-            continue
-        enabled = _settings_enabled(manifest, settings)
-        if enabled is False:
-            continue
-        if not _detect_matches(manifest, changed_files):
-            continue
-        if (
-            enabled is None
-            and manifest.default_enabled == "auto"
-            and not _auto_manifest_enabled(manifest, repo_root)
-        ):
-            continue
-        candidates.append(manifest)
-
-    grouped: dict[str, list[AnalyzerManifest]] = {}
-    selected: list[AnalyzerManifest] = []
-    for manifest in candidates:
-        group = manifest.exclusive_group
-        if not group:
-            selected.append(manifest)
-            continue
-        grouped.setdefault(group, []).append(manifest)
+    selected, grouped = _group_candidates(candidates)
 
     overrides = (settings.get("analyzers") or {}).get("overrides") or {}
     explicit = {
@@ -204,15 +287,11 @@ def detect_enabled(
     }
 
     for group, members in grouped.items():
-        explicit_members = [m for m in members if m.id in explicit]
-        if len(explicit_members) > 1:
-            selected.extend(sorted(explicit_members, key=lambda m: m.id))
-            continue
-        if len(explicit_members) == 1:
-            selected.append(explicit_members[0])
-            continue
-        winner = _exclusive_group_winner(group, members, repo_root=repo_root, settings=settings)
-        selected.append(winner)
+        selected.extend(
+            _resolve_group_members(
+                group, members, repo_root=repo_root, settings=settings, explicit=explicit
+            )
+        )
 
     return selected
 

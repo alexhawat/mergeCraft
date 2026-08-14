@@ -49,7 +49,7 @@ from mergecraft.tracing.tracer import (
     _open_provider_llm_pair,
 )
 from mergecraft.types import MERGECRAFT_MCP_NAME
-from mergecraft.utils.privilege import wrap_agent_command
+from mergecraft.utils.privilege import prepare_workspace_for_agent, wrap_agent_command
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
@@ -86,6 +86,13 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
         ),
         encoding="utf-8",
     )
+    # write_mcp_config runs in the root orchestrator, before the privilege
+    # drop wraps the actual claude subprocess in setpriv — a plain mkdir()
+    # here creates config_dir owned by root even though ctx.tmpdir itself is
+    # already chowned to the agent user, since ownership of a newly created
+    # directory follows the creating process's uid, not the parent's (same
+    # bug class as codex.py's $CODEX_HOME).
+    prepare_workspace_for_agent(str(config_dir))
     return str(config_path)
 
 
@@ -758,12 +765,24 @@ def _run_claude_legacy_subprocess(
     ``capture_output=True`` read loop reachable so PR #16's
     ``_build_claude_failure_error`` semantics and the failure-diagnosis
     contract continue to hold.
+
+    In the real action image this path is not expected to be reached at all
+    — ``claude`` ships on PATH there, so the streaming ``Popen`` above only
+    raises ``FileNotFoundError`` in a stripped-down test environment. It
+    still goes through the same ``wrap_agent_command`` + ``agent_subprocess_env``
+    privilege-drop pairing as the primary path, for defense-in-depth and so a
+    future change that makes this path reachable in production does not
+    silently reintroduce the ``$HOME`` bug.
     """
+    from mergecraft.utils.privilege import agent_subprocess_env
+
     try:
+        wrapped_cmd = wrap_agent_command(cmd)
+        resolved_env = agent_subprocess_env(_build_env(ctx))
         completed = subprocess.run(
-            wrap_agent_command(cmd),
+            wrapped_cmd,
             cwd=os.getcwd(),
-            env=_build_env(ctx),
+            env=resolved_env,
             capture_output=True,
             text=True,
             timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
