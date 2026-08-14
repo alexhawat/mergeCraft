@@ -21,3 +21,11 @@ rules:
       # number reaches the CLI via `env:`, not a `run:` interpolation.
       # Authorization = the merge itself.
       - findings-carryover.yml
+      # Submits a privileged PR approval as the distinct @sevn-one identity
+      # (D14 gate 3, PR #200). No checkout of any kind — only a read of the
+      # already-posted mergecraft-approval check-run conclusion (a pure
+      # function of Finding severities, not the reviewing agent's narrative)
+      # and, if it is "success", a `gh api` POST to /pulls/{n}/reviews pinned
+      # to that exact commit_id. pull_requests[0] is empty for fork PRs by
+      # GitHub's own documented behavior, so this never fires for them.
+      - mergecraft-approve.yml
