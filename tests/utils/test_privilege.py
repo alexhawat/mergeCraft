@@ -11,6 +11,7 @@ import pytest
 import mergecraft.utils.privilege as privilege
 from mergecraft.agents.shared import wrap_agent_subprocess
 from mergecraft.utils.privilege import (
+    agent_subprocess_env,
     agent_user_name,
     prepare_workspace_for_agent,
     wrap_agent_command,
@@ -157,3 +158,152 @@ def test_prepare_workspace_for_agent_chowns_when_root(
     assert calls[0][1] == "-R"
     assert calls[0][2] == "1001:1001"
     assert calls[0][3] == str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# agent_subprocess_env — HOME/USER/LOGNAME redirect (live-bug fix)
+# ---------------------------------------------------------------------------
+
+
+class _PwWithHome:
+    """Stand-in ``pwd.struct_passwd`` carrying the fields ``agent_subprocess_env`` reads."""
+
+    def __init__(
+        self,
+        name: str = "mergecraft",
+        uid: int = 1001,
+        gid: int = 1001,
+        home: str = "/home/mergecraft",
+    ) -> None:
+        self.pw_name = name
+        self.pw_uid = uid
+        self.pw_gid = gid
+        self.pw_dir = home
+
+
+def _install_fake_pwd(monkeypatch: MonkeyPatch, entry: _PwWithHome) -> None:
+    import sys
+
+    fake_pwd = MagicMock()
+    fake_pwd.getpwnam.return_value = entry
+    monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
+
+
+def test_agent_subprocess_env_noop_when_not_root(monkeypatch: MonkeyPatch) -> None:
+    """Direct ``agent_subprocess_env`` — non-root hosts get an unchanged copy back."""
+    monkeypatch.setattr(privilege.os, "getuid", lambda: 501)
+    env = {"HOME": "/github/home", "PATH": "/usr/bin"}
+    out = agent_subprocess_env(env)
+    assert out == env
+    assert out is not env, "must return a copy, never the same dict object"
+
+
+def test_agent_subprocess_env_redirects_inherited_home_when_root(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Root + HOME not owned by the agent uid → HOME/USER/LOGNAME are redirected.
+
+    This is the live bug: the container sets ``HOME=/github/home`` (owned by
+    the runner's original uid), setpriv drops uid/gid but not HOME, and the
+    agent CLI then hits EACCES trying to write dotfiles under it.
+    """
+    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
+    _install_fake_pwd(monkeypatch, _PwWithHome())
+    # /github/home is not owned by uid 1001 in this scenario.
+    monkeypatch.setattr(privilege.os, "stat", lambda _path: MagicMock(st_uid=0))
+
+    env = {"HOME": "/github/home", "USER": "root", "LOGNAME": "root", "PATH": "/usr/bin"}
+    out = agent_subprocess_env(env)
+
+    assert out["HOME"] == "/home/mergecraft"
+    assert out["USER"] == "mergecraft"
+    assert out["LOGNAME"] == "mergecraft"
+    assert out["PATH"] == "/usr/bin", "unrelated keys must pass through untouched"
+    assert env["HOME"] == "/github/home", "input dict must not be mutated"
+
+
+def test_agent_subprocess_env_preserves_home_already_owned_by_agent_user(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A HOME the driver already pointed at a pre-chowned scratch dir is left alone.
+
+    Gemini's driver sets ``HOME`` to its own per-run tmpdir (already chowned
+    to the agent user by ``git_setup._prepare_temp_dir_for_agent`` so its MCP
+    settings.json is discoverable there) — ``agent_subprocess_env`` must not
+    clobber that back to the passwd home directory, or Gemini's MCP config
+    silently stops resolving under the privilege drop.
+    """
+    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
+    entry = _PwWithHome()
+    _install_fake_pwd(monkeypatch, entry)
+    # The driver-chosen HOME is already owned by the resolved agent uid.
+    monkeypatch.setattr(privilege.os, "stat", lambda _path: MagicMock(st_uid=entry.pw_uid))
+
+    env = {"HOME": "/tmp/mergecraft-xyz", "PATH": "/usr/bin"}
+    out = agent_subprocess_env(env)
+
+    assert out["HOME"] == "/tmp/mergecraft-xyz", "already-owned HOME must survive untouched"
+    assert out["USER"] == "mergecraft"
+    assert out["LOGNAME"] == "mergecraft"
+
+
+def test_agent_subprocess_env_fills_missing_home(monkeypatch: MonkeyPatch) -> None:
+    """No ``HOME`` key at all → still filled in with the agent user's real home."""
+    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
+    _install_fake_pwd(monkeypatch, _PwWithHome())
+
+    out = agent_subprocess_env({"PATH": "/usr/bin"})
+
+    assert out["HOME"] == "/home/mergecraft"
+
+
+def test_agent_subprocess_env_missing_user_fails_closed(monkeypatch: MonkeyPatch) -> None:
+    """Same fail-closed contract as ``wrap_agent_command`` — missing agent user raises."""
+    from mergecraft.main import _ConfigurationError
+
+    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
+
+    import sys
+
+    fake_pwd = MagicMock()
+
+    def _raise_keyerror(_name: str) -> None:
+        raise KeyError(_name)
+
+    fake_pwd.getpwnam.side_effect = _raise_keyerror
+    monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
+
+    with pytest.raises(_ConfigurationError, match="mergecraft"):
+        agent_subprocess_env({"HOME": "/github/home"})
+
+
+def test_agent_subprocess_env_uid_zero_fails_closed(monkeypatch: MonkeyPatch) -> None:
+    """Same fail-closed contract — a user resolving to UID/GID 0 raises, not redirects."""
+    from mergecraft.main import _ConfigurationError
+
+    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
+    _install_fake_pwd(monkeypatch, _PwWithHome(uid=0, gid=0))
+
+    with pytest.raises(_ConfigurationError, match="uid=0"):
+        agent_subprocess_env({"HOME": "/github/home"})
+
+
+def test_agent_subprocess_env_custom_agent_user_via_env(monkeypatch: MonkeyPatch) -> None:
+    """``MERGECRAFT_AGENT_USER`` drives which pwd entry is resolved, same as ``wrap_agent_command``."""
+    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    monkeypatch.setenv("MERGECRAFT_AGENT_USER", "reviewer")
+    _install_fake_pwd(
+        monkeypatch, _PwWithHome(name="reviewer", uid=1002, gid=1002, home="/home/reviewer")
+    )
+    monkeypatch.setattr(privilege.os, "stat", lambda _path: MagicMock(st_uid=0))
+
+    out = agent_subprocess_env({"HOME": "/github/home"})
+
+    assert out["HOME"] == "/home/reviewer"
+    assert out["USER"] == "reviewer"
+    assert out["LOGNAME"] == "reviewer"

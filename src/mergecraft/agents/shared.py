@@ -30,13 +30,23 @@ def spawn_agent_cli(
     Shared by Claude/Codex/Gemini/OpenCode so wrap + pipes + ``start_new_session``
     stay one place (W9 / Final CQ). Callers own streaming and
     :func:`wait_or_kill_process_group`.
+
+    Wraps argv with :func:`wrap_agent_command` *before* patching ``env`` with
+    :func:`agent_subprocess_env` — both resolve the same agent user
+    independently and fail closed the same way, but ordering them this way
+    means a fail-closed ``setpriv``/user error surfaces at the argv wrap
+    (matching every existing test's expectations) rather than only after the
+    env has already been rebuilt.
     """
-    from mergecraft.utils.privilege import wrap_agent_command
+    from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
+
+    wrapped_cmd = wrap_agent_command(cmd)
+    resolved_env = agent_subprocess_env(env)
 
     return subprocess.Popen(
-        wrap_agent_command(cmd),
+        wrapped_cmd,
         cwd=cwd if cwd is not None else os.getcwd(),
-        env=env,
+        env=resolved_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
