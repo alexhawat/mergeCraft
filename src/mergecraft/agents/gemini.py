@@ -112,6 +112,14 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     }
     config_path = gemini_home / "settings.json"
     config_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    # write_mcp_config runs in the root orchestrator, before the privilege
+    # drop wraps the actual gemini subprocess in setpriv — a plain mkdir()
+    # here creates gemini_home owned by root regardless of its parent's
+    # permissions, so the dropped-to agent user cannot write under it later
+    # (same bug class as codex.py's $CODEX_HOME).
+    from mergecraft.utils.privilege import prepare_workspace_for_agent
+
+    prepare_workspace_for_agent(str(gemini_home))
     return str(config_path)
 
 

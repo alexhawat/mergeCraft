@@ -16,6 +16,17 @@ of OpenCode), OpenCode's ``_boot_opencode_server`` bypass, and Claude's legacy
 ``Popen``/``subprocess.run`` has ``HOME``/``USER``/``LOGNAME`` redirected to
 the resolved agent user, while argv is still ``setpriv``-wrapped exactly as
 before.
+
+A second, related but distinct bug: Codex does not use ``$HOME`` at all — it
+uses its own ``$CODEX_HOME`` (``codex.py::_codex_home``), a directory that
+``write_mcp_config()``/``_setup_codex_auth()`` create and write into (as
+root) *before* the privilege-dropped subprocess starts. The ``HOME`` redirect
+above does not touch this separate directory, so it stayed root-owned and
+Codex's own PATH-alias bootstrap failed closed with the same class of
+``Permission denied (os error 13)`` — confirmed live on PR #175/#189 even
+after the ``HOME`` fix landed. ``codex.py::_build_env`` now chowns
+``$CODEX_HOME`` via ``prepare_workspace_for_agent`` as its last step, mirroring
+the checkout-workspace chown that already existed for W3.4.
 """
 
 from __future__ import annotations
@@ -43,6 +54,8 @@ if TYPE_CHECKING:
 # ``mergecraft.agents.codex``.
 claude_module = importlib.import_module("mergecraft.agents.claude")
 opencode_module = importlib.import_module("mergecraft.agents.opencode")
+codex_module = importlib.import_module("mergecraft.agents.codex")
+gemini_module = importlib.import_module("mergecraft.agents.gemini")
 
 
 class _FakePw:
@@ -207,3 +220,152 @@ def test_claude_legacy_subprocess_redirects_home_under_privilege_drop(
     assert resolved_env["USER"] == "mergecraft"
     assert resolved_env["LOGNAME"] == "mergecraft"
     assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# codex.py::_build_env — $CODEX_HOME is not $HOME; it needs its own chown
+# ---------------------------------------------------------------------------
+
+
+def test_build_env_chowns_codex_home_under_privilege_drop(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _simulate_root_privilege_drop(monkeypatch)
+
+    captured: dict[str, Any] = {}
+
+    def _fake_chown_run(cmd: list[str], **kwargs: object) -> object:
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(privilege_module.subprocess, "run", _fake_chown_run)
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # _codex_home()'s fallback chain (RUNNER_TEMP / GITHUB_WORKSPACE / the
+    # real shared ~/.cache/mergecraft) touches the real filesystem outside
+    # tmp_path whenever ctx.tmpdir resolves under a forbidden temp root —
+    # true on real CI, where pytest's tmp_path lives under /tmp (an env var
+    # override still resolves under tmp_path, so it doesn't help). Clear the
+    # forbidden-root list so ctx.tmpdir is always accepted directly,
+    # regardless of where the host platform's tmp_path happens to resolve.
+    monkeypatch.setattr(codex_module, "_FORBIDDEN_TEMP_ROOTS", ())
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="gpt-5.6-sol")
+    env = codex_module._build_env(ctx)
+
+    assert captured["cmd"][0] == "chown"
+    assert captured["cmd"][1] == "-R"
+    assert captured["cmd"][2] == "1001:1001"
+    codex_home = codex_module._codex_home(ctx)
+    assert captured["cmd"][3] == str(codex_home)
+    assert env["CODEX_HOME"] == str(codex_home)
+
+
+def test_build_env_does_not_chown_when_not_root(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(privilege_module.os, "getuid", lambda: 501)
+
+    called: list[list[str]] = []
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> object:
+        called.append(cmd)
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(privilege_module.subprocess, "run", _fake_run)
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # _build_env() calls _codex_home() unconditionally, before the root
+    # check — clear the forbidden-root list here too (see the sibling
+    # root-path test's comment for why).
+    monkeypatch.setattr(codex_module, "_FORBIDDEN_TEMP_ROOTS", ())
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="gpt-5.6-sol")
+    codex_module._build_env(ctx)
+
+    assert called == []
+
+
+# ---------------------------------------------------------------------------
+# gemini.py::write_mcp_config — same bug class, unobserved only because this
+# repo's self-review doesn't route through Gemini
+# ---------------------------------------------------------------------------
+
+
+def test_gemini_write_mcp_config_chowns_gemini_home_under_privilege_drop(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _simulate_root_privilege_drop(monkeypatch)
+
+    captured: dict[str, Any] = {}
+
+    def _fake_chown_run(cmd: list[str], **kwargs: object) -> object:
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(privilege_module.subprocess, "run", _fake_chown_run)
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="gemini-pro")
+    gemini_module.write_mcp_config(ctx)
+
+    assert captured["cmd"][0] == "chown"
+    assert captured["cmd"][2] == "1001:1001"
+    assert captured["cmd"][3] == str(gemini_module._gemini_home(ctx))
+
+
+def test_gemini_write_mcp_config_does_not_chown_when_not_root(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(privilege_module.os, "getuid", lambda: 501)
+
+    called: list[list[str]] = []
+    monkeypatch.setattr(
+        privilege_module.subprocess, "run", lambda cmd, **kw: called.append(cmd) or MagicMock()
+    )
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="gemini-pro")
+    gemini_module.write_mcp_config(ctx)
+
+    assert called == []
+
+
+# ---------------------------------------------------------------------------
+# claude.py::write_mcp_config — same bug class again; ctx.tmpdir itself is
+# chowned at creation, but a subdirectory root creates under it is not
+# ---------------------------------------------------------------------------
+
+
+def test_claude_write_mcp_config_chowns_config_dir_under_privilege_drop(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _simulate_root_privilege_drop(monkeypatch)
+
+    captured: dict[str, Any] = {}
+
+    def _fake_chown_run(cmd: list[str], **kwargs: object) -> object:
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(privilege_module.subprocess, "run", _fake_chown_run)
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="claude-sonnet")
+    claude_module.write_mcp_config(ctx)
+
+    assert captured["cmd"][0] == "chown"
+    assert captured["cmd"][2] == "1001:1001"
+    assert captured["cmd"][3] == str(tmp_path / ".claude")
+
+
+def test_claude_write_mcp_config_does_not_chown_when_not_root(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(privilege_module.os, "getuid", lambda: 501)
+
+    called: list[list[str]] = []
+    monkeypatch.setattr(
+        privilege_module.subprocess, "run", lambda cmd, **kw: called.append(cmd) or MagicMock()
+    )
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="claude-sonnet")
+    claude_module.write_mcp_config(ctx)
+
+    assert called == []
