@@ -1,40 +1,45 @@
-# Tracing units + span-count cap — test plan (G5.1 RED)
+# Tracing units + span-count cap — test plan (G5)
 
 Wave plan: `.ignorelocal/waves/issues-showcase-readiness-wave-plan.md` (PR **G5**)
 Worktree: `mergecraft-gsr-g5-tracing-units` @ `wave/gsr-g5-tracing-units`
 
 G-F10: `tests/tracing/` had 11 test modules exercising `tracer.py` / `exporters.py`
 only transitively; none named `test_tracer.py` / `test_exporters.py` targeted
-their public API directly, and no span-count cap existed at all. G5.1 adds
-both new modules; G5.2 (a separate `wave-plan-executor` pass) implements the
-cap.
+their public API directly, and no span-count cap existed at all. G5.1 added
+both new modules with the two cap tests marked `xfail(strict=False)` pending
+G5.2's implementation. G5.2 landed `MAX_SPANS_PER_RUN` in this same PR — the
+reconciliation pass below removes both markers, per a review finding on PR
+#174 that caught them left in place.
 
-## xfail schedule
+## Reconciliation (post-G5.2)
 
-| Wave | Test files | Marker reason |
-|------|------------|----------------|
-| **G5.2** | `tests/tracing/test_tracer.py::test_span_count_cap_stops_emission_at_limit`, `tests/tracing/test_tracer.py::test_span_cap_logs_once_and_does_not_raise` | `green after G5.2: span-count cap` |
-
-Both markers use `strict=False` — an `XPASS` once G5.2 lands `MAX_SPANS_PER_RUN`
-must not fail the suite. The reconciliation pass (test-creator, re-dispatched
-after G5.2) removes both markers once the cap is real.
+The two cap tests were `xfail(strict=False)` markers pending G5.2. G5.2
+landed in the same PR (commit `41d722b`), so both markers are now removed —
+leaving them would report the tests as `XPASS` forever and give the cap zero
+regression protection (a broken cap would show as an *expected* `XFAIL`, not
+a failure). Both test docstrings and the module docstring were also updated:
+they described the pre-G5.2 not-yet-implemented state (`NullSpan`, "does not
+exist yet"), which no longer matches G5.2's actual approach (a suppressed
+`Span`, not `NullSpan` — see G5.2's PR description for the deviation
+rationale).
 
 ## Acceptance (per plan)
 
-12 collected; 10 green today (characterising existing behaviour); 2 xfail
-pending G5.2. None of the 10 require the optional `[tracing]` extra — see
-"OTLP tests use a fake tracer" below — so this holds under the default
-`make setup` (`--extra dev` only) with no skip risk:
+12 collected, all 12 green — no xfail remaining:
 
 ```
 $ uv run pytest -v tests/tracing/test_tracer.py tests/tracing/test_exporters.py
 ...
-10 passed, 2 xfailed in 0.22s
+12 passed in 0.3s
 ```
 
+None of the 12 require the optional `[tracing]` extra — see "OTLP tests use
+a fake tracer" below — so this holds under the default `make setup`
+(`--extra dev` only) with no skip risk.
+
 Also verified: `make lint` and `make typecheck` clean; the full
-`tests/tracing/` suite (193 passed, 12 xfailed, 0 failed) under the fixed
-seed `make test` uses (`MERGECRAFT_PYTEST_RANDOM_SEED` default `424242`).
+`tests/tracing/` suite green under the fixed seed `make test` uses
+(`MERGECRAFT_PYTEST_RANDOM_SEED` default `424242`).
 
 ## Contract matrix
 
@@ -47,8 +52,8 @@ seed `make test` uses (`MERGECRAFT_PYTEST_RANDOM_SEED` default `424242`).
 | A second `close()` after a `with`-block exit is a no-op — no duplicate emit, no `ts_end_ns` restamp, active-span stays reset | Unit | Edge case (idempotency) — extends the W6 `_closed` coverage in `test_span_lifecycle.py`, which only covers the manually-built (no `__enter__`) path | `test_span_close_is_idempotent` |
 | A raising span body still pops the `_ACTIVE_SPAN` frame; the aborted span is still emitted with `status="error"`; a span opened afterward is a fresh root, not chained onto the dead frame | Unit | Error handling (the W5 `_ACTIVE_SPAN` leak class) | `test_active_span_contextvar_restores_on_exception` |
 | `NullTracer.start_span(...)` never evaluates `attrs_source` (#56 D9) | Unit | Edge case (disabled path) | `test_null_tracer_is_a_true_noop` |
-| Opening `MAX_SPANS_PER_RUN + 10` spans emits exactly `MAX_SPANS_PER_RUN` events | Unit | Edge case (unbounded growth guard) — **RED, xfail non-strict pending G5.2** | `test_span_count_cap_stops_emission_at_limit` |
-| Hitting the cap logs exactly one `warning` and never raises (#56 D6: tracing never fails the run) | Unit | Error handling — **RED, xfail non-strict pending G5.2** | `test_span_cap_logs_once_and_does_not_raise` |
+| Opening `MAX_SPANS_PER_RUN + 10` spans emits exactly `MAX_SPANS_PER_RUN` events | Unit | Edge case (unbounded growth guard) | `test_span_count_cap_stops_emission_at_limit` |
+| Hitting the cap logs exactly one `warning` and never raises (#56 D6: tracing never fails the run) | Unit | Error handling | `test_span_cap_logs_once_and_does_not_raise` |
 
 ### `tests/tracing/test_exporters.py`
 
@@ -62,11 +67,13 @@ seed `make test` uses (`MERGECRAFT_PYTEST_RANDOM_SEED` default `424242`).
 
 ## Notes
 
-- `MAX_SPANS_PER_RUN` is imported **inside** the two cap test bodies, not at
-  module scope — importing it at module level would raise `ImportError` at
-  collection time and break collection for the other 10 tests in the file.
-  The lazy import is itself the RED assertion; pytest reports the resulting
-  `ImportError` as the expected (non-strict) failure.
+- `MAX_SPANS_PER_RUN` is still imported **inside** the two cap test bodies
+  rather than at module scope. That was load-bearing pre-G5.2 (a module-level
+  import would have raised `ImportError` at collection time, before the
+  symbol existed); it's cosmetic now that G5.2 has landed the constant, and
+  was left as-is during reconciliation rather than moved, to keep the fix
+  scoped to the review finding (remove the xfail markers, fix the stale
+  docstrings) rather than a drive-by restyle.
 - `test_span_close_is_idempotent` intentionally exercises the `with`-block
   exit path rather than the manually-built path `test_span_lifecycle.py`
   already covers — its own docstring says that path is "unchanged here",

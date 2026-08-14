@@ -7,13 +7,15 @@ This file closes that gap.
 
 Five of the seven tests here characterise **existing** lifecycle behaviour
 (propagation, nesting, idempotent close, the ``_ACTIVE_SPAN`` exception-safety
-class, and the ``NullTracer`` no-op contract — #56 D9) and are green today.
-The remaining two pin the **not-yet-implemented** span-count cap (G-F10: no
-span-count cap exists, so a runaway review can emit an unbounded span tree)
-and are marked ``xfail(strict=False)`` pending G5.2, which adds
-``MAX_SPANS_PER_RUN`` to ``tracer.py``. Non-strict so G5.2 landing (an
-``XPASS``) does not fail the suite — the reconciliation pass removes the
-markers once G5.2 is green.
+class, and the ``NullTracer`` no-op contract — #56 D9). The remaining two pin
+the span-count cap (G-F10: bounds a runaway review's span tree) added by G5.2:
+``MAX_SPANS_PER_RUN`` on ``tracer.py``, past which ``start_span`` returns a
+``Span`` flagged ``_suppressed=True`` (not a ``NullSpan`` — see the deviation
+note in G5.2's PR description) whose ``close()`` skips ``attrs_source``
+evaluation and the sink write. All seven are real passes, not xfail: G5.2
+landed in this same PR, so the cap tests characterise landed behaviour like
+the other five, and leaving them xfail would give the cap zero regression
+protection.
 """
 
 from __future__ import annotations
@@ -183,17 +185,16 @@ def test_null_tracer_is_a_true_noop() -> None:
     assert tracer.current_span() is None
 
 
-@pytest.mark.xfail(reason="green after G5.2: span-count cap", strict=False)
 def test_span_count_cap_stops_emission_at_limit() -> None:
     """Opening more than the cap stops emission at exactly ``MAX_SPANS_PER_RUN``.
 
-    G-F10 / #56 — nothing today bounds span growth, so a large review (or a
-    genuine runaway) can emit an unbounded span tree. G5.2 adds
+    G-F10 / #56 — nothing bounded span growth before G5.2, so a large review
+    (or a genuine runaway) could emit an unbounded span tree. G5.2 added
     ``MAX_SPANS_PER_RUN`` and a ``_span_count`` counter on ``Tracer``; past
-    the cap, ``start_span`` returns a ``NullSpan`` instead of a real ``Span``
-    so the configured sink never receives more than the cap's worth of
-    events. ``MAX_SPANS_PER_RUN`` does not exist yet — the import below is
-    the RED assertion.
+    the cap, ``start_span`` returns a ``Span`` flagged ``_suppressed=True``
+    (not a ``NullSpan`` — its ``close()`` skips ``attrs_source`` evaluation
+    and the sink write) so the configured sink never receives more than the
+    cap's worth of events.
     """
     from mergecraft.tracing import MemorySink, Tracer
     from mergecraft.tracing.tracer import MAX_SPANS_PER_RUN
@@ -207,7 +208,6 @@ def test_span_count_cap_stops_emission_at_limit() -> None:
     assert len(sink.events) == MAX_SPANS_PER_RUN
 
 
-@pytest.mark.xfail(reason="green after G5.2: span-count cap", strict=False)
 def test_span_cap_logs_once_and_does_not_raise() -> None:
     """Hitting the span cap logs exactly one warning and never raises (#56 D6).
 
