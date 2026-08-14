@@ -1133,3 +1133,266 @@ def test_apply_logfire_wiring_handles_nameless_action_step(tmp_path: Path) -> No
     assert step["with"]["tracing-to"] == "logfire"
     assert step["with"]["logfire-token"] == "${{ secrets.LOGFIRE_TOKEN }}"
     assert step["env"]["MERGECRAFT_TRACING_PROJECT"] == "${{ vars.LOGFIRE_PROJECT }}"
+
+
+# ---------------------------------------------------------------------------
+# Round-4 regression coverage
+# ---------------------------------------------------------------------------
+
+# Blocker 2 (security): ``\b`` and bare ``startswith`` also match the
+# canonical action name as a prefix of a fork -- ``alexhawat/mergeCraft-fork``,
+# ``alexhawat/mergecraft`` (lowercased), etc. The fix requires ``@``
+# immediately after the action name in both the regex and the parsed
+# ``startswith`` checks. A successful wire against a fork would
+# happily inject ``${{ secrets.LOGFIRE_TOKEN }}`` into a different
+# action.
+_FORK_SIMILAR_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: forge
+        uses: alexhawat/mergeCraft-fork@deadbeef # similar repo name
+        with:
+          prompt: hi
+      - name: lowcased
+        uses: alexhawat/mergecraft@f5b070bddce40099dab77778231cac3456a55157
+        with:
+          prompt: hi
+"""
+
+
+def test_apply_logfire_wiring_rejects_similar_fork_action_uses(tmp_path: Path) -> None:
+    """Wiring refuses steps whose ``uses:`` only prefix-matches the canonical action.
+
+    Regression for round-4 blocker 2: ``\b`` in the regex and bare
+    ``startswith(_ACTION_USES)`` in the parsed-view checks also match
+    ``alexhawat/mergeCraft-fork`` (a different repo / potential fork)
+    and ``alexhawat/mergecraft`` (lowercased; GitHub treats it as a
+    different owner). Wiring such a step would silently inject
+    ``${{ secrets.LOGFIRE_TOKEN }}`` into an action we don't own.
+    The fix requires ``@`` immediately after the action name in both
+    checks; this test asserts that ``--step all`` (which would
+    otherwise sweep every match) reports zero affected steps.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _FORK_SIMILAR_TEMPLATE)
+    # No real ``uses: alexhawat/mergeCraft@vN`` step exists in the file --
+    # both selectors raise the same "no matching step" error they would
+    # raise for any file with zero matching action steps. The fork and
+    # lowercase variants never match the canonical-action regex.
+    with pytest.raises(LogfireWorkflowError, match="no ``uses: alexhawat/mergeCraft`` step found"):
+        apply_logfire_wiring(
+            workflow_path=workflow,
+            secret_name="LOGFIRE_TOKEN",
+            project_var_name="LOGFIRE_PROJECT",
+            step_selector="all",
+            force=False,
+        )
+    with pytest.raises(LogfireWorkflowError, match="no ``uses: alexhawat/mergeCraft`` step found"):
+        apply_logfire_wiring(
+            workflow_path=workflow,
+            secret_name="LOGFIRE_TOKEN",
+            project_var_name="LOGFIRE_PROJECT",
+            step_selector="primary",
+            force=False,
+        )
+
+
+# Blocker 1 (deepseek elevated): ``_strip_owned_keys`` and
+# ``_create_env_block`` hardcoded the child indent as ``key_indent + 2``,
+# while ``_insert_owned_keys_into_block`` derived it from the observed
+# first child. On a workflow whose ``with:``/``env:`` children live at
+# a non-canonical (e.g. +4) indent, the wire would insert at the
+# dynamic +4, but the unwire would only scan at the hardcoded +2 --
+# leaving the wired keys in place and exiting 0 with "had no Logfire
+# wiring; no changes needed". The fix derives the child indent from
+# the observed first child on the strip and create-env paths too, so
+# wire -> unwire round trips are symmetric on such files.
+_NON_CANONICAL_INDENT_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        with:
+            prompt: hi
+        env:
+            MERGECRAFT_X: keep_me
+"""
+
+
+def test_wire_unwire_round_trip_on_non_canonical_child_indent(tmp_path: Path) -> None:
+    """Wire -> unwire is symmetric on workflows using a non-canonical child indent.
+
+    Regression for round-4 blocker 1: the strip / create-env paths
+    used a hardcoded ``key_indent + 2`` while the insert path derived
+    the indent from the observed first child. On a 4-space-indented
+    workflow the wire wrote the keys at ``+4`` but the unwire only
+    scanned at ``+2``, so the keys remained while the CLI claimed
+    success. With the fix both paths share the same dynamic derivation,
+    and the round trip leaves the file byte-stable (apart from any
+    owned keys it removed).
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _NON_CANONICAL_INDENT_TEMPLATE)
+    change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+    )
+    assert change.was_modified
+    wired_text = change.new_text
+    # The new env child lands at the workflow's own +12 indent (4-space
+    # style under 8-space body), not the canonical +2 / +10.
+    assert "            MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}" in wired_text
+    # The unrelated ``MERGECRAFT_X: keep_me`` survives untouched.
+    assert "MERGECRAFT_X: keep_me" in wired_text
+    # Persist the wire so the next call sees the modified file.
+    workflow.write_text(wired_text, encoding="utf-8")
+    # Now unwire.
+    remove_change = remove_logfire_wiring(
+        workflow_path=workflow,
+        step_selector="primary",
+    )
+    # The unwire must actually remove the wired keys, not silently
+    # leave them in place.
+    assert remove_change.was_modified
+    assert "MERGECRAFT_TRACING_PROJECT" not in remove_change.new_text
+    # The unrelated ``MERGECRAFT_X: keep_me`` survives the unwire too,
+    # and the with: keys are gone as well.
+    parsed_after = yaml.safe_load(remove_change.new_text)
+    step_after = parsed_after["jobs"]["review"]["steps"][0]
+    assert "MERGECRAFT_TRACING_PROJECT" not in (step_after.get("env") or {})
+    assert "MERGECRAFT_X" in step_after["env"]
+    for key in OWNED_WITH_KEYS:
+        assert key not in step_after["with"]
+
+
+# Blocker 3 (data integrity): ``_find_mapping_block`` matched the first
+# ``env:`` / ``tracing-to:`` line at *any* indent, so a literal ``env:``
+# line inside a ``prompt: |`` block scalar was treated as the step's
+# real ``env:`` mapping. The fix scopes the search to direct indents
+# (``at_indent = step body indent``), and tightens ``_assert_wired_semantics``
+# to require a parsed ``env:`` mapping (rather than silently accepting
+# ``env: None``). The two cases below pin both halves.
+_BLOCK_SCALAR_NESTED_ENV_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        with:
+          prompt: |
+            env: this is just script text inside the prompt block scalar
+            tracing-to: ditto
+          logfire-token-typo: anything
+        env:
+          MERGECRAFT_X: keep_me
+"""
+
+
+def test_unwire_does_not_touch_block_scalar_nested_env_or_tracing_to(tmp_path: Path) -> None:
+    """Unwire leaves literal ``env:`` / ``tracing-to:`` text inside ``prompt: |`` alone.
+
+    Regression for round-4 blocker 3 (part 1): ``_find_mapping_block``
+    matched the first ``env:`` line at any indent, including a line
+    inside ``with.prompt: |``. The fix scopes the search to the
+    step's body indent. A line like ``env: this is just script text``
+    inside the block scalar must remain untouched by unwire.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _BLOCK_SCALAR_NESTED_ENV_TEMPLATE)
+    # Wire first, so the owned keys land alongside the script text.
+    wire_change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+    )
+    assert wire_change.was_modified
+    wired_text = wire_change.new_text
+    # Script text survives the wire -- the line-based mutator must not
+    # have hoisted or rewritten it.
+    assert "env: this is just script text inside the prompt block scalar" in wired_text
+    assert "tracing-to: ditto" in wired_text
+    # Persist the wire so the next call sees the modified file.
+    workflow.write_text(wired_text, encoding="utf-8")
+    # Now unwire.
+    remove_change = remove_logfire_wiring(
+        workflow_path=workflow,
+        step_selector="primary",
+    )
+    assert remove_change.was_modified
+    unwired_text = remove_change.new_text
+    # The script text still survives.
+    assert "env: this is just script text inside the prompt block scalar" in unwired_text
+    assert "tracing-to: ditto" in unwired_text
+    # And the canonical env child is gone.
+    assert "MERGECRAFT_TRACING_PROJECT" not in unwired_text
+    # The unrelated ``MERGECRAFT_X: keep_me`` survives.
+    assert "MERGECRAFT_X: keep_me" in unwired_text
+
+
+def test_assert_wired_semantics_rejects_missing_parsed_env(tmp_path: Path) -> None:
+    """A successful wire MUST leave a parsed ``env:`` mapping on the step.
+
+    Regression for round-4 blocker 3 (part 2): the post-mutation
+    assertion used to silently accept a missing parsed ``env:``
+    (``step.get("env") is None``), which let a wire that lost the
+    block-scalar ``env:`` to script-text redirection pass the check.
+    The fix makes ``_assert_wired_semantics`` reject a step whose
+    parsed ``env:`` is ``None`` -- a wire is required to leave one.
+
+    This test reaches into the post-check helper directly because the
+    block-scalar redirection above is hard to trigger from the public
+    API now that the regex is scoped; the requirement itself
+    (reject ``env is None``) is a parseable invariant worth pinning.
+    """
+    from mergecraft.cli.tracing_logfire_wf_yaml import (
+        _assert_wired_semantics,
+    )
+
+    # A step whose parsed ``env:`` is None -- this is the condition the
+    # post-check used to accept.
+    bad_yaml = """\
+jobs:
+  review:
+    steps:
+      - uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157
+        with:
+          tracing: 'true'
+          tracing-to: logfire
+          logfire-token: x
+"""
+    with pytest.raises(LogfireWorkflowError, match="missing env:"):
+        _assert_wired_semantics(bad_yaml, step_identifiers=["job:review/step:0"])
+
+    # Sanity: a step that does have a parsed env passes.
+    good_yaml = """\
+jobs:
+  review:
+    steps:
+      - uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157
+        with:
+          tracing: 'true'
+          tracing-to: logfire
+          logfire-token: x
+        env:
+          MERGECRAFT_TRACING_PROJECT: y
+"""
+    _assert_wired_semantics(good_yaml, step_identifiers=["job:review/step:0"])

@@ -47,7 +47,30 @@ DEFAULT_WORKFLOW_RELATIVE_PATH = ".github/workflows/mergecraft.yml"
 # (lowercased in chat) as different owners at the URL level, but the
 # operator-facing reference is the canonical form. Matching exactly avoids
 # silently mutating forks with a similarly-named action.
+#
+# IMPORTANT: callers must match against ``<uses> + "@"``, NOT just the
+# prefix. A bare ``startswith(_ACTION_USES)`` (or a regex using ``\b``)
+# also matches similarly-prefixed forks like ``alexhawat/mergeCraft-fork``
+# / ``alexhawat/mergecraft`` (lowercased) / etc. -- and would happily wire
+# ``${{ secrets.LOGFIRE_TOKEN }}`` into a different action. Use the
+# ``_is_action_uses`` helper below for the structural check, and the
+# ``_ACTION_USES_AT_RE`` constant for the line-based regex.
 _ACTION_USES = "alexhawat/mergeCraft"
+
+
+def _is_action_uses(uses: str, action_uses: str = _ACTION_USES) -> bool:
+    """Return ``True`` iff ``uses`` is the canonical action followed by ``@<ref>``.
+
+    The ``@`` is mandatory -- a bare ``startswith`` would also match
+    ``alexhawat/mergeCraft-fork``, ``alexhawat/mergeCraft-anything``, etc.,
+    and silently wire the Logfire token into a fork. The reference after
+    the ``@`` must also be non-empty.
+    """
+    if not uses.startswith(action_uses + "@"):
+        return False
+    ref = uses[len(action_uses) + 1 :]
+    return bool(ref)
+
 
 # Owned keys -- every key whose value this module is willing to insert
 # or strip. Kept as tuples so callers (and tests) can import them.
@@ -96,6 +119,36 @@ def _line_indent_len(line: str) -> int:
     return len(line) - len(line.lstrip(" \t"))
 
 
+def _derive_child_indent(
+    block_text: str, block_start: int, block_end: int, key_indent: int
+) -> str | None:
+    """Return the canonical child-indent string for a mapping block.
+
+    The block is delimited by ``[block_start, block_end)`` inside ``block_text``
+    and is expected to contain a ``key:`` line whose indent is ``key_indent``
+    followed (or not) by child lines. Returns the whitespace prefix of the
+    first child line whose indent is strictly deeper than ``key_indent``, or
+    ``None`` if no such line exists.
+
+    This is the single source of truth used by both the insert path and the
+    strip / create-env paths so that the wire and unwire operations agree on
+    indentation on workflows that use a non-canonical (e.g. 4-space) child
+    indent. Previously the strip / create paths hardcoded ``key_indent + 2``,
+    which made wire -> unwire round trips silently no-op on such files: the
+    wire would insert at the dynamic +6 indent, the unwire would only scan
+    for owned keys at the hardcoded +2 indent, and the keys would remain.
+    """
+    lines = block_text[block_start:block_end].splitlines(keepends=True)
+    for ln in lines[1:]:
+        if not ln.strip():
+            continue
+        leading = _line_indent_len(ln)
+        if leading <= key_indent:
+            break
+        return ln[:leading]
+    return None
+
+
 def _find_action_steps(text: str, action_uses: str = _ACTION_USES) -> list[tuple[int, int, int]]:
     """Locate every ``uses: <action_uses>`` step in ``text``.
 
@@ -107,7 +160,10 @@ def _find_action_steps(text: str, action_uses: str = _ACTION_USES) -> list[tuple
     """
     lines = text.splitlines(keepends=True)
     out: list[tuple[int, int, int]] = []
-    uses_re = re.compile(r"^(?P<indent>[ \t]+)uses:[ \t]*" + re.escape(action_uses) + r"\b")
+    # Require ``@`` immediately after the action name. ``\b`` would also
+    # match ``alexhawat/mergeCraft-fork``, ``alexhawat/mergecraft`` (lower-
+    # cased), etc. -- a fork that we must not wire the Logfire token into.
+    uses_re = re.compile(r"^(?P<indent>[ \t]+)uses:[ \t]*" + re.escape(action_uses) + r"@")
     cum: list[int] = []
     offset = 0
     for ln in lines:
@@ -228,7 +284,7 @@ def _parsed_step_identifiers(
             if not isinstance(step, dict):
                 continue
             uses = step.get("uses")
-            if not isinstance(uses, str) or not uses.startswith(action_uses):
+            if not isinstance(uses, str) or not _is_action_uses(uses, action_uses):
                 continue
             ident = step.get("id") or step.get("name") or f"job:{job_name}/step:{i}"
             out.append((matched_index, str(ident)))
@@ -268,7 +324,12 @@ def _select_step_indices(
 # ---------------------------------------------------------------------------
 
 
-def _find_mapping_block(text: str, key: str) -> tuple[int, int, int] | None:
+def _find_mapping_block(
+    text: str,
+    key: str,
+    *,
+    at_indent: int | None = None,
+) -> tuple[int, int, int] | None:
     """Return ``(line_start, line_end, key_indent_len)`` for the first ``key:`` block.
 
     The block consists of the ``key:`` line (plus its trailing newline) and
@@ -280,6 +341,17 @@ def _find_mapping_block(text: str, key: str) -> tuple[int, int, int] | None:
     ``line_start`` is the byte offset at the start of the leading whitespace
     of the ``key:`` line; ``line_end`` is the byte offset of the first line
     that does not belong to the block (or end of text).
+
+    ``at_indent`` scopes the search to a specific indent level. When
+    provided, a ``key:`` line whose indent is not exactly ``at_indent``
+    is skipped. This is how callers prevent literal ``key:`` lines that
+    happen to live inside a ``prompt: |`` / ``run: |`` block scalar from
+    being mistaken for workflow structure -- the block-scalar content is
+    indented deeper than the step's body, and ``at_indent`` is set to the
+    step's body indent (the same indent ``uses:`` sits at). Without this
+    scoping, ``unwire-workflow`` could pick a script line that happens to
+    read ``env: SOMETHING`` as the step's ``env:`` mapping and then the
+    parsed-state assertion would silently accept the mismatch.
     """
     lines = text.splitlines(keepends=True)
     cum: list[int] = []
@@ -296,6 +368,10 @@ def _find_mapping_block(text: str, key: str) -> tuple[int, int, int] | None:
         if m is None:
             continue
         indent_len = len(m.group("indent"))
+        if at_indent is not None and indent_len != at_indent:
+            # Literal ``key:`` at the wrong indent -- most often a line of
+            # block-scalar content. Skip and keep scanning.
+            continue
         block_start = cum[i]
         if m.group("rest"):
             # Inline value -- no children possible.
@@ -333,6 +409,7 @@ def _insert_owned_keys_into_block(
     canonical: list[tuple[str, str]],
     env_style: bool,
     force: bool,
+    at_indent: int | None = None,
 ) -> tuple[str, bool]:
     """Idempotently insert / replace the canonical owned keys inside one ``key:`` block.
 
@@ -342,6 +419,12 @@ def _insert_owned_keys_into_block(
     ``[A-Z_][A-Z0-9_]*``. ``force=True`` permits overwriting existing values
     that differ from canonical.
 
+    ``at_indent`` scopes the search for ``key:`` to a specific indent --
+    the matched ``key:`` line must be at exactly that indent. This prevents
+    a literal ``env:`` (or ``tracing-to:``) that lives inside a ``prompt: |``
+    block scalar from being mistaken for the step's real mapping, which
+    would otherwise corrupt script text and bypass the parsed-state check.
+
     Strategy: locate the ``key:`` mapping block in ``block``; for every child
     line whose first token (the key) is one of the canonical names, keep it
     if the value matches, replace it if ``force=True``, or record a refusal
@@ -350,7 +433,7 @@ def _insert_owned_keys_into_block(
     reconstructed by slicing the original text; siblings before / after the
     block are byte-stable.
     """
-    mapping = _find_mapping_block(block, key)
+    mapping = _find_mapping_block(block, key, at_indent=at_indent)
     if mapping is None:
         return block, False
     block_start, block_end, key_indent = mapping
@@ -365,15 +448,7 @@ def _insert_owned_keys_into_block(
     # Determine the children indent -- the indent of the first child line --
     # which the mutator uses for any newly-inserted canonical key.
     lines = block[block_start:block_end].splitlines(keepends=True)
-    children_indent_str: str | None = None
-    for ln in lines[1:]:
-        if not ln.strip():
-            continue
-        leading_spaces = _line_indent_len(ln)
-        if leading_spaces <= key_indent:
-            break
-        children_indent_str = ln[:leading_spaces]
-        break
+    children_indent_str = _derive_child_indent(block, block_start, block_end, key_indent)
 
     if children_indent_str is None and len(lines) == 1:
         # ``key:`` is present but cannot accept children -- either written
@@ -393,6 +468,7 @@ def _insert_owned_keys_into_block(
     refused: list[str] = []
     new_lines: list[str] = [lines[0]]  # the ``key:`` line itself.
     seen: set[str] = set()
+    child_indent_len = len(children_indent_str) if children_indent_str is not None else None
     for ln in lines[1:]:
         if not ln.strip():
             new_lines.append(ln)
@@ -400,6 +476,17 @@ def _insert_owned_keys_into_block(
         leading_spaces = _line_indent_len(ln)
         if leading_spaces <= key_indent:
             # Sibling key -- outside this block; preserve.
+            new_lines.append(ln)
+            continue
+        if child_indent_len is not None and leading_spaces != child_indent_len:
+            # Deeper than the direct-child indent -- most often the body
+            # of a ``prompt: |`` / ``run: |`` block scalar. The strip
+            # path already scopes to direct children (so a block-scalar
+            # ``tracing-to:`` line isn't silently deleted); the insert
+            # path needs the same scoping, otherwise it will treat a
+            # literal ``tracing-to: ditto`` line inside ``prompt: |``
+            # as a ``with:`` child and refuse the wire (or worse, replace
+            # the script text).
             new_lines.append(ln)
             continue
         m = child_line_re.match(ln)
@@ -465,7 +552,7 @@ def _insert_owned_keys_into_block(
     return new_block, True
 
 
-def _strip_owned_keys(block: str) -> tuple[str, bool]:
+def _strip_owned_keys(block: str, at_indent: int | None = None) -> tuple[str, bool]:
     """Remove ``OWNED_WITH_KEYS`` lines from ``with:`` and ``OWNED_ENV_KEYS`` from ``env:``.
 
     Scoped to the *direct children* of the step's ``with:`` / ``env:``
@@ -476,6 +563,12 @@ def _strip_owned_keys(block: str) -> tuple[str, bool]:
     happened to contain a literal ``tracing:`` line. The parsed-state
     assertion can't see that data loss (block-scalar content is opaque to
     the loader), so the scoping has to happen here.
+
+    ``at_indent`` scopes the search for the ``with:`` / ``env:`` mapping
+    lines themselves to a specific indent -- prevents a literal ``env:``
+    line inside a ``prompt: |`` block scalar from being mistaken for the
+    step's real ``env:`` mapping (which would corrupt script text and
+    bypass the parsed-state check).
     """
     owned = set(OWNED_WITH_KEYS) | set(OWNED_ENV_KEYS)
     owned_re = re.compile(r"^[ \t]*(?P<k>[A-Za-z0-9_-]+|MERGECRAFT_[A-Z_]+):.*\n")
@@ -484,14 +577,41 @@ def _strip_owned_keys(block: str) -> tuple[str, bool]:
     # Slice the block into "owned mapping blocks" (``with:`` / ``env:``) and
     # "everything else" (sibling attributes, block scalars, blank lines).
     # Strip only the direct children of the owned mapping blocks.
-    with_block = _find_mapping_block(block, "with")
-    env_block = _find_mapping_block(block, "env")
-    owned_ranges: list[tuple[int, int, int]] = []
+    with_block = _find_mapping_block(block, "with", at_indent=at_indent)
+    env_block = _find_mapping_block(block, "env", at_indent=at_indent)
+    owned_ranges: list[tuple[int, int, int, str]] = []
     if with_block is not None:
-        # Child indent is two spaces deeper than the ``with:`` key indent.
-        owned_ranges.append((with_block[0], with_block[1], with_block[2] + 2))
+        # Derive the canonical child indent from the observed ``with:``
+        # children -- the *same* derivation the insert path uses. A previous
+        # version hardcoded ``key_indent + 2`` here, which made wire -> unwire
+        # round trips silently no-op on workflows that use a non-canonical
+        # child indent (e.g. 4-space style): the wire would insert at the
+        # dynamic +6 indent, the unwire would only scan at the hardcoded +2,
+        # and the keys would remain while the CLI printed "had no Logfire
+        # wiring; no changes needed" and exited 0.
+        child_indent_ws = _derive_child_indent(block, with_block[0], with_block[1], with_block[2])
+        if child_indent_ws is None:
+            # ``with:`` exists but has no children -- same inline-mapping
+            # refusal as the insert path. Better to fail loudly here than
+            # to silently no-op and let the post-check pass on an empty
+            # target set.
+            with_key_line = block[with_block[0] : with_block[1]].splitlines(keepends=False)[0]
+            raise LogfireWorkflowError(
+                f"{with_key_line!r} has no children; cannot strip owned keys. "
+                "Convert it to a block mapping (delete the inline value, "
+                "let ``with:`` stand on its own line, then re-run)."
+            )
+        owned_ranges.append((with_block[0], with_block[1], len(child_indent_ws), "with"))
     if env_block is not None:
-        owned_ranges.append((env_block[0], env_block[1], env_block[2] + 2))
+        child_indent_ws = _derive_child_indent(block, env_block[0], env_block[1], env_block[2])
+        if child_indent_ws is None:
+            env_key_line = block[env_block[0] : env_block[1]].splitlines(keepends=False)[0]
+            raise LogfireWorkflowError(
+                f"{env_key_line!r} has no children; cannot strip owned keys. "
+                "Convert it to a block mapping (delete the inline value, "
+                "let ``env:`` stand on its own line, then re-run)."
+            )
+        owned_ranges.append((env_block[0], env_block[1], len(child_indent_ws), "env"))
 
     if not owned_ranges:
         # No ``with:`` / ``env:`` mapping in this step -- nothing to strip.
@@ -511,7 +631,7 @@ def _strip_owned_keys(block: str) -> tuple[str, bool]:
     # child region.
     pieces: list[str] = []
     last = 0
-    for block_start, block_end, child_indent in owned_ranges:
+    for block_start, block_end, child_indent, _label in owned_ranges:
         # Emit everything between ``last`` and the start of this mapping
         # block untouched (sibling attributes, the ``with:``/``env:`` key
         # line itself, etc.).
@@ -559,10 +679,17 @@ def _mutate_steps(
     text: str,
     *,
     step_selector: str,
-    mutate_one: Callable[[str], tuple[str, bool]],
+    mutate_one: Callable[[str, int], tuple[str, bool]],
     post_mutation_check: Callable[..., None] | None = None,
 ) -> WiringChange:
-    """Run ``mutate_one(block) -> (new_block, modified)`` on each selected step.
+    """Run ``mutate_one(block, step_indent) -> (new_block, modified)`` on each selected step.
+
+    ``step_indent`` is the indent (in characters) of the ``uses:`` line for
+    the matched step -- the same indent the step's ``with:`` and ``env:``
+    mappings live at. Callers pass it through to ``_find_mapping_block`` so
+    a literal ``env:`` line that happens to appear inside a ``prompt: |``
+    block scalar (deeper indent) cannot be mistaken for the step's real
+    ``env:`` mapping.
 
     Mutates sequentially from the **last** matching step backward so earlier
     byte offsets remain valid after each in-place splice. After each splice
@@ -595,9 +722,9 @@ def _mutate_steps(
     affected: list[str] = []
     cur_text = text
     for idx in sorted(selected_indices, reverse=True):
-        start, end, _indent = blocks[idx]
+        start, end, step_indent = blocks[idx]
         block = cur_text[start:end]
-        new_block, modified = mutate_one(block)
+        new_block, modified = mutate_one(block, step_indent)
         if not modified:
             continue
         cur_text = cur_text[:start] + new_block + cur_text[end:]
@@ -668,7 +795,7 @@ def _assert_wired_semantics(text: str, *, step_identifiers: list[str]) -> None:
             if not isinstance(step, dict):
                 continue
             uses = step.get("uses")
-            if not isinstance(uses, str) or not uses.startswith(_ACTION_USES):
+            if not isinstance(uses, str) or not _is_action_uses(uses):
                 continue
             step_id = step.get("id") or step.get("name") or f"job:{job_name}/step:{i}"
             if step_id not in targets:
@@ -684,14 +811,22 @@ def _assert_wired_semantics(text: str, *, step_identifiers: list[str]) -> None:
             for key in OWNED_WITH_KEYS:
                 if key not in with_map:
                     unwired.append(f"{step_id}: missing with.{key}")
+            # ``env:`` is required. A previous version accepted a missing
+            # ``env:`` (because ``step.get("env")`` is ``None`` when the
+            # step has no ``env:`` mapping), which let a nested ``env:``
+            # inside a ``prompt: |`` block scalar -- parsed as a sibling
+            # string, not the step's ``env:`` mapping -- pass the check.
+            # Wire is required to create an ``env:`` block when none exists
+            # (see ``_do``), so requiring it here is sound.
             env_map = step.get("env")
-            if env_map is not None and not isinstance(env_map, dict):
+            if env_map is None:
+                unwired.append(f"{step_id}: missing env: mapping")
+            elif not isinstance(env_map, dict):
                 unwired.append(
                     f"{step_id}: env: is {env_map!r} (not a mapping); "
                     "cannot carry MERGECRAFT_TRACING_PROJECT"
                 )
-                continue
-            if isinstance(env_map, dict):
+            else:
                 for key in OWNED_ENV_KEYS:
                     if key not in env_map:
                         unwired.append(f"{step_id}: missing env.{key}")
@@ -727,7 +862,7 @@ def _assert_unwired_semantics(text: str, *, step_identifiers: list[str]) -> None
             if not isinstance(step, dict):
                 continue
             uses = step.get("uses")
-            if not isinstance(uses, str) or not uses.startswith(_ACTION_USES):
+            if not isinstance(uses, str) or not _is_action_uses(uses):
                 continue
             step_id = step.get("id") or step.get("name") or f"job:{job_name}/step:{i}"
             if step_id not in targets:
@@ -774,22 +909,35 @@ def apply_logfire_wiring(
         ("MERGECRAFT_TRACING_PROJECT", f"${{{{ vars.{_splice_secret(project_var_name)} }}}}"),
     ]
 
-    def _do(block: str) -> tuple[str, bool]:
+    def _do(block: str, step_indent: int) -> tuple[str, bool]:
         # Order matters: insert ``with:`` keys first so an existing ``env:``
         # block's byte offsets used by the second call haven't been perturbed.
+        # ``step_indent`` scopes the ``with:`` / ``env:`` search to the step's
+        # body indent so a literal ``env:`` inside a ``prompt: |`` block
+        # scalar can't be mistaken for the step's real ``env:`` mapping.
         block2, mod_with = _insert_owned_keys_into_block(
-            block, key="with", canonical=with_canonical, env_style=False, force=force
+            block,
+            key="with",
+            canonical=with_canonical,
+            env_style=False,
+            force=force,
+            at_indent=step_indent,
         )
         # The step *must* have a ``with:`` block at this point: the mergeCraft
         # action requires it, and the prior mutation was a no-op only if it
         # already existed. There is no concept of a step with no ``with:``.
         block3, mod_env = _insert_owned_keys_into_block(
-            block2, key="env", canonical=env_canonical, env_style=True, force=force
+            block2,
+            key="env",
+            canonical=env_canonical,
+            env_style=True,
+            force=force,
+            at_indent=step_indent,
         )
-        if not mod_env and _find_mapping_block(block2, "env") is None:
+        if not mod_env and _find_mapping_block(block2, "env", at_indent=step_indent) is None:
             # ``env:`` block is genuinely absent -- create one immediately
             # after the ``with:`` block (or after ``uses:`` if no ``with:``).
-            block3 = _create_env_block(block2, env_canonical[0])
+            block3 = _create_env_block(block2, env_canonical[0], at_indent=step_indent)
             mod_env = True
         return block3, mod_with or mod_env
 
@@ -801,24 +949,39 @@ def apply_logfire_wiring(
     )
 
 
-def _create_env_block(block: str, canonical: tuple[str, str]) -> str:
+def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | None = None) -> str:
     """Insert a fresh ``env:`` block immediately after the ``with:`` block.
 
     When the step has no ``with:`` block the new ``env:`` is appended after
     the ``uses:`` line (the canonical sibling placement). The new block holds
     a single child line ``MERGECRAFT_TRACING_PROJECT`` at the canonical
-    child indent -- two spaces deeper than the ``env:`` key, which is
-    itself at the same indent as the ``with:`` key (or ``uses:`` line).
+    child indent -- which we derive from the existing ``with:`` block's
+    observed child indent when present (falling back to ``+2``), so the
+    new ``env:`` mirrors the workflow's own style even on non-canonical
+    indentation (e.g. 4-space). This keeps wire -> unwire symmetric on such
+    files: the wire writes at the dynamic indent, the unwire scans at the
+    same dynamic indent.
+
+    ``at_indent`` scopes the search for the existing ``with:`` mapping
+    line to the step's body indent -- prevents a literal ``with:`` line
+    inside a block scalar from being mistaken for the step's real ``with:``
+    mapping.
     """
     canonical_key, canonical_value = canonical
     # Prefer inserting after the ``with:`` block (its trailing `block_end`).
-    with_block = _find_mapping_block(block, "with")
+    with_block = _find_mapping_block(block, "with", at_indent=at_indent)
     if with_block is not None:
         with_end = with_block[1]
         # The indent for the new ``env:`` key is the same as ``with:``'s indent.
         with_indent = " " * with_block[2]
-        env_indent = with_indent + "  "
-        insertion = f"{with_indent}env:\n{env_indent}{canonical_key}: {canonical_value}\n"
+        # Derive the child indent from the existing ``with:`` children so
+        # the new ``env:`` block matches the workflow's own style. Fall
+        # back to ``+2`` only if ``with:`` has no children (which the
+        # ``LogfireWorkflowError`` above already forbids for the wire
+        # path, but be defensive for callers that go straight here).
+        child_ws = _derive_child_indent(block, with_block[0], with_block[1], with_block[2])
+        env_child_indent = child_ws if child_ws is not None else with_indent + "  "
+        insertion = f"{with_indent}env:\n{env_child_indent}{canonical_key}: {canonical_value}\n"
         return block[:with_end] + insertion + block[with_end:]
     # No ``with:`` -- fall back to inserting after ``uses:``.
     uses_re = re.compile(r"^(?P<indent>[ \t]*)uses:[ \t]*\S+[^\n]*\n", re.MULTILINE)
