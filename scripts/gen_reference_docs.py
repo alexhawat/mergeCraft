@@ -234,20 +234,19 @@ def _render_cli_table(commands: list[tuple[CommandPath, Any]]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _splice(text: str, begin: str, end: str, content: str, *, required: bool) -> str:
+def _splice(text: str, begin: str, end: str, content: str) -> str:
     """Replace the text between a ``<!-- BEGIN:x -->`` / ``<!-- END:x -->`` pair.
 
-    When ``required`` is False and the sentinel pair is absent, ``text`` is
-    returned unchanged — used for the action-outputs table, which is not part
-    of the generator's frozen scratch-fixture contract (``README.md`` in the
-    real repo carries the sentinel; ad-hoc scratch fixtures may not).
+    Every sentinel pair is mandatory: a removed pair must fail the generator
+    loudly (``--check`` as well as default/write mode), not silently leave a
+    now-unmanaged table in place. A table that survives sentinel removal
+    would still contain the right substrings today, so ``--check`` would
+    report clean even though nothing regenerates or verifies it anymore.
     """
     pattern = re.compile(re.escape(begin) + r"\n.*?" + re.escape(end), re.DOTALL)
     if not pattern.search(text):
-        if required:
-            msg = f"{README_PATH}: sentinel pair not found: {begin} / {end}"
-            raise SystemExit(msg)
-        return text
+        msg = f"{README_PATH}: sentinel pair not found: {begin} / {end}"
+        raise SystemExit(msg)
     replacement = f"{begin}\n{content}{end}"
     return pattern.sub(lambda _match: replacement, text, count=1)
 
@@ -258,19 +257,11 @@ def _generate(
     inputs = dict(action_data.get("inputs") or {})
     outputs = dict(action_data.get("outputs") or {})
     text = readme_text
+    text = _splice(text, _ACTION_INPUTS_BEGIN, _ACTION_INPUTS_END, _render_action_inputs(inputs))
     text = _splice(
-        text, _ACTION_INPUTS_BEGIN, _ACTION_INPUTS_END, _render_action_inputs(inputs), required=True
+        text, _ACTION_OUTPUTS_BEGIN, _ACTION_OUTPUTS_END, _render_action_outputs(outputs)
     )
-    text = _splice(
-        text,
-        _ACTION_OUTPUTS_BEGIN,
-        _ACTION_OUTPUTS_END,
-        _render_action_outputs(outputs),
-        required=False,
-    )
-    return _splice(
-        text, _CLI_COMMANDS_BEGIN, _CLI_COMMANDS_END, _render_cli_table(commands), required=True
-    )
+    return _splice(text, _CLI_COMMANDS_BEGIN, _CLI_COMMANDS_END, _render_cli_table(commands))
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pytest
 import yaml
 
 from mergecraft.cli.app import app as root_app
@@ -30,7 +31,6 @@ from mergecraft.cli.auth_cmd import app as auth_app
 from tests.ci.workflow_support import REPO_ROOT
 
 if TYPE_CHECKING:
-    import pytest
     import typer
 
 ACTION_YML = REPO_ROOT / "action.yml"
@@ -242,6 +242,11 @@ _SCRATCH_README = """\
 
 <!-- BEGIN:action-inputs -->
 <!-- END:action-inputs -->
+
+#### Action outputs
+
+<!-- BEGIN:action-outputs -->
+<!-- END:action-outputs -->
 """
 
 
@@ -398,3 +403,28 @@ def test_generator_check_mode_detects_drift(
         "--check must emit a unified diff (lines starting with ---/+++/@@) on drift, "
         f"not just a terse message; got:\n{output}"
     )
+
+
+def test_generator_fails_when_a_sentinel_pair_is_removed(tmp_path: Path) -> None:
+    """A removed sentinel pair must fail loudly, not silently orphan that table.
+
+    If a sentinel pair is deleted (e.g. by a careless hand-edit) but the table
+    content it used to wrap is left behind, that table still contains the
+    right substrings — so a content-presence check alone would stay green
+    while the table quietly stops being regenerated or verified. Every
+    sentinel pair must therefore be mandatory: removing one must raise, in
+    both write and ``--check`` mode.
+    """
+    module = _load_gen_reference_docs()
+    _, readme = _write_scratch_repo(tmp_path, module)
+
+    text = readme.read_text(encoding="utf-8")
+    assert "<!-- BEGIN:action-outputs -->" in text
+    stripped = text.replace("<!-- BEGIN:action-outputs -->\n<!-- END:action-outputs -->\n", "", 1)
+    assert stripped != text, "fixture sentinel pair not found; cannot remove it"
+    readme.write_text(stripped, encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        module.main([])
+    with pytest.raises(SystemExit):
+        module.main(["--check"])
