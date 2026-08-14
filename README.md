@@ -176,9 +176,8 @@ jobs:
 ```
 
 > **Pin to the exact tag**, e.g. `@v0.1.0` — it is an immutable release ref and
-> will not move. Pinning to a moving branch name (or a full commit SHA, for the
-> strictest supply-chain posture) is the only way to guarantee a given workflow
-> run reviews with the code that tag names.
+> will not move, so a workflow run always reviews with the code that tag names.
+> For the strictest supply-chain posture, pin a full commit SHA instead.
 
 ### Example 2 — hardened, review as a required check
 
@@ -702,7 +701,7 @@ Full rationale in the collapsible sections of
 | [docs/REVIEW-DOCTRINE.md](docs/REVIEW-DOCTRINE.md) | Why mergeCraft makes the calls it makes |
 | [docs/evidence-packet.md](docs/evidence-packet.md) | Typed findings & merge evidence |
 | [docs/eval-bank.md](docs/eval-bank.md) | Eval replay and bench scoring |
-| [docs/distribution.md](docs/distribution.md) | 0.0.1 release checklist — PyPI, Marketplace, assets ([#141](https://github.com/alexhawat/mergeCraft/issues/141)) |
+| [docs/distribution.md](docs/distribution.md) | 0.1.0 release checklist — PyPI, Marketplace, assets ([#141](https://github.com/alexhawat/mergeCraft/issues/141)) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributor workflow (`make setup / lint / typecheck / test / ci`) |
 
 ## 🗺️ Roadmap
