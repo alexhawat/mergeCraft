@@ -36,7 +36,7 @@ from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROM
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
-from mergecraft.utils.privilege import wrap_agent_command
+from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
 from mergecraft.utils.process_group import (
     kill_process_group,
     register_process_group,
@@ -227,10 +227,18 @@ class _ServerHandle:
 
 
 def _boot_opencode_server(*, cli: str, env: dict[str, str], cwd: str) -> _ServerHandle:
+    # Wrap argv with setpriv, then patch HOME/USER/LOGNAME to match the
+    # dropped-to agent user (setpriv does not reset $HOME itself — see
+    # mergecraft.utils.privilege.agent_subprocess_env). This is the exact
+    # bug behind "opencode serve exited early: EACCES: permission denied,
+    # mkdir '/github/home/.local'": opencode inherited the container's
+    # HOME=/github/home, which the dropped-to uid cannot write under.
+    wrapped_cmd = wrap_agent_command([cli, "serve", "--port", "0", "--hostname", "127.0.0.1"])
+    resolved_env = agent_subprocess_env(env)
     proc = subprocess.Popen(
-        wrap_agent_command([cli, "serve", "--port", "0", "--hostname", "127.0.0.1"]),
+        wrapped_cmd,
         cwd=cwd,
-        env=env,
+        env=resolved_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
