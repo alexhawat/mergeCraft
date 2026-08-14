@@ -8,7 +8,7 @@ Every check mergecraft applies when it reviews a pull request, grouped by what i
 
 A quick orientation before the lists:
 
-- Most of these are **judgment checks** carried out by the reviewing agent, not scripted rules. There is no rule engine — the behavior lives in the `Review` and `IncrementalReview` mode prompts in [`src/mergecraft/modes.py`](src/mergecraft/modes.py).
+- Most of these are **judgment checks** carried out by the reviewing agent, not scripted rules. There is no rule engine — the behavior lives in the `Review` and `IncrementalReview` mode prompts in [`src/mergecraft/modes/Review.py`](src/mergecraft/modes/Review.py) and [`src/mergecraft/modes/IncrementalReview.py`](src/mergecraft/modes/IncrementalReview.py).
 - **Mechanical evidence** comes from two layers: your repo's own gates (`staticChecks` / Makefile targets via `run_static_checks`) and mergeCraft's **catalog analyzers** (`run_analyzers`). Only **`failed`** gate status and **verified** analyzer findings become review signal — everything else is reported as skipped.
 - Groups 1–3 are the ones that produce findings. Groups 4–8 govern how findings are graded, placed, filtered, and formatted — they are why the review stays short.
 
@@ -73,6 +73,8 @@ packet wins over every other signal — including the recorded
 ## 1. Code correctness and risk
 
 The reviewer reads the whole diff itself, then picks the **lenses** the PR actually warrants and investigates each as a falsifiable question — optionally dispatching a `mergecraft-reviewer` subagent per lens so they run in parallel. Nothing here is a fixed pass; a docs-only diff gets none of it.
+
+**Run lifecycle (S1)** — a failed or timed-out trusted-tier `setupScript` yields `RunOutcome.inconclusive` (neutral check conclusion), not a review. An under-provisioned tree never receives a review verdict. See [`docs/config-failure-policy.md`](docs/config-failure-policy.md#setup-script-failures-s1--d5--d10--f6) for the policy table and operator checklist.
 
 **Always in play**
 

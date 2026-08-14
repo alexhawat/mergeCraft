@@ -30,6 +30,8 @@ from mergecraft.analyzers.trust import derive_trust_tier
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
 
 # ---------------------------------------------------------------------------
 # Module-availability helpers — same pattern as test_decide_approval.py.
@@ -231,6 +233,7 @@ async def test_report_status_checks_surfaces_neutral_for_crashed_run(
 
 def test_fork_pr_cannot_self_approve_at_decision_layer(
     blocked_pr_event: dict,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``derive_trust_tier()`` returns ``"untrusted"`` for a fork PR, and
     ``prApproveEnabled=true`` ⇒ no approval, regardless of config (D14).
@@ -241,6 +244,7 @@ def test_fork_pr_cannot_self_approve_at_decision_layer(
     ``"neutral"`` (the exact shape is W8's call; the contract is *not*
     success).
     """
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     tier = derive_trust_tier(blocked_pr_event)
     assert tier == "untrusted", (
         "sanity: a fork PR event must be tier='untrusted' before we assert the inert path"

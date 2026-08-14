@@ -29,14 +29,17 @@ from mergecraft.analyzers.scope import parse_diff_scope
 from mergecraft.classify import ChangeSet, classify_blast_radius
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.emit import write_packet
-from mergecraft.evidence.packet import DeterministicCheck
+from mergecraft.evidence.packet import DeterministicCheck, ModePromptVersion
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from mergecraft.analyzers.finding import Finding
     from mergecraft.classify import BlastRadiusClassification
     from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import ToolState
+    from mergecraft.modes import Mode
 
 PACKET_FILENAME = "merge-evidence-packet.json"
 """Stable basename for the emitted packet, under whichever directory wins."""
@@ -178,6 +181,51 @@ def _deterministic_checks(state: ToolState) -> list[DeterministicCheck]:
     return checks
 
 
+def _selected_modes(state: ToolState, ctx: ToolContext) -> Sequence[Mode]:
+    """Return the mode that actually ran, as a one-element sequence.
+
+    ``state.selected_mode`` (set by the ``select_mode`` MCP tool in
+    ``src/mergecraft/mcp/select_mode.py``) names the mode the agent
+    dispatched on; the matching :class:`Mode` object is resolved against
+    ``ctx.modes`` (the configured catalog) so the packet records the prompt
+    *version* the agent saw. When ``selected_mode`` is unset — an issue
+    comment, a run that picked no mode, or an early exit — the returned
+    sequence is empty and ``_mode_prompt_versions`` yields no rows. A
+    ``selected_mode`` that names an unknown catalog entry degrades to the
+    empty sequence rather than a fabricated row, so the packet can never
+    lie about a mode it does not have a prompt for.
+    """
+    selected_name = state.selected_mode
+    if not selected_name:
+        return ()
+    for mode in ctx.modes:
+        if mode.name == selected_name:
+            return (mode,)
+    return ()
+
+
+def _mode_prompt_versions(modes: Sequence[Mode]) -> list[ModePromptVersion]:
+    """Project the modes that actually ran into ``ModePromptVersion`` rows (#145).
+
+    The input is a one-element sequence containing the mode that ran (or
+    an empty sequence when no mode was selected). The packet must
+    attribute its verdict to the prompt that produced it — emitting a
+    row for every mode in ``ctx.modes`` (the *catalog*) instead would
+    falsely advertise every catalog mode as having produced this run's
+    verdict. Modes without a version yield a row with an empty
+    ``prompt_version`` rather than being dropped, so legacy ``Mode``
+    objects built before the S5 split still register a row.
+    """
+    rows: list[ModePromptVersion] = []
+    for m in modes:
+        name = getattr(m, "name", "")
+        version = getattr(m, "version", "") or ""
+        if not name:
+            continue
+        rows.append(ModePromptVersion(mode_name=name, prompt_version=version))
+    return rows
+
+
 def _self_assessment(state: ToolState) -> dict[str, Any] | None:
     """Translate the legacy ``ApprovalRecord`` into the packet's input shape.
 
@@ -287,6 +335,13 @@ def build_run_packet(
         self_assessment=_self_assessment(state),
         blast_radius=blast_radius,
         trajectory=trajectory.model_dump(mode="json"),
+        # S5 (#145): one ``ModePromptVersion`` row for the mode that actually
+        # ran, so an archived verdict can be attributed to the prompt that
+        # produced it. ``ctx.modes`` is the *catalog* (Build/Review/Plan/...),
+        # not the dispatched mode — every row in the catalog falsely
+        # advertising the verdict is a misleading evidence artifact. Mirrors
+        # the ``JudgePin`` pattern for the verifier.
+        mode_prompt_versions=_mode_prompt_versions(_selected_modes(state, ctx)),
     )
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
     # W9 (#46): the decision row carries the closed action vocabulary and

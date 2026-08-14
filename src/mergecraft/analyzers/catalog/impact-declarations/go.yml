@@ -1,0 +1,10 @@
+id: impact-decl-go
+language: go
+rule:
+  any:
+    - kind: function_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: method_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: type_spec
+      has: { field: name, pattern: $NAME }

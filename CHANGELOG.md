@@ -7,8 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Eval bank replay harness (`make eval-replay`) writes versioned result sets with
+  judge pins, rubric version, and S5 mode prompt versions; seeded corpus expanded
+  to ten human-labelled cases across correctness, security, cross-file, and
+  adversarial classes ([#140](https://github.com/alexhawat/mergeCraft/issues/140))
+- Ruff advisory families are no longer selected and ignored in blocking `make lint`:
+  ERA is enforced; noisy families are dropped; BLE, PTH, PERF, and C901 run as a
+  non-blocking `lint-ruff-advisory` CI step ([#146](https://github.com/alexhawat/mergeCraft/issues/146))
+- Coverage ratchet now runs from `make ci` via `coverage-gate`; measured coverage must
+  stay within `fail_under` and a fixed margin or the floor must be bumped deliberately
+  in `pyproject.toml` ([#142](https://github.com/alexhawat/mergeCraft/issues/142))
+- 0.0.1 distribution checklist: README prototype markers removed, docs badge label
+  aligned with GitHub Pages, operator runbook at `docs/distribution.md`, and prototype
+  residue (`meat_python_plus/`, `docs/meat-spike.md`) dropped from the tree ([#141](https://github.com/alexhawat/mergeCraft/issues/141))
+- CI/CD publish path now gates `build-images` on the Action-image E2E suite for the
+  exact release SHA via a reusable `e2e-gate` job (`workflow_call` on `e2e.yml`)
+- Image vulnerability scans now block promotion on every publish ref when Trivy reports
+  unwaived HIGH/CRITICAL findings; `.trivyignore` waivers require per-entry justification
+  and expiry (a CVE cannot inherit a neighbor's metadata)
+- `make ci` runs the unit suite once via `coverage-gate`; live integration selection
+  lives in `scripts/run_live_integration.py`; eval result sets pin `evals/cases` at
+  `HEAD:evals/cases`; OTLP collector image digest is single-sourced in
+  `scripts/otel_collector_image.txt`; PR integration excludes live and OTLP-docker tests
+
+### Fixed
+
+- Fixed: the nightly live-provider job now issues a real minimal request per provider
+  and asserts a structured completion. Previously it exported four provider keys but ran
+  only offline-shaped tests — three of the four keys had no consumer — and exited 0 with
+  "skipped" when credentials were absent, so a rotation outage looked like a pass
+- Fixed: OTLP tracing export now forwards `gen_ai.*` span attributes to real collectors;
+  CI and `make test-otlp-collector` gate merge with a digest-pinned
+  `otel/opentelemetry-collector` service ([#143](https://github.com/alexhawat/mergeCraft/issues/143))
+- Fixed: nightly GitHub live-integration matrix leg can post status checks (`statuses: write`)
+- Fixed: `README.md` no longer references the nonexistent `docs/assets/logo.svg` /
+  `docs/assets/demo.gif`; the hero mark now renders from tracked `assets/brand/`
+  SVGs via a light/dark `<picture>` element, and `assets/brand/` (13 SVGs, the
+  source JPG, and `build_logo.py`) is tracked in git for the first time
+
+### Removed
+
+- Dropped the `docs-mergecraft.dev` badge and every `alexhawat.github.io/mergeCraft`
+  link from `README.md` — the GitHub Pages docs site was never published and the
+  badge/links 404'd. Docs links now point at the in-repo `docs/` tree
+
 ### Security
 
+- Fixed: the agent privilege drop now fails closed. When the action image runs
+  as root and `setpriv` or the `mergecraft` user is unavailable, the run
+  aborts as `configuration_error` instead of silently executing the agent as
+  root — previously that degradation was logged at `debug` and the review
+  continued. The image build now asserts both are present.
+- Fixed: the privilege drop also rejects the resolved user when its UID/GID is
+  0 — the username is not the security boundary, so `MERGECRAFT_AGENT_USER=root`
+  (or any user mapped to uid 0) can no longer silently run the agent as root
+- Fixed: `prepare_workspace_for_agent` is now guarded at its `main()` call site,
+  so a missing/UID-0 agent user surfaces as `RunOutcome.configuration_error`
+  instead of escaping as an uncaught traceback
 - Trust tier is derived before any repo-controlled git setup or `setupScript`;
   untrusted events skip operator scripts instead of running them first
 - Agent CLI subprocesses receive an explicit credential allowlist — no ambient
@@ -20,9 +77,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Askpass helpers are written then immediately shredded after git setup
   (auth is brokered via MCP `http.extraHeader`, never ambient `GIT_ASKPASS`);
   runner-temp wipe only removes mergeCraft-registered paths
+- Fixed: `derive_trust_tier` now returns `untrusted` for unrecognized or
+  malformed GitHub event shapes instead of defaulting to `trusted`.
+  Previously an unknown event type received the most permissive tier. The
+  `pull_request` dict branch is gated on `GITHUB_EVENT_NAME == "pull_request"`
+  and only a same-repo shape (`fork is False`) earns the trusted tier; an
+  unknown event name with a PR-shaped payload, or a `pull_request` payload
+  with missing or wrong-typed nested fields, fails closed to `untrusted`.
+  Comment / schedule / `workflow_call` / `workflow_run` / `merge_group` /
+  `push` / `release` / empty `GITHUB_EVENT_NAME` all resolve to `untrusted`.
+  (#144)
 
 ### Added
 
+- `feat(analyzers): add change-impact extraction (impactPath) for review prompts` — new
+  `analyzers.impact` setting (default off) enables declaration-level reference-lead
+  extraction from the diff. When enabled and the diff touches files with recognised
+  extensions, `checkout_pr` returns an `impactPath` JSON file listing every declaration
+  the diff touches, grouped by language, capped at 24 declarations. Defaults to off
+  pending eval-bank measurement. (#94)
+- `feat(findings): carry unresolved review findings past the merge` — a merged PR
+  keeps its inline comments forever but nobody re-opens one, so findings the
+  author never fixed or rebutted were lost to attention. `mergecraft findings
+  export --pr N` prints them (read-only, JSON or markdown) and `mergecraft
+  findings carryover --pr N --apply` files one issue each, labelled
+  `mergecraft-carryover`. Only unresolved, mergeCraft-raised, human-unanswered
+  threads carry over; `--include-resolved` / `--include-answered` widen that.
+  Re-running is a no-op — every filed issue embeds a PR-scoped carryover key and
+  each sweep reads those back first, so a finding reintroduced by a later PR
+  still files as the regression it is. `.github/workflows/findings-carryover.yml`
+  runs it on every merged PR, dry unless the `CARRYOVER_AUTO_APPLY` repository
+  variable is set. See [`docs/findings-carryover.md`](docs/findings-carryover.md).
 - `feat(tracing): enrich tool.call attrs to carry invoke + complete + verb sub-event info` —
   every `tool.call` span carries the request/response byte counts, `exit_code`,
   error class/message, and input-key list. Known-verb tools (`browser`,
@@ -84,6 +169,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integration gate in PR CI (`make test-integration`, coverage floors,
   `npm audit` on agent CLIs, actionlint/zizmor) plus a secrets-gated live
   integration job as a release precondition
+- `fix(setup): bound `setupScript` execution and fail closed on its failure` (S1) —
+  three new action inputs land:
+  `setupFailurePolicy` (`inconclusive` (default) | `fail` | `warn`) and
+  `setupTimeout` (default `10m`, duration grammar `5m` / `30s` / `1h`). A
+  trusted-tier `setupScript` now runs as a session leader with
+  `asyncio.wait_for` over its `communicate()`; a timeout TERM → grace → KILLs
+  the whole process tree via the existing `utils/process_group.kill_process_group`
+  helper (no second kill path). A failed or timed-out setup script maps the
+  run to `RunOutcome.inconclusive` (D5) under the default policy, never
+  silently `passed`. The trust check at `main.py:368` still precedes every
+  subprocess spawn (convention 8); untrusted tiers continue to skip the
+  script. Setup-script elapsed time is deducted from the agent deadline
+  (F6) so a slow install cannot silently extend the run budget. Setup
+  stderr reaching the prompt or `result` output is passed through
+  `analyzers.redact.redact_secrets` first (convention 7). `RunOutcome`
+  stays at its closed six-value taxonomy (convention 6); S1 adds producers
+  of `inconclusive`, never a seventh outcome.
 
 ### Changed
 
@@ -122,6 +224,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unparseable Action `timeout` input fails closed as `configuration_error`
   (keep `--notimeout` to disable); dependency-install failure maps the run to
   `inconclusive` rather than a silent continue
+- Changed: unknown keys in optional-feature config blocks (`staticChecks`,
+  `ciEvidence`, custom mode definitions, tracing sink entries) are now
+  configuration errors instead of being silently ignored — the one-release
+  warning shim has ended. Security and runtime blocks were already strict.
+  A syntactically broken `.mergecraft/config.yaml` still falls back to
+  defaults.
 - Tracing `enabled` is tri-state (`true` / `false` / unset); Action
   `tracing` input no longer collapses unset to false, and is wired into the
   live Action path (input > env > YAML > default)

@@ -146,6 +146,39 @@ inputs:
       ``http://127.0.0.1:4318/v1/traces``. Wins over the config block.
     required: false
     default: ""
+  setup_failure_policy:
+    description: >-
+      S1 / D10 — what happens when a trusted-tier ``setupScript`` fails (non-zero
+      exit) or times out. ``inconclusive`` (default) maps the run to
+      ``RunOutcome.inconclusive`` (a ``neutral`` check conclusion) — the run is
+      treated as no-verdict, never a passing review of an under-provisioned tree.
+      ``fail`` aborts the run as ``RunOutcome.configuration_error`` (the consumer
+      has declared the failure is unrecoverable). ``warn`` reproduces the legacy
+      continue-on-failure behaviour; the prompt still carries the failure text so
+      the reviewing agent knows its tree may be partially provisioned. Unknown
+      values fail closed as ``configuration_error`` (this is a security/runtime
+      surface — ``extra="forbid"`` semantics).
+    required: false
+    default: ""
+  setup_timeout:
+    description: >-
+      S1 / F6 — maximum wall-clock duration for ``setupScript`` (e.g. ``5m``,
+      ``30s``, ``1h``). A hanging install stalls the run otherwise. The setup
+      runs as a session leader so its whole process tree is TERM→KILLed on
+      timeout. Reusing ``resolve_timeout_ms`` — the same parser the ``timeout``
+      input uses. Default ``10m`` applies even when ``timeout`` is unset or
+      ``--notimeout``; setup never consumes the whole run budget.
+
+      Note: ``setupTimeout`` must be strictly less than ``timeout`` (or the
+      run aborts as ``configuration_error``). Equal / larger budgets would let
+      the setup script eat the whole run deadline; the agent is then given
+      ≈1 ms and a setup timeout surfaces as ``timed_out`` instead of the
+      ``inconclusive`` / ``configuration_error`` the setup policy was supposed
+      to produce. Lower ``setupTimeout`` or raise ``timeout`` to satisfy the
+      guard — see ``docs/config-failure-policy.md`` for the runtime reason
+      text.
+    required: false
+    default: ""
 
 outputs:
   result:
@@ -191,6 +224,8 @@ runs:
     INPUT_TRACING_TO: ${{ inputs.tracing-to }}
     INPUT_LOGFIRE_TOKEN: ${{ inputs.logfire-token }}
     INPUT_OTEL_ENDPOINT: ${{ inputs.otel-endpoint }}
+    INPUT_SETUP_FAILURE_POLICY: ${{ inputs.setup_failure_policy }}
+    INPUT_SETUP_TIMEOUT: ${{ inputs.setup_timeout }}
 
 branding:
   icon: "code"

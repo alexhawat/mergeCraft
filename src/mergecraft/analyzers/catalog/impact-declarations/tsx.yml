@@ -1,0 +1,24 @@
+id: impact-decl-tsx
+language: tsx
+rule:
+  any:
+    - kind: function_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: method_definition
+      has: { field: name, pattern: $NAME }
+    - kind: class_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: interface_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: type_alias_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: enum_declaration
+      has: { field: name, pattern: $NAME }
+    - kind: variable_declarator
+      all:
+        - has: { field: value, kind: arrow_function }
+        - has: { field: name, pattern: $NAME }
+    - kind: variable_declarator
+      all:
+        - has: { field: value, kind: function_expression }
+        - has: { field: name, pattern: $NAME }

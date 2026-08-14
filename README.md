@@ -1,10 +1,9 @@
-<!-- README-ideal.md — proposed README for alexhawat/mergeCraft.
-     Asset placeholders (logo, demo gif, screenshots) live under docs/assets/. -->
-
 <div align="center">
 
-<!-- TODO: add docs/assets/logo.svg (light/dark variants) -->
-<img src="docs/assets/logo.svg" alt="mergeCraft logo" width="120"/>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/mark-dark.svg">
+  <img src="assets/brand/mark-light.svg" alt="mergeCraft logo" width="120"/>
+</picture>
 
 # mergeCraft
 
@@ -16,14 +15,10 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 [![Docker](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](pyproject.toml)
-[![Docs](https://img.shields.io/badge/docs-mergecraft.dev-blue)](https://alexhawat.github.io/mergeCraft/)
-
-<!-- TODO: add docs/assets/demo.gif — a 30s screen capture: open PR → @mergecraft review → inline findings → approval check -->
-<img src="docs/assets/demo.gif" alt="mergeCraft reviewing a pull request" width="720"/>
 
 [Get started](#-get-started-in-3-steps) ·
 [Features](#-features) ·
-[Docs](https://alexhawat.github.io/mergeCraft/) ·
+[Docs](docs/) ·
 [Review checks](REVIEW-CHECKS.md) ·
 [Contributing](CONTRIBUTING.md)
 
@@ -65,7 +60,25 @@ Inspired by [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 | 📡 **SARIF upload (opt-in)** | Publish analyzer findings to GitHub code scanning with one flag |
 | 📈 **Tracing (opt-in)** | Per-run span trees to local JSONL, Logfire, or any OTLP collector — with redaction |
 | 💻 **Offline mode** | `mergecraft diff-review` reviews local diffs or patch files, no PR required — `--json` for benchmarks |
-| 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in |
+| 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in — benchmark numbers unpublished; run `make eval-replay` locally (see [evals/README.md](evals/README.md)) |
+
+## 🗂️ Repository layout
+
+One row per root-level directory, for anyone who has just cloned:
+
+| Path | What it is |
+|---|---|
+| `src/mergecraft/` | The Python package — reviewer, analyzers, agents, MCP server, CLI, Action entry |
+| `tests/` | Unit + integration suite |
+| `docs/` | Reference documentation (`ANALYZERS.md`, `TRACING.md`, `REVIEW-DOCTRINE.md`, …) |
+| `evals/` | Eval bank cases replayed by `mergecraft eval` |
+| `examples/` | Consumer-facing example workflows, generated and drift-checked |
+| `scripts/` | Repo tooling invoked from `make` (catalog check, coverage floors, doc generators) |
+| `docker/` | Agent CLI pinning for the Action image |
+| `get-installation-token/` | A small companion Action that mints a GitHub App installation token |
+| `assets/brand/` | Brand SVGs and the source logo build script (see [assets/brand/README.md](assets/brand/README.md)) |
+| `evidence/` | Committed CI debris awaiting removal — slated for deletion, do not add to it |
+| `action.yml` / `Dockerfile` | The GitHub Action surface |
 
 ## 🏗️ How it works
 
@@ -108,9 +121,12 @@ into a comment changes nothing. Details:
 
 ## 🚀 Get started in 3 steps
 
-> **Requirements:** Python 3.14+, [uv](https://docs.astral.sh/uv/),
-> an authenticated [GitHub CLI](https://cli.github.com), and one provider
-> credential.
+> **Requirements:** **Python 3.14+** (hard requirement for `uv tool install` — see
+> [pyproject.toml](pyproject.toml)), [uv](https://docs.astral.sh/uv/), an
+> authenticated [GitHub CLI](https://cli.github.com), and one provider credential.
+> **Without Python 3.14**, use the [Docker Action](#example-1--auto-review-every-pr)
+> (`alexhawat/mergeCraft@…`) — the container image ships a compatible runtime; no
+> local Python install needed ([`docs/distribution.md`](docs/distribution.md)).
 
 **1. Install and scaffold** (in the repo you want reviewed):
 
@@ -291,6 +307,20 @@ inlined into the workflow file and never logged (convention 7). For
 multi-provider setups, fall back to the indexed env-var form below —
 `with:` cannot enumerate multiple providers.
 
+The full input list:
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `model` | _(empty)_ | Pass-through model slug. Resolved against the configured provider chain. |
+| `provider_base_url` | _(empty)_ | OpenAI-compatible base URL for the singleton provider. |
+| `provider_api_key_env` | _(empty)_ | **Env-var name** that holds the API key (never the key value itself). |
+| `tracing` | _(unset)_ | `true` enables telemetry; unset defers to the next precedence layer. |
+| `tracing-to` | _(empty)_ | `local_files` / `logfire` / `otel` — telemetry sink. |
+| `logfire-token` | _(empty)_ | Logfire auth token (W8.5). |
+| `otel-endpoint` | _(empty)_ | OTLP collector URL (W8.5 / W7.7). |
+| `setup_failure_policy` | `inconclusive` | S1 / D10 — what a trusted-tier `setupScript` failure (non-zero exit **or** timeout) maps to: `inconclusive` (default — neutral check conclusion, the run is no-verdict), `fail` (configuration_error), or `warn` (run continues; prompt still carries the failure text). Closed vocabulary — unknown values fail closed as `configuration_error` before the run starts. |
+| `setup_timeout` | `10m` | S1 / F6 — wall-clock budget for `setupScript` (e.g. `5m`, `30s`, `1h`). A hanging install stalls the run otherwise. Reuses the same duration grammar as `timeout`. The setup runs as a session leader so a TERM → grace → KILL on the deadline reaches the whole process tree. |
+
 #### Worked example — Nous-hosted DeepSeek V4 Flash
 
 A raw pass-through slug reaches Nous's OpenAI-compatible endpoint via
@@ -455,7 +485,7 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
   advisory only.
 - **Analyzers under low trust run untrusted-only** — no secrets, no network, no
   PR-authored command construction; exclusions are reported as named skips.
-- **Agent subprocess env is an explicit allowlist (W2)** — agent CLIs never
+- **Agent subprocess env is an explicit allowlist** — agent CLIs never
   inherit the full process environment. Stripped by default: ``GIT_ASKPASS``,
   ``GITHUB_TOKEN``/``GH_TOKEN``, ``ACTIONS_ID_TOKEN_*``, and every non-active
   provider API key. Git authentication for agent operations is brokered
@@ -464,7 +494,7 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
   ``0o600`` inside a ``0o700`` credentials directory the agent cannot read.
   Run temp dirs and registered leak-surface paths are removed on success and
   failure; ``wipe_runner_leak_surface`` only unlinks mergeCraft-owned paths.
-- **Containment hardening (W3)** — ``safe.directory`` is scoped to
+- **Containment hardening** — ``safe.directory`` is scoped to
   ``$GITHUB_WORKSPACE`` and registered cross-repo checkout roots (no wildcard).
   Git hooks run only when ``shell: enabled``; ``restricted`` and ``disabled``
   neutralize hooks via ``core.hooksPath``. ``cwd`` and MCP shell
@@ -485,14 +515,54 @@ never does: [REVIEW-CHECKS.md](REVIEW-CHECKS.md).
 
 ## ⚙️ Workflow-placement gotchas (`pull_request_target`)
 
-Under GitHub's Nov 2025 policy (effective 2025-12-08), `pull_request_target`
-workflows resolve from the **default branch** — so a PR that edits the workflow
-cannot review itself, and a copy on a non-default trunk is inert. If the review
-is **not** a required check, prefer plain `pull_request`. If you pin the action
-SHA in several places, gate them in CI — and read the workflow side from the
-default branch (`git show origin/main:.github/workflows/mergecraft.yml`).
+GitHub resolves `pull_request_target` workflows from the **default branch** —
+the workflow file *and* the checked-out commit, whatever base the PR targets
+([Nov 2025 policy](https://github.blog/changelog/2025-11-07-actions-pull_request_target-and-environment-branch-protections-changes/),
+effective 2025-12-08). Three consequences:
+
+- **A copy on a non-default trunk is inert.** If `main` is a stub and real work
+  lands on a staging branch, this workflow still has to live on `main`.
+- **`GITHUB_REF` / `GITHUB_SHA` point at the default branch**, not the PR base —
+  so a bare `actions/checkout` lands on default-branch tip and
+  `.mergecraft/config.yaml` is read from there. Environment branch-protection
+  rules also now evaluate against the default branch; update environment
+  filters if you gate secrets that way.
+- **A PR that edits this workflow is still reviewed — by the default-branch
+  copy.** Its own edits apply to the *next* PR, after merge. (That much was
+  always true of `pull_request_target`; what Nov 2025 changed is base branch →
+  default branch.)
+
+If the review is **not** a required check, prefer plain `pull_request` — simpler,
+and no secrets in scope. The case for accepting `pull_request_target` is narrower
+than it looks: GitHub cannot build `refs/pull/N/merge` for a conflicted PR, so
+`pull_request` runs are skipped and a *required* review check sits unreported
+for as long as the conflict lasts. `pull_request_target` still fires on
+`synchronize` in that state, so the review lands — and its verdict is visible —
+while the PR is still conflicted.
+
+That is the whole of the benefit, and it is worth stating plainly: pushing the
+conflict fix to the PR branch fires `synchronize` and clears a `pull_request`
+check too, so the gap is the conflicted window, not a permanent block. It
+outlasts the conflict only when the conflict disappears *without* a push to the
+head branch — the base moved, say — because nothing then re-triggers the run.
+A conflicted PR is unmergeable on its own account anyway, so weigh this against
+running with secrets in scope rather than treating it as decisive.
+
+If you pin the action SHA in more than one place, gate the copies against each
+other in CI — and read the workflow side from the **default branch**
+(`git show origin/main:.github/workflows/mergecraft.yml`), not the working tree.
+Bump order is default branch first, local pin second.
+
+Since [June 2026](https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/)
+`actions/checkout` refuses to check out fork PR code under `pull_request_target`
+unless you pass `allow-unsafe-pr-checkout` (v7 GA 2026-06-18, backported to all
+supported majors 2026-07-20). mergeCraft's shipped workflows are unaffected —
+they check out the default branch with no `ref:` and reach PR content through
+`checkout_pr` and the API, never by executing PR-authored code with secrets in
+scope.
+
 Full rationale in the collapsible sections of
-[docs](https://alexhawat.github.io/mergeCraft/).
+[docs](docs/).
 
 ## 📚 Documentation
 
@@ -504,6 +574,7 @@ Full rationale in the collapsible sections of
 | [docs/REVIEW-DOCTRINE.md](docs/REVIEW-DOCTRINE.md) | Why mergeCraft makes the calls it makes |
 | [docs/evidence-packet.md](docs/evidence-packet.md) | Typed findings & merge evidence |
 | [docs/eval-bank.md](docs/eval-bank.md) | Eval replay and bench scoring |
+| [docs/distribution.md](docs/distribution.md) | 0.0.1 release checklist — PyPI, Marketplace, assets ([#141](https://github.com/alexhawat/mergeCraft/issues/141)) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributor workflow (`make setup / lint / typecheck / test / ci`) |
 
 ## 🗺️ Roadmap
@@ -512,7 +583,7 @@ Full rationale in the collapsible sections of
 - [ ] GitHub Marketplace listing
 - [ ] Cursor local CLI harness (issue #13 Phase B)
 - [ ] Expanded analyzer catalog (opt-in long tail)
-- [ ] Published eval benchmarks
+- [ ] Published eval benchmarks — **unpublished** (D19 partial: structural replay harness + versioned result sets landed in W9; precision/recall/F1 require an operator-triggered live run with ≥2 provider keys via `make eval-replay`)
 
 ## Development
 

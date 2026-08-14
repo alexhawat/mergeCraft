@@ -2,18 +2,22 @@ version: 2
 updates:
   - package-ecosystem: pip
     directory: /
+    target-branch: pre-0.0.1
     schedule:
       interval: weekly
   - package-ecosystem: github-actions
     directory: /
+    target-branch: pre-0.0.1
     schedule:
       interval: weekly
   - package-ecosystem: docker
     directory: /
+    target-branch: pre-0.0.1
     schedule:
       interval: weekly
   # Agent CLI lockfile for Dockerfile / Dockerfile.analyzers (W7 / D7).
   - package-ecosystem: npm
     directory: /docker/agent-clis
+    target-branch: pre-0.0.1
     schedule:
       interval: weekly

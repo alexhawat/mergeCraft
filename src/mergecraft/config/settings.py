@@ -24,15 +24,21 @@ from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 AccountPlan = Literal["none", "payg"]
 HeadingDepth = Literal[1, 2, 3, 4, 5, 6]
 
-# D4 / W6.2 — security/runtime models use ``extra="forbid"``; optional-feature
-# models keep ``extra="ignore"`` for one release with a warning shim. See
-# ``docs/config-failure-policy.md``.
+# D4 / D8 / W6.2 — security/runtime and optional-feature models both use
+# ``extra="forbid"``. The optional-feature one-release warning shim has ended
+# (D8 flipped at pre-0.0.1; see ``docs/config-failure-policy.md``).
 _SECURITY_RUNTIME_EXTRA: Literal["forbid"] = "forbid"
-_OPTIONAL_FEATURE_EXTRA: Literal["ignore"] = "ignore"
+_OPTIONAL_FEATURE_EXTRA: Literal["forbid"] = "forbid"
 
 
 def _warn_unknown_config_keys(model_name: str, data: object, fields: dict[str, Any]) -> object:
-    """Warn on unknown keys for optional-feature models (D4 one-release shim)."""
+    """Warn on unknown keys for optional-feature models (D4 one-release shim).
+
+    The shim was retired in D8 (``_OPTIONAL_FEATURE_EXTRA = "forbid"``); the
+    helper is preserved as a direct symbol anchor for tests that still assert
+    it warns when called, and as a fallback for any future caller that wants
+    to surface a soft warning before raising.
+    """
     if not isinstance(data, dict):
         return data
     known: set[str] = set()
@@ -53,14 +59,9 @@ def _warn_unknown_config_keys(model_name: str, data: object, fields: dict[str, A
 
 
 class _OptionalFeatureModel(BaseModel):
-    """Optional-feature config models: ``extra="ignore"`` + unknown-key warning."""
+    """Optional-feature config models: ``extra="forbid"`` (D8)."""
 
     model_config = ConfigDict(extra=_OPTIONAL_FEATURE_EXTRA, populate_by_name=True)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _warn_extras(cls, data: object) -> object:
-        return _warn_unknown_config_keys(cls.__name__, data, cls.model_fields)
 
 
 class ModeDefinition(_OptionalFeatureModel):
@@ -178,6 +179,12 @@ class AnalyzersSettings(BaseModel):
     # before the upload can succeed. The `sarif_upload` action input overrides
     # this in both directions when it is set (`resolve_sarif_upload_enabled`).
     sarif_upload: bool = Field(default=False, alias="sarifUpload")
+    # #94 / S6 — change-impact extraction (impactPath), default off.
+    # Produces a declaration-level reference-lead table for the diff at
+    # review time. Off by default until the eval-bank corpus (#140) measures
+    # its cost-to-benefit ratio (see S6 design at
+    # .ignorelocal/waves/issues-setup-container-hygiene-wave-plan.md).
+    impact: bool = Field(default=False, alias="impact")
 
 
 # D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.
@@ -304,6 +311,22 @@ class RepoSettings(BaseModel):
     setup_script: str | None = Field(default=None, alias="setupScript")
     prepush_script: str | None = Field(default=None, alias="prepushScript")
     stop_script: str | None = Field(default=None, alias="stopScript")
+    # S1 / D10 — ``setup_failure_policy`` decides what a trusted-tier
+    # ``setup_script`` failure means. Closed vocabulary
+    # (``inconclusive`` | ``fail`` | ``warn``); default ``inconclusive``
+    # matches D5 — the run maps to ``RunOutcome.inconclusive`` rather than
+    # passing a review of an under-provisioned tree. Unknown values fail
+    # closed via the action-input resolver (``apply_setup_overrides``).
+    setup_failure_policy: Literal["inconclusive", "fail", "warn"] = Field(
+        default="inconclusive",
+        alias="setupFailurePolicy",
+    )
+    # S1 / F6 — wall-clock budget for ``setup_script`` in seconds.
+    # Always applied (even with ``--notimeout``); never consumes the whole
+    # run deadline. Resolved from ``INPUT_SETUP_TIMEOUT`` via
+    # ``action.inputs.apply_setup_overrides`` so the same parser the
+    # ``timeout`` input uses covers both.
+    setup_timeout_s: int = Field(default=600, alias="setupTimeout", gt=0)
     push: PushPermission = "restricted"
     shell: ShellPermission = "restricted"
     pr_approve_enabled: bool = Field(default=False, alias="prApproveEnabled")
@@ -396,6 +419,8 @@ def default_settings() -> RepoSettings:
             "setup_script": None,
             "prepush_script": None,
             "stop_script": None,
+            "setup_failure_policy": "inconclusive",
+            "setup_timeout_s": 600,
             "push": "restricted",
             "shell": "restricted",
             "pr_approve_enabled": False,

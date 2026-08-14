@@ -11,7 +11,7 @@ If the operator has a usable credential, the script prints the four
 measurements (D10); if not, it prints the blocker and the harness-only
 behaviour that **is** observable offline (subprocess boundary overhead,
 token-count of the raw diff, gate outcomes). The output is the raw
-material for ``docs/meat-spike.md``.
+operator measurement output (no repo writes).
 
 No writes to the repo; no git operations; the only network is to the
 LLM credential host and that is the spike's whole point. The script is

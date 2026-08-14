@@ -1,0 +1,20 @@
+# OTLP collector config for mergeCraft e2e tracing tests (W7 / #143).
+# Receives OTLP/HTTP on :4318 and appends exported spans to a host-mounted file.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  file:
+    # Directory mount (not a single-file bind): the image runs as uid 10001 and
+    # the file exporter may write a sibling temp file then rename.
+    path: /var/lib/otelcol/out/spans.json
+    format: json
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [file]

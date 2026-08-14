@@ -78,16 +78,38 @@ def derive_trust_tier(
     if event_name == "pull_request_target":
         return "untrusted"
 
-    pull_request = event.get("pull_request")
-    if isinstance(pull_request, dict):
-        head = pull_request.get("head")
-        if isinstance(head, dict):
-            repo = head.get("repo")
-            if isinstance(repo, dict) and repo.get("fork") is True:
-                return "untrusted"
-        return "trusted"
+    if event_name == "pull_request":
+        pull_request = event.get("pull_request")
+        if isinstance(pull_request, dict):
+            head = pull_request.get("head")
+            if isinstance(head, dict):
+                repo = head.get("repo")
+                if isinstance(repo, dict) and repo.get("fork") is False:
+                    return "trusted"
+        return "untrusted"
 
-    return "trusted"
+    if event_name == "issue_comment":
+        # ``resolve_native_event`` already authorises comment-driven runs by
+        # author association (OWNER / MEMBER / COLLABORATOR).  Mirror that
+        # gate here so a maintainer's ``issue_comment`` earns the trusted tier
+        # (setup_script, secrets, approve tool) rather than falling through
+        # to the fail-closed ``untrusted`` default.
+        comment = event.get("comment")
+        if isinstance(comment, dict):
+            association = comment.get("author_association", "")
+            if isinstance(association, str) and association in {"OWNER", "MEMBER", "COLLABORATOR"}:
+                return "trusted"
+        return "untrusted"
+
+    # Fail closed (#144): an unrecognised event shape is more restricted, never
+    # more permissive. Convention 5 / D7 — matches ``UNKNOWN_MODE_FALLBACK``
+    # above. Comment / schedule / workflow_call / workflow_run / merge_group /
+    # push / release / empty ``GITHUB_EVENT_NAME`` all land here and resolve to
+    # ``untrusted``. The events with explicit branches — ``workflow_dispatch``
+    # (trusted), ``pull_request_target`` (untrusted), and same-repo
+    # ``pull_request`` (trusted via the gated branch above) — never fall
+    # through to this default.
+    return "untrusted"
 
 
 def build_analyzer_env(

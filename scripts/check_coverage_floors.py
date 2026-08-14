@@ -12,13 +12,23 @@ paths listed in the punch list get their own line/branch floors.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
-# Global line-coverage floor (coverage.py ``fail_under`` mirrors this).
-GLOBAL_LINE_FLOOR = 65.0
+
+def _fail_under_from_pyproject() -> float:
+    cfg_path = Path(__file__).resolve().parent / "coverage_config.py"
+    spec = importlib.util.spec_from_file_location("coverage_config", cfg_path)
+    if spec is None or spec.loader is None:
+        msg = f"could not load coverage config: {cfg_path}"
+        raise ImportError(msg)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.fail_under_from_pyproject()
+
 
 # Critical-path floors (line %, branch %). Values are ratchet floors just
 # under the 2026-08-11 measured baseline so decreases fail the gate.
@@ -70,10 +80,11 @@ def main() -> int:
     data = json.loads(args.coverage_json.read_text(encoding="utf-8"))
     totals = data["totals"]
     global_line = float(totals["percent_covered"])
+    global_floor = _fail_under_from_pyproject()
     failures: list[str] = []
 
-    if global_line + 1e-9 < GLOBAL_LINE_FLOOR:
-        failures.append(f"global line coverage {global_line:.2f}% < floor {GLOBAL_LINE_FLOOR:.2f}%")
+    if global_line + 1e-9 < global_floor:
+        failures.append(f"global line coverage {global_line:.2f}% < floor {global_floor:.2f}%")
 
     files: dict[str, Any] = data["files"]
     for suffix, (line_floor, branch_floor) in MODULE_FLOORS.items():
@@ -113,7 +124,7 @@ def main() -> int:
             print(f"  - {item}", file=sys.stderr)
         return 1
 
-    print(f"coverage floor check OK (global line {global_line:.2f}% ≥ {GLOBAL_LINE_FLOOR:.2f}%)")
+    print(f"coverage floor check OK (global line {global_line:.2f}% ≥ {global_floor:.2f}%)")
     return 0
 
 

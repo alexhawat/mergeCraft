@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
+from mergecraft.analyzers.trust import analyzers_enabled
+from mergecraft.config.settings import load_repo_settings
 from mergecraft.mcp.git import _git_env, _run_git
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
@@ -259,6 +262,51 @@ def checkout_pr_tool(ctx: ToolContext):
                         len(changed),
                     )
 
+        # S6 #94 — impact-path extraction (default off behind analyzers.impact).
+        # Emitted only when enabled; returns None (-> no key) when the diff
+        # has zero declarations, matching the incrementalDiffPath convention.
+        # The analyzers.impact toggle is read from the PR's own checkout (fine —
+        # repo config is safe to *read* regardless of trust tier), but gated
+        # behind analyzers_enabled(ctx) first so the operator's effective
+        # policy (analyzers: off, or analyzers.enabled: false) always wins over
+        # whatever a PR sets in its own config — mirrors run_analyzers_tool's
+        # gate (mcp/analyzers.py). ast-grep execution itself is further gated
+        # on ctx.trust_tier inside write_impact, which fails closed (omits
+        # impactPath) when sandbox isolation for an untrusted checkout isn't
+        # available (D7).
+        try:
+            repo_root = Path(cwd)
+            settings_obj = load_repo_settings(root=repo_root, load_learnings_files=False)
+            if analyzers_enabled(ctx) and settings_obj.analyzers.impact:
+                ast_grep_binary = resolve_ast_grep_binary()
+                if ast_grep_binary is None:
+                    logger.info(
+                        "impactPath skipped for PR #{}: managed ast-grep binary unavailable",
+                        pull_number,
+                    )
+                else:
+                    impact_result = write_impact(
+                        diff,
+                        cwd,
+                        temp,
+                        pull_number,
+                        ast_grep_binary=ast_grep_binary,
+                        tier=ctx.trust_tier,
+                    )
+                    if impact_result is not None:
+                        result["impactPath"] = impact_result["impactPath"]
+                        result["impactTruncated"] = impact_result["impactTruncated"]
+                        result["impactDeclarationCount"] = impact_result["impactDeclarationCount"]
+                        logger.info(
+                            "impactPath for PR #{} -> {} ({} declarations, truncated={})",
+                            pull_number,
+                            impact_result["impactPath"],
+                            impact_result["impactDeclarationCount"],
+                            impact_result["impactTruncated"],
+                        )
+        except Exception as imp_err:
+            logger.info("impact extraction soft-failed: {}", imp_err)
+
         logger.info("checked out PR #{} -> {}", pull_number, local_branch)
         return result
 
@@ -270,7 +318,9 @@ def checkout_pr_tool(ctx: ToolContext):
             "Checkout a pull request branch locally. Returns diffPath pointing to the "
             "formatted diff file, plus incrementalDiffPath (changes since the last "
             "mergeCraft review) on a re-review when a prior reviewed commit is "
-            "recoverable and the range is non-empty."
+            "recoverable and the range is non-empty. When the repo config enables "
+            "analyzers.impact, also returns impactPath pointing to a JSON file listing "
+            "declaration-level reference leads for the changed files."
         ),
         input_schema={
             "type": "object",

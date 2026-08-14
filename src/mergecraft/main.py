@@ -5,16 +5,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import time
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from loguru import logger
 
-from mergecraft.action.inputs import apply_tracing_overrides
+from mergecraft.action.inputs import apply_setup_overrides, apply_tracing_overrides
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult, AgentRunContext
-from mergecraft.analyzers.redact import install_loguru_redaction_filter
+from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_secrets
 from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
 from mergecraft.analyzers.trust import (
     allow_repo_command_overrides,
@@ -22,11 +23,12 @@ from mergecraft.analyzers.trust import (
     resolve_analyzers_mode,
 )
 from mergecraft.evidence.run_packet import emit_run_packet
+from mergecraft.main_outcome import _classify_outcome, _publish_span_attrs
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import ProgressComment, init_tool_state
-from mergecraft.modes import Mode, compute_modes
+from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
 from mergecraft.utils.agent_resolve import (
@@ -63,6 +65,11 @@ from mergecraft.utils.payload import (
     resolve_timeout_ms,
 )
 from mergecraft.utils.privilege import prepare_workspace_for_agent
+from mergecraft.utils.process_group import (
+    kill_process_group,
+    register_process_group,
+    unregister_process_group,
+)
 from mergecraft.utils.secrets import set_env_allowlist
 from mergecraft.utils.skills import install_bundled_skills
 from mergecraft.utils.status_checks import report_status_checks
@@ -72,9 +79,6 @@ from mergecraft.utils.workspace import (
     ensure_github_workspace_registered,
     resolve_allowed_working_directory,
 )
-
-if TYPE_CHECKING:
-    from mergecraft.config.settings import ModeDefinition
 
 
 @dataclass(slots=True)
@@ -135,10 +139,6 @@ def _payload_to_ctx(payload: dict[str, Any]) -> ResolvedPayload:
     )
 
 
-def _custom_modes(defs: list[ModeDefinition]) -> list[Mode]:
-    return [Mode(name=d.name, description=d.description, prompt=d.prompt or None) for d in defs]
-
-
 class _AgentTimeoutError(RuntimeError):
     """Marks the ``asyncio.wait_for`` timeout path (D3/W5.2).
 
@@ -178,12 +178,57 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
     return RunOutcome.infra_error
 
 
+def _short_circuit_setup_failure(
+    setup_hook_failure: str,
+    setup_failure_policy: str,
+) -> tuple[str, _ConfigurationError | str | None]:
+    """Decide whether a trusted-tier ``setup_script`` failure short-circuits the run (S1 / D10).
+
+    Returns a 2-tuple ``(action, payload)`` consumed by :func:`main`:
+
+    - ``("abort", _ConfigurationError(reason))`` — ``fail`` policy. Raise the
+      exception so the outer handler maps the run to ``configuration_error``
+      while still calling ``report_status_checks`` and ``persist_learnings``.
+    - ``("skip_agent", reason)`` — ``inconclusive`` policy. The agent loop
+      must NOT run (no review/mutation tools); ``main`` returns a
+      ``MainResult(outcome=RunOutcome.inconclusive)`` after running the
+      publish block.
+    - ``("continue", None)`` — no failure, ``warn`` policy, or otherwise. The
+      agent loop proceeds.
+
+    The ``fail`` branch raises rather than returning ``RunOutcome`` directly
+    so the operator gets the existing configuration-error semantics (same
+    path as invalid action-input values). The ``inconclusive`` branch uses a
+    sentinel return so ``main`` can run the publish block — skipping that
+    would leave the run without a status check.
+    """
+    if not setup_hook_failure:
+        return ("continue", None)
+    if setup_failure_policy == "fail":
+        return ("abort", _ConfigurationError(setup_hook_failure))
+    if setup_failure_policy == "inconclusive":
+        return ("skip_agent", setup_hook_failure)
+    # ``warn`` and any other value fall through; the late outcome block at
+    # the bottom of ``main`` handles them.
+    return ("continue", None)
+
+
 async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
     """Return a reason string when review-relevant dependency prep failed (W6.1).
 
-    Awaits an in-progress install before inspecting status. Trusted-tier
-    ``setup_script`` failures are intentionally *not* included here — they
-    stay warn-only by policy (see ``docs/config-failure-policy.md``).
+    Awaits an in-progress install before inspecting status.
+
+    Trusted-tier ``setup_script`` failures are **not** included here. They
+    resolve through ``setup_failure_policy`` (S1 / D10 — closed vocabulary
+    ``inconclusive`` | ``fail`` | ``warn``) at the post-run outcome block
+    in :func:`main` — see :data:`mergecraft.action.inputs.SetupFailurePolicy`
+    and ``docs/config-failure-policy.md``. This helper only emits a reason
+    string; the ``fail`` policy short-circuits at the run-time guard above
+    (so this branch never sees a ``fail``-mapped outcome). The ``warn`` and
+    ``inconclusive`` policies carry their own resolution text via
+    ``tool_state.setup_hook_failure`` and are deliberately kept off this
+    helper's path so prep and setup failure reasons stay distinguishable
+    to the operator.
     """
     state = tool_context.tool_state.dependency_installation
     if state is None:
@@ -211,7 +256,19 @@ async def main() -> MainResult:
     ensure_github_workspace_registered()
     workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
     if workspace:
-        prepare_workspace_for_agent(workspace)
+        # Guard the workspace prep at its call site so a missing/UID-0 agent
+        # user surfaces as a structured ``RunOutcome.configuration_error``
+        # rather than escaping as an uncaught traceback. The outer ``try/except``
+        # below is reached only after this block returns, so we route through
+        # the same classification the outer handler would have used.
+        try:
+            prepare_workspace_for_agent(workspace)
+        except _ConfigurationError as exc:
+            return MainResult(
+                success=False,
+                error=str(exc),
+                outcome=_classify_error_outcome(exc),
+            )
     stop_mcp = None
     github: GitHubClient | None = None
     token_ref = None
@@ -270,6 +327,34 @@ async def main() -> MainResult:
         payload = resolve_payload(resolved_prompt, settings)
         tool_state.model = payload.get("model")
         tool_state.oss = run_context.oss
+
+        # Resolve the run deadline up front so the setup-script budget can
+        # be capped against it (S1 / F6 — setup must never consume the
+        # whole run budget). Invalid input is captured into a sentinel
+        # ``timeout_error``; the actual ``_ConfigurationError`` raise is
+        # deferred until AFTER ``tool_context`` is constructed so the
+        # outer handler can still call ``report_status_checks`` for the
+        # ``configuration_error`` outcome (S1 review / NEW1+NEW2 —
+        # building the reporting context first, then validating, prevents
+        # setup from running on bad inputs while preserving completion-
+        # check reporting).
+        timeout_raw = payload.get("timeout")
+        timeout_ms: int | None
+        timeout_error: str | None = None
+        if timeout_raw == TIMEOUT_DISABLED:
+            timeout_ms = None
+        elif timeout_raw:
+            usable = resolve_timeout_ms(timeout_raw)
+            if usable is None:
+                timeout_ms = None
+                timeout_error = (
+                    f'invalid timeout "{timeout_raw}" '
+                    "(use a duration like 10m/1h or --notimeout to disable)"
+                )
+            else:
+                timeout_ms = usable
+        else:
+            timeout_ms = 3_600_000
 
         wipe_runner_leak_surface()
 
@@ -352,45 +437,16 @@ async def main() -> MainResult:
         tool_state.fallback_index = 0
         tool_state.fallback_occurred = False
 
-        await asyncio.to_thread(
-            setup_git,
-            git_token=token_ref.git_token,
-            owner=run_context.repo.owner,
-            name=run_context.repo.name,
-            tool_state=tool_state,
-            shell=payload.get("shell") or "restricted",
-            tmpdir=tmpdir,
-            octokit=github,
-        )
-
-        setup_script_skip_reason = ""
-        if settings.setup_script:
-            if trust_tier == "trusted":
-                logger.info("» running setup script")
-                proc = await asyncio.create_subprocess_shell(
-                    settings.setup_script,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _out, err = await proc.communicate()
-                if proc.returncode != 0:
-                    logger.warning(
-                        "» setup script failed (exit {}): {}",
-                        proc.returncode,
-                        (err or b"").decode(errors="replace")[:500],
-                    )
-            else:
-                event_name = os.environ.get("GITHUB_EVENT_NAME", "unknown")
-                setup_script_skip_reason = (
-                    f"skipped setup_script on untrusted tier ({event_name} event)"
-                )
-                tool_state.setup_script_skip_reason = setup_script_skip_reason
-                logger.warning("» {}", setup_script_skip_reason)
-
+        # S1 review / F3+F4 follow-up — build ``tool_context`` BEFORE the
+        # equal-deadline guard and the fail-policy short-circuit so the
+        # outer handler can still call ``report_status_checks`` when those
+        # guards raise ``_ConfigurationError``. The MCP server URL is
+        # blank here; ``start_mcp_http_server`` later fills it in.
         modes = [
             *compute_modes(agent_id, settings.signed_commits),
             *_custom_modes(settings.modes),
         ]
+        tool_state.modes = modes
         output_schema = resolve_output_schema()
 
         ctx_payload = _payload_to_ctx(payload)
@@ -443,6 +499,175 @@ async def main() -> MainResult:
             resolved_model=resolved_model,
             suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         )
+
+        # S1 review / NEW1 — apply the action-input setup overrides
+        # (policy + timeout) NOW, after ``tool_context`` is built (so the
+        # outer handler can still call ``report_status_checks`` for the
+        # ``configuration_error`` outcome) but BEFORE ``setup_git`` /
+        # ``asyncio.create_subprocess_shell`` (so a bad value never
+        # triggers the setup script to run). A bad value raises
+        # ``ValueError`` which is re-raised as ``_ConfigurationError``.
+        try:
+            settings = apply_setup_overrides(settings)
+        except ValueError as exc:
+            raise _ConfigurationError(str(exc)) from None
+
+        # S1 review / NEW1 — re-raise the captured bad-``timeout``
+        # sentinel now that ``tool_context`` exists. The input parsing
+        # already classified the input as bad earlier; this block only
+        # fires the guard so a ``--notimeout`` / unset input still
+        # resolves to ``None`` / ``3_600_000`` without firing.
+        if timeout_error is not None:
+            raise _ConfigurationError(timeout_error) from None
+
+        await asyncio.to_thread(
+            setup_git,
+            git_token=token_ref.git_token,
+            owner=run_context.repo.owner,
+            name=run_context.repo.name,
+            tool_state=tool_state,
+            shell=payload.get("shell") or "restricted",
+            tmpdir=tmpdir,
+            octokit=github,
+        )
+
+        # S1 / F6 — wall-clock budget for ``setup_script``. The action-input
+        # resolver already bounds the upper end (``DEFAULT_SETUP_TIMEOUT_S``
+        # = 10 m); the *only* cross-budget constraint is that
+        # ``setup_timeout_s`` be strictly less than the run timeout, so a
+        # failed setup script cannot be masked by an agent timeout
+        # (S1 review / F3 follow-up — equal-or-larger setup budgets let the
+        # setup script consume the entire run deadline, after which the
+        # agent budget is clamped to ~1 ms and the failure surfaces as
+        # ``_AgentTimeoutError`` (``timed_out``) instead of the
+        # ``configuration_error`` / ``inconclusive`` the setup policy was
+        # supposed to produce). Only check when a setup script is actually
+        # configured and a run timeout is in scope.
+        configured_setup_timeout_s = settings.setup_timeout_s
+        if (
+            settings.setup_script
+            and timeout_ms is not None
+            and configured_setup_timeout_s * 1000 >= timeout_ms
+        ):
+            raise _ConfigurationError(
+                f"setup_timeout ({configured_setup_timeout_s}s) must be less than the run "
+                f"timeout ({timeout_ms // 1000}s) so a failed setup script is not "
+                f"masked as an agent timeout"
+            )
+        setup_timeout_s = configured_setup_timeout_s
+
+        setup_script_skip_reason = ""
+        setup_hook_failure = ""
+        setup_started_at = time.monotonic()
+        if settings.setup_script:
+            if trust_tier == "trusted":
+                logger.info("» running setup script")
+                proc = await asyncio.create_subprocess_shell(
+                    settings.setup_script,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,  # F6 — session leader so killpg reaches grandchildren
+                )
+                register_process_group(proc.pid)
+                try:
+                    _out, err = await asyncio.wait_for(proc.communicate(), timeout=setup_timeout_s)
+                except TimeoutError:
+                    # F6 — TERM → grace → KILL the whole tree (convention 9).
+                    kill_process_group(proc.pid)
+                    setup_hook_failure = f"setup script timed out after {setup_timeout_s}s"
+                else:
+                    if proc.returncode != 0:
+                        # S1 review / NEW3 — redact the full stderr text
+                        # BEFORE truncating to 500 chars. Truncating first
+                        # can lop a ``ghp_…`` token below the redactor's
+                        # pattern minimum length, leaving a partial prefix
+                        # in the prompt — redaction must run on the whole
+                        # input so the pattern matches and the slice is
+                        # taken from the *redacted* output.
+                        detail = redact_secrets((err or b"").decode(errors="replace"))[:500]
+                        setup_hook_failure = (
+                            f"setup script failed (exit {proc.returncode}): {detail}"
+                        )
+                finally:
+                    unregister_process_group(proc.pid)
+                if setup_hook_failure:
+                    tool_state.setup_hook_failure = setup_hook_failure
+                    logger.warning("» {}", setup_hook_failure)
+            else:
+                event_name = os.environ.get("GITHUB_EVENT_NAME", "unknown")
+                setup_script_skip_reason = (
+                    f"skipped setup_script on untrusted tier ({event_name} event)"
+                )
+                tool_state.setup_script_skip_reason = setup_script_skip_reason
+                logger.warning("» {}", setup_script_skip_reason)
+        setup_elapsed_s = time.monotonic() - setup_started_at
+
+        # S1 review / F4 + S1 review / N2 — the policy decides whether a
+        # trusted-tier ``setup_script`` failure short-circuits *before* the
+        # agent loop. ``fail`` aborts (existing F4 behaviour); ``inconclusive``
+        # (N2 fix) skips the agent and runs the publish block with outcome
+        # ``inconclusive`` so no review/mutation tool is invoked; ``warn``
+        # falls through to the late outcome block at the bottom of ``main``.
+        # Pre-N2 the ``inconclusive`` branch ran the agent first and only
+        # then rewrote the outcome — letting the agent post reviews / push
+        # branches on an under-provisioned tree.
+        sc_action, sc_payload = _short_circuit_setup_failure(
+            setup_hook_failure, settings.setup_failure_policy
+        )
+        if sc_action == "abort":
+            assert isinstance(sc_payload, _ConfigurationError)
+            logger.warning(
+                "» setup script failure under fail policy — aborting before agent runs: {}",
+                setup_hook_failure,
+            )
+            raise sc_payload
+        if sc_action == "skip_agent":
+            assert isinstance(sc_payload, str)
+            skip_reason = sc_payload
+            logger.warning(
+                "» setup script failure under inconclusive policy — skipping agent "
+                "loop to honour no-verdict: {}",
+                skip_reason,
+            )
+            skip_outcome = RunOutcome.inconclusive
+            skip_packet_path: str | None = None
+            if tool_context:
+                from mergecraft.tracing.tracer import get_tracer_from_settings
+
+                tracer = get_tracer_from_settings(settings)
+                with tracer.start_span(
+                    "mergecraft.publish",
+                    attrs_source=lambda: {"run_succeeded": False},
+                ) as _skip_publish_span:
+                    await persist_learnings(tool_context)
+                    await report_status_checks(
+                        tool_context,
+                        run_succeeded=run_succeeded_for_outcome(skip_outcome),
+                        failure_reason=skip_reason,
+                        conclusion=RUN_OUTCOME_CONCLUSION[skip_outcome],
+                    )
+                    # #39 — opt-in, off by default. Never reaches the wire when
+                    # ``sarif_upload`` is unset.
+                    await report_sarif_upload(tool_context)
+                    written = await asyncio.to_thread(
+                        emit_run_packet,
+                        tool_context,
+                        run_succeeded=skip_outcome is RunOutcome.passed,
+                    )
+                    skip_packet_path = str(written) if written else None
+            return MainResult(
+                success=False,
+                error=skip_reason,
+                evidence_packet_path=skip_packet_path,
+                outcome=skip_outcome,
+            )
+
+        # ``tool_context``, ``modes``, ``output_schema``, ``ctx_payload``,
+        # ``analyzers_mode`` and ``sarif_upload_enabled`` were all built
+        # earlier — before the F3 equal-deadline guard and the F4
+        # fail-policy short-circuit — so the outer handler can still call
+        # ``report_status_checks`` when those guards raise
+        # ``_ConfigurationError``. The MCP server URL is filled in below.
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
         tool_context.mcp_server_url = mcp_url
@@ -497,7 +722,8 @@ async def main() -> MainResult:
             signed_commits=settings.signed_commits,
             learnings_file_path=tool_state.learnings_file_path,
             learnings_headings=settings.learnings_headings,
-            setup_hook_failure="",
+            setup_hook_failure=setup_hook_failure,
+            setup_script_skip_reason=setup_script_skip_reason,
             xrepo_brief=settings.xrepo_brief,
             xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
             xrepo_learnings_headings=settings.xrepo_learnings_headings,
@@ -516,25 +742,11 @@ async def main() -> MainResult:
             stop_script=settings.stop_script,
         )
 
-        timeout_raw = payload.get("timeout")
-
-        # W6.3 — unparseable timeout fails closed *before* the agent starts.
-        # ``--notimeout`` / ``none`` remains the explicit escape; unset keeps
-        # the historical 1h default.
-        timeout_ms: int | None
-        if timeout_raw == TIMEOUT_DISABLED:
-            timeout_ms = None
-        elif timeout_raw:
-            usable = resolve_timeout_ms(timeout_raw)
-            if usable is None:
-                msg = (
-                    f'invalid timeout "{timeout_raw}" '
-                    "(use a duration like 10m/1h or --notimeout to disable)"
-                )
-                raise _ConfigurationError(msg)
-            timeout_ms = usable
-        else:
-            timeout_ms = 3_600_000
+        # ``timeout_ms`` and ``timeout_raw`` are resolved up front (just
+        # after ``payload = resolve_payload(...)``) so the setup-script
+        # budget can be capped against the run deadline (S1 / F6). The
+        # ``--notimeout`` / ``none`` escape and the fail-closed validation
+        # both happen there; this block just spends the resolved values.
 
         async def _run_agent_once(slug: str) -> AgentResult:
             attempt_model = resolve_model(slug=slug, respect_env_override=False)
@@ -557,7 +769,8 @@ async def main() -> MainResult:
                     signed_commits=settings.signed_commits,
                     learnings_file_path=tool_state.learnings_file_path,
                     learnings_headings=settings.learnings_headings,
-                    setup_hook_failure="",
+                    setup_hook_failure=setup_hook_failure,
+                    setup_script_skip_reason=setup_script_skip_reason,
                     xrepo_brief=settings.xrepo_brief,
                     xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
                     xrepo_learnings_headings=settings.xrepo_learnings_headings,
@@ -574,6 +787,7 @@ async def main() -> MainResult:
                 )
                 tool_context.agent_id = attempt_agent_id
                 tool_context.modes = attempt_modes
+                tool_state.modes = attempt_modes
                 tool_context.resolved_model = attempt_model
                 logger.info(
                     "» model chain advanced to agent={} model={}",
@@ -595,12 +809,30 @@ async def main() -> MainResult:
 
         agent_task = asyncio.create_task(_execute_agent())
 
+        # S1 / F6 — deduct the setup-script elapsed time from the agent
+        # deadline. A slow setup must NOT silently extend the total run
+        # deadline. ``setup_elapsed_s`` is the wall-clock duration measured
+        # by the bounded setup block above; ``timeout_ms`` is the
+        # pre-deduction run budget.
+        agent_timeout_ms: int | None
         if timeout_ms is None:
+            agent_timeout_ms = None
+        else:
+            agent_timeout_ms = max(1, int(timeout_ms - setup_elapsed_s * 1000))
+            if agent_timeout_ms != timeout_ms:
+                logger.info(
+                    "» deducted setup elapsed {:.2f}s from agent deadline ({}s -> {}s)",
+                    setup_elapsed_s,
+                    timeout_ms / 1000,
+                    agent_timeout_ms / 1000,
+                )
+
+        if agent_timeout_ms is None:
             winning_slug, result = await agent_task
         else:
             try:
                 winning_slug, result = await asyncio.wait_for(
-                    agent_task, timeout=timeout_ms / 1000.0
+                    agent_task, timeout=agent_timeout_ms / 1000.0
                 )
             except TimeoutError:
                 agent_task.cancel()
@@ -647,29 +879,34 @@ async def main() -> MainResult:
         except Exception as exc:
             logger.debug("post-run finalize skipped: {}", exc)
 
-        # D3/W5.2 + W6.1 — a completed run is `passed` / `failed`, or
-        # `inconclusive` when review-relevant dependency prep failed underneath
-        # a otherwise-successful agent. Agent failure wins over prep failure.
+        # D3/W5.2 + W6.1 + S1/D5/D10 — a completed run is ``passed`` / ``failed``,
+        # ``inconclusive`` when review-relevant dependency prep failed OR a
+        # trusted-tier ``setup_script`` failed under the default policy, or
+        # ``configuration_error`` when the operator opted into ``fail``. Agent
+        # failure wins over both prep and setup-script failure (the agent
+        # genuinely couldn't do its job). S1 also adds D10's
+        # ``setup_failure_policy`` to the resolution.
         prep_reason = await _prep_failure_reason(tool_context)
-        if not result.success:
-            outcome = RunOutcome.failed
-            failure_reason = result.error
-        elif prep_reason:
-            outcome = RunOutcome.inconclusive
-            failure_reason = prep_reason
-            logger.warning("» prep failure mapped run to inconclusive: {}", prep_reason)
-        else:
-            outcome = RunOutcome.passed
-            failure_reason = None
+        setup_reason = tool_state.setup_hook_failure or ""
+        outcome, failure_reason = _classify_outcome(
+            result=result,
+            setup_reason=setup_reason,
+            setup_policy=settings.setup_failure_policy,
+            prep_reason=prep_reason,
+        )
 
         packet_path: str | None = None
         if tool_context:
             from mergecraft.tracing.tracer import get_tracer_from_settings
 
             tracer = get_tracer_from_settings(settings)
+            selected_mode_obj = next(
+                (m for m in tool_context.modes if m.name == tool_context.tool_state.selected_mode),
+                None,
+            )
             with tracer.start_span(
                 "mergecraft.publish",
-                attrs_source=lambda: {"run_succeeded": outcome is RunOutcome.passed},
+                attrs_source=lambda: _publish_span_attrs(outcome, selected_mode_obj),
             ) as _publish_span:
                 await persist_learnings(tool_context)
                 await report_status_checks(

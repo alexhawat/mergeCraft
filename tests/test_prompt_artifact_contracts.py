@@ -63,6 +63,9 @@ def test_mcp_layer_produces_the_known_diff_artifacts() -> None:
     produced = _keys_produced_by_mcp_tools()
     assert "diffPath" in produced
     assert "incrementalDiffPath" in produced
+    assert "impactPath" in produced, (
+        "impactPath landed in checkout_pr but was not detected; rerun drift check"
+    )
 
 
 def test_every_prompt_artifact_key_is_returned_by_some_mcp_tool() -> None:

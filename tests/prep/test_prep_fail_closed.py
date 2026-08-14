@@ -4,9 +4,12 @@ Contracts:
 
 - A review-relevant setup failure (dependency install failed) maps the run to
   ``inconclusive`` with the reason recorded — never a silent continue (D4).
-- ``setup_script`` failure on the *trusted* tier stays warn-only by policy
-  (documented); untrusted never runs it at all (W1 — covered in
-  ``tests/security/``).
+- ``setup_script`` failure on the *trusted* tier maps the run to
+  ``RunOutcome.inconclusive`` under the default ``setupFailurePolicy``
+  (S1 / D5 / D10). Operators can opt into the legacy warn-only behaviour
+  by setting ``setupFailurePolicy: warn`` (see
+  ``tests/config/test_setup_failure_policy.py``). Untrusted tiers never run
+  the script at all (W1 — covered in ``tests/security/``).
 """
 
 from __future__ import annotations
@@ -59,11 +62,20 @@ async def test_successful_prep_keeps_success_path(
     assert rec.result.success, f"run failed: {rec.result}"
 
 
-async def test_setup_script_failure_warn_only_on_trusted_tier(
+async def test_setup_script_failure_yields_inconclusive_on_trusted_tier(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """W6.1 — trusted-tier setup_script failure warns but does not fail the run."""
+    """S1 — trusted-tier ``setup_script`` failure maps to ``inconclusive`` (D5/D10 default).
+
+    Replaces the legacy ``test_setup_script_failure_warn_only_on_trusted_tier``
+    (W6.1 / pre-S1). The default ``setupFailurePolicy`` is ``inconclusive``
+    — an under-provisioned tree never receives a review verdict. Operators
+    that want the legacy continue-on-failure behaviour opt in via
+    ``setupFailurePolicy: warn`` (covered in
+    ``tests/config/test_setup_failure_policy.py::test_policy_warn_reproduces_legacy_continue``).
+    """
     from mergecraft.config.settings import RepoSettings
+    from mergecraft.run_outcome import RunOutcome
 
     rec = await run_main_for_test(
         monkeypatch=monkeypatch,
@@ -74,9 +86,11 @@ async def test_setup_script_failure_warn_only_on_trusted_tier(
         setup_script_rc=1,
     )
     assert rec.result is not None
-    assert rec.result.success, (
-        f"trusted-tier setup_script failure must stay warn-only: {rec.result}"
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome is RunOutcome.inconclusive, (
+        f"S1 / D5: trusted setup_script failure must map to inconclusive, got {outcome!r}"
     )
+    assert not rec.result.success
     assert rec.tool_context is not None
     assert rec.tool_context.trust_tier == "trusted"
 
@@ -100,3 +114,47 @@ async def test_agent_result_failure_still_maps_to_failed(
     rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=tmp_path, agent=agent)
     assert rec.result is not None
     assert not rec.result.success
+
+
+def test_prep_failure_reason_docstring_describes_three_value_policy() -> None:
+    """S1 review follow-up — ``_prep_failure_reason`` docstring must reflect
+    the current 3-value ``SetupFailurePolicy``.
+
+    The pre-fix docstring claimed setup failures "stay warn-only by policy".
+    That language predates the ``inconclusive`` default (D5 / D10) and the
+    ``fail`` short-circuit — operators reading the helper's contract got a
+    misleading picture of how trusted-tier setup failures are resolved.
+
+    Assert the docstring mentions all three policy values and disowns the
+    legacy "warn-only" phrasing. The check is on the *contract surface* —
+    the helper's behaviour is unchanged, only its documentation moves.
+    """
+    import inspect
+
+    from mergecraft.main import _prep_failure_reason
+
+    doc = inspect.getdoc(_prep_failure_reason) or ""
+    assert doc, "_prep_failure_reason must carry a docstring"
+
+    # Must mention each of the three closed-vocabulary values.
+    for value in ("inconclusive", "fail", "warn"):
+        assert value in doc, (
+            f"_prep_failure_reason docstring must mention the {value!r} "
+            f"policy value (SetupFailurePolicy vocabulary); got:\n{doc}"
+        )
+
+    # Must not carry the stale warn-only phrasing.
+    lowered = doc.lower()
+    for stale in ("warn-only", "warn only", "stay warn", "stay-warn"):
+        assert stale not in lowered, (
+            f"_prep_failure_reason docstring still uses stale {stale!r} "
+            f"phrasing — setup_failure_policy is now 3-valued "
+            f"(inconclusive | fail | warn), not warn-only:\n{doc}"
+        )
+
+    # Reference back to the canonical authority so the doc does not
+    # silently drift again.
+    assert "SetupFailurePolicy" in doc or "setup_failure_policy" in doc, (
+        f"_prep_failure_reason docstring should reference the canonical "
+        f"SetupFailurePolicy name so future drift is detectable; got:\n{doc}"
+    )

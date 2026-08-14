@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Final
+
 from mergecraft.modes import (
     NON_COMMITTING_MODES,
     PR_SUMMARY_FORMAT,
@@ -194,3 +199,241 @@ def test_expanded_prompts_have_no_template_markers() -> None:
                 prompt = mode.prompt or ""
                 assert "${" not in prompt, mode.name
                 assert "<<<NEST>>>" not in prompt, mode.name
+
+
+# ── S5 — per-mode prompt version + byte-identical split (#145) ───────────────
+
+# Snapshot of every mode's rendered prompt on pre-0.0.1 HEAD. The
+# ``test_mode_prompt_text_is_byte_identical_after_split`` test below is the
+# load-bearing pin that defends this refactor: any silent prompt drift across
+# the modes.py -> modes/ move fails this test loudly.
+_PRE_SPLIT_PROMPTS_PATH: Final[Path] = (
+    Path(__file__).parent / "_fixtures" / "pre_split_prompts.json"
+)
+
+
+def _load_pre_split_snapshot() -> Mapping[str, Mapping[str, str]]:
+    """Load the snapshot fixture captured on the pre-split tree.
+
+    Raises FileNotFoundError with a clear message if the fixture is missing
+    rather than letting the test fail with an unrelated JSON decode error.
+    """
+    if not _PRE_SPLIT_PROMPTS_PATH.is_file():
+        msg = (
+            f"S5 snapshot fixture missing at {_PRE_SPLIT_PROMPTS_PATH}. "
+            "Re-run the snapshot capture step before the modes.py -> modes/ move."
+        )
+        raise FileNotFoundError(msg)
+    return json.loads(_PRE_SPLIT_PROMPTS_PATH.read_text(encoding="utf-8"))
+
+
+def test_every_mode_exposes_a_prompt_version() -> None:
+    """Every built-in mode carries a version constant (#145).
+
+    The version is the prompt's content-identity — a hash of its rendered body
+    — so an edit cannot silently keep the old version. The mode name maps to a
+    module-level constant of the form ``<NAME>_PROMPT_VERSION``; ``Mode`` itself
+    carries it on every instance so consumers can read it without an import dance.
+    """
+    expected = {m.name for m in compute_modes("opencode")}
+    assert expected, "no built-in modes resolved — wiring is broken"
+
+    for mode_name in expected:
+        mode = next(m for m in compute_modes("opencode") if m.name == mode_name)
+        assert hasattr(mode, "version"), mode_name
+        version = getattr(mode, "version", "")
+        assert isinstance(version, str), mode_name
+        assert version, mode_name
+        # Content-hash versions are short hex strings; pin the shape so a
+        # future refactor that swaps the scheme has to revisit this test.
+        assert len(version) >= 8, (mode_name, version)
+
+
+def test_prompt_version_changes_when_prompt_text_changes() -> None:
+    """Version is derived from the prompt body, not stored independently.
+
+    Any function the catalog exposes that takes a prompt body and yields a
+    version must produce different versions for different bodies, and the same
+    version for identical bodies. Pin the contract on the helper directly so a
+    silent change to the hashing scheme fails loudly.
+    """
+    from mergecraft.modes import compute_prompt_version
+
+    assert compute_prompt_version("hello") == compute_prompt_version("hello")
+    assert compute_prompt_version("hello") != compute_prompt_version("hello!")
+    assert compute_prompt_version("") != compute_prompt_version("x")
+
+
+def test_prompt_version_appears_in_evidence_packet() -> None:
+    """The selected mode's version reaches the run's evidence packet (#145).
+
+    The packet is the audit artifact for one merge; without a prompt version
+    on it, an archived verdict cannot be attributed to the prompt that
+    produced it. Only the mode that actually ran appears in the packet.
+    """
+    from mergecraft.evidence.run_packet import _mode_prompt_versions, _selected_modes
+    from mergecraft.mcp.context import RepoIdentity, ResolvedPayload, ToolContext
+    from mergecraft.mcp.tool_state import ToolState
+    from mergecraft.utils.github import GitHubClient
+
+    modes = compute_modes("opencode")
+    review_mode = next(m for m in modes if m.name == "Review")
+
+    # Homemade ToolContext with the specific mode in its catalog.
+    ctx = ToolContext(
+        agent_id="opencode",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(),
+        github=GitHubClient(token=""),
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=list(modes),
+        tool_state=ToolState(repos={}, primary_repo_key="acme/demo"),
+        mcp_server_url="",
+        tmpdir="",
+    )
+
+    # Selected mode present → exactly one row with matching version.
+    state = ToolState(repos={}, primary_repo_key="acme/demo", selected_mode="Review")
+    rows = _mode_prompt_versions(_selected_modes(state, ctx))
+    assert len(rows) == 1
+    assert rows[0].mode_name == "Review"
+    assert rows[0].prompt_version == review_mode.version
+
+    # No selected mode → empty list.
+    no_mode = ToolState(repos={}, primary_repo_key="acme/demo")
+    assert _mode_prompt_versions(_selected_modes(no_mode, ctx)) == []
+
+
+def test_prompt_version_appears_in_trace_attrs() -> None:
+    """Every mode's version reaches the trace attrs emitted by the run (#145).
+
+    Tracing's whole point is to identify what produced a row; a row with no
+    prompt version cannot be attributed to the prompt that produced it.
+    """
+    from mergecraft.tracing.event import trace_attrs_for_mode
+
+    review_mode = next(m for m in compute_modes("opencode") if m.name == "Review")
+    attrs = trace_attrs_for_mode(review_mode)
+    assert attrs.get("mergecraft.mode.name") == "Review"
+    assert attrs.get("mergecraft.mode.prompt_version") == review_mode.version
+
+
+def test_publish_span_attrs_source_emits_mode_attrs_end_to_end() -> None:
+    """Regression pin: ``_publish_span_attrs`` spreads ``trace_attrs_for_mode``
+    over the selected mode (#145 + post-#145 wiring).
+
+    The audit found that ``trace_attrs_for_mode`` was unit-tested but never
+    wired into production; the helper silently returned its dict into the
+    void. This test guards against a re-introduction of that gap by
+    exercising the module-scope ``_publish_span_attrs`` helper that
+    ``main.py`` invokes for the ``mergecraft.publish`` span. Both
+    ``run_succeeded`` and at least one set of per-mode attrs must be
+    present — a future refactor that drops the spread (e.g. shrinks to
+    ``{"run_succeeded": ...}``) fails this test loudly.
+    """
+    from mergecraft.main_outcome import _publish_span_attrs
+    from mergecraft.run_outcome import RunOutcome
+
+    review_mode = next(m for m in compute_modes("opencode") if m.name == "Review")
+
+    emitted = _publish_span_attrs(RunOutcome.passed, review_mode)
+
+    assert emitted.get("run_succeeded") is True
+    assert emitted.get("mergecraft.mode.name") == "Review"
+    assert emitted.get("mergecraft.mode.prompt_version") == review_mode.version
+
+
+def test_publish_span_attrs_none_mode_yields_no_mode_attrs() -> None:
+    """When no mode was selected, ``_publish_span_attrs`` omits mode keys."""
+    from mergecraft.main_outcome import _publish_span_attrs
+    from mergecraft.run_outcome import RunOutcome
+
+    emitted = _publish_span_attrs(RunOutcome.configuration_error, None)
+
+    assert emitted.get("run_succeeded") is False
+    assert "mergecraft.mode.name" not in emitted
+    assert "mergecraft.mode.prompt_version" not in emitted
+
+
+def test_all_modes_still_resolve_by_name() -> None:
+    """Regression pin: the names ``compute_modes`` returns are unchanged.
+
+    The split relocates the per-mode modules; this test guards the public
+    surface (``compute_modes``, ``_custom_modes``, ``modes``) against an
+    accidental rename.
+    """
+    result = compute_modes("opencode")
+    assert [m.name for m in result] == EXPECTED_MODE_NAMES
+
+    # The static ``modes`` export (used by the UI) must mirror ``compute_modes``.
+    assert [m.name for m in modes] == EXPECTED_MODE_NAMES
+
+    # Custom mode merging is in main.py — guard that the public surface
+    # used by main.py is still importable from the same location.
+    from mergecraft.modes import _custom_modes
+
+    assert _custom_modes([]) == []
+
+
+def test_mode_prompt_text_is_byte_identical_after_split() -> None:
+    """The load-bearing pin: every mode's rendered prompt is byte-identical
+    against the snapshot captured on ``pre-0.0.1`` HEAD (#145).
+
+    The split relocates ~84 KB of prompt text from ``modes.py`` to
+    ``modes/<name>.py`` with no rewording, no reflowing, no "while I'm here"
+    prompt edits. If this test fails, the move drifted text — restore the
+    verbatim text; do NOT rewrite prompts.
+    """
+    snapshot = _load_pre_split_snapshot()
+    current = {m.name: (m.description, m.prompt) for m in compute_modes("opencode")}
+
+    assert set(snapshot) == set(current), (
+        f"snapshot modes {set(snapshot) - set(current)} missing, "
+        f"current modes {set(current) - set(snapshot)} extra"
+    )
+
+    for name, (description, prompt) in current.items():
+        expected = snapshot[name]
+        assert description == expected["description"], (f"{name}: description drifted",)
+        assert prompt == expected["prompt"], f"{name}: prompt drifted"
+
+
+def test_custom_modes_from_config_still_merge() -> None:
+    """Regression pin: custom mode definitions from ``.mergecraft/config.yaml``
+    still merge with the built-ins.
+
+    The split must not touch ``_custom_modes`` (the helper ``main.py`` uses to
+    project ``settings.modes`` into ``Mode`` objects). It is exported from the
+    package root so the existing call sites do not change.
+    """
+    from mergecraft.config.settings import ModeDefinition
+    from mergecraft.modes import _custom_modes
+
+    custom = _custom_modes(
+        [
+            ModeDefinition(
+                id="my-mode",
+                name="MyMode",
+                description="a custom mode",
+                prompt="do the thing",
+            ),
+        ]
+    )
+    assert len(custom) == 1
+    assert custom[0].name == "MyMode"
+    assert custom[0].description == "a custom mode"
+    assert custom[0].prompt == "do the thing"
+
+    # Audit pin: a non-empty custom prompt must get the same content-hash
+    # version as a built-in would — the evidence packet must attribute the
+    # verdict to the consumer-supplied prompt exactly like a built-in.
+    from mergecraft.modes import compute_prompt_version
+
+    assert custom[0].version == compute_prompt_version("do the thing")
+
+    # Built-ins still resolve alongside the custom mode.
+    combined_names = [m.name for m in (*compute_modes("opencode"), *custom)]
+    assert "MyMode" in combined_names
+    assert "Build" in combined_names

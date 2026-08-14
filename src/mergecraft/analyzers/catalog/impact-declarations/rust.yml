@@ -1,0 +1,18 @@
+id: impact-decl-rust
+language: rust
+rule:
+  any:
+    - kind: function_item
+      has: { field: name, pattern: $NAME }
+    - kind: function_signature_item
+      has: { field: name, pattern: $NAME }
+    - kind: struct_item
+      has: { field: name, pattern: $NAME }
+    - kind: trait_item
+      has: { field: name, pattern: $NAME }
+    - kind: enum_item
+      has: { field: name, pattern: $NAME }
+    - kind: union_item
+      has: { field: name, pattern: $NAME }
+    - kind: macro_definition
+      has: { field: name, pattern: $NAME }
