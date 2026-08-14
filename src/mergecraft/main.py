@@ -1296,8 +1296,8 @@ async def main() -> MainResult:
                     failure_reason=error_message,
                     conclusion=RUN_OUTCOME_CONCLUSION[error_outcome],
                 )
-            except Exception:
-                pass
+            except Exception as cleanup_exc:
+                logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
         return MainResult(success=False, error=error_message, outcome=error_outcome)
     else:
         return await _finalize(ctx, agent_result)

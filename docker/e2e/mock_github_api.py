@@ -46,7 +46,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
+    def do_GET(self) -> None:
         path = urlparse(self.path).path
         repo_match = _REPO_RE.match(path)
         if repo_match:
@@ -85,7 +85,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send_json(404, {"message": f"Not Found: {path}"})
 
-    def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
+    def do_POST(self) -> None:
         path = urlparse(self.path).path
         check_match = _CHECK_RE.match(path)
         if check_match:

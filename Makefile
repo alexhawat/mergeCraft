@@ -17,7 +17,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	examples example-workflows-check bench-review eval-gate eval-replay \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory
+	lint-ruff-advisory hook-pins-check
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -43,10 +43,14 @@ install: ## Sync dev environment after dependency changes
 lockcheck: ## Fail if uv.lock is out of date
 	$(UV) lock --check
 
-lint: ## Ruff check + formatting + loguru-only
+lint: ## Ruff check + formatting + loguru-only + hook-pins-check
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
+	$(MAKE) hook-pins-check
+
+hook-pins-check: ## Fail when .pre-commit-config.yaml hook revs drift from pyproject.toml pins
+	$(UV) run python scripts/check_hook_pins.py
 
 lint-ruff-advisory: ## Ruff advisory families (non-blocking CI; #146)
 	$(RUFF) check src tests scripts --select $(RUFF_ADVISORY_FAMILIES)
