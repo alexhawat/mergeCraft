@@ -87,6 +87,7 @@ The reviewer reads the whole diff itself, then picks the **lenses** the PR actua
 **Picked when the diff warrants it**
 
 - **Security** — new endpoints, authorization, input validation, secret handling, replay / CSRF / injection, cross-tenant isolation.
+- **Privilege drop ordering** — for a diff where a privileged process (root, before a `setpriv`/`sudo -u`/`su`/container-user-switch step) creates a file or directory that a later, lower-privileged process must then read or write: does the write land only after ownership is fixed for the dropped-privilege user, or does the privileged process's plain `mkdir()`/file write leave the path owned by the wrong uid? Ownership follows the *creating* process, not the parent directory's owner and not a later chmod/chown applied only to the parent — this is how mergeCraft shipped `Permission denied` bugs against its own `$HOME` and `$CODEX_HOME`/`.gemini`/`.claude` writes twice in production.
 - **Performance** — N+1 queries, hot-path allocation, latency budgets, index coverage.
 - **Test integrity** — meaningful coverage for the changed behavior, deterministic, no shared-state pollution.
 - **User journey** — for UX-touching flows, walking the happy path and the failure modes as a user.
