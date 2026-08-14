@@ -262,7 +262,7 @@ def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> Fas
     """
     tool_ctx = ctx
     by_name = {t.name: t for t in tools}
-    app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.0.1")
+    app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.1.0")
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -279,7 +279,7 @@ def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> Fas
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": MERGECRAFT_MCP_NAME, "version": "0.0.1"},
+                    "serverInfo": {"name": MERGECRAFT_MCP_NAME, "version": "0.1.0"},
                 },
             }
         if method == "tools/list":

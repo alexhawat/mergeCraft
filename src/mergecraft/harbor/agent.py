@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from harbor.environments.base import BaseEnvironment
     from harbor.models.agent.context import AgentContext
 
-DEFAULT_INSTALL_REF = "pre-0.0.1"
+DEFAULT_INSTALL_REF = "v0.1.0"
 MERGECRAFT_GIT_URL = "git+https://github.com/alexhawat/mergeCraft"
 FINDINGS_FILENAME = "findings.json"
 _PATCH_CANDIDATES = ("task.patch", "changes.patch", "diff.patch", "review.patch")

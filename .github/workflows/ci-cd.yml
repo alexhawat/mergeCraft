@@ -345,19 +345,43 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # :latest / :analyzers are the production mutable tags — main only. A
+      # pre-release branch build must never win that race against main's own
+      # build just by finishing later (both had independent per-ref
+      # concurrency groups and no ordering guarantee between them). Actual
+      # version releases retag :latest separately via Craft (.craft.yml,
+      # triggered off refs/tags/v*), which is a distinct promotion path, not
+      # this branch-push one.
       - name: Retag slim digest → :latest
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1'
+        if: github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "${IMAGE_SLIM}:latest" \
             "${IMAGE_SLIM}@${{ needs.build-images.outputs.slim_digest }}"
       - name: Retag analyzers digest → :analyzers
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1'
+        if: github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "${IMAGE_ANALYZERS}:analyzers" \
+            "${IMAGE_ANALYZERS}@${{ needs.build-images.outputs.analyzers_digest }}"
+      # pre-0.0.1 (the active pre-release/staging branch) gets its own mutable
+      # channel instead, so pre-release testers have a moving tag to pull
+      # without ever touching the production :latest / :analyzers.
+      - name: Retag slim digest → :rc
+        if: github.ref == 'refs/heads/pre-0.0.1'
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE_SLIM}:rc" \
+            "${IMAGE_SLIM}@${{ needs.build-images.outputs.slim_digest }}"
+      - name: Retag analyzers digest → :analyzers-rc
+        if: github.ref == 'refs/heads/pre-0.0.1'
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE_ANALYZERS}:analyzers-rc" \
             "${IMAGE_ANALYZERS}@${{ needs.build-images.outputs.analyzers_digest }}"
       - name: Record digests for Craft SHA→version retag
         run: |

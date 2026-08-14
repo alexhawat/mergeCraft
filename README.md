@@ -131,7 +131,7 @@ into a comment changes nothing. Details:
 **1. Install and scaffold** (in the repo you want reviewed):
 
 ```bash
-uv tool install "git+https://github.com/alexhawat/mergeCraft@pre-0.0.1"
+uv tool install "git+https://github.com/alexhawat/mergeCraft@v0.1.0"
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
@@ -170,10 +170,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: alexhawat/mergeCraft@pre-0.0.1
+      - uses: alexhawat/mergeCraft@v0.1.0
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
+
+> **Pin to the exact tag**, e.g. `@v0.1.0` — it is an immutable release ref and
+> will not move, so a workflow run always reviews with the code that tag names.
+> For the strictest supply-chain posture, pin a full commit SHA instead.
 
 ### Example 2 — hardened, review as a required check
 
@@ -227,7 +231,7 @@ permissions:
 jobs:
   review:
     steps:
-      - uses: alexhawat/mergeCraft@pre-0.0.1
+      - uses: alexhawat/mergeCraft@v0.1.0
         with:
           sarif_upload: enabled
 ```
@@ -245,7 +249,7 @@ Every run can emit a per-request span tree — to local JSONL, to
 default:
 
 ```yaml
-- uses: alexhawat/mergeCraft@pre-0.0.1
+- uses: alexhawat/mergeCraft@v0.1.0
   with:
     tracing: enabled
     tracing-to: logfire
@@ -327,7 +331,7 @@ For the common single-provider case, two top-level `with:` inputs map
 onto the singleton env vars — no need to name them in `env:`:
 
 ```yaml
-- uses: alexhawat/mergeCraft@pre-0.0.1
+- uses: alexhawat/mergeCraft@v0.1.0
   with:
     model: default/your-model-id
     provider_base_url: https://api.example.com/v1
@@ -406,7 +410,7 @@ A raw pass-through slug reaches Nous's OpenAI-compatible endpoint via
 either harness:
 
 ```yaml
-- uses: alexhawat/mergeCraft@pre-0.0.1
+- uses: alexhawat/mergeCraft@v0.1.0
   with:
     model: nous/deepseek/deepseek-v4-flash  # raw pass-through slug
   env:
@@ -423,7 +427,7 @@ Two distinct OpenAI-compatible providers in one workflow (e.g. MiniMax
 and Nous alongside OpenAI):
 
 ```yaml
-- uses: alexhawat/mergeCraft@pre-0.0.1
+- uses: alexhawat/mergeCraft@v0.1.0
   with:
     model: provider_1/deepseek-v4-flash           # active provider_1
   env:
@@ -493,7 +497,7 @@ modelFallbacks:
 ```yaml
 # .github/workflows/mergecraft.yml — a single ``uses:`` step walks the
 # chain. ``model:`` is the head; the configured tail follows.
-- uses: alexhawat/mergeCraft@pre-0.0.1
+- uses: alexhawat/mergeCraft@v0.1.0
   with:
     model: anthropic/claude-sonnet        # ← chain head (your pick)
     # model_pin: enabled                 # ← uncomment to collapse to one model
@@ -520,7 +524,7 @@ semantics, set `model_pin: enabled` on the `with:` block, or
 `modelPin: true` in `.mergecraft/config.yaml` (the action input wins):
 
 ```yaml
-- uses: alexhawat/mergeCraft@pre-0.0.1
+- uses: alexhawat/mergeCraft@v0.1.0
   with:
     model: anthropic/claude-sonnet
     model_pin: enabled                 # ← chain collapses to [claude-sonnet]
@@ -699,7 +703,7 @@ Full rationale in the collapsible sections of
 | [docs/REVIEW-DOCTRINE.md](docs/REVIEW-DOCTRINE.md) | Why mergeCraft makes the calls it makes |
 | [docs/evidence-packet.md](docs/evidence-packet.md) | Typed findings & merge evidence |
 | [docs/eval-bank.md](docs/eval-bank.md) | Eval replay and bench scoring |
-| [docs/distribution.md](docs/distribution.md) | 0.0.1 release checklist — PyPI, Marketplace, assets ([#141](https://github.com/alexhawat/mergeCraft/issues/141)) |
+| [docs/distribution.md](docs/distribution.md) | 0.1.0 release checklist — PyPI, Marketplace, assets ([#141](https://github.com/alexhawat/mergeCraft/issues/141)) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributor workflow (`make setup / lint / typecheck / test / ci`) |
 
 ## 🗺️ Roadmap

@@ -37,12 +37,12 @@ if TYPE_CHECKING:
 
 def test_json_payload_requires_marker() -> None:
     payload = JsonPayload.model_validate(
-        {"~mergecraft": True, "version": "0.0.1", "prompt": "hello"}
+        {"~mergecraft": True, "version": "0.1.0", "prompt": "hello"}
     )
     assert payload.mergecraft is True
     assert payload.prompt == "hello"
     with pytest.raises(ValidationError):
-        JsonPayload.model_validate({"version": "0.0.1", "prompt": "x"})
+        JsonPayload.model_validate({"version": "0.1.0", "prompt": "x"})
 
 
 def test_resolve_prompt_input_plain_text(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -54,7 +54,7 @@ def test_resolve_prompt_input_plain_text(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_resolve_prompt_input_json_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(
         "INPUT_PROMPT",
-        json.dumps({"~mergecraft": True, "version": "0.0.1", "prompt": "from json"}),
+        json.dumps({"~mergecraft": True, "version": "0.1.0", "prompt": "from json"}),
     )
     monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
     resolved = resolve_prompt_input()
@@ -105,7 +105,7 @@ def test_resolve_payload_non_collaborator_cannot_enable_shell(
         json.dumps(
             {
                 "~mergecraft": True,
-                "version": "0.0.1",
+                "version": "0.1.0",
                 "prompt": "hi",
                 "event": {"trigger": "issues_opened", "authorPermission": "read"},
             }
