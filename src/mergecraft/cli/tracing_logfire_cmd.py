@@ -334,6 +334,8 @@ def logfire_disable(
             "retry with --scope local or --scope github to isolate the failure."
         )
 
+    console.print("\n[bold]Logfire tracing disabled.[/bold]")
+
 
 # ---------------------------------------------------------------------------
 # Workflow wiring
@@ -510,8 +512,6 @@ def logfire_unwire_workflow(
     except OSError as exc:
         _bail(f"could not write {workflow}: {exc}")
     console.print(f"[green]wrote[/green] {workflow}")
-
-    console.print("\n[bold]Logfire tracing disabled.[/bold]")
 
 
 def register(root: typer.Typer) -> None:

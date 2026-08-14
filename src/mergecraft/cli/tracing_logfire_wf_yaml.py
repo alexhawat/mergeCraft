@@ -56,13 +56,8 @@ OWNED_ENV_KEYS: tuple[str, ...] = ("MERGECRAFT_TRACING_PROJECT",)
 
 # Indent units. The upstream convention is two-space indent for keys under a
 # step (``uses:`` at 8 spaces, ``with:``/``env:`` at 8 spaces, children at
-# 10 or 12). We re-derive the children's indent dynamically from the
-# observed ``with:`` / ``env:`` key line, but expose these constants for
-# callers that want a default.
-_STEP_INDENT_DEFAULT = "        "  # 8 spaces.
-_WITH_ENV_INDENT_DEFAULT = "        "  # 8 spaces -- ``with:`` / ``env:`` live at step indent.
-_WITH_CHILDREN_INDENT_DEFAULT = "          "  # 10 spaces.
-_ENV_CHILDREN_INDENT_DEFAULT = "            "  # 12 spaces.
+# 10 or 12). The mutator re-derives the children's indent dynamically from
+# the observed ``with:`` / ``env:`` key line; no fixed default is needed.
 
 
 class LogfireWorkflowError(Exception):
@@ -260,24 +255,6 @@ def _splice_secret(name: str) -> str:
     return name
 
 
-def _children_start_indent(text: str, key: str) -> int | None:
-    """Return the indent length at which children of ``key:`` appear, if any."""
-    block = _find_mapping_block(text, key)
-    if block is None:
-        return None
-    block_start, _, key_indent = block
-    lines = text[block_start:].splitlines(keepends=True)
-    # Skip the ``key:`` line itself.
-    for ln in lines[1:]:
-        if not ln.strip():
-            continue
-        leading = _line_indent_len(ln)
-        if leading <= key_indent:
-            return None
-        return leading
-    return None
-
-
 def _insert_owned_keys_into_block(
     block: str,
     *,
@@ -327,6 +304,21 @@ def _insert_owned_keys_into_block(
         children_indent_str = ln[:leading_spaces]
         break
 
+    if children_indent_str is None and len(lines) == 1:
+        # ``key:`` is present but cannot accept children -- either written
+        # as ``key: {}`` (flow-style mapping with no entries), as
+        # ``key: <inline-value>`` (e.g. ``with: prompt``), or as the bare
+        # ``key:`` line followed immediately by a sibling at the same
+        # indent. Silently skipping here would leave the step syntactically
+        # valid but unwired, and the CLI would print ``wrote`` even though
+        # the keys never landed. Refuse loudly instead.
+        key_line = lines[0].rstrip("\n")
+        raise LogfireWorkflowError(
+            f"{key_line!r} has no children; cannot insert owned keys. "
+            "Convert it to a block mapping (delete the inline value, "
+            f"let ``{key}:`` stand on its own line, then re-run)."
+        )
+
     refused: list[str] = []
     new_lines: list[str] = [lines[0]]  # the ``key:`` line itself.
     seen: set[str] = set()
@@ -355,7 +347,6 @@ def _insert_owned_keys_into_block(
             new_lines.append(ln)
             continue
         # Replace in place, preserving newline.
-        assert children_indent_str is not None
         new_lines.append(f"{children_indent_str}{key_name}: {target}\n")
         seen.add(key_name)
 
@@ -432,12 +423,22 @@ def _mutate_steps(
     *,
     step_selector: str,
     mutate_one: Callable[[str], tuple[str, bool]],
+    post_mutation_check: Callable[..., None] | None = None,
 ) -> WiringChange:
     """Run ``mutate_one(block) -> (new_block, modified)`` on each selected step.
 
     Mutates sequentially from the **last** matching step backward so earlier
     byte offsets remain valid after each in-place splice. After each splice
     the step layout is rescanned.
+
+    ``post_mutation_check`` (optional) is called as
+    ``post_mutation_check(cur_text, step_identifiers=...)`` after every splice
+    to perform a structural assertion (e.g. owned keys landed in the right
+    step's ``with:`` / ``env:`` mappings via ``yaml.safe_load``). It should
+    raise :class:`LogfireWorkflowError` on failure. ``step_identifiers`` is
+    the ordered list of identifiers (id / name / index fallback) of the
+    steps the selector targeted, so callers can restrict assertions to just
+    those.
     """
     blocks = _find_action_steps(text)
     selected_indices = _select_step_indices(blocks, text, step_selector)
@@ -455,6 +456,10 @@ def _mutate_steps(
         blocks = _find_action_steps(cur_text)
 
     _ensure_yaml_loadable(cur_text)
+    if post_mutation_check is not None:
+        # Reverse to preserve selector order (we mutated last-to-first).
+        selected_identifiers = list(reversed(affected))
+        post_mutation_check(cur_text, step_identifiers=selected_identifiers)
     return WiringChange(old_text=text, new_text=cur_text, affected_steps=list(reversed(affected)))
 
 
@@ -464,6 +469,130 @@ def _ensure_yaml_loadable(text: str) -> None:
         yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise LogfireWorkflowError(f"mutation produced invalid YAML: {exc}") from exc
+
+
+def _assert_wired_semantics(text: str, *, step_identifiers: list[str]) -> None:
+    """Confirm every selected ``uses: alexhawat/mergeCraft`` step carries the owned keys.
+
+    Uses :func:`yaml.safe_load` (which we already trust to confirm parseability)
+    to assert each *selected* ``alexhawat/mergeCraft`` step has ``tracing`` /
+    ``tracing-to`` / ``logfire-token`` keys in its ``with:`` mapping and
+    ``MERGECRAFT_TRACING_PROJECT`` in its ``env:`` mapping. This catches
+    silent partial wirings -- a step whose ``with:`` was inline
+    (``with: {}`` or ``with: prompt``) and therefore had no children to
+    insert into, leaving the file syntactically valid but unwired. Also
+    catches a ``run: |`` block-scalar whose content fooled the line-based
+    detector into splicing keys into a script line.
+
+    ``step_identifiers`` is the ordered list of identifiers (id / name / index
+    fallback) of the steps the selector targeted; only those steps are
+    checked. Other ``alexhawat/mergeCraft`` steps the operator didn't target
+    (e.g. a sibling fallback step under ``--step mergecraft_primary``) are
+    not asserted.
+    """
+    if not step_identifiers:
+        return  # nothing to assert; a selector that matched zero steps is a separate error.
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        # ``_ensure_yaml_loadable`` runs first and would already have raised
+        # on a syntax error; this is a belt-and-braces second guard.
+        raise LogfireWorkflowError(f"mutation produced invalid YAML: {exc}") from exc
+    if not isinstance(parsed, dict):
+        return
+    jobs = parsed.get("jobs")
+    if not isinstance(jobs, dict):
+        return
+    targets = set(step_identifiers)
+    unwired: list[str] = []
+    seen_targets: set[str] = set()
+    for job_name, job_def in jobs.items():
+        if not isinstance(job_def, dict):
+            continue
+        steps = job_def.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if not isinstance(uses, str) or not uses.startswith(_ACTION_USES):
+                continue
+            step_id = step.get("id") or step.get("name") or f"job:{job_name}/step:{i}"
+            if step_id not in targets:
+                continue
+            seen_targets.add(step_id)
+            with_map = step.get("with")
+            if not isinstance(with_map, dict):
+                unwired.append(
+                    f"{step_id}: with: is {with_map!r} (not a mapping); "
+                    "cannot carry the four owned keys"
+                )
+                continue
+            for key in OWNED_WITH_KEYS:
+                if key not in with_map:
+                    unwired.append(f"{step_id}: missing with.{key}")
+            env_map = step.get("env")
+            if env_map is not None and not isinstance(env_map, dict):
+                unwired.append(
+                    f"{step_id}: env: is {env_map!r} (not a mapping); "
+                    "cannot carry MERGECRAFT_TRACING_PROJECT"
+                )
+                continue
+            if isinstance(env_map, dict):
+                for key in OWNED_ENV_KEYS:
+                    if key not in env_map:
+                        unwired.append(f"{step_id}: missing env.{key}")
+    missing = targets - seen_targets
+    if missing:
+        unwired.append(f"selected step(s) not present in parsed workflow: {sorted(missing)}")
+    if unwired:
+        joined = "; ".join(unwired)
+        raise LogfireWorkflowError(f"mergeCraft step(s) not fully wired after mutation: {joined}")
+
+
+def _assert_unwired_semantics(text: str, *, step_identifiers: list[str]) -> None:
+    """Confirm every selected step has no surviving owned keys (for remove)."""
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return  # ``_ensure_yaml_loadable`` already raised; nothing to add.
+    if not isinstance(parsed, dict):
+        return
+    jobs = parsed.get("jobs")
+    if not isinstance(jobs, dict):
+        return
+    targets = set(step_identifiers)
+    stale: list[str] = []
+    owned = set(OWNED_WITH_KEYS) | set(OWNED_ENV_KEYS)
+    for job_name, job_def in jobs.items():
+        if not isinstance(job_def, dict):
+            continue
+        steps = job_def.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if not isinstance(uses, str) or not uses.startswith(_ACTION_USES):
+                continue
+            step_id = step.get("id") or step.get("name") or f"job:{job_name}/step:{i}"
+            if step_id not in targets:
+                continue
+            with_map = step.get("with")
+            if isinstance(with_map, dict):
+                for key in owned & set(with_map):
+                    stale.append(f"{step_id}: with.{key} still present")
+            env_map = step.get("env")
+            if isinstance(env_map, dict):
+                for key in owned & set(env_map):
+                    stale.append(f"{step_id}: env.{key} still present")
+    if stale:
+        joined = "; ".join(stale)
+        raise LogfireWorkflowError(
+            f"mergeCraft step(s) still carry owned keys after unwire: {joined}"
+        )
 
 
 def apply_logfire_wiring(
@@ -512,7 +641,12 @@ def apply_logfire_wiring(
             mod_env = True
         return block3, mod_with or mod_env
 
-    return _mutate_steps(text, step_selector=step_selector, mutate_one=_do)
+    return _mutate_steps(
+        text,
+        step_selector=step_selector,
+        mutate_one=_do,
+        post_mutation_check=_assert_wired_semantics,
+    )
 
 
 def _create_env_block(block: str, canonical: tuple[str, str]) -> str:
@@ -556,7 +690,12 @@ def remove_logfire_wiring(
         text = workflow_path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
         raise LogfireWorkflowError(f"workflow file not found: {workflow_path}") from exc
-    return _mutate_steps(text, step_selector=step_selector, mutate_one=_strip_owned_keys)
+    return _mutate_steps(
+        text,
+        step_selector=step_selector,
+        mutate_one=_strip_owned_keys,
+        post_mutation_check=_assert_unwired_semantics,
+    )
 
 
 def render_workflow_diff(workflow_path: Path, change: WiringChange, *, max_lines: int = 200) -> str:

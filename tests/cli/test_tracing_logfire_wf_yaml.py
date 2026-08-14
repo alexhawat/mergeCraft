@@ -570,3 +570,218 @@ def test_cli_wire_workflow_default_path_uses_relative_default(
     )
     assert result.exit_code == 0
     assert DEFAULT_WORKFLOW_RELATIVE_PATH in result.output
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 -- regression tests for the review comments on PR #207
+# ---------------------------------------------------------------------------
+#
+# Three behaviors were called out by the mergeCraft self-review on the
+# initial implementation. These tests pin them down so they cannot regress.
+#
+# 1. ``logfire_disable`` prints the "Logfire tracing disabled." completion
+#    message; ``unwire-workflow`` does not (it only strips workflow keys,
+#    the .env / secret clearing is the separate ``disable`` command).
+# 2. Wiring a step whose ``with:`` (or ``env:``) is inline -- e.g.
+#    ``with: prompt`` or ``env: {}`` -- refuses loudly instead of silently
+#    leaving the step partially wired.
+# 3. The post-mutation semantic check raises if a selected step's ``with:``
+#    is not a mapping at all (e.g. a ``run: |`` script body whose content
+#    fooled the line-based detector) or if the four owned keys are absent
+#    after a successful-looking syntax pass.
+
+
+_INLINE_WITH_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review
+        id: mergecraft_primary
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        with: prompt
+        env:
+          NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}
+"""
+
+
+_INLINE_ENV_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review
+        id: mergecraft_primary
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        with:
+          prompt: hi
+        env: {}
+"""
+
+
+# The mutator's ``child_line_re`` requires the line to match
+# ``^[ \\t]*(?P<k>[A-Za-z0-9_-]+):`` -- a colon-terminated key. A flow-style
+# list ``with: [...]`` is NOT a mapping and cannot accept owned keys; the
+# mutator's line-based view sees the ``with:`` line with an inline value
+# (``[...]``) and the inline-block guard must refuse the wiring.
+_FLOW_LIST_WITH_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review
+        id: mergecraft_primary
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        with: [foo, bar]
+        env:
+          NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}
+"""
+
+
+def test_apply_logfire_wiring_raises_on_inline_with_block(tmp_path: Path) -> None:
+    """A step with ``with: prompt`` (inline value) cannot accept owned keys.
+
+    Regression for review comment 2 on PR #207: previously the mutator
+    silently returned ``was_modified=False``, the CLI printed ``wrote``,
+    and a subsequent re-run falsely reported ``already wired``.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _INLINE_WITH_TEMPLATE)
+    with pytest.raises(LogfireWorkflowError) as exc:
+        apply_logfire_wiring(
+            workflow_path=workflow,
+            secret_name="LOGFIRE_TOKEN",
+            project_var_name="LOGFIRE_PROJECT",
+            step_selector="primary",
+            force=False,
+        )
+    msg = str(exc.value)
+    assert "with" in msg
+    assert "no children" in msg or "cannot insert" in msg
+    # And the workflow on disk is untouched.
+    assert workflow.read_text(encoding="utf-8") == _INLINE_WITH_TEMPLATE
+
+
+def test_apply_logfire_wiring_raises_on_empty_env_block(tmp_path: Path) -> None:
+    """A step with ``env: {}`` (flow-style empty mapping) cannot accept owned keys."""
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _INLINE_ENV_TEMPLATE)
+    with pytest.raises(LogfireWorkflowError) as exc:
+        apply_logfire_wiring(
+            workflow_path=workflow,
+            secret_name="LOGFIRE_TOKEN",
+            project_var_name="LOGFIRE_PROJECT",
+            step_selector="primary",
+            force=False,
+        )
+    msg = str(exc.value)
+    assert "env" in msg
+    assert "no children" in msg or "cannot insert" in msg
+
+
+def test_post_mutation_check_catches_inline_flow_with_block(tmp_path: Path) -> None:
+    """A flow-style ``with: [...]`` cannot accept owned keys.
+
+    Regression for review comment 3 on PR #207: previously the mutator's
+    line-based view of a flow-style list (``with: [foo, bar]``) saw an
+    inline value, returned ``was_modified=False``, the CLI printed
+    ``wrote``, and the structural assertion (which runs *after* the
+    mutation) would have raised on a fully-wired file -- but in the
+    pre-fix code the assertion didn't exist. With the inline-block guard
+    the mutator refuses loudly up front, and ``_assert_wired_semantics``
+    is the second-line defence for any future case that slips past the
+    guard.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _FLOW_LIST_WITH_TEMPLATE)
+    with pytest.raises(LogfireWorkflowError) as exc:
+        apply_logfire_wiring(
+            workflow_path=workflow,
+            secret_name="LOGFIRE_TOKEN",
+            project_var_name="LOGFIRE_PROJECT",
+            step_selector="primary",
+            force=False,
+        )
+    assert "with" in str(exc.value)
+    assert workflow.read_text(encoding="utf-8") == _FLOW_LIST_WITH_TEMPLATE
+
+
+def test_post_mutation_check_is_scoped_to_selected_steps(tmp_path: Path) -> None:
+    """The structural assertion only flags the *selected* steps.
+
+    With ``--step mergecraft_codex`` only the Codex fallback step is
+    targeted; the sibling Nous primary step remains unwired and must not
+    trigger the assertion. This protects the legitimate "wire a single
+    step out of N" use case.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, TWO_STEP_TEMPLATE)
+    change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="mergecraft_codex",
+        force=False,
+    )
+    assert change.was_modified
+    assert change.affected_steps == ["mergecraft_codex"]
+    # The Nous step is untouched -- and crucially, no LogfireWorkflowError
+    # raised even though it is unwired.
+    new = change.new_text
+    assert new.count('tracing: "true"') == 1
+
+
+def test_logfire_disable_prints_completion_message(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """``tracing logfire disable`` prints ``Logfire tracing disabled.``.
+
+    Regression for review comment 1 on PR #207: the completion message
+    was moved into ``unwire-workflow`` by accident; restore it here.
+    We stub out the env / gh-secret clearing (not what this test covers)
+    so the test runs offline.
+    """
+    from mergecraft.cli import tracing_logfire_cmd
+
+    # Stub the .env writer to a no-op so we don't touch real disk config.
+    monkeypatch.setattr(tracing_logfire_cmd, "_write_env_value", lambda *_a, **_kw: True)
+    # Stub the gh secret delete to a no-op so the test does not need gh CLI.
+    monkeypatch.setattr(tracing_logfire_cmd, "_delete_gh_secret", lambda **_kw: True)
+    result = runner.invoke(
+        app,
+        ["tracing", "logfire", "disable"],
+    )
+    assert result.exit_code == 0
+    assert "Logfire tracing disabled." in result.output
+
+
+def test_logfire_unwire_workflow_does_not_print_disabled_message(
+    tmp_path: Path,
+) -> None:
+    """``unwire-workflow`` must NOT print the ``disable`` completion message.
+
+    It only strips workflow keys; the .env / secret clearing is the
+    separate ``disable`` command. Pair with the regression above so the
+    two surfaces stay disambiguated.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, ONE_STEP_TEMPLATE)
+    runner.invoke(
+        app,
+        ["tracing", "logfire", "wire-workflow", "--workflow", str(workflow), "--apply"],
+    )
+    result = runner.invoke(
+        app,
+        ["tracing", "logfire", "unwire-workflow", "--workflow", str(workflow), "--apply"],
+    )
+    assert result.exit_code == 0
+    assert "Logfire tracing disabled." not in result.output
