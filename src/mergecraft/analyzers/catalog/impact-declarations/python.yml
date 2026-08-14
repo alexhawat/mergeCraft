@@ -1,0 +1,8 @@
+id: impact-decl-python
+language: python
+rule:
+  any:
+    - kind: function_definition
+      has: { field: name, pattern: $NAME }
+    - kind: class_definition
+      has: { field: name, pattern: $NAME }

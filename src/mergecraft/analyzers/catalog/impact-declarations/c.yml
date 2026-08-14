@@ -1,0 +1,18 @@
+id: impact-decl-c
+language: c
+rule:
+  any:
+    - kind: function_definition
+      has:
+        field: declarator
+        has: { field: declarator, pattern: $NAME }
+    - kind: declaration
+      has:
+        field: declarator
+        has: { field: declarator, pattern: $NAME }
+    - kind: struct_specifier
+      has: { field: name, pattern: $NAME }
+    - kind: union_specifier
+      has: { field: name, pattern: $NAME }
+    - kind: enum_specifier
+      has: { field: name, pattern: $NAME }
