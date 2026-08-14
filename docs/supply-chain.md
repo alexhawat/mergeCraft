@@ -1,8 +1,9 @@
 # Supply chain — image scans and vulnerability waivers
 
 mergeCraft publishes container images from [`.github/workflows/ci-cd.yml`](../.github/workflows/ci-cd.yml).
-The `sbom-scan` job runs Trivy on every digest that can be promoted to `:latest` or
-`:analyzers`, and **HIGH/CRITICAL findings block the pipeline** unless explicitly waived.
+The `sbom-scan` job runs Trivy on every digest that can be promoted to `:latest` /
+`:analyzers` (main) or `:rc` / `:analyzers-rc` (pre-0.0.1), and **HIGH/CRITICAL
+findings block the pipeline** unless explicitly waived.
 
 This policy is part of the [0.0.1 distribution checklist](https://github.com/alexhawat/mergeCraft/issues/141).
 

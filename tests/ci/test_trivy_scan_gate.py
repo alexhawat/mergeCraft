@@ -75,40 +75,32 @@ def test_promote_latest_channel_is_main_only() -> None:
     assert "refs/heads/main" not in analyzers_rc
 
 
-def _docker_tag_script(step_name: str) -> str:
-    content = read_text(".github/workflows/docker.yml")
-    match = re.search(
-        rf"name:\s*{re.escape(step_name)}.*?run:\s*\|\s*\n(?P<script>.*?)(?:\n      - name:|\Z)",
-        content,
-        re.DOTALL,
-    )
-    assert match is not None, f"{step_name!r} step not found in docker.yml"
-    return match.group("script")
+def test_docker_yml_never_pushes_to_the_registry() -> None:
+    """PR #201 follow-up (finding 6736461a / 661a2231) — docker.yml must be a
+    pure build-and-smoke-test workflow, never a second registry writer, on
+    any trigger.
 
-
-def test_docker_yml_never_pushes_a_mutable_tag() -> None:
-    """PR #201 follow-up — ci-cd.yml's promote job is the sole owner of every
-    mutable/channel tag (:latest, :analyzers, :rc, :analyzers-rc). docker.yml
-    is a second, unsynchronized pipeline; it may only push the immutable SHA
-    tag, never duplicate a moving one alongside ci-cd.yml's promote job.
+    ci-cd.yml's build-images/promote jobs are the sole publishers of the
+    canonical SHA tag and every mutable/channel tag. docker/build-push-action
+    adds buildx provenance by default, so two independent builds of the same
+    commit are not guaranteed the same digest — a second pusher here could
+    silently replace the SHA tag ci-cd.yml's sbom-scan/sign-attest jobs pull
+    BY NAME (not by the digest build-images actually captured), between two
+    workflows with no ordering guarantee (separate concurrency groups).
     """
-    for step_name, mutable_tags in (
-        (
-            "Resolve slim image tags",
-            ("ghcr.io/alexhawat/mergecraft:latest", "ghcr.io/alexhawat/mergecraft:rc"),
-        ),
-        (
-            "Resolve analyzers image tags",
-            (
-                "ghcr.io/alexhawat/mergecraft:analyzers'",
-                "ghcr.io/alexhawat/mergecraft:analyzers-rc",
-            ),
-        ),
-    ):
-        script = _docker_tag_script(step_name)
-        for tag in mutable_tags:
-            assert tag not in script, f"{step_name!r} still pushes mutable tag {tag!r}"
-        assert "${GITHUB_SHA}" in script, f"{step_name!r} lost its SHA tag"
+    doc = load_workflow("docker.yml")
+    permissions = doc.get("permissions") or {}
+    assert "packages" not in permissions, (
+        "docker.yml must not declare packages: write — it never pushes"
+    )
+
+    build = job(doc, "build")
+    for step_name in ("Build slim", "Build analyzers"):
+        step = _step(build, step_name)
+        with_block = step.get("with") or {}
+        assert with_block.get("push") is False, f"{step_name!r} must set push: false"
+        tags = str(with_block.get("tags", ""))
+        assert "ghcr.io" not in tags, f"{step_name!r} still tags for the registry: {tags!r}"
 
 
 def test_scan_gate_blocks_every_ref_that_can_publish() -> None:

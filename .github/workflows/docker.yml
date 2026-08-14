@@ -1,7 +1,21 @@
 # SPDX-License-Identifier: MIT
 name: Docker
 
-# Advisory/manual only on PRs (catalog F.2). Post-merge publish runs via CI/CD + workflow_dispatch.
+# Build-and-smoke-test only — NEVER pushes to the registry, on any trigger.
+# ci-cd.yml is the sole publisher of both the canonical SHA tag and every
+# mutable/channel tag (:latest, :analyzers, :rc, :analyzers-rc). This
+# workflow used to also push on `push` events; that was removed (PR #201
+# review) because docker/build-push-action's buildx provenance means two
+# independent builds of the same commit are NOT guaranteed to produce the
+# same digest, so a late push here could overwrite ci-cd.yml's SHA tag
+# in-place between its build-images and sbom-scan/sign-attest jobs — those
+# pull the SHA tag BY NAME, not by the digest build-images actually
+# captured, so the wrong image could get scanned/signed/promoted. Two
+# concurrency groups with no ordering guarantee between them (docker-*-<ref>
+# vs ci-cd-*-<ref>) means "harmless because same commit" does not hold.
+# See tests/ci/test_trivy_scan_gate.py::test_docker_yml_never_pushes_a_mutable_tag
+# for the (deliberately narrower) mutable-tag half of this contract; ci-cd.yml
+# remains the only workflow with `packages: write` at all.
 on:
   push:
     branches: [main, pre-0.0.1]
@@ -17,7 +31,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: docker-${{ github.workflow }}-${{ github.ref }}
@@ -31,65 +44,29 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Resolve slim image tags
-        id: slim-tags
-        # Never a mutable/channel tag (:latest, :rc, …) here — ci-cd.yml's
-        # promote job is the sole owner of those (build once → SBOM → scan →
-        # sign → attest → promote). This step only pushes the immutable SHA
-        # tag, which ci-cd.yml's own build-images job also pushes with
-        # identical content — redundant but harmless, unlike a mutable tag
-        # duplicated across two unsynchronized pipelines.
-        run: |
-          {
-            echo 'tags<<EOF'
-            echo "ghcr.io/alexhawat/mergecraft:${GITHUB_SHA}"
-            if [ "${{ github.event_name }}" != "push" ]; then
-              echo 'mergecraft:ci'
-            fi
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
       - name: Build slim
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile
-          push: ${{ github.event_name == 'push' }}
-          load: ${{ github.event_name != 'push' }}
-          tags: ${{ steps.slim-tags.outputs.tags }}
+          push: false
+          load: true
+          tags: mergecraft:ci
           cache-from: type=gha,scope=mergeCraft-slim
           cache-to: type=gha,mode=max,scope=mergeCraft-slim
-      - name: Resolve analyzers image tags
-        id: analyzers-tags
-        # Same "SHA tag only, no mutable channel" rule as the slim tags above.
-        run: |
-          {
-            echo 'tags<<EOF'
-            echo "ghcr.io/alexhawat/mergecraft:analyzers-${GITHUB_SHA}"
-            if [ "${{ github.event_name }}" != "push" ]; then
-              echo 'mergecraft-analyzers:ci'
-            fi
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
       - name: Build analyzers
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile.analyzers
-          push: ${{ github.event_name == 'push' }}
-          load: ${{ github.event_name != 'push' }}
-          tags: ${{ steps.analyzers-tags.outputs.tags }}
+          push: false
+          load: true
+          tags: mergecraft-analyzers:ci
           cache-from: type=gha,scope=mergeCraft-analyzers
           cache-to: type=gha,mode=max,scope=mergeCraft-analyzers
       - name: Entrypoint smoke (slim)
-        if: github.event_name != 'push'
         run: docker run --rm mergecraft:ci --help
       - name: Entrypoint smoke (analyzers)
-        if: github.event_name != 'push'
         run: |
           docker run --rm mergecraft-analyzers:ci --help
           docker run --rm --entrypoint /bin/sh mergecraft-analyzers:ci -c "which actionlint zizmor shellcheck hadolint"
