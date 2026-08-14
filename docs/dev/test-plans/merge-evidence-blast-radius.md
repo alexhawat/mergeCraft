@@ -4,7 +4,7 @@ Wave plan: `.ignorelocal/waves/issues-merge-evidence-gating-wave-plan.md`
 Worktree: `mergecraft-evi-b-blast` @ `wave/evi-b-blast`
 Tests: `tests/evidence/test_blast_radius.py`
 
-This plan mirrors the structural shape of `docs/test-plans/merge-evidence-gating.md`
+This plan mirrors the structural shape of `docs/dev/test-plans/merge-evidence-gating.md`
 (Batch A test plan) so the WB-T close-out is directly comparable to WA-T.
 
 ## Locked decisions exercised

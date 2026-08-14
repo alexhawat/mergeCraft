@@ -386,7 +386,7 @@ After W4 lands:
 ## Notes
 
 - No `src/` or production-doc edits in this wave; the test plan lives at
-  `docs/test-plans/issues-provider-routing.md` and is **tracked** in this
+  `docs/dev/test-plans/issues-provider-routing.md` and is **tracked** in this
   repo (not gitignored — confirmed at wave time).
 - The W1 work does not touch the primary checkout's
   `.ignorelocal/waves/issues-provider-routing-wave-plan.md` — that copy is

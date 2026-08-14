@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -153,6 +153,36 @@ def _pr_repo_with_two_commits(tmp_path: Path) -> tuple[Path, str, str]:
     return clone, first, head
 
 
+def _pr_repo_with_impact_enabled(tmp_path: Path) -> tuple[Path, str]:
+    """Build an origin whose PR branch enables ``analyzers.impact`` and adds a
+    declaration, for exercising the ``impactPath`` wiring in ``checkout_pr``."""
+    origin = tmp_path / "origin.git"
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init")
+    _git(work, "config", "user.email", "test@example.com")
+    _git(work, "config", "user.name", "Test")
+    (work / "README.md").write_text("base\n", encoding="utf-8")
+    _git(work, "add", "README.md")
+    _git(work, "commit", "-m", "base")
+    _git(work, "branch", "-M", "base")
+    _git(work, "checkout", "-b", "feature")
+    (work / ".mergecraft").mkdir()
+    (work / ".mergecraft" / "config.yaml").write_text(
+        "analyzers:\n  impact: true\n", encoding="utf-8"
+    )
+    (work / "src").mkdir()
+    (work / "src" / "app.py").write_text("def changed():\n    return True\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-m", "enable impact + add app.py")
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=work, text=True).strip()
+    _git(work, "clone", "--bare", str(work), str(origin))
+    _git(work, "push", str(origin), "feature:refs/pull/1/head")
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", str(origin), str(clone))
+    return clone, head
+
+
 def _read(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
@@ -161,7 +191,15 @@ def _exists(path: str) -> bool:
     return Path(path).is_file()
 
 
-def _ctx_for(repo: Path, github: GitHubClient, tmp_path: Path, *, mode: str) -> ToolContext:
+def _ctx_for(
+    repo: Path,
+    github: GitHubClient,
+    tmp_path: Path,
+    *,
+    mode: str,
+    trust_tier: Literal["trusted", "untrusted"] = "trusted",
+    analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto",
+) -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=str(repo))
     state.selected_mode = mode
     (tmp_path / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -173,6 +211,8 @@ def _ctx_for(repo: Path, github: GitHubClient, tmp_path: Path, *, mode: str) -> 
         github_installation_token="",
         git_token="",
         api_token="",
+        trust_tier=trust_tier,
+        analyzers_mode=analyzers_mode,
         modes=compute_modes("claude"),
         tool_state=state,
         mcp_server_url="",
@@ -261,3 +301,82 @@ async def test_incremental_key_is_omitted_when_the_prior_sha_is_unreachable(
     payload = await _checkout(ctx)
 
     assert "incrementalDiffPath" not in payload
+
+
+@pytest.mark.asyncio
+async def test_impact_path_present_when_enabled_and_binary_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.mcp import checkout as checkout_module
+
+    repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda: "ast-grep")
+    github = _StubGitHub(head_sha=head_sha, reviews=[])
+    ctx = _ctx_for(repo, github, tmp_path, mode="Review")
+
+    payload = await _checkout(ctx)
+
+    assert "impactPath" in payload
+    assert _exists(payload["impactPath"])
+    data = json.loads(_read(payload["impactPath"]))
+    decl_names = {r["declaration"] for r in data["impactPath"]}
+    assert "changed" in decl_names
+
+
+@pytest.mark.asyncio
+async def test_impact_path_omitted_when_ast_grep_binary_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.mcp import checkout as checkout_module
+
+    repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda: None)
+    github = _StubGitHub(head_sha=head_sha, reviews=[])
+    ctx = _ctx_for(repo, github, tmp_path, mode="Review")
+
+    payload = await _checkout(ctx)
+
+    assert "impactPath" not in payload
+
+
+@pytest.mark.asyncio
+async def test_impact_path_omitted_for_untrusted_checkout_without_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fork PR (untrusted trust tier) enabling analyzers.impact in its own
+    checked-out config must not get ast-grep run unsandboxed against its own
+    source — outside CI there is no sandbox isolation available, so the
+    artifact is suppressed rather than executed without isolation (D7)."""
+    from mergecraft.mcp import checkout as checkout_module
+
+    repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda: "ast-grep")
+    github = _StubGitHub(head_sha=head_sha, reviews=[])
+    ctx = _ctx_for(repo, github, tmp_path, mode="Review", trust_tier="untrusted")
+
+    payload = await _checkout(ctx)
+
+    assert "impactPath" not in payload
+
+
+@pytest.mark.asyncio
+async def test_impact_path_omitted_when_operator_disables_analyzers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The operator's effective analyzer policy (analyzers: off) must win over
+    whatever a PR sets in its own analyzers.impact — a PR cannot self-enable
+    ast-grep execution once the operator has switched analyzers off."""
+    from mergecraft.mcp import checkout as checkout_module
+
+    repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda: "ast-grep")
+    github = _StubGitHub(head_sha=head_sha, reviews=[])
+    ctx = _ctx_for(repo, github, tmp_path, mode="Review", analyzers_mode="off")
+
+    payload = await _checkout(ctx)
+
+    assert "impactPath" not in payload

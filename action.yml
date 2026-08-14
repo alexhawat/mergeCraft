@@ -98,8 +98,11 @@ inputs:
       and exposes it to the harness as `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`.
       Never inline the API key value here — reference the env-var *name*
       only (convention 7). Wire the secret via the workflow's `env:` block
-      from a GitHub Actions secret (`${{ secrets.MY_PROVIDER_API_KEY }}`).
-      See issue #71.
+      from a GitHub Actions secret named `MY_PROVIDER_API_KEY` (interpolated
+      in your workflow YAML, not written literally here — a literal
+      `secrets.*` expression inside this file's own description text fails
+      action.yml validation, since `secrets` isn't a valid context for a
+      composite action's metadata). See issue #71.
     required: false
   output_schema:
     description: "JSON Schema (draft-07) for structured output validation."
@@ -128,16 +131,16 @@ inputs:
     description: |
       Tracing shorthand (W8.5 / W7.7): ``local_files`` / ``logfire`` /
       ``otel``. Wins over the config block. ``logfire`` requires the
-      optional ``[tracing]`` extra plus ``${{ secrets.LOGFIRE_TOKEN }}``;
-      ``otel`` requires an ``otel-endpoint``.
+      optional ``[tracing]`` extra plus a `LOGFIRE_TOKEN` secret wired via
+      `logfire-token` below; ``otel`` requires an ``otel-endpoint``.
     required: false
     default: ""
   logfire-token:
     description: |
-      Direct logfire token (W8.5 / W7.7). Wire as
-      ``${{ secrets.LOGFIRE_TOKEN }}`` so the secret never appears in
-      the workflow file. Held at runtime only; never inlined into
-      config dumps.
+      Direct logfire token (W8.5 / W7.7). Wire from a `LOGFIRE_TOKEN`
+      GitHub Actions secret (interpolated in your workflow YAML, not written
+      literally here) so the secret never appears in the workflow file.
+      Held at runtime only; never inlined into config dumps.
     required: false
     default: ""
   otel-endpoint:

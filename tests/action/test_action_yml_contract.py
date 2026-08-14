@@ -271,3 +271,21 @@ class TestActionYmlHygiene:
             assert expr.startswith("${{"), (
                 f"{env_var} hard-codes a value instead of referencing inputs.*: {expr!r}"
             )
+
+    def test_no_secrets_expression_in_manifest_text(self) -> None:
+        """A ``${{ secrets.* }}`` expression anywhere in action.yml fails to load.
+
+        GitHub evaluates ``${{ ... }}`` wherever it appears lexically in a
+        composite action's YAML — including inside plain ``description:``
+        prose meant only as a consumer-facing example — and ``secrets`` is
+        not a valid named-value in a composite action's own metadata scope.
+        This previously broke every consumer pinning past a specific commit
+        with "Unrecognized named-value: 'secrets'" at action-load time, not
+        at review time, so it surfaced only when something (a self-review
+        pin bump) finally pinned past the offending commit. Parsed YAML
+        loses the literal ``${{ }}`` text once it's inside a string value,
+        so this greps the raw file rather than the parsed dict.
+        """
+        raw = _ACTION_YML.read_text(encoding="utf-8")
+        offending = [line for line in raw.splitlines() if "${{" in line and "secrets." in line]
+        assert not offending, f"literal secrets.* expression(s) in action.yml: {offending}"
