@@ -24,6 +24,7 @@ Standards and conventions for all code written in mergeCraft. Follow these consi
 - [Tool Output Conventions](#tool-output-conventions)
 - [Git & Commits](#git--commits)
 - [Config File Convention](#config-file-convention)
+- [GitHub Actions YAML Hygiene](#github-actions-yaml-hygiene)
 - [Enforcement](#enforcement)
 
 ---
@@ -767,6 +768,16 @@ staticChecks:
   - make lint
   - make test
 ```
+
+---
+
+## GitHub Actions YAML Hygiene
+
+**Never write a literal `${{ ... }}` GitHub Actions expression inside documentation or description text in `action.yml` or workflow YAML** — including `inputs.*.description` prose meant purely as a consumer-facing example. GitHub evaluates `${{ ... }}` wherever it appears *lexically* in the file, regardless of the field's semantics — a plain `description:` scalar gets the same treatment as an executable field like `runs.env`, `outputs.*.value`, or a `with:` block. A composite action's own metadata scope does not expose every context a consumer's workflow does (`secrets` in particular is **not** a valid named-value there), so an invalid-context reference breaks the action's *load* step — not a review-time lint failure, but "Unrecognized named-value" at load time for every consumer pinning past that commit, with no signal until something actually pins past it. (`c498e82` — a `${{ secrets.MY_PROVIDER_API_KEY }}` example copy-pasted into three `description:` fields broke `action.yml` load for months before mergeCraft's own self-review pin bump surfaced it.)
+
+**To reference a secret or input in documentation instead:** name it without the `${{ }}` wrapper — plain or backtick-quoted prose (`` a `MY_PROVIDER_API_KEY` secret, wired via your workflow's `env:` block ``) — never the live expression syntax, even though the literal text looks harmless in an editor.
+
+This is enforced by `scripts/check_action_yml_hygiene.py` (`make lint` / pre-commit) and the default pattern-scanner ruleset (`semgrep-default-rules.yml`'s `action-yml-description-expression` rule).
 
 ---
 

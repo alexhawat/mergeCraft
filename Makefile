@@ -43,11 +43,15 @@ install: ## Sync dev environment after dependency changes
 lockcheck: ## Fail if uv.lock is out of date
 	$(UV) lock --check
 
-lint: ## Ruff check + formatting + loguru-only + hook-pins-check
+lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-check
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
+	$(MAKE) action-yml-hygiene-check
 	$(MAKE) hook-pins-check
+
+action-yml-hygiene-check: ## Fail when an action.yml description embeds a literal ${{ }} expression
+	$(UV) run python scripts/check_action_yml_hygiene.py
 
 hook-pins-check: ## Fail when .pre-commit-config.yaml hook revs drift from pyproject.toml pins
 	$(UV) run python scripts/check_hook_pins.py

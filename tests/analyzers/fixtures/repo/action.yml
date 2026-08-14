@@ -1,0 +1,16 @@
+name: "fixture composite action"
+description: "Planted action.yml hygiene sink (catalog C3 / action-yml-hygiene)"
+
+inputs:
+  token:
+    description: >-
+      Wire via a GitHub Actions secret named FIXTURE_TOKEN — planted
+      copy-paste mistake for pattern-scanner coverage:
+      `${{ secrets.FIXTURE_TOKEN }}`
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - run: echo hi
+      shell: bash

@@ -65,6 +65,36 @@ def test_pattern_scanner_catches_planted_sink(tool_id: str, adapter_fixture_repo
     assert matches, f"{tool_id} must catch taint-style sink at {path}:{line}"
 
 
+def test_semgrep_default_ruleset_catches_action_yml_expression_footgun(
+    adapter_fixture_repo: Path,
+) -> None:
+    """c498e82 regression: default semgrep ruleset flags ``${{`` inside ``description:``.
+
+    ``tests/analyzers/fixtures/repo/action.yml`` plants the exact shape of
+    the incident this guards against — a ``description:`` field embedding a
+    literal ``${{ secrets.* }}`` example meant only as consumer-facing
+    documentation. GitHub evaluates that expression lexically regardless of
+    field semantics, which breaks the action's *load* step for every
+    consumer. See ``docs/_standards/coding-standards.md`` and
+    ``scripts/check_action_yml_hygiene.py`` for the other two layers of
+    defense against this same class of bug.
+    """
+    if "semgrep" not in _catalog_ids():
+        pytest.fail("semgrep manifest missing from catalog")
+
+    result = _run("semgrep", adapter_fixture_repo, ["action.yml"])
+    assert not result.skipped, result.skip_reason
+    matches = [
+        f
+        for f in result.findings
+        if f.path == "action.yml" and "action-yml-description-expression" in f.rule_id
+    ]
+    assert matches, (
+        "default semgrep ruleset must flag the planted `${{` inside "
+        f"action.yml's description: text; got {result.findings!r}"
+    )
+
+
 def test_taint_finding_requires_verification_before_review(adapter_fixture_repo: Path) -> None:
     pipeline = import_module("mergecraft.analyzers.pipeline")
     verifier = import_module("mergecraft.agents.verifier")
