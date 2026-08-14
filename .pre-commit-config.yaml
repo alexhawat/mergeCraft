@@ -24,6 +24,13 @@ repos:
         pass_filenames: false
         files: ^src/mergecraft/.*\.py$
 
+      - id: mergecraft-action-yml-hygiene
+        name: action.yml hygiene (no ${{ }} in description text)
+        entry: uv run python scripts/check_action_yml_hygiene.py
+        language: system
+        pass_filenames: false
+        files: (^|/)action\.ya?ml$
+
       - id: conventional-commit
         name: Conventional Commits
         entry: uv run python scripts/check_conventional_commit.py

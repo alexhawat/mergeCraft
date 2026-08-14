@@ -1,6 +1,6 @@
 id: ast-grep
 category: security
-languages: ["python", "javascript", "typescript", "go", "java", "rust", "c", "cpp"]
+languages: ["python", "javascript", "typescript", "go", "java", "rust", "c", "cpp", "yaml"]
 detect:
   files:
     - "*.py"
@@ -11,6 +11,8 @@ detect:
     - "*.java"
     - "*.rs"
     - "*.{c,h,cpp,hpp,cc,cxx}"
+    - "action.yml"
+    - "action.yaml"
 command:
   - ast-grep
   - scan

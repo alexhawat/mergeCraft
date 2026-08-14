@@ -9,7 +9,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 |----|----------|-----------|---------|---------|-------|-----------------|-------|
 | `actionlint` | ci | — | auto | managed | untrusted | — | — |
 | `agentsec` | security | — | enabled | repo-native | untrusted | — | — |
-| `ast-grep` | security | python, javascript, typescript, go, java, rust, c, cpp | auto | managed | untrusted | pattern-scanner | Substrate for a future native policy engine — not built in C3. |
+| `ast-grep` | security | python, javascript, typescript, go, java, rust, c, cpp, yaml | auto | managed | untrusted | pattern-scanner | Substrate for a future native policy engine — not built in C3. |
 | `basedpyright` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `biome` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `blinter` | lint | batch | disabled | managed | trusted | — | requires non-Linux runner — Windows batch lint not supported on Linux (C6) |
@@ -36,7 +36,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `markdownlint` | lint | markdown | disabled | repo-native | trusted | — | — |
 | `mypy` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `oasdiff` | contract | — | auto | managed | untrusted | — | — |
-| `opengrep` | security | python, javascript, typescript, go, java, ruby, rust | disabled | managed | untrusted | pattern-scanner | — |
+| `opengrep` | security | python, javascript, typescript, go, java, ruby, rust, yaml | disabled | managed | untrusted | pattern-scanner | — |
 | `osv-scanner` | vuln | — | auto | managed | untrusted | dependency-vuln | — |
 | `oxlint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `phpcs` | lint | php | disabled | repo-native | trusted | php-lint | — |
@@ -51,7 +51,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `regal` | lint | rego | disabled | managed | trusted | — | — |
 | `rubocop` | lint | ruby | disabled | repo-native | trusted | ruby-lint | — |
 | `ruff` | lint | python | auto | repo-native | trusted | python-lint | — |
-| `semgrep` | security | python, javascript, typescript, go, java, ruby, rust | enabled | managed | untrusted | pattern-scanner | — |
+| `semgrep` | security | python, javascript, typescript, go, java, ruby, rust, yaml | enabled | managed | untrusted | pattern-scanner | — |
 | `shellcheck` | lint | shell | auto | managed | untrusted | — | — |
 | `shopify-theme-check` | lint | liquid | disabled | repo-native | trusted | — | manifest-only — Shopify Theme Check not bundled on Linux runners (C6 out of scope) |
 | `smarty-lint` | lint | smarty | disabled | repo-native | trusted | — | manifest-only — Smarty Lint not bundled on Linux runners (C6 out of scope) |
