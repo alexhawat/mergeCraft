@@ -227,6 +227,28 @@ async def _checkout(ctx: ToolContext) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+async def test_checkout_pr_succeeds_when_local_branch_already_checked_out(
+    tmp_path: Path,
+) -> None:
+    """Regression: a second checkout_pr call in the same shared workspace
+    (e.g. a Nous review, then a Codex fallback, both calling checkout_pr
+    against the same /github/workspace within one job) must not fail with
+    "refusing to fetch into branch ... checked out" just because the first
+    call already left HEAD on the PR's local branch.
+    """
+    clone, _first, head = _pr_repo_with_two_commits(tmp_path)
+    github = _StubGitHub(head_sha=head, reviews=[])
+    ctx = _ctx_for(clone, github, tmp_path, mode="Review")
+
+    first = await _checkout(ctx)
+    second = await _checkout(ctx)
+
+    assert first["pullNumber"] == 1
+    assert second["pullNumber"] == 1
+    assert second["localBranch"] == "pr-1"
+
+
+@pytest.mark.asyncio
 async def test_incremental_diff_covers_only_commits_since_the_last_review(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
