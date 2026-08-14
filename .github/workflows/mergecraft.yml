@@ -393,7 +393,14 @@ jobs:
         # agent_subprocess_env); a1c10ef is #190 merged into pre-0.0.1. Lesson for whoever
         # bumps this next: landing a fix on pre-0.0.1/main does NOT update this pin — it is a
         # literal SHA and must be re-bumped explicitly every time, even right after a sync PR.
-        uses: alexhawat/mergeCraft@a1c10ef85c23afbd06f1bca7d2b371a32c3c5b21 # pre-0.0.1
+        # 2026-08-14 (fourth bump, same day): #190's fix only redirected $HOME; Codex uses
+        # its own $CODEX_HOME (and Gemini/Claude their own .gemini/.claude), each created
+        # root-owned by write_mcp_config()/_setup_codex_auth() before the setpriv drop —
+        # same bug shape, different path, still EACCES ("Permission denied (os error 13)"
+        # initializing the Codex app-server). Fixed in #194 (prepare_workspace_for_agent()
+        # chown as the last step); f5b070b is #194 merged into pre-0.0.1, synced to main
+        # via #195. Lesson holds: re-bump this SHA explicitly, every time.
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: 25m
@@ -481,9 +488,10 @@ jobs:
         # 2026-08-07: rolled back from 88c6f419 to 8d747f39 — Codex stdin hang regression. See PR #246.
         # 2026-08-14: re-bumped to pre-0.0.1 tip (0ab5388), then to f951af0 (#186: action.yml
         # load-breaking `${{ secrets.X }}` in description text), then to a1c10ef (#190:
-        # setpriv never resets $HOME, agent subprocess EACCES post-privilege-drop) — see the
-        # matching comment on the Nous step above for why.
-        uses: alexhawat/mergeCraft@a1c10ef85c23afbd06f1bca7d2b371a32c3c5b21 # pre-0.0.1
+        # setpriv never resets $HOME, agent subprocess EACCES post-privilege-drop), then to
+        # f5b070b (#194: $CODEX_HOME/.gemini/.claude also created root-owned before the
+        # drop, same bug shape) — see the matching comment on the Nous step above for why.
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
