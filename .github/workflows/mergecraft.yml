@@ -57,8 +57,10 @@
 # NOUS_API_KEY the primary is inert and Codex is the only reviewer; without
 # CODEX_AUTH_JSON / OPENAI_API_KEY, Nous is the only reviewer.
 #
-# Trigger: pull_request_target (not pull_request). GitHub skips pull_request
-# workflows when refs/pull/N/merge cannot be built (merge conflicts), so the
+# Trigger: pull_request_target for fork PRs, pull_request for same-repo PRs
+# (see the D14 gate-3 note near the bottom of this comment block for why both
+# now exist). GitHub skips pull_request workflows when refs/pull/N/merge
+# cannot be built (merge conflicts), so the
 # ruleset check require-mergecraft-review sits unreported for as long as the
 # conflict lasts. pull_request_target always fires on synchronize even with
 # merge conflicts, so the review still lands while the PR is conflicted.
@@ -76,10 +78,24 @@
 # Therefore a PR that edits this file cannot review itself with its own changes;
 # they take effect on the next PR after merge.
 #
-# The bootstrap `pull_request` trigger has been removed: running BOTH triggers made
-# each synchronize fire two runs that resolved to the SAME concurrency group (see
-# below) — with cancel-in-progress they cancelled each other, and a cancelled
-# `mergecraft review` is a non-success on the required check. Do not re-add it.
+# A `pull_request` trigger returned (PR #200 / D14 gate 3): self-review needs a
+# genuine non-fork `pull_request` event for derive_trust_tier() (src/mergecraft/
+# analyzers/trust.py) to legitimately return "trusted" — pull_request_target is
+# hardcoded "untrusted" regardless of fork status, by design (D14), so no same-repo
+# PR could ever earn a real APPROVE while pull_request_target was the only trigger.
+#
+# This is NOT the same shape as the bootstrap trigger removed below: that removal
+# was never about pull_request being unsafe to trigger on — it was that BOTH
+# triggers shared ONE concurrency group, so `cancel-in-progress` force-cancelled
+# whichever run lost the race, and a cancelled `mergecraft review` is a non-success
+# on the required check. This return avoids that by (1) keying the concurrency
+# group on `github.event_name` too, so the two triggers' runs never share a group
+# and never cancel each other, and (2) gating the `review` (and `wait-for-ci`) job
+# so pull_request_target only does real work for fork PRs and pull_request only for
+# same-repo PRs — the "wrong" lane's job cleanly SKIPS rather than races, and a
+# skipped required check does not block merges. Both triggers still fire on every
+# push regardless of fork status (GitHub does not support conditional trigger
+# registration); the mutual exclusivity lives entirely in the job-level `if`s.
 #
 # Same-repo guard below keeps fork PRs from receiving secrets (prior pull_request
 # behavior). mergeCraft uses checkout_pr + API with push/shell disabled — no
@@ -114,6 +130,12 @@ on:
     # .coderabbit.yaml `pre-.*` coverage).
     branches: [main, develop, test-pre, "pre-*"]
     types: [opened, synchronize, reopened, ready_for_review]
+  pull_request:
+    # Same-repo PRs only in practice — the `review` / `wait-for-ci` job `if`s
+    # skip this lane for forks. Exists so derive_trust_tier() sees a genuine
+    # non-fork `pull_request` event (D14 gate 3). See the trigger comment above.
+    branches: [main, develop, test-pre, "pre-*"]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       prompt:
@@ -127,7 +149,10 @@ permissions:
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
   # so concurrent reviews do not cancel each other (GitHub Nov 2025 policy).
-  group: mergecraft-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # event_name is also part of the key so the pull_request_target (fork) and
+  # pull_request (same-repo) lanes never share a group and never cancel each
+  # other — see the trigger comment above.
+  group: mergecraft-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -142,7 +167,16 @@ jobs:
   # context, which is the pre-existing behavior.
   wait-for-ci:
     name: mergecraft wait for CI
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    # Same lane-exclusivity clause as the `review` job below: only the lane that
+    # will actually run a review bothers waiting for CI (avoids burning a runner
+    # on the lane that is about to skip).
+    if: >-
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -154,7 +188,7 @@ jobs:
     steps:
       - name: Wait for CI checks on the PR head SHA
         id: wait
-        if: github.event_name == 'pull_request_target'
+        if: github.event_name == 'pull_request_target' || github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -238,9 +272,21 @@ jobs:
     # `always()` keeps the required check reporting even if the (fail-open) wait
     # job errors out on a runner fault; a skipped wait job still skips the review,
     # because the draft/dispatch condition below is the same one it uses.
+    #
+    # The trailing clause is the lane-exclusivity gate (D14 gate 3 / PR #200):
+    # pull_request_target only reviews fork PRs, pull_request only reviews
+    # same-repo PRs, workflow_dispatch always runs. Both triggers fire on every
+    # push regardless of fork status, so this is what keeps exactly one lane
+    # doing real work per push — see the trigger comment near the top of the
+    # file for the concurrency-group half of that story.
     if: >-
       always() &&
-      (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false)
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -312,7 +358,7 @@ jobs:
           CI_CHECK_SUITE_ID: ${{ needs.wait-for-ci.outputs.check_suite_id }}
         run: |
           set -euo pipefail
-          if [ "${EVENT_NAME}" != "pull_request_target" ]; then
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
             text="${DISPATCH_PROMPT:-Review the current pull request.}"
           else
             # Codex presents mergeCraft MCP tools as mergecraft_. Naming the
@@ -351,7 +397,7 @@ jobs:
         if: >-
           env.HAS_NOUS == 'true' &&
           env.HAS_CODEX == 'true' &&
-          github.event_name == 'pull_request_target'
+          github.event_name != 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -445,7 +491,7 @@ jobs:
         run: |
           set -euo pipefail
           need="false"
-          if [ "${EVENT_NAME}" = "pull_request_target" ]; then
+          if [ "${EVENT_NAME}" != "workflow_dispatch" ]; then
             latest=""
             for attempt in $(seq 1 3); do
               if latest="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
@@ -557,7 +603,7 @@ jobs:
         # Retries below only smooth over a single transient API blip; once
         # retries are exhausted without success, this step exits 1.
         if: >-
-          github.event_name == 'pull_request_target' &&
+          github.event_name != 'workflow_dispatch' &&
           env.HAS_AUTH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
