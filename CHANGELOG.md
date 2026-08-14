@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Dropped `evidence/` from the tree — it held regenerable verifier/tool-run
+  output, not project history; `/evidence/` is now gitignored so local runs
+  keep writing there without re-entering the index
+- `meat_python_plus/`'s prior removal from trunk is now backed by an archive
+  branch: all 56 files are preserved at `archive/meat-python-plus`
+  (`39db421af2a6afbd8c17bea1533117fb4f3c7f42`) for anyone who needs the
+  prototype's history
+
+### Changed
+
+- `docs/test-plans/` moved to `docs/dev/test-plans/`, keeping engineering
+  history out of the top-level docs a reader browses
+
 ### Changed
 
 - Eval bank replay harness (`make eval-replay`) writes versioned result sets with

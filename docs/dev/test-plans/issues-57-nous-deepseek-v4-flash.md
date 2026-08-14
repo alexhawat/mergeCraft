@@ -169,8 +169,8 @@ entry in `PROVIDERS`:
   the validator tests must be re-evaluated; this plan does not assume
   that change.
 - No `src/` or production-doc edits in this wave; the test plan lives
-  at `docs/test-plans/issues-57-nous-deepseek-v4-flash.md` and is **not**
-  gitignored (`docs/test-plans/` is the tracked test-doc root).
+  at `docs/dev/test-plans/issues-57-nous-deepseek-v4-flash.md` and is **not**
+  gitignored (`docs/dev/test-plans/` is the tracked test-doc root).
 - The W1 work does not touch the primary checkout's
   `.ignorelocal/waves/issues-nous-deepseek-v4-flash-wave-plan.md` — that
   copy is the planning ledger and is updated in the wave close-out step

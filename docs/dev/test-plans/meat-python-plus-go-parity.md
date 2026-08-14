@@ -1,7 +1,7 @@
 # meat_python_plus Go parity — W1 RED test plan
 
-Wave plan: `.ignorelocal/design/plan/meat-python-plus-go-parity-wave-plan.md`  
-Worktree: `mergecraft-meat-python-plus` @ `feat/meat-python-plus-tokenhub`  
+Wave plan: `.ignorelocal/design/plan/meat-python-plus-go-parity-wave-plan.md`
+Worktree: `mergecraft-meat-python-plus` @ `feat/meat-python-plus-tokenhub`
 Upstream pin: `boldsoftware/meat` @ `f39f41dfe7b5b37a12b35fdfbaecc7e779855bd3`
 
 W1 owns the **RED** suite for W2–W10. Tests collect with zero import/collection

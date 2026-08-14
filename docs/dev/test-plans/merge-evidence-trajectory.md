@@ -4,7 +4,7 @@ Wave plan: `.ignorelocal/waves/issues-merge-evidence-gating-wave-plan.md`
 Worktree: `mergecraft-evi-c-trajectory` @ `wave/evi-c-trajectory`
 Tests: `tests/evidence/test_trajectory.py`
 
-Mirrors `docs/test-plans/merge-evidence-blast-radius.md` (Batch B) so the WC-T
+Mirrors `docs/dev/test-plans/merge-evidence-blast-radius.md` (Batch B) so the WC-T
 close-out is directly comparable.
 
 ## Locked decisions exercised

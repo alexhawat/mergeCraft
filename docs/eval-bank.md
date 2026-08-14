@@ -345,7 +345,7 @@ The wave plan pins the following rules (D5, D13, D11):
   packet tests.
 - `tests/cli/test_eval_cmd.py` — the CLI tests (including the
   `--category=rejected` / `--category=reverted` filters).
-- `docs/test-plans/cross-file-deps.md` — the cross-file contract the
+- `docs/dev/test-plans/cross-file-deps.md` — the cross-file contract the
   bank inherits from the security Batch C plan.
 - Issue [#44](https://github.com/alexhawat/mergeCraft/issues/44),
   Issue [#51](https://github.com/alexhawat/mergeCraft/issues/51).
