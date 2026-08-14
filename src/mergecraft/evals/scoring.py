@@ -428,6 +428,16 @@ def _empty_breakdowns() -> tuple[dict[str, Breakdown], dict[str, Breakdown]]:
     Every ``review_taxonomy`` value is present up front (even at zero) so a
     corpus that happens to use every category still reports exactly that
     vocabulary — see ``test_by_category_keys_use_the_review_taxonomy_vocabulary``.
+
+    B1.0 design-gate reconciliation: this is deliberately a different, orthogonal
+    vocabulary from ``benchmark.py``'s ``corpus_class_for()`` four buckets
+    (``correctness`` / ``security`` / ``cross_file`` / ``adversarial_noop``).
+    ``FINDING_CATEGORIES`` classifies an individual finding (this module operates
+    at finding granularity and has no notion of a benchmark *case*);
+    ``corpus_class_for()`` classifies a whole bank case by its
+    ``bench-<class>-<slug>`` id prefix, for decision-replay gate metrics (B2). A
+    published report shows both side by side (B7's "Detection" vs "By class"
+    sections) rather than merging them into one taxonomy.
     """
     by_category = {category: Breakdown() for category in FINDING_CATEGORIES}
     by_severity = {severity: Breakdown() for severity in FINDING_SEVERITIES}
