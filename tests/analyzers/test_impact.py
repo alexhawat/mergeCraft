@@ -436,3 +436,71 @@ def test_write_impact_omits_key_for_untrusted_tier_without_sandbox(tmp_path: Pat
     repo = _git_repo(tmp_path)
     _write_and_commit(repo, {"src/example.py": "def existing_func():\n    pass\n"})
     assert write_impact(_SAMPLE_DIFF, str(repo), str(tmp_path), 7, tier="untrusted") is None
+
+
+def test_declaration_scan_rejects_symlink_escaping_the_checkout(tmp_path: Path) -> None:
+    """A PR can add a symlink whose target lives outside the checkout.
+    ``os.path.isfile`` follows symlinks, so an unresolved containment check
+    would hand ast-grep a path outside the repo to parse. The declaration
+    (only reachable via the symlink target) must never appear."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.py").write_text("def outside_secret():\n    pass\n")
+
+    repo = _git_repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "src" / "escape.py").symlink_to(outside / "secret.py")
+    subprocess.run(["git", "add", "-f", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "add symlink"], cwd=repo, check=True, capture_output=True
+    )
+
+    diff = _added_file_diff("src/escape.py", "def outside_secret():\n    pass\n")
+    result = extract_impact(diff, str(repo), tier="trusted")
+    assert result is not None
+    decl_names = {r["declaration"] for r in result["impactPath"]}
+    assert "outside_secret" not in decl_names
+
+
+def test_resolve_ast_grep_binary_uses_cache_outside_any_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The managed binary cache/lock must never live under a PR checkout.
+
+    ``resolve_with_lock`` trusts an existing cached executable whenever its
+    hash matches its *own* lock entry, without re-checking either against the
+    manifest's pinned provenance — so a checkout-relative cache is poisonable
+    by the PR itself (commit a binary plus a matching lock entry at the known
+    path). Caching under the user cache dir instead removes that surface."""
+    from mergecraft.analyzers import provision as provision_module
+    from mergecraft.analyzers.impact import resolve_ast_grep_binary
+
+    fake_cache_home = tmp_path / "isolated-cache-home"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(fake_cache_home))
+    monkeypatch.delenv("MERGECRAFT_ANALYZERS", raising=False)
+
+    # Simulate a PR that committed a poisoned binary + lock entry at the old,
+    # vulnerable, checkout-relative cache path.
+    poisoned_checkout = tmp_path / "checkout"
+    poisoned_cache = poisoned_checkout / ".mergecraft" / "analyzer-cache"
+    poisoned_cache.mkdir(parents=True)
+    (poisoned_cache / "ast-grep").write_text("not a real binary")
+
+    seen: dict[str, Path] = {}
+
+    def _fake_resolve_with_lock(
+        *, manifest: object, lock_path: Path, cache_dir: Path, platform: str
+    ) -> object:
+        seen["lock_path"] = lock_path
+        seen["cache_dir"] = cache_dir
+        raise provision_module.ProvisionError("stub: no network in test")
+
+    monkeypatch.setattr(provision_module, "resolve_with_lock", _fake_resolve_with_lock)
+
+    result = resolve_ast_grep_binary()
+
+    assert result is None
+    assert str(seen["cache_dir"]).startswith(str(fake_cache_home))
+    assert str(seen["lock_path"]).startswith(str(fake_cache_home))
+    assert "checkout" not in str(seen["cache_dir"])
+    assert "checkout" not in str(seen["lock_path"])

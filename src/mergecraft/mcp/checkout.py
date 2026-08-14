@@ -278,7 +278,7 @@ def checkout_pr_tool(ctx: ToolContext):
             repo_root = Path(cwd)
             settings_obj = load_repo_settings(root=repo_root, load_learnings_files=False)
             if analyzers_enabled(ctx) and settings_obj.analyzers.impact:
-                ast_grep_binary = resolve_ast_grep_binary(repo_root)
+                ast_grep_binary = resolve_ast_grep_binary()
                 if ast_grep_binary is None:
                     logger.info(
                         "impactPath skipped for PR #{}: managed ast-grep binary unavailable",

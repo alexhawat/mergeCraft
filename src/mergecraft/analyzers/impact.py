@@ -168,11 +168,22 @@ def _find_declarations_batch(
 
     Raises ``_ExtractionFailed`` if any batch's ast-grep invocation fails outright.
     A path that does not exist on disk (deleted file, etc.) is skipped, not a failure.
+    Paths are resolved and checked for containment within ``cwd`` before use —
+    a PR can add a symlink pointing outside the checkout, and ``os.path.isfile``
+    follows symlinks, so an unresolved check would hand ast-grep a target
+    outside the repo (matching the containment check ``expand_analyzer_argv``
+    already applies to manifest-driven analyzer argv).
     """
     groups: dict[str, list[str]] = {}
     labels: dict[str, str] = {}
+    repo_root = Path(cwd).resolve()
     for fp in paths:
-        if not os.path.isfile(os.path.join(cwd, fp)):
+        try:
+            resolved = (repo_root / fp).resolve()
+            resolved.relative_to(repo_root)
+        except OSError, ValueError:
+            continue
+        if not resolved.is_file():
             continue
         rule = _EXTENSION_RULES.get(_extension(fp))
         if rule is None:
@@ -331,12 +342,20 @@ def write_impact(
     }
 
 
-def resolve_ast_grep_binary(repo_root: Path) -> str | None:
+def resolve_ast_grep_binary() -> str | None:
     """Resolve the pinned, managed ``ast-grep`` binary (D10) for impact extraction.
 
     Returns ``None`` when it cannot be resolved (unsupported platform, network
     unavailable, checksum mismatch) — callers should skip emitting ``impactPath``
     rather than fall back to an unpinned binary found on ``PATH``.
+
+    The managed cache and lock live under the user cache dir, never under the
+    PR checkout: ``resolve_with_lock`` trusts an existing cached executable
+    whenever its hash matches its *own* lock entry, without re-checking either
+    against the manifest's pinned provenance. A PR that committed a binary at
+    the checkout-relative cache path plus a matching lock entry would have
+    that binary accepted as "managed" and executed. Caching outside the
+    checkout removes that attacker-controlled surface entirely.
     """
     from mergecraft.analyzers.execution import provision_platform_key
     from mergecraft.analyzers.provision import (
@@ -351,8 +370,9 @@ def resolve_ast_grep_binary(repo_root: Path) -> str | None:
     if baked is not None:
         return str(baked)
 
-    cache_dir = repo_root / ".mergecraft" / "analyzer-cache"
-    lock_path = repo_root / ".mergecraft" / "analyzers.lock"
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")) / "mergecraft"
+    cache_dir = cache_root / "analyzer-cache"
+    lock_path = cache_root / "analyzers.lock"
     try:
         result = resolve_with_lock(
             manifest=manifest,

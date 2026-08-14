@@ -311,7 +311,7 @@ async def test_impact_path_present_when_enabled_and_binary_resolves(
 
     repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
     monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
-    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda repo_root: "ast-grep")
+    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda: "ast-grep")
     github = _StubGitHub(head_sha=head_sha, reviews=[])
     ctx = _ctx_for(repo, github, tmp_path, mode="Review")
 
@@ -332,7 +332,7 @@ async def test_impact_path_omitted_when_ast_grep_binary_unavailable(
 
     repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
     monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
-    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda repo_root: None)
+    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda: None)
     github = _StubGitHub(head_sha=head_sha, reviews=[])
     ctx = _ctx_for(repo, github, tmp_path, mode="Review")
 
@@ -353,7 +353,7 @@ async def test_impact_path_omitted_for_untrusted_checkout_without_sandbox(
 
     repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
     monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
-    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda repo_root: "ast-grep")
+    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda: "ast-grep")
     github = _StubGitHub(head_sha=head_sha, reviews=[])
     ctx = _ctx_for(repo, github, tmp_path, mode="Review", trust_tier="untrusted")
 
@@ -373,7 +373,7 @@ async def test_impact_path_omitted_when_operator_disables_analyzers(
 
     repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
     monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
-    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda repo_root: "ast-grep")
+    monkeypatch.setattr(checkout_module, "resolve_ast_grep_binary", lambda: "ast-grep")
     github = _StubGitHub(head_sha=head_sha, reviews=[])
     ctx = _ctx_for(repo, github, tmp_path, mode="Review", analyzers_mode="off")
 
