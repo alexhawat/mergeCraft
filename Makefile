@@ -43,10 +43,11 @@ install: ## Sync dev environment after dependency changes
 lockcheck: ## Fail if uv.lock is out of date
 	$(UV) lock --check
 
-lint: ## Ruff check + formatting + loguru-only
+lint: ## Ruff check + formatting + loguru-only + privilege-drop chown
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
+	$(UV) run python scripts/check_privilege_drop_chown.py
 
 lint-ruff-advisory: ## Ruff advisory families (non-blocking CI; #146)
 	$(RUFF) check src tests scripts --select $(RUFF_ADVISORY_FAMILIES)
