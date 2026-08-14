@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/gen_reference_docs.py` regenerates README's `action.yml` input/output
+  tables and CLI command table from the live sources (never a subprocess — it
+  walks the live Typer `app` object) and splices them between HTML sentinel
+  comments; `make reference-docs-check` (wired into `make ci-static`) fails the
+  build on drift. Closes the audit in the issues-showcase-readiness wave plan
+  (PR G2): the README table documented 9 of 24 real `action.yml` inputs and
+  neither declared output anywhere
+
+### Fixed
+
+- `README.md`'s CLI table documented `mergecraft traces <run-id>`, but the real
+  registered command is `mergecraft traces show <run-id>` — the stale
+  invocation is now generated from the live CLI app instead of hand-maintained
+
 ### Removed
 
 - Dropped `evidence/` from the tree — it held regenerable verifier/tool-run
