@@ -192,6 +192,63 @@ def _enrich_trivy_findings(
     return enriched
 
 
+def _osv_package_names_by_file(raw: str) -> dict[str, str]:
+    """Parse the raw ``osv-scanner`` JSON payload into ``{source filename: package name}``.
+
+    Best-effort: malformed JSON or an unexpected shape yields an empty map
+    rather than raising — the caller still has ``parse_osv_json``'s own
+    findings even when this enrichment lookup comes up empty.
+    """
+    package_names: dict[str, str] = {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return package_names
+    for result in payload.get("results") or []:
+        if not isinstance(result, dict):
+            continue
+        source = result.get("source") or {}
+        rel = Path(str(source.get("path") or "")).name
+        for package in result.get("packages") or []:
+            if not isinstance(package, dict):
+                continue
+            pkg_info = package.get("package") or {}
+            pkg_name = str(pkg_info.get("name") or "")
+            if pkg_name:
+                package_names[rel] = pkg_name
+    return package_names
+
+
+def _enrich_osv_findings(
+    findings: list[Finding],
+    *,
+    manifest_paths: dict[str, Path],
+    package_names: dict[str, str],
+) -> list[Finding]:
+    """Attach fixed-version + dependency-relationship metadata to each OSV finding."""
+    enriched: list[Finding] = []
+    for finding in findings:
+        rel_path = Path(finding.path).name
+        manifest_path = manifest_paths.get(rel_path) or manifest_paths.get(finding.path)
+        pkg = package_names.get(rel_path, "")
+        fixed = None
+        if finding.remediation and "upgrade to" in finding.remediation.casefold():
+            fixed = (
+                finding.remediation.casefold()
+                .split("upgrade to", 1)[-1]
+                .split(" or later", 1)[0]
+                .strip()
+            )
+        enriched.append(
+            _enrich_vuln_finding(
+                finding,
+                fixed_version=fixed,
+                relationship=_dependency_relationship(manifest_path, pkg),
+            )
+        )
+    return enriched
+
+
 def _run_osv_scan(
     *,
     manifest: AnalyzerManifest,
@@ -245,45 +302,11 @@ def _run_osv_scan(
         else outcome.output
     )
     manifest_paths = _manifest_paths(repo_root, existing)
-    package_names: dict[str, str] = {}
-    try:
-        payload = json.loads(raw)
-        for result in payload.get("results") or []:
-            if not isinstance(result, dict):
-                continue
-            source = result.get("source") or {}
-            rel = Path(str(source.get("path") or "")).name
-            for package in result.get("packages") or []:
-                if not isinstance(package, dict):
-                    continue
-                pkg_info = package.get("package") or {}
-                pkg_name = str(pkg_info.get("name") or "")
-                if pkg_name:
-                    package_names[rel] = pkg_name
-    except json.JSONDecodeError:
-        pass
-
+    package_names = _osv_package_names_by_file(raw)
     findings = parse_osv_json(raw, manifest=manifest, repo_root=repo_root)
-    enriched: list[Finding] = []
-    for finding in findings:
-        rel_path = Path(finding.path).name
-        manifest_path = manifest_paths.get(rel_path) or manifest_paths.get(finding.path)
-        pkg = package_names.get(rel_path, "")
-        fixed = None
-        if finding.remediation and "upgrade to" in finding.remediation.casefold():
-            fixed = (
-                finding.remediation.casefold()
-                .split("upgrade to", 1)[-1]
-                .split(" or later", 1)[0]
-                .strip()
-            )
-        enriched.append(
-            _enrich_vuln_finding(
-                finding,
-                fixed_version=fixed,
-                relationship=_dependency_relationship(manifest_path, pkg),
-            )
-        )
+    enriched = _enrich_osv_findings(
+        findings, manifest_paths=manifest_paths, package_names=package_names
+    )
     return enriched, None
 
 
