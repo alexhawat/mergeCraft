@@ -26,12 +26,89 @@ def _scan_gate_script() -> str:
     return match.group("script")
 
 
+def _step(job_dict: dict[str, Any], name: str) -> dict[str, Any]:
+    for step in job_dict.get("steps", []):
+        if step.get("name") == name:
+            return step
+    names = [step.get("name") for step in job_dict.get("steps", [])]
+    raise AssertionError(f"step {name!r} not found; have {names}")
+
+
 def test_promote_still_fires_on_main_and_pre_001() -> None:
-    """D6 — do not strip ``:latest`` from main/pre-0.0.1; tighten the scan instead."""
+    """D6 — the promote JOB (build → SBOM → scan → sign → attest) still runs
+    for both main and pre-0.0.1, so the scan gate stays blocking on both —
+    tighten which mutable TAG each branch gets instead (see
+    test_promote_latest_channel_is_main_only), not whether the job fires.
+    """
     promote = job(load_workflow("ci-cd.yml"), "promote")
     condition = str(promote.get("if", ""))
     assert "refs/heads/main" in condition
     assert "refs/heads/pre-0.0.1" in condition
+
+
+def test_promote_latest_channel_is_main_only() -> None:
+    """PR #201 — :latest/:analyzers must never come from pre-0.0.1.
+
+    Two unsynchronized pipelines (main's and pre-0.0.1's) racing for the same
+    mutable tag meant whichever finished last silently became the public
+    production image. pre-0.0.1 gets its own :rc / :analyzers-rc channel
+    instead — this pins that split so a regression that re-adds pre-0.0.1 to
+    the :latest/:analyzers steps (or drops it from the :rc/:analyzers-rc
+    steps) fails loudly.
+    """
+    promote = job(load_workflow("ci-cd.yml"), "promote")
+
+    latest = str(_step(promote, "Retag slim digest → :latest").get("if", ""))
+    assert "refs/heads/main" in latest
+    assert "refs/heads/pre-0.0.1" not in latest
+
+    analyzers = str(_step(promote, "Retag analyzers digest → :analyzers").get("if", ""))
+    assert "refs/heads/main" in analyzers
+    assert "refs/heads/pre-0.0.1" not in analyzers
+
+    rc = str(_step(promote, "Retag slim digest → :rc").get("if", ""))
+    assert "refs/heads/pre-0.0.1" in rc
+    assert "refs/heads/main" not in rc
+
+    analyzers_rc = str(_step(promote, "Retag analyzers digest → :analyzers-rc").get("if", ""))
+    assert "refs/heads/pre-0.0.1" in analyzers_rc
+    assert "refs/heads/main" not in analyzers_rc
+
+
+def _docker_tag_script(step_name: str) -> str:
+    content = read_text(".github/workflows/docker.yml")
+    match = re.search(
+        rf"name:\s*{re.escape(step_name)}.*?run:\s*\|\s*\n(?P<script>.*?)(?:\n      - name:|\Z)",
+        content,
+        re.DOTALL,
+    )
+    assert match is not None, f"{step_name!r} step not found in docker.yml"
+    return match.group("script")
+
+
+def test_docker_yml_never_pushes_a_mutable_tag() -> None:
+    """PR #201 follow-up — ci-cd.yml's promote job is the sole owner of every
+    mutable/channel tag (:latest, :analyzers, :rc, :analyzers-rc). docker.yml
+    is a second, unsynchronized pipeline; it may only push the immutable SHA
+    tag, never duplicate a moving one alongside ci-cd.yml's promote job.
+    """
+    for step_name, mutable_tags in (
+        (
+            "Resolve slim image tags",
+            ("ghcr.io/alexhawat/mergecraft:latest", "ghcr.io/alexhawat/mergecraft:rc"),
+        ),
+        (
+            "Resolve analyzers image tags",
+            (
+                "ghcr.io/alexhawat/mergecraft:analyzers'",
+                "ghcr.io/alexhawat/mergecraft:analyzers-rc",
+            ),
+        ),
+    ):
+        script = _docker_tag_script(step_name)
+        for tag in mutable_tags:
+            assert tag not in script, f"{step_name!r} still pushes mutable tag {tag!r}"
+        assert "${GITHUB_SHA}" in script, f"{step_name!r} lost its SHA tag"
 
 
 def test_scan_gate_blocks_every_ref_that_can_publish() -> None:
