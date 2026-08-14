@@ -139,15 +139,33 @@ def _find_action_steps(text: str, action_uses: str = _ACTION_USES) -> list[tuple
             if stripped.startswith("-") and (len(stripped) == 1 or stripped[1] in " :"):
                 step_start = cum[j]
                 break
-        # Walk forward to the end -- the next ``-`` list marker at any indent
-        # terminates the step.
+        # Walk forward to the end. A step terminates at the NEXT sibling
+        # step marker -- a ``-`` line at indent <= the current step's
+        # ``-`` indent (the step list indent). A ``-`` at deeper indent is
+        # block-scalar content (Markdown bullet inside ``prompt: |`` /
+        # ``run: |``) and is part of the step's body. This avoids the bug
+        # where a Markdown bullet inside a block scalar truncated the step
+        # early and the unwire path then silently no-op'd because the
+        # owned keys lived past the truncation.
         end = total
         for j in range(i + 1, len(lines)):
             cur = lines[j]
             if not cur.strip():
                 continue
             stripped = cur.lstrip(" \t")
-            if stripped.startswith("-") and (len(stripped) == 1 or stripped[1] in " :"):
+            leading = len(cur) - len(stripped)
+            # Sibling step marker only if at the step-list indent or
+            # shallower. ``step_indent`` is the indent of the matched
+            # step's ``uses:`` line, which equals its leading ``-``
+            # indent when the step is the ``- uses:`` inline form, or
+            # the indent of ``- name:`` when ``-`` lives on its own
+            # line (the step's body shares that indent). Either way,
+            # a sibling ``-`` must be at <= step_indent.
+            if (
+                stripped.startswith("-")
+                and (len(stripped) == 1 or stripped[1] in " :")
+                and leading <= step_indent
+            ):
                 end = cum[j]
                 break
         out.append((step_start, end, step_indent))
@@ -155,7 +173,16 @@ def _find_action_steps(text: str, action_uses: str = _ACTION_USES) -> list[tuple
 
 
 def _step_identifier(block: str, fallback_index: int) -> str:
-    """Extract a step's ``id:`` or ``name:``; fall back to ``step[{n}]``."""
+    """Extract a step's ``id:`` or ``name:``; fall back to ``step[{n}]``.
+
+    Note: the parsed-structure counterpart (``_assert_wired_semantics`` /
+    ``_assert_unwired_semantics``) falls back to ``job:{job_name}/step:{i}``.
+    For nameless matched action steps this means the regex-based identifier
+    and the parsed-based identifier will not match -- the caller is
+    responsible for translating between the two schemes via
+    :func:`_parsed_step_identifiers` before passing them into the post-
+    mutation check.
+    """
     id_match = re.search(r"^[ \t]*id:[ \t]*(?P<v>\S+)[ \t]*$", block, re.MULTILINE)
     if id_match:
         return str(id_match.group("v"))
@@ -163,6 +190,50 @@ def _step_identifier(block: str, fallback_index: int) -> str:
     if name_match:
         return str(name_match.group("v")).strip()
     return f"step[{fallback_index}]"
+
+
+def _parsed_step_identifiers(
+    text: str,
+    action_uses: str = _ACTION_USES,
+) -> list[tuple[int, str]]:
+    """Pair each matched ``uses: <action_uses>`` step with its parsed identifier.
+
+    Returns an ordered list of ``(matched_index, parsed_identifier)`` pairs.
+    The parsed identifier is the same string the post-mutation check would
+    compute for that step: the step's ``id:`` if present, else ``name:``,
+    else ``job:{job_name}/step:{i}`` (indexed among all job steps). This
+    closes the gap where a nameless action step mutated by
+    ``_step_identifier`` returned ``step[N]`` but the parsed-structure
+    assertion looked for ``job:{job}/step:{M}``, falsely rejecting a
+    successful mutation.
+    """
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise LogfireWorkflowError(f"could not parse workflow to identify steps: {exc}") from exc
+    if not isinstance(parsed, dict):
+        return []
+    jobs = parsed.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+    out: list[tuple[int, str]] = []
+    matched_index = 0
+    for job_name, job_def in jobs.items():
+        if not isinstance(job_def, dict):
+            continue
+        steps = job_def.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if not isinstance(uses, str) or not uses.startswith(action_uses):
+                continue
+            ident = step.get("id") or step.get("name") or f"job:{job_name}/step:{i}"
+            out.append((matched_index, str(ident)))
+            matched_index += 1
+    return out
 
 
 def _select_step_indices(
@@ -426,6 +497,14 @@ def _strip_owned_keys(block: str) -> tuple[str, bool]:
         # No ``with:`` / ``env:`` mapping in this step -- nothing to strip.
         return block, False
 
+    # Stitch the cleaned mappings back in *byte order*. ``with:`` and
+    # ``env:`` can appear in either order in valid YAML; an unsorted loop
+    # would advance ``last`` through the later mapping first and then
+    # re-emit the earlier mapping, duplicating / reordering chunks. The
+    # post-check would then reject the result, so wire->unwire round
+    # trips on ``env:``-before-``with:`` workflows would silently break.
+    owned_ranges.sort(key=lambda r: r[0])
+
     # For each owned mapping, scan its child lines at the canonical indent
     # and drop those whose key matches an owned name. Rebuild the block
     # by stitching together unmodified sibling regions and the cleaned
@@ -501,6 +580,18 @@ def _mutate_steps(
     blocks = _find_action_steps(text)
     selected_indices = _select_step_indices(blocks, text, step_selector)
 
+    # Resolve each matched action step to its parsed-structure identifier
+    # once, before any mutation. This guarantees the same identifier
+    # scheme the post-mutation check uses (``job:{job_name}/step:{i}``
+    # fallback for nameless steps), so a successful mutation is never
+    # rejected by a fallback-string mismatch between the regex and
+    # parsed views.
+    try:
+        parsed_pairs = _parsed_step_identifiers(text)
+    except LogfireWorkflowError:
+        parsed_pairs = []
+    parsed_by_matched_index = {mi: ident for mi, ident in parsed_pairs}
+
     affected: list[str] = []
     cur_text = text
     for idx in sorted(selected_indices, reverse=True):
@@ -510,7 +601,10 @@ def _mutate_steps(
         if not modified:
             continue
         cur_text = cur_text[:start] + new_block + cur_text[end:]
-        affected.append(_step_identifier(block, idx))
+        # Prefer the parsed identifier (single source of truth across the
+        # mutator and the post-check); fall back to the regex view only
+        # if parsing failed entirely.
+        affected.append(parsed_by_matched_index.get(idx) or _step_identifier(block, idx))
         blocks = _find_action_steps(cur_text)
 
     _ensure_yaml_loadable(cur_text)

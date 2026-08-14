@@ -922,3 +922,214 @@ jobs:
         f"env child indent is {child_indent - env_indent}, expected 2: "
         f"env={env_lines[0]!r} child={child_lines[0]!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 -- round-3 review blockers (gpt-5.6-sol)
+# ---------------------------------------------------------------------------
+#
+# Three correctness gaps flagged on commit ``255fcd8``. Each is closed
+# and pinned here.
+#
+# 1. ``_find_action_steps`` truncated a step block at any ``-`` line at
+#    any indent -- including a Markdown bullet inside a ``prompt: |``
+#    block scalar. The truncation cut the step short of the ``tracing``
+#    / ``tracing-to`` / ``logfire-token`` keys, so unwire reported no
+#    modification and exited 0 while the keys remained.
+# 2. ``_strip_owned_keys`` stitched ``with:`` and ``env:`` ranges in
+#    fixed order regardless of byte offset, duplicating/reordering
+#    chunks when ``env:`` preceded ``with:``.
+# 3. ``_step_identifier``'s ``step[{n}]`` fallback and
+#    ``_assert_wired_semantics``'s ``job:{job}/step:{i}`` fallback used
+#    different schemes, so a nameless action step mutated by the regex
+#    view was rejected by the parsed-structure check.
+
+
+_PROMPT_WITH_BULLET_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review
+        id: mergecraft_primary
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        with:
+          prompt: |
+            Steps:
+            - first bullet
+            - second bullet
+            - third bullet
+          timeout: 25m
+        env:
+          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+"""
+
+
+def test_unwire_workflow_handles_block_scalar_with_bullets(tmp_path: Path) -> None:
+    """unwire-workflow must not be fooled by ``- item`` inside ``prompt: |``.
+
+    Regression for round-3 blocker 1: ``_find_action_steps`` previously
+    truncated the action block at any ``-`` line at any indent, so a
+    Markdown bullet inside ``prompt: |`` cut the step short of the
+    ``tracing:`` / ``tracing-to:`` / ``logfire-token:`` / ``MERGECRAFT_*
+    `` keys further down. The unwire path then reported ``was_modified=
+    False`` and exited 0 while the keys remained -- a silent no-op.
+
+    The fix bounds the forward terminator to ``-`` lines at the step's
+    own list indent or shallower, so block-scalar content is never
+    mistaken for a sibling step marker.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _PROMPT_WITH_BULLET_TEMPLATE)
+    # First wire the step (insert the four keys at the canonical indents).
+    wire_change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+    )
+    assert wire_change.was_modified
+    workflow.write_text(wire_change.new_text, encoding="utf-8")
+    # Now unwire -- this is the path the previous bug broke.
+    unwire_change = remove_logfire_wiring(
+        workflow_path=workflow,
+        step_selector="primary",
+    )
+    assert unwire_change.was_modified, "unwire must actually strip the owned keys"
+    new = unwire_change.new_text
+    # All four owned keys are gone.
+    assert 'tracing: "true"' not in new
+    assert "tracing-to: logfire" not in new
+    assert "logfire-token: ${{ secrets.LOGFIRE_TOKEN }}" not in new
+    assert "MERGECRAFT_TRACING_PROJECT:" not in new
+    # The block-scalar bullets survive.
+    assert "- first bullet" in new
+    assert "- second bullet" in new
+    assert "- third bullet" in new
+
+
+_ENV_BEFORE_WITH_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review
+        id: mergecraft_primary
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        env:
+          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+        with:
+          prompt: hi
+          tracing: "true"
+          tracing-to: logfire
+          logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
+"""
+
+
+def test_unwire_workflow_handles_env_before_with(tmp_path: Path) -> None:
+    """unwire-workflow must handle ``env:`` preceding ``with:`` in the step.
+
+    Regression for round-3 blocker 2: ``_strip_owned_keys`` previously
+    built ``owned_ranges`` as ``[with_block, env_block]`` in fixed
+    order and stitched chunks in that order. When ``env:`` appeared
+    before ``with:``, the later ``with:`` range's chunks got duplicated
+    / reordered; the post-check then rejected the result and a
+    wire->unwire round trip on such a workflow silently broke.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _ENV_BEFORE_WITH_TEMPLATE)
+    change = remove_logfire_wiring(
+        workflow_path=workflow,
+        step_selector="primary",
+    )
+    assert change.was_modified
+    new = change.new_text
+    # All four owned keys are gone.
+    assert 'tracing: "true"' not in new
+    assert "tracing-to: logfire" not in new
+    assert "logfire-token: ${{ secrets.LOGFIRE_TOKEN }}" not in new
+    assert "MERGECRAFT_TRACING_PROJECT:" not in new
+    # The non-owned lines survive.
+    assert "prompt: hi" in new
+    # The result is still valid YAML with the expected shape.
+    parsed = yaml.safe_load(new)
+    step = parsed["jobs"]["review"]["steps"][0]
+    assert step["with"]["prompt"] == "hi"
+    # The env block may parse to None (empty mapping) or {} after the
+    # last owned key is stripped; either way, MERGECRAFT_TRACING_PROJECT
+    # must not be present.
+    env = step["env"]
+    if env is not None:
+        assert "MERGECRAFT_TRACING_PROJECT" not in env
+    # The file order is preserved: ``env:`` still precedes ``with:``.
+    env_pos = new.index("env:")
+    with_pos = new.index("with:")
+    assert env_pos < with_pos
+
+
+_NAMELESS_STEP_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - if: ${{ always() }}
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        with:
+          prompt: hi
+        env:
+          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+"""
+
+
+def test_apply_logfire_wiring_handles_nameless_action_step(tmp_path: Path) -> None:
+    """A nameless action step (no ``id:``, no ``name:``) is wired without a fallback mismatch.
+
+    Regression for round-3 blocker 3: ``_step_identifier`` returned
+    ``step[N]`` (file-indexed among matched action steps) for a step
+    with no ``id:`` and no ``name:``, but ``_assert_wired_semantics``
+    looked for ``job:{job}/step:{i}`` (job-indexed among all job
+    steps). The two schemes never matched, so a successful mutation
+    was rejected as ``selected step(s) not present in parsed
+    workflow``.
+
+    The fix resolves each matched step to its parsed identifier once
+    (``id:`` -> ``name:`` -> ``job:{job}/step:{i}``) and uses that as
+    the single source of truth across the mutator and the post-check.
+    Constructed with a step that has neither ``id:`` nor ``name:``
+    (only ``if:``), forcing the fallback path on both sides.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _NAMELESS_STEP_TEMPLATE)
+    change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+    )
+    assert change.was_modified
+    # The matched-step identifier is the parsed fallback (job-indexed),
+    # not the regex fallback. The matched step is the second step in
+    # the ``review`` job (index 1 in job-step coordinates; the first
+    # step is ``actions/checkout@v5`` which is *not* an action step
+    # we own).
+    assert change.affected_steps == ["job:review/step:1"]
+    parsed = yaml.safe_load(change.new_text)
+    step = parsed["jobs"]["review"]["steps"][1]
+    assert step["with"]["tracing"] == "true"
+    assert step["with"]["tracing-to"] == "logfire"
+    assert step["with"]["logfire-token"] == "${{ secrets.LOGFIRE_TOKEN }}"
+    assert step["env"]["MERGECRAFT_TRACING_PROJECT"] == "${{ vars.LOGFIRE_PROJECT }}"
