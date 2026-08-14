@@ -24,7 +24,7 @@ import time
 import uuid
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -42,6 +42,14 @@ if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
 
 
+# G-F10 / #56 D6 — a guard, not a budget. A large review emits on the order
+# of hundreds of spans (one ``analyzer.run`` per analyzer, one ``tool.call``
+# per tool invocation, one ``llm.call`` + ``provider.call`` per turn); 10k is
+# ~20x the realistic ceiling, so this only fires on a genuine runaway. See
+# ``docs/TRACING.md``'s Limits section.
+MAX_SPANS_PER_RUN: Final[int] = 10_000
+
+
 @dataclass(slots=True)
 class Tracer:
     """Create spans and route completed events to one configured sink."""
@@ -51,6 +59,8 @@ class Tracer:
     run_id: str
     tier: str = "balanced"
     trace_id: str = ""
+    _span_count: int = 0
+    _cap_warned: bool = False
 
     def __post_init__(self) -> None:
         """Resolve ``trace_id`` from env when the caller did not pass one.
@@ -82,6 +92,16 @@ class Tracer:
     ) -> Span:
         """Create a span whose parent defaults to the active span.
 
+        Past :data:`MAX_SPANS_PER_RUN`, the returned ``Span`` is marked
+        suppressed: it still enters/exits/chains normally (so callers that
+        assume a plain ``Span`` — the ``http.py`` / ``provider_llm_pair``
+        call sites — keep working unmodified), but ``close()`` skips both
+        the ``attrs_source`` evaluation and the sink write, so the
+        configured sink never receives more than the cap's worth of events
+        (G-F10 / #56 D6 — a guard, not a budget; hitting it must never fail
+        the run). The transition is logged exactly once at ``warning``, not
+        once per subsequent call.
+
         Args:
             kind (str): Canonical span kind.
             parent_span_id (str | None, optional): Explicit parent span identifier.
@@ -90,13 +110,34 @@ class Tracer:
                 producer evaluated only when the span closes. Defaults to None.
 
         Returns:
-            Span: A context-managed span ready to enter.
+            Span: A context-managed span ready to enter. Suppressed (emits
+            nothing on close) once :data:`MAX_SPANS_PER_RUN` has been reached.
 
         Examples:
             >>> tracer = Tracer(sink=object(), session_id="session", run_id="run")
             >>> tracer.start_span("mergecraft.run").kind
             'mergecraft.run'
         """
+        if self._span_count >= MAX_SPANS_PER_RUN:
+            if not self._cap_warned:
+                logger.warning(
+                    "trace span cap reached: {} spans emitted this run, further spans dropped",
+                    MAX_SPANS_PER_RUN,
+                )
+                self._cap_warned = True
+            return Span(
+                tracer=self,
+                kind=kind,
+                parent_span_id=parent_span_id,
+                span_id=uuid.uuid4().hex,
+                session_id=self.session_id,
+                trace_id=self.trace_id,
+                turn_id=uuid.uuid4().hex,
+                tier=self.tier,
+                _suppressed=True,
+            )
+        self._span_count += 1
+
         active = _ACTIVE_SPAN.get()
         resolved_parent = parent_span_id
         if resolved_parent is None and isinstance(active, Span) and active.tracer is self:
@@ -153,6 +194,7 @@ class Span:
     _exc: BaseException | None = None
     _context_token: Token[Span | NullSpan | None] | None = None
     _closed: bool = False
+    _suppressed: bool = False
 
     def __enter__(self) -> Span:
         """Start timing and make this span active."""
@@ -228,10 +270,23 @@ class Span:
         entered and already-closed cases by gating on ``_context_token is
         None`` alone, which silently dropped manually-built spans; the flag
         keeps the contract that ``close()`` is idempotent and emits once.
+
+        G-F10 / #56 D6 — a span opened past :data:`MAX_SPANS_PER_RUN` is
+        constructed with ``_suppressed=True``. It still pops its active-span
+        frame like any other span (so parent/child bookkeeping stays sound),
+        but skips ``attrs_source`` evaluation and the sink write entirely,
+        mirroring ``NullSpan``'s true no-op contract for the disabled path.
         """
         if self._closed:
             return
         self.ts_end_ns = time.time_ns()
+
+        if self._suppressed:
+            if self._context_token is not None:
+                _ACTIVE_SPAN.reset(self._context_token)
+                self._context_token = None
+            self._closed = True
+            return
 
         attrs: dict[str, Any] = {}
         if self._attrs_source is not None:

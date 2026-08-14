@@ -122,6 +122,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tracer spans are now capped at `MAX_SPANS_PER_RUN` (10,000) per run — once a
+  run hits the ceiling, further spans stop reaching the configured sink and a
+  single `warning` is logged, instead of the trace tree growing unbounded on a
+  runaway (#56)
+- Direct unit tests for `Tracer` / `Span` / `NullTracer` and the JSONL,
+  redacting, and OTLP sinks (`tests/tracing/test_tracer.py`,
+  `tests/tracing/test_exporters.py`), previously only exercised transitively
+  through other tracing test modules
 - `feat(analyzers): add change-impact extraction (impactPath) for review prompts` — new
   `analyzers.impact` setting (default off) enables declaration-level reference-lead
   extraction from the diff. When enabled and the diff touches files with recognised

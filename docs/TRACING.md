@@ -159,6 +159,23 @@ record.
 whose mtime is older than the cap are removed on the next write (or
 explicit purge).
 
+## Limits
+
+Two independent caps bound how much a single run can emit — both are guards
+against a runaway, not budgets to plan around, and neither fails the run
+when hit (convention 6).
+
+| Cap | Constant | Value | Behaviour past the cap |
+|---|---|---|---|
+| Per-event `attrs` size | `TRACE_ATTRS_JSON_MAX_BYTES` (`src/mergecraft/tracing/cap.py:18`) | 64 KiB | `cap_event_attrs()` replaces `attrs` with `{"truncated": True}`; the row still lands. |
+| Span count per run | `MAX_SPANS_PER_RUN` (`src/mergecraft/tracing/tracer.py`) | 10,000 | `Tracer.start_span()` keeps returning a span (so callers don't need to special-case it), but the span is suppressed — it never reaches the configured sink. Logged once at `warning` with the count on the first span past the cap, not once per subsequent call. |
+
+10,000 is roughly 20x the realistic ceiling for a large review (one
+`analyzer.run` per analyzer, one `tool.call` per tool invocation, one
+`llm.call` + `provider.call` per turn), so it only fires on a genuine
+runaway — a large PR review should never come close. If a legitimate run
+does hit it, raise the `Final` constant; it is a single line to change.
+
 ## Behaviour guarantees
 
 1. **Disabled is a no-op** (convention 9). A repo that does not enable
