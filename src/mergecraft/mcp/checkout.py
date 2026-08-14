@@ -157,6 +157,18 @@ def checkout_pr_tool(ctx: ToolContext):
         )
         local_branch = f"pr-{pull_number}"
 
+        # Detach HEAD before fetching into local_branch. checkout_pr can run
+        # more than once against the same shared workspace within a single
+        # job (e.g. a Nous review, then a Codex fallback both calling
+        # checkout_pr against /github/workspace) — if a prior call already
+        # left HEAD on local_branch, `git fetch ... :local_branch` fails with
+        # "refusing to fetch into branch ... checked out" and the second
+        # review never completes. Detaching first — safe, since the dirty
+        # check above already guarantees no uncommitted work to lose — means
+        # the fetch target is never the current HEAD, regardless of what an
+        # earlier checkout_pr call left behind.
+        _run_git(["checkout", "--detach", "HEAD"], cwd=cwd)
+
         # Fetch PR head via GitHub's pull/<n>/head ref
         _run_git(
             ["fetch", "--no-tags", "origin", f"pull/{pull_number}/head:{local_branch}"],
