@@ -245,11 +245,11 @@ def test_build_env_chowns_codex_home_under_privilege_drop(
     # _codex_home()'s fallback chain (RUNNER_TEMP / GITHUB_WORKSPACE / the
     # real shared ~/.cache/mergecraft) touches the real filesystem outside
     # tmp_path whenever ctx.tmpdir resolves under a forbidden temp root —
-    # true on real CI, where pytest's tmp_path lives under /tmp. Pin the
-    # first-checked override so this test's mkdir stays inside tmp_path
-    # regardless of platform/CI, instead of racing other tests for the
-    # real, unisolated ~/.cache/mergecraft directory.
-    monkeypatch.setenv("MERGECRAFT_CODEX_HOME_PARENT", str(tmp_path / "codex-home-parent"))
+    # true on real CI, where pytest's tmp_path lives under /tmp (an env var
+    # override still resolves under tmp_path, so it doesn't help). Clear the
+    # forbidden-root list so ctx.tmpdir is always accepted directly,
+    # regardless of where the host platform's tmp_path happens to resolve.
+    monkeypatch.setattr(codex_module, "_FORBIDDEN_TEMP_ROOTS", ())
 
     ctx = make_agent_run_context(tmp_path, resolved_model="gpt-5.6-sol")
     env = codex_module._build_env(ctx)
@@ -275,9 +275,9 @@ def test_build_env_does_not_chown_when_not_root(tmp_path: Path, monkeypatch: Mon
     monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     # _build_env() calls _codex_home() unconditionally, before the root
-    # check — pin the fallback parent to tmp_path here too (see the sibling
+    # check — clear the forbidden-root list here too (see the sibling
     # root-path test's comment for why).
-    monkeypatch.setenv("MERGECRAFT_CODEX_HOME_PARENT", str(tmp_path / "codex-home-parent"))
+    monkeypatch.setattr(codex_module, "_FORBIDDEN_TEMP_ROOTS", ())
 
     ctx = make_agent_run_context(tmp_path, resolved_model="gpt-5.6-sol")
     codex_module._build_env(ctx)
