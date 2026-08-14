@@ -13,9 +13,8 @@ name: Docker
 # captured, so the wrong image could get scanned/signed/promoted. Two
 # concurrency groups with no ordering guarantee between them (docker-*-<ref>
 # vs ci-cd-*-<ref>) means "harmless because same commit" does not hold.
-# See tests/ci/test_trivy_scan_gate.py::test_docker_yml_never_pushes_a_mutable_tag
-# for the (deliberately narrower) mutable-tag half of this contract; ci-cd.yml
-# remains the only workflow with `packages: write` at all.
+# Enforced by tests/ci/test_trivy_scan_gate.py::test_docker_yml_never_pushes_to_the_registry;
+# ci-cd.yml remains the only workflow with `packages: write` at all.
 on:
   push:
     branches: [main, pre-0.0.1]
