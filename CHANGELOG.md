@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (x2), and `mcp/server.py` now log the swallowed exception via
   `logger.debug` before continuing; the best-effort swallowing semantics are
   unchanged, but the failure is no longer invisible in a CI log
+- `main()` is now a thin orchestrator over `RunContext`-carried phase functions
+  (`_setup_run`, `_resolve_credentials`, `_execute_agent`, `_finalize`), and the
+  five worst analyzer hotspots (`resolve_analyzer`, `_exclusive_group_winner`,
+  `run_plan`, `_run_osv_scan`, `detect_enabled`) are split into small named
+  helpers. Pure refactor — no user-visible behaviour change; the new `max-
+  complexity = 15` `ruff --select C901` gate now passes on the whole tree.
 - Eval bank replay harness (`make eval-replay`) writes versioned result sets with
   judge pins, rubric version, and S5 mode prompt versions; seeded corpus expanded
   to ten human-labelled cases across correctness, security, cross-file, and
