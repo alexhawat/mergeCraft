@@ -785,3 +785,140 @@ def test_logfire_unwire_workflow_does_not_print_disabled_message(
     )
     assert result.exit_code == 0
     assert "Logfire tracing disabled." not in result.output
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 -- scoped `_strip_owned_keys` (block-scalar safety) + env indent
+# ---------------------------------------------------------------------------
+#
+# Round-2 review surfaced two non-blocking items that were elevated by
+# the second reviewer to blockers; both are fixed and pinned here.
+#
+# 1. ``_strip_owned_keys`` used to match owned-key-shaped lines at *any*
+#    indent inside the step block, so a line like ``tracing: do-not-delete``
+#    inside a ``prompt: |`` / ``run: |`` block scalar would be silently
+#    removed. The parsed-state assertion cannot detect that data loss
+#    because block-scalar content is opaque to the YAML loader.
+# 2. ``_create_env_block`` emitted the new env child at ``with_indent + 4``
+#    instead of the canonical ``+2``, producing inconsistent indentation
+#    in the diff. Valid YAML, cosmetic, but inconsistent for a tool whose
+#    premise is minimal canonical diffs.
+
+
+_RUN_BLOCK_SCALAR_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review
+        id: mergecraft_primary
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        with:
+          prompt: |
+            tracing: do-not-delete-this-is-script-text
+            tracing-to: also-do-not-delete
+            logfire-token: still-do-not-delete
+          timeout: 25m
+        env:
+          NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}
+          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+"""
+
+
+def test_unwire_workflow_preserves_block_scalar_content(tmp_path: Path) -> None:
+    """``unwire-workflow`` must not delete owned-key-shaped lines inside a block scalar.
+
+    Regression for the second round of review on PR #207: a previous
+    implementation of ``_strip_owned_keys`` matched owned-key-shaped lines
+    at any indent inside the step block, so it would silently delete
+    script text inside ``prompt: |`` / ``run: |`` that happened to match
+    the owned-key shape. The parsed-state assertion cannot detect that
+    data loss (block-scalar content is opaque to the YAML loader), so the
+    scoping has to happen in the mutator itself.
+
+    Construct a step whose ``with.prompt:`` is a block scalar containing
+    ``tracing:``, ``tracing-to:``, ``logfire-token:`` lines, plus an
+    ``env.MERGECRAFT_TRACING_PROJECT:`` line at the canonical child indent.
+    Run ``unwire-workflow`` -- the script text must survive intact; only
+    the canonical ``MERGECRAFT_TRACING_PROJECT:`` line in ``env:`` may
+    be stripped.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _RUN_BLOCK_SCALAR_TEMPLATE)
+    change = remove_logfire_wiring(
+        workflow_path=workflow,
+        step_selector="primary",
+    )
+    assert change.was_modified
+    new = change.new_text
+    # The block-scalar script content must survive verbatim.
+    assert "tracing: do-not-delete-this-is-script-text" in new
+    assert "tracing-to: also-do-not-delete" in new
+    assert "logfire-token: still-do-not-delete" in new
+    # The canonical env child must be stripped.
+    assert "MERGECRAFT_TRACING_PROJECT:" not in new
+    # The other env entries survive.
+    assert "NOUS_API_KEY:" in new
+    # The prompt block scalar remains in the parsed structure -- the
+    # wiring keys are NOT inside the parsed ``with.prompt`` string value.
+    parsed = yaml.safe_load(new)
+    prompt = parsed["jobs"]["review"]["steps"][0]["with"]["prompt"]
+    assert isinstance(prompt, str)
+    assert "tracing: do-not-delete-this-is-script-text" in prompt
+
+
+def test_apply_logfire_wiring_creates_env_block_at_canonical_indent(tmp_path: Path) -> None:
+    """A newly-created ``env:`` block uses the canonical ``+2`` child indent.
+
+    Regression for the second round of review on PR #207: a previous
+    implementation emitted the new ``env:`` child at ``with_indent + 4``
+    spaces (two deeper than the file's canonical env-children indent),
+    producing an inconsistent diff. The fix lands the child at
+    ``with_indent + 2`` -- the same indent that ``env:`` uses when it
+    exists from the start.
+
+    Build a step that has a ``with:`` block but no ``env:`` block;
+    apply wiring; assert the generated ``MERGECRAFT_TRACING_PROJECT``
+    line is at exactly two spaces deeper than the ``env:`` key.
+    """
+    workflow_text = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft review
+        id: mergecraft_primary
+        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        with:
+          prompt: x
+"""
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, workflow_text)
+    change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+    )
+    new = change.new_text
+    # Find the ``env:`` key line and the ``MERGECRAFT_TRACING_PROJECT``
+    # child line; the child must be exactly two spaces deeper than ``env:``.
+    env_lines = [ln for ln in new.splitlines() if ln.lstrip().startswith("env:")]
+    child_lines = [
+        ln for ln in new.splitlines() if ln.lstrip().startswith("MERGECRAFT_TRACING_PROJECT:")
+    ]
+    assert env_lines, "env: block was not created"
+    assert child_lines, "MERGECRAFT_TRACING_PROJECT child was not created"
+    env_indent = len(env_lines[0]) - len(env_lines[0].lstrip())
+    child_indent = len(child_lines[0]) - len(child_lines[0].lstrip())
+    assert child_indent - env_indent == 2, (
+        f"env child indent is {child_indent - env_indent}, expected 2: "
+        f"env={env_lines[0]!r} child={child_lines[0]!r}"
+    )

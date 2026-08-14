@@ -395,22 +395,80 @@ def _insert_owned_keys_into_block(
 
 
 def _strip_owned_keys(block: str) -> tuple[str, bool]:
-    """Remove every ``OWNED_WITH_KEYS`` and ``OWNED_ENV_KEYS`` line from the block.
+    """Remove ``OWNED_WITH_KEYS`` lines from ``with:`` and ``OWNED_ENV_KEYS`` from ``env:``.
 
-    Operates line by line: any line whose leading key matches an owned name
-    is dropped. The trailing newline is consumed with the line.
+    Scoped to the *direct children* of the step's ``with:`` / ``env:``
+    mappings at the canonical child indent. Lines inside a ``run: |`` /
+    ``prompt: |`` / ``script: |`` block-scalar are at a deeper indent and
+    are not touched -- a previous, unscoped implementation matched owned-key-
+    shaped lines at any indent and could silently delete script text that
+    happened to contain a literal ``tracing:`` line. The parsed-state
+    assertion can't see that data loss (block-scalar content is opaque to
+    the loader), so the scoping has to happen here.
     """
     owned = set(OWNED_WITH_KEYS) | set(OWNED_ENV_KEYS)
     owned_re = re.compile(r"^[ \t]*(?P<k>[A-Za-z0-9_-]+|MERGECRAFT_[A-Z_]+):.*\n")
     modified = False
-    new_lines: list[str] = []
-    for ln in block.splitlines(keepends=True):
-        m = owned_re.match(ln)
-        if m is not None and m.group("k") in owned:
-            modified = True
+
+    # Slice the block into "owned mapping blocks" (``with:`` / ``env:``) and
+    # "everything else" (sibling attributes, block scalars, blank lines).
+    # Strip only the direct children of the owned mapping blocks.
+    with_block = _find_mapping_block(block, "with")
+    env_block = _find_mapping_block(block, "env")
+    owned_ranges: list[tuple[int, int, int]] = []
+    if with_block is not None:
+        # Child indent is two spaces deeper than the ``with:`` key indent.
+        owned_ranges.append((with_block[0], with_block[1], with_block[2] + 2))
+    if env_block is not None:
+        owned_ranges.append((env_block[0], env_block[1], env_block[2] + 2))
+
+    if not owned_ranges:
+        # No ``with:`` / ``env:`` mapping in this step -- nothing to strip.
+        return block, False
+
+    # For each owned mapping, scan its child lines at the canonical indent
+    # and drop those whose key matches an owned name. Rebuild the block
+    # by stitching together unmodified sibling regions and the cleaned
+    # child region.
+    pieces: list[str] = []
+    last = 0
+    for block_start, block_end, child_indent in owned_ranges:
+        # Emit everything between ``last`` and the start of this mapping
+        # block untouched (sibling attributes, the ``with:``/``env:`` key
+        # line itself, etc.).
+        pieces.append(block[last:block_start])
+        # The block starts at the start of the ``key:`` line -- we need
+        # to re-emit that line first, then process its children.
+        lines = block[block_start:block_end].splitlines(keepends=True)
+        if not lines:
+            pieces.append(block[block_start:block_end])
+            last = block_end
             continue
-        new_lines.append(ln)
-    return "".join(new_lines), modified
+        pieces.append(lines[0])  # the ``with:`` / ``env:`` line.
+        for ln in lines[1:]:
+            stripped = ln.strip()
+            if not stripped:
+                pieces.append(ln)
+                continue
+            leading = _line_indent_len(ln)
+            if leading <= (child_indent - 2):
+                # Sibling of ``with:``/``env:`` -- outside this mapping.
+                pieces.append(ln)
+                continue
+            if leading != child_indent:
+                # Deeper than the direct-child indent -- likely inside a
+                # block scalar (``prompt: |`` / ``run: |``). Preserve
+                # verbatim so we never touch script text.
+                pieces.append(ln)
+                continue
+            m = owned_re.match(ln)
+            if m is not None and m.group("k") in owned:
+                modified = True
+                continue  # drop the line.
+            pieces.append(ln)
+        last = block_end
+    pieces.append(block[last:])
+    return "".join(pieces), modified
 
 
 # ---------------------------------------------------------------------------
@@ -655,7 +713,8 @@ def _create_env_block(block: str, canonical: tuple[str, str]) -> str:
     When the step has no ``with:`` block the new ``env:`` is appended after
     the ``uses:`` line (the canonical sibling placement). The new block holds
     a single child line ``MERGECRAFT_TRACING_PROJECT`` at the canonical
-    indent for ``env`` children (two spaces deeper than the ``uses:`` line).
+    child indent -- two spaces deeper than the ``env:`` key, which is
+    itself at the same indent as the ``with:`` key (or ``uses:`` line).
     """
     canonical_key, canonical_value = canonical
     # Prefer inserting after the ``with:`` block (its trailing `block_end`).
@@ -665,7 +724,7 @@ def _create_env_block(block: str, canonical: tuple[str, str]) -> str:
         # The indent for the new ``env:`` key is the same as ``with:``'s indent.
         with_indent = " " * with_block[2]
         env_indent = with_indent + "  "
-        insertion = f"{with_indent}env:\n{env_indent}  {canonical_key}: {canonical_value}\n"
+        insertion = f"{with_indent}env:\n{env_indent}{canonical_key}: {canonical_value}\n"
         return block[:with_end] + insertion + block[with_end:]
     # No ``with:`` -- fall back to inserting after ``uses:``.
     uses_re = re.compile(r"^(?P<indent>[ \t]*)uses:[ \t]*\S+[^\n]*\n", re.MULTILINE)
@@ -676,7 +735,7 @@ def _create_env_block(block: str, canonical: tuple[str, str]) -> str:
         )
     indent_str = m.group("indent")
     env_indent = indent_str + "  "
-    insertion = f"{indent_str}env:\n{env_indent}  {canonical_key}: {canonical_value}\n"
+    insertion = f"{indent_str}env:\n{env_indent}{canonical_key}: {canonical_value}\n"
     return block[: m.end()] + insertion + block[m.end() :]
 
 
