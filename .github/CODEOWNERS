@@ -5,4 +5,9 @@
 # submit an "Approve" review (GitHub platform restriction), so a genuinely
 # separate account is required for a clean self-review to satisfy
 # required_approving_review_count with require_code_owner_review intact.
+#
+# Both owners MUST stay on one line: CODEOWNERS resolves each file to only
+# its LAST matching pattern, so two separate `*` lines (as briefly landed
+# directly on main in 9ddd546) silently drop every owner but the last one —
+# `* @sevn-one` alone, with @alexhawat dropped as a code owner entirely.
 * @alexhawat @sevn-one
