@@ -6,9 +6,10 @@ import json
 import re
 import shutil
 import tempfile
+import time
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 from loguru import logger
 
@@ -25,6 +26,7 @@ from mergecraft.analyzers.sandbox import plan_sandbox
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import AnalyzerManifest
+    from mergecraft.analyzers.sandbox import SandboxContext
 
 TrustTier = Literal["trusted", "untrusted"]
 
@@ -310,6 +312,62 @@ def _run_osv_scan(
     return enriched, None
 
 
+# Trivy fetches its vulnerability DB over the network on every invocation (no
+# offline/cached-DB mode is wired up here) — a slow or interrupted download
+# can leave stdout without a valid JSON object at all (ghcr.io / trivy-db.
+# github.io / mirror.gcr.io per the catalog's network_allowlist), which is a
+# different failure than a legitimately clean scan: a clean scan is still
+# valid JSON, just with an empty ``Results``, and never raises. Only the
+# unparsable case is retried — an empty-but-valid result is never retried
+# into a different answer.
+_TRIVY_MAX_ATTEMPTS: Final[int] = 3
+_TRIVY_RETRY_DELAY_S: Final[float] = 3.0
+
+
+def _run_trivy_and_parse(
+    finalized: AnalyzerPlan,
+    *,
+    manifest: AnalyzerManifest,
+    repo_root: Path,
+    sandbox_context: SandboxContext | None,
+) -> tuple[list[Finding], str, str | None]:
+    """Run trivy and parse its output, retrying only on unparsable output.
+
+    Returns ``(findings, raw_output, error)``. ``error`` is set only for a
+    process-level failure (``outcome.ran is False``); a parse failure that
+    survives every retry is re-raised, matching the pre-retry contract.
+    """
+    last_error: ValueError | None = None
+    for attempt in range(1, _TRIVY_MAX_ATTEMPTS + 1):
+        outcome = run_plan(finalized, sandbox_context=sandbox_context)
+        if not outcome.ran:
+            return [], "", outcome.output
+
+        raw = (
+            Path(outcome.output_path).read_text(encoding="utf-8")
+            if outcome.output_path
+            else outcome.output
+        )
+        try:
+            findings = parse_output(raw, manifest=manifest, repo_root=repo_root)
+        except ValueError as exc:
+            last_error = exc
+            logger.warning(
+                "{}: unparsable output on attempt {}/{}: {}",
+                manifest.id,
+                attempt,
+                _TRIVY_MAX_ATTEMPTS,
+                exc,
+            )
+            if attempt < _TRIVY_MAX_ATTEMPTS:
+                time.sleep(_TRIVY_RETRY_DELAY_S)
+            continue
+        return findings, raw, None
+
+    assert last_error is not None, "loop always assigns last_error before exhausting attempts"
+    raise last_error
+
+
 def _run_trivy_fs(
     *,
     manifest: AnalyzerManifest,
@@ -360,16 +418,15 @@ def _run_trivy_fs(
     if not sandbox.can_run:
         return [], sandbox.skip_reason
 
-    outcome = run_plan(finalized, sandbox_context=sandbox.context)
-    if not outcome.ran:
-        return [], outcome.output
-
-    raw = (
-        Path(outcome.output_path).read_text(encoding="utf-8")
-        if outcome.output_path
-        else outcome.output
+    findings, raw, error = _run_trivy_and_parse(
+        finalized,
+        manifest=manifest,
+        repo_root=repo_root,
+        sandbox_context=sandbox.context,
     )
-    findings = parse_output(raw, manifest=manifest, repo_root=repo_root)
+    if error is not None:
+        return [], error
+
     return (
         _enrich_trivy_findings(
             findings,
@@ -444,16 +501,15 @@ def _run_trivy_config(
     if not sandbox.can_run:
         return [], sandbox.skip_reason
 
-    outcome = run_plan(finalized, sandbox_context=sandbox.context)
-    if not outcome.ran:
-        return [], outcome.output
-
-    raw = (
-        Path(outcome.output_path).read_text(encoding="utf-8")
-        if outcome.output_path
-        else outcome.output
+    findings, _raw, error = _run_trivy_and_parse(
+        finalized,
+        manifest=manifest,
+        repo_root=repo_root,
+        sandbox_context=sandbox.context,
     )
-    return parse_output(raw, manifest=manifest, repo_root=repo_root), None
+    if error is not None:
+        return [], error
+    return findings, None
 
 
 def _scan_side(
