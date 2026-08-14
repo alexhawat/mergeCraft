@@ -5,6 +5,7 @@ Everything is emitted as vector paths — the output has no font dependency.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -17,7 +18,13 @@ from fontTools.varLib.instancer import instantiateVariableFont
 
 OUT = Path(__file__).parent
 FONT = OUT / ".cache" / "InterTight[wght].ttf"
-FONT_URL = "https://github.com/google/fonts/raw/main/ofl/intertight/InterTight%5Bwght%5D.ttf"
+# Pinned to an immutable commit (not `main`, which google/fonts rewrites in place)
+# so a rebuild months from now fetches the exact same bytes.
+_FONT_COMMIT = "fac60545cc0de9d4eff6eb5b1ab88bcdfc9ecc69"
+FONT_URL = (
+    f"https://github.com/google/fonts/raw/{_FONT_COMMIT}/ofl/intertight/InterTight%5Bwght%5D.ttf"
+)
+FONT_SHA256 = "b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f"
 
 # Palette lifted from .ignorelocal/styles concepts.
 DARK = {"bg": "#181513", "bd": "#322c27", "blue": "#5fb1f7", "red": "#ff3b3b", "neutral": "#ece7e1"}
@@ -35,12 +42,21 @@ BORDER = 0.008  # badge hairline as a fraction of badge size
 
 
 def fetch_font() -> Path:
-    """Inter Tight (SIL OFL 1.1). Cached locally; not committed."""
+    """Inter Tight (SIL OFL 1.1), pinned commit. Cached locally; not committed."""
     if not FONT.exists():
         FONT.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
             ["curl", "-sSfL", "-o", str(FONT), FONT_URL],
             check=True,
+        )
+    digest = hashlib.sha256(FONT.read_bytes()).hexdigest()
+    if digest != FONT_SHA256:
+        FONT.unlink()  # don't leave a bad file in the cache for the next run
+        raise RuntimeError(
+            f"Inter Tight checksum mismatch: expected {FONT_SHA256}, got {digest}. "
+            f"The pinned commit {_FONT_COMMIT} should always yield the same bytes — "
+            "re-download, and if this persists, verify the commit SHA hasn't been "
+            "force-pushed over before trusting the new checksum."
         )
     return FONT
 

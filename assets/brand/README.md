@@ -74,13 +74,18 @@ For explicit control over GitHub's light/dark themes, use `<picture>` with the p
 ## Regenerating
 
 ```bash
-uv run --with fonttools python assets/brand/build_logo.py
+uv run --with fonttools==4.63.0 python assets/brand/build_logo.py
 ```
 
-`build_logo.py` fetches Inter Tight into `assets/brand/.cache/` (gitignored) and re-emits
-every SVG. Output is deterministic — a clean rebuild is byte-identical. Edit the constants
-at the top of the script to change proportions or the palette; never hand-edit the SVGs,
-they'll be overwritten.
+`build_logo.py` fetches Inter Tight from a pinned `google/fonts` commit into
+`assets/brand/.cache/` (gitignored), verifies it against a hardcoded SHA-256, and re-emits
+every SVG. Output is deterministic — a clean rebuild is byte-identical, and the checksum
+means that stays true even if the pinned commit is later garbage-collected upstream (the
+download will fail loudly rather than silently substitute different bytes). Edit the
+constants at the top of the script to change proportions or the palette; never hand-edit
+the SVGs, they'll be overwritten. Bumping `fonttools` or the pinned font commit is a
+deliberate choice — update both the version above and `_FONT_COMMIT`/`FONT_SHA256` in the
+script together, and confirm the rebuild is still byte-identical before committing.
 
 Inter Tight is licensed under the [SIL Open Font License 1.1](https://openfontlicense.org/).
 The OFL permits embedding outlined glyphs in artwork like these logos; the font binary
