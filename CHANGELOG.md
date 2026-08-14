@@ -26,8 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The four silent `except Exception: pass` sites in `main.py`, `mcp/shell.py`
   (x2), and `mcp/server.py` now log the swallowed exception via
-  `logger.debug` before continuing; the best-effort swallowing semantics are
-  unchanged, but the failure is no longer invisible in a CI log
+  `logger.warning` before continuing; the best-effort swallowing semantics
+  are unchanged, but the failure is no longer invisible at the default log
+  level
 - `main()` is now a thin orchestrator over `RunContext`-carried phase functions
   (`_setup_run`, `_resolve_credentials`, `_execute_agent`, `_finalize`), and the
   five worst analyzer hotspots (`resolve_analyzer`, `_exclusive_group_winner`,
