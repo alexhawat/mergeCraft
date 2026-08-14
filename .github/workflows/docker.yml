@@ -38,10 +38,19 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Resolve slim image tags
         id: slim-tags
+        # :latest is the production mutable tag — main only. pre-0.0.1 (the
+        # active pre-release/staging branch) gets :rc instead, so this build
+        # can never win a same-tag race against main's own build just by
+        # finishing later — mirrors ci-cd.yml's promote job, which is the
+        # authoritative signed/scanned publish path for the same two tags.
         run: |
           {
             echo 'tags<<EOF'
-            echo 'ghcr.io/alexhawat/mergecraft:latest'
+            if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+              echo 'ghcr.io/alexhawat/mergecraft:latest'
+            elif [ "${GITHUB_REF}" = "refs/heads/pre-0.0.1" ]; then
+              echo 'ghcr.io/alexhawat/mergecraft:rc'
+            fi
             echo "ghcr.io/alexhawat/mergecraft:${GITHUB_SHA}"
             if [ "${{ github.event_name }}" != "push" ]; then
               echo 'mergecraft:ci'
@@ -60,10 +69,15 @@ jobs:
           cache-to: type=gha,mode=max,scope=mergeCraft-slim
       - name: Resolve analyzers image tags
         id: analyzers-tags
+        # Same main-vs-pre-0.0.1 channel split as the slim tags above.
         run: |
           {
             echo 'tags<<EOF'
-            echo 'ghcr.io/alexhawat/mergecraft:analyzers'
+            if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+              echo 'ghcr.io/alexhawat/mergecraft:analyzers'
+            elif [ "${GITHUB_REF}" = "refs/heads/pre-0.0.1" ]; then
+              echo 'ghcr.io/alexhawat/mergecraft:analyzers-rc'
+            fi
             echo "ghcr.io/alexhawat/mergecraft:analyzers-${GITHUB_SHA}"
             if [ "${{ github.event_name }}" != "push" ]; then
               echo 'mergecraft-analyzers:ci'
