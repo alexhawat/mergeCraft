@@ -59,3 +59,16 @@ tests/analyzers/fixtures/repo/.mergecraft/
 # checkout instead of alongside it (backstop; operator removes them with
 # `git worktree remove`, this just keeps them out of `git status`/`find`).
 /mergecraft-*/
+
+# mergeCraft's own runtime cache/scratch state, provisioned into <repo>/.mergecraft/
+# on every self-review run (analyzer-cache/, analyzer-scratch/, analyzer-runs/,
+# analyzers.lock, .provision.lock, traces/) — regenerated every run, never source
+# of truth. Without this it shows up as untracked and dirties the working tree on
+# every self-review, which can also trip checkout_pr's clean-tree guard
+# (src/mergecraft/mcp/checkout.py) on a second checkout in the same job. Repo-authored
+# content under .mergecraft/ stays tracked via the negations below.
+/.mergecraft/*
+!/.mergecraft/config.yaml
+!/.mergecraft/learnings.md
+!/.mergecraft/xrepo-learnings.md
+!/.mergecraft/xrepo-brief.md

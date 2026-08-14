@@ -1,0 +1,110 @@
+# mergeCraft self-review — privileged same-repo approval (D14 gate 3, PR #200).
+#
+# Companion to mergecraft.yml. That workflow's own reviewing agent can never
+# submit a real GitHub APPROVE under pull_request_target: derive_trust_tier()
+# (src/mergecraft/analyzers/trust.py) hardcodes pull_request_target to
+# "untrusted" unconditionally, regardless of fork status, by design (D14) —
+# because the agent reads PR-authored content as part of reviewing it, so its
+# own approved:true output can never be trusted as the thing that unlocks a
+# real approval, same-repo PR or not.
+#
+# This workflow is a SEPARATE, privileged path that never re-reads PR content
+# and never re-invokes the agent. It only reads the mergecraft-approval
+# check-run mergecraft.yml already posted — which decide_approval()
+# (src/mergecraft/agents/gates.py) computes as a pure function of Finding
+# severities (W7.1/W7.2 of docs/dev/test-plans/security-structural-approval.md),
+# immune to whatever the agent's own narrative says — and, only when that
+# conclusion is "success", submits a PAT-backed APPROVE as @sevn-one (the
+# distinct CODEOWNER identity from PR #196/#200; the default GITHUB_TOKEN is
+# silently downgraded to a comment on any approve attempt, a GitHub platform
+# restriction unrelated to PR authorship).
+#
+# Why workflow_run instead of a step inside mergecraft.yml's own
+# pull_request_target job: a `workflow_run` trigger's definition is ALWAYS read
+# from the repository default branch (even more unconditionally than
+# pull_request_target's Nov-2025-policy guarantee) and runs on its own runner
+# with no PR checkout at all — real privilege separation from whatever the
+# reviewing agent touched, not just "same trigger type, different job".
+# `workflow_run.pull_requests` is documented to be empty for fork PRs, so this
+# workflow naturally never fires for them without any manual fork check.
+#
+# 2026-08-14: an earlier version of this fix added a `pull_request` trigger to
+# mergecraft.yml itself to earn a "trusted" tier for same-repo PRs. That got a
+# same-day CHANGES_REQUESTED revert on PR #200: `pull_request` resolves the
+# workflow *definition* from the PR's own branch, so it would have handed
+# MERGECRAFT_REVIEWER_PAT, provider credentials, OIDC, and a write-scoped token
+# to PR-controlled code. See the "bootstrap pull_request trigger" comment near
+# the top of mergecraft.yml. Do not reintroduce that shape here either — this
+# file must stay workflow_run-only.
+name: mergecraft-approve
+
+on:
+  workflow_run:
+    workflows: [mergecraft]
+    types: [completed]
+
+permissions:
+  contents: read
+  checks: read
+
+jobs:
+  approve:
+    name: mergecraft privileged approve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # workflow_run.pull_requests is populated only for same-repo PRs (empty for
+    # forks) — this is the fork exclusion, not a manual repo-name comparison.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request_target' &&
+      github.event.workflow_run.pull_requests[0] != null
+    steps:
+      - name: Check the structural mergecraft-approval verdict
+        id: verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          conclusion=""; queried=""
+          for attempt in $(seq 1 3); do
+            if conclusion="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
+              --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
+              | sort_by(.completed_at // .started_at) | last | .conclusion // ""')"; then
+              queried="yes"; break
+            fi
+            echo "check-runs query failed (attempt ${attempt}/3); retrying in 3s…" >&2
+            sleep 3
+          done
+          if [ -z "${queried}" ]; then
+            echo "check-runs API unreachable after retries — not approving." >&2
+            echo "conclusion=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "mergecraft-approval conclusion for ${HEAD_SHA}: ${conclusion:-none}"
+          echo "conclusion=${conclusion}" >> "${GITHUB_OUTPUT}"
+
+      - name: Submit privileged APPROVE
+        if: steps.verdict.outputs.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.MERGECRAFT_REVIEWER_PAT }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "MERGECRAFT_REVIEWER_PAT not configured — nothing to submit with."
+            exit 0
+          fi
+          # commit_id pins the review to the exact reviewed SHA — GitHub rejects
+          # the call if the PR has since moved to a new head, so a stale verdict
+          # can never approve a commit it never actually saw.
+          gh api "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+            -X POST \
+            -f event=APPROVE \
+            -f commit_id="${HEAD_SHA}" \
+            -f body="Approved by mergeCraft (@sevn-one) — clean structural verdict on ${HEAD_SHA}." \
+            >/dev/null
+          echo "Submitted PAT-backed APPROVE for PR #${PR_NUMBER} @ ${HEAD_SHA}."
