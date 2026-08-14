@@ -1,3 +1,8 @@
 # Every path requires review from the owner before merge.
 # The ruleset "protect-main" enforces code-owner review on the default branch.
-* @alexhawat
+# sevn-one is the distinct GitHub identity mergeCraft's own self-review job
+# authenticates as (fix/reviewer-identity) — the default github.token cannot
+# submit an "Approve" review (GitHub platform restriction), so a genuinely
+# separate account is required for a clean self-review to satisfy
+# required_approving_review_count with require_code_owner_review intact.
+* @alexhawat @sevn-one

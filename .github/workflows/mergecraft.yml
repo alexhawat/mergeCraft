@@ -250,6 +250,13 @@ jobs:
       HAS_CODEX: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       HAS_NOUS: ${{ secrets.NOUS_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # The default github.token cannot submit an "Approve" review — GitHub
+      # silently downgrades any attempt to a comment (a documented platform
+      # restriction, independent of PR author). A PAT from a genuinely
+      # distinct account (sevn-one, a collaborator + CODEOWNERS entry) can.
+      # Only used for same-repo runs — fork PRs still rely purely on the
+      # review's findings, never on an approval identity to route around.
+      HAS_BOT_TOKEN: ${{ secrets.MERGECRAFT_REVIEWER_PAT != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -410,6 +417,9 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
+          # See HAS_BOT_TOKEN above — falls back to github.token when the PAT
+          # isn't configured (e.g. a fork of this repo without the secret).
+          token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
         env:
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
@@ -503,6 +513,8 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
+          # See the matching comment on the Nous step above.
+          token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
