@@ -1,0 +1,11 @@
+# mergeCraft repo-config for this repo's own self-review consumer workflow
+# (.github/workflows/mergecraft.yml). See docs/REVIEW-DOCTRINE.md.
+#
+# prApproveEnabled alone does not let self-review submit a real GitHub APPROVE
+# (D14, PR #200): create_pull_request_review_tool also requires the agent's own
+# approved=true AND ctx.trust_tier == "trusted", which derive_trust_tier()
+# (src/mergecraft/analyzers/trust.py) only grants to a genuine non-fork
+# `pull_request` event or workflow_dispatch — never to pull_request_target,
+# regardless of fork status. See the mergecraft.yml trigger comment for how the
+# workflow now earns that "trusted" tier for same-repo PRs.
+prApproveEnabled: true

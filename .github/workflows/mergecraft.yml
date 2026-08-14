@@ -81,6 +81,24 @@
 # below) — with cancel-in-progress they cancelled each other, and a cancelled
 # `mergecraft review` is a non-success on the required check. Do not re-add it.
 #
+# 2026-08-14 (PR #200): a same-repo `pull_request` trigger was tried here as a way
+# to earn derive_trust_tier() == "trusted" for self-review (D14 gate 3) and got a
+# same-day CHANGES_REQUESTED revert: `pull_request` resolves the workflow
+# *definition* from the PR's own branch (unlike pull_request_target, which always
+# reads it from the default branch), so that lane would have handed
+# MERGECRAFT_REVIEWER_PAT, provider credentials, OIDC, and a write-scoped token to
+# PR-controlled code — any same-repo collaborator could edit this file on their
+# branch to self-approve or exfiltrate the PAT. Do not re-add a `pull_request`
+# trigger to this workflow for that purpose. The actual fix lives in the sibling
+# `mergecraft-approve.yml` workflow: a `workflow_run` trigger, which (like
+# pull_request_target, and more unconditionally so) always resolves its
+# definition from the default branch, runs on its own runner with no PR checkout
+# at all, and — via `workflow_run.pull_requests` being empty for forks by
+# GitHub's own documented behavior — naturally never fires for fork PRs. It only
+# reads the already-posted `mergecraft-approval` check-run conclusion (a pure
+# function of Finding severities, immune to the agent's own narrative) and, if
+# it is "success", submits the PAT-backed APPROVE itself.
+#
 # Same-repo guard below keeps fork PRs from receiving secrets (prior pull_request
 # behavior). mergeCraft uses checkout_pr + API with push/shell disabled — no
 # PR-controlled scripts run in CI.
@@ -250,6 +268,13 @@ jobs:
       HAS_CODEX: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       HAS_NOUS: ${{ secrets.NOUS_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # The default github.token cannot submit an "Approve" review — GitHub
+      # silently downgrades any attempt to a comment (a documented platform
+      # restriction, independent of PR author). A PAT from a genuinely
+      # distinct account (sevn-one, a collaborator + CODEOWNERS entry) can.
+      # Only used for same-repo runs — fork PRs still rely purely on the
+      # review's findings, never on an approval identity to route around.
+      HAS_BOT_TOKEN: ${{ secrets.MERGECRAFT_REVIEWER_PAT != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -400,7 +425,22 @@ jobs:
         # initializing the Codex app-server). Fixed in #194 (prepare_workspace_for_agent()
         # chown as the last step); f5b070b is #194 merged into pre-0.0.1, synced to main
         # via #195. Lesson holds: re-bump this SHA explicitly, every time.
-        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        # 2026-08-14 (fifth bump, same day): re-bumped to 3bf6d7b — checkout_pr failed
+        # when re-run against a shared workspace within one job: a Nous review, then a
+        # Codex fallback, both call checkout_pr against the same /github/workspace, and
+        # the second call's fetch failed outright ("refusing to fetch into branch
+        # 'refs/heads/pr-<n>' checked out at '/github/workspace'"). Reproduced on both
+        # PR #201 and PR #202 — Nous timed out (Nous Portal flakiness, unrelated), the
+        # Codex fallback then hit this, and neither posted a mergecraft-approval verdict
+        # before running out of budget. Fixed in #204 (src/mergecraft/mcp/checkout.py —
+        # detach HEAD before the fetch). Unlike every prior bump above, this SHA is
+        # #204's own branch-tip commit, pinned before merge: #204 cannot review itself
+        # with its own fix (the same self-review limitation the top-of-file comment
+        # describes for mergecraft.yml edits), so bumping only after merge would need a
+        # second PR just to consume the first. 3bf6d7b survives merge intact — this repo
+        # merges PRs with a merge commit, never squash — so once #204 lands this pin is
+        # already correct; no follow-up bump needed.
+        uses: alexhawat/mergeCraft@3bf6d7bba38cfeb7966b78316bdc5a150c43ce0d # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: 25m
@@ -410,6 +450,9 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
+          # See HAS_BOT_TOKEN above — falls back to github.token when the PAT
+          # isn't configured (e.g. a fork of this repo without the secret).
+          token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
         env:
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
@@ -490,8 +533,10 @@ jobs:
         # load-breaking `${{ secrets.X }}` in description text), then to a1c10ef (#190:
         # setpriv never resets $HOME, agent subprocess EACCES post-privilege-drop), then to
         # f5b070b (#194: $CODEX_HOME/.gemini/.claude also created root-owned before the
-        # drop, same bug shape) — see the matching comment on the Nous step above for why.
-        uses: alexhawat/mergeCraft@f5b070bddce40099dab77778231cac3456a55157 # pre-0.0.1
+        # drop, same bug shape), then to 3bf6d7b (#204: checkout_pr fetch failure on a
+        # shared workspace when Nous falls back to Codex, fixed by detaching HEAD before
+        # the fetch) — see the matching comment on the Nous step above for why.
+        uses: alexhawat/mergeCraft@3bf6d7bba38cfeb7966b78316bdc5a150c43ce0d # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -503,6 +548,8 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
+          # See the matching comment on the Nous step above.
+          token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
