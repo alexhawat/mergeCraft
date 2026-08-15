@@ -1,7 +1,7 @@
 """VP2 fail-closed terminal verdict — policy, validator, and outcome resolver.
 
 Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP2.1 RED, VP2.2
-impl; xfail markers cleared after VP2.2).
+impl; xfail markers cleared after VP2.2; VP2.3 live ``run_static_checks`` persist).
 
 Pinned contracts (W0):
     D2 — missing verdict → ``RunOutcome.inconclusive``, not ``failed``.
@@ -18,6 +18,7 @@ Pinned contracts (W0):
 from __future__ import annotations
 
 import inspect
+import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -37,8 +38,10 @@ from mergecraft.mcp.context import (
 )
 from mergecraft.mcp.review import create_pull_request_review_tool
 from mergecraft.mcp.shared import ToolResult
+from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
+from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.review_taxonomy import FINDING_MARKER_PREFIX, finding_fingerprint
 from mergecraft.run_outcome import RunOutcome, run_succeeded_for_outcome
 from mergecraft.utils.github import GitHubClient
@@ -70,7 +73,13 @@ _REASON_APPROVE_FAILED_GATE = "approve_with_failed_required_gate"
 _REASON_CONFLICTING_SUBMISSION = "conflicting_submission"
 
 
-def _ctx(tmp_path: Path, *, issue_number: int | None = 7) -> ToolContext:
+def _ctx(
+    tmp_path: Path,
+    *,
+    issue_number: int | None = 7,
+    static_checks: list[StaticCheckConfig] | None = None,
+    static_checks_enabled: bool = False,
+) -> ToolContext:
     return ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
@@ -87,6 +96,8 @@ def _ctx(tmp_path: Path, *, issue_number: int | None = 7) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
         pr_approve_enabled=True,
+        static_checks=list(static_checks or []),
+        static_checks_enabled=static_checks_enabled,
     )
 
 
@@ -560,6 +571,48 @@ def test_approve_with_failing_required_deterministic_check_fails(tmp_path: Path)
     )
     validation = _validate(_approve_payload(), state=state)
     _assert_typed_rejection(validation, _REASON_APPROVE_FAILED_GATE)
+
+
+@pytest.mark.xfail(
+    reason="green after VP2.3: persist static_checks on ToolState",
+    strict=False,
+)
+@pytest.mark.asyncio
+async def test_approve_after_failed_run_static_checks_tool_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """Live path: a failing ``run_static_checks`` gate must reject ``approve`` (D8).
+
+    Does not inject ``static_checks=`` into a hand-built SimpleNamespace. Rows
+    must come from ``run_static_checks_tool`` → ``ToolState`` →
+    ``validation_state_from_tool_context``.
+    """
+    from mergecraft.mcp.verdict import (
+        submit_review_verdict_tool,
+        validation_state_from_tool_context,
+    )
+
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="python -c 'raise SystemExit(1)'")],
+        static_checks_enabled=True,
+    )
+    checks_result = await run_static_checks_tool(ctx).execute({})
+    assert checks_result.is_error is False
+    payload = json.loads(checks_result.content[0]["text"])
+    assert any(check.get("status") == "failed" for check in payload["checks"])
+
+    verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert verdict.is_error is True
+    assert _REASON_APPROVE_FAILED_GATE in verdict.content[0]["text"]
+    assert ctx.tool_state.terminal_submission is None
+
+    derived = validation_state_from_tool_context(ctx)
+    assert any(row.get("status") == "failed" for row in derived.static_checks)
+    _assert_typed_rejection(
+        _validate(_approve_payload(), state=derived),
+        _REASON_APPROVE_FAILED_GATE,
+    )
 
 
 def test_verifier_dropped_finding_does_not_block_approval() -> None:
