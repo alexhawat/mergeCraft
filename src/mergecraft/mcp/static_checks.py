@@ -34,10 +34,23 @@ def _serialize(outcome: StaticCheckOutcome) -> dict[str, Any]:
 
 
 def _persist_static_checks(ctx: ToolContext, outcomes: list[StaticCheckOutcome]) -> None:
-    """Replace ``ToolState.static_checks`` with the last run's normalized rows."""
-    ctx.tool_state.static_checks = [
-        {"name": outcome.name, "status": outcome.status} for outcome in outcomes
+    """Update ``ToolState.static_checks`` with this run's rows.
+
+    Same-name outcomes replace prior rows. Prior ``failed`` rows whose gate was
+    not in this plan stay — a suffix-filtered or partial rerun must not clear an
+    earlier failure the session already recorded.
+    """
+    incoming = {
+        outcome.name: {"name": outcome.name, "status": outcome.status} for outcome in outcomes
+    }
+    retained_failed = [
+        row
+        for row in ctx.tool_state.static_checks
+        if isinstance(row, dict)
+        and row.get("status") == "failed"
+        and row.get("name") not in incoming
     ]
+    ctx.tool_state.static_checks = [*retained_failed, *incoming.values()]
 
 
 def _report(
@@ -126,7 +139,6 @@ def run_static_checks_tool(ctx: ToolContext):
             changed_files=changed,
         )
         if not checks:
-            ctx.tool_state.static_checks = []
             return {
                 "ran": False,
                 "reason": (
