@@ -1,6 +1,7 @@
 """VP4 publication split — ``create_pull_request_review`` delegates; publisher is internal.
 
-Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP4.1 RED, VP4.2 impl).
+Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP4.1 RED,
+VP4.2 impl; xfail markers cleared after VP4.2).
 
 Pinned contracts (W0):
     D7 — ``create_pull_request_review`` is adapted, not deleted; thin delegate
@@ -35,18 +36,6 @@ if TYPE_CHECKING:
 
 _TOOL_NAME = "create_pull_request_review"
 _PUBLISHER_NAME = "publish_pull_request_review"
-_VP42_DELEGATE = pytest.mark.xfail(
-    reason="green after VP4.2: create_pull_request_review delegates through validate_submission",
-    strict=False,
-)
-_VP42_PUBLISH = pytest.mark.xfail(
-    reason="green after VP4.2: publication requires a validated terminal submission",
-    strict=False,
-)
-_VP42_INTERNAL = pytest.mark.xfail(
-    reason="green after VP4.2: publisher is not an MCP tool",
-    strict=False,
-)
 
 
 class _RecordingGitHub(GitHubClient):
@@ -122,7 +111,6 @@ def _tool_names(ctx: ToolContext) -> set[str]:
     return names
 
 
-@_VP42_DELEGATE
 @pytest.mark.asyncio
 async def test_create_pull_request_review_delegates_to_recorder(tmp_path: Path) -> None:
     """D7: the live legacy tool records through ``validate_submission``.
@@ -132,7 +120,13 @@ async def test_create_pull_request_review_delegates_to_recorder(tmp_path: Path) 
     ``terminal_submission`` unset (D8). Writing ``ApprovalRecord.would_approve``
     without that validation is the V6 bypass this PR closes.
     """
-    from mergecraft.mcp.verdict import validate_submission, validation_state_from_tool_context
+    from mergecraft.mcp.verdict import (
+        record_validated_terminal_submission,
+        validate_submission,
+        validation_state_from_tool_context,
+    )
+
+    assert callable(record_validated_terminal_submission)
 
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github)
@@ -181,7 +175,6 @@ def test_legacy_tool_still_registered(tmp_path: Path) -> None:
     assert orchestrator[_TOOL_NAME].name == _TOOL_NAME
 
 
-@_VP42_PUBLISH
 @pytest.mark.asyncio
 async def test_publication_requires_a_validated_submission(tmp_path: Path) -> None:
     """Publishing without a validated terminal submission is an error."""
@@ -190,6 +183,7 @@ async def test_publication_requires_a_validated_submission(tmp_path: Path) -> No
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github)
     assert getattr(ctx.tool_state, "terminal_submission", None) is None
+    assert ctx.tool_state.pending_review_publication is None
 
     caught: BaseException | None = None
     outcome: object | None = None
@@ -217,7 +211,6 @@ async def test_publication_requires_a_validated_submission(tmp_path: Path) -> No
     assert github.review_payloads == []
 
 
-@_VP42_INTERNAL
 def test_publisher_is_not_an_mcp_tool(tmp_path: Path) -> None:
     """The internal publisher exists as a function and is not in any toolset."""
     from mergecraft.mcp.review import publish_pull_request_review

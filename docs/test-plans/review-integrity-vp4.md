@@ -7,10 +7,10 @@ Worktree: `mergecraft-vp4-enforce-publish` @ `wave/vp4-enforce-publish` (stacked
 
 | Wave | Test files | Marker |
 |------|------------|--------|
-| **VP4.2** | `tests/review/test_publication_split.py` — delegate, publication-requires-submission, publisher-not-a-tool | `@pytest.mark.xfail(reason="green after VP4.2: …", strict=False)` |
-| **VP4.2** | `tests/review/test_enforcement_flip.py::test_enforce_is_default_after_this_pr` | same |
-| **VP4.2** | `tests/prompts/test_terminal_protocol_prompt.py` — Review + IncrementalReview contract tests | same |
-| **VP4.2** | `tests/review/test_phase_guards.py` (both) | same |
+| **VP4.2** | `tests/review/test_publication_split.py` — delegate, publication-requires-submission, publisher-not-a-tool | *(markers removed 2026-08-16 after VP4.2)* |
+| **VP4.2** | `tests/review/test_enforcement_flip.py::test_enforce_is_default_after_this_pr` | *(markers removed 2026-08-16 after VP4.2)* |
+| **VP4.2** | `tests/prompts/test_terminal_protocol_prompt.py` — Review + IncrementalReview contract tests | *(markers removed 2026-08-16 after VP4.2)* |
+| **VP4.2** | `tests/review/test_phase_guards.py` (both) | *(markers removed 2026-08-16 after VP4.2)* |
 
 Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a later XPASS into a hard failure the impl wave cannot touch.
 
@@ -26,7 +26,7 @@ Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a l
 
 | Date | Impl wave | Markers removed | Notes |
 |------|-----------|-----------------|-------|
-| — | VP4.2 | *(pending)* | |
+| 2026-08-16 | VP4.2 | `_VP42_DELEGATE`, `_VP42_PUBLISH`, `_VP42_INTERNAL` on `test_publication_split.py`; `_VP42` on `test_enforcement_flip.py`; `_VP42_REVIEW`, `_VP42_INCREMENTAL` on `test_terminal_protocol_prompt.py`; `_VP42_SCOPE`, `_VP42_TRACE` on `test_phase_guards.py` | Suite is now 11/11 real passes (0 xfail / 0 XPASS). Direct pins added: `record_validated_terminal_submission`, `stamp_review_phase_on_active_span`. `pending_review_publication` pinned as a `ToolState` field. VP4 Final not flipped. |
 
 ## Named symbols this suite pins
 
@@ -34,6 +34,8 @@ Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a l
 |--------|--------|-------------|
 | `create_pull_request_review_tool` | `mcp/review.py` | `test_create_pull_request_review_delegates_to_recorder`, `test_legacy_tool_still_registered` |
 | `validate_submission` | `mcp/verdict.py` | `test_create_pull_request_review_delegates_to_recorder` (mapped approve + confirmed blocker is rejected; live tool must not bypass) |
+| `record_validated_terminal_submission` | `mcp/verdict.py` | `test_create_pull_request_review_delegates_to_recorder` (`callable` pin on the public recorder the delegate uses) |
+| `stamp_review_phase_on_active_span` | `mcp/verdict.py` | `test_phase_reaches_the_trace` (`callable` pin; live `checkout_pr` stamps `review.phase`) |
 | `publish_pull_request_review` | `mcp/review.py` | `test_publication_requires_a_validated_submission`, `test_publisher_is_not_an_mcp_tool` |
 | `ToolSpec` | `mcp/shared.py` | `test_publisher_is_not_an_mcp_tool` (publisher is callable and is not a `ToolSpec`) |
 | `build_common_tools` / `build_orchestrator_tools` | `mcp/server.py` | `test_legacy_tool_still_registered`, `test_publisher_is_not_an_mcp_tool` |
@@ -47,8 +49,9 @@ Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a l
 | `checkout_pr_tool` | `mcp/checkout.py` | `test_phase_reaches_the_trace` |
 | `ApprovalRecord` / `ToolState.approval` | `mcp/tool_state.py` | `test_create_pull_request_review_delegates_to_recorder` (must stay unset on rejection) |
 | `ToolState.terminal_submission` | `mcp/tool_state.py` | delegate + publication + submit-before-scope (D8: unset on reject) |
+| `ToolState.pending_review_publication` | `mcp/tool_state.py` | `test_publication_requires_a_validated_submission` (unset when no validated submission) |
 
-`ReviewPhase`, `publish_pull_request_review`, and `validate_submission` are imported **inside test bodies** so collection stays green before VP4.2.
+`ReviewPhase`, `publish_pull_request_review`, `validate_submission`, `record_validated_terminal_submission`, and `stamp_review_phase_on_active_span` are imported **inside test bodies**.
 
 ### Closed `ReviewPhase` vocabulary
 
@@ -97,3 +100,7 @@ No source-grep assertions. Delegate and phase tests drive the real tools. Prompt
 ## RED acceptance (VP4.1)
 
 11 collected; 3 pass (legacy tool registered, shadow still selectable, prompt byte-diff pin); 8 xfail pending VP4.2. Zero collection errors. `make lint` and `make typecheck` clean. Product code is not edited in this wave. VP4.2 / VP4 Final checkboxes are not flipped here.
+
+## VP4.2 xfail reconciliation
+
+11 collected; 11 pass; 0 xfail / 0 XPASS on `tests/review/test_publication_split.py` + `tests/review/test_enforcement_flip.py` + `tests/prompts/test_terminal_protocol_prompt.py` + `tests/review/test_phase_guards.py`. Markers cleared; `record_validated_terminal_submission` and `stamp_review_phase_on_active_span` directly pinned; `pending_review_publication` pinned as a `ToolState` field. Product code is not edited in this wave. VP4 Final remains open.

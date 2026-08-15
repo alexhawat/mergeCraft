@@ -1,6 +1,7 @@
 """VP4 terminal-protocol prompt contract — Review and IncrementalReview step text.
 
-Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP4.1 RED, VP4.2 impl).
+Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP4.1 RED,
+VP4.2 impl; xfail markers cleared after VP4.2).
 
 Pinned contracts (W0):
     File 3/4 — the rendered Review / IncrementalReview prompt names
@@ -15,19 +16,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from mergecraft.modes import IncrementalReview, Review, compute_modes
 from mergecraft.types import AgentId, format_mcp_tool_ref
-
-_VP42_REVIEW = pytest.mark.xfail(
-    reason="green after VP4.2: Review prompt names submit_review_verdict",
-    strict=False,
-)
-_VP42_INCREMENTAL = pytest.mark.xfail(
-    reason="green after VP4.2: IncrementalReview prompt names submit_review_verdict",
-    strict=False,
-)
 
 _T_SUBMIT = '${t("submit_review_verdict")}'
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -72,14 +62,12 @@ def _assert_terminal_act(template: str, prompt: str, *, agent_id: AgentId) -> No
     )
 
 
-@_VP42_REVIEW
 def test_review_prompt_states_the_contract() -> None:
     """Rendered Review prompt names ``submit_review_verdict`` exactly once."""
     prompt = _rendered("Review")
     _assert_terminal_act(Review.TEMPLATE, prompt, agent_id="claude")
 
 
-@_VP42_INCREMENTAL
 def test_incremental_review_prompt_states_the_contract() -> None:
     """Rendered IncrementalReview prompt names ``submit_review_verdict`` exactly once."""
     prompt = _rendered("IncrementalReview")

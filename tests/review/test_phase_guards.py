@@ -1,6 +1,7 @@
 """VP4 phase guards — ``ReviewPhase`` StrEnum + submit-before-scope (D10).
 
-Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP4.1 RED, VP4.2 impl).
+Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP4.1 RED,
+VP4.2 impl; xfail markers cleared after VP4.2).
 
 Pinned ``ReviewPhase`` members (name == value), in order:
     INIT → ESTABLISH_SCOPE → COLLECT_EVIDENCE → REVIEW → NORMALIZE →
@@ -27,15 +28,6 @@ from mergecraft.mcp.context import (
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
-
-_VP42_SCOPE = pytest.mark.xfail(
-    reason="green after VP4.2: submit_review_verdict requires ESTABLISH_SCOPE",
-    strict=False,
-)
-_VP42_TRACE = pytest.mark.xfail(
-    reason="green after VP4.2: ReviewPhase reaches the trace",
-    strict=False,
-)
 
 _PHASES: tuple[str, ...] = (
     "INIT",
@@ -153,7 +145,6 @@ def _phase_on_events(events: list[Any], expected: str) -> bool:
     return False
 
 
-@_VP42_SCOPE
 @pytest.mark.asyncio
 async def test_submit_before_scope_is_rejected(tmp_path: Path) -> None:
     """D10: ``submit_review_verdict`` before ``checkout_pr`` established scope errors."""
@@ -169,12 +160,13 @@ async def test_submit_before_scope_is_rejected(tmp_path: Path) -> None:
     assert getattr(ctx.tool_state, "terminal_submission", None) is None
 
 
-@_VP42_TRACE
 @pytest.mark.asyncio
 async def test_phase_reaches_the_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``ReviewPhase`` appears on a span attr after a real tool advances it."""
-    from mergecraft.mcp.verdict import ReviewPhase
+    from mergecraft.mcp.verdict import ReviewPhase, stamp_review_phase_on_active_span
     from mergecraft.tracing import MemorySink, Tracer
+
+    assert callable(stamp_review_phase_on_active_span)
 
     members = tuple(member.name for member in ReviewPhase)
     assert members == _PHASES, (
