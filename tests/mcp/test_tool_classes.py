@@ -1,4 +1,4 @@
-"""HA4.1 RED suite — class-derived agent toolsets (D14).
+"""HA4 suite — class-derived agent toolsets (D14).
 
 Every assertion builds a real toolset through ``mcp/server.py`` and inspects
 ``ToolSpec`` objects. Role filters replace the ``mutates`` heuristic for
@@ -57,8 +57,6 @@ MUTATION_CLASSES = frozenset(
     }
 )
 
-_HA42 = pytest.mark.xfail(reason="green after HA4.2: tool classes", strict=False)
-
 
 def _tool_ctx(
     tmp_path: Path,
@@ -108,7 +106,6 @@ def _assert_real_toolspecs(tools: list[ToolSpec]) -> None:
     assert all(isinstance(spec, ToolSpec) for spec in tools)
 
 
-@_HA42
 def test_every_registered_tool_declares_a_class(tool_ctx: ToolContext) -> None:
     """No tool ships unclassified — ``tool_class`` is required, no default."""
     orchestrator = build_orchestrator_tools(tool_ctx)
@@ -130,7 +127,6 @@ def test_every_registered_tool_declares_a_class(tool_ctx: ToolContext) -> None:
         assert _class_value(spec) in declared
 
 
-@_HA42
 def test_reviewer_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
     """H4 — reviewer toolset is class-filtered, never a mutation class."""
     _assert_real_toolspecs(build_orchestrator_tools(tool_ctx))
@@ -147,7 +143,6 @@ def test_reviewer_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
         )
 
 
-@_HA42
 def test_verifier_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
     """Verifier toolset is class-filtered, never a mutation class."""
     _assert_real_toolspecs(build_orchestrator_tools(tool_ctx))
@@ -164,7 +159,6 @@ def test_verifier_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
         )
 
 
-@_HA42
 def test_reviewer_and_verifier_toolsets_differ(tool_ctx: ToolContext) -> None:
     """H4 core — reviewer and verifier are no longer identical toolsets."""
     _assert_real_toolspecs(build_orchestrator_tools(tool_ctx))
@@ -199,7 +193,6 @@ def _read_only_toolsets(ctx: ToolContext) -> tuple[list[ToolSpec], list[ToolSpec
     return reviewer, verifier
 
 
-@_HA42
 def test_no_read_only_role_receives_terminal_protocol(tool_ctx: ToolContext) -> None:
     """H5 — ``terminal-protocol`` (e.g. ``submit_review_verdict``) is orchestrator-only.
 
@@ -214,7 +207,6 @@ def test_no_read_only_role_receives_terminal_protocol(tool_ctx: ToolContext) -> 
         assert "submit_review_verdict" not in {spec.name for spec in tools}
 
 
-@_HA42
 def test_no_read_only_role_receives_github_mutation(tool_ctx: ToolContext) -> None:
     """Read-only roles never receive ``github-mutation`` even when common tools include it."""
     registered = build_orchestrator_tools(tool_ctx)
@@ -230,7 +222,6 @@ def test_no_read_only_role_receives_github_mutation(tool_ctx: ToolContext) -> No
         assert not leaked, f"{role} received github-mutation: {leaked}"
 
 
-@_HA42
 def test_no_read_only_role_receives_shell(tool_ctx: ToolContext) -> None:
     """Read-only roles never receive ``shell``, even when the run has shell=restricted."""
     registered = build_orchestrator_tools(tool_ctx)
@@ -248,7 +239,6 @@ def test_no_read_only_role_receives_shell(tool_ctx: ToolContext) -> None:
         assert "kill_background" not in names
 
 
-@_HA42
 def test_orchestrator_receives_only_policy_allowed_classes(tmp_path: Path) -> None:
     """Orchestrator: all classes except ``repository-mutation`` when push is restricted."""
     from mergecraft.mcp.shared import ToolClass
@@ -274,7 +264,19 @@ def test_orchestrator_receives_only_policy_allowed_classes(tmp_path: Path) -> No
     )
 
 
-@_HA42
+def test_repository_mutation_class_for_push() -> None:
+    """Direct pin: push tools are repository-mutation only when push is enabled.
+
+    Deleting ``repository_mutation_class_for_push`` (or swapping the two
+    branches) must fail this test even if orchestrator filtering still looks
+    right via another path.
+    """
+    from mergecraft.mcp.shared import ToolClass, repository_mutation_class_for_push
+
+    assert repository_mutation_class_for_push("enabled") is ToolClass.REPOSITORY_MUTATION
+    assert repository_mutation_class_for_push("restricted") is ToolClass.GITHUB_MUTATION
+
+
 def test_shell_disabled_run_exposes_no_execution_tool(tmp_path: Path) -> None:
     """``shell=disabled`` exposes no tool whose class is ``shell`` on any role."""
     ctx = _tool_ctx(tmp_path, shell="disabled")
