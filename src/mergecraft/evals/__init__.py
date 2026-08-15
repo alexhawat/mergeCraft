@@ -22,10 +22,13 @@ network, and no module-level I/O at import time (§W11.6).
 from __future__ import annotations
 
 from mergecraft.evals.scoring import (
+    AggregateScoreReport,
     BaselineIssue,
+    Breakdown,
     Match,
     ReportedFinding,
     ScoreReport,
+    fold_score_reports,
     format_report,
     load_baseline_issues,
     load_reported_findings,
@@ -58,7 +61,9 @@ __all__ = [
     "CASE_STATUS_PASSED",
     "CASE_STATUS_REGRESSION",
     "DEFAULT_BANK_DIR",
+    "AggregateScoreReport",
     "BaselineIssue",
+    "Breakdown",
     "Case",
     "CaseFilter",
     "Match",
@@ -67,6 +72,7 @@ __all__ = [
     "ScoreReport",
     "add_case",
     "diff_cases",
+    "fold_score_reports",
     "format_report",
     "list_cases",
     "load_baseline_issues",
