@@ -1,0 +1,10 @@
+diff --git a/src/mergecraft/evals/mean_score.py b/src/mergecraft/evals/mean_score.py
+--- a/src/mergecraft/evals/mean_score.py
++++ b/src/mergecraft/evals/mean_score.py
+@@ -4,6 +4,4 @@
+
+
+ def mean_score(scores: list[float]) -> float:
+-    if not scores:
+-        return 0.0
+     return sum(scores) / len(scores)

@@ -1,0 +1,11 @@
+diff --git a/src/mergecraft/learnings/store.py b/src/mergecraft/learnings/store.py
+--- a/src/mergecraft/learnings/store.py
++++ b/src/mergecraft/learnings/store.py
+@@ -7,6 +7,6 @@
+
+ def learnings_for_repo(conn: sqlite3.Connection, repo_slug: str) -> list[sqlite3.Row]:
+     cursor = conn.execute(
+-        "SELECT * FROM learnings WHERE repo_slug = ?", (repo_slug,)
++        "SELECT * FROM learnings WHERE repo_slug = '" + repo_slug + "'"
+     )
+     return cursor.fetchall()

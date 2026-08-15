@@ -1,0 +1,9 @@
+diff --git a/src/mergecraft/mcp/tools/admin.py b/src/mergecraft/mcp/tools/admin.py
+--- a/src/mergecraft/mcp/tools/admin.py
++++ b/src/mergecraft/mcp/tools/admin.py
+@@ -9,7 +9,6 @@
+
+
+ def reset_learnings(caller_role: str) -> None:
+-    require_admin(caller_role)
+     _do_reset()

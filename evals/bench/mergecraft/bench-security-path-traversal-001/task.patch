@@ -1,0 +1,10 @@
+diff --git a/src/mergecraft/utils/artifact_fetch.py b/src/mergecraft/utils/artifact_fetch.py
+--- a/src/mergecraft/utils/artifact_fetch.py
++++ b/src/mergecraft/utils/artifact_fetch.py
+@@ -7,6 +7,4 @@
+
+ def resolve_artifact(results_dir: Path, requested: str) -> Path:
+     candidate = (results_dir / requested).resolve()
+-    if not candidate.is_relative_to(results_dir.resolve()):
+-        raise ValueError("artifact path escapes results directory")
+     return candidate

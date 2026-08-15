@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-security-sql-injection-001-001",
+      "path": "src/mergecraft/ci/db.py",
+      "start_line": 9,
+      "end_line": 10,
+      "title": "find_run builds SQL via f-string interpolation",
+      "severity": "Critical",
+      "category": "Security & Privacy",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-crossfile-signature-stale-001",
+      "path": "src/mergecraft/analyzers/pipeline.py",
+      "start_line": 13,
+      "end_line": 13,
+      "title": "wire_default_adapters call site not updated after register_adapter gained a required trust_tier kwarg",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

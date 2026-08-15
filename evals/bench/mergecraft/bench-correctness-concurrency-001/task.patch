@@ -1,0 +1,9 @@
+diff --git a/src/mergecraft/ci/notify.py b/src/mergecraft/ci/notify.py
+--- a/src/mergecraft/ci/notify.py
++++ b/src/mergecraft/ci/notify.py
+@@ -7,4 +7,4 @@
+
+ async def notify_all(hooks: list[object]) -> None:
+     for hook in hooks:
+-        await hook.send()
++        hook.send()

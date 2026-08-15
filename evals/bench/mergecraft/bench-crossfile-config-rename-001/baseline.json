@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-crossfile-config-rename-001-001",
+      "path": "src/mergecraft/agents/gate_config_reader.py",
+      "start_line": 12,
+      "end_line": 12,
+      "title": "blocking_threshold still reads config.severity_threshold after the field was renamed",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

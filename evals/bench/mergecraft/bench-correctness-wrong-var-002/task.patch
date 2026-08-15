@@ -1,0 +1,9 @@
+diff --git a/src/mergecraft/analyzers/severity.py b/src/mergecraft/analyzers/severity.py
+--- a/src/mergecraft/analyzers/severity.py
++++ b/src/mergecraft/analyzers/severity.py
+@@ -7,4 +7,4 @@
+     """Weight Critical findings 3x, Major findings 1x."""
+     critical_weight = critical_count * 3
+     major_weight = major_count * 1
+-    return critical_weight + major_weight
++    return critical_weight + critical_weight

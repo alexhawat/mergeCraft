@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-security-path-traversal-002-001",
+      "path": "src/mergecraft/cli/export_cmd.py",
+      "start_line": 11,
+      "end_line": 11,
+      "title": "export_report joins the raw report name, allowing path traversal",
+      "severity": "Critical",
+      "category": "Security & Privacy",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

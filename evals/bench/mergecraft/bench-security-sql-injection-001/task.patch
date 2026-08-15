@@ -1,0 +1,11 @@
+diff --git a/src/mergecraft/ci/db.py b/src/mergecraft/ci/db.py
+--- a/src/mergecraft/ci/db.py
++++ b/src/mergecraft/ci/db.py
+@@ -6,5 +6,6 @@
+
+
+ def find_run(conn: sqlite3.Connection, run_id: str) -> sqlite3.Row | None:
+-    cursor = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,))
++    query = f"SELECT * FROM runs WHERE run_id = '{run_id}'"
++    cursor = conn.execute(query)
+     return cursor.fetchone()

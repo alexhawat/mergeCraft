@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-cmp-flip-002-001",
+      "path": "src/mergecraft/ci/flaky.py",
+      "start_line": 12,
+      "end_line": 12,
+      "title": "is_exhausted allows one retry past the configured maximum",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

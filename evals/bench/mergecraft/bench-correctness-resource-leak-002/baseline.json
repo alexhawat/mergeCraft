@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-resource-leak-002-001",
+      "path": "src/mergecraft/ci/log_fetch.py",
+      "start_line": 9,
+      "end_line": 9,
+      "title": "fetch_log leaks the httpx.Client connection pool on every call",
+      "severity": "Major",
+      "category": "Stability & Availability",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

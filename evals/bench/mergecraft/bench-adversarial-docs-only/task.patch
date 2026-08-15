@@ -1,0 +1,10 @@
+diff --git a/src/mergecraft/utils/note.py b/src/mergecraft/utils/note.py
+--- a/src/mergecraft/utils/note.py
++++ b/src/mergecraft/utils/note.py
+@@ -4,5 +4,5 @@
+
+
+ def describe_policy() -> str:
+-    # NOTE: this returns a static description; it does not read config.
++    # NOTE: static description only — does not read live config values.
+     return "retries: 3, backoff: exponential"

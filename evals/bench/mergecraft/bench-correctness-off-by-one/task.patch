@@ -1,0 +1,12 @@
+diff --git a/src/mergecraft/utils/range.py b/src/mergecraft/utils/range.py
+--- a/src/mergecraft/utils/range.py
++++ b/src/mergecraft/utils/range.py
+@@ -16,7 +16,7 @@
+ def last_n(items: list[int], n: int) -> list[int]:
+     """Return the last ``n`` items in order."""
+     result = []
+-    for i in range(len(items)):
++    for i in range(len(items) + 1):
+         if i >= len(items) - n:
+             result.append(items[i])
+     return result

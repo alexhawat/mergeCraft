@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-off-by-one-001",
+      "path": "src/mergecraft/utils/range.py",
+      "start_line": 18,
+      "end_line": 22,
+      "title": "last_n indexes one past the last element",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}
