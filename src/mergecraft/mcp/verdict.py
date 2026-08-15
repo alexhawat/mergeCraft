@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 _ALLOWED_VERDICTS = frozenset({"approve", "request_changes"})
 _ALLOWED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary", "findings"})
 _REQUIRED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary"})
+_REVIEW_MODES = frozenset({"Review", "IncrementalReview"})
 
 REJECTION_INVALID_VERDICT = "invalid_verdict"
 REJECTION_UNKNOWN_FIELDS = "unknown_fields"
@@ -36,6 +37,21 @@ REJECTION_REQUEST_CHANGES_NO_FINDINGS = "request_changes_without_findings"
 REJECTION_APPROVE_CONFIRMED_BLOCKER = "approve_with_confirmed_blocker"
 REJECTION_APPROVE_FAILED_GATE = "approve_with_failed_required_gate"
 REJECTION_CONFLICTING_SUBMISSION = "conflicting_submission"
+
+
+class ReviewPhase(StrEnum):
+    """Closed review-phase vocabulary (D10 / VP4)."""
+
+    INIT = "INIT"
+    ESTABLISH_SCOPE = "ESTABLISH_SCOPE"
+    COLLECT_EVIDENCE = "COLLECT_EVIDENCE"
+    REVIEW = "REVIEW"
+    NORMALIZE = "NORMALIZE"
+    VERIFY_BLOCKERS = "VERIFY_BLOCKERS"
+    SUBMIT = "SUBMIT"
+    POLICY = "POLICY"
+    PUBLISH = "PUBLISH"
+    COMPLETE = "COMPLETE"
 
 
 class VerdictDiagnostic(StrEnum):
@@ -65,6 +81,71 @@ def span_attrs_for_verdict_diagnostic(
     )
 
 
+def stamp_review_phase_on_active_span(phase: ReviewPhase) -> None:
+    """Stamp ``review.phase`` on the active span when one is open (D10)."""
+    from mergecraft.tracing import Span
+    from mergecraft.tracing.tracer import _ACTIVE_SPAN
+
+    active = _ACTIVE_SPAN.get()
+    if isinstance(active, Span):
+        active.set_attribute("review.phase", phase.value)
+        active.set_attribute("mergecraft.review.phase", phase.value)
+
+
+def _current_review_phase(tool_state: Any) -> ReviewPhase:
+    raw = getattr(tool_state, "review_phase", ReviewPhase.INIT)
+    if isinstance(raw, ReviewPhase):
+        return raw
+    return ReviewPhase(str(raw))
+
+
+def record_validated_terminal_submission(
+    ctx: ToolContext,
+    submission: dict[str, Any],
+    *,
+    findings: list[Any] | None = None,
+) -> TerminalSubmission:
+    """Validate and record a terminal submission on ``ToolState`` (VP4 delegate path)."""
+    payload_hash = _canonical_payload_hash(_submission_dict_for_hash(submission))
+    existing = ctx.tool_state.terminal_submission
+
+    if existing is not None:
+        if existing.payload_hash == payload_hash:
+            ctx.tool_state.terminal_submission_conflict = False
+            return existing
+        ctx.tool_state.terminal_submission_conflict = True
+        msg = (
+            "terminal submission conflict: a different verdict payload was already "
+            "recorded for this run"
+        )
+        raise ValueError(msg)
+
+    validation = validate_submission(
+        submission,
+        state=validation_state_from_tool_context(ctx),
+    )
+    if not validation.accepted:
+        msg = f"terminal submission rejected: {validation.rejection_reason}"
+        raise ValueError(msg)
+
+    verdict = submission["verdict"]
+    summary = submission["summary"]
+    resolved_findings = findings if findings is not None else list(submission.get("findings") or [])
+
+    recorded = TerminalSubmission(
+        id=uuid.uuid4().hex,
+        verdict=verdict,
+        summary=str(summary),
+        findings=list(resolved_findings),
+        payload_hash=payload_hash,
+        submitted_at=datetime.now(UTC).isoformat(),
+        attempt_id=ctx.tool_state.attempt_id,
+    )
+    ctx.tool_state.terminal_submission = recorded
+    ctx.tool_state.terminal_submission_conflict = False
+    return recorded
+
+
 def verdict_satisfies_attempt(
     submission: TerminalSubmission,
     *,
@@ -77,6 +158,22 @@ def verdict_satisfies_attempt(
 def _canonical_payload_hash(payload: dict[str, Any]) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _submission_dict_for_hash(submission: dict[str, Any]) -> dict[str, Any]:
+    """Return a JSON-serializable submission dict for canonical hashing."""
+    findings_raw = submission.get("findings") or []
+    serializable_findings: list[Any] = []
+    for item in findings_raw:
+        if hasattr(item, "model_dump"):
+            serializable_findings.append(item.model_dump())
+        else:
+            serializable_findings.append(item)
+    return {
+        "verdict": submission["verdict"],
+        "summary": submission["summary"],
+        "findings": serializable_findings,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,49 +333,44 @@ class SubmitReviewVerdictParams(BaseModel):
 
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        validated = SubmitReviewVerdictParams.model_validate(params)
-        payload_hash = _canonical_payload_hash(dict(params))
-        existing = ctx.tool_state.terminal_submission
-
-        if existing is not None:
-            if existing.payload_hash == payload_hash:
-                ctx.tool_state.terminal_submission_conflict = False
-                return {
-                    "recorded": True,
-                    "id": existing.id,
-                    "verdict": existing.verdict,
-                    "replayed": True,
-                }
-            ctx.tool_state.terminal_submission_conflict = True
+        mode = ctx.tool_state.selected_mode
+        if mode in _REVIEW_MODES and _current_review_phase(ctx.tool_state) == ReviewPhase.INIT:
             msg = (
-                "terminal submission conflict: a different verdict payload was already "
-                "recorded for this run"
+                "submit_review_verdict requires checkout_pr to establish review scope "
+                "before the terminal verdict can be recorded"
             )
             raise ValueError(msg)
 
-        validation = validate_submission(
-            dict(params),
-            state=validation_state_from_tool_context(ctx),
-        )
-        if not validation.accepted:
-            msg = f"terminal submission rejected: {validation.rejection_reason}"
-            raise ValueError(msg)
+        validated = SubmitReviewVerdictParams.model_validate(params)
+        payload_hash = _canonical_payload_hash(dict(params))
+        submission_dict = {
+            "verdict": validated.verdict,
+            "summary": validated.summary,
+            "findings": [item.model_dump() for item in validated.findings],
+        }
+        existing = ctx.tool_state.terminal_submission
+        if existing is not None and existing.payload_hash == payload_hash:
+            ctx.tool_state.terminal_submission_conflict = False
+            ctx.tool_state.review_phase = ReviewPhase.SUBMIT.value
+            stamp_review_phase_on_active_span(ReviewPhase.SUBMIT)
+            return {
+                "recorded": True,
+                "id": existing.id,
+                "verdict": existing.verdict,
+                "replayed": True,
+            }
 
-        submission = TerminalSubmission(
-            id=uuid.uuid4().hex,
-            verdict=validated.verdict,
-            summary=validated.summary,
+        recorded = record_validated_terminal_submission(
+            ctx,
+            submission_dict,
             findings=list(validated.findings),
-            payload_hash=payload_hash,
-            submitted_at=datetime.now(UTC).isoformat(),
-            attempt_id=ctx.tool_state.attempt_id,
         )
-        ctx.tool_state.terminal_submission = submission
-        ctx.tool_state.terminal_submission_conflict = False
+        ctx.tool_state.review_phase = ReviewPhase.SUBMIT.value
+        stamp_review_phase_on_active_span(ReviewPhase.SUBMIT)
         return {
             "recorded": True,
-            "id": submission.id,
-            "verdict": submission.verdict,
+            "id": recorded.id,
+            "verdict": recorded.verdict,
             "replayed": False,
         }
 
@@ -338,10 +430,13 @@ __all__ = [
     "REJECTION_MISSING_REQUIRED_FIELDS",
     "REJECTION_REQUEST_CHANGES_NO_FINDINGS",
     "REJECTION_UNKNOWN_FIELDS",
+    "ReviewPhase",
     "SubmissionValidation",
     "SubmitReviewVerdictParams",
     "VerdictDiagnostic",
+    "record_validated_terminal_submission",
     "span_attrs_for_verdict_diagnostic",
+    "stamp_review_phase_on_active_span",
     "submit_review_verdict_tool",
     "validate_submission",
     "validation_state_from_tool_context",

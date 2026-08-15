@@ -209,6 +209,11 @@ class ToolState:
     # live path always sets this.
     modes: list[Mode] = field(default_factory=list)
     review: ReviewRecord | None = None
+    # D10 / VP4 — closed ``ReviewPhase`` vocabulary; advanced by checkout and
+    # verdict tools (``mcp/verdict.py``).
+    review_phase: str = "INIT"
+    # Stashed ``create_pull_request_review`` params for ``publish_pull_request_review``.
+    pending_review_publication: dict[str, Any] | None = None
     terminal_submission: TerminalSubmission | None = None
     terminal_submission_conflict: bool = False
     approval: ApprovalRecord | None = None

@@ -62,6 +62,8 @@ Inspired by [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 | 💻 **Offline mode** | `mergecraft diff-review` reviews local diffs or patch files, no PR required — `--json` for benchmarks |
 | 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in — benchmark numbers unpublished; run `make eval-replay` locally (see [evals/README.md](evals/README.md)) |
 
+**Terminal verdict (default: enforce).** `gates.terminal_verdict` defaults to `enforce`: a run without a validated `submit_review_verdict` submission reports `inconclusive`. Set `gates.terminal_verdict: shadow` in `.mergecraft/config.yaml` to log diagnostics only. `create_pull_request_review` records through the same validator as `submit_review_verdict` and cannot approve without a validated terminal submission.
+
 ## 🗂️ Repository layout
 
 One row per root-level directory, for anyone who has just cloned:
