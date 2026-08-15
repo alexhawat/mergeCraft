@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-empty-input-001-001",
+      "path": "src/mergecraft/evals/first_case.py",
+      "start_line": 7,
+      "end_line": 7,
+      "title": "first_case_id indexes an empty list without a guard",
+      "severity": "Major",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

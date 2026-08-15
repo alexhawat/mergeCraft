@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-wrong-var-001-001",
+      "path": "src/mergecraft/evals/aggregate.py",
+      "start_line": 10,
+      "end_line": 10,
+      "title": "average_recall divides the wrong accumulator",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

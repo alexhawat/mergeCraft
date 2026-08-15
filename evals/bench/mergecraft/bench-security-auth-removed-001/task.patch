@@ -1,0 +1,11 @@
+diff --git a/src/mergecraft/action/webhook.py b/src/mergecraft/action/webhook.py
+--- a/src/mergecraft/action/webhook.py
++++ b/src/mergecraft/action/webhook.py
+@@ -6,7 +6,4 @@
+
+
+ def handle_webhook(payload: bytes, signature: str, secret: str) -> bool:
+-    expected = hmac.new(secret.encode(), payload, "sha256").hexdigest()
+-    if not hmac.compare_digest(expected, signature):
+-        return False
+     return True

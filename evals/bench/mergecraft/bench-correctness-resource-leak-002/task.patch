@@ -1,0 +1,13 @@
+diff --git a/src/mergecraft/ci/log_fetch.py b/src/mergecraft/ci/log_fetch.py
+--- a/src/mergecraft/ci/log_fetch.py
++++ b/src/mergecraft/ci/log_fetch.py
+@@ -6,6 +6,6 @@
+
+
+ def fetch_log(url: str) -> str:
+-    with httpx.Client() as client:
+-        response = client.get(url)
+-        return response.text
++    client = httpx.Client()
++    response = client.get(url)
++    return response.text

@@ -1,0 +1,13 @@
+diff --git a/src/mergecraft/ci/cache.py b/src/mergecraft/ci/cache.py
+--- a/src/mergecraft/ci/cache.py
++++ b/src/mergecraft/ci/cache.py
+@@ -8,7 +8,5 @@
+
+
+ async def get_or_compute(cache: dict[str, str], key: str, compute) -> str:
+-    async with _LOCK:
+-        if key not in cache:
+-            cache[key] = await compute()
+-        return cache[key]
++    if key not in cache:
++        cache[key] = await compute()

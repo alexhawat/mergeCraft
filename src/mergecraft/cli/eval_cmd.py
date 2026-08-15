@@ -29,10 +29,16 @@ import typer
 from pydantic import ValidationError
 from rich.console import Console
 
+from mergecraft.config import load_repo_settings
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
     replay_bank,
+    write_result_set,
+)
+from mergecraft.evals.live_run import (
+    DEFAULT_DETECTION_CORPUS_DIR,
+    run_full_benchmark,
 )
 from mergecraft.evals.scoring import (
     DEFAULT_LINE_SLACK,
@@ -57,6 +63,8 @@ from mergecraft.evals.store import (
     replay_case,
     write_permanent_test,
 )
+from mergecraft.models import get_model_provider
+from mergecraft.utils.agent_resolve import resolve_effective_model_slug, resolve_model
 from mergecraft.utils.learnings import LearningProvenance
 
 app = typer.Typer(
@@ -540,6 +548,11 @@ def replay_bank_cmd(
         "--json",
         help="Emit the result set as JSON on stdout.",
     ),
+    gate: bool = typer.Option(
+        False,
+        "--gate",
+        help="Also print the directional gate matrix (unsafe-approval / clean-block rates).",
+    ),
 ) -> None:
     """Replay the eval bank and write a versioned benchmark result set (#140).
 
@@ -564,6 +577,135 @@ def replay_bank_cmd(
         console.print(f"  pass rate : {result.metrics.decision_replay_pass_rate:.2%}")
         console.print(f"  corpus @  : {result.pins.corpus_commit[:12]}")
         console.print(f"  rubric    : {result.pins.rubric_version}")
+        if gate:
+            matrix = result.metrics.gate_matrix
+            console.print("  gate matrix (directional, #140):")
+            console.print(
+                f"    buggy : {matrix.buggy_total} total, "
+                f"{matrix.buggy_correct_block} correctly blocked, "
+                f"{matrix.buggy_unsafe_approval} unsafe approvals, "
+                f"{matrix.buggy_inconclusive} inconclusive"
+            )
+            console.print(
+                f"    clean : {matrix.clean_total} total, "
+                f"{matrix.clean_correct_approval} correctly approved, "
+                f"{matrix.clean_unsafe_block} unsafe blocks, "
+                f"{matrix.clean_inconclusive} inconclusive"
+            )
+            console.print(f"  unsafe approval rate: {result.metrics.unsafe_approval_rate:.2%}")
+            console.print(f"  clean block rate    : {result.metrics.clean_block_rate:.2%}")
+            console.print(f"  inconclusive rate   : {result.metrics.inconclusive_rate:.2%}")
+
+
+# ── bench ──────────────────────────────────────────────────────────────
+
+
+@app.command("bench")
+def bench_cmd(
+    bank: Path | None = typer.Option(
+        None,
+        "--bank",
+        help="Bank directory for structural replay (default: evals/cases/).",
+    ),
+    detection_corpus: Path = typer.Option(
+        DEFAULT_DETECTION_CORPUS_DIR,
+        "--detection-corpus",
+        help="Patch-bearing detection-corpus directory.",
+    ),
+    results_dir: Path | None = typer.Option(
+        None,
+        "--results-dir",
+        help="Directory for result sets (default: evals/results/).",
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Model slug to drive live detection with (otherwise .mergecraft/config.yaml / "
+        "MERGECRAFT_MODEL — same resolution as `diff-review`).",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the joined result set as JSON on stdout.",
+    ),
+) -> None:
+    """Join structural decision replay with a live finding-location run (#140, B3).
+
+    Structural replay (keyless) always runs. Live detection additionally runs
+    ``diff-review`` against the patch-bearing detection corpus, if credentials
+    for ``--model`` are available and the corpus is non-empty — otherwise the
+    ``detection`` section is omitted and the reason is reported, never
+    fabricated (see ``evals/README.md``).
+
+    ``--model`` is resolved the same way ``diff-review`` resolves its own
+    ``--model`` — never hardcoded to a specific vendor here (a prior
+    hardcoded default silently broke the credential check entirely and
+    presumed every operator wants the same provider; mergeCraft self-review,
+    PR #216). The provider is derived from the resolved model slug, not
+    asked for separately, so the two can never disagree.
+
+    One invocation's ``detection`` section covers exactly the one resolved
+    model — it is **not** the full ≥2-provider comparison D12 requires for a
+    published report. Run this once per provider (each writes its own
+    timestamped result set and raw-findings directory, per D9) and combine
+    the separate files at publication time (B7); a single-provider result
+    set is a valid, honestly-partial artifact, not a stand-in for the
+    complete comparison.
+    """
+    resolved_model = resolve_model(slug=model)
+    if resolved_model is None:
+        # `resolve_model()` alone never reads `.mergecraft/config.yaml` — it
+        # only checks an explicit slug and MERGECRAFT_MODEL. Fall through to
+        # the same config resolution `mergecraft models show` uses (mergeCraft
+        # self-review, PR #216: this command previously advertised config-only
+        # resolution in its help text without ever actually reading config).
+        settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+        resolved_model = resolve_effective_model_slug(settings)
+    if resolved_model is None:
+        console.print(
+            "[red]No model configured[/red] — pass --model, or set MERGECRAFT_MODEL / "
+            "model: in .mergecraft/config.yaml."
+        )
+        raise typer.Exit(1)
+    try:
+        detection_provider = get_model_provider(resolved_model)
+    except ValueError:
+        console.print(
+            f'[red]Could not derive a provider[/red] from model slug "{resolved_model}" '
+            '— expected "provider/model" (see `mergecraft models list`).'
+        )
+        raise typer.Exit(1) from None
+
+    bank_dir = _bank_dir(bank)
+    out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
+    result = run_full_benchmark(
+        bank_dir,
+        detection_corpus_dir=detection_corpus,
+        results_dir=out_dir,
+        providers=DEFAULT_BENCHMARK_PROVIDERS,
+        detection_provider=detection_provider,
+        detection_model=resolved_model,
+    )
+    # update_latest=False: a single-provider detection result must not
+    # silently become "latest.json" — see write_result_set's docstring (D12).
+    path = write_result_set(result, results_dir=out_dir, update_latest=False)
+    if json_output:
+        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+        return
+
+    console.print(f"[green]benchmark result set[/green] → {path}")
+    console.print(f"  structural cases: {result.metrics.cases_total}")
+    console.print(f"  pass rate       : {result.metrics.decision_replay_pass_rate:.2%}")
+    if result.detection is not None:
+        det = result.detection
+        console.print(f"  detection cases : {det.cases_run}")
+        console.print(f"  recall          : {det.aggregate.recall:.2%}")
+        console.print(f"  precision       : {det.aggregate.corpus_confirmed_precision:.2%}")
+        console.print(f"  f1              : {det.aggregate.f1:.2%}")
+        console.print(f"  raw findings @  : {det.raw_findings_dir}")
+    else:
+        console.print(f"[yellow]detection skipped[/yellow]: {result.skipped_reason}")
 
 
 # ── gate ───────────────────────────────────────────────────────────────

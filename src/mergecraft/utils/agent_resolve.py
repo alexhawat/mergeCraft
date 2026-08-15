@@ -187,6 +187,38 @@ def effective_model_slugs(settings: RepoSettings) -> list[str]:
     return [env_model, *rest]
 
 
+def resolve_effective_model_slug(settings: RepoSettings) -> str | None:
+    """Return the model slug that would actually run right now, or ``None``.
+
+    The shared "what would win" resolution — originally ``mergecraft
+    models show``'s private ``_winning_slug`` helper, promoted here so
+    other CLI commands (e.g. ``mergecraft eval bench``) can resolve
+    ``.mergecraft/config.yaml`` the same way rather than only checking
+    ``MERGECRAFT_MODEL`` (``resolve_model(slug=None)`` alone never reads
+    config — it only checks an explicit slug and the env override;
+    mergeCraft self-review, PR #216, caught `mergecraft eval bench`
+    advertising config-only resolution while never actually consulting it).
+
+    Precedence: ``MERGECRAFT_MODEL`` env override, else the first
+    configured slug with detected credentials, else the first configured
+    slug regardless, else ``settings.model`` resolved through the alias
+    catalog.
+    """
+    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
+    if env_model:
+        return env_model
+
+    configured = _configured_model_slugs(settings)
+    for slug in configured:
+        if has_credentials_for_slug(slug):
+            return slug
+
+    if configured:
+        return configured[0]
+
+    return resolve_model(slug=settings.model)
+
+
 def _alias_for_slug(slug: str) -> ModelAlias | None:
     return next(
         (alias for alias in MODEL_ALIASES if alias.slug == slug or alias.resolve == slug), None
@@ -930,6 +962,7 @@ __all__ = [
     "is_runnable_model_slug",
     "pick_runnable_slug_from_chain",
     "promote_model_evidence",
+    "resolve_effective_model_slug",
     "resolve_model",
     "resolve_runtime_agent",
     "run_with_model_chain",

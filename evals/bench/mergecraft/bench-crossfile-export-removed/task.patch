@@ -1,0 +1,24 @@
+diff --git a/src/mergecraft/cli/review_cmd.py b/src/mergecraft/cli/review_cmd.py
+--- a/src/mergecraft/cli/review_cmd.py
++++ b/src/mergecraft/cli/review_cmd.py
+@@ -5,8 +5,3 @@
+ import typer
+
+ review_app = typer.Typer()
+-
+-
+-def legacy_review_command(pr_number: int) -> None:
+-    """Deprecated: use `mergecraft diff-review` instead."""
+-    raise NotImplementedError
+diff --git a/src/mergecraft/cli/main.py b/src/mergecraft/cli/main.py
+--- a/src/mergecraft/cli/main.py
++++ b/src/mergecraft/cli/main.py
+@@ -6,6 +6,8 @@
+
+ from mergecraft.cli.eval_cmd import eval_app
+ from mergecraft.cli.review_cmd import legacy_review_command
++from mergecraft.cli.gate_cmd import gate_app
+
+ app = typer.Typer()
+ app.add_typer(eval_app, name="eval")
++app.add_typer(gate_app, name="gate")

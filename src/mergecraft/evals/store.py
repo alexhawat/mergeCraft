@@ -278,6 +278,14 @@ class Case(BaseModel):
     recorded_findings: list[dict[str, Any]] | None = None
     run_succeeded: bool = True
     trust_tier: str = "trusted"
+    # An explicit curator assertion that `recorded_findings` is complete and
+    # confirmed-clean — mirrors `scoring.BaselineIssue`'s `closed_world` flag
+    # (D4/D5). Trust tier alone is not defect ground truth: an untrusted-tier
+    # case can still carry a real seeded defect the review missed, and only
+    # this flag distinguishes "curator asserts: nothing to find" from
+    # "empty for some other reason" (mergeCraft self-review, PR #216 —
+    # gate-matrix classification must not infer ground truth from trust_tier).
+    closed_world: bool = False
 
     @property
     def is_replayable(self) -> bool:

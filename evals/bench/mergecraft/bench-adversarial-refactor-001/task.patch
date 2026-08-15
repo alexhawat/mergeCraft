@@ -1,0 +1,23 @@
+diff --git a/src/mergecraft/utils/duration.py b/src/mergecraft/utils/duration.py
+--- a/src/mergecraft/utils/duration.py
++++ b/src/mergecraft/utils/duration.py
+@@ -3,11 +3,11 @@
+ from __future__ import annotations
+
+
+-def format_duration(s: float) -> str:
+-    m, sec = divmod(int(s), 60)
+-    h, m = divmod(m, 60)
+-    if h:
+-        return f"{h}h{m}m{sec}s"
+-    if m:
+-        return f"{m}m{sec}s"
+-    return f"{sec}s"
++def format_duration(total_seconds: float) -> str:
++    minutes, seconds = divmod(int(total_seconds), 60)
++    hours, minutes = divmod(minutes, 60)
++    if hours:
++        return f"{hours}h{minutes}m{seconds}s"
++    if minutes:
++        return f"{minutes}m{seconds}s"
++    return f"{seconds}s"

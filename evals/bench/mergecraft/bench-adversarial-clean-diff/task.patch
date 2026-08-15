@@ -1,0 +1,13 @@
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,7 @@
+ # mergeCraft
+
+-mergeCraft reviews your pull requests using your own AI provider credentials.
++mergeCraft reviews your pull requests using your own AI provider credentials (BYOK).
+
+ ## Installation
+
+-See the quick start guide for setup instructions.
++See the quick start guide below for setup instructions.

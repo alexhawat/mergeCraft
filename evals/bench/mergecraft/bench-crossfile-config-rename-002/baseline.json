@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-crossfile-config-rename-002-001",
+      "path": "src/mergecraft/ci/tracing_client.py",
+      "start_line": 14,
+      "end_line": 14,
+      "title": "build_client still reads settings.otlp_endpoint after the field was renamed",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

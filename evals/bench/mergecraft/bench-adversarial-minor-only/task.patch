@@ -1,0 +1,9 @@
+diff --git a/docs/CONTRIBUTING.md b/docs/CONTRIBUTING.md
+--- a/docs/CONTRIBUTING.md
++++ b/docs/CONTRIBUTING.md
+@@ -37,4 +37,4 @@
+
+
+
+-# Configure the color output for CI logs before running the suite locally.
++# Configure the colour output for CI logs before running the suite locally.

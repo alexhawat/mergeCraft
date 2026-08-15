@@ -1,0 +1,15 @@
+{
+  "closed_world": true,
+  "issues": [
+    {
+      "id": "bench-adversarial-minor-only-001",
+      "path": "docs/CONTRIBUTING.md",
+      "start_line": 40,
+      "end_line": 40,
+      "title": "Comment uses British spelling where project style prefers American",
+      "severity": "Minor",
+      "category": "Maintainability & Code Quality",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

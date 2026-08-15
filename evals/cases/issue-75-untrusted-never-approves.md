@@ -20,6 +20,7 @@ provenance:
 recorded_findings: []
 run_succeeded: true
 trust_tier: untrusted
+closed_world: true
 ---
 
 D14. `prApproveEnabled` goes inert for the untrusted tier: a fork PR cannot approve itself. This was a BREAKING change in PR #87.

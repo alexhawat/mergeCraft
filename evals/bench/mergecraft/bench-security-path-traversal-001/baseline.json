@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-security-path-traversal-001-001",
+      "path": "src/mergecraft/utils/artifact_fetch.py",
+      "start_line": 9,
+      "end_line": 10,
+      "title": "resolve_artifact drops the path-traversal containment check",
+      "severity": "Critical",
+      "category": "Security & Privacy",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

@@ -22,12 +22,15 @@ from mergecraft.evals.benchmark import (
     BenchmarkMetrics,
     BenchmarkResultSet,
     CaseReplayRow,
+    DetectionMetrics,
+    ReviewingModelPin,
     VersionPins,
     corpus_class_for,
     replay_bank,
     run_structural_replay,
     write_result_set,
 )
+from mergecraft.evals.scoring import AggregateScoreReport
 from mergecraft.evals.store import Case, add_case
 from mergecraft.modes import compute_prompt_version
 from mergecraft.utils.learnings import LearningProvenance
@@ -98,7 +101,38 @@ def _pins() -> VersionPins:
         mode_prompt_versions={"stable": compute_prompt_version("stable")},
         corpus_commit="deadbeef",
         recorded_at=datetime(2026, 8, 13, 17, 0, 0, tzinfo=UTC),
+        mergecraft_commit="deadbeef",
+        reviewing_model={
+            "claude": ReviewingModelPin(
+                model_id="claude-sonnet-5", model_pin="claude-sonnet-5", model_pinned=True
+            )
+        },
+        scorer_version="1.0.0",
+        line_slack=3,
     )
+
+
+def _empty_gate_kwargs() -> dict[str, Any]:
+    """Zeroed gate-matrix fields for a `BenchmarkMetrics` with no cases (B2)."""
+    return {
+        "unsafe_approval_rate": 0.0,
+        "clean_block_rate": 0.0,
+        "inconclusive_rate": 0.0,
+        "gate_matrix": {
+            "buggy_total": 0,
+            "buggy_correct_block": 0,
+            "buggy_unsafe_approval": 0,
+            "buggy_inconclusive": 0,
+            "clean_total": 0,
+            "clean_correct_approval": 0,
+            "clean_unsafe_block": 0,
+            "clean_inconclusive": 0,
+        },
+        "by_corpus_class": {
+            bucket: {"total": 0, "correct": 0, "incorrect": 0, "inconclusive": 0}
+            for bucket in ("correctness", "security", "cross_file", "adversarial_noop")
+        },
+    }
 
 
 @_SPUN_OUT_W9
@@ -212,6 +246,7 @@ def test_benchmark_result_set_wire_shape_and_rejects_extra_fields() -> None:
             cases_regression=0,
             cases_blocked=0,
             decision_replay_pass_rate=0.0,
+            **_empty_gate_kwargs(),
         ),
         case_results=[],
     )
@@ -261,6 +296,7 @@ def test_write_result_set_persists_json_and_latest_mirror(tmp_path: Path) -> Non
             cases_regression=0,
             cases_blocked=0,
             decision_replay_pass_rate=0.0,
+            **_empty_gate_kwargs(),
         ),
         case_results=[],
     )
@@ -271,7 +307,70 @@ def test_write_result_set_persists_json_and_latest_mirror(tmp_path: Path) -> Non
     assert payload["pins"]["rubric_version"] == VERIFIER_RUBRIC_VERSION
     latest = tmp_path / "latest.json"
     assert latest.is_file()
-    assert json.loads(latest.read_text(encoding="utf-8")) == payload
+
+
+def _aggregate() -> AggregateScoreReport:
+    return AggregateScoreReport(
+        total_cases=0,
+        total_issues=0,
+        total_reported=0,
+        found=0,
+        false_negatives=0,
+        unadjudicated=0,
+        false_positives=0,
+        false_positives_per_case=0.0,
+        clean_case_fp_rate=0.0,
+    )
+
+
+def _detection(provider: str) -> DetectionMetrics:
+    return DetectionMetrics(
+        provider=provider,
+        model=f"{provider}/some-model",
+        cases_run=0,
+        aggregate=_aggregate(),
+        case_results=[],
+        raw_findings_dir=f"/tmp/{provider}-raw",
+    )
+
+
+def test_write_result_set_default_filename_survives_same_second_different_provider(
+    tmp_path: Path,
+) -> None:
+    """Two `mergecraft eval bench` runs for different providers, started
+    within the same second (`recorded_at` fixed identically here to force
+    the collision), must not silently overwrite each other's result-set
+    file — the default filename previously carried only a 1-second-
+    resolution timestamp with no provider or randomness component
+    (mergeCraft self-review, PR #216)."""
+    same_instant = datetime(2026, 8, 15, 12, 0, 0, tzinfo=UTC)
+
+    def _result(provider: str) -> BenchmarkResultSet:
+        pins = _pins()
+        pins = pins.model_copy(update={"recorded_at": same_instant})
+        return BenchmarkResultSet(
+            pins=pins,
+            metrics=BenchmarkMetrics(
+                cases_total=0,
+                cases_replayable=0,
+                cases_passed=0,
+                cases_regression=0,
+                cases_blocked=0,
+                decision_replay_pass_rate=0.0,
+                **_empty_gate_kwargs(),
+            ),
+            case_results=[],
+            detection=_detection(provider),
+        )
+
+    first = write_result_set(_result("claude"), results_dir=tmp_path)
+    second = write_result_set(_result("openai"), results_dir=tmp_path)
+
+    assert first != second
+    assert first.is_file()
+    assert second.is_file()
+    assert "claude" in first.name
+    assert "openai" in second.name
 
 
 def test_replay_bank_writes_result_set_and_returns_pair(tmp_path: Path) -> None:

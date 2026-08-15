@@ -1,0 +1,10 @@
+diff --git a/src/mergecraft/utils/env_probe.py b/src/mergecraft/utils/env_probe.py
+--- a/src/mergecraft/utils/env_probe.py
++++ b/src/mergecraft/utils/env_probe.py
+@@ -9,6 +9,4 @@
+     # Fixed in #118: os.environ.get() can return None if MERGECRAFT_REGION
+     # is set to an empty string via `export MERGECRAFT_REGION=`; guard before .strip().
+     value = os.environ.get("MERGECRAFT_REGION")
+-    if value is None:
+-        return default
+     return value.strip() or default

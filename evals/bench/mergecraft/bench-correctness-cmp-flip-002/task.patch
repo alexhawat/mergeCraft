@@ -1,0 +1,9 @@
+diff --git a/src/mergecraft/ci/flaky.py b/src/mergecraft/ci/flaky.py
+--- a/src/mergecraft/ci/flaky.py
++++ b/src/mergecraft/ci/flaky.py
+@@ -9,4 +9,4 @@
+
+
+ def is_exhausted(attempt: int, max_attempts: int) -> bool:
+-    return attempt >= max_attempts
++    return attempt > max_attempts

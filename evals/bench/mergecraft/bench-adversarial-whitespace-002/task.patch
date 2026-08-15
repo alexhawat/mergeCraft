@@ -1,0 +1,10 @@
+diff --git a/src/mergecraft/cli/help_text.py b/src/mergecraft/cli/help_text.py
+--- a/src/mergecraft/cli/help_text.py
++++ b/src/mergecraft/cli/help_text.py
+@@ -2,5 +2,5 @@
+
+ from __future__ import annotations
+
+-USAGE = "mergecraft [OPTIONS] COMMAND [ARGS]..."
++USAGE = "mergecraft [OPTIONS] COMMAND [ARGS]..."
+ EPILOG = "See https://github.com/alexhawat/mergeCraft for docs."

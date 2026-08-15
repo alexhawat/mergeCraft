@@ -1,0 +1,25 @@
+diff --git a/src/mergecraft/analyzers/pipeline_result.py b/src/mergecraft/analyzers/pipeline_result.py
+--- a/src/mergecraft/analyzers/pipeline_result.py
++++ b/src/mergecraft/analyzers/pipeline_result.py
+@@ -5,9 +5,9 @@
+ from mergecraft.analyzers.finding import Finding
+
+
+-def run_pipeline(paths: list[str]) -> list[Finding]:
++def run_pipeline(paths: list[str]) -> dict[str, object]:
+     findings = _collect(paths)
+-    return findings
++    return {"findings": findings, "meta": {"path_count": len(paths)}}
+
+
+ def _collect(paths: list[str]) -> list[Finding]:
+diff --git a/src/mergecraft/cli/pipeline_cmd.py b/src/mergecraft/cli/pipeline_cmd.py
+--- a/src/mergecraft/cli/pipeline_cmd.py
++++ b/src/mergecraft/cli/pipeline_cmd.py
+@@ -8,5 +8,6 @@
+
+
+ def print_findings(paths: list[str]) -> None:
++    logger.debug("printing pipeline findings")
+     for finding in run_pipeline(paths):
+         print(finding.message)

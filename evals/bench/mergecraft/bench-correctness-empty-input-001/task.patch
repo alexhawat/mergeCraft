@@ -1,0 +1,10 @@
+diff --git a/src/mergecraft/evals/first_case.py b/src/mergecraft/evals/first_case.py
+--- a/src/mergecraft/evals/first_case.py
++++ b/src/mergecraft/evals/first_case.py
+@@ -4,6 +4,4 @@
+
+
+ def first_case_id(case_ids: list[str]) -> str:
+-    if not case_ids:
+-        return ""
+     return case_ids[0]

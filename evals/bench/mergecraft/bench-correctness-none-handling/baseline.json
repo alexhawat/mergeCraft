@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-none-handling-001",
+      "path": "src/mergecraft/config/threshold.py",
+      "start_line": 10,
+      "end_line": 11,
+      "title": "resolve_min_severity dereferences an optional config section without a guard",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}
