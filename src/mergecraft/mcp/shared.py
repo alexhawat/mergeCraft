@@ -75,9 +75,7 @@ class ToolSpec:
     description: str
     input_schema: JsonSchema
     execute: ToolHandler
-    # Default for bare test fixtures (``create_mcp_app([spec])``); production
-    # tools always pass an explicit class via ``tool()``.
-    tool_class: ToolClass = ToolClass.ANALYSIS
+    tool_class: ToolClass
     mutates: bool = False
     annotations: dict[str, Any] = field(default_factory=dict)
     timeout_ms: int | None = None
