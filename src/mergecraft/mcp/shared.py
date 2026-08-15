@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from enum import StrEnum
+from typing import Any, Final, Literal
 
 from loguru import logger
 
@@ -13,6 +14,47 @@ JsonSchema = dict[str, Any]
 # Tool bodies vary across modules; wrap loosely then normalize in ``execute``.
 ToolBody = Callable[..., Awaitable[Any]]
 ToolHandler = Callable[[Mapping[str, Any]], Awaitable[Any]]
+
+
+class ToolClass(StrEnum):
+    """D14 — ten closed values; role toolsets derive from class filters."""
+
+    SCOPE = "scope"
+    REPOSITORY_READ = "repository-read"
+    ANALYSIS = "analysis"
+    VERIFICATION = "verification"
+    REVIEW_READ = "review-read"
+    REVIEW_WRITE = "review-write"
+    GITHUB_MUTATION = "github-mutation"
+    REPOSITORY_MUTATION = "repository-mutation"
+    SHELL = "shell"
+    TERMINAL_PROTOCOL = "terminal-protocol"
+
+
+REVIEWER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
+    {
+        ToolClass.SCOPE,
+        ToolClass.REPOSITORY_READ,
+        ToolClass.ANALYSIS,
+        ToolClass.REVIEW_READ,
+    }
+)
+VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
+    {
+        ToolClass.REPOSITORY_READ,
+        ToolClass.ANALYSIS,
+        ToolClass.VERIFICATION,
+    }
+)
+
+
+def repository_mutation_class_for_push(
+    push: Literal["disabled", "restricted", "enabled"],
+) -> ToolClass:
+    """Classify push/commit tools: ``repository-mutation`` only when push is enabled."""
+    if push == "enabled":
+        return ToolClass.REPOSITORY_MUTATION
+    return ToolClass.GITHUB_MUTATION
 
 
 @dataclass(slots=True)
@@ -33,6 +75,7 @@ class ToolSpec:
     description: str
     input_schema: JsonSchema
     execute: ToolHandler
+    tool_class: ToolClass
     mutates: bool = False
     annotations: dict[str, Any] = field(default_factory=dict)
     timeout_ms: int | None = None
@@ -54,6 +97,7 @@ def tool(
     description: str,
     input_schema: JsonSchema,
     execute: ToolHandler,
+    tool_class: ToolClass,
     mutates: bool = False,
     annotations: dict[str, Any] | None = None,
     timeout_ms: int | None = None,
@@ -63,6 +107,7 @@ def tool(
         description=description,
         input_schema=input_schema,
         execute=execute,
+        tool_class=tool_class,
         mutates=mutates,
         annotations=annotations or {},
         timeout_ms=timeout_ms,

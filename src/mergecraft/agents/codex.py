@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -75,6 +76,20 @@ USER_NAMESPACE_FAILURES: tuple[str, ...] = (
 # ephemeral, isolated container; the nested sandbox is redundant".
 CODEX_SANDBOX_ENV = "MERGECRAFT_CODEX_SANDBOX"
 CODEX_SANDBOX_UNSANDBOXED = "danger-full-access"
+
+
+@dataclass(frozen=True, slots=True)
+class CodexSubagentDegradation:
+    """Declared limitation for Codex subagent dispatch (D15)."""
+
+    kind: str
+    toolset_parity: bool
+
+
+CODEX_SUBAGENT_DEGRADATION = CodexSubagentDegradation(
+    kind="prose-only",
+    toolset_parity=False,
+)
 
 # Mirrors mergecraft.utils.git_setup — Codex refuses PATH aliases under these.
 _FORBIDDEN_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/usr/tmp")

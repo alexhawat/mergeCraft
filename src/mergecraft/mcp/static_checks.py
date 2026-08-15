@@ -13,7 +13,7 @@ from mergecraft.ci.evidence import (
     record_gate_substitutions,
     substitute_declared_gates,
 )
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.review_checks import declared_cannot_run_outcomes, plan_checks, run_checks
 
@@ -160,6 +160,7 @@ def run_static_checks_tool(ctx: ToolContext):
 
     return tool(
         name="run_static_checks",
+        tool_class=ToolClass.ANALYSIS,
         timeout_ms=600_000,
         description=(
             "Run the reviewed repo's own mechanical gates (declared `staticChecks`, "

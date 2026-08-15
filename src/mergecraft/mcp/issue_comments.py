@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
@@ -34,6 +34,7 @@ def get_issue_comments_tool(ctx: ToolContext):
 
     return tool(
         name="get_issue_comments",
+        tool_class=ToolClass.REPOSITORY_READ,
         description="Get all comments for a GitHub issue.",
         input_schema={
             "type": "object",

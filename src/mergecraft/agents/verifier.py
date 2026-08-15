@@ -42,8 +42,8 @@ from typing import TYPE_CHECKING, Final, Literal
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
-from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.analyzers.scope import withdrawn_fingerprints
+from mergecraft.mcp.shared import VERIFIER_ALLOWED_TOOL_CLASSES
 from mergecraft.review_taxonomy import (
     FINDING_SEVERITIES,
     WITHDRAWN_FINDINGS_HEADING,
@@ -150,8 +150,15 @@ def verifier_denied_tool_names(
     ctx: ToolContext,
     output_schema: object | None = None,
 ) -> list[str]:
-    """Canonical bare names of every state-mutating MCP tool for the verifier."""
-    return subagent_denied_tool_names(ctx, output_schema)  # type: ignore[arg-type]
+    """Canonical bare names denied to the verifier (H4 — independent complement)."""
+    from mergecraft.agents.gates import _denied_tool_names_for_allowed_classes
+
+    return _denied_tool_names_for_allowed_classes(
+        ctx,
+        VERIFIER_ALLOWED_TOOL_CLASSES,
+        role="verifier",
+        output_schema=output_schema,  # type: ignore[arg-type]
+    )
 
 
 def should_verify(finding: Finding) -> bool:

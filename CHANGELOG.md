@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (PR G2): the README table documented 9 of 24 real `action.yml` inputs and
   neither declared output anywhere
 
+### Security
+
+- Reviewer and verifier now hold distinct, class-derived MCP toolsets; terminal-protocol tools are denied to every read-only role
+
 ### Fixed
 
 - `README.md`'s CLI table documented `mergecraft traces <run-id>`, but the real

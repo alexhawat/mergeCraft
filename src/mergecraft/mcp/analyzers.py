@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.config import load_repo_settings
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
 
 if TYPE_CHECKING:
@@ -92,6 +92,7 @@ def run_analyzers_tool(ctx: ToolContext):
 
     return tool(
         name="run_analyzers",
+        tool_class=ToolClass.ANALYSIS,
         timeout_ms=600_000,
         description=(
             "Run mergeCraft catalog analyzers over the changed files and return per-analyzer "
@@ -172,6 +173,7 @@ def analyzer_findings_tool(ctx: ToolContext):
 
     return tool(
         name="analyzer_findings",
+        tool_class=ToolClass.ANALYSIS,
         description=(
             "Retrieve the scoped, clustered, budgeted analyzer finding set from the most recent "
             "run_analyzers call — inline bodies include tool/rule citations and confidence tags. "

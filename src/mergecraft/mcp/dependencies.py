@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.mcp.shared import EMPTY_SCHEMA, execute, tool
+from mergecraft.mcp.shared import EMPTY_SCHEMA, ToolClass, execute, tool
 from mergecraft.mcp.tool_state import DependencyInstallationState
 from mergecraft.prep import PrepOptions, PrepResult, run_prep_phase
 
@@ -94,6 +94,7 @@ def start_dependency_installation_tool(ctx: ToolContext):
 
     return tool(
         name="start_dependency_installation",
+        tool_class=ToolClass.ANALYSIS,
         mutates=True,
         description=(
             "Start installing project dependencies in the background. Non-blocking and idempotent."
@@ -124,6 +125,7 @@ def await_dependency_installation_tool(ctx: ToolContext):
 
     return tool(
         name="await_dependency_installation",
+        tool_class=ToolClass.ANALYSIS,
         description=(
             "Wait for dependency installation to complete and get the results. "
             "Auto-starts if not yet started."

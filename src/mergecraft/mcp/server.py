@@ -58,7 +58,14 @@ from mergecraft.mcp.review_comments import (
     resolve_review_thread_tool,
 )
 from mergecraft.mcp.select_mode import select_mode_tool
-from mergecraft.mcp.shared import JsonSchema, ToolResult, ToolSpec
+from mergecraft.mcp.shared import (
+    REVIEWER_ALLOWED_TOOL_CLASSES,
+    VERIFIER_ALLOWED_TOOL_CLASSES,
+    JsonSchema,
+    ToolClass,
+    ToolResult,
+    ToolSpec,
+)
 from mergecraft.mcp.shell import kill_background_tool, shell_tool
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.upload import upload_file_tool
@@ -134,6 +141,39 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
     if ctx.payload.shell == "restricted":
         tools.extend([shell_tool(ctx), kill_background_tool(ctx)])
     return tools
+
+
+def _filter_tools_by_class(
+    tools: list[ToolSpec],
+    allowed: frozenset[ToolClass],
+) -> list[ToolSpec]:
+    filtered = [spec for spec in tools if spec.tool_class in allowed]
+    if not filtered:
+        msg = "class filter yielded an empty toolset"
+        raise RuntimeError(msg)
+    return filtered
+
+
+def build_reviewer_tools(
+    ctx: ToolContext,
+    output_schema: JsonSchema | None = None,
+) -> list[ToolSpec]:
+    """Read-only reviewer surface — class-filtered, distinct from verifier (H4)."""
+    return _filter_tools_by_class(
+        build_orchestrator_tools(ctx, output_schema),
+        REVIEWER_ALLOWED_TOOL_CLASSES,
+    )
+
+
+def build_verifier_tools(
+    ctx: ToolContext,
+    output_schema: JsonSchema | None = None,
+) -> list[ToolSpec]:
+    """Read-only verifier surface — class-filtered, distinct from reviewer (H4)."""
+    return _filter_tools_by_class(
+        build_orchestrator_tools(ctx, output_schema),
+        VERIFIER_ALLOWED_TOOL_CLASSES,
+    )
 
 
 def build_orchestrator_tools(

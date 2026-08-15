@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.mcp.comment import add_footer
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -60,6 +60,7 @@ def create_pull_request_tool(ctx: ToolContext):
 
     return tool(
         name="create_pull_request",
+        tool_class=ToolClass.GITHUB_MUTATION,
         mutates=True,
         description="Create a pull request from the current branch",
         input_schema={
@@ -96,6 +97,7 @@ def update_pull_request_body_tool(ctx: ToolContext):
 
     return tool(
         name="update_pull_request_body",
+        tool_class=ToolClass.GITHUB_MUTATION,
         mutates=True,
         description="Update the body/description of an existing pull request",
         input_schema={
@@ -129,6 +131,7 @@ def close_pull_request_tool(ctx: ToolContext):
 
     return tool(
         name="close_pull_request",
+        tool_class=ToolClass.GITHUB_MUTATION,
         mutates=True,
         description="Close an open pull request WITHOUT merging it.",
         input_schema={

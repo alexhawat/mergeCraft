@@ -9,7 +9,7 @@ from loguru import logger
 
 from mergecraft.mcp.comment import add_footer
 from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
 from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
 from mergecraft.review_taxonomy import stamp_finding_fingerprint
@@ -298,6 +298,7 @@ def create_pull_request_review_tool(ctx: ToolContext):
 
     return tool(
         name="create_pull_request_review",
+        tool_class=ToolClass.REVIEW_WRITE,
         mutates=True,
         description=(
             "Submit a review for an existing pull request. "

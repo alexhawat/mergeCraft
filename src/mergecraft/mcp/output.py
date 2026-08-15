@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.mcp.shared import JsonSchema, execute, tool
+from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -20,6 +20,7 @@ def set_output_tool(ctx: ToolContext, output_schema: JsonSchema | None = None):
 
         return tool(
             name="set_output",
+            tool_class=ToolClass.ANALYSIS,
             mutates=True,
             description=(
                 "Set the structured action output. You MUST call this tool before "
@@ -35,6 +36,7 @@ def set_output_tool(ctx: ToolContext, output_schema: JsonSchema | None = None):
 
     return tool(
         name="set_output",
+        tool_class=ToolClass.ANALYSIS,
         mutates=True,
         description=(
             "Set the action output. Exposes the value as the 'result' GitHub Action "
