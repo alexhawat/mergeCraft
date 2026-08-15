@@ -1,6 +1,7 @@
-"""VP3.1 RED suite — ``VerdictDiagnostic`` on the span, through redaction.
+"""VP3 diagnostics suite — ``VerdictDiagnostic`` on the span, through redaction.
 
-Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP3.1 File 4).
+Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP3.1 File 4,
+VP3.2 impl; xfail markers cleared after VP3.2).
 
 The eight closed values (snake_case ``StrEnum`` members) must each appear
 as a span attribute and/or check-run summary **through**
@@ -13,13 +14,6 @@ from __future__ import annotations
 
 import json
 from typing import Any
-
-import pytest
-
-_VP32 = pytest.mark.xfail(
-    reason="green after VP3.2: verdict diagnostic span + redaction",
-    strict=False,
-)
 
 # Plan VP3.1: provider failure · provider success w/o submission ·
 # schema-invalid · semantic-invalid · policy rejection ·
@@ -75,7 +69,6 @@ def _attrs_from_helper(diagnostic: Any, *, summary: str) -> dict[str, Any]:
     return attrs
 
 
-@_VP32
 def test_each_diagnostic_reaches_the_span() -> None:
     """Each of the eight closed ``VerdictDiagnostic`` values reaches the span.
 
@@ -120,7 +113,6 @@ def test_each_diagnostic_reaches_the_span() -> None:
         assert _diagnostic_on_attrs(event.attrs, member.value)
 
 
-@_VP32
 def test_diagnostics_are_redacted() -> None:
     """A submission summary that looks like a token must not appear on the span.
 

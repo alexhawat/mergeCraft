@@ -7,25 +7,26 @@ Worktree: `mergecraft-vp3-shadow` @ `wave/vp3-shadow` (stacked on VP2 `087df16`)
 
 | Wave | Test files | Marker |
 |------|------------|--------|
-| **VP3.2** | `tests/evidence/test_verdict_shadow.py` (all 5) | `@pytest.mark.xfail(reason="green after VP3.2: verdict-protocol shadow predicate", strict=False)` |
-| **VP3.2** | `tests/tracing/test_verdict_diagnostics.py` (both) | `@pytest.mark.xfail(reason="green after VP3.2: verdict diagnostic span + redaction", strict=False)` |
-| **VP3.2** | `tests/review/test_attempt_attribution.py` (both) | `@pytest.mark.xfail(reason="green after VP3.2: attempt_id stamp + stale structural result", strict=False)` |
+| **VP3.2** | `tests/evidence/test_verdict_shadow.py` (all 5) | *(markers removed 2026-08-16 after VP3.2)* |
+| **VP3.2** | `tests/tracing/test_verdict_diagnostics.py` (both) | *(markers removed 2026-08-16 after VP3.2)* |
+| **VP3.2** | `tests/review/test_attempt_attribution.py` (both) | *(markers removed 2026-08-16 after VP3.2)* |
 
 Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a later XPASS into a hard failure the impl wave cannot touch.
 
-Existing gate-action shadow tests in `tests/evidence/test_gate_actions.py` are not part of this suite and must keep collecting.
+Existing gate-action shadow tests in `tests/evidence/test_gate_actions.py` are not part of this suite and must keep collecting. Their leftover W9/W10 xfails are unchanged.
 
 ### xfail reconciliation log
 
 | Date | Impl wave | Markers removed | Notes |
 |------|-----------|-----------------|-------|
-| *(pending VP3.2)* | | | |
+| 2026-08-16 | VP3.2 | `_VP32` on all 5 tests in `test_verdict_shadow.py`, both tests in `test_verdict_diagnostics.py`, and both tests in `test_attempt_attribution.py` | Suite is now 9/9 real passes (0 xfail / 0 XPASS). Direct pin added: `VerdictProtocolPrediction`. Gate-action W9/W10 xfails in `test_gate_actions.py` left in place. VP3 Final not flipped. |
 
 ## Named symbols this suite pins
 
 | Symbol | Module | Direct test |
 |--------|--------|-------------|
 | `predict_verdict_protocol` | `evidence/shadow.py` | all five tests in `test_verdict_shadow.py` |
+| `VerdictProtocolPrediction` | `evidence/shadow.py` | `test_shadow_records_prediction_without_changing_outcome` (`isinstance` pin) |
 | `record_shadow_prediction` | `evidence/shadow.py` | `test_shadow_records_prediction_without_changing_outcome`, agreement, diagnostic-on-row |
 | `disagree_with_outcome` | `evidence/shadow.py` | `test_disagreement_is_queryable` (also agreement fallback) |
 | `VerdictDiagnostic` | `mcp/verdict.py` | `test_shadow_row_carries_diagnostic_code`, `test_each_diagnostic_reaches_the_span` |
@@ -39,7 +40,7 @@ Existing gate-action shadow tests in `tests/evidence/test_gate_actions.py` are n
 | `verdict_satisfies_attempt` | `mcp/verdict.py` | `test_stale_structural_result_is_not_reused` |
 | `finalize_agent_result` | `agents/post_run.py` | stale-attempt guard-deletion pin |
 
-`predict_verdict_protocol`, `VerdictDiagnostic`, `span_attrs_for_verdict_diagnostic`, `stamp_attempt_id`, and `verdict_satisfies_attempt` are imported **inside test bodies** so collection stays green before VP3.2 lands them.
+`predict_verdict_protocol`, `VerdictProtocolPrediction`, `VerdictDiagnostic`, `span_attrs_for_verdict_diagnostic`, `stamp_attempt_id`, and `verdict_satisfies_attempt` are imported **inside test bodies**.
 
 ### Closed `VerdictDiagnostic` vocabulary
 
@@ -85,3 +86,7 @@ No source-grep assertions. Shadow tests drive the real `record_shadow_prediction
 ## RED acceptance (VP3.1)
 
 9 collected; 0 pass; 9 xfail pending VP3.2. Zero collection errors. `make lint` and `make typecheck` clean. Product code is not edited in this wave. VP3.2 / VP3 Final checkboxes are not flipped here.
+
+## VP3.2 xfail reconciliation
+
+9 collected; 9 pass; 0 xfail / 0 XPASS on `tests/evidence/test_verdict_shadow.py` + `tests/tracing/test_verdict_diagnostics.py` + `tests/review/test_attempt_attribution.py`. Markers cleared; `VerdictProtocolPrediction` directly pinned. Gate-action leftover xfails in `tests/evidence/test_gate_actions.py` unchanged. Product code is not edited in this wave. VP3 Final remains open.

@@ -1,6 +1,7 @@
-"""VP3.1 RED suite — V7 attempt attribution / verdict freshness.
+"""VP3 attempt attribution — V7 verdict freshness.
 
-Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP3 File 3).
+Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP3 File 3,
+VP3.2 impl; xfail markers cleared after VP3.2).
 
 **V7**: bind the terminal verdict to the attempt that produced it. Stamp
 ``attempt_id`` when the model chain starts an attempt (beside
@@ -32,11 +33,6 @@ from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_VP32 = pytest.mark.xfail(
-    reason="green after VP3.2: attempt_id stamp + stale structural result",
-    strict=False,
-)
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -77,7 +73,6 @@ def _approve_payload() -> dict[str, str | list[object]]:
     }
 
 
-@_VP32
 @pytest.mark.asyncio
 async def test_verdict_is_bound_to_its_attempt(tmp_path: Path) -> None:
     """V7: ``TerminalSubmission.attempt_id`` is the id stamped when the attempt starts.
@@ -106,7 +101,6 @@ async def test_verdict_is_bound_to_its_attempt(tmp_path: Path) -> None:
     assert finalized.diagnostics.get("attempt_id") == 2
 
 
-@_VP32
 @pytest.mark.asyncio
 async def test_stale_structural_result_is_not_reused(tmp_path: Path) -> None:
     """A result whose ``attempt_id`` does not match the current attempt does not satisfy it.

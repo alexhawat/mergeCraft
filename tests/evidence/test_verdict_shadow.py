@@ -1,6 +1,7 @@
-"""VP3.1 RED suite — shadow the terminal-verdict protocol (D6).
+"""VP3 shadow suite — terminal-verdict protocol (D6).
 
-Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP3.1).
+Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP3.1 RED,
+VP3.2 impl; xfail markers cleared after VP3.2).
 
 Pinned contracts (W0):
     **D6** — reuse ``evidence/shadow.py`` (``record_shadow_prediction``,
@@ -12,19 +13,12 @@ Pinned contracts (W0):
     actually fires.
 
 House style matches ``tests/evidence/test_gate_actions.py``: helpers at
-the top, one behaviour per test, imports of not-yet-landed symbols live
-inside test bodies so collection stays green.
-
-Every test is ``@pytest.mark.xfail(..., strict=False)`` pending VP3.2.
-Never ``strict=True`` — ``xfail_strict = true`` in pyproject.toml would
-turn a later XPASS into a hard failure the impl wave cannot touch.
+the top, one behaviour per test.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-
-import pytest
 
 from mergecraft.agents.shared import AgentResult
 from mergecraft.run_outcome import RunOutcome
@@ -33,11 +27,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from mergecraft.evidence.packet import MergeEvidencePacket
-
-_VP32 = pytest.mark.xfail(
-    reason="green after VP3.2: verdict-protocol shadow predicate",
-    strict=False,
-)
 
 _POLICY_ID = "verdict-protocol"
 _MISSING_VERDICT_REASON = "no terminal review verdict was submitted for this attempt"
@@ -151,7 +140,6 @@ def _as_outcome(value: Any) -> RunOutcome:
 # ── D6 — shadow records without changing the legacy outcome ───────────────────
 
 
-@_VP32
 def test_shadow_records_prediction_without_changing_outcome(tmp_path: Path) -> None:
     """Shadow on, missing terminal verdict: legacy outcome unchanged, a row is written.
 
@@ -161,7 +149,11 @@ def test_shadow_records_prediction_without_changing_outcome(tmp_path: Path) -> N
     through the existing ``record_shadow_prediction`` writer (D6).
     """
     from mergecraft.config.settings import default_settings
-    from mergecraft.evidence.shadow import predict_verdict_protocol, record_shadow_prediction
+    from mergecraft.evidence.shadow import (
+        VerdictProtocolPrediction,
+        predict_verdict_protocol,
+        record_shadow_prediction,
+    )
     from mergecraft.mcp.verdict import VerdictDiagnostic
 
     assert default_settings().gates.terminal_verdict == "shadow"
@@ -173,6 +165,7 @@ def test_shadow_records_prediction_without_changing_outcome(tmp_path: Path) -> N
     )
 
     prediction = predict_verdict_protocol(result, mode="Review")
+    assert isinstance(prediction, VerdictProtocolPrediction)
     assert _as_outcome(_prediction_outcome(prediction)) is RunOutcome.inconclusive
     diagnostic = _prediction_diagnostic(prediction)
     assert diagnostic == VerdictDiagnostic.provider_success_without_submission or (
@@ -200,7 +193,6 @@ def test_shadow_records_prediction_without_changing_outcome(tmp_path: Path) -> N
     assert _row_diagnostic(row) is not None
 
 
-@_VP32
 def test_shadow_records_agreement_when_verdict_present(tmp_path: Path) -> None:
     """Both decisions agree when a terminal verdict is present; the row says so."""
     from mergecraft.evidence.shadow import (
@@ -249,7 +241,6 @@ def test_shadow_records_agreement_when_verdict_present(tmp_path: Path) -> None:
     assert disagreement is False
 
 
-@_VP32
 def test_shadow_row_carries_diagnostic_code(tmp_path: Path) -> None:
     """The closed ``VerdictDiagnostic`` value is on the shadow row."""
     from mergecraft.evidence.shadow import predict_verdict_protocol, record_shadow_prediction
@@ -274,7 +265,6 @@ def test_shadow_row_carries_diagnostic_code(tmp_path: Path) -> None:
     )
 
 
-@_VP32
 def test_enforce_mode_changes_the_outcome() -> None:
     """With enforce on, the VP2 ``_classify_outcome`` branch fires.
 
@@ -295,7 +285,6 @@ def test_enforce_mode_changes_the_outcome() -> None:
     assert _as_outcome(_prediction_outcome(prediction)) is RunOutcome.inconclusive
 
 
-@_VP32
 def test_disagreement_is_queryable() -> None:
     """``disagree_with_outcome`` surfaces shadow-vs-actual mismatches (D6).
 
