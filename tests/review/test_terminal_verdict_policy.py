@@ -1,7 +1,8 @@
 """VP2 fail-closed terminal verdict — policy, validator, and outcome resolver.
 
 Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP2.1 RED, VP2.2
-impl; xfail markers cleared after VP2.2; VP2.3 live ``run_static_checks`` persist).
+impl; xfail markers cleared after VP2.2; VP2.3 live ``run_static_checks`` persist;
+VP2.4 sticky failed static_checks across empty-plan rerun).
 
 Pinned contracts (W0):
     D2 — missing verdict → ``RunOutcome.inconclusive``, not ``failed``.
@@ -616,18 +617,14 @@ async def test_approve_after_failed_run_static_checks_tool_is_rejected(
     )
 
 
-@pytest.mark.xfail(
-    reason="green after VP2.4: sticky failed static_checks",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_failed_static_check_survives_empty_plan_rerun(
     tmp_path: Path,
 ) -> None:
     """A later empty ``plan_checks`` must not wipe a prior ``failed`` row.
 
-    Suffix-filtered ``changed_files`` that match no gate currently assign
-    ``ToolState.static_checks = []``, after which ``approve`` is accepted.
+    Suffix-filtered ``changed_files`` that match no gate must leave a prior
+    ``failed`` row in place, so ``approve`` stays rejected (D8).
     """
     from mergecraft.mcp.verdict import (
         submit_review_verdict_tool,

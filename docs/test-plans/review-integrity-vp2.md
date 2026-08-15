@@ -10,7 +10,7 @@ Worktree: `mergecraft-vp2-fail-closed` @ `wave/vp2-fail-closed` (stacked on VP1 
 | **VP2.2** | `tests/review/test_terminal_verdict_policy.py` (16 of 20) | *(markers removed 2026-08-16 after VP2.2)* |
 | **VP2.2** | `tests/review/test_post_run_terminal_gate.py` (both) | *(markers removed 2026-08-16 after VP2.2)* |
 | **VP2.3** | `tests/review/test_terminal_verdict_policy.py::test_approve_after_failed_run_static_checks_tool_is_rejected` | *(marker removed 2026-08-16 after VP2.3 persist)* |
-| **VP2.4** | `tests/review/test_terminal_verdict_policy.py::test_failed_static_check_survives_empty_plan_rerun` | `@pytest.mark.xfail(reason="green after VP2.4: sticky failed static_checks", strict=False)` |
+| **VP2.4** | `tests/review/test_terminal_verdict_policy.py::test_failed_static_check_survives_empty_plan_rerun` | *(marker removed 2026-08-16 after VP2.4 sticky persist)* |
 
 Never `strict=True` — a strict xfail that XPASSes after VP2.2 is a hard failure the impl wave cannot touch.
 
@@ -31,6 +31,7 @@ Never `strict=True` — a strict xfail that XPASSes after VP2.2 is a hard failur
 | 2026-08-16 | VP2.3 (RED) | `test_approve_after_failed_run_static_checks_tool_is_rejected` added, xfail pending persist | Security-review medium: `run_static_checks_tool` does not persist rows on `ToolState`; `validation_state_from_tool_context` hardcodes `static_checks=[]`. Injected-row unit test kept. No `unavailable`/empty sibling — that pin would pass today without the persist field. |
 | 2026-08-16 | VP2.3 | `test_approve_after_failed_run_static_checks_tool_is_rejected` xfail removed | Live-path is now a real pass (not XPASS). Direct pin added: `_persist_static_checks`. Injected-row unit test kept. VP2 Final / security-review not flipped. |
 | 2026-08-16 | VP2.4 (RED) | `test_failed_static_check_survives_empty_plan_rerun` added, xfail pending sticky persist | Security-review medium: empty `plan_checks` (suffix-filtered no-op) assigns `ToolState.static_checks = []` and wipes a prior `failed` row. VP2.3 live-path stays a real pass. |
+| 2026-08-16 | VP2.4 | `test_failed_static_check_survives_empty_plan_rerun` xfail removed | Empty-plan rerun is now a real pass (not XPASS). VP2.3 live-path stays a real pass. VP2 Final / security-review not flipped. |
 
 ## Named symbols this suite pins
 
@@ -123,3 +124,7 @@ Expect: existing 22 VP2 policy tests pass; the new test xfails (`strict=False`) 
 `test_failed_static_check_survives_empty_plan_rerun` drives two live `run_static_checks_tool` calls: a failing `.py` gate, then a suffix-filtered `README.md` rerun that plans no checks. `approve` must still reject with `approve_with_failed_required_gate`, leave `terminal_submission` unset (D8), and keep a `status: failed` row on `validation_state_from_tool_context`. `StaticCheckConfig.suffixes` is pinned as a tuple. The VP2.3 live-path test stays a real pass.
 
 Expect: existing policy tests pass; VP2.3 live-path passes; the new test xfails (`strict=False`) until empty `plan_checks` stops clearing `ToolState.static_checks` and any `failed` this session stays sticky. Product code is not edited in this wave. VP2 Final remains open (security-review still `[ ]`).
+
+## VP2.4 xfail reconciliation
+
+24 VP2 policy tests across `tests/review/test_terminal_verdict_policy.py` (22) + `tests/review/test_post_run_terminal_gate.py` (2); 22/22 pass on the policy file; 0 xfail / 0 XPASS. Live-path `test_approve_after_failed_run_static_checks_tool_is_rejected` and `test_failed_static_check_survives_empty_plan_rerun` are real passes. Product code is not edited in this wave. VP2 Final remains open (security-review still `[ ]`).
