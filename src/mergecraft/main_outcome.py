@@ -8,7 +8,7 @@ Both helpers carry over verbatim — the audit confirmed ``NO_ISSUES`` on the
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -51,6 +51,7 @@ def _classify_outcome(
     setup_policy: SetupFailurePolicy,
     prep_reason: str | None,
     mode: str | Mode | None = None,
+    verdict_protocol: Literal["shadow", "enforce"] | None = None,
 ) -> tuple[RunOutcome, str | None]:
     """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
 
@@ -81,7 +82,11 @@ def _classify_outcome(
     if prep_reason:
         logger.warning("» prep failure mapped run to inconclusive: {}", prep_reason)
         return RunOutcome.inconclusive, prep_reason
-    if _is_review_mode(mode) and not result.terminal_submission_received:
+    if (
+        _is_review_mode(mode)
+        and not result.terminal_submission_received
+        and verdict_protocol != "shadow"
+    ):
         logger.warning("» {}", _MISSING_TERMINAL_VERDICT_REASON)
         return RunOutcome.inconclusive, _MISSING_TERMINAL_VERDICT_REASON
     # ``setup_policy`` is the closed ``SetupFailurePolicy`` vocabulary; any

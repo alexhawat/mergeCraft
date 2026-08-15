@@ -175,13 +175,20 @@ def build_reflection_prompt(issues: PostRunIssues) -> str:
 
 
 def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None, dict[str, Any]]:
+    from mergecraft.mcp.verdict import verdict_satisfies_attempt
+
     submission = ctx.tool_state.terminal_submission
     if submission is None or ctx.tool_state.terminal_submission_conflict:
         diagnostics: dict[str, Any] = {}
         if ctx.tool_state.terminal_submission_conflict:
             diagnostics["rejection_reason"] = "conflicting_submission"
         return False, None, diagnostics
-    return True, submission.id, {}
+    if not verdict_satisfies_attempt(
+        submission,
+        current_attempt_id=ctx.tool_state.attempt_id,
+    ):
+        return False, None, {}
+    return True, submission.id, {"attempt_id": submission.attempt_id}
 
 
 async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> AgentResult:

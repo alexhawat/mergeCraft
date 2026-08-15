@@ -42,24 +42,41 @@ Exports:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from mergecraft.agents.gates import decide_action, select_rule_id
 from mergecraft.evidence.gate_policy import GATE_ACTIONS, GateAction, GateActionPolicy
+from mergecraft.run_outcome import RunOutcome
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from mergecraft.agents.shared import AgentResult
     from mergecraft.evidence.packet import MergeEvidencePacket
 
 
 # Closed action vocabulary: the predicted action must be one of the
 # seven names. Anything outside is rejected here, not by the consumer.
 _VALID_ACTIONS: Final[frozenset[str]] = frozenset(GATE_ACTIONS)
+
+# Run-outcome strings compared by the verdict-protocol shadow path. Each maps
+# to its own direction so ``passed`` vs ``inconclusive`` disagreements stay
+# visible — folding both onto a generic "review" direction would hide them.
+_PROTOCOL_OUTCOMES: Final[frozenset[str]] = frozenset(
+    {
+        str(RunOutcome.passed),
+        str(RunOutcome.inconclusive),
+        str(RunOutcome.failed),
+        str(RunOutcome.configuration_error),
+    }
+)
+
+_REVIEW_MODE_NAMES: Final[frozenset[str]] = frozenset({"Review", "IncrementalReview"})
 
 
 # Map a packet's blast radius lane to a coarse repo area for the
@@ -97,6 +114,22 @@ class ShadowRecord(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     actual_outcome: str | None = None
     disagreement: bool | None = None
+    outcome: str | None = None
+    predicted_outcome: str | None = None
+    diagnostic: str | None = None
+    verdict_diagnostic: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class VerdictProtocolPrediction:
+    """Pure verdict-protocol shadow prediction (VP3)."""
+
+    outcome: RunOutcome
+    diagnostic: str
+
+    @property
+    def predicted_outcome(self) -> RunOutcome:
+        return self.outcome
 
 
 def _validate_action(action: str) -> None:
@@ -118,6 +151,52 @@ def _lane_to_repo_area(packet: MergeEvidencePacket) -> str | None:
         return None
     lane = packet.blast_radius.lane
     return _LANE_TO_AREA.get(lane, lane)
+
+
+def _prediction_outcome_value(prediction: Any) -> str:
+    if hasattr(prediction, "outcome"):
+        return str(prediction.outcome)
+    if hasattr(prediction, "predicted_outcome"):
+        return str(prediction.predicted_outcome)
+    if isinstance(prediction, dict):
+        raw = prediction.get("outcome") or prediction.get("predicted_outcome")
+        return str(raw)
+    msg = f"unsupported verdict-protocol prediction shape: {type(prediction).__name__}"
+    raise TypeError(msg)
+
+
+def _prediction_diagnostic_value(prediction: Any) -> str:
+    if hasattr(prediction, "diagnostic"):
+        return str(prediction.diagnostic)
+    if isinstance(prediction, dict):
+        raw = prediction.get("diagnostic")
+        return str(raw)
+    msg = f"unsupported verdict-protocol prediction shape: {type(prediction).__name__}"
+    raise TypeError(msg)
+
+
+def predict_verdict_protocol(
+    result: AgentResult,
+    *,
+    mode: str,
+) -> VerdictProtocolPrediction:
+    """Read the terminal-verdict protocol prediction without recording it (VP3)."""
+    from mergecraft.mcp.verdict import VerdictDiagnostic
+
+    if not result.success:
+        return VerdictProtocolPrediction(
+            outcome=RunOutcome.failed,
+            diagnostic=VerdictDiagnostic.provider_failure.value,
+        )
+    if mode in _REVIEW_MODE_NAMES and not result.terminal_submission_received:
+        return VerdictProtocolPrediction(
+            outcome=RunOutcome.inconclusive,
+            diagnostic=VerdictDiagnostic.provider_success_without_submission.value,
+        )
+    return VerdictProtocolPrediction(
+        outcome=RunOutcome.passed,
+        diagnostic=VerdictDiagnostic.approved.value,
+    )
 
 
 def predict_action(
@@ -159,18 +238,55 @@ def record_shadow_prediction(
     policy_id: str,
     output_path: Path,
     policy: GateActionPolicy | None = None,
+    prediction: Any | None = None,
+    actual_outcome: str | None = None,
 ) -> ShadowRecord:
-    """Build a :class:`ShadowRecord` and append it to ``output_path`` (W10.2).
+    """Build a :class:`ShadowRecord` and append it to ``output_path`` (W10.2 / VP3).
 
-    The function never re-derives evidence. It reads the packet's
-    blast radius, decides the rule key, computes the action via the
-    gate, and writes one JSON-Lines row. The output file is the
-    audit trail of what the gate *would* have done — the disagreement
-    report reads it later.
-
-    The record is returned so the caller can attach it to the packet
-    directly. The file write is the durable side.
+    When ``prediction`` is supplied the row records a verdict-protocol shadow
+    prediction in the same JSONL file as gate-action rows (D6). Otherwise the
+    gate-action path is unchanged.
     """
+    if prediction is not None:
+        predicted_outcome = _prediction_outcome_value(prediction)
+        diagnostic = _prediction_diagnostic_value(prediction)
+        disagreement: bool | None = None
+        if actual_outcome is not None:
+            report = disagree_with_outcome(
+                predicted_action=predicted_outcome,
+                actual_outcome=actual_outcome,
+                predicted_lane="review",
+                predicted_rule_id=diagnostic,
+                repo_area=policy_id,
+            )
+            raw_disagreement = report["disagreement"]
+            disagreement = raw_disagreement if isinstance(raw_disagreement, bool) else None
+        record = ShadowRecord(
+            run_id=run_id,
+            change_id=change_id,
+            policy_id=policy_id,
+            rule_id=diagnostic,
+            action=predicted_outcome,
+            repo_area=policy_id,
+            outcome=predicted_outcome,
+            predicted_outcome=predicted_outcome,
+            diagnostic=diagnostic,
+            verdict_diagnostic=diagnostic,
+            actual_outcome=actual_outcome,
+            disagreement=disagreement,
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("a", encoding="utf-8") as handle:
+            handle.write(record.model_dump_json())
+            handle.write("\n")
+        logger.info(
+            "» shadow record: change={} verdict_protocol outcome={} diagnostic={}",
+            change_id,
+            predicted_outcome,
+            diagnostic,
+        )
+        return record
+
     rule_id = select_rule_id(packet)
     action = predict_action(packet, policy=policy)
     _validate_action(action.value)
@@ -226,16 +342,20 @@ def disagree_with_outcome(
     # human final state. A "merge-shaped" outcome is a merge.
     block_shape = {"closed", "changes_requested", "block"}
     merge_shape = {"merged", "auto_merge"}
-    if predicted_action in merge_shape:
+    # Normalize gate-action vocabulary and verdict-protocol run outcomes onto
+    # comparable directions. Protocol outcomes each get their own direction so
+    # ``passed`` vs ``inconclusive`` mismatches are not folded away.
+    if predicted_action in _PROTOCOL_OUTCOMES:
+        predicted_direction = predicted_action
+    elif predicted_action in merge_shape:
         predicted_direction = "merge"
     elif predicted_action in block_shape:
         predicted_direction = "block"
     else:
-        # ``request_changes`` / ``require_human_review`` /
-        # ``require_more_tests`` / ``quarantine`` / ``escalate`` are
-        # all "the gate wants a human look before merging".
         predicted_direction = "review"
-    if actual_outcome in merge_shape:
+    if actual_outcome in _PROTOCOL_OUTCOMES:
+        actual_direction = actual_outcome
+    elif actual_outcome in merge_shape:
         actual_direction = "merge"
     elif actual_outcome in block_shape:
         actual_direction = "block"
@@ -320,10 +440,12 @@ def disagreement_report(
 
 __all__ = [
     "ShadowRecord",
+    "VerdictProtocolPrediction",
     "disagree_with_outcome",
     "disagreement_report",
     "enforce_action",
     "load_shadow_records",
     "predict_action",
+    "predict_verdict_protocol",
     "record_shadow_prediction",
 ]

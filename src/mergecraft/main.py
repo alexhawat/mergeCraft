@@ -1216,6 +1216,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         setup_policy=settings.setup_failure_policy,
         prep_reason=prep_reason,
         mode=tool_state.selected_mode,
+        verdict_protocol=settings.gates.terminal_verdict,
     )
 
     selected_mode_obj = next(

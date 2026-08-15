@@ -411,6 +411,22 @@ def _attach_model_evidence(
     return result
 
 
+def stamp_attempt_id(
+    tool_state: ToolState,
+    *,
+    attempt_id: int,
+    fallback_index: int,
+) -> None:
+    """Stamp the active model-chain attempt on ``tool_state`` (V7 / VP3).
+
+    Called when a model-chain attempt starts so ``submit_review_verdict`` can
+    copy the same id onto ``TerminalSubmission`` instead of inferring one at
+    submit time.
+    """
+    tool_state.attempt_id = attempt_id
+    tool_state.fallback_index = fallback_index
+
+
 def promote_model_evidence(
     tool_state: ToolState,
     *,
@@ -967,4 +983,5 @@ __all__ = [
     "resolve_runtime_agent",
     "run_with_model_chain",
     "select_runnable_model_slug",
+    "stamp_attempt_id",
 ]
