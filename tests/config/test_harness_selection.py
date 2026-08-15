@@ -1,4 +1,4 @@
-"""HA3 RED suite — explicit ``harness:`` selection (D11).
+"""HA3 suite — explicit ``harness:`` selection (D11).
 
 Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (PR HA3).
 Locked decision **D11**: ``harness:`` set → use it. Unset → today's
@@ -7,7 +7,7 @@ never silent routing. Existing ``nous/deepseek-*`` configs must keep
 working untouched.
 
 Target API (HA3.2): ``RepoSettings.harness`` is
-``Literal["opencode", "codex", "claude", "gemini", "cursor"] | None = None``.
+    ``Literal["opencode", "codex", "claude", "gemini", "cursor"] | None = None``.
 ``resolve_harness(settings, slug)`` honours the explicit value (validated
 against HA1 capabilities) and otherwise delegates to
 ``_agent_mode_for_slug``.
@@ -15,20 +15,21 @@ against HA1 capabilities) and otherwise delegates to
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
 from mergecraft.config.settings import RepoSettings
-from mergecraft.utils.agent_resolve import _agent_mode_for_slug
+from mergecraft.utils.agent_resolve import (
+    _NATIVE_HARNESS_PROVIDERS,
+    _OPENCODE_NATIVE_PROVIDERS,
+    _agent_mode_for_slug,
+    _harness_supports_provider,
+    resolve_harness,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_HA3_2 = pytest.mark.xfail(
-    reason="green after HA3.2: harness selection",
-    strict=False,
-)
 
 NOUS_CATALOG_SLUG = "nous/deepseek/deepseek-v4-flash"
 NOUS_SHORT_SLUG = "nous/deepseek-v4-flash"
@@ -50,16 +51,6 @@ _INFERENCE_MATRIX: tuple[tuple[str, str], ...] = (
     (GEMINI_SLUG, "gemini"),
     (CURSOR_SLUG, "cursor"),
 )
-
-
-def _load_resolve_harness() -> Any:
-    """Import the HA3.2 resolver; fail loudly if the symbol is absent."""
-    from mergecraft.utils import agent_resolve as mod
-
-    helper = getattr(mod, "resolve_harness", None)
-    if helper is None:
-        pytest.fail("mergecraft.utils.agent_resolve.resolve_harness not implemented")
-    return helper
 
 
 def _configuration_error_types() -> tuple[type[BaseException], ...]:
@@ -103,6 +94,7 @@ def test_codex_remains_selectable() -> None:
 
     assert getattr(RepoSettings.model_validate({"model": OPENAI_SLUG}), "harness", None) is None
     assert _agent_mode_for_slug(OPENAI_SLUG) == "codex"
+    assert _NATIVE_HARNESS_PROVIDERS["codex"] == frozenset({"openai"})
     assert resolve_agent("codex").name == "codex"
 
 
@@ -123,6 +115,12 @@ def test_claude_gemini_cursor_remain_selectable() -> None:
             f"{slug!r} must infer {harness!r}; got {_agent_mode_for_slug(slug)!r}"
         )
         assert resolve_agent(harness).name == harness
+    assert {
+        "codex": frozenset({"openai"}),
+        "claude": frozenset({"anthropic"}),
+        "gemini": frozenset({"google"}),
+        "cursor": frozenset({"cursor"}),
+    } == _NATIVE_HARNESS_PROVIDERS
 
 
 def test_inference_path_unchanged_when_harness_unset() -> None:
@@ -142,10 +140,9 @@ def test_inference_path_unchanged_when_harness_unset() -> None:
         )
 
 
-# ── RED until HA3.2 (explicit harness, validation, telemetry) ────────────────
+# ── Explicit harness, validation, telemetry ──────────────────────────────────
 
 
-@_HA3_2
 def test_explicit_harness_overrides_inference() -> None:
     """D11 — ``harness:`` set wins over provider/model inference.
 
@@ -153,7 +150,12 @@ def test_explicit_harness_overrides_inference() -> None:
     ``_agent_mode_for_slug`` alone: openai infers ``codex``, anthropic infers
     ``claude``; explicit ``opencode`` must win in both cases (vice versa).
     """
-    resolve_harness = _load_resolve_harness()
+    assert (
+        frozenset({"nous", "tokenhub", "minimax", "openai", "anthropic"})
+        == _OPENCODE_NATIVE_PROVIDERS
+    )
+    assert _harness_supports_provider("opencode", "openai") is True
+    assert _harness_supports_provider("opencode", "anthropic") is True
     cases = (
         (OPENAI_SLUG, "codex", "opencode"),
         (ANTHROPIC_SLUG, "claude", "opencode"),
@@ -169,7 +171,6 @@ def test_explicit_harness_overrides_inference() -> None:
         )
 
 
-@_HA3_2
 def test_opencode_with_non_nous_provider_resolves() -> None:
     """OpenAI-compatible model under OpenCode — no review-logic duplication.
 
@@ -178,7 +179,6 @@ def test_opencode_with_non_nous_provider_resolves() -> None:
     """
     from mergecraft.agents import agents, resolve_agent
 
-    resolve_harness = _load_resolve_harness()
     assert _agent_mode_for_slug(OPENAI_SLUG) == "codex"
     settings = RepoSettings.model_validate({"model": OPENAI_SLUG, "harness": "opencode"})
     resolved = resolve_harness(settings, OPENAI_SLUG)
@@ -189,7 +189,6 @@ def test_opencode_with_non_nous_provider_resolves() -> None:
     assert agent is resolve_agent("opencode")
 
 
-@_HA3_2
 def test_unsupported_combination_is_a_configuration_error() -> None:
     """D11 — unsupported (harness, provider/model) is a configuration error
     naming both halves. Never silent routing.
@@ -202,9 +201,9 @@ def test_unsupported_combination_is_a_configuration_error() -> None:
     from mergecraft.main import _classify_error_outcome
     from mergecraft.run_outcome import RunOutcome
 
-    resolve_harness = _load_resolve_harness()
     harness = "claude"
     slug = NOUS_CATALOG_SLUG
+    assert _harness_supports_provider(harness, "nous") is False
     settings = RepoSettings.model_validate({"model": slug, "harness": harness})
 
     with pytest.raises(_configuration_error_types()) as exc_info:
@@ -222,7 +221,6 @@ def test_unsupported_combination_is_a_configuration_error() -> None:
     )
 
 
-@_HA3_2
 def test_unknown_harness_value_fails_closed() -> None:
     """Unknown ``harness`` *value* is a ValidationError naming the key.
 
@@ -244,7 +242,6 @@ def test_unknown_harness_value_fails_closed() -> None:
     assert "harness" in text, f"error must name the key: {text}"
 
 
-@_HA3_2
 def test_harness_reaches_telemetry() -> None:
     """Resolved harness is recorded on the attempt (span attr or result metadata).
 

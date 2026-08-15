@@ -31,21 +31,33 @@ selects opencode.
 
 ## xfail schedule
 
-All HA3.2 markers use `strict=False` (`pyproject.toml` sets `xfail_strict =
-true`; an early-passing xfail must be XPASS, not a hard failure). Imports of
-not-yet-existing helpers (`resolve_harness`, `RepoSettings.harness`) live
-**inside test bodies**.
+All HA3.2 markers used `strict=False` (`pyproject.toml` sets `xfail_strict =
+true`; an early-passing xfail must be XPASS, not a hard failure). **Cleared
+after HA3.2** — the five explicit-harness / validation / telemetry cases are
+real passes; the four regression pins were never marked.
 
 | Wave | Test | Marker reason | Status |
 |------|------|---------------|--------|
-| **HA3.2** | `test_explicit_harness_overrides_inference` | `green after HA3.2: harness selection` | pending |
-| **HA3.2** | `test_opencode_with_non_nous_provider_resolves` | same | pending |
-| **HA3.2** | `test_unsupported_combination_is_a_configuration_error` | same | pending |
-| **HA3.2** | `test_unknown_harness_value_fails_closed` | same | pending |
-| **HA3.2** | `test_harness_reaches_telemetry` | same | pending |
+| **HA3.2** | `test_explicit_harness_overrides_inference` | `green after HA3.2: harness selection` | cleared post-HA3.2 |
+| **HA3.2** | `test_opencode_with_non_nous_provider_resolves` | same | cleared post-HA3.2 |
+| **HA3.2** | `test_unsupported_combination_is_a_configuration_error` | same | cleared post-HA3.2 |
+| **HA3.2** | `test_unknown_harness_value_fails_closed` | same | cleared post-HA3.2 |
+| **HA3.2** | `test_harness_reaches_telemetry` | same | cleared post-HA3.2 |
 
 Regression / compatibility pins below have **no** xfail — they must pass
 against current `_agent_mode_for_slug` behaviour on the HA1 stack.
+
+## HA3.2 xfail reconciliation (2026-08-16)
+
+Removed `_HA3_2` and all five `green after HA3.2: harness selection` markers
+from `tests/config/test_harness_selection.py`. Suite is 9 real passes
+(0 xfail / 0 xpass). Added direct pins for the previously unreferenced
+helpers: `_NATIVE_HARNESS_PROVIDERS` (closed native map in the remain-
+selectable tests), `_OPENCODE_NATIVE_PROVIDERS` (exact frozenset in the
+override test), and `_harness_supports_provider` (True for opencode×openai/
+anthropic; False for claude×nous). `resolve_harness` stays imported at
+module level. The four inference pins were never xfailed. HA3 Final is
+unchanged.
 
 ## Contract matrix
 
@@ -107,6 +119,9 @@ family.
 | `RepoSettings.harness` | `test_unknown_harness_value_fails_closed` (+ override / telemetry tests) |
 | `resolve_harness` | `test_explicit_harness_overrides_inference`, `test_opencode_with_non_nous_provider_resolves`, `test_unsupported_combination_is_a_configuration_error` |
 | `_agent_mode_for_slug` | `test_existing_nous_config_still_selects_opencode`, `test_inference_path_unchanged_when_harness_unset`, `test_codex_remains_selectable`, `test_claude_gemini_cursor_remain_selectable` |
+| `_NATIVE_HARNESS_PROVIDERS` | `test_codex_remains_selectable`, `test_claude_gemini_cursor_remain_selectable` |
+| `_OPENCODE_NATIVE_PROVIDERS` | `test_explicit_harness_overrides_inference` |
+| `_harness_supports_provider` | `test_explicit_harness_overrides_inference`, `test_unsupported_combination_is_a_configuration_error` |
 
 ## RED acceptance (HA3.1)
 
@@ -117,6 +132,15 @@ family.
   (explicit harness, OpenCode×non-Nous, unsupported combo, unknown value,
   telemetry). Do not edit `src/` to make RED tests green.
 - `make lint` and `make typecheck` clean.
+
+## Post-HA3.2 acceptance (xfail reconciliation)
+
+- File run: **9 passed, 0 xfail, 0 xpass** on
+  `tests/config/test_harness_selection.py`. Existing
+  `tests/config/test_settings.py`, `tests/config/test_extra_forbid.py`, and
+  `tests/agents/test_resolve.py` must not newly fail.
+- `make lint` and `make typecheck` clean. Tests-only commit; HA3 Final
+  unchanged.
 
 ## Implementation notes for HA3.2
 
