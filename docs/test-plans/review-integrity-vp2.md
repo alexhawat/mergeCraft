@@ -9,7 +9,7 @@ Worktree: `mergecraft-vp2-fail-closed` @ `wave/vp2-fail-closed` (stacked on VP1 
 |------|------------|--------|
 | **VP2.2** | `tests/review/test_terminal_verdict_policy.py` (16 of 20) | *(markers removed 2026-08-16 after VP2.2)* |
 | **VP2.2** | `tests/review/test_post_run_terminal_gate.py` (both) | *(markers removed 2026-08-16 after VP2.2)* |
-| **VP2.3** | `tests/review/test_terminal_verdict_policy.py::test_approve_after_failed_run_static_checks_tool_is_rejected` | `@pytest.mark.xfail(reason="green after VP2.3: persist static_checks on ToolState", strict=False)` |
+| **VP2.3** | `tests/review/test_terminal_verdict_policy.py::test_approve_after_failed_run_static_checks_tool_is_rejected` | *(marker removed 2026-08-16 after VP2.3 persist)* |
 
 Never `strict=True` — a strict xfail that XPASSes after VP2.2 is a hard failure the impl wave cannot touch.
 
@@ -28,6 +28,7 @@ Never `strict=True` — a strict xfail that XPASSes after VP2.2 is a hard failur
 |------|-----------|-----------------|-------|
 | 2026-08-16 | VP2.2 | `_VP22` on 16 tests in `test_terminal_verdict_policy.py` + both tests in `test_post_run_terminal_gate.py` | Suite is now 22/22 real passes. Direct pins added: `validation_state_from_tool_context`, `_is_review_mode`, `has_failed_required_static_check`. VP2 Final not flipped. |
 | 2026-08-16 | VP2.3 (RED) | `test_approve_after_failed_run_static_checks_tool_is_rejected` added, xfail pending persist | Security-review medium: `run_static_checks_tool` does not persist rows on `ToolState`; `validation_state_from_tool_context` hardcodes `static_checks=[]`. Injected-row unit test kept. No `unavailable`/empty sibling — that pin would pass today without the persist field. |
+| 2026-08-16 | VP2.3 | `test_approve_after_failed_run_static_checks_tool_is_rejected` xfail removed | Live-path is now a real pass (not XPASS). Direct pin added: `_persist_static_checks`. Injected-row unit test kept. VP2 Final / security-review not flipped. |
 
 ## Named symbols this suite pins
 
@@ -37,6 +38,7 @@ Never `strict=True` — a strict xfail that XPASSes after VP2.2 is a hard failur
 | `SubmissionValidation` | `mcp/verdict.py` | every validator test (`accepted` + closed `rejection_reason`; result is not a bool — D5) |
 | `validation_state_from_tool_context` | `mcp/verdict.py` | `test_valid_approve_and_clear_gates_succeeds` (wires `tool_state` / `analyzer_run` / `terminal_submission` from `ToolContext`); `test_approve_after_failed_run_static_checks_tool_is_rejected` (must copy a `status: failed` row from `ToolState` — guard-deletion pin) |
 | `run_static_checks_tool` | `mcp/static_checks.py` | `test_approve_after_failed_run_static_checks_tool_is_rejected` (live failing command; payload `status == "failed"`) |
+| `_persist_static_checks` | `mcp/static_checks.py` | `test_approve_after_failed_run_static_checks_tool_is_rejected` (callable + `ToolState.static_checks` carries a `status: failed` row after the live tool run — deleting the helper fails the suite) |
 | `_classify_outcome` | `main_outcome.py` | `test_no_terminal_submission_is_inconclusive` (real `AgentResult`, not a mock), V3, D8, harness parity |
 | `_is_review_mode` | `main_outcome.py` | `test_no_terminal_submission_is_inconclusive` (Review / IncrementalReview true; Build / `None` false; `Mode` object true) |
 | `has_failed_required_static_check` | `agents/gates.py` | `test_approve_with_failing_required_deterministic_check_fails` (`failed` true; `passed` / empty false) |
@@ -108,3 +110,7 @@ No source-grep assertions. `_classify_outcome` is called with a real `AgentResul
 `test_approve_after_failed_run_static_checks_tool_is_rejected` drives the live MCP path: a configured failing `StaticCheckConfig` through `run_static_checks_tool`, then `submit_review_verdict_tool(approve)`. It must reject with `approve_with_failed_required_gate`, leave `terminal_submission` unset (D8), and show a `status: failed` row on `validation_state_from_tool_context(ctx).static_checks`. The injected-row unit test stays. No `unavailable`/empty-checks sibling — `has_failed_required_static_check` already treats only `failed` as negative, and that pin would pass today without persisting rows.
 
 Expect: existing 22 VP2 policy tests pass; the new test xfails (`strict=False`) until ToolState persist + copy in `validation_state_from_tool_context`. Product code is not edited in this wave. VP2 Final remains open (security-review still `[ ]`).
+
+## VP2.3 xfail reconciliation
+
+23 VP2 policy tests across `tests/review/test_terminal_verdict_policy.py` (21) + `tests/review/test_post_run_terminal_gate.py` (2); 21/21 pass on the policy file; 0 xfail / 0 XPASS. Live-path `test_approve_after_failed_run_static_checks_tool_is_rejected` is a real pass. `_persist_static_checks` now has a direct `tests/` reference. Product code is not edited in this wave. VP2 Final remains open (security-review still `[ ]`).

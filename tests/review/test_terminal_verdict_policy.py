@@ -38,7 +38,7 @@ from mergecraft.mcp.context import (
 )
 from mergecraft.mcp.review import create_pull_request_review_tool
 from mergecraft.mcp.shared import ToolResult
-from mergecraft.mcp.static_checks import run_static_checks_tool
+from mergecraft.mcp.static_checks import _persist_static_checks, run_static_checks_tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
@@ -573,10 +573,6 @@ def test_approve_with_failing_required_deterministic_check_fails(tmp_path: Path)
     _assert_typed_rejection(validation, _REASON_APPROVE_FAILED_GATE)
 
 
-@pytest.mark.xfail(
-    reason="green after VP2.3: persist static_checks on ToolState",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_approve_after_failed_run_static_checks_tool_is_rejected(
     tmp_path: Path,
@@ -601,6 +597,11 @@ async def test_approve_after_failed_run_static_checks_tool_is_rejected(
     assert checks_result.is_error is False
     payload = json.loads(checks_result.content[0]["text"])
     assert any(check.get("status") == "failed" for check in payload["checks"])
+    # Direct pin: `_persist_static_checks` must have written the failed row
+    # onto ToolState. Deleting the helper fails this import; skipping the
+    # write leaves `tool_state.static_checks` without a failed row.
+    assert callable(_persist_static_checks)
+    assert any(row.get("status") == "failed" for row in ctx.tool_state.static_checks)
 
     verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
     assert verdict.is_error is True
