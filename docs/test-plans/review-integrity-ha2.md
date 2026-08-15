@@ -70,3 +70,7 @@ Every test builds outcomes as real `AgentResult` values and passes them through 
 ## Reconciliation (post-HA2.2)
 
 10 collected; 10 passed; 0 xfail; 0 xpass. `_classify_skip_reason` and `_retryable_failure_reason` now have direct `tests/` references. HA2 Final checkboxes are not flipped here.
+
+## Escalation (coverage-gate)
+
+`make_agent_result(success=True)` in `tests/tracing/instrumentation/conftest.py` now defaults `terminal_submission_received=True` so canned success is a usable D13 winner; pass `terminal_submission_received=False` to script incomplete success. `AgentResult` in `src/` is unchanged.

@@ -116,19 +116,28 @@ def make_agent_result(
     error: str | None = None,
     retryable: bool = False,
     usage: Any | None = None,
+    terminal_submission_received: bool | None = None,
 ) -> Any:
-    """Build an ``AgentResult`` with optional ``retryable`` metadata."""
+    """Build an ``AgentResult`` with optional ``retryable`` metadata.
+
+    Canned ``success=True`` is a usable chain winner
+    (``terminal_submission_received=True``) unless the caller scripts
+    incomplete success. Live ``AgentResult`` still defaults the field to
+    ``False`` — this helper is test-only.
+    """
 
     from mergecraft.agents.shared import AgentResult
 
     metadata: dict[str, Any] = {}
     if retryable:
         metadata["retryable"] = True
+    received = success if terminal_submission_received is None else terminal_submission_received
     return AgentResult(
         success=success,
         error=error,
         metadata=metadata,
         usage=usage,
+        terminal_submission_received=received,
     )
 
 
