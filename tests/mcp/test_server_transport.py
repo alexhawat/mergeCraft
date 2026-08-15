@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mergecraft.mcp.server import MCP_ENDPOINT, create_mcp_app
-from mergecraft.mcp.shared import ToolResult, ToolSpec
+from mergecraft.mcp.shared import ToolClass, ToolResult, ToolSpec
 
 
 async def _echo(_arguments: dict[str, Any]) -> ToolResult:
@@ -22,6 +22,7 @@ def client() -> TestClient:
         description="Echo a value back.",
         input_schema={"type": "object", "properties": {}},
         execute=_echo,
+        tool_class=ToolClass.ANALYSIS,
     )
     return TestClient(create_mcp_app([spec]))
 
