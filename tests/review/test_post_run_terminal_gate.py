@@ -1,9 +1,9 @@
 """VP2 fail-closed post-run gate — unsubmitted review without a progress comment.
 
 Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP2.1 RED, VP2.2
-impl). V4: ``get_unsubmitted_review`` must gate Review / IncrementalReview even
-when ``had_progress_comment`` is false, and retry exhaustion must not fall
-through to ``passed``.
+impl; xfail markers cleared after VP2.2). V4: ``get_unsubmitted_review`` must
+gate Review / IncrementalReview even when ``had_progress_comment`` is false,
+and retry exhaustion must not fall through to ``passed``.
 """
 
 from __future__ import annotations
@@ -27,11 +27,6 @@ from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_VP22 = pytest.mark.xfail(
-    reason="green after VP2.2: fail-closed terminal verdict",
-    strict=False,
-)
 
 _MISSING_VERDICT_REASON = "no terminal review verdict was submitted for this attempt"
 
@@ -91,7 +86,6 @@ def _recorded_submission() -> TerminalSubmission:
     )
 
 
-@_VP22
 def test_unsubmitted_review_without_progress_comment_still_gates(tmp_path: Path) -> None:
     """V4: Review / IncrementalReview gate on ``terminal_submission``, not ``review``.
 
@@ -117,7 +111,6 @@ def test_unsubmitted_review_without_progress_comment_still_gates(tmp_path: Path)
     assert get_unsubmitted_review(state) is None
 
 
-@_VP22
 @pytest.mark.asyncio
 async def test_retry_exhaustion_yields_inconclusive_not_passed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

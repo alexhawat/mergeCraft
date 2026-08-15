@@ -1,8 +1,7 @@
 """VP2 fail-closed terminal verdict — policy, validator, and outcome resolver.
 
 Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP2.1 RED, VP2.2
-impl). Unimplemented contracts are marked
-``xfail(reason="green after VP2.2: fail-closed terminal verdict", strict=False)``.
+impl; xfail markers cleared after VP2.2).
 
 Pinned contracts (W0):
     D2 — missing verdict → ``RunOutcome.inconclusive``, not ``failed``.
@@ -46,11 +45,6 @@ from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_VP22 = pytest.mark.xfail(
-    reason="green after VP2.2: fail-closed terminal verdict",
-    strict=False,
-)
 
 _MISSING_VERDICT_REASON = "no terminal review verdict was submitted for this attempt"
 _DECIDE_APPROVAL_PARAMS = ("findings", "run_succeeded", "tier")
@@ -274,10 +268,15 @@ class _RecordingGitHub(GitHubClient):
         return record
 
 
-@_VP22
 def test_valid_approve_and_clear_gates_succeeds(tmp_path: Path) -> None:
     """A schema-valid ``approve`` with no blockers and passing gates is accepted."""
+    from mergecraft.mcp.verdict import validation_state_from_tool_context
+
     ctx = _ctx(tmp_path)
+    derived = validation_state_from_tool_context(ctx)
+    assert derived.tool_state is ctx.tool_state
+    assert derived.analyzer_run is ctx.tool_state.analyzer_run
+    assert derived.terminal_submission is ctx.tool_state.terminal_submission
     state = _validation_state(ctx.tool_state, static_checks=[{"name": "lint", "status": "passed"}])
     validation = _validate(_approve_payload(), state=state)
     assert isinstance(validation, _validation_type())
@@ -296,7 +295,6 @@ def test_valid_approve_and_clear_gates_succeeds(tmp_path: Path) -> None:
     assert decide_approval([_trivial_finding()], run_succeeded=True, tier="trusted") == "success"
 
 
-@_VP22
 def test_agent_approve_with_verified_blocker_fails_structurally(tmp_path: Path) -> None:
     """``approve`` over a verifier-confirmed Critical/Major finding is rejected."""
     blocker = _blocker_finding()
@@ -314,7 +312,6 @@ def test_agent_approve_with_verified_blocker_fails_structurally(tmp_path: Path) 
     assert conclusion == "failure"
 
 
-@_VP22
 def test_request_changes_with_verified_blocker_blocks(tmp_path: Path) -> None:
     """``request_changes`` with a confirmed blocker is a usable verdict; the gate blocks."""
     blocker = _blocker_finding()
@@ -336,10 +333,17 @@ def test_request_changes_with_verified_blocker_blocks(tmp_path: Path) -> None:
     assert decide_approval([blocker], run_succeeded=True, tier="trusted") == "failure"
 
 
-@_VP22
 def test_no_terminal_submission_is_inconclusive() -> None:
     """D2: a successful provider result with no terminal verdict is ``inconclusive``."""
+    from mergecraft.main_outcome import _is_review_mode
+
     _assert_run_outcome_not_widened()
+    assert _is_review_mode("Review") is True
+    assert _is_review_mode("IncrementalReview") is True
+    assert _is_review_mode("Build") is False
+    assert _is_review_mode(None) is False
+    review_mode = next(m for m in compute_modes("claude") if m.name == "Review")
+    assert _is_review_mode(review_mode) is True
     result = AgentResult(success=True, terminal_submission_received=False)
     assert result.success is True
     assert result.terminal_submission_received is False
@@ -355,7 +359,6 @@ def test_no_terminal_submission_is_inconclusive() -> None:
     assert build_outcome is RunOutcome.passed
 
 
-@_VP22
 def test_prose_lgtm_without_terminal_call_cannot_approve() -> None:
     """Narrative ``LGTM`` is not an input to ``decide_approval`` and cannot pass a review."""
     _assert_decide_approval_signature_unchanged()
@@ -383,7 +386,6 @@ def test_prose_lgtm_without_terminal_call_cannot_approve() -> None:
     assert conclusion != "success"
 
 
-@_VP22
 def test_invalid_verdict_enum_rejected(tmp_path: Path) -> None:
     """Schema: ``\"lgtm\"`` is not a verdict — typed rejection, not a bool."""
     ctx = _ctx(tmp_path)
@@ -394,7 +396,6 @@ def test_invalid_verdict_enum_rejected(tmp_path: Path) -> None:
     _assert_typed_rejection(validation, _REASON_INVALID_VERDICT)
 
 
-@_VP22
 def test_unknown_fields_rejected(tmp_path: Path) -> None:
     """Schema: an unrecognized key is a typed rejection, not a silent drop."""
     ctx = _ctx(tmp_path)
@@ -405,7 +406,6 @@ def test_unknown_fields_rejected(tmp_path: Path) -> None:
     _assert_typed_rejection(validation, _REASON_UNKNOWN_FIELDS)
 
 
-@_VP22
 def test_missing_required_fields_rejected(tmp_path: Path) -> None:
     """Schema: absent ``summary`` / ``verdict`` is a typed rejection."""
     ctx = _ctx(tmp_path)
@@ -417,7 +417,6 @@ def test_missing_required_fields_rejected(tmp_path: Path) -> None:
         _assert_typed_rejection(validation, _REASON_MISSING_REQUIRED)
 
 
-@_VP22
 def test_request_changes_with_no_findings_is_semantically_rejected(tmp_path: Path) -> None:
     """D9: ``request_changes`` with zero findings is a semantic rejection."""
     ctx = _ctx(tmp_path)
@@ -434,7 +433,6 @@ def test_request_changes_with_no_findings_is_semantically_rejected(tmp_path: Pat
     assert validation.rejection_reason != _REASON_MISSING_REQUIRED
 
 
-@_VP22
 @pytest.mark.asyncio
 async def test_duplicate_conflicting_submissions_fail_closed(tmp_path: Path) -> None:
     """D4: a differing payload is rejected and the attempt is unusable."""
@@ -463,7 +461,6 @@ async def test_duplicate_conflicting_submissions_fail_closed(tmp_path: Path) -> 
     assert run_succeeded_for_outcome(outcome) is False
 
 
-@_VP22
 @pytest.mark.asyncio
 async def test_identical_resubmission_is_idempotent(tmp_path: Path) -> None:
     """D4: the same payload hash returns the original id and remains a usable verdict."""
@@ -493,7 +490,6 @@ async def test_identical_resubmission_is_idempotent(tmp_path: Path) -> None:
     assert run_succeeded_for_outcome(outcome) is True
 
 
-@_VP22
 def test_provider_success_without_verdict_is_not_a_successful_review() -> None:
     """V3: ``_classify_outcome`` must not return ``passed`` when no verdict was submitted."""
     result = AgentResult(success=True, output="done", terminal_submission_received=False)
@@ -504,7 +500,6 @@ def test_provider_success_without_verdict_is_not_a_successful_review() -> None:
     assert run_succeeded_for_outcome(outcome) is False
 
 
-@_VP22
 def test_missing_verdict_leaves_run_fallback_eligible(tmp_path: Path) -> None:
     """D8 / D13: absence and semantic rejection both leave ``received=False``."""
     missing = AgentResult(success=True, terminal_submission_received=False)
@@ -536,7 +531,6 @@ def test_missing_verdict_leaves_run_fallback_eligible(tmp_path: Path) -> None:
     assert rejected_outcome is not RunOutcome.failed
 
 
-@_VP22
 def test_fresh_valid_verdict_does_not_trigger_fallback() -> None:
     """A usable terminal submission is not fallback-eligible (D13)."""
     result = AgentResult(
@@ -551,13 +545,18 @@ def test_fresh_valid_verdict_does_not_trigger_fallback() -> None:
     assert run_succeeded_for_outcome(outcome) is True
 
 
-@_VP22
 def test_approve_with_failing_required_deterministic_check_fails(tmp_path: Path) -> None:
     """``approve`` with a failed required ``run_static_checks`` gate is rejected."""
+    from mergecraft.agents.gates import has_failed_required_static_check
+
     ctx = _ctx(tmp_path)
+    failed_rows = [{"name": "lint", "status": "failed"}]
+    assert has_failed_required_static_check(failed_rows) is True
+    assert has_failed_required_static_check([{"name": "lint", "status": "passed"}]) is False
+    assert has_failed_required_static_check([]) is False
     state = _validation_state(
         ctx.tool_state,
-        static_checks=[{"name": "lint", "status": "failed"}],
+        static_checks=failed_rows,
     )
     validation = _validate(_approve_payload(), state=state)
     _assert_typed_rejection(validation, _REASON_APPROVE_FAILED_GATE)
@@ -658,7 +657,6 @@ async def test_existing_review_and_comment_behaviour_unchanged(tmp_path: Path) -
     assert ctx.tool_state.last_progress_body == "still working"
 
 
-@_VP22
 def test_both_harness_paths_obey_the_same_contract() -> None:
     """An OpenCode-shaped and a Codex-shaped ``AgentResult`` reach the same outcome."""
     opencode = AgentResult(

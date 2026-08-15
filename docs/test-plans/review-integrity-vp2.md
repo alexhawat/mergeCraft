@@ -7,8 +7,8 @@ Worktree: `mergecraft-vp2-fail-closed` @ `wave/vp2-fail-closed` (stacked on VP1 
 
 | Wave | Test files | Marker |
 |------|------------|--------|
-| **VP2.2** | `tests/review/test_terminal_verdict_policy.py` (16 of 20) | `@pytest.mark.xfail(reason="green after VP2.2: fail-closed terminal verdict", strict=False)` |
-| **VP2.2** | `tests/review/test_post_run_terminal_gate.py` (both) | same marker |
+| **VP2.2** | `tests/review/test_terminal_verdict_policy.py` (16 of 20) | *(markers removed 2026-08-16 after VP2.2)* |
+| **VP2.2** | `tests/review/test_post_run_terminal_gate.py` (both) | *(markers removed 2026-08-16 after VP2.2)* |
 
 Never `strict=True` — a strict xfail that XPASSes after VP2.2 is a hard failure the impl wave cannot touch.
 
@@ -25,7 +25,7 @@ Never `strict=True` — a strict xfail that XPASSes after VP2.2 is a hard failur
 
 | Date | Impl wave | Markers removed | Notes |
 |------|-----------|-----------------|-------|
-| — | VP2.2 | *(pending)* | Remove the 18 markers after the outcome resolver, post-run gate, and `validate_submission` land. |
+| 2026-08-16 | VP2.2 | `_VP22` on 16 tests in `test_terminal_verdict_policy.py` + both tests in `test_post_run_terminal_gate.py` | Suite is now 22/22 real passes. Direct pins added: `validation_state_from_tool_context`, `_is_review_mode`, `has_failed_required_static_check`. VP2 Final not flipped. |
 
 ## Named symbols this suite pins
 
@@ -33,7 +33,10 @@ Never `strict=True` — a strict xfail that XPASSes after VP2.2 is a hard failur
 |--------|--------|-------------|
 | `validate_submission` | `mcp/verdict.py` | schema tests, D9, D4, approve+blocker, approve+failed gate, valid approve |
 | `SubmissionValidation` | `mcp/verdict.py` | every validator test (`accepted` + closed `rejection_reason`; result is not a bool — D5) |
+| `validation_state_from_tool_context` | `mcp/verdict.py` | `test_valid_approve_and_clear_gates_succeeds` (wires `tool_state` / `analyzer_run` / `terminal_submission` from `ToolContext`) |
 | `_classify_outcome` | `main_outcome.py` | `test_no_terminal_submission_is_inconclusive` (real `AgentResult`, not a mock), V3, D8, harness parity |
+| `_is_review_mode` | `main_outcome.py` | `test_no_terminal_submission_is_inconclusive` (Review / IncrementalReview true; Build / `None` false; `Mode` object true) |
+| `has_failed_required_static_check` | `agents/gates.py` | `test_approve_with_failing_required_deterministic_check_fails` (`failed` true; `passed` / empty false) |
 | `get_unsubmitted_review` | `agents/post_run.py` | `test_unsubmitted_review_without_progress_comment_still_gates` |
 | `run_post_run_retry_loop` | `agents/post_run.py` | `test_retry_exhaustion_yields_inconclusive_not_passed` |
 | `decide_approval` | `agents/gates.py` | dropped / confirmed / publication pins; signature `findings, *, run_succeeded, tier` |
@@ -43,7 +46,7 @@ Never `strict=True` — a strict xfail that XPASSes after VP2.2 is a hard failur
 | `create_pull_request_review_tool` | `mcp/review.py` | publication pin + existing-behaviour pin |
 | `create_issue_comment_tool` / `report_progress_tool` | `mcp/comment.py` | `test_existing_review_and_comment_behaviour_unchanged` |
 
-`validate_submission` / `SubmissionValidation` are imported **inside test bodies** so collection succeeds before VP2.2.
+`validate_submission` / `SubmissionValidation` stay imported **inside test bodies** (collection-safe leftover from the RED wave).
 
 ### Closed `rejection_reason` vocabulary (D5)
 
@@ -91,3 +94,7 @@ No source-grep assertions. `_classify_outcome` is called with a real `AgentResul
 ## RED acceptance (VP2.1)
 
 22 collected; 4 pass (the `decide_approval` / existing review+comment pins); 18 xfail pending VP2.2. Zero collection errors. `make lint` and `make typecheck` clean. Product code is not edited in this wave.
+
+## VP2.2 xfail reconciliation
+
+22 collected; 22 pass; 0 xfail / 0 XPASS on `tests/review/test_terminal_verdict_policy.py` + `tests/review/test_post_run_terminal_gate.py`. Markers cleared; three previously zero-test-ref symbols pinned by extra assertions in existing tests. Product code is not edited in this wave. VP2 Final remains open.
