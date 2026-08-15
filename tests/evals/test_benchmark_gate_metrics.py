@@ -112,6 +112,7 @@ def _bench_case(
     run_succeeded: bool = True,
     expected_decision: str = "neutral",
     trust_tier: str = "trusted",
+    closed_world: bool = False,
 ) -> Case:
     return Case(
         id=case_id,
@@ -129,6 +130,7 @@ def _bench_case(
         recorded_findings=findings,
         run_succeeded=run_succeeded,
         trust_tier=trust_tier,
+        closed_world=closed_world,
     )
 
 
@@ -330,23 +332,25 @@ def test_gate_matrix_rollup_by_corpus_class(tmp_path: Path) -> None:
 def test_untrusted_tier_zero_findings_is_not_counted_as_buggy(
     tmp_path: Path,
 ) -> None:
-    """An untrusted-tier case whose run *completed* and recorded zero
-    findings is not "buggy" (regression: issue-75-untrusted-never-approves,
-    `run_succeeded=True`, `recorded_findings=[]`, `trust_tier="untrusted"`,
-    corpus_class="security" via corpus_class_for's id-substring heuristic,
+    """An untrusted-tier case whose run *completed*, recorded zero findings,
+    AND is curator-confirmed clean (`closed_world=True`) is not "buggy"
+    (regression: issue-75-untrusted-never-approves — `run_succeeded=True`,
+    `recorded_findings=[]`, `trust_tier="untrusted"`, `closed_world=True`,
+    corpus_class="security" via corpus_class_for's id-substring heuristic —
     was previously counted as a `buggy_unsafe_approval` even though approval
     was structurally impossible for this trust tier regardless of findings —
     the mergeCraft self-review on PR #216 caught this: it made the published
     unsafe_approval_rate entirely attributable to a case where the gate
     correctly declined to approve an untrusted run).
 
-    The override is deliberately narrow — scoped to `trust_tier=="untrusted"`
-    specifically, not "any zero-finding success" — because a **trusted**
-    run with zero findings on a genuinely buggy case is exactly what
-    `unsafe_approval_rate` exists to catch (a review that ran and missed a
-    real defect), and must stay counted as `buggy_unsafe_approval`. See
+    The override keys off `closed_world` — an explicit curator assertion —
+    not `trust_tier` alone: a trust tier is a policy classification, not
+    ground truth about whether a defect exists. See
+    `test_untrusted_tier_case_without_closed_world_still_counts_as_buggy` for
+    the case this distinction protects (a genuinely buggy untrusted-tier
+    case the review missed, which must stay counted), and
     `test_trusted_zero_findings_on_a_buggy_case_still_counts_as_unsafe_approval`
-    for that scenario, and
+    for the analogous **trusted** scenario, and
     `test_crashed_run_on_a_buggy_case_is_inconclusive_not_a_correct_block`
     for the separate crashed-run (`run_succeeded=False`) case, which must
     also stay counted as buggy via the inconclusive branch.
@@ -361,6 +365,7 @@ def test_untrusted_tier_zero_findings_is_not_counted_as_buggy(
                 run_succeeded=True,
                 expected_decision="neutral",
                 trust_tier="untrusted",
+                closed_world=True,
             )
         ],
     )
@@ -372,6 +377,43 @@ def test_untrusted_tier_zero_findings_is_not_counted_as_buggy(
     assert matrix.clean_total == 1
     assert matrix.clean_correct_approval == 1
     assert result.metrics.unsafe_approval_rate == 0.0
+
+
+def test_untrusted_tier_case_without_closed_world_still_counts_as_buggy(
+    tmp_path: Path,
+) -> None:
+    """The untrusted-tier override must NOT swallow a genuine untrusted-tier
+    buggy miss: a case with `trust_tier="untrusted"`, zero recorded findings,
+    and `closed_world=False` (the default — no curator assertion that this
+    case is clean) is a real seeded-bug case the review missed, and must
+    stay counted as `buggy_unsafe_approval` exactly like the trusted-tier
+    equivalent below. Trust tier alone was never sufficient ground truth
+    that no defect exists (mergeCraft self-review, PR #216: an earlier
+    version of this override inferred "no defect" from `trust_tier==
+    "untrusted"` alone, which would have silently reclassified this exact
+    scenario as clean)."""
+    bank = tmp_path / "bank"
+    _add_all(
+        bank,
+        [
+            _bench_case(
+                case_id="bench-security-untrusted-missed-000",
+                findings=[],
+                run_succeeded=True,
+                expected_decision="neutral",
+                trust_tier="untrusted",
+                closed_world=False,
+            )
+        ],
+    )
+
+    result = run_structural_replay(bank)
+
+    matrix = result.metrics.gate_matrix
+    assert matrix.buggy_total == 1
+    assert matrix.buggy_unsafe_approval == 1
+    assert matrix.clean_total == 0
+    assert result.metrics.unsafe_approval_rate == 1.0
 
 
 def test_trusted_zero_findings_on_a_buggy_case_still_counts_as_unsafe_approval(

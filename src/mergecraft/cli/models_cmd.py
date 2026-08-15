@@ -16,7 +16,7 @@ from mergecraft.models import MODEL_ALIASES
 from mergecraft.utils.agent_resolve import (
     effective_model_slugs,
     has_credentials_for_slug,
-    resolve_model,
+    resolve_effective_model_slug,
 )
 
 if TYPE_CHECKING:
@@ -40,22 +40,6 @@ def _configured_model_slugs(settings: RepoSettings) -> list[str]:
     if settings.model:
         return [settings.model]
     return []
-
-
-def _winning_slug(settings: RepoSettings) -> str | None:
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
-    if env_model:
-        return env_model
-
-    for slug in _configured_model_slugs(settings):
-        if has_credentials_for_slug(slug):
-            return slug
-
-    configured = _configured_model_slugs(settings)
-    if configured:
-        return configured[0]
-
-    return resolve_model(slug=settings.model)
 
 
 def _config_path(cwd: Path) -> Path:
@@ -138,7 +122,7 @@ def show_cmd(
     settings = load_repo_settings(root=repo_root, load_learnings_files=False)
     order = effective_model_slugs(settings)
     env_override = os.environ.get("MERGECRAFT_MODEL", "").strip()
-    winner = _winning_slug(settings)
+    winner = resolve_effective_model_slug(settings)
 
     if env_override:
         console.print(f"env override [cyan]MERGECRAFT_MODEL[/cyan]: {env_override}")

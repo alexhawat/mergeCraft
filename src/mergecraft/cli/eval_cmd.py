@@ -29,6 +29,7 @@ import typer
 from pydantic import ValidationError
 from rich.console import Console
 
+from mergecraft.config import load_repo_settings
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
@@ -63,7 +64,7 @@ from mergecraft.evals.store import (
     write_permanent_test,
 )
 from mergecraft.models import get_model_provider
-from mergecraft.utils.agent_resolve import resolve_model
+from mergecraft.utils.agent_resolve import resolve_effective_model_slug, resolve_model
 from mergecraft.utils.learnings import LearningProvenance
 
 app = typer.Typer(
@@ -653,6 +654,14 @@ def bench_cmd(
     complete comparison.
     """
     resolved_model = resolve_model(slug=model)
+    if resolved_model is None:
+        # `resolve_model()` alone never reads `.mergecraft/config.yaml` — it
+        # only checks an explicit slug and MERGECRAFT_MODEL. Fall through to
+        # the same config resolution `mergecraft models show` uses (mergeCraft
+        # self-review, PR #216: this command previously advertised config-only
+        # resolution in its help text without ever actually reading config).
+        settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+        resolved_model = resolve_effective_model_slug(settings)
     if resolved_model is None:
         console.print(
             "[red]No model configured[/red] — pass --model, or set MERGECRAFT_MODEL / "

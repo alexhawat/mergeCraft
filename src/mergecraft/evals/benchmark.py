@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -364,34 +365,39 @@ def run_structural_replay(
         # `diff.current_decision` alone.
         #
         # `corpus_class` is a scenario label (which bug family a case
-        # represents), not proof a defect exists — `issue-75-untrusted-
-        # never-approves` lands in the "security" bucket via corpus_class_for's
-        # id-substring heuristic, but its untrusted trust tier structurally
-        # cannot approve regardless of findings (D14): counting its "neutral"
-        # as an unsafe approval blamed the gate for correctly declining to
-        # approve an untrusted run.
+        # represents), not proof a defect exists, and neither is trust tier:
+        # an untrusted-tier case can still carry a real seeded defect the
+        # review missed (D14's "untrusted never approves" is a policy
+        # outcome, not a claim that no bug exists). Only `case.closed_world`
+        # — an explicit curator assertion, mirroring `scoring.BaselineIssue`'s
+        # flag of the same name (D4/D5) — marks a case's `recorded_findings`
+        # as complete and confirmed-clean. `issue-75-untrusted-never-approves`
+        # sets it because that case genuinely has no seeded defect (its point
+        # is the trust-tier policy itself); a hypothetical future untrusted
+        # `bench-security-*` case with a real seeded bug would leave it
+        # `False` and stay correctly counted as buggy (mergeCraft self-review,
+        # PR #216: an earlier version of this override inferred "no defect"
+        # from `trust_tier=="untrusted"` alone, which would have silently
+        # swallowed exactly that scenario — see
+        # `test_untrusted_tier_case_without_closed_world_still_counts_as_buggy`).
         #
-        # This override is intentionally narrow — scoped to `trust_tier ==
-        # "untrusted"` specifically, NOT "any completed run with zero
-        # findings". `recorded_findings=[]` on a **trusted** run is reviewer
+        # `recorded_findings=[]` without `closed_world=True` is reviewer
         # *output*, not ground truth that no defect exists — it is exactly
         # the evidence a genuine missed-bug case would produce, and must
-        # stay counted as `buggy_unsafe_approval` (mergeCraft self-review,
-        # PR #216, flagged a broader version of this fix for silently
-        # reclassifying that scenario as clean too — see
-        # `test_trusted_zero_findings_on_a_buggy_case_still_counts_as_unsafe_approval`).
+        # stay counted as `buggy_unsafe_approval` regardless of trust tier
+        # (see `test_trusted_zero_findings_on_a_buggy_case_still_counts_as_unsafe_approval`).
         # A crashed run (`run_succeeded=False`) is excluded either way — its
         # empty `recorded_findings` reflects a missing run, not a confirmed-
         # clean one, and must still count toward `buggy_total` via the
         # `inconclusive` branch below (pinned by
         # `test_crashed_run_on_a_buggy_case_is_inconclusive_not_a_correct_block`).
-        untrusted_policy_neutral = (
-            case.trust_tier == "untrusted"
+        confirmed_clean = (
+            case.closed_world
             and case.recorded_findings is not None
             and len(case.recorded_findings) == 0
             and case.run_succeeded
         )
-        is_buggy = corpus_class != "adversarial_noop" and not untrusted_policy_neutral
+        is_buggy = corpus_class != "adversarial_noop" and not confirmed_clean
         bucket = class_rollup[corpus_class]
         bucket["total"] += 1
         inconclusive = (not case.run_succeeded) or (
@@ -491,10 +497,23 @@ def write_result_set(
     provider comparison D12 requires — silently promoting it to "latest"
     would let a downstream consumer mistake it for a complete, published
     report (mergeCraft self-review, PR #216).
+
+    The default filename (when ``filename`` is not given) is provider-
+    scoped and carries a random suffix: two ``mergecraft eval bench`` runs
+    for different providers started within the same second previously
+    shared one ``structural-replay-<timestamp>.json`` name — the raw-
+    findings directories were already per-run-unique, but the *result set*
+    itself was not, so one provider's publication could silently overwrite
+    another's (mergeCraft self-review, PR #216).
     """
     results_dir.mkdir(parents=True, exist_ok=True)
     stamp = result.pins.recorded_at.strftime("%Y%m%dT%H%M%SZ")
-    out_name = filename or f"structural-replay-{stamp}.json"
+    if filename is not None:
+        out_name = filename
+    else:
+        suffix = uuid.uuid4().hex[:8]
+        provider_tag = f"-{result.detection.provider}" if result.detection is not None else ""
+        out_name = f"structural-replay{provider_tag}-{stamp}-{suffix}.json"
     path = results_dir / out_name
     path.write_text(
         json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
