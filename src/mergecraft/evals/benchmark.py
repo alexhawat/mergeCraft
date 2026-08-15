@@ -15,9 +15,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from mergecraft.agents.verifier import VERIFIER_RUBRIC_VERSION, judge_pin
+from mergecraft.agents.verifier import (
+    VERIFIER_RUBRIC_VERSION,
+    judge_pin,
+    pinned_judge_model,
+)
+from mergecraft.evals.scoring import DEFAULT_LINE_SLACK
 from mergecraft.evals.store import (
     CASE_STATUS_PASSED,
     CASE_STATUS_REGRESSION,
@@ -28,11 +33,16 @@ from mergecraft.evals.store import (
 )
 from mergecraft.modes import modes
 
-RESULT_SET_SCHEMA_VERSION: Final[str] = "1.0.0"
+RESULT_SET_SCHEMA_VERSION: Final[str] = "1.1.0"
 DEFAULT_RESULTS_DIR: Final[Path] = Path("evals/results")
 
 # Providers the benchmark names by default (W9.0: ≥2 providers).
 DEFAULT_BENCHMARK_PROVIDERS: Final[tuple[str, ...]] = ("claude", "openai")
+
+# Scoring-contract version pinned alongside the reviewing-model identity (N6)
+# — bump whenever `evals/scoring.py`'s matching rules change in a way that
+# would move a published number.
+SCORER_VERSION: Final[str] = "1.0.0"
 
 _CORPUS_ID_PREFIX: Final[tuple[tuple[str, str], ...]] = (
     ("bench-adversarial", "adversarial_noop"),
@@ -40,6 +50,26 @@ _CORPUS_ID_PREFIX: Final[tuple[tuple[str, str], ...]] = (
     ("bench-security", "security"),
     ("bench-correctness", "correctness"),
 )
+
+# `decide_approval()`'s closed verdict vocabulary, split by direction. A
+# decision outside `_BLOCK_LIKE_DECISIONS` is treated as wave-through — see
+# `docs/dev/test-plans/eval-benchmark-b2-gate.md`'s "inconclusive" section for
+# why this can't be derived from the decision string alone for "neutral".
+_BLOCK_LIKE_DECISIONS: Final[frozenset[str]] = frozenset(
+    {
+        "failure",
+        "block",
+        "request_changes",
+        "require_human_review",
+        "require_more_tests",
+        "quarantine",
+        "escalate",
+    }
+)
+# A row is inconclusive when the run itself never produced a real decision —
+# either it crashed (`Case.run_succeeded is False`, checked separately by the
+# caller) or the replay engine had no evidence to recompute one at all.
+_INCONCLUSIVE_DECISIONS: Final[frozenset[str | None]] = frozenset({None, "unavailable"})
 
 
 class CaseReplayRow(BaseModel):
@@ -55,6 +85,15 @@ class CaseReplayRow(BaseModel):
     replayable: bool
 
 
+class ReviewingModelPin(BaseModel):
+    """The pinned identity of the model a provider reviews with (N6, D12)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_id: str
+    model_pin: str
+
+
 class VersionPins(BaseModel):
     """Pinned identities recorded on every published result set."""
 
@@ -65,6 +104,42 @@ class VersionPins(BaseModel):
     mode_prompt_versions: dict[str, str]
     corpus_commit: str
     recorded_at: datetime
+    # N6: the mergeCraft commit itself, promoted from `_git_head_sha()`'s
+    # former role as a fallback-only value to a first-class required pin —
+    # #140 requires "mergeCraft commit included with published numbers".
+    mergecraft_commit: str
+    # D12: every provider a published number covers, pinned by model id +
+    # model_pin, never averaged. A missing/empty pin is a hard failure (D9) —
+    # a published report never has zero pinned reviewing models.
+    reviewing_model: dict[str, ReviewingModelPin] = Field(min_length=1)
+    scorer_version: str
+    line_slack: int
+
+
+class GateMatrix(BaseModel):
+    """The 2x2-plus-inconclusive directional gate outcome matrix (B2, #140)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    buggy_total: int
+    buggy_correct_block: int
+    buggy_unsafe_approval: int
+    buggy_inconclusive: int
+    clean_total: int
+    clean_correct_approval: int
+    clean_unsafe_block: int
+    clean_inconclusive: int
+
+
+class CorpusClassRollup(BaseModel):
+    """Gate outcome counts for one `corpus_class_for()` bucket."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total: int
+    correct: int
+    incorrect: int
+    inconclusive: int
 
 
 class BenchmarkMetrics(BaseModel):
@@ -78,6 +153,15 @@ class BenchmarkMetrics(BaseModel):
     cases_regression: int
     cases_blocked: int
     decision_replay_pass_rate: float
+    # Directional gate metrics (B2, #140) — split the one scalar above into
+    # "did the gate wave a real bug through" vs. "did it block a clean PR for
+    # nothing", since those are safety-opposite failure modes a single pass
+    # rate cannot distinguish.
+    unsafe_approval_rate: float
+    clean_block_rate: float
+    inconclusive_rate: float
+    gate_matrix: GateMatrix
+    by_corpus_class: dict[str, CorpusClassRollup]
 
 
 class BenchmarkResultSet(BaseModel):
@@ -145,6 +229,21 @@ def _judge_pins(providers: tuple[str, ...]) -> dict[str, dict[str, Any]]:
     return pins
 
 
+def _reviewing_model_pins(providers: tuple[str, ...]) -> dict[str, ReviewingModelPin]:
+    """Pin the reviewing-model identity per provider (N6, D12).
+
+    Mirrors ``_judge_pins``: structural replay never invokes a live provider,
+    but the *configured* pin for each named provider is itself a fact worth
+    recording — a report that later adds a live finding-location run (B3) can
+    then diff its own recorded model against this structural baseline.
+    """
+    pins: dict[str, ReviewingModelPin] = {}
+    for provider in providers:
+        model = pinned_judge_model(provider) or "unknown"
+        pins[provider] = ReviewingModelPin(model_id=model, model_pin=model)
+    return pins
+
+
 def run_structural_replay(
     bank_dir: Path = DEFAULT_BANK_DIR,
     *,
@@ -155,6 +254,13 @@ def run_structural_replay(
     rows: list[CaseReplayRow] = []
     passed = regression = blocked = 0
     replayable_count = 0
+
+    buggy_total = buggy_correct_block = buggy_unsafe_approval = buggy_inconclusive = 0
+    clean_total = clean_correct_approval = clean_unsafe_block = clean_inconclusive = 0
+    class_rollup: dict[str, dict[str, int]] = {
+        bucket: {"total": 0, "correct": 0, "incorrect": 0, "inconclusive": 0}
+        for _, bucket in _CORPUS_ID_PREFIX
+    }
 
     for case in cases:
         replayable = case.is_replayable
@@ -167,10 +273,12 @@ def run_structural_replay(
             regression += 1
         else:
             blocked += 1
+
+        corpus_class = corpus_class_for(case)
         rows.append(
             CaseReplayRow(
                 case_id=case.id,
-                corpus_class=corpus_class_for(case),
+                corpus_class=corpus_class,
                 status=diff.status,
                 expected_decision=diff.expected_decision,
                 current_decision=diff.current_decision,
@@ -178,8 +286,55 @@ def run_structural_replay(
             )
         )
 
+        # Gate-matrix aggregation reads `case.run_succeeded` directly here,
+        # where `case` (not just the `CaseReplayRow` built above) is in
+        # scope — see the B2.0 design-gate note on why a crashed run and a
+        # genuinely clean "neutral" decision can't be told apart from
+        # `diff.current_decision` alone.
+        is_buggy = corpus_class != "adversarial_noop"
+        bucket = class_rollup[corpus_class]
+        bucket["total"] += 1
+        inconclusive = (not case.run_succeeded) or (
+            diff.current_decision in _INCONCLUSIVE_DECISIONS
+        )
+
+        if inconclusive:
+            bucket["inconclusive"] += 1
+            if is_buggy:
+                buggy_total += 1
+                buggy_inconclusive += 1
+            else:
+                clean_total += 1
+                clean_inconclusive += 1
+            continue
+
+        blocked_like = diff.current_decision in _BLOCK_LIKE_DECISIONS
+        if is_buggy:
+            buggy_total += 1
+            if blocked_like:
+                buggy_correct_block += 1
+                bucket["correct"] += 1
+            else:
+                buggy_unsafe_approval += 1
+                bucket["incorrect"] += 1
+        else:
+            clean_total += 1
+            if blocked_like:
+                clean_unsafe_block += 1
+                bucket["incorrect"] += 1
+            else:
+                clean_correct_approval += 1
+                bucket["correct"] += 1
+
     total = len(cases)
     pass_rate = (passed / replayable_count) if replayable_count else 0.0
+
+    unsafe_denom = buggy_total - buggy_inconclusive
+    unsafe_approval_rate = (buggy_unsafe_approval / unsafe_denom) if unsafe_denom else 0.0
+    clean_denom = clean_total - clean_inconclusive
+    clean_block_rate = (clean_unsafe_block / clean_denom) if clean_denom else 0.0
+    inconclusive_total = buggy_inconclusive + clean_inconclusive
+    inconclusive_rate = (inconclusive_total / total) if total else 0.0
 
     metrics = BenchmarkMetrics(
         cases_total=total,
@@ -188,6 +343,22 @@ def run_structural_replay(
         cases_regression=regression,
         cases_blocked=blocked,
         decision_replay_pass_rate=pass_rate,
+        unsafe_approval_rate=unsafe_approval_rate,
+        clean_block_rate=clean_block_rate,
+        inconclusive_rate=inconclusive_rate,
+        gate_matrix=GateMatrix(
+            buggy_total=buggy_total,
+            buggy_correct_block=buggy_correct_block,
+            buggy_unsafe_approval=buggy_unsafe_approval,
+            buggy_inconclusive=buggy_inconclusive,
+            clean_total=clean_total,
+            clean_correct_approval=clean_correct_approval,
+            clean_unsafe_block=clean_unsafe_block,
+            clean_inconclusive=clean_inconclusive,
+        ),
+        by_corpus_class={
+            bucket: CorpusClassRollup(**counts) for bucket, counts in class_rollup.items()
+        },
     )
 
     pins = VersionPins(
@@ -196,6 +367,10 @@ def run_structural_replay(
         mode_prompt_versions=_mode_prompt_versions(),
         corpus_commit=_git_corpus_commit(),
         recorded_at=datetime.now(UTC),
+        mergecraft_commit=_git_head_sha(),
+        reviewing_model=_reviewing_model_pins(providers),
+        scorer_version=SCORER_VERSION,
+        line_slack=DEFAULT_LINE_SLACK,
     )
 
     return BenchmarkResultSet(pins=pins, metrics=metrics, case_results=rows)
@@ -237,9 +412,13 @@ __all__ = [
     "DEFAULT_BENCHMARK_PROVIDERS",
     "DEFAULT_RESULTS_DIR",
     "RESULT_SET_SCHEMA_VERSION",
+    "SCORER_VERSION",
     "BenchmarkMetrics",
     "BenchmarkResultSet",
     "CaseReplayRow",
+    "CorpusClassRollup",
+    "GateMatrix",
+    "ReviewingModelPin",
     "VersionPins",
     "corpus_class_for",
     "replay_bank",
