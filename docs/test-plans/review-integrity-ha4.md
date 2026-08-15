@@ -103,7 +103,7 @@ xfail.
 
 ## Known follow-up (HA4.2 reconciliation)
 
-Resolved: `tests/agents/test_verifier.py::test_verifier_deny_list_is_independent_and_non_empty` pins H4 independence (verifier complement ≠ reviewer/subagent complement; `checkout_pr` vs `verify_agent_findings`) instead of equality; both lists stay non-empty and include `push_branch`.
+Resolved: `tests/agents/test_verifier.py::test_verifier_deny_list_is_independent_and_non_empty` pins H4 independence (verifier complement ≠ reviewer/subagent complement; `checkout_pr` vs `verify_agent_findings`) instead of equality; both lists stay non-empty and include `push_branch`. Escalation: `tests/agents/test_resolve.py::test_subagent_denied_tools_derived_from_class_complement` pins the same class-complement contract (`checkout_pr` off the subagent deny list; mutation tools stay on).
 
 ## Status
 

@@ -45,7 +45,8 @@ def test_resolve_agent_unknown_raises() -> None:
         resolve_agent("not-a-real-agent")
 
 
-def test_subagent_denied_tools_derived_from_mutates(tmp_path: Path) -> None:
+def test_subagent_denied_tools_derived_from_class_complement(tmp_path: Path) -> None:
+    """H4 / D14 — subagent deny list is the complement of reviewer-allowed classes."""
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
     ctx = ToolContext(
         agent_id="claude",
@@ -67,8 +68,11 @@ def test_subagent_denied_tools_derived_from_mutates(tmp_path: Path) -> None:
     denied = subagent_denied_tool_names(ctx)
     assert "push_branch" in denied
     assert "create_issue_comment" in denied
-    assert "checkout_pr" in denied
     assert "commit_changes" in denied
+    # `checkout_pr` is class `scope` — reviewer-allowed, so off the subagent deny list.
+    assert "checkout_pr" not in denied
+    # Verification is not in the reviewer allow-list.
+    assert "verify_agent_findings" in denied
     assert "git" not in denied
     assert "get_issue" not in denied
     assert len(denied) > 0
