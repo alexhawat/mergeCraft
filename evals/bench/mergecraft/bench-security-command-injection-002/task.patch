@@ -1,0 +1,10 @@
+diff --git a/src/mergecraft/analyzers/adapters/lint_runner.py b/src/mergecraft/analyzers/adapters/lint_runner.py
+--- a/src/mergecraft/analyzers/adapters/lint_runner.py
++++ b/src/mergecraft/analyzers/adapters/lint_runner.py
+@@ -6,4 +6,5 @@
+
+
+ def run_lint(command: list[str], target: str) -> subprocess.CompletedProcess[str]:
+-    return subprocess.run([*command, target], capture_output=True, text=True, check=False)
++    full_command = " ".join(command) + " " + target
++    return subprocess.run(full_command, shell=True, capture_output=True, text=True, check=False)

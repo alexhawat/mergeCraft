@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-cmp-flip-001-001",
+      "path": "src/mergecraft/utils/quota.py",
+      "start_line": 8,
+      "end_line": 8,
+      "title": "is_over_budget no longer flags usage at exactly the limit",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+diff --git a/src/mergecraft/utils/retry.py b/src/mergecraft/utils/retry.py
+--- a/src/mergecraft/utils/retry.py
++++ b/src/mergecraft/utils/retry.py
+@@ -14,8 +14,8 @@
+     last_exc: Exception | None = None
+     for _ in range(attempts):
+         try:
+-            result = fn()
+-            return result
++            if fn():
++                return fn()
+         except Exception as exc:  # noqa: BLE001
+             last_exc = exc
+     raise last_exc  # type: ignore[misc]

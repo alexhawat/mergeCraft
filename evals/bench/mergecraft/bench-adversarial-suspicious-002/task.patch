@@ -1,0 +1,10 @@
+diff --git a/src/mergecraft/utils/http_retry.py b/src/mergecraft/utils/http_retry.py
+--- a/src/mergecraft/utils/http_retry.py
++++ b/src/mergecraft/utils/http_retry.py
+@@ -4,4 +4,6 @@
+
+
+ def default_retry_after(status_code: int) -> int:
++    if status_code == 429:
++        return 3
+     return 5

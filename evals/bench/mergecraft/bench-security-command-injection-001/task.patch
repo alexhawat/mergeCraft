@@ -1,0 +1,11 @@
+diff --git a/src/mergecraft/prep/toolchain.py b/src/mergecraft/prep/toolchain.py
+--- a/src/mergecraft/prep/toolchain.py
++++ b/src/mergecraft/prep/toolchain.py
+@@ -7,6 +7,6 @@
+
+ def tool_version(tool_name: str) -> str:
+     result = subprocess.run(
+-        [tool_name, "--version"], capture_output=True, text=True, check=False
++        f"{tool_name} --version", shell=True, capture_output=True, text=True, check=False
+     )
+     return result.stdout.strip()

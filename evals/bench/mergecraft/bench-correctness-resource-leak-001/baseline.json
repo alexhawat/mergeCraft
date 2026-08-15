@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-resource-leak-001-001",
+      "path": "src/mergecraft/utils/tempfiles.py",
+      "start_line": 17,
+      "end_line": 17,
+      "title": "read_scratch opens a file handle without closing it",
+      "severity": "Major",
+      "category": "Stability & Availability",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-security-command-injection-001-001",
+      "path": "src/mergecraft/prep/toolchain.py",
+      "start_line": 9,
+      "end_line": 11,
+      "title": "tool_version shells out with shell=True on an unsanitized tool name",
+      "severity": "Critical",
+      "category": "Security & Privacy",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

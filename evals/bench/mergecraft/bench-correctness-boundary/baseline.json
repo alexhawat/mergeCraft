@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-boundary-001",
+      "path": "src/mergecraft/utils/pagination.py",
+      "start_line": 9,
+      "end_line": 9,
+      "title": "page_slice returns one extra item past the page boundary",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

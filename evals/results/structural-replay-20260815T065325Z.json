@@ -418,7 +418,7 @@
     "unsafe_approval_rate": 0.030303030303030304
   },
   "pins": {
-    "corpus_commit": "f8632ce12d3b540a8e1a2db99a8048a571f82f85",
+    "corpus_commit": "02128d636921eb34e078b9d4a6bc37f901210d90",
     "judge_pins": {
       "claude": {
         "judge_version": "1.0.0",
@@ -436,7 +436,7 @@
       }
     },
     "line_slack": 3,
-    "mergecraft_commit": "d4527cf3d04055fb3854df797ce30addc78b55e1",
+    "mergecraft_commit": "3b7edd995ef0a99bf442c569a3d6f5b7f7c2aea8",
     "mode_prompt_versions": {
       "AddressReviews": "cde9609dd8b5",
       "Build": "e1065f5ab713",
@@ -447,7 +447,7 @@
       "Review": "e1f8d730908e",
       "Task": "ef49457aebfc"
     },
-    "recorded_at": "2026-08-15T07:15:37.808412Z",
+    "recorded_at": "2026-08-15T06:53:25.132390Z",
     "reviewing_model": {
       "claude": {
         "model_id": "claude-sonnet-5",

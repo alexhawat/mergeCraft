@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-security-auth-removed-001-001",
+      "path": "src/mergecraft/action/webhook.py",
+      "start_line": 9,
+      "end_line": 9,
+      "title": "handle_webhook always returns True \u2014 signature verification removed",
+      "severity": "Critical",
+      "category": "Security & Privacy",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

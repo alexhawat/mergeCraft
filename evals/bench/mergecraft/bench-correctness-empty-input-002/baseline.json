@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-empty-input-002-001",
+      "path": "src/mergecraft/evals/mean_score.py",
+      "start_line": 7,
+      "end_line": 7,
+      "title": "mean_score divides by len(scores) without guarding the empty-list case",
+      "severity": "Major",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

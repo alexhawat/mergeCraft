@@ -1,0 +1,21 @@
+diff --git a/src/mergecraft/config/tracing_settings.py b/src/mergecraft/config/tracing_settings.py
+--- a/src/mergecraft/config/tracing_settings.py
++++ b/src/mergecraft/config/tracing_settings.py
+@@ -6,5 +6,5 @@
+
+
+ class TracingSettings(BaseModel):
+-    otlp_endpoint: str = ""
++    exporter_endpoint: str = ""
+     enabled: bool = False
+diff --git a/src/mergecraft/ci/tracing_client.py b/src/mergecraft/ci/tracing_client.py
+--- a/src/mergecraft/ci/tracing_client.py
++++ b/src/mergecraft/ci/tracing_client.py
+@@ -8,6 +8,7 @@
+
+
+ def build_client(settings: TracingSettings):
++    logger.debug("building tracing client")
+     if not settings.enabled:
+         return None
+     return _Client(settings.otlp_endpoint)

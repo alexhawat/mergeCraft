@@ -139,6 +139,13 @@ corpus is empty (B4 seeds it), so every `bench-detect` run reports the latter.
 Ground truth is the human-labelled corpus above. LLM-as-judge scoring is a
 separate measured component when live runs are enabled.
 
+Every case added by B4 (the `evals/bench/mergecraft/` detection-corpus patches
+and their `evals/cases/bench-*` bank entries) is agent-seeded/synthetic rather
+than human-mined — every such row carries `provenance: agent-seeded` — and is
+distinct from both the human-labelled table above and the human-provenance
+tripll ReviewBench corpus described earlier in this document; caveat it
+separately when publishing (B7).
+
 Provider set defaults to **Claude + OpenAI**; estimate ~10–30 tokens per case for
 a minimal live probe. Full diff-review runs are operator-triggered, not PR CI.
 

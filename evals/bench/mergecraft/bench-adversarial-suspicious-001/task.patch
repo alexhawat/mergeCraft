@@ -1,0 +1,12 @@
+diff --git a/src/mergecraft/ci/best_effort.py b/src/mergecraft/ci/best_effort.py
+--- a/src/mergecraft/ci/best_effort.py
++++ b/src/mergecraft/ci/best_effort.py
+@@ -6,4 +6,7 @@
+
+
+ def flush_telemetry(sink) -> None:
+-    sink.flush()
++    try:
++        sink.flush()
++    except Exception:  # noqa: BLE001 - telemetry must never crash the caller
++        logger.debug("telemetry flush failed; ignoring by design")

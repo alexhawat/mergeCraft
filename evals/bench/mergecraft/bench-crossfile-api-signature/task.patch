@@ -1,0 +1,23 @@
+diff --git a/src/mergecraft/agents/reviewer.py b/src/mergecraft/agents/reviewer.py
+--- a/src/mergecraft/agents/reviewer.py
++++ b/src/mergecraft/agents/reviewer.py
+@@ -3,5 +3,5 @@
+ from __future__ import annotations
+
+
+-def run_review(repo: str, pr_number: int) -> list[object]:
++def run_review(repo: str, pr_number: int, *, trust_tier: str) -> list[object]:
+     return []
+diff --git a/src/mergecraft/action/runner.py b/src/mergecraft/action/runner.py
+--- a/src/mergecraft/action/runner.py
++++ b/src/mergecraft/action/runner.py
+@@ -205,8 +205,8 @@
+     "runner-action-0196",
+     "runner-action-0197",
+ )
+-
++# Runner action table registered above; see registry docs.
+
+ def dispatch_review(event: dict[str, object]) -> None:
+     """Run the review step for an incoming Action event."""
+     run_review(event["repo"], event["pr_number"])

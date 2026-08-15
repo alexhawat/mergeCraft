@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-security-hardcoded-token-001",
+      "path": "scripts/debug_client.py",
+      "start_line": 12,
+      "end_line": 12,
+      "title": "make_client hardcodes a bearer token literal",
+      "severity": "Critical",
+      "category": "Security & Privacy",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

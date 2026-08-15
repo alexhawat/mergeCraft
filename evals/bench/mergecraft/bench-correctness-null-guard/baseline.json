@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-null-guard-001",
+      "path": "src/mergecraft/config/loader.py",
+      "start_line": 44,
+      "end_line": 48,
+      "title": "enabled_analyzer_names dereferences settings.analyzers without a None guard",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

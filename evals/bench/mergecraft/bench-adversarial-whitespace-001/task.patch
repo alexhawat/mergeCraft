@@ -1,0 +1,14 @@
+diff --git a/src/mergecraft/utils/formatting.py b/src/mergecraft/utils/formatting.py
+--- a/src/mergecraft/utils/formatting.py
++++ b/src/mergecraft/utils/formatting.py
+@@ -3,7 +3,8 @@
+ from __future__ import annotations
+
+
+-def truncate(text: str, limit: int) -> str:
+-    if len(text) <= limit:
++def truncate(text: str, limit: int) -> str:
++    if len(text) <= limit:
+         return text
+     return text[: limit - 1] + "…"
++

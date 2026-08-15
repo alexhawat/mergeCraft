@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-regression-002-001",
+      "path": "src/mergecraft/utils/retry.py",
+      "start_line": 17,
+      "end_line": 18,
+      "title": "call_once_with_retry reintroduces the double-execution bug the #94 comment says was fixed",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-security-sql-injection-002-001",
+      "path": "src/mergecraft/learnings/store.py",
+      "start_line": 10,
+      "end_line": 10,
+      "title": "learnings_for_repo concatenates repo_slug directly into SQL",
+      "severity": "Critical",
+      "category": "Security & Privacy",
+      "provenance": "agent-seeded"
+    }
+  ]
+}
