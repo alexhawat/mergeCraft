@@ -123,7 +123,7 @@ silently ignores anything shaped like the other corpus rather than erroring.
 
 ```bash
 make bench-detect
-# or: mergecraft eval bench --provider claude --model claude-sonnet-5 --json
+# or: mergecraft eval bench --model anthropic/claude-sonnet --json
 ```
 
 Joins the keyless structural replay above with a live run against

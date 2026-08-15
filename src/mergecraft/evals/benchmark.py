@@ -120,10 +120,38 @@ class VersionPins(BaseModel):
     mergecraft_commit: str
     # D12: every provider a published number covers, pinned by model id +
     # model_pin, never averaged. A missing/empty pin is a hard failure (D9) —
-    # a published report never has zero pinned reviewing models.
+    # a published report never has zero pinned reviewing models. An entry can
+    # still carry `model_pinned=False` (honest, D9's "detect" half — no
+    # PINNED_JUDGE_MODELS entry exists for e.g. openai yet); this model does
+    # not hard-reject that at construction time, because doing so would break
+    # every existing structural-replay call for the ("claude", "openai")
+    # default pair — no entry pins the entire pipeline could actually run
+    # today. `unpinned_providers`/`fully_pinned` below give a real, callable
+    # enforcement point for the moment a result set is *published* (D9's
+    # "reject" half — B7's job), rather than leaving it as an unchecked
+    # promise (mergeCraft self-review, PR #216).
     reviewing_model: dict[str, ReviewingModelPin] = Field(min_length=1)
     scorer_version: str
     line_slack: int
+
+    @property
+    def unpinned_providers(self) -> tuple[str, ...]:
+        """Providers whose `reviewing_model` entry is not a confirmed pin."""
+        return tuple(
+            provider
+            for provider, pin in sorted(self.reviewing_model.items())
+            if not pin.model_pinned
+        )
+
+    @property
+    def fully_pinned(self) -> bool:
+        """True iff every named provider carries a confirmed model pin (D9).
+
+        Structural replay may legitimately produce `False` (see the field
+        comment above) — this is the check B7 must call before publishing,
+        not a constructor-time invariant.
+        """
+        return len(self.unpinned_providers) == 0
 
 
 class GateMatrix(BaseModel):

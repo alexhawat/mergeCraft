@@ -657,3 +657,22 @@ def test_reviewing_model_pins_flag_unpinned_providers_honestly(tmp_path: Path) -
     openai_pin = result.pins.reviewing_model["openai"]
     assert openai_pin.model_pinned is False
     assert openai_pin.model_id == "unknown"
+
+    # A real, callable D9 enforcement point -- not just a promise. B7
+    # (publication) must call this before writing a claim to the README;
+    # structural replay itself is allowed to produce a not-fully-pinned
+    # result set, since rejecting that at construction time would break
+    # every existing call with the default ("claude", "openai") pair (no
+    # PINNED_JUDGE_MODELS entry for openai exists in this codebase today).
+    assert result.pins.fully_pinned is False
+    assert result.pins.unpinned_providers == ("openai",)
+
+
+def test_version_pins_fully_pinned_true_when_every_provider_is_confirmed() -> None:
+    """The positive case: once every named provider has a confirmed pin,
+    `fully_pinned` flips to `True` and `unpinned_providers` is empty."""
+    kwargs = {**_old_pin_kwargs(), **_NEW_PIN_KWARGS}
+    pins = VersionPins(**kwargs)
+
+    assert pins.fully_pinned is True
+    assert pins.unpinned_providers == ()
