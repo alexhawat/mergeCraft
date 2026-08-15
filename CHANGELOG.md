@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added: optional `harness` setting (`opencode` / `codex` / `claude` / `gemini` / `cursor`) to select the agent runtime independently of provider/model. Existing configs with the key unset keep today's inference
 - `mergecraft tracing logfire wire-workflow` / `unwire-workflow` — surgical
   YAML mutation of `.github/workflows/*.yml` to wire (or strip) the four
   Logfire keys (`tracing: "true"`, `tracing-to: logfire`,

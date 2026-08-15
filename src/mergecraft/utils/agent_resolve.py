@@ -519,19 +519,22 @@ async def run_with_model_chain(
             attempts += 1
             logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
 
+            resolved_harness = resolve_harness(settings, slug)
             attempt_attrs = {
                 "model.id": slug,
                 "model.provider": _agent_provider_for_slug(slug),
-                "model.mode": _agent_mode_for_slug(slug),
+                "model.mode": resolved_harness,
                 "model.fallback_index": chain_index,
                 "model.attempt_number": attempts,
                 "agent.provider": _agent_provider_for_slug(slug),
-                "agent.mode": _agent_mode_for_slug(slug),
+                "agent.mode": resolved_harness,
+                "harness": resolved_harness,
+                "agent.harness": resolved_harness,
                 # OTel GenAI semantic-convention names so Logfire's native
                 # GenAI dashboard populates. ``gen_ai.system`` is the provider
                 # slug (anthropic/openai/google/opencode/...).
                 "gen_ai.system": _agent_provider_for_slug(slug),
-                "gen_ai.agent.name": _agent_mode_for_slug(slug),
+                "gen_ai.agent.name": resolved_harness,
                 "gen_ai.request.model": slug,
                 "agent.cli_argv": cli_argv,
             }
@@ -676,6 +679,66 @@ def _agent_mode_for_slug(slug: str) -> str:
     if provider == "cursor":
         return "cursor"
     return "opencode"
+
+
+_NATIVE_HARNESS_PROVIDERS: dict[str, frozenset[str]] = {
+    "codex": frozenset({"openai"}),
+    "claude": frozenset({"anthropic"}),
+    "gemini": frozenset({"google"}),
+    "cursor": frozenset({"cursor"}),
+}
+
+# OpenCode is the generic multi-provider harness: gateway presets, custom
+# slugs, and explicit overrides (openai / anthropic under ``harness: opencode``).
+_OPENCODE_NATIVE_PROVIDERS = frozenset({"nous", "tokenhub", "minimax", "openai", "anthropic"})
+_KNOWN_CATALOG_PROVIDERS = frozenset(
+    {
+        "anthropic",
+        "openai",
+        "google",
+        "cursor",
+        "bedrock",
+        "vertex",
+        "nous",
+        "tokenhub",
+        "minimax",
+    }
+)
+
+
+def _harness_supports_provider(harness: str, provider: str) -> bool:
+    """Return whether ``harness`` may run models from ``provider``."""
+    if harness == "opencode":
+        if provider in _OPENCODE_NATIVE_PROVIDERS:
+            return True
+        # Custom / unknown catalog prefixes route through OpenCode today.
+        return provider not in _KNOWN_CATALOG_PROVIDERS
+    native = _NATIVE_HARNESS_PROVIDERS.get(harness)
+    return native is not None and provider in native
+
+
+def resolve_harness(settings: RepoSettings, slug: str) -> str:
+    """Resolve the agent harness for ``slug`` under ``settings`` (HA3 / D11).
+
+    When ``settings.harness`` is unset, delegates to today's
+    :func:`_agent_mode_for_slug` inference. When set, validates the
+    (harness, provider, model) triple and returns the explicit value.
+    Unsupported combinations raise :class:`ModelFallbackPolicyError` so
+    ``main._classify_error_outcome`` maps them to ``configuration_error``.
+    """
+    if settings.harness is None:
+        return _agent_mode_for_slug(slug)
+
+    harness = settings.harness
+    provider = _agent_provider_for_slug(slug)
+    if _harness_supports_provider(harness, provider):
+        return harness
+
+    msg = (
+        f"configuration error: harness {harness!r} is incompatible with "
+        f"model {slug!r} (provider {provider!r})"
+    )
+    raise ModelFallbackPolicyError(msg)
 
 
 def _cost_attrs_from_usage(usage: Any) -> dict[str, Any]:
@@ -963,6 +1026,7 @@ __all__ = [
     "pick_runnable_slug_from_chain",
     "promote_model_evidence",
     "resolve_effective_model_slug",
+    "resolve_harness",
     "resolve_model",
     "resolve_runtime_agent",
     "run_with_model_chain",

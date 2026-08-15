@@ -458,6 +458,24 @@ key value — convention 7. The harness reads the env var at exec time.
 
 #### Which harness handles which
 
+**Harness vs provider vs model.** OpenCode is the generic multi-provider
+harness (OpenAI-compatible gateways, Nous, TokenHub, custom providers).
+Codex is the OpenAI-native harness. **Nous** is a *provider* (inference
+gateway); **DeepSeek** is a *model family* under that provider — not a
+harness name. Set `harness:` in `.mergecraft/config.yaml` to pick the
+runtime independently of `model:`; when unset, mergeCraft infers the
+harness from the model slug (see matrix below).
+
+| Model slug (unset `harness`) | Inferred harness | Explicit override exercised by tests |
+|------------------------------|------------------|--------------------------------------|
+| `nous/deepseek-v4-flash` | `opencode` | — |
+| `nous/deepseek/deepseek-v4-flash` | `opencode` | — |
+| `openai/gpt-5.3-codex` | `codex` | `harness: opencode` → `opencode` |
+| `anthropic/claude-sonnet` | `claude` | `harness: opencode` → `opencode` |
+| `google/gemini-3.1-pro-preview` | `gemini` | — |
+| `cursor/cloud-agent` | `cursor` | — |
+| `nous/deepseek/deepseek-v4-flash` + `harness: claude` | — | **configuration error** (names both halves) |
+
 | Harness | Format written | Where it lives |
 |---------|----------------|----------------|
 | OpenCode | `provider.<id>.options.baseURL` / `.apiKey` (JSON) | `OPENCODE_CONFIG_CONTENT` (inline) and `OPENCODE_CONFIG` (file) |

@@ -16,6 +16,23 @@ scheduled nightly job covers the **broad slice** plus live providers
 | **Push** | `disabled`, `restricted`, `enabled` | Default runtime resolve is `restricted`; default branch protected under `restricted` |
 | **Arch** | `linux/amd64`, `linux/arm64` | Images built multi-arch where the release pipeline publishes them; PR E2E runs on `ubuntu-latest` (amd64) |
 
+## Harness × model (HA3 / D11)
+
+OpenCode = generic multi-provider harness · Codex = OpenAI-native harness ·
+Nous = provider · DeepSeek = model family. When `harness:` is unset in
+`.mergecraft/config.yaml`, mergeCraft infers the harness from the model slug.
+Explicit `harness:` wins over inference; unsupported combinations are
+configuration errors naming both halves.
+
+| Model slug | `harness` unset (inferred) | Explicit override / error |
+|------------|----------------------------|---------------------------|
+| `nous/deepseek-v4-flash` | `opencode` | — |
+| `nous/deepseek/deepseek-v4-flash` | `opencode` | `harness: claude` → configuration error |
+| `openai/gpt-5.3-codex` | `codex` | `harness: opencode` → `opencode` |
+| `anthropic/claude-sonnet` | `claude` | `harness: opencode` → `opencode` |
+| `google/gemini-3.1-pro-preview` | `gemini` | — |
+| `cursor/cloud-agent` | `cursor` | — |
+
 ## Security-relevant slice (PR gate — `.github/workflows/e2e.yml`)
 
 Runs on every pull request. **No live LLMs** (D6): fixture event payloads +
