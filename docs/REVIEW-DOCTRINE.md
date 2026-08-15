@@ -291,6 +291,41 @@ The cross-reference is **one-way**: the doctrine refers to the bank, the bank re
 back to the doctrine. The bank does not embed doctrine; the doctrine does not embed
 case payloads. The protocol is the join key (`case_id`).
 
+## Terminal submission requirement (VP2)
+
+mergeCraft separates three layers that older review flows conflated:
+
+1. **Terminal submission** — `submit_review_verdict` records the agent's
+   `approve` / `request_changes` choice, summary, and structured findings on
+   `ToolState`. One authoritative payload per attempt; identical re-submission
+   is idempotent, a conflicting payload is rejected.
+2. **Structural verdict** — `decide_approval(findings, *, run_succeeded, tier)`
+   is a pure function of typed findings and run state. It never reads agent
+   prose, `result.output`, or `ApprovalRecord.would_approve`.
+3. **Publication** — `create_pull_request_review` posts to GitHub and writes an
+   advisory `ApprovalRecord`. It cannot bypass the structural gate.
+
+**Schema vs semantic validation.** Pydantic enforces the wire shape (closed
+verdict enum, `extra="forbid"`). `validate_submission` then applies semantic
+rules in trusted mergeCraft code: `request_changes` with zero findings,
+`approve` over a verifier-confirmed Critical/Major blocker, and `approve` with
+a failing required deterministic check are all rejected with a typed
+`rejection_reason`. A rejected submission leaves
+`terminal_submission_received=false` — fallback-eligible, same as no
+submission (D8).
+
+**Outcome resolution.** In `Review` and `IncrementalReview` modes, a provider
+that returns process success without a usable terminal submission maps to
+`RunOutcome.inconclusive` (`neutral` check conclusion), not `passed`. Build and
+other non-review modes are unchanged.
+
+**Fallback.** The semantic-fallback chain advances on
+`not terminal_submission_received`, not on verdict content. A valid
+`request_changes` with confirmed findings is a usable review result; a missing
+or semantically rejected submission is not.
+
+See also [`REVIEW-CHECKS.md`](../REVIEW-CHECKS.md#terminal-verdict-vs-structural-verdict-vp2).
+
 ## Provenance
 
 (Harvested from pullfrog-py commits; see the heading above for sources.)

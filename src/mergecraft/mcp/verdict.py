@@ -1,8 +1,9 @@
-"""Terminal review verdict MCP tool (VP1).
+"""Terminal review verdict MCP tool (VP1) and semantic validation (VP2).
 
 Records a typed terminal submission on ``ToolState`` without publishing to
-GitHub. Enforcement and outcome wiring land in VP2; this module is inert for
-run outcomes until then.
+GitHub. VP2 adds ``validate_submission`` and wires it into the tool so
+schema-invalid and semantically-invalid payloads fail closed without setting
+``terminal_submission``.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -21,10 +23,148 @@ from mergecraft.mcp.tool_state import TerminalSubmission
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
+_ALLOWED_VERDICTS = frozenset({"approve", "request_changes"})
+_ALLOWED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary", "findings"})
+_REQUIRED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary"})
+
+REJECTION_INVALID_VERDICT = "invalid_verdict"
+REJECTION_UNKNOWN_FIELDS = "unknown_fields"
+REJECTION_MISSING_REQUIRED_FIELDS = "missing_required_fields"
+REJECTION_REQUEST_CHANGES_NO_FINDINGS = "request_changes_without_findings"
+REJECTION_APPROVE_CONFIRMED_BLOCKER = "approve_with_confirmed_blocker"
+REJECTION_APPROVE_FAILED_GATE = "approve_with_failed_required_gate"
+REJECTION_CONFLICTING_SUBMISSION = "conflicting_submission"
+
 
 def _canonical_payload_hash(payload: dict[str, Any]) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class SubmissionValidation:
+    """Typed validator result (D5) — not a bare bool."""
+
+    accepted: bool
+    rejection_reason: str | None
+
+
+def _confirmed_findings_from_state(state: Any) -> list[Any]:
+    explicit = getattr(state, "confirmed_findings", None)
+    if explicit:
+        return list(explicit)
+    analyzer_run = getattr(state, "analyzer_run", None)
+    if analyzer_run is None:
+        return []
+    verified_ids = getattr(analyzer_run, "verified_ids", None) or set()
+    findings_raw = getattr(analyzer_run, "findings", None) or []
+    from mergecraft.analyzers.finding import Finding
+
+    confirmed: list[Any] = []
+    for item in findings_raw:
+        if isinstance(item, Finding):
+            finding = item
+        elif isinstance(item, dict):
+            finding = Finding.model_validate(item)
+        else:
+            continue
+        if finding.fingerprint in verified_ids:
+            confirmed.append(finding)
+    return confirmed
+
+
+def _static_checks_from_state(state: Any) -> list[dict[str, str]]:
+    explicit = getattr(state, "static_checks", None)
+    if explicit:
+        return [dict(row) for row in explicit if isinstance(row, dict)]
+    return []
+
+
+def validation_state_from_tool_context(ctx: ToolContext) -> Any:
+    """Build the duck-typed consultation object ``validate_submission`` reads."""
+    from types import SimpleNamespace
+
+    tool_state = ctx.tool_state
+    state = SimpleNamespace(
+        terminal_submission=tool_state.terminal_submission,
+        terminal_submission_conflict=tool_state.terminal_submission_conflict,
+        confirmed_findings=[],
+        static_checks=[],
+        withdrawn_fingerprints=set(),
+        tool_state=tool_state,
+        analyzer_run=tool_state.analyzer_run,
+    )
+    state.confirmed_findings = _confirmed_findings_from_state(state)
+    return state
+
+
+def validate_submission(submission: dict[str, Any], *, state: Any) -> SubmissionValidation:
+    """Pure semantic + structural validation for a terminal verdict payload (D5, D9)."""
+    if getattr(state, "terminal_submission_conflict", False):
+        return SubmissionValidation(
+            accepted=False,
+            rejection_reason=REJECTION_CONFLICTING_SUBMISSION,
+        )
+
+    if not isinstance(submission, dict):
+        return SubmissionValidation(
+            accepted=False,
+            rejection_reason=REJECTION_MISSING_REQUIRED_FIELDS,
+        )
+
+    unknown = set(submission.keys()) - _ALLOWED_TOP_LEVEL_KEYS
+    if unknown:
+        return SubmissionValidation(
+            accepted=False,
+            rejection_reason=REJECTION_UNKNOWN_FIELDS,
+        )
+
+    for key in _REQUIRED_TOP_LEVEL_KEYS:
+        if key not in submission:
+            return SubmissionValidation(
+                accepted=False,
+                rejection_reason=REJECTION_MISSING_REQUIRED_FIELDS,
+            )
+
+    verdict = submission["verdict"]
+    if verdict not in _ALLOWED_VERDICTS:
+        return SubmissionValidation(
+            accepted=False,
+            rejection_reason=REJECTION_INVALID_VERDICT,
+        )
+
+    findings_raw = submission.get("findings", [])
+    if findings_raw is None:
+        findings_raw = []
+    if not isinstance(findings_raw, list):
+        return SubmissionValidation(
+            accepted=False,
+            rejection_reason=REJECTION_MISSING_REQUIRED_FIELDS,
+        )
+
+    if verdict == "request_changes" and len(findings_raw) == 0:
+        return SubmissionValidation(
+            accepted=False,
+            rejection_reason=REJECTION_REQUEST_CHANGES_NO_FINDINGS,
+        )
+
+    if verdict == "approve":
+        from mergecraft.agents.gates import BLOCKING_SEVERITIES, has_failed_required_static_check
+
+        for finding in _confirmed_findings_from_state(state):
+            severity = finding.severity if hasattr(finding, "severity") else finding.get("severity")
+            if severity in BLOCKING_SEVERITIES:
+                return SubmissionValidation(
+                    accepted=False,
+                    rejection_reason=REJECTION_APPROVE_CONFIRMED_BLOCKER,
+                )
+        if has_failed_required_static_check(_static_checks_from_state(state)):
+            return SubmissionValidation(
+                accepted=False,
+                rejection_reason=REJECTION_APPROVE_FAILED_GATE,
+            )
+
+    return SubmissionValidation(accepted=True, rejection_reason=None)
 
 
 class SubmitReviewVerdictParams(BaseModel):
@@ -76,6 +216,14 @@ def submit_review_verdict_tool(ctx: ToolContext):
                 "terminal submission conflict: a different verdict payload was already "
                 "recorded for this run"
             )
+            raise ValueError(msg)
+
+        validation = validate_submission(
+            dict(params),
+            state=validation_state_from_tool_context(ctx),
+        )
+        if not validation.accepted:
+            msg = f"terminal submission rejected: {validation.rejection_reason}"
             raise ValueError(msg)
 
         submission = TerminalSubmission(
@@ -144,4 +292,17 @@ def submit_review_verdict_tool(ctx: ToolContext):
     )
 
 
-__all__ = ["SubmitReviewVerdictParams", "submit_review_verdict_tool"]
+__all__ = [
+    "REJECTION_APPROVE_CONFIRMED_BLOCKER",
+    "REJECTION_APPROVE_FAILED_GATE",
+    "REJECTION_CONFLICTING_SUBMISSION",
+    "REJECTION_INVALID_VERDICT",
+    "REJECTION_MISSING_REQUIRED_FIELDS",
+    "REJECTION_REQUEST_CHANGES_NO_FINDINGS",
+    "REJECTION_UNKNOWN_FIELDS",
+    "SubmissionValidation",
+    "SubmitReviewVerdictParams",
+    "submit_review_verdict_tool",
+    "validate_submission",
+    "validation_state_from_tool_context",
+]

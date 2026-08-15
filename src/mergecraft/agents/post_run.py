@@ -30,12 +30,10 @@ if TYPE_CHECKING:
 
 def get_unsubmitted_review(tool_state: ToolState) -> str | None:
     mode = tool_state.selected_mode
-    if not tool_state.had_progress_comment:
-        return None
     if mode == "Review":
-        return None if tool_state.review else "Review"
+        return None if tool_state.terminal_submission else "Review"
     if mode == "IncrementalReview":
-        if tool_state.review or tool_state.final_summary_written:
+        if tool_state.terminal_submission or tool_state.final_summary_written:
             return None
         return "IncrementalReview"
     return None
@@ -178,8 +176,11 @@ def build_reflection_prompt(issues: PostRunIssues) -> str:
 
 def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None, dict[str, Any]]:
     submission = ctx.tool_state.terminal_submission
-    if submission is None:
-        return False, None, {}
+    if submission is None or ctx.tool_state.terminal_submission_conflict:
+        diagnostics: dict[str, Any] = {}
+        if ctx.tool_state.terminal_submission_conflict:
+            diagnostics["rejection_reason"] = "conflicting_submission"
+        return False, None, diagnostics
     return True, submission.id, {}
 
 
@@ -189,28 +190,6 @@ async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> Ag
     if not result.success:
         return replace(
             result,
-            terminal_submission_received=received,
-            terminal_submission_id=submission_id,
-            diagnostics=diagnostics,
-        )
-    issues = await collect_post_run_issues(ctx, skip_summary_stale=True)
-    if issues.unsubmitted_review:
-        expected = (
-            "create_pull_request_review"
-            if issues.unsubmitted_review == "Review"
-            else "create_pull_request_review or report_progress"
-        )
-        return replace(
-            AgentResult(
-                success=False,
-                output=result.output,
-                error=(
-                    f"post-run gate failed: selected {issues.unsubmitted_review} mode but "
-                    f"never called {expected}"
-                ),
-                usage=result.usage,
-                metadata=result.metadata,
-            ),
             terminal_submission_received=received,
             terminal_submission_id=submission_id,
             diagnostics=diagnostics,

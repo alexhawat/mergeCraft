@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added: server-side semantic validation of the terminal verdict — `request_changes` with no findings, `approve` over a verifier-confirmed blocker, and `approve` with a failing required deterministic check are all rejected and fail closed
 - Added: `submit_review_verdict` — a typed MCP operation that records a review's terminal verdict
   (`approve` / `request_changes`), summary and structured findings. Unknown fields and invalid
   verdict values are rejected; an identical re-submission is idempotent, a conflicting one is an
@@ -35,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed: a review run that completes without submitting a terminal verdict now reports `inconclusive` (a `neutral` check conclusion) instead of `passed`. Previously a provider that returned successfully without reviewing anything produced a successful run. Prose such as "LGTM" has never been able to approve and still cannot
 - `README.md`'s CLI table documented `mergecraft traces <run-id>`, but the real
   registered command is `mergecraft traces show <run-id>` — the stale
   invocation is now generated from the live CLI app instead of hand-maintained
