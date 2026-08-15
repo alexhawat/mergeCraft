@@ -1,8 +1,9 @@
-# Review integrity HA1 — typed `ProviderConfig` — RED test plan
+# Review integrity HA1 — typed `ProviderConfig` — test plan
 
 Wave plan: `.ignorelocal/01-review-integrity-wave-plan.md` (PR HA1)
 Worktree: `../mergecraft-ha1-provider-config` @ `wave/ha1-provider-config`
 Authoring wave: **HA1.1** (tests-first — this file). Implementation: **HA1.2**.
+xfail-reconciliation: **post-HA1.2** (this file).
 
 HA1 types the existing OpenAI-compatible provider surface. It does **not**
 change the wire contract (**D16**): `MERGECRAFT_CUSTOM_PROVIDER_*` keeps
@@ -22,23 +23,35 @@ internally.
 
 ## xfail schedule
 
-All HA1.2 markers use `strict=False` (`pyproject.toml` sets `xfail_strict =
-true`; an early-passing xfail must be XPASS, not a hard failure).
+All HA1.2 markers used `strict=False` (`pyproject.toml` sets `xfail_strict =
+true`; an early-passing xfail must be XPASS, not a hard failure). **Cleared
+after HA1.2** — the eight typed-model / D12 / credential-hygiene cases are
+real passes; the four regression pins were never marked.
 
-| Wave | Test | Marker reason |
-|------|------|---------------|
-| **HA1.2** | `test_gateway_env_pairs_produce_typed_configs` | `green after HA1.2: ProviderConfig` |
-| **HA1.2** | `test_api_key_never_appears_in_repr` | same |
-| **HA1.2** | `test_api_key_never_appears_in_json_dump` | same |
-| **HA1.2** | `test_api_key_never_reaches_trace_attrs` | same |
-| **HA1.2** | `test_api_key_never_reaches_run_packet` | same |
-| **HA1.2** | `test_unsupported_capability_is_a_configuration_error` | same |
-| **HA1.2** | `test_capability_declaration_round_trips` | same |
-| **HA1.2** | `test_custom_base_url_validates` | same |
+| Wave | Test | Marker reason | Status |
+|------|------|---------------|--------|
+| **HA1.2** | `test_gateway_env_pairs_produce_typed_configs` | `green after HA1.2: ProviderConfig` | cleared post-HA1.2 |
+| **HA1.2** | `test_api_key_never_appears_in_repr` | same | cleared post-HA1.2 |
+| **HA1.2** | `test_api_key_never_appears_in_json_dump` | same | cleared post-HA1.2 |
+| **HA1.2** | `test_api_key_never_reaches_trace_attrs` | same | cleared post-HA1.2 |
+| **HA1.2** | `test_api_key_never_reaches_run_packet` | same | cleared post-HA1.2 |
+| **HA1.2** | `test_unsupported_capability_is_a_configuration_error` | same | cleared post-HA1.2 |
+| **HA1.2** | `test_capability_declaration_round_trips` | same | cleared post-HA1.2 |
+| **HA1.2** | `test_custom_base_url_validates` | same | cleared post-HA1.2 |
 
 Regression pins below have **no** xfail — they must pass against current
 `resolve_gateway_endpoints` / `build_custom_provider` / `_custom_provider_ids`
 behaviour on `pre-0.0.1`.
+
+## HA1.2 xfail reconciliation (2026-08-16)
+
+Removed `_HA1_2_XFAIL` and all eight `green after HA1.2: ProviderConfig`
+markers from `tests/agents/test_provider_config.py`. Suite is 12 real
+passes (0 xfail / 0 xpass). Added a closed-vocabulary pin:
+`CAPABILITY_VALUES == _CLOSED_CAPABILITIES` in
+`test_capability_declaration_round_trips` (deleting or widening the public
+constant fails). Private `_provider_config_from_env_pair` /
+`_api_key_from_env` remain untested by design. HA1 Final is unchanged.
 
 ## Contract matrix
 
@@ -94,17 +107,20 @@ to protect.
 |--------|-------------|
 | `ProviderConfig` | `test_gateway_env_pairs_produce_typed_configs` (+ credential / capability tests) |
 | `require_capabilities` | `test_unsupported_capability_is_a_configuration_error` |
+| `CAPABILITY_VALUES` | `test_capability_declaration_round_trips` (`== _CLOSED_CAPABILITIES`) |
 | `build_custom_provider` | `test_emitted_opencode_config_is_byte_identical_for_existing_inputs` |
 | `_custom_provider_ids` | `test_partial_pair_is_dropped`, `test_gaps_in_indices_are_preserved`, `test_named_presets_still_resolve` |
 
-## RED acceptance
+## RED acceptance (HA1.1, historical)
 
 - `uv run pytest --collect-only -q tests/agents/test_provider_config.py` → **12**
   collected, zero collection errors (`ProviderConfig` imports live inside
   test bodies / helpers called only from xfailed tests).
-- File run: **4 pass** (regression pins) + **8 xfail** (typed model / D12 /
-  credential hygiene). Do not edit `src/` to make RED tests green.
+- File run at HA1.1: **4 pass** (regression pins) + **8 xfail** (typed model /
+  D12 / credential hygiene). Do not edit `src/` to make RED tests green.
 - `make lint` and `make typecheck` clean.
+
+Post-HA1.2 reconciliation: **12 passed**, 0 xfail, 0 xpass, 0 fail.
 
 ## Implementation notes for HA1.2
 
@@ -121,5 +137,5 @@ to protect.
   `mergecraft.main._ConfigurationError` naming the missing capability
   (match `structured_output`) without invoking an agent.
 - `base_url="not a url"` is a Pydantic `ValidationError` at construction.
-- Do not change tests. After HA1.2, the orchestrator re-dispatches
-  test-creator to remove the now-satisfied xfail markers.
+- Tests are owned by test-creator. HA1.2 xfails were cleared in the
+  post-impl reconciliation pass; HA1 Final is unchanged.

@@ -13,8 +13,7 @@ at use time and is never stored on the model (convention 5 / HA1 File 1).
 records internally; emitted OpenCode JSON is byte-identical to
 ``origin/pre-0.0.1``.
 
-Cross-wave markers use ``strict=False`` so an early-passing xfail is XPASS,
-not a hard failure (``xfail_strict = true`` in ``pyproject.toml``).
+HA1.2 landed the typed model; this suite is real passes (xfails cleared).
 """
 
 from __future__ import annotations
@@ -25,7 +24,10 @@ from typing import Any
 
 import pytest
 
-from mergecraft.agents.openai_compatible_gateways import resolve_gateway_endpoints
+from mergecraft.agents.openai_compatible_gateways import (
+    CAPABILITY_VALUES,
+    resolve_gateway_endpoints,
+)
 from mergecraft.agents.opencode import _custom_provider_ids, build_custom_provider
 
 # -- env-var surface (D16 / README "Custom OpenAI-compatible provider") ------
@@ -49,13 +51,9 @@ TOKENHUB_BASE_URL = "https://tokenhub-intl.tencentcloudmaas.com/v1"
 # adding ``api_key`` to the model makes this value show up in repr / dump.
 CANARY_API_KEY = "ha1-canary-NEVER-LEAK-9f3c2a1b"
 
-_HA1_2_XFAIL = pytest.mark.xfail(
-    reason="green after HA1.2: ProviderConfig",
-    strict=False,
-)
-
 # Closed capability vocabulary (HA1 File 1). ``context_limit`` is a sibling
-# ``int | None`` field, not a set member.
+# ``int | None`` field, not a set member. Deleting or widening
+# ``CAPABILITY_VALUES`` must fail the round-trip pin.
 _CLOSED_CAPABILITIES = frozenset(
     {
         "tool_calling",
@@ -401,10 +399,9 @@ def test_emitted_opencode_config_is_byte_identical_for_existing_inputs(
     )
 
 
-# -- HA1.2 typed ProviderConfig (RED until the model exists) -----------------
+# -- HA1.2 typed ProviderConfig ----------------------------------------------
 
 
-@_HA1_2_XFAIL
 def test_gateway_env_pairs_produce_typed_configs(monkeypatch: pytest.MonkeyPatch) -> None:
     """The ``_N`` env-pair form yields ``ProviderConfig`` records with today's ids."""
     provider_config_cls = _provider_config_type()
@@ -423,7 +420,6 @@ def test_gateway_env_pairs_produce_typed_configs(monkeypatch: pytest.MonkeyPatch
         assert "api_key" not in type(record).model_fields
 
 
-@_HA1_2_XFAIL
 def test_api_key_never_appears_in_repr(monkeypatch: pytest.MonkeyPatch) -> None:
     """Convention 5: the resolved key never appears in ``repr`` / ``str``."""
     monkeypatch.setenv(INDEXED_API_KEY_FMT.format(n=1), CANARY_API_KEY)
@@ -433,7 +429,6 @@ def test_api_key_never_appears_in_repr(monkeypatch: pytest.MonkeyPatch) -> None:
     assert CANARY_API_KEY not in str(config)
 
 
-@_HA1_2_XFAIL
 def test_api_key_never_appears_in_json_dump(monkeypatch: pytest.MonkeyPatch) -> None:
     """Convention 5: ``model_dump`` / ``model_dump_json`` never carry the key."""
     monkeypatch.setenv(INDEXED_API_KEY_FMT.format(n=1), CANARY_API_KEY)
@@ -446,7 +441,6 @@ def test_api_key_never_appears_in_json_dump(monkeypatch: pytest.MonkeyPatch) -> 
     assert CANARY_API_KEY not in json.dumps(dumped)
 
 
-@_HA1_2_XFAIL
 def test_api_key_never_reaches_trace_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
     """Construct, emit a span, assert the key is absent from the event.
 
@@ -474,7 +468,6 @@ def test_api_key_never_reaches_trace_attrs(monkeypatch: pytest.MonkeyPatch) -> N
     assert CANARY_API_KEY not in json.dumps(payload)
 
 
-@_HA1_2_XFAIL
 def test_api_key_never_reaches_run_packet(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The resolved key must not land in the run packet's serialised form."""
     from mergecraft.evidence.run_packet import build_run_packet
@@ -514,7 +507,6 @@ def test_api_key_never_reaches_run_packet(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert "api_key" not in config.model_dump(mode="json")
 
 
-@_HA1_2_XFAIL
 def test_unsupported_capability_is_a_configuration_error() -> None:
     """D12: requesting an unsupported capability is a configuration error
     *before* agent execution, not a runtime degradation.
@@ -529,7 +521,6 @@ def test_unsupported_capability_is_a_configuration_error() -> None:
         require_capabilities(config, frozenset({"structured_output"}))
 
 
-@_HA1_2_XFAIL
 def test_capability_declaration_round_trips() -> None:
     """Declared capabilities survive dump/validate and into the harness records."""
     declared = frozenset({"tool_calling", "streaming", "openai_compatible", "custom_base_url"})
@@ -538,6 +529,7 @@ def test_capability_declaration_round_trips() -> None:
     )
     assert config.capabilities == declared
     assert declared <= _CLOSED_CAPABILITIES
+    assert CAPABILITY_VALUES == _CLOSED_CAPABILITIES
     provider_config_cls = _provider_config_type()
     restored = provider_config_cls.model_validate(config.model_dump(mode="json"))
     assert restored.capabilities == declared
@@ -547,7 +539,6 @@ def test_capability_declaration_round_trips() -> None:
     assert restored.api_key_env == INDEXED_API_KEY_FMT.format(n=1)
 
 
-@_HA1_2_XFAIL
 def test_custom_base_url_validates() -> None:
     """A malformed base URL is rejected at construction, before execution."""
     from pydantic import ValidationError
