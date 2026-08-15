@@ -89,7 +89,7 @@ def validation_state_from_tool_context(ctx: ToolContext) -> Any:
         terminal_submission=tool_state.terminal_submission,
         terminal_submission_conflict=tool_state.terminal_submission_conflict,
         confirmed_findings=[],
-        static_checks=[],
+        static_checks=[dict(row) for row in tool_state.static_checks if isinstance(row, dict)],
         withdrawn_fingerprints=set(),
         tool_state=tool_state,
         analyzer_run=tool_state.analyzer_run,

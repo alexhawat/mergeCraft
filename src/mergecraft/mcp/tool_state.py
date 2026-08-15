@@ -293,6 +293,10 @@ class ToolState:
     # verification tools (D14): an LLM judge may not evaluate a finding before
     # the deterministic checks it is meant to supplement have had their turn.
     static_checks_ran: bool = False
+    # Last ``run_static_checks`` report — ``{name, status}`` rows, replaced (not
+    # appended) on each call. Read by ``validation_state_from_tool_context`` so
+    # ``approve`` is rejected when a required gate recorded ``status: failed``.
+    static_checks: list[dict[str, Any]] = field(default_factory=list)
 
 
 def repo_key(owner: str, name: str) -> str:

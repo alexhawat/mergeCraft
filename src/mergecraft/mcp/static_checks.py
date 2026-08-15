@@ -33,7 +33,15 @@ def _serialize(outcome: StaticCheckOutcome) -> dict[str, Any]:
     }
 
 
+def _persist_static_checks(ctx: ToolContext, outcomes: list[StaticCheckOutcome]) -> None:
+    """Replace ``ToolState.static_checks`` with the last run's normalized rows."""
+    ctx.tool_state.static_checks = [
+        {"name": outcome.name, "status": outcome.status} for outcome in outcomes
+    ]
+
+
 def _report(
+    ctx: ToolContext,
     outcomes: list[StaticCheckOutcome],
     substitutions: list[GateSubstitution],
     *,
@@ -45,6 +53,7 @@ def _report(
     declared CI check run proved counts, which is exactly how #36 removes the
     duplicate ``unavailable`` row without inventing a second reporting shape.
     """
+    _persist_static_checks(ctx, outcomes)
     executed = [outcome for outcome in outcomes if outcome.ran]
     payload: dict[str, Any] = {"checks": [_serialize(o) for o in outcomes]}
     if substitutions:
@@ -117,6 +126,7 @@ def run_static_checks_tool(ctx: ToolContext):
             changed_files=changed,
         )
         if not checks:
+            ctx.tool_state.static_checks = []
             return {
                 "ran": False,
                 "reason": (
@@ -135,7 +145,7 @@ def run_static_checks_tool(ctx: ToolContext):
             )
             declared = declared_cannot_run_outcomes(checks, reason=reason)
             outcomes, substitutions = await _apply_ci_evidence(ctx, declared)
-            return _report(outcomes, substitutions, reason=reason)
+            return _report(ctx, outcomes, substitutions, reason=reason)
 
         outcomes = run_checks(checks, root=root)
         outcomes, substitutions = await _apply_ci_evidence(ctx, outcomes)
@@ -147,6 +157,7 @@ def run_static_checks_tool(ctx: ToolContext):
             len(outcomes) - len(executed),
         )
         return _report(
+            ctx,
             outcomes,
             substitutions,
             reason=(
