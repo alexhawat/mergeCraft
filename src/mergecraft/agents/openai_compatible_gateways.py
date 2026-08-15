@@ -19,6 +19,12 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from typing import Annotated, Any
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic.functional_serializers import PlainSerializer
+from pydantic.functional_validators import BeforeValidator
 
 NOUS_API_KEY_ENV = "NOUS_API_KEY"
 NOUS_BASE_URL_ENV = "NOUS_BASE_URL"
@@ -51,6 +57,86 @@ INDEXED_CUSTOM_PROVIDER_API_KEY_RE = re.compile(r"^MERGECRAFT_CUSTOM_PROVIDER_AP
 # indexed pairs; ``"default"`` for the singleton back-compat alias.
 INDEXED_PROVIDER_ID_FMT = "provider_{n}"
 SINGLETON_PROVIDER_ID = "default"
+
+# Closed capability vocabulary (HA1 / D12). ``context_limit`` is a sibling
+# field on ``ProviderConfig``, not a set member.
+CAPABILITY_VALUES: frozenset[str] = frozenset(
+    {
+        "tool_calling",
+        "streaming",
+        "reasoning_controls",
+        "structured_output",
+        "custom_base_url",
+        "openai_compatible",
+        "native_opencode",
+    }
+)
+
+_DEFAULT_GATEWAY_CAPABILITIES: frozenset[str] = frozenset(
+    {"openai_compatible", "custom_base_url", "tool_calling", "streaming"}
+)
+
+
+def _coerce_capabilities(value: object) -> frozenset[str]:
+    if isinstance(value, frozenset):
+        items = value
+    elif isinstance(value, (list, set, tuple)):
+        items = frozenset(str(item) for item in value)
+    else:
+        msg = "capabilities must be a frozenset or JSON list of capability names"
+        raise TypeError(msg)
+    unknown = items - CAPABILITY_VALUES
+    if unknown:
+        msg = f"unknown capabilities: {', '.join(sorted(unknown))}"
+        raise ValueError(msg)
+    return items
+
+
+CapabilitiesField = Annotated[
+    frozenset[str],
+    BeforeValidator(_coerce_capabilities),
+    PlainSerializer(lambda value: sorted(value), return_type=list[str]),
+]
+
+
+class ProviderConfig(BaseModel):
+    """One configured OpenAI-compatible provider, typed for harness use.
+
+    API keys are read through ``api_key_env`` at emit/use time and are never
+    stored on this model (convention 5 / HA1).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    provider_id: str
+    model_id: str = ""
+    base_url: str
+    api_key_env: str
+    adapter: str = "openai-compatible"
+    capabilities: CapabilitiesField = Field(default_factory=lambda: _DEFAULT_GATEWAY_CAPABILITIES)
+    extra_options: dict[str, Any] = Field(default_factory=dict)
+    context_limit: int | None = None
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, value: str) -> str:
+        stripped = value.strip()
+        parsed = urlparse(stripped)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            msg = "base_url must be an http(s) URL"
+            raise ValueError(msg)
+        return stripped
+
+
+def require_capabilities(config: ProviderConfig, required: frozenset[str]) -> None:
+    """Fail closed when ``config`` lacks a declared capability (D12)."""
+    from mergecraft.main import _ConfigurationError
+
+    missing = required - config.capabilities
+    if missing:
+        names = ", ".join(sorted(missing))
+        msg = f"provider {config.provider_id!r} missing required capabilities: {names}"
+        raise _ConfigurationError(msg)
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,7 +254,20 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
     return provider_id, base_url, api_key
 
 
-def _resolve_indexed_providers() -> dict[str, ProviderRecord]:
+def _provider_config_from_env_pair(
+    *,
+    provider_id: str,
+    base_url: str,
+    api_key_env: str,
+) -> ProviderConfig:
+    return ProviderConfig(
+        provider_id=provider_id,
+        base_url=base_url,
+        api_key_env=api_key_env,
+    )
+
+
+def _resolve_indexed_providers() -> dict[str, ProviderConfig]:
     """Enumerate ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`` pairs.
 
     Returns a dict keyed by provider id (``"provider_<N>"``). Both halves of a
@@ -195,24 +294,22 @@ def _resolve_indexed_providers() -> dict[str, ProviderRecord]:
                 continue
             base_url, api_key = by_index.get(n, ("", ""))
             by_index[n] = (base_url, stripped)
-    out: dict[str, ProviderRecord] = {}
+    out: dict[str, ProviderConfig] = {}
     for n in sorted(by_index):
         base_url, api_key = by_index[n]
         if not base_url or not api_key:
             # Partial pair — drop silently.
             continue
         provider_id = INDEXED_PROVIDER_ID_FMT.format(n=n)
-        out[provider_id] = ProviderRecord(
+        out[provider_id] = _provider_config_from_env_pair(
             provider_id=provider_id,
             base_url=base_url,
-            api_key=api_key,
-            base_url_env=f"MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_{n}",
             api_key_env=f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{n}",
         )
     return out
 
 
-def _resolve_singleton_provider() -> ProviderRecord | None:
+def _resolve_singleton_provider() -> ProviderConfig | None:
     """Back-compat alias for a single ``default`` provider.
 
     Returns ``None`` if either half of the singleton pair is missing or empty.
@@ -221,16 +318,14 @@ def _resolve_singleton_provider() -> ProviderRecord | None:
     api_key = os.environ.get(CUSTOM_PROVIDER_API_KEY_ENV, "").strip()
     if not base_url or not api_key:
         return None
-    return ProviderRecord(
+    return _provider_config_from_env_pair(
         provider_id=SINGLETON_PROVIDER_ID,
         base_url=base_url,
-        api_key=api_key,
-        base_url_env=CUSTOM_PROVIDER_BASE_URL_ENV,
         api_key_env=CUSTOM_PROVIDER_API_KEY_ENV,
     )
 
 
-def resolve_gateway_endpoints() -> dict[str, ProviderRecord]:
+def resolve_gateway_endpoints() -> dict[str, ProviderConfig]:
     """Return every configured OpenAI-compatible provider, keyed by provider id.
 
     Multi-provider resolver (W3 / issue #71). The returned dict carries all
@@ -260,6 +355,7 @@ def resolve_gateway_endpoints() -> dict[str, ProviderRecord]:
 
 
 __all__ = [
+    "CAPABILITY_VALUES",
     "CUSTOM_PROVIDER_API_KEY_ENV",
     "CUSTOM_PROVIDER_BASE_URL_ENV",
     "DEFAULT_MINIMAX_BASE_URL",
@@ -274,9 +370,11 @@ __all__ = [
     "TOKENHUB_API_KEY_ENV",
     "TOKENHUB_BASE_URL_ENV",
     "GatewayPreset",
+    "ProviderConfig",
     "ProviderRecord",
     "has_custom_provider_env",
     "has_gateway_credentials",
+    "require_capabilities",
     "resolve_gateway_endpoint",
     "resolve_gateway_endpoints",
 ]
