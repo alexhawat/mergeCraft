@@ -616,6 +616,56 @@ async def test_approve_after_failed_run_static_checks_tool_is_rejected(
     )
 
 
+@pytest.mark.xfail(
+    reason="green after VP2.4: sticky failed static_checks",
+    strict=False,
+)
+@pytest.mark.asyncio
+async def test_failed_static_check_survives_empty_plan_rerun(
+    tmp_path: Path,
+) -> None:
+    """A later empty ``plan_checks`` must not wipe a prior ``failed`` row.
+
+    Suffix-filtered ``changed_files`` that match no gate currently assign
+    ``ToolState.static_checks = []``, after which ``approve`` is accepted.
+    """
+    from mergecraft.mcp.verdict import (
+        submit_review_verdict_tool,
+        validation_state_from_tool_context,
+    )
+
+    lint = StaticCheckConfig(
+        name="lint",
+        command="python -c 'raise SystemExit(1)'",
+        suffixes=(".py",),
+    )
+    assert isinstance(lint.suffixes, tuple)
+    assert lint.suffixes == (".py",)
+
+    ctx = _ctx(tmp_path, static_checks=[lint], static_checks_enabled=True)
+    first = await run_static_checks_tool(ctx).execute({"changed_files": ["src/foo.py"]})
+    assert first.is_error is False
+    first_payload = json.loads(first.content[0]["text"])
+    assert any(check.get("status") == "failed" for check in first_payload["checks"])
+
+    second = await run_static_checks_tool(ctx).execute({"changed_files": ["README.md"]})
+    assert second.is_error is False
+    second_payload = json.loads(second.content[0]["text"])
+    assert second_payload.get("ran") is False or second_payload.get("checks") == []
+
+    verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert verdict.is_error is True
+    assert _REASON_APPROVE_FAILED_GATE in verdict.content[0]["text"]
+    assert ctx.tool_state.terminal_submission is None
+
+    derived = validation_state_from_tool_context(ctx)
+    assert any(row.get("status") == "failed" for row in derived.static_checks)
+    _assert_typed_rejection(
+        _validate(_approve_payload(), state=derived),
+        _REASON_APPROVE_FAILED_GATE,
+    )
+
+
 def test_verifier_dropped_finding_does_not_block_approval() -> None:
     """A dropped finding is omitted before ``decide_approval``; the remainder may approve.
 
