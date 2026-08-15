@@ -1,0 +1,93 @@
+# Review integrity VP2 — fail-closed terminal verdict — test plan
+
+Wave plan: `.ignorelocal/01-review-integrity-wave-plan.md`
+Worktree: `mergecraft-vp2-fail-closed` @ `wave/vp2-fail-closed` (stacked on VP1 `08cb957`)
+
+## xfail schedule
+
+| Wave | Test files | Marker |
+|------|------------|--------|
+| **VP2.2** | `tests/review/test_terminal_verdict_policy.py` (16 of 20) | `@pytest.mark.xfail(reason="green after VP2.2: fail-closed terminal verdict", strict=False)` |
+| **VP2.2** | `tests/review/test_post_run_terminal_gate.py` (both) | same marker |
+
+Never `strict=True` — a strict xfail that XPASSes after VP2.2 is a hard failure the impl wave cannot touch.
+
+### Pins that must pass against current code (do not xfail)
+
+| Test | Why it is green today |
+|------|------------------------|
+| `test_verifier_dropped_finding_does_not_block_approval` | Real `decide_approval` — a Trivial-only list is not `"failure"`; including the dropped Critical still is (guard-deletion pin). Signature unchanged (convention 4). |
+| `test_verifier_confirmed_finding_blocks_approval` | Real `decide_approval` — a Critical finding is `"failure"`. Narrative is not a parameter. |
+| `test_publication_cannot_bypass_structural_policy` | `create_pull_request_review(approved=True)` still writes `ApprovalRecord`; `decide_approval` still returns `"failure"` for a blocker. |
+| `test_existing_review_and_comment_behaviour_unchanged` | Fingerprinted inline comments, same-SHA replay skip, `create_issue_comment`, `report_progress`. |
+
+### xfail reconciliation log
+
+| Date | Impl wave | Markers removed | Notes |
+|------|-----------|-----------------|-------|
+| — | VP2.2 | *(pending)* | Remove the 18 markers after the outcome resolver, post-run gate, and `validate_submission` land. |
+
+## Named symbols this suite pins
+
+| Symbol | Module | Direct test |
+|--------|--------|-------------|
+| `validate_submission` | `mcp/verdict.py` | schema tests, D9, D4, approve+blocker, approve+failed gate, valid approve |
+| `SubmissionValidation` | `mcp/verdict.py` | every validator test (`accepted` + closed `rejection_reason`; result is not a bool — D5) |
+| `_classify_outcome` | `main_outcome.py` | `test_no_terminal_submission_is_inconclusive` (real `AgentResult`, not a mock), V3, D8, harness parity |
+| `get_unsubmitted_review` | `agents/post_run.py` | `test_unsubmitted_review_without_progress_comment_still_gates` |
+| `run_post_run_retry_loop` | `agents/post_run.py` | `test_retry_exhaustion_yields_inconclusive_not_passed` |
+| `decide_approval` | `agents/gates.py` | dropped / confirmed / publication pins; signature `findings, *, run_succeeded, tier` |
+| `RunOutcome.inconclusive` | `run_outcome.py` | D2 core case; taxonomy stays six values |
+| `AgentResult.terminal_submission_received` | `agents/shared.py` | D2, D8, D13, D4 finalize paths |
+| `submit_review_verdict_tool` | `mcp/verdict.py` | D4 conflict / idempotent (policy layer on top of VP1) |
+| `create_pull_request_review_tool` | `mcp/review.py` | publication pin + existing-behaviour pin |
+| `create_issue_comment_tool` / `report_progress_tool` | `mcp/comment.py` | `test_existing_review_and_comment_behaviour_unchanged` |
+
+`validate_submission` / `SubmissionValidation` are imported **inside test bodies** so collection succeeds before VP2.2.
+
+### Closed `rejection_reason` vocabulary (D5)
+
+| Reason | Class | Test |
+|--------|-------|------|
+| `invalid_verdict` | schema | `test_invalid_verdict_enum_rejected` |
+| `unknown_fields` | schema | `test_unknown_fields_rejected` |
+| `missing_required_fields` | schema | `test_missing_required_fields_rejected` |
+| `request_changes_without_findings` | semantic | `test_request_changes_with_no_findings_is_semantically_rejected` (D9) |
+| `approve_with_confirmed_blocker` | policy | `test_agent_approve_with_verified_blocker_fails_structurally` |
+| `approve_with_failed_required_gate` | policy | `test_approve_with_failing_required_deterministic_check_fails` |
+| `conflicting_submission` | policy | `test_duplicate_conflicting_submissions_fail_closed` (D4) |
+
+`state` duck-types `ToolState` plus `confirmed_findings`, `static_checks` (`run_static_checks` row shape: `name` + `status`), and `withdrawn_fingerprints`.
+
+`_classify_outcome` grows a `mode` parameter. Before the final `return RunOutcome.passed`, review modes with `not result.terminal_submission_received` return `RunOutcome.inconclusive` with reason `"no terminal review verdict was submitted for this attempt"`. Do not add a seventh `RunOutcome` member.
+
+## Contract matrix
+
+| Decision | Layer | Scenario | Primary test |
+|----------|-------|----------|--------------|
+| Valid approve + clear gates | Functional | Happy: validator accepts; classify with `received=True` is `passed`; trivial finding may approve | `test_valid_approve_and_clear_gates_succeeds` |
+| Approve + confirmed blocker | Integration | Error: typed policy rejection **and** `decide_approval` is `"failure"` | `test_agent_approve_with_verified_blocker_fails_structurally` |
+| Request-changes + blocker | Integration | Happy+gate: validator accepts; `decide_approval` still `"failure"` | `test_request_changes_with_verified_blocker_blocks` |
+| **D2** missing verdict | Unit | Core: real `AgentResult(success=True, terminal_submission_received=False)` → `inconclusive`, not `failed`; Build still `passed` | `test_no_terminal_submission_is_inconclusive` |
+| Prose is not a verdict | Unit | Edge: output `"LGTM"` is not a `decide_approval` input and cannot yield `passed` | `test_prose_lgtm_without_terminal_call_cannot_approve` |
+| Schema enum / extra / required | Unit | Error: typed `SubmissionValidation`, not a bool | three schema tests |
+| **D9** | Unit | Semantic: `request_changes` + `[]` rejected; reason is not `missing_required_fields` | `test_request_changes_with_no_findings_is_semantically_rejected` |
+| **D4** conflict | Functional | Error: tool conflict + validator reject + finalize `received=False` → `inconclusive` | `test_duplicate_conflicting_submissions_fail_closed` |
+| **D4** identical | Functional | Happy: same id, `received=True`, classify `passed` | `test_identical_resubmission_is_idempotent` |
+| **V3** | Unit | Error: provider success without a verdict is not `passed` | `test_provider_success_without_verdict_is_not_a_successful_review` |
+| **D8** fallback-eligible | Unit | Edge: missing **and** semantically rejected submissions keep `received=False` and map to `inconclusive` | `test_missing_verdict_leaves_run_fallback_eligible` |
+| Fresh verdict | Unit | Happy: `received=True` → `passed`, not fallback-eligible (D13) | `test_fresh_valid_verdict_does_not_trigger_fallback` |
+| Failed required gate | Unit | Error: `static_checks` row `status=failed` rejects `approve` | `test_approve_with_failing_required_deterministic_check_fails` |
+| Dropped finding | Unit | Regression: remainder does not fail; including the dropped Critical would | `test_verifier_dropped_finding_does_not_block_approval` |
+| Confirmed finding | Unit | Regression: real `decide_approval`, not a reimplemented severity check | `test_verifier_confirmed_finding_blocks_approval` |
+| Publication vs policy | Integration | Regression: GitHub `APPROVE` / `would_approve=True` cannot outvote a blocker | `test_publication_cannot_bypass_structural_policy` |
+| Existing MCP review+comment | Functional | Regression: fingerprint, same-SHA skip, issue comment, progress | `test_existing_review_and_comment_behaviour_unchanged` |
+| Harness parity | Unit | Happy: OpenCode-shaped and Codex-shaped `AgentResult` → same `inconclusive` | `test_both_harness_paths_obey_the_same_contract` |
+| **V4** progress-comment precondition | Unit | Edge: `had_progress_comment=False` still gates; `tool_state.review` does not satisfy; `terminal_submission` does | `test_unsubmitted_review_without_progress_comment_still_gates` |
+| **V4** retry exhaustion | Integration | Error: `MAX_POST_RUN_RETRIES` resumes, then `inconclusive` not `passed`/`failed` | `test_retry_exhaustion_yields_inconclusive_not_passed` |
+
+No source-grep assertions. `_classify_outcome` is called with a real `AgentResult`. Confirmed/dropped approval tests call real `decide_approval`.
+
+## RED acceptance (VP2.1)
+
+22 collected; 4 pass (the `decide_approval` / existing review+comment pins); 18 xfail pending VP2.2. Zero collection errors. `make lint` and `make typecheck` clean. Product code is not edited in this wave.
