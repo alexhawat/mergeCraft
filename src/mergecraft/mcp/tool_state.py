@@ -86,6 +86,23 @@ class ProgressComment:
 
 
 @dataclass(slots=True)
+class TerminalSubmission:
+    """Recorded terminal review verdict for a run (VP1).
+
+    Findings are ``AgentFinding`` instances at runtime; typed as ``Any`` here
+    to keep this module free of the verifier import cycle.
+    """
+
+    id: str
+    verdict: Literal["approve", "request_changes"]
+    summary: str
+    findings: list[Any]
+    payload_hash: str
+    submitted_at: str
+    attempt_id: int
+
+
+@dataclass(slots=True)
 class ReviewRecord:
     id: int
     node_id: str
@@ -192,6 +209,8 @@ class ToolState:
     # live path always sets this.
     modes: list[Mode] = field(default_factory=list)
     review: ReviewRecord | None = None
+    terminal_submission: TerminalSubmission | None = None
+    terminal_submission_conflict: bool = False
     approval: ApprovalRecord | None = None
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None

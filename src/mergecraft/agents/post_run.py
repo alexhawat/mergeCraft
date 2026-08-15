@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -175,10 +176,23 @@ def build_reflection_prompt(issues: PostRunIssues) -> str:
     return f"{base}\n\nThis is a reflection turn — address the issues above, then stop."
 
 
+def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None, dict[str, Any]]:
+    submission = ctx.tool_state.terminal_submission
+    if submission is None:
+        return False, None, {}
+    return True, submission.id, {}
+
+
 async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> AgentResult:
     """Terminal hard-fail if stopHook / unsubmittedReview still open."""
+    received, submission_id, diagnostics = _terminal_submission_fields(ctx)
     if not result.success:
-        return result
+        return replace(
+            result,
+            terminal_submission_received=received,
+            terminal_submission_id=submission_id,
+            diagnostics=diagnostics,
+        )
     issues = await collect_post_run_issues(ctx, skip_summary_stale=True)
     if issues.unsubmitted_review:
         expected = (
@@ -186,17 +200,27 @@ async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> Ag
             if issues.unsubmitted_review == "Review"
             else "create_pull_request_review or report_progress"
         )
-        return AgentResult(
-            success=False,
-            output=result.output,
-            error=(
-                f"post-run gate failed: selected {issues.unsubmitted_review} mode but "
-                f"never called {expected}"
+        return replace(
+            AgentResult(
+                success=False,
+                output=result.output,
+                error=(
+                    f"post-run gate failed: selected {issues.unsubmitted_review} mode but "
+                    f"never called {expected}"
+                ),
+                usage=result.usage,
+                metadata=result.metadata,
             ),
-            usage=result.usage,
-            metadata=result.metadata,
+            terminal_submission_received=received,
+            terminal_submission_id=submission_id,
+            diagnostics=diagnostics,
         )
-    return result
+    return replace(
+        result,
+        terminal_submission_received=received,
+        terminal_submission_id=submission_id,
+        diagnostics=diagnostics,
+    )
 
 
 async def run_post_run_retry_loop(

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added: `submit_review_verdict` — a typed MCP operation that records a review's terminal verdict
+  (`approve` / `request_changes`), summary and structured findings. Unknown fields and invalid
+  verdict values are rejected; an identical re-submission is idempotent, a conflicting one is an
+  error. Not yet enforced — the run outcome is unchanged in this release
 - `mergecraft tracing logfire wire-workflow` / `unwire-workflow` — surgical
   YAML mutation of `.github/workflows/*.yml` to wire (or strip) the four
   Logfire keys (`tracing: "true"`, `tracing-to: logfire`,
