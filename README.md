@@ -404,6 +404,7 @@ described below); the *effective* runtime default when left unset is
 |--------|-------------|
 | `evidence_packet` | JSON body of this run's Merge Evidence Packet (#47) — the versioned, structured record of the findings, deterministic checks, blast-radius lane, self-assessment, and decision behind the review. Emitted via `$GITHUB_OUTPUT` as multiline JSON (not a filesystem path). Empty when the run had no pull request to attest to. To upload as an artifact, write the output to a file in a later step. Schema: `docs/evidence-packet.md`. |
 | `result` | Set when the prompt requests it; required when output_schema is provided. |
+| `verdict_diagnostic` | Closed VerdictDiagnostic code from the terminal-verdict policy path for this run. Empty when the run did not evaluate terminal protocol policy. |
 <!-- END:action-outputs -->
 
 #### Worked example — Nous-hosted DeepSeek V4 Flash
