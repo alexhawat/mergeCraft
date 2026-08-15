@@ -86,12 +86,21 @@ class CaseReplayRow(BaseModel):
 
 
 class ReviewingModelPin(BaseModel):
-    """The pinned identity of the model a provider reviews with (N6, D12)."""
+    """The pinned identity of the model a provider reviews with (N6, D12).
+
+    Mirrors ``JudgePin``'s ``model_pinned`` field: a provider without a
+    ``PINNED_JUDGE_MODELS`` entry still yields a complete pin record, but
+    ``model_pinned=False`` marks ``model_id``/``model_pin`` as unconfirmed
+    rather than silently presenting an ``"unknown"`` placeholder as if it
+    were a real pin (D9 — a reader must be able to tell a confirmed pin
+    from a missing one, not just see a string that happens to parse).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     model_id: str
     model_pin: str
+    model_pinned: bool
 
 
 class VersionPins(BaseModel):
@@ -207,7 +216,11 @@ class DetectionMetrics(BaseModel):
 
     provider: str
     model: str
+    # Cases whose review actually produced a scored result — excludes
+    # `cases_failed` (a review-attempt failure is not a zero-finding pass).
     cases_run: int
+    cases_failed: int = 0
+    failed_case_ids: list[str] = Field(default_factory=list)
     aggregate: AggregateScoreReport
     case_results: list[DetectionCaseResult]
     raw_findings_dir: str
@@ -294,8 +307,11 @@ def _reviewing_model_pins(providers: tuple[str, ...]) -> dict[str, ReviewingMode
     """
     pins: dict[str, ReviewingModelPin] = {}
     for provider in providers:
-        model = pinned_judge_model(provider) or "unknown"
-        pins[provider] = ReviewingModelPin(model_id=model, model_pin=model)
+        pinned = pinned_judge_model(provider)
+        model = pinned or "unknown"
+        pins[provider] = ReviewingModelPin(
+            model_id=model, model_pin=model, model_pinned=pinned is not None
+        )
     return pins
 
 
@@ -346,7 +362,27 @@ def run_structural_replay(
         # scope — see the B2.0 design-gate note on why a crashed run and a
         # genuinely clean "neutral" decision can't be told apart from
         # `diff.current_decision` alone.
-        is_buggy = corpus_class != "adversarial_noop"
+        #
+        # `corpus_class` is a scenario label (which bug family a case
+        # represents), not proof a defect exists — `issue-75-untrusted-
+        # never-approves` lands in the "security" bucket via corpus_class_for's
+        # id-substring heuristic, but records zero findings and completed
+        # successfully: there is nothing for the review to have missed, so
+        # counting its "neutral" as an unsafe approval blamed the gate for
+        # correctly declining to approve an untrusted run. A completed run
+        # (`run_succeeded=True`) with a confirmed-empty finding list is
+        # therefore never "buggy" regardless of corpus_class. A crashed run
+        # (`run_succeeded=False`) is excluded from this override — its empty
+        # `recorded_findings` reflects a missing run, not a confirmed-clean
+        # one, and must still count toward `buggy_total` via the
+        # `inconclusive` branch below (pinned by
+        # `test_crashed_run_on_a_buggy_case_is_inconclusive_not_a_correct_block`).
+        zero_confirmed_findings = (
+            case.recorded_findings is not None
+            and len(case.recorded_findings) == 0
+            and case.run_succeeded
+        )
+        is_buggy = corpus_class != "adversarial_noop" and not zero_confirmed_findings
         bucket = class_rollup[corpus_class]
         bucket["total"] += 1
         inconclusive = (not case.run_succeeded) or (

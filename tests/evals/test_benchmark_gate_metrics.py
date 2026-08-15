@@ -326,6 +326,44 @@ def test_gate_matrix_rollup_by_corpus_class(tmp_path: Path) -> None:
     assert by_class["adversarial_noop"].incorrect == 1
 
 
+def test_completed_run_with_zero_confirmed_findings_is_not_counted_as_buggy(
+    tmp_path: Path,
+) -> None:
+    """A non-adversarial_noop case whose run *completed* and recorded zero
+    findings is not "buggy" just because its corpus_class prefix says so
+    (regression: issue-75-untrusted-never-approves, `run_succeeded=True`,
+    `recorded_findings=[]`, corpus_class="security" via corpus_class_for's
+    id-substring heuristic, was previously counted as a `buggy_unsafe_approval`
+    even though there is no confirmed defect for the review to have missed —
+    the mergeCraft self-review on PR #216 caught this: it made the published
+    unsafe_approval_rate entirely attributable to a case where the gate
+    correctly declined to approve an untrusted run). Distinct from a crashed
+    run (`run_succeeded=False`), which must still count as buggy via the
+    inconclusive branch (see
+    test_crashed_run_on_a_buggy_case_is_inconclusive_not_a_correct_block).
+    """
+    bank = tmp_path / "bank"
+    _add_all(
+        bank,
+        [
+            _bench_case(
+                case_id="bench-security-untrusted-completed-000",
+                findings=[],
+                run_succeeded=True,
+                expected_decision="neutral",
+            )
+        ],
+    )
+
+    result = run_structural_replay(bank)
+
+    matrix = result.metrics.gate_matrix
+    assert matrix.buggy_total == 0
+    assert matrix.clean_total == 1
+    assert matrix.clean_correct_approval == 1
+    assert result.metrics.unsafe_approval_rate == 0.0
+
+
 def test_zero_buggy_or_zero_clean_cases_does_not_divide_by_zero(tmp_path: Path) -> None:
     """An all-clean (or all-buggy) bank must not raise ZeroDivisionError."""
     bank = tmp_path / "bank"
@@ -415,8 +453,16 @@ def test_result_set_schema_version_is_at_least_1_1_0() -> None:
 _NEW_PIN_KWARGS: dict[str, Any] = {
     "mergecraft_commit": "abc1234",
     "reviewing_model": {
-        "claude": {"model_id": "claude-sonnet-5", "model_pin": "claude-sonnet-5-20260115"},
-        "openai": {"model_id": "gpt-5.1-codex", "model_pin": "gpt-5.1-codex-2026-01-01"},
+        "claude": {
+            "model_id": "claude-sonnet-5",
+            "model_pin": "claude-sonnet-5-20260115",
+            "model_pinned": True,
+        },
+        "openai": {
+            "model_id": "gpt-5.1-codex",
+            "model_pin": "gpt-5.1-codex-2026-01-01",
+            "model_pinned": True,
+        },
     },
     "scorer_version": "1.0.0",
     "line_slack": 3,
@@ -475,3 +521,26 @@ def test_version_pins_reviewing_model_rejects_an_empty_pin_set() -> None:
     kwargs = {**_old_pin_kwargs(), **_NEW_PIN_KWARGS, "reviewing_model": {}}
     with pytest.raises(ValidationError):
         VersionPins(**kwargs)
+
+
+def test_reviewing_model_pins_flag_unpinned_providers_honestly(tmp_path: Path) -> None:
+    """A provider without a `PINNED_JUDGE_MODELS` entry (e.g. openai today --
+    only claude has one) still gets a complete `ReviewingModelPin`, but
+    `model_pinned=False` so a reader can tell the `"unknown"` model_id/pin
+    apart from a genuine pin (D9). Mirrors `JudgePin.model_pinned` -- the
+    codebase's existing precedent for exactly this "no pin configured" state
+    (mergeCraft self-review on PR #216: substituting "unknown" with no flag
+    silently defeated D9's hard-failure invariant for missing pins).
+    """
+    bank = tmp_path / "bank"
+    _add_all(bank, [_clean_approved(0)])
+
+    result = run_structural_replay(bank, providers=("claude", "openai"))
+
+    claude_pin = result.pins.reviewing_model["claude"]
+    assert claude_pin.model_pinned is True
+    assert claude_pin.model_id == "claude-sonnet-5"
+
+    openai_pin = result.pins.reviewing_model["openai"]
+    assert openai_pin.model_pinned is False
+    assert openai_pin.model_id == "unknown"

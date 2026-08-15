@@ -47,6 +47,7 @@ from mergecraft.evals.live_run import (
     DetectionCase,
     DetectionCaseResult,
     DetectionMetrics,
+    ReviewRunFailed,
     discover_detection_cases,
     run_detection,
     run_full_benchmark,
@@ -478,6 +479,77 @@ def test_full_benchmark_omits_detection_when_no_credential(
 def test_result_set_schema_version_bumped_to_1_2_0() -> None:
     """B3.2 checklist: bump schema -> 1.2.0 for the detection join."""
     assert RESULT_SET_SCHEMA_VERSION == "1.2.0"
+
+
+# ── review-failure handling (mergeCraft self-review, PR #216) ──────────
+
+
+def test_review_run_failed_excludes_case_from_scoring_not_a_zero_finding_pass(
+    tmp_path: Path,
+) -> None:
+    """A case whose ``review_fn`` raises ``ReviewRunFailed`` is excluded from
+    ``cases_run``/the aggregate and reported via ``cases_failed``/
+    ``failed_case_ids`` instead -- never silently scored as "reviewed, found
+    nothing" (which would depress recall/F1 for the wrong reason)."""
+    corpus = tmp_path / "detect-corpus"
+    _write_detection_case(corpus, "bench-detect-ok-001", closed_world=False, issues=[])
+    _write_detection_case(corpus, "bench-detect-fails-001", closed_world=False, issues=[])
+    cases = discover_detection_cases(corpus)
+
+    def review_fn(case: DetectionCase) -> list[dict[str, Any]]:
+        if case.case_id == "bench-detect-fails-001":
+            raise ReviewRunFailed("simulated provider rate-limit error")
+        return []
+
+    metrics = run_live_detection(
+        cases,
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=tmp_path / "results",
+    )
+
+    assert metrics.cases_run == 1
+    assert metrics.cases_failed == 1
+    assert metrics.failed_case_ids == ["bench-detect-fails-001"]
+    assert {r.case_id for r in metrics.case_results} == {"bench-detect-ok-001"}
+    # The failed case's aggregate isn't polluted with a fabricated zero-finding pass.
+    assert metrics.aggregate.total_cases == 1
+
+
+def test_raw_findings_dir_is_scoped_per_run_second_run_does_not_overwrite_first(
+    tmp_path: Path,
+) -> None:
+    """A fixed shared `raw-findings/` path would let a later run silently
+    overwrite an earlier publication's evidence. Two `run_live_detection`
+    calls (different provider) must write to different directories, and the
+    first run's raw findings must still be readable after the second."""
+    corpus = tmp_path / "detect-corpus"
+    _write_detection_case(corpus, "bench-detect-open-001", closed_world=False, issues=[])
+    cases = discover_detection_cases(corpus)
+    results_dir = tmp_path / "results"
+
+    review_fn, _ = _stub_review_fn({"bench-detect-open-001": []})
+    first = run_live_detection(
+        cases,
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=results_dir,
+    )
+    second = run_live_detection(
+        cases,
+        provider="openai",
+        model="gpt-5.1-codex",
+        review_fn=review_fn,
+        results_dir=results_dir,
+    )
+
+    assert first.raw_findings_dir != second.raw_findings_dir
+    assert Path(first.raw_findings_dir).is_dir()
+    assert (Path(first.raw_findings_dir) / "bench-detect-open-001.json").is_file()
+    assert Path(second.raw_findings_dir).is_dir()
+    assert (Path(second.raw_findings_dir) / "bench-detect-open-001.json").is_file()
 
 
 def test_detection_case_forbids_unknown_fields() -> None:

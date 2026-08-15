@@ -89,10 +89,18 @@ Each result set records:
 - `corpus_commit` (git SHA of the case files)
 - structural decision-replay pass rate across the bank
 
-Finding-location **precision / recall / F1** and false-positives-per-run are
-written only when a live run completes across ≥2 configured providers. With
-missing API keys the harness records `skipped: no live credential` and omits
-those metrics — do not fabricate a table in the README.
+Finding-location **precision / recall / F1** and false-positives-per-run come
+from a live run. With missing API keys the harness records `skipped: no live
+credential` and omits those metrics — do not fabricate a table in the README.
+
+`mergecraft eval bench` runs **one** provider/model per invocation — its
+`detection` section is that single provider's result, not the full
+comparison. **Publishing requires ≥2 configured providers** (D12: reported
+per provider, never averaged) — run `eval bench` once per provider (each
+call gets its own timestamped result set and raw-findings directory, so
+nothing overwrites an earlier run's evidence) and combine the separate files
+at publication time (B7). A single-provider result set committed along the
+way is an honest partial artifact, not a claim that D12 is satisfied.
 
 ### Two corpora, two questions (D7)
 
@@ -124,8 +132,9 @@ scored against its `baseline.json` with `score_findings()`, and folded into
 the `detection` section of the published result set (`evals/live_run.py`).
 The structural section always populates; `detection` is `None` with a typed
 `skipped_reason` — `"no live credential"` or `"no patch-bearing cases"` — when
-it cannot run, never a fabricated zero. As of this writing the detection
-corpus is empty (B4 seeds it), so every `bench-detect` run reports the latter.
+it cannot run, never a fabricated zero. B4 seeded the detection corpus (43
+patch-bearing cases); as of this writing no live provider credentials are
+configured in CI, so every `bench-detect` run there reports the former.
 
 ### Seeded corpus (human-labelled, W9.0)
 

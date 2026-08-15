@@ -23,8 +23,11 @@ import asyncio
 import json
 import tempfile
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
+
+from loguru import logger
 
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
@@ -66,6 +69,18 @@ SKIP_REASON_NO_CREDENTIAL: Final[str] = "no live credential"
 SKIP_REASON_NO_CASES: Final[str] = "no patch-bearing cases"
 
 ReviewFn = Callable[[DetectionCase], list[dict[str, Any]]]
+
+
+class ReviewRunFailed(RuntimeError):
+    """A live review attempt produced no usable signal.
+
+    Raised by a ``ReviewFn`` (auth/rate-limit/agent/structured-output
+    failure) — never by orchestration code. ``run_live_detection`` catches
+    this per case so a failed run is excluded from scoring and reported as
+    ``cases_failed``, rather than silently treated as "reviewed, zero
+    findings" — a materially different, better-looking outcome that would
+    depress recall/F1 for the wrong reason (mergeCraft self-review, PR #216).
+    """
 
 
 def discover_detection_cases(
@@ -114,19 +129,36 @@ def run_live_detection(
 ) -> DetectionMetrics:
     """Drive every case through ``review_fn``, score it, and fold the results.
 
-    Raw findings are persisted per case under ``results_dir/raw-findings/`` —
-    a published number must be able to show its work (D9).
+    Raw findings are persisted per case under a run-scoped
+    ``results_dir/raw-findings/<provider>-<model>-<timestamp>/`` directory —
+    a fixed shared path would let a later run silently overwrite an earlier
+    publication's evidence (D9: a published number must be able to show its
+    work, and keep showing it after the next run).
+
+    A case whose ``review_fn`` raises :class:`ReviewRunFailed` is excluded
+    from scoring — its own review never produced a real result, so counting
+    it as "reviewed, zero findings" would misrepresent both the case and the
+    aggregate metrics. Failed cases are reported separately via
+    ``cases_failed``/``failed_case_ids``, never silently dropped.
     """
-    raw_dir = results_dir / "raw-findings"
+    run_stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    raw_dir = results_dir / "raw-findings" / f"{provider}-{model}-{run_stamp}"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     reports = []
     case_results: list[DetectionCaseResult] = []
+    failed_case_ids: list[str] = []
     for case in cases:
+        try:
+            raw_rows = review_fn(case)
+        except ReviewRunFailed as exc:
+            logger.warning("detection case {} review failed: {}", case.case_id, exc)
+            failed_case_ids.append(case.case_id)
+            continue
+
         baseline_payload = json.loads(case.baseline_path.read_text(encoding="utf-8"))
         issues = load_baseline_issues(baseline_payload)
 
-        raw_rows = review_fn(case)
         (raw_dir / f"{case.case_id}.json").write_text(
             json.dumps({"findings": raw_rows}, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -152,7 +184,9 @@ def run_live_detection(
     return DetectionMetrics(
         provider=provider,
         model=model,
-        cases_run=len(cases),
+        cases_run=len(case_results),
+        cases_failed=len(failed_case_ids),
+        failed_case_ids=failed_case_ids,
         aggregate=fold_score_reports(reports),
         case_results=case_results,
         raw_findings_dir=str(raw_dir),
@@ -164,22 +198,39 @@ def _default_review_fn(model: str) -> ReviewFn:
 
     Not exercised by the RED suite (needs a live provider) — the seam this
     plugs into is what the tests inject a stub at instead (B3.0 finding 4).
+
+    ``cwd`` is a fresh empty scratch directory per case, not the caller's
+    real checkout: this in-repo corpus's patches are self-contained diff
+    text (B3.0 finding 4 — ``materialize_diff`` never applies a ``--diff``
+    file against ``cwd``, it just relays the raw text), several of them name
+    paths that do not exist in *any* real tree, and handing the reviewer the
+    operator's actual mergeCraft checkout would let real, unrelated source
+    and ``.mergecraft/config.yaml`` settings leak into what is supposed to
+    be an isolated case (mergeCraft self-review, PR #216). An empty
+    directory means the reviewer finds nothing extra rather than something
+    misleading. Materializing a worktree with the case's true pre-patch
+    file state is a larger corpus-format change, deferred.
     """
     from mergecraft.offline_review import run_offline_diff_review
 
     def _fn(case: DetectionCase) -> list[dict[str, Any]]:
         with tempfile.TemporaryDirectory(prefix="mergecraft-detect-") as tmp:
-            json_path = Path(tmp) / "findings.json"
-            asyncio.run(
+            scratch = Path(tmp)
+            json_path = scratch / "findings.json"
+            result = asyncio.run(
                 run_offline_diff_review(
-                    cwd=Path.cwd(),
+                    cwd=scratch,
                     diff_file=case.patch_path,
                     model=model,
                     json_path=json_path,
                 )
             )
+            if not result.success:
+                msg = f"{case.case_id}: {result.error or 'diff-review did not succeed'}"
+                raise ReviewRunFailed(msg)
             if not json_path.is_file():
-                return []
+                msg = f"{case.case_id}: diff-review succeeded but wrote no findings JSON"
+                raise ReviewRunFailed(msg)
             payload = json.loads(json_path.read_text(encoding="utf-8"))
             if isinstance(payload, dict):
                 rows = payload.get("findings", [])

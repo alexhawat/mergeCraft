@@ -101,7 +101,9 @@ def _pins() -> VersionPins:
         recorded_at=datetime(2026, 8, 13, 17, 0, 0, tzinfo=UTC),
         mergecraft_commit="deadbeef",
         reviewing_model={
-            "claude": ReviewingModelPin(model_id="claude-sonnet-5", model_pin="claude-sonnet-5")
+            "claude": ReviewingModelPin(
+                model_id="claude-sonnet-5", model_pin="claude-sonnet-5", model_pinned=True
+            )
         },
         scorer_version="1.0.0",
         line_slack=3,

@@ -637,6 +637,14 @@ def bench_cmd(
     for ``--model`` are available and the corpus is non-empty — otherwise the
     ``detection`` section is omitted and the reason is reported, never
     fabricated (see ``evals/README.md``).
+
+    One invocation's ``detection`` section covers exactly the one
+    ``--provider``/``--model`` pair given here — it is **not** the full ≥2-
+    provider comparison D12 requires for a published report. Run this once
+    per provider (each writes its own timestamped result set and raw-
+    findings directory, per D9) and combine the separate files at
+    publication time (B7); a single-provider result set is a valid,
+    honestly-partial artifact, not a stand-in for the complete comparison.
     """
     bank_dir = _bank_dir(bank)
     out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
