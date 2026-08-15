@@ -22,6 +22,7 @@ from mergecraft.evals.benchmark import (
     BenchmarkMetrics,
     BenchmarkResultSet,
     CaseReplayRow,
+    ReviewingModelPin,
     VersionPins,
     corpus_class_for,
     replay_bank,
@@ -98,7 +99,36 @@ def _pins() -> VersionPins:
         mode_prompt_versions={"stable": compute_prompt_version("stable")},
         corpus_commit="deadbeef",
         recorded_at=datetime(2026, 8, 13, 17, 0, 0, tzinfo=UTC),
+        mergecraft_commit="deadbeef",
+        reviewing_model={
+            "claude": ReviewingModelPin(model_id="claude-sonnet-5", model_pin="claude-sonnet-5")
+        },
+        scorer_version="1.0.0",
+        line_slack=3,
     )
+
+
+def _empty_gate_kwargs() -> dict[str, Any]:
+    """Zeroed gate-matrix fields for a `BenchmarkMetrics` with no cases (B2)."""
+    return {
+        "unsafe_approval_rate": 0.0,
+        "clean_block_rate": 0.0,
+        "inconclusive_rate": 0.0,
+        "gate_matrix": {
+            "buggy_total": 0,
+            "buggy_correct_block": 0,
+            "buggy_unsafe_approval": 0,
+            "buggy_inconclusive": 0,
+            "clean_total": 0,
+            "clean_correct_approval": 0,
+            "clean_unsafe_block": 0,
+            "clean_inconclusive": 0,
+        },
+        "by_corpus_class": {
+            bucket: {"total": 0, "correct": 0, "incorrect": 0, "inconclusive": 0}
+            for bucket in ("correctness", "security", "cross_file", "adversarial_noop")
+        },
+    }
 
 
 @_SPUN_OUT_W9
@@ -212,6 +242,7 @@ def test_benchmark_result_set_wire_shape_and_rejects_extra_fields() -> None:
             cases_regression=0,
             cases_blocked=0,
             decision_replay_pass_rate=0.0,
+            **_empty_gate_kwargs(),
         ),
         case_results=[],
     )
@@ -261,6 +292,7 @@ def test_write_result_set_persists_json_and_latest_mirror(tmp_path: Path) -> Non
             cases_regression=0,
             cases_blocked=0,
             decision_replay_pass_rate=0.0,
+            **_empty_gate_kwargs(),
         ),
         case_results=[],
     )

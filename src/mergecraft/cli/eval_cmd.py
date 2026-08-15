@@ -540,6 +540,11 @@ def replay_bank_cmd(
         "--json",
         help="Emit the result set as JSON on stdout.",
     ),
+    gate: bool = typer.Option(
+        False,
+        "--gate",
+        help="Also print the directional gate matrix (unsafe-approval / clean-block rates).",
+    ),
 ) -> None:
     """Replay the eval bank and write a versioned benchmark result set (#140).
 
@@ -564,6 +569,24 @@ def replay_bank_cmd(
         console.print(f"  pass rate : {result.metrics.decision_replay_pass_rate:.2%}")
         console.print(f"  corpus @  : {result.pins.corpus_commit[:12]}")
         console.print(f"  rubric    : {result.pins.rubric_version}")
+        if gate:
+            matrix = result.metrics.gate_matrix
+            console.print("  gate matrix (directional, #140):")
+            console.print(
+                f"    buggy : {matrix.buggy_total} total, "
+                f"{matrix.buggy_correct_block} correctly blocked, "
+                f"{matrix.buggy_unsafe_approval} unsafe approvals, "
+                f"{matrix.buggy_inconclusive} inconclusive"
+            )
+            console.print(
+                f"    clean : {matrix.clean_total} total, "
+                f"{matrix.clean_correct_approval} correctly approved, "
+                f"{matrix.clean_unsafe_block} unsafe blocks, "
+                f"{matrix.clean_inconclusive} inconclusive"
+            )
+            console.print(f"  unsafe approval rate: {result.metrics.unsafe_approval_rate:.2%}")
+            console.print(f"  clean block rate    : {result.metrics.clean_block_rate:.2%}")
+            console.print(f"  inconclusive rate   : {result.metrics.inconclusive_rate:.2%}")
 
 
 # ── gate ───────────────────────────────────────────────────────────────
