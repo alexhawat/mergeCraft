@@ -1,9 +1,7 @@
-"""RED suite for ``submit_review_verdict`` — the typed terminal review operation (VP1).
+"""Suite for ``submit_review_verdict`` — the typed terminal review operation (VP1).
 
-Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP1.1).
-Implementation lands in VP1.2 (``mergecraft.mcp.verdict``); every test here is
-non-strict xfail until then. Imports of that module stay inside helpers so
-collection does not fail while the module is absent.
+Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP1.1 RED, VP1.2
+impl). xfail markers were removed after VP1.2.
 
 Pinned contracts (W0):
     D3 — submission findings are ``AgentFinding``, not a parallel type.
@@ -21,7 +19,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import ValidationError
 
-from mergecraft.agents.gates import subagent_denied_tool_names
+from mergecraft.agents.gates import (
+    TERMINAL_PROTOCOL_DENIED_TOOL_NAMES,
+    subagent_denied_tool_names,
+)
 from mergecraft.agents.verifier import AgentFinding, verifier_denied_tool_names
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -37,11 +38,6 @@ from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-pytestmark = pytest.mark.xfail(
-    reason="green after VP1.2: submit_review_verdict",
-    strict=False,
-)
 
 _TOOL_NAME = "submit_review_verdict"
 _UNEXPECTED_FIELD = "unexpected_field"
@@ -258,5 +254,6 @@ def test_tool_is_registered_for_orchestrator_only(tmp_path: Path) -> None:
 def test_tool_is_in_subagent_deny_list(tmp_path: Path) -> None:
     """Terminal-protocol tools are denied to subagents and the verifier even when mutates=False."""
     ctx = _ctx(tmp_path)
+    assert _TOOL_NAME in TERMINAL_PROTOCOL_DENIED_TOOL_NAMES
     assert _TOOL_NAME in subagent_denied_tool_names(ctx)
     assert _TOOL_NAME in verifier_denied_tool_names(ctx)

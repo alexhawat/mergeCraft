@@ -1,9 +1,8 @@
 """AgentResult fields that record whether a terminal verdict was submitted (VP1 / V2).
 
-``test_defaults_preserve_existing_behaviour`` is a regression pin: it must
-pass against current ``AgentResult`` (no new fields required) and keep
-passing after VP1.2 adds defaults. ``test_fields_populate_from_tool_state``
-is RED until VP1.2 populates the fields from ``ctx.tool_state``.
+``test_defaults_preserve_existing_behaviour`` is a V2 regression pin.
+``test_fields_populate_from_tool_state`` was xfail until VP1.2; the marker
+was removed after that wave populated the fields from ``ctx.tool_state``.
 """
 
 from __future__ import annotations
@@ -64,7 +63,6 @@ def test_defaults_preserve_existing_behaviour() -> None:
     assert getattr(populated, "terminal_submission_received", False) is False
 
 
-@pytest.mark.xfail(reason="green after VP1.2: submit_review_verdict", strict=False)
 @pytest.mark.asyncio
 async def test_fields_populate_from_tool_state(tmp_path: Path) -> None:
     """After a recorded submission, finalize copies the flag and id onto ``AgentResult``."""
