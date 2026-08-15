@@ -103,12 +103,7 @@ xfail.
 
 ## Known follow-up (HA4.2 reconciliation)
 
-`tests/agents/test_verifier.py::test_verifier_deny_list_derived_from_mutates_non_empty`
-currently asserts `verifier_denied_tool_names(ctx) == subagent_denied_tool_names(ctx)`
-— that equality **is** H4's defect. After HA4.2 the lists must differ; only
-test-creator may drop that equality pin (keep the non-empty / `push_branch`
-asserts). Do not treat that existing test as a HA4.1 deliverable. Not in
-scope for this reconciliation pass.
+Resolved: `tests/agents/test_verifier.py::test_verifier_deny_list_is_independent_and_non_empty` pins H4 independence (verifier complement ≠ reviewer/subagent complement; `checkout_pr` vs `verify_agent_findings`) instead of equality; both lists stay non-empty and include `push_branch`.
 
 ## Status
 

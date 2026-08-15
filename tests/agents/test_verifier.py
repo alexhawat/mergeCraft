@@ -42,13 +42,22 @@ def _ctx(tmp_path: Path) -> ToolContext:
     )
 
 
-def test_verifier_deny_list_derived_from_mutates_non_empty(tmp_path: Path) -> None:
+def test_verifier_deny_list_is_independent_and_non_empty(tmp_path: Path) -> None:
+    """H4 — verifier complement is independent of the reviewer/subagent complement."""
     verifier = import_module("mergecraft.agents.verifier")
     ctx = _ctx(tmp_path)
     denied = verifier.verifier_denied_tool_names(ctx)
+    subagent_denied = subagent_denied_tool_names(ctx)
     assert denied
-    assert denied == subagent_denied_tool_names(ctx)
+    assert denied != subagent_denied
     assert "push_branch" in denied
+    assert "push_branch" in subagent_denied
+    # Verifier deny list includes scope tools the reviewer allow-list keeps.
+    assert "checkout_pr" in denied
+    assert "checkout_pr" not in subagent_denied
+    # Subagent deny list includes verification tools the verifier allow-list keeps.
+    assert "verify_agent_findings" in subagent_denied
+    assert "verify_agent_findings" not in denied
 
 
 @pytest.mark.parametrize("severity", ["Critical", "Major"])
