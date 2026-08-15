@@ -435,6 +435,8 @@ def test_full_benchmark_structural_section_matches_a_bare_structural_replay(
         detection_corpus_dir=corpus,
         results_dir=tmp_path / "results",
         providers=DEFAULT_BENCHMARK_PROVIDERS,
+        detection_provider="claude",
+        detection_model="anthropic/claude-sonnet",
         review_fn=_stub_review_fn({})[0],
     )
 
@@ -465,6 +467,8 @@ def test_full_benchmark_omits_detection_when_no_credential(
         detection_corpus_dir=corpus,
         results_dir=tmp_path / "results",
         providers=DEFAULT_BENCHMARK_PROVIDERS,
+        detection_provider="claude",
+        detection_model="anthropic/claude-sonnet",
         review_fn=_stub_review_fn({})[0],
     )
 
@@ -476,9 +480,15 @@ def test_full_benchmark_omits_detection_when_no_credential(
     assert result.pins.corpus_commit  # unchanged VersionPins machinery still runs
 
 
-def test_result_set_schema_version_bumped_to_1_2_0() -> None:
-    """B3.2 checklist: bump schema -> 1.2.0 for the detection join."""
-    assert RESULT_SET_SCHEMA_VERSION == "1.2.0"
+def test_result_set_schema_version_is_at_least_1_2_0() -> None:
+    """B3.2 checklist: bump schema -> 1.2.0 for the detection join. Pins the
+    floor B3 actually needs, not an exact string a later fix's own version
+    bump would otherwise break (same pattern as B3's floor check on B2's
+    schema bump). See
+    test_pre_fix_1_2_0_reviewing_model_shape_no_longer_silently_parses in
+    test_benchmark_gate_metrics.py for why it was bumped again, to 1.3.0."""
+    major, minor, _ = (int(part) for part in RESULT_SET_SCHEMA_VERSION.split("."))
+    assert (major, minor) >= (1, 2)
 
 
 # ── review-failure handling (mergeCraft self-review, PR #216) ──────────
@@ -522,8 +532,12 @@ def test_raw_findings_dir_is_scoped_per_run_second_run_does_not_overwrite_first(
 ) -> None:
     """A fixed shared `raw-findings/` path would let a later run silently
     overwrite an earlier publication's evidence. Two `run_live_detection`
-    calls (different provider) must write to different directories, and the
-    first run's raw findings must still be readable after the second."""
+    calls for the **same provider/model within the same second** — the
+    actual collision scenario (a timestamp alone is not collision-resistant;
+    mergeCraft self-review, PR #216, flagged that a differing-provider test
+    doesn't exercise it) — must still write to different directories, via
+    the run-id's random suffix, and the first run's raw findings must still
+    be readable after the second."""
     corpus = tmp_path / "detect-corpus"
     _write_detection_case(corpus, "bench-detect-open-001", closed_world=False, issues=[])
     cases = discover_detection_cases(corpus)
@@ -539,8 +553,8 @@ def test_raw_findings_dir_is_scoped_per_run_second_run_does_not_overwrite_first(
     )
     second = run_live_detection(
         cases,
-        provider="openai",
-        model="gpt-5.1-codex",
+        provider="claude",
+        model="claude-sonnet-5",
         review_fn=review_fn,
         results_dir=results_dir,
     )

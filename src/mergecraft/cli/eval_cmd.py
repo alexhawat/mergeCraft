@@ -62,6 +62,8 @@ from mergecraft.evals.store import (
     replay_case,
     write_permanent_test,
 )
+from mergecraft.models import get_model_provider
+from mergecraft.utils.agent_resolve import resolve_model
 from mergecraft.utils.learnings import LearningProvenance
 
 app = typer.Typer(
@@ -614,15 +616,12 @@ def bench_cmd(
         "--results-dir",
         help="Directory for result sets (default: evals/results/).",
     ),
-    provider: str = typer.Option(
-        "claude",
-        "--provider",
-        help="Provider name recorded on the detection result (structural replay always pins both).",
-    ),
-    model: str = typer.Option(
-        "claude-sonnet-5",
+    model: str | None = typer.Option(
+        None,
         "--model",
-        help="Model slug to check credentials for and drive live detection with.",
+        "-m",
+        help="Model slug to drive live detection with (otherwise .mergecraft/config.yaml / "
+        "MERGECRAFT_MODEL — same resolution as `diff-review`).",
     ),
     json_output: bool = typer.Option(
         False,
@@ -638,14 +637,37 @@ def bench_cmd(
     ``detection`` section is omitted and the reason is reported, never
     fabricated (see ``evals/README.md``).
 
-    One invocation's ``detection`` section covers exactly the one
-    ``--provider``/``--model`` pair given here — it is **not** the full ≥2-
-    provider comparison D12 requires for a published report. Run this once
-    per provider (each writes its own timestamped result set and raw-
-    findings directory, per D9) and combine the separate files at
-    publication time (B7); a single-provider result set is a valid,
-    honestly-partial artifact, not a stand-in for the complete comparison.
+    ``--model`` is resolved the same way ``diff-review`` resolves its own
+    ``--model`` — never hardcoded to a specific vendor here (a prior
+    hardcoded default silently broke the credential check entirely and
+    presumed every operator wants the same provider; mergeCraft self-review,
+    PR #216). The provider is derived from the resolved model slug, not
+    asked for separately, so the two can never disagree.
+
+    One invocation's ``detection`` section covers exactly the one resolved
+    model — it is **not** the full ≥2-provider comparison D12 requires for a
+    published report. Run this once per provider (each writes its own
+    timestamped result set and raw-findings directory, per D9) and combine
+    the separate files at publication time (B7); a single-provider result
+    set is a valid, honestly-partial artifact, not a stand-in for the
+    complete comparison.
     """
+    resolved_model = resolve_model(slug=model)
+    if resolved_model is None:
+        console.print(
+            "[red]No model configured[/red] — pass --model, or set MERGECRAFT_MODEL / "
+            "model: in .mergecraft/config.yaml."
+        )
+        raise typer.Exit(1)
+    try:
+        detection_provider = get_model_provider(resolved_model)
+    except ValueError:
+        console.print(
+            f'[red]Could not derive a provider[/red] from model slug "{resolved_model}" '
+            '— expected "provider/model" (see `mergecraft models list`).'
+        )
+        raise typer.Exit(1) from None
+
     bank_dir = _bank_dir(bank)
     out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
     result = run_full_benchmark(
@@ -653,10 +675,12 @@ def bench_cmd(
         detection_corpus_dir=detection_corpus,
         results_dir=out_dir,
         providers=DEFAULT_BENCHMARK_PROVIDERS,
-        detection_provider=provider,
-        detection_model=model,
+        detection_provider=detection_provider,
+        detection_model=resolved_model,
     )
-    path = write_result_set(result, results_dir=out_dir)
+    # update_latest=False: a single-provider detection result must not
+    # silently become "latest.json" — see write_result_set's docstring (D12).
+    path = write_result_set(result, results_dir=out_dir, update_latest=False)
     if json_output:
         typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
         return

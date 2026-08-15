@@ -33,7 +33,7 @@ from mergecraft.evals.store import (
 )
 from mergecraft.modes import modes
 
-RESULT_SET_SCHEMA_VERSION: Final[str] = "1.2.0"
+RESULT_SET_SCHEMA_VERSION: Final[str] = "1.3.0"
 DEFAULT_RESULTS_DIR: Final[Path] = Path("evals/results")
 
 # Providers the benchmark names by default (W9.0: ≥2 providers).
@@ -366,23 +366,32 @@ def run_structural_replay(
         # `corpus_class` is a scenario label (which bug family a case
         # represents), not proof a defect exists — `issue-75-untrusted-
         # never-approves` lands in the "security" bucket via corpus_class_for's
-        # id-substring heuristic, but records zero findings and completed
-        # successfully: there is nothing for the review to have missed, so
-        # counting its "neutral" as an unsafe approval blamed the gate for
-        # correctly declining to approve an untrusted run. A completed run
-        # (`run_succeeded=True`) with a confirmed-empty finding list is
-        # therefore never "buggy" regardless of corpus_class. A crashed run
-        # (`run_succeeded=False`) is excluded from this override — its empty
-        # `recorded_findings` reflects a missing run, not a confirmed-clean
-        # one, and must still count toward `buggy_total` via the
+        # id-substring heuristic, but its untrusted trust tier structurally
+        # cannot approve regardless of findings (D14): counting its "neutral"
+        # as an unsafe approval blamed the gate for correctly declining to
+        # approve an untrusted run.
+        #
+        # This override is intentionally narrow — scoped to `trust_tier ==
+        # "untrusted"` specifically, NOT "any completed run with zero
+        # findings". `recorded_findings=[]` on a **trusted** run is reviewer
+        # *output*, not ground truth that no defect exists — it is exactly
+        # the evidence a genuine missed-bug case would produce, and must
+        # stay counted as `buggy_unsafe_approval` (mergeCraft self-review,
+        # PR #216, flagged a broader version of this fix for silently
+        # reclassifying that scenario as clean too — see
+        # `test_trusted_zero_findings_on_a_buggy_case_still_counts_as_unsafe_approval`).
+        # A crashed run (`run_succeeded=False`) is excluded either way — its
+        # empty `recorded_findings` reflects a missing run, not a confirmed-
+        # clean one, and must still count toward `buggy_total` via the
         # `inconclusive` branch below (pinned by
         # `test_crashed_run_on_a_buggy_case_is_inconclusive_not_a_correct_block`).
-        zero_confirmed_findings = (
-            case.recorded_findings is not None
+        untrusted_policy_neutral = (
+            case.trust_tier == "untrusted"
+            and case.recorded_findings is not None
             and len(case.recorded_findings) == 0
             and case.run_succeeded
         )
-        is_buggy = corpus_class != "adversarial_noop" and not zero_confirmed_findings
+        is_buggy = corpus_class != "adversarial_noop" and not untrusted_policy_neutral
         bucket = class_rollup[corpus_class]
         bucket["total"] += 1
         inconclusive = (not case.run_succeeded) or (
@@ -472,8 +481,17 @@ def write_result_set(
     *,
     results_dir: Path = DEFAULT_RESULTS_DIR,
     filename: str | None = None,
+    update_latest: bool = True,
 ) -> Path:
-    """Persist a result set as JSON under ``evals/results/``."""
+    """Persist a result set as JSON under ``evals/results/``.
+
+    ``update_latest=False`` writes only the timestamped file, leaving
+    ``latest.json`` untouched. A single-provider detection result (from
+    ``mergecraft eval bench``) is an honest partial artifact, not the ≥2-
+    provider comparison D12 requires — silently promoting it to "latest"
+    would let a downstream consumer mistake it for a complete, published
+    report (mergeCraft self-review, PR #216).
+    """
     results_dir.mkdir(parents=True, exist_ok=True)
     stamp = result.pins.recorded_at.strftime("%Y%m%dT%H%M%SZ")
     out_name = filename or f"structural-replay-{stamp}.json"
@@ -482,8 +500,9 @@ def write_result_set(
         json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    latest = results_dir / "latest.json"
-    latest.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    if update_latest:
+        latest = results_dir / "latest.json"
+        latest.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
     return path
 
 

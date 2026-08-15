@@ -111,6 +111,7 @@ def _bench_case(
     findings: list[dict[str, Any]] | None,
     run_succeeded: bool = True,
     expected_decision: str = "neutral",
+    trust_tier: str = "trusted",
 ) -> Case:
     return Case(
         id=case_id,
@@ -127,7 +128,7 @@ def _bench_case(
         body="",
         recorded_findings=findings,
         run_succeeded=run_succeeded,
-        trust_tier="trusted",
+        trust_tier=trust_tier,
     )
 
 
@@ -326,21 +327,29 @@ def test_gate_matrix_rollup_by_corpus_class(tmp_path: Path) -> None:
     assert by_class["adversarial_noop"].incorrect == 1
 
 
-def test_completed_run_with_zero_confirmed_findings_is_not_counted_as_buggy(
+def test_untrusted_tier_zero_findings_is_not_counted_as_buggy(
     tmp_path: Path,
 ) -> None:
-    """A non-adversarial_noop case whose run *completed* and recorded zero
-    findings is not "buggy" just because its corpus_class prefix says so
-    (regression: issue-75-untrusted-never-approves, `run_succeeded=True`,
-    `recorded_findings=[]`, corpus_class="security" via corpus_class_for's
-    id-substring heuristic, was previously counted as a `buggy_unsafe_approval`
-    even though there is no confirmed defect for the review to have missed —
+    """An untrusted-tier case whose run *completed* and recorded zero
+    findings is not "buggy" (regression: issue-75-untrusted-never-approves,
+    `run_succeeded=True`, `recorded_findings=[]`, `trust_tier="untrusted"`,
+    corpus_class="security" via corpus_class_for's id-substring heuristic,
+    was previously counted as a `buggy_unsafe_approval` even though approval
+    was structurally impossible for this trust tier regardless of findings —
     the mergeCraft self-review on PR #216 caught this: it made the published
     unsafe_approval_rate entirely attributable to a case where the gate
-    correctly declined to approve an untrusted run). Distinct from a crashed
-    run (`run_succeeded=False`), which must still count as buggy via the
-    inconclusive branch (see
-    test_crashed_run_on_a_buggy_case_is_inconclusive_not_a_correct_block).
+    correctly declined to approve an untrusted run).
+
+    The override is deliberately narrow — scoped to `trust_tier=="untrusted"`
+    specifically, not "any zero-finding success" — because a **trusted**
+    run with zero findings on a genuinely buggy case is exactly what
+    `unsafe_approval_rate` exists to catch (a review that ran and missed a
+    real defect), and must stay counted as `buggy_unsafe_approval`. See
+    `test_trusted_zero_findings_on_a_buggy_case_still_counts_as_unsafe_approval`
+    for that scenario, and
+    `test_crashed_run_on_a_buggy_case_is_inconclusive_not_a_correct_block`
+    for the separate crashed-run (`run_succeeded=False`) case, which must
+    also stay counted as buggy via the inconclusive branch.
     """
     bank = tmp_path / "bank"
     _add_all(
@@ -351,6 +360,7 @@ def test_completed_run_with_zero_confirmed_findings_is_not_counted_as_buggy(
                 findings=[],
                 run_succeeded=True,
                 expected_decision="neutral",
+                trust_tier="untrusted",
             )
         ],
     )
@@ -362,6 +372,42 @@ def test_completed_run_with_zero_confirmed_findings_is_not_counted_as_buggy(
     assert matrix.clean_total == 1
     assert matrix.clean_correct_approval == 1
     assert result.metrics.unsafe_approval_rate == 0.0
+
+
+def test_trusted_zero_findings_on_a_buggy_case_still_counts_as_unsafe_approval(
+    tmp_path: Path,
+) -> None:
+    """The narrow untrusted-tier override above must NOT swallow this case:
+    a **trusted** run that completed and reported zero findings on a
+    genuinely buggy (non-adversarial_noop) case is exactly what
+    `unsafe_approval_rate` exists to measure — the review ran, had every
+    opportunity to catch the defect, and didn't. `recorded_findings=[]` here
+    is reviewer *output*, not proof no defect exists; corpus_class alone
+    still marks this a buggy case and it must stay counted as
+    `buggy_unsafe_approval` (mergeCraft self-review on PR #216 flagged the
+    first version of the untrusted-tier fix for being broad enough to risk
+    swallowing exactly this scenario)."""
+    bank = tmp_path / "bank"
+    _add_all(
+        bank,
+        [
+            _bench_case(
+                case_id="bench-correctness-missed-000",
+                findings=[],
+                run_succeeded=True,
+                expected_decision="neutral",
+                trust_tier="trusted",
+            )
+        ],
+    )
+
+    result = run_structural_replay(bank)
+
+    matrix = result.metrics.gate_matrix
+    assert matrix.buggy_total == 1
+    assert matrix.buggy_unsafe_approval == 1
+    assert matrix.clean_total == 0
+    assert result.metrics.unsafe_approval_rate == 1.0
 
 
 def test_zero_buggy_or_zero_clean_cases_does_not_divide_by_zero(tmp_path: Path) -> None:
@@ -477,6 +523,31 @@ def _old_pin_kwargs() -> dict[str, Any]:
         "corpus_commit": "deadbeef",
         "recorded_at": _WHEN,
     }
+
+
+def test_pre_fix_1_2_0_reviewing_model_shape_no_longer_silently_parses() -> None:
+    """A PR #216 fix commit added a *required* `ReviewingModelPin.model_pinned`
+    field without (at first) bumping the schema version, so an old genuinely-
+    1.2.0-shaped result set (written before that fix, no `model_pinned` key
+    on its `reviewing_model` entries) would still claim `schema_version ==
+    "1.2.0"` while silently failing to parse under the new code -- the exact
+    "same version string, no longer mutually parseable" gap the mergeCraft
+    self-review caught. `RESULT_SET_SCHEMA_VERSION` was bumped to 1.3.0 to
+    make that incompatibility explicit instead of silent; this test builds
+    the old 1.2.0 shape directly (no `model_pinned` key at all, not even
+    `False`) and confirms it is rejected outright, not silently accepted
+    under a stale label."""
+    old_pins_dict = {
+        **_old_pin_kwargs(),
+        "mergecraft_commit": "deadbeef",
+        "reviewing_model": {
+            "claude": {"model_id": "claude-sonnet-5", "model_pin": "claude-sonnet-5"},
+        },
+        "scorer_version": "1.0.0",
+        "line_slack": 3,
+    }
+    with pytest.raises(ValidationError):
+        VersionPins(**old_pins_dict)
 
 
 def test_version_pins_round_trips_with_every_n6_field() -> None:

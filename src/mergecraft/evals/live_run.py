@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -141,8 +142,13 @@ def run_live_detection(
     aggregate metrics. Failed cases are reported separately via
     ``cases_failed``/``failed_case_ids``, never silently dropped.
     """
+    # A timestamp alone collides for two runs of the same provider/model
+    # within the same second (concurrent or rapid repeated invocations) —
+    # append a short random suffix so the directory is collision-resistant,
+    # not just usually-distinct (mergeCraft self-review, PR #216).
     run_stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    raw_dir = results_dir / "raw-findings" / f"{provider}-{model}-{run_stamp}"
+    run_id = f"{provider}-{model}-{run_stamp}-{uuid.uuid4().hex[:8]}"
+    raw_dir = results_dir / "raw-findings" / run_id
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     reports = []
@@ -277,8 +283,8 @@ def run_full_benchmark(
     detection_corpus_dir: Path = DEFAULT_DETECTION_CORPUS_DIR,
     results_dir: Path = DEFAULT_RESULTS_DIR,
     providers: tuple[str, ...] = DEFAULT_BENCHMARK_PROVIDERS,
-    detection_provider: str = "claude",
-    detection_model: str = "claude-sonnet-5",
+    detection_provider: str,
+    detection_model: str,
     review_fn: ReviewFn | None = None,
 ) -> BenchmarkResultSet:
     """Join structural decision replay with the live detection run.
@@ -286,6 +292,16 @@ def run_full_benchmark(
     The join is additive: the structural section (``metrics``/``pins``/
     ``case_results``) is byte-identical to a bare ``run_structural_replay()``
     call whether or not detection could run alongside it.
+
+    ``detection_provider``/``detection_model`` are required, not defaulted
+    to a specific vendor — the operator's actual configured model (resolved
+    the same way ``diff-review`` resolves ``.mergecraft/config.yaml`` /
+    ``MERGECRAFT_MODEL``) belongs at the CLI layer (``mergecraft eval
+    bench``), not hardcoded here. A previous hardcoded default
+    (``"claude-sonnet-5"``, a bare id with no provider prefix) also silently
+    broke ``has_credentials_for_slug``'s parsing, making every credential
+    check report "no live credential" regardless of what was actually
+    configured (mergeCraft self-review, PR #216).
     """
     structural = run_structural_replay(bank_dir, providers=providers)
     metrics, skipped_reason = run_detection(
