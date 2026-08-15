@@ -94,6 +94,39 @@ written only when a live run completes across ≥2 configured providers. With
 missing API keys the harness records `skipped: no live credential` and omits
 those metrics — do not fabricate a table in the README.
 
+### Two corpora, two questions (D7)
+
+`evals/cases/` (the bank above) and `evals/bench/mergecraft/` (below) answer
+different questions and are never conflated:
+
+| | `evals/cases/` (bank) | `evals/bench/mergecraft/` (detection corpus) |
+|---|---|---|
+| Question | *Did the gate make the right decision?* | *Did the review find the right lines?* |
+| Ground truth | `recorded_findings` + `expected_decision`, no patch | a patch + `baseline.json` (`{"closed_world": bool, "issues": [...]}`) |
+| Cost | free, keyless — `replay_case()` recomputes the verdict | needs a live provider — runs `diff-review` for real |
+| Consumer | `mergecraft eval replay-bank`, the `gate_matrix` fields | `mergecraft eval bench`, the `detection` section |
+
+A bank case cannot answer a detection question (no patch to review) and a
+detection case cannot answer a gate question (no `expected_decision`) — see
+`docs/dev/test-plans/eval-benchmark-b3-live.md` for why `discover_detection_cases`
+silently ignores anything shaped like the other corpus rather than erroring.
+
+### Live detection join (B3, #140)
+
+```bash
+make bench-detect
+# or: mergecraft eval bench --provider claude --model claude-sonnet-5 --json
+```
+
+Joins the keyless structural replay above with a live run against
+`evals/bench/mergecraft/`: each case's patch is reviewed via `diff-review`,
+scored against its `baseline.json` with `score_findings()`, and folded into
+the `detection` section of the published result set (`evals/live_run.py`).
+The structural section always populates; `detection` is `None` with a typed
+`skipped_reason` — `"no live credential"` or `"no patch-bearing cases"` — when
+it cannot run, never a fabricated zero. As of this writing the detection
+corpus is empty (B4 seeds it), so every `bench-detect` run reports the latter.
+
 ### Seeded corpus (human-labelled, W9.0)
 
 | Class | Count | Case ids |

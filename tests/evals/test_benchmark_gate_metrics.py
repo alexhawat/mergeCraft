@@ -402,8 +402,12 @@ def test_decision_replay_pass_rate_is_unchanged_by_the_new_gate_fields(
     assert result.metrics.decision_replay_pass_rate == pytest.approx(1.0)
 
 
-def test_result_set_schema_version_bumped_to_1_1_0() -> None:
-    assert RESULT_SET_SCHEMA_VERSION == "1.1.0"
+def test_result_set_schema_version_is_at_least_1_1_0() -> None:
+    """B2 bumped 1.0.0 -> 1.1.0 for the gate-matrix fields; B3 bumped it again
+    to 1.2.0 for the detection join. Pin the floor B2 actually needs, not an
+    exact string a later PR's own version bump would otherwise break."""
+    major, minor, _ = (int(part) for part in RESULT_SET_SCHEMA_VERSION.split("."))
+    assert (major, minor) >= (1, 1)
 
 
 # ── VersionPins: N6 pin completion ──────────────────────────────────────
