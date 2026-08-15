@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed: model-chain fallback now advances when the provider succeeds without a terminal verdict; a valid `request_changes` is a usable result and does not trigger fallback
 - `README.md`'s CLI table documented `mergecraft traces <run-id>`, but the real
   registered command is `mergecraft traces show <run-id>` — the stale
   invocation is now generated from the live CLI app instead of hand-maintained

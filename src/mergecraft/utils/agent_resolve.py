@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -40,6 +41,23 @@ class ModelFallbackPolicyError(RuntimeError):
     Message always names configuration/fallback so operators and RED tests can
     match the policy without inspecting the exception type alone.
     """
+
+
+class FallbackReason(StrEnum):
+    """Why a model-chain entry was skipped (HA2 / D13).
+
+    Distinct from verdict content — a valid ``request_changes`` is a usable
+    result and never appears here. Stamped on the **winner** as the reason the
+    previous attempt was skipped (last skip wins when multiple advances).
+    """
+
+    provider_error = "provider_error"
+    timeout = "timeout"
+    crash = "crash"
+    no_terminal_verdict = "no_terminal_verdict"
+    malformed_submission = "malformed_submission"
+    semantic_rejection = "semantic_rejection"
+    stale_attempt = "stale_attempt"
 
 
 def _has_env(name: str) -> bool:
@@ -385,12 +403,41 @@ def _is_retryable_failure(result: AgentResult) -> bool:
     return retryable is True
 
 
+def _retryable_failure_reason(result: AgentResult) -> FallbackReason:
+    error = (result.error or "").lower()
+    metadata = result.metadata or {}
+    if "timeout" in error or metadata.get("timeout") is True:
+        return FallbackReason.timeout
+    if "crash" in error or metadata.get("crash") is True:
+        return FallbackReason.crash
+    return FallbackReason.provider_error
+
+
+def _classify_skip_reason(result: AgentResult, chain_index: int) -> FallbackReason | None:
+    """Return why ``result`` cannot be the chain winner, or ``None`` when usable."""
+    diagnostics = result.diagnostics or {}
+    attempt_id = diagnostics.get("attempt_id")
+    if attempt_id is not None and attempt_id != chain_index:
+        return FallbackReason.stale_attempt
+
+    if result.success and result.terminal_submission_received:
+        return None
+
+    if not result.success:
+        return _retryable_failure_reason(result)
+
+    if diagnostics.get("malformed_submission"):
+        return FallbackReason.malformed_submission
+    return FallbackReason.no_terminal_verdict
+
+
 def _attach_model_evidence(
     result: AgentResult,
     *,
     requested_model: str,
     executed_model: str,
     fallback_index: int,
+    fallback_reason: FallbackReason | None = None,
 ) -> AgentResult:
     """Stamp requested/executed/fallback fields onto ``result.metadata`` (W10.2/W10.3).
 
@@ -407,6 +454,8 @@ def _attach_model_evidence(
             "fallback_occurred": fallback_index > 0,
         }
     )
+    if fallback_reason is not None:
+        meta["fallback_reason"] = fallback_reason
     result.metadata = meta
     return result
 
@@ -509,6 +558,7 @@ async def run_with_model_chain(
 
         chain_index = 0
         attempts = 0
+        last_skip_reason: FallbackReason | None = None
 
         root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
 
@@ -568,11 +618,12 @@ async def run_with_model_chain(
                 ) as _call_span:
                     pass
 
-                if result.success:
+                skip_reason = _classify_skip_reason(result, chain_index)
+                if skip_reason is None:
                     attempt_span.set_status("ok")
                     terminal_status = "ok"
                     logger.info("» model chain succeeded slug={}", slug)
-                elif not _is_retryable_failure(result):
+                elif not result.success and not _is_retryable_failure(result):
                     attempt_span.set_status("error", result.error or "unknown error")
                     terminal_status = "error"
                     logger.warning(
@@ -586,29 +637,41 @@ async def run_with_model_chain(
                         msg = (
                             "configuration error: allow_fallback is false — refusing "
                             f"model fallback from unavailable primary {slug!r}: "
-                            f"{result.error or 'unknown error'}"
+                            f"{result.error or 'incomplete review result'}"
                         )
                         raise ModelFallbackPolicyError(msg)
+                    last_skip_reason = skip_reason
                     nxt = chain[chain_index + 1]
-                    attempt_span.set_status("retryable", result.error or "unknown error")
-                    # W10.3 — structured, operator-visible warning (must name
-                    # "fallback"; also stamped onto result.metadata below).
+                    attempt_span.set_status(
+                        "retryable",
+                        result.error or skip_reason.value,
+                    )
+                    terminal_status = "retryable"
                     logger.warning(
-                        "model fallback occurred: requested={} failed ({}); "
+                        "model fallback occurred: requested={} skipped ({}) — "
                         "advancing to executed={} (fallback_index={})",
                         requested_model or slug,
-                        result.error or "unknown error",
+                        skip_reason.value,
                         nxt,
                         chain_index + 1,
                     )
-                else:
+                elif not result.success and _is_retryable_failure(result):
                     attempt_span.set_status("retryable", result.error or "unknown error")
+                    terminal_status = "retryable"
                     logger.warning(
                         "» model chain slug={} failed (retryable): {} — retrying ({}/{})",
                         slug,
                         result.error or "unknown error",
                         attempts,
                         max_attempts,
+                    )
+                else:
+                    attempt_span.set_status("error", skip_reason.value)
+                    terminal_status = "error"
+                    logger.warning(
+                        "» model chain slug={} unusable at chain tail: {}",
+                        slug,
+                        skip_reason.value,
                     )
 
             # The ``agent.attempt`` span has now closed and emitted. Emit
@@ -641,6 +704,7 @@ async def run_with_model_chain(
                     requested_model=requested_model or slug,
                     executed_model=slug,
                     fallback_index=winner_index,
+                    fallback_reason=last_skip_reason,
                 )
                 if terminal_status == "ok":
                     _root.set_status("ok")
@@ -955,6 +1019,7 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
 
 
 __all__ = [
+    "FallbackReason",
     "ModelFallbackPolicyError",
     "effective_model_chain",
     "effective_model_slugs",

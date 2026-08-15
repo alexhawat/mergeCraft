@@ -180,7 +180,13 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
     submission = ctx.tool_state.terminal_submission
     if submission is None:
         return False, None, {}
-    return True, submission.id, {}
+    diagnostics: dict[str, Any] = {
+        "verdict": submission.verdict,
+        "summary": submission.summary,
+        "findings": submission.findings,
+        "attempt_id": submission.attempt_id,
+    }
+    return True, submission.id, diagnostics
 
 
 async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> AgentResult:
