@@ -21,7 +21,13 @@ import pytest
 
 from mergecraft.agents.shared import AgentResult, AgentUsage
 from mergecraft.config.settings import RepoSettings
-from mergecraft.utils.agent_resolve import ModelFallbackPolicyError, run_with_model_chain
+from mergecraft.utils.agent_resolve import (
+    FallbackReason,
+    ModelFallbackPolicyError,
+    _classify_skip_reason,
+    _retryable_failure_reason,
+    run_with_model_chain,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -29,8 +35,6 @@ if TYPE_CHECKING:
 _PRIMARY = "anthropic/claude-opus"
 _SECONDARY = "openai/gpt-5"
 _TERTIARY = "google/gemini-3.1-pro-preview"
-
-_XFAIL_HA2 = pytest.mark.xfail(reason="green after HA2.2: semantic fallback", strict=False)
 
 _REVIEW_FAILED_REASONS = frozenset(
     {
@@ -107,7 +111,6 @@ async def test_runtime_failure_still_triggers_fallback() -> None:
     assert result.terminal_submission_id == "runtime-ok"
 
 
-@_XFAIL_HA2
 async def test_provider_success_without_verdict_triggers_fallback() -> None:
     """H2 / D13 core: provider success without a terminal verdict must advance."""
     winner, result, calls = await _run_chain(
@@ -128,11 +131,8 @@ async def test_provider_success_without_verdict_triggers_fallback() -> None:
     assert result.terminal_submission_id == "after-no-verdict"
 
 
-@_XFAIL_HA2
 async def test_malformed_submission_triggers_fallback() -> None:
     """A schema-invalid submission is not a usable verdict — the chain advances."""
-    from mergecraft.utils.agent_resolve import FallbackReason
-
     winner, result, calls = await _run_chain(
         {
             _PRIMARY: AgentResult(
@@ -226,12 +226,9 @@ async def test_valid_approve_does_not_trigger_fallback() -> None:
     assert reason != "semantic_rejection"
 
 
-@_XFAIL_HA2
 async def test_fallback_reason_is_recorded_and_distinct() -> None:
     """Closed ``FallbackReason``: review-failed is not review-says-PR-fails (D13)."""
     from enum import Enum
-
-    from mergecraft.utils.agent_resolve import FallbackReason
 
     assert issubclass(FallbackReason, Enum)
     values = {member.value for member in FallbackReason}
@@ -240,6 +237,66 @@ async def test_fallback_reason_is_recorded_and_distinct() -> None:
     assert "approve" not in values
     assert FallbackReason.no_terminal_verdict != FallbackReason.semantic_rejection
     assert FallbackReason.no_terminal_verdict.value != FallbackReason.semantic_rejection.value
+
+    timeout_fail = AgentResult(success=False, error="request timeout", metadata={"retryable": True})
+    crash_fail = AgentResult(success=False, error="process crash", metadata={"retryable": True})
+    provider_fail = AgentResult(
+        success=False, error="provider unavailable", metadata={"retryable": True}
+    )
+    assert _retryable_failure_reason(timeout_fail) == FallbackReason.timeout
+    assert _retryable_failure_reason(crash_fail) == FallbackReason.crash
+    assert _retryable_failure_reason(provider_fail) == FallbackReason.provider_error
+    assert (
+        _retryable_failure_reason(
+            AgentResult(success=False, error="boom", metadata={"timeout": True})
+        )
+        == FallbackReason.timeout
+    )
+    assert (
+        _retryable_failure_reason(
+            AgentResult(success=False, error="boom", metadata={"crash": True})
+        )
+        == FallbackReason.crash
+    )
+
+    usable = AgentResult(
+        success=True,
+        terminal_submission_received=True,
+        terminal_submission_id="ok",
+        diagnostics={"verdict": "request_changes"},
+    )
+    assert _classify_skip_reason(usable, 0) is None
+    assert (
+        _classify_skip_reason(
+            AgentResult(success=True, output="prose", terminal_submission_received=False),
+            0,
+        )
+        == FallbackReason.no_terminal_verdict
+    )
+    assert (
+        _classify_skip_reason(
+            AgentResult(
+                success=True,
+                terminal_submission_received=False,
+                diagnostics={"malformed_submission": True},
+            ),
+            0,
+        )
+        == FallbackReason.malformed_submission
+    )
+    assert (
+        _classify_skip_reason(
+            AgentResult(
+                success=True,
+                terminal_submission_received=True,
+                diagnostics={"attempt_id": 0},
+            ),
+            1,
+        )
+        == FallbackReason.stale_attempt
+    )
+    assert _classify_skip_reason(provider_fail, 0) == FallbackReason.provider_error
+    assert _classify_skip_reason(timeout_fail, 0) == FallbackReason.timeout
 
     winner, result, calls = await _run_chain(
         {
@@ -336,15 +393,12 @@ async def test_allow_fallback_false_still_blocks() -> None:
     assert calls == [_PRIMARY], f"chain advanced despite allow_fallback=false: {calls}"
 
 
-@_XFAIL_HA2
 async def test_stale_primary_result_is_not_reused_by_fallback() -> None:
     """A result whose attempt id does not match the current attempt is not reused.
 
     HA2 surface (VP3 types may not exist yet): ``fallback_reason`` is
     ``stale_attempt`` and the returned ``AgentResult`` is not the stale object.
     """
-    from mergecraft.utils.agent_resolve import FallbackReason
-
     stale = AgentResult(
         success=True,
         output="cached review from attempt 0",
@@ -380,7 +434,6 @@ async def test_stale_primary_result_is_not_reused_by_fallback() -> None:
     assert _fallback_reason(result) == FallbackReason.stale_attempt
 
 
-@_XFAIL_HA2
 async def test_both_harnesses_obey_the_rule() -> None:
     """OpenCode-shaped and Codex-shaped incomplete results reach the same decision."""
     incomplete = {
