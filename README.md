@@ -563,6 +563,7 @@ of them for its full flag set):
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
 | `mergecraft diff-review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft eval add` | Add a case to the bank. |
+| `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval gate` | Check the eval bank's integrity — the CI-safe half of the eval loop. |
 | `mergecraft eval list` | List cases in the bank. |
 | `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44, W12.1). |

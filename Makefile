@@ -16,6 +16,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	examples example-workflows-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
+	bench-detect \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check
 
@@ -177,6 +178,9 @@ eval-gate: ## Check eval-bank integrity (structural; see 'mergecraft eval gate -
 
 eval-replay: ## Replay eval bank; write versioned result set (operator-triggered; needs live keys for F1)
 	$(UV) run mergecraft eval replay-bank
+
+bench-detect: ## Join structural replay + live finding-location detection (#140, B3; needs live keys)
+	$(UV) run mergecraft eval bench
 
 docker-build: ## Build action Docker image
 	docker build -t mergeCraft:local -f Dockerfile .

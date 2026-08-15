@@ -33,6 +33,11 @@ from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
     replay_bank,
+    write_result_set,
+)
+from mergecraft.evals.live_run import (
+    DEFAULT_DETECTION_CORPUS_DIR,
+    run_full_benchmark,
 )
 from mergecraft.evals.scoring import (
     DEFAULT_LINE_SLACK,
@@ -587,6 +592,79 @@ def replay_bank_cmd(
             console.print(f"  unsafe approval rate: {result.metrics.unsafe_approval_rate:.2%}")
             console.print(f"  clean block rate    : {result.metrics.clean_block_rate:.2%}")
             console.print(f"  inconclusive rate   : {result.metrics.inconclusive_rate:.2%}")
+
+
+# ── bench ──────────────────────────────────────────────────────────────
+
+
+@app.command("bench")
+def bench_cmd(
+    bank: Path | None = typer.Option(
+        None,
+        "--bank",
+        help="Bank directory for structural replay (default: evals/cases/).",
+    ),
+    detection_corpus: Path = typer.Option(
+        DEFAULT_DETECTION_CORPUS_DIR,
+        "--detection-corpus",
+        help="Patch-bearing detection-corpus directory.",
+    ),
+    results_dir: Path | None = typer.Option(
+        None,
+        "--results-dir",
+        help="Directory for result sets (default: evals/results/).",
+    ),
+    provider: str = typer.Option(
+        "claude",
+        "--provider",
+        help="Provider name recorded on the detection result (structural replay always pins both).",
+    ),
+    model: str = typer.Option(
+        "claude-sonnet-5",
+        "--model",
+        help="Model slug to check credentials for and drive live detection with.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the joined result set as JSON on stdout.",
+    ),
+) -> None:
+    """Join structural decision replay with a live finding-location run (#140, B3).
+
+    Structural replay (keyless) always runs. Live detection additionally runs
+    ``diff-review`` against the patch-bearing detection corpus, if credentials
+    for ``--model`` are available and the corpus is non-empty — otherwise the
+    ``detection`` section is omitted and the reason is reported, never
+    fabricated (see ``evals/README.md``).
+    """
+    bank_dir = _bank_dir(bank)
+    out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
+    result = run_full_benchmark(
+        bank_dir,
+        detection_corpus_dir=detection_corpus,
+        results_dir=out_dir,
+        providers=DEFAULT_BENCHMARK_PROVIDERS,
+        detection_provider=provider,
+        detection_model=model,
+    )
+    path = write_result_set(result, results_dir=out_dir)
+    if json_output:
+        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+        return
+
+    console.print(f"[green]benchmark result set[/green] → {path}")
+    console.print(f"  structural cases: {result.metrics.cases_total}")
+    console.print(f"  pass rate       : {result.metrics.decision_replay_pass_rate:.2%}")
+    if result.detection is not None:
+        det = result.detection
+        console.print(f"  detection cases : {det.cases_run}")
+        console.print(f"  recall          : {det.aggregate.recall:.2%}")
+        console.print(f"  precision       : {det.aggregate.corpus_confirmed_precision:.2%}")
+        console.print(f"  f1              : {det.aggregate.f1:.2%}")
+        console.print(f"  raw findings @  : {det.raw_findings_dir}")
+    else:
+        console.print(f"[yellow]detection skipped[/yellow]: {result.skipped_reason}")
 
 
 # ── gate ───────────────────────────────────────────────────────────────

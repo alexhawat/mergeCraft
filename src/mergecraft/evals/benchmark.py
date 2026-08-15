@@ -22,7 +22,7 @@ from mergecraft.agents.verifier import (
     judge_pin,
     pinned_judge_model,
 )
-from mergecraft.evals.scoring import DEFAULT_LINE_SLACK
+from mergecraft.evals.scoring import DEFAULT_LINE_SLACK, AggregateScoreReport
 from mergecraft.evals.store import (
     CASE_STATUS_PASSED,
     CASE_STATUS_REGRESSION,
@@ -33,7 +33,7 @@ from mergecraft.evals.store import (
 )
 from mergecraft.modes import modes
 
-RESULT_SET_SCHEMA_VERSION: Final[str] = "1.1.0"
+RESULT_SET_SCHEMA_VERSION: Final[str] = "1.2.0"
 DEFAULT_RESULTS_DIR: Final[Path] = Path("evals/results")
 
 # Providers the benchmark names by default (W9.0: ≥2 providers).
@@ -164,6 +164,55 @@ class BenchmarkMetrics(BaseModel):
     by_corpus_class: dict[str, CorpusClassRollup]
 
 
+class DetectionCase(BaseModel):
+    """One patch-bearing detection-corpus case discovered on disk (B3, N5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str
+    patch_path: Path
+    baseline_path: Path
+    closed_world: bool = False
+
+
+class DetectionCaseResult(BaseModel):
+    """One case's live finding-location outcome — mirrors ``CaseReplayRow``'s
+    role for structural replay, but for the detection join (B3, N5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str
+    closed_world: bool
+    total_issues: int
+    total_reported: int
+    found: int
+    recall: float
+    corpus_confirmed_precision: float
+    f1: float
+    # None on an open-world case — `ScoreReport.strict_precision` raises there
+    # (D4); never fabricated as a number that doesn't exist.
+    strict_precision: float | None = None
+
+
+class DetectionMetrics(BaseModel):
+    """Live finding-location metrics for one provider/model (B3, N5).
+
+    The join `run_structural_replay()`'s own docstring named as a future
+    path: corpus case → `diff-review` findings → `score_findings()` →
+    folded here. Optional on `BenchmarkResultSet` — see `skipped_reason`
+    for why a run may carry neither `detection` nor a fabricated one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    model: str
+    cases_run: int
+    aggregate: AggregateScoreReport
+    case_results: list[DetectionCaseResult]
+    raw_findings_dir: str
+
+
 class BenchmarkResultSet(BaseModel):
     """Wire shape written under ``evals/results/``."""
 
@@ -173,6 +222,12 @@ class BenchmarkResultSet(BaseModel):
     pins: VersionPins
     metrics: BenchmarkMetrics
     case_results: list[CaseReplayRow]
+    # B3, N5: the live finding-location join. `None` when no live run
+    # attempted it yet, or when one was attempted but skipped — see
+    # `skipped_reason` for which. Both optional (default `None`) so a
+    # pre-B3 committed result set with neither key still validates (D3).
+    detection: DetectionMetrics | None = None
+    skipped_reason: str | None = None
 
 
 def corpus_class_for(case: Case) -> str:
@@ -417,6 +472,9 @@ __all__ = [
     "BenchmarkResultSet",
     "CaseReplayRow",
     "CorpusClassRollup",
+    "DetectionCase",
+    "DetectionCaseResult",
+    "DetectionMetrics",
     "GateMatrix",
     "ReviewingModelPin",
     "VersionPins",
