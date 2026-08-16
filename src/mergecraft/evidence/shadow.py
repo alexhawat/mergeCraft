@@ -112,6 +112,7 @@ class ShadowRecord(BaseModel):
     predicted_outcome: str | None = None
     diagnostic: str | None = None
     verdict_diagnostic: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
