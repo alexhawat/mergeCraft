@@ -196,7 +196,7 @@ def test_opencode_with_non_nous_provider_resolves() -> None:
     async def run_once(slug: str) -> AgentResult:
         agent = resolve_runtime_agent(model=slug, settings=settings)
         chosen.append(agent)
-        return AgentResult(success=True)
+        return AgentResult(success=True, terminal_submission_received=True)
 
     asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
     assert chosen == [agents["opencode"]], (
@@ -308,7 +308,7 @@ def test_harness_reaches_telemetry() -> None:
     memory = wrapper.inner.sinks[0]
 
     async def run_once(_slug: str) -> AgentResult:
-        return AgentResult(success=True)
+        return AgentResult(success=True, terminal_submission_received=True)
 
     _slug, result = asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
 
@@ -352,7 +352,7 @@ def test_not_visited_spans_stamp_explicit_harness() -> None:
     memory = wrapper.inner.sinks[0]
 
     async def run_once(_slug: str) -> AgentResult:
-        return AgentResult(success=True)
+        return AgentResult(success=True, terminal_submission_received=True)
 
     asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
 
