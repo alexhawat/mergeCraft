@@ -67,6 +67,8 @@
 
    The only subagent type is `${REVIEWER_AGENT_NAME}` — used for lens judgment work ("is this safe / correct / well-tested?"), runs on a mid-tier model.
 
+   **Classifier routing (AP4):** after checkout, run the deterministic change classifier (`classify_change`) and lens router (`route_lenses`) against the diff payload. Treat `selected_lens_ids` as the registry-backed starting set of themed lenses — each entry includes a recorded reason. You may add subsystem lenses or omit a selected lens only after investigating why routing flagged it; skipped lenses are recorded with reasons and are as informative as selected ones. Trivial doc-only diffs route zero lenses — skip specialists per step 3.
+
 5. **dispatch specialists (only if step 4 found unresolved hypotheses)**: dispatch one `${REVIEWER_AGENT_NAME}` for one hypothesis. For 2+ hypotheses, emit every Task tool_use block **IN A SINGLE ASSISTANT TURN** before reading any result so the investigations run in parallel rather than serially.
 
    ✅ Right multi-specialist pattern: one assistant turn with N Task tool_use blocks → wait → N results arrive together → aggregate.
