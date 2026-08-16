@@ -162,6 +162,16 @@ class AnalyzerPatternSettings(_OptionalFeatureModel):
 
 
 DispatchMode = Literal["single", "ensemble", "shadow"]
+RiskBand = Literal["low", "medium", "high"]
+
+
+class LensTriggerOverride(BaseModel):
+    """Declarative routing triggers for a registry lens entry (AP4)."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    categories: list[str] = Field(default_factory=list)
+    min_risk_band: RiskBand | None = Field(default=None, alias="minRiskBand")
 
 
 class AgentBindingOverride(BaseModel):
@@ -178,6 +188,7 @@ class AgentBindingOverride(BaseModel):
     budget: int | None = None
     timeout_s: int | None = Field(default=None, alias="timeoutS")
     dispatch: DispatchMode | None = None
+    triggers: LensTriggerOverride | None = None
 
     @field_validator("role", mode="before")
     @classmethod
