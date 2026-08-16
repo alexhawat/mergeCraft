@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/03-agent-pipeline-wave-plan.md` (PR AP5)
 Worktree: `../mergecraft-agent-pipeline` @ `feature/agent-pipeline-ap5`
 Authoring wave: **AP5.1** (tests-first). Implementation: **AP5.2**.
-xfail-reconciliation: **post-AP5.2** (pending).
+xfail-reconciliation: **post-AP5.2** (complete).
 
 Locked decisions: **D11** (six originally-dropped lenses ship with the other 14 —
 `impact`, `research-validated-assumptions`, `user-journey`, `operational-readiness`,
@@ -12,15 +12,14 @@ Locked decisions: **D11** (six originally-dropped lenses ship with the other 14 
 
 ## xfail schedule
 
-All nine AP5.1 tests are `@pytest.mark.xfail(reason="AP5.2", strict=True)` until
-AP5.2 lands. Post-AP5.2 reconciliation removes the markers.
+| Test file | Tests | Marker | Status |
+|-----------|-------|--------|--------|
+| `tests/agents/test_lenses.py` | 9 | — | **GREEN** |
 
-| Test file | Tests | Marker | Status at AP5.1 |
-|-----------|-------|--------|-----------------|
-| `tests/agents/test_lenses.py` | 9 | `AP5.2` `strict=True` | **RED (xfail)** |
-
-**Acceptance (AP5.1):** 9 collected; 0 pass; 9 xfail. `make lint` + `make typecheck`
-clean.
+**Acceptance (post-AP5.2 reconciliation):** 9 collected; 9 pass. `make lint` +
+`make typecheck` clean. Rubric preservation compares against
+`tests/_fixtures/ap5_starter_menu_rubrics.json` (starter-menu prose frozen at AP5.1;
+`Review.TEMPLATE` no longer embeds bullets after AP5.2).
 
 ## Target API AP5.2 must satisfy
 
@@ -32,7 +31,7 @@ Each module exports a frozen `LensDefinition` (name may vary) with:
 |-------|----------|
 | `lens_id` | Stable slug (`security`, `copy-vs-code`, `schema-migration`, …) |
 | `title` | Human display title (starter-menu prose title where applicable) |
-| `rubric` | Preserved starter-menu prose — byte-identical to extracted `Review.py` text for the 13 prompt lenses |
+| `rubric` | Preserved starter-menu prose — byte-identical to `tests/_fixtures/ap5_starter_menu_rubrics.json` for the 13 prompt lenses |
 | `triggers` | `LensTriggers` (`categories`, `minRiskBand`) for AP4 routing intersection |
 | `required_evidence` | Non-empty tuple of evidence kinds the lens expects |
 | `tool_classes` | Per-lens `frozenset[ToolClass]` — security includes `ANALYSIS`; copy-vs-code includes `REPOSITORY_READ` without `ANALYSIS` |
@@ -90,7 +89,7 @@ into lens modules unchanged — not rewritten (out-of-scope guard).
 | 3 | `test_subsystem_lenses_need_no_entry` | unit | edge | `auth` not in catalog; `build_subsystem_lens("auth")` has rubric + triggers + evidence |
 | 4 | `test_each_lens_declares_triggers_rubric_and_required_evidence` | unit | data integrity | Every bundled lens has triggers, rubric, required_evidence |
 | 5 | `test_each_lens_has_its_own_toolset` | unit | guard-deletion | Security ≠ copy-vs-code toolsets; security has `ANALYSIS`; copy has read without analyzers |
-| 6 | `test_lens_rubric_text_is_preserved_from_the_prompt` | unit | byte preservation | Rubric == extracted `Review.py` prose per prompt lens |
+| 6 | `test_lens_rubric_text_is_preserved_from_the_prompt` | unit | byte preservation | Rubric == `ap5_starter_menu_rubrics.json` per prompt lens |
 | 7 | `test_prompt_no_longer_duplicates_the_menu` | functional | de-duplication | No starter-menu bullets in `TEMPLATE`; registry reference present |
 | 8 | `test_lens_test_verb_runs_one_lens_in_isolation` | functional/E2E | CLI | `lens test security --diff` exits 0 with lens output |
 | 9 | `test_review_coverage_does_not_regress` | integration | recall gate | Eval-shaped baseline (`tests/_fixtures/ap5_routing_recall_baseline.json`) — mean recall ≥ `min_recall` |
@@ -99,15 +98,19 @@ into lens modules unchanged — not rewritten (out-of-scope guard).
 
 `mergecraft.agents.lenses` and `mergecraft.cli.lens_cmd` symbols are imported
 **inside test bodies** (or helpers those bodies call) so collection succeeds before
-AP5.2. Module-level `pytestmark` applies xfail to all nine tests.
+AP5.2.
 
-## Baseline fixture
+## Baseline fixtures
 
 `tests/_fixtures/ap5_routing_recall_baseline.json` — eight eval-shaped routing
 cases with `expected_lens_ids` and `min_recall: 1.0`. Captures pre-refactor
 routing intent; AP5.2 must not drop recall on this corpus.
 
+`tests/_fixtures/ap5_starter_menu_rubrics.json` — frozen starter-menu rubric
+prose for the 13 prompt lenses (captured before AP5.2 removed bullets from
+`Review.TEMPLATE`).
+
 ## Status
 
-AP5.1 RED suite authored; AP5.2 implementation pending; xfail markers remain
-until post-AP5.2 reconciliation.
+AP5.1 RED suite authored; AP5.2 implementation landed; post-AP5.2 xfail
+reconciliation complete — all nine tests GREEN.

@@ -12,20 +12,19 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from typer.testing import CliRunner
 
-from mergecraft.cli.app import app
 from mergecraft.mcp.shared import ToolClass
 from mergecraft.modes.Review import TEMPLATE
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
-pytestmark = pytest.mark.xfail(reason="AP5.2", strict=True)
-
 _FIXTURES = Path(__file__).resolve().parent.parent / "_fixtures"
 _RECALL_BASELINE = _FIXTURES / "ap5_routing_recall_baseline.json"
+_STARTER_MENU_RUBRICS: dict[str, str] = json.loads(
+    (_FIXTURES / "ap5_starter_menu_rubrics.json").read_text(encoding="utf-8")
+)["rubrics"]
 
 _DEFAULT_MODELS_YAML = """
 models:
@@ -66,7 +65,9 @@ _STARTER_MENU_BULLETS: tuple[str, ...] = tuple(
     f"**{title}**" for title in _PROMPT_LENS_TITLES.values()
 )
 
-_runner = CliRunner()
+
+def _cli_runner() -> CliRunner:
+    return CliRunner()
 
 
 def _write_config(tmp_path: Path, body: str = _DEFAULT_MODELS_YAML) -> None:
@@ -101,21 +102,13 @@ def _build_subsystem_lens(lens_id: str) -> Any:
     return build_subsystem_lens(lens_id)
 
 
-def _starter_menu_rubric(display_title: str) -> str:
-    """Extract the preserved rubric prose for one starter-menu lens from Review.py."""
-    marker = f"**{display_title}**"
-    start = TEMPLATE.find(marker)
-    if start < 0:
-        msg = f"starter-menu lens {display_title!r} not found in Review.py TEMPLATE"
-        raise AssertionError(msg)
-    dash = TEMPLATE.find(" — ", start)
-    if dash < 0:
-        msg = f"no rubric delimiter for lens {display_title!r}"
-        raise AssertionError(msg)
-    end = TEMPLATE.find("\n   - **", dash)
-    if end < 0:
-        end = len(TEMPLATE)
-    return TEMPLATE[dash + 3 : end].strip()
+def _starter_menu_rubric(lens_id: str) -> str:
+    """Return the frozen starter-menu rubric prose for one prompt lens."""
+    try:
+        return _STARTER_MENU_RUBRICS[lens_id]
+    except KeyError as exc:
+        msg = f"starter-menu lens {lens_id!r} not found in ap5_starter_menu_rubrics.json"
+        raise AssertionError(msg) from exc
 
 
 def test_all_thirteen_prompt_lenses_have_registry_entries(
@@ -188,9 +181,9 @@ def test_each_lens_has_its_own_toolset(tmp_path: Path, monkeypatch: MonkeyPatch)
 
 
 def test_lens_rubric_text_is_preserved_from_the_prompt() -> None:
-    """Bundled rubric text must byte-match the extracted Review.py starter-menu prose."""
-    for lens_id, display_title in _PROMPT_LENS_TITLES.items():
-        expected = _starter_menu_rubric(display_title)
+    """Bundled rubric text must byte-match the frozen starter-menu fixture."""
+    for lens_id in _PROMPT_LENS_TITLES:
+        expected = _starter_menu_rubric(lens_id)
         lens = _get_lens(lens_id)
         assert lens.rubric == expected, f"rubric drift for {lens_id!r}"
 
@@ -207,6 +200,8 @@ def test_lens_test_verb_runs_one_lens_in_isolation(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """``mergecraft lens test`` runs one bundled lens against a diff fixture."""
+    from mergecraft.cli.app import app
+
     diff_path = tmp_path / "security.patch"
     diff_path.write_text(
         "diff --git a/src/auth/session.py b/src/auth/session.py\n"
@@ -218,7 +213,7 @@ def test_lens_test_verb_runs_one_lens_in_isolation(
     _write_config(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    result = _runner.invoke(app, ["lens", "test", "security", "--diff", str(diff_path)])
+    result = _cli_runner().invoke(app, ["lens", "test", "security", "--diff", str(diff_path)])
 
     assert result.exit_code == 0, result.stdout + result.stderr
     output = result.stdout.lower()
