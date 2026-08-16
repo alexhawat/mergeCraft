@@ -161,6 +161,32 @@ class AnalyzerPatternSettings(_OptionalFeatureModel):
     backend: str | None = None
 
 
+DispatchMode = Literal["single", "ensemble", "shadow"]
+
+
+class AgentBindingOverride(BaseModel):
+    """Partial override for one agent entry under ``agents:`` in config (AP1)."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    role: str | None = None
+    lens: str | None = None
+    model: str | None = None
+    model_chain: list[str] | None = Field(default=None, alias="modelChain")
+    prompt_id: str | None = Field(default=None, alias="promptId")
+    prompt_version: str | None = Field(default=None, alias="promptVersion")
+    budget: int | None = None
+    timeout_s: int | None = Field(default=None, alias="timeoutS")
+    dispatch: DispatchMode | None = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _normalize_role(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.lower()
+        return value
+
+
 class AnalyzersSettings(BaseModel):
     """Catalog analyzer configuration block.
 
@@ -343,6 +369,7 @@ class RepoSettings(BaseModel):
     # no declaration, no substitution, no extra API call.
     ci_evidence: CiEvidenceSettings = Field(default_factory=CiEvidenceSettings, alias="ciEvidence")
     analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
+    agents: dict[str, AgentBindingOverride] = Field(default_factory=dict)
     learnings: str | None = None
     learnings_headings: list[LearningsHeading] = Field(
         default_factory=list, alias="learningsHeadings"
