@@ -16,8 +16,8 @@ def validate_agent_registry(*, repo_root: Path | None = None) -> None:
         if (root / ".mergecraft" / "config.yaml").is_file()
         else default_settings()
     )
-    registry = load_registry(settings=settings, repo_root=root)
     try:
+        registry = load_registry(settings=settings, repo_root=root)
         registry.validate()
     except RegistryValidationError as exc:
         msg = f"agent registry validation failed: {exc}"

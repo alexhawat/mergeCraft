@@ -123,6 +123,13 @@ def _model_reference_valid(ref: str) -> bool:
     return any(alias.resolve == ref for alias in MODEL_ALIASES)
 
 
+def _parse_role(value: str) -> AgentRole | None:
+    try:
+        return AgentRole(value)
+    except ValueError:
+        return None
+
+
 def _default_model_chain(settings: RepoSettings, *, role: AgentRole) -> list[str]:
     run_chain = effective_model_chain(settings)
     if not run_chain:
@@ -278,13 +285,16 @@ def load_registry(
         bindings[role.value] = _build_default_binding(settings, role)
 
     for agent_key, override in settings.agents.items():
-        base_key = override.role or agent_key
-        try:
-            base_role = AgentRole(base_key)
-            base = bindings.get(base_role.value) or _build_default_binding(settings, base_role)
-        except ValueError:
-            base_role = AgentRole.reviewer
-            base = _build_default_binding(settings, base_role)
+        key_role = _parse_role(agent_key)
+        declared_role = _parse_role(override.role) if override.role is not None else None
+        if key_role is None and declared_role is None and override.lens is None:
+            msg = (
+                f"unknown agent key {agent_key!r}: set role: or lens: "
+                "so it does not silently replace a default role binding"
+            )
+            raise RegistryValidationError(msg)
+        base_role = declared_role or key_role or AgentRole.reviewer
+        base = bindings.get(base_role.value) or _build_default_binding(settings, base_role)
         bindings[agent_key] = _apply_override(
             base, override, agent_key=agent_key, settings=settings
         )

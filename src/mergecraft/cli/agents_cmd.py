@@ -10,7 +10,12 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-from mergecraft.agents.registry import load_registry, resolve_prompt_text
+from mergecraft.agents.registry import (
+    AgentRole,
+    RegistryValidationError,
+    load_registry,
+    resolve_prompt_text,
+)
 from mergecraft.config.settings import AgentBindingOverride, load_repo_settings
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -71,7 +76,10 @@ def list_cmd(
     """List agent bindings with model chain, prompt id, and tool count."""
     repo_root = _repo_root(cwd)
     settings = load_repo_settings(root=repo_root)
-    registry = load_registry(settings=settings, repo_root=repo_root)
+    try:
+        registry = load_registry(settings=settings, repo_root=repo_root)
+    except RegistryValidationError as exc:
+        _bail(str(exc))
     ctx = _tool_ctx(repo_root)
 
     table = Table(title="Agent registry")
@@ -102,10 +110,17 @@ def show_cmd(
 ) -> None:
     """Show resolved prompt text and MCP tool names for one role."""
     repo_root = _repo_root(cwd)
-    settings = load_repo_settings(root=repo_root)
-    registry = load_registry(settings=settings, repo_root=repo_root)
     try:
+        AgentRole(role)
+    except ValueError:
+        _bail(f"unknown role: {role!r}")
+
+    settings = load_repo_settings(root=repo_root)
+    try:
+        registry = load_registry(settings=settings, repo_root=repo_root)
         binding = registry.resolve_role(role)
+    except RegistryValidationError as exc:
+        _bail(str(exc))
     except KeyError:
         _bail(f"unknown role: {role!r}")
 
@@ -133,6 +148,13 @@ def set_cmd(
     if model is None:
         _bail("pass at least one override flag (e.g. --model)")
 
+    role_key = role.lower()
+    try:
+        AgentRole(role_key)
+    except ValueError:
+        known = ", ".join(item.value for item in AgentRole)
+        _bail(f"unknown role: {role!r} (expected one of: {known})")
+
     repo_root = _repo_root(cwd)
     config_path = repo_root / ".mergecraft" / "config.yaml"
     if not config_path.is_file():
@@ -146,9 +168,9 @@ def set_cmd(
     if not isinstance(agents, dict):
         _bail("agents block must be a mapping")
 
-    entry = agents.setdefault(role, {})
+    entry = agents.setdefault(role_key, {})
     if not isinstance(entry, dict):
-        _bail(f"agents.{role} must be a mapping")
+        _bail(f"agents.{role_key} must be a mapping")
 
     if model is not None:
         entry["modelChain"] = [model]
@@ -156,4 +178,4 @@ def set_cmd(
     # Validate the override round-trips through Pydantic before writing.
     AgentBindingOverride.model_validate(entry)
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
-    console.print(f"[green]updated agents.{role} in {config_path}[/green]")
+    console.print(f"[green]updated agents.{role_key} in {config_path}[/green]")

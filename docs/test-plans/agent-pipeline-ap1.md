@@ -26,6 +26,9 @@ post-AP1.2 reconciliation. Previously:
 **Acceptance (post-AP1.2 reconciliation):** 16 collected; 16 pass; 0 xfail/xpass.
 `make lint` + `make typecheck` clean.
 
+**PR #231 review finding:** non-role key without `role:`/`lens:` must not overwrite
+the default reviewer. Coverage rows 17–19; collected count is 19.
+
 ## Target API AP1.2 must satisfy
 
 `src/mergecraft/agents/registry.py` (new):
@@ -49,7 +52,7 @@ post-AP1.2 reconciliation. Previously:
 
 ## Contract → coverage matrix
 
-### `tests/agents/test_agent_registry.py` — 13 tests
+### `tests/agents/test_agent_registry.py` — 15 tests
 
 | # | Test | Layer | Scenario | Contract |
 |---|------|-------|----------|----------|
@@ -66,14 +69,17 @@ post-AP1.2 reconciliation. Previously:
 | 11 | `test_registry_validation_rejects_a_missing_model` | unit | error | Unknown model slug → `RegistryValidationError` |
 | 12 | `test_registry_validation_rejects_an_unknown_prompt_id` | unit | error | Unknown `promptId` → `RegistryValidationError` |
 | 13 | `test_registry_validation_rejects_an_unreachable_lens` | unit | error | Lens entry without registry support → `RegistryValidationError` |
+| 17 | `test_non_role_override_without_role_or_lens_raises` | unit | error / guard-deletion | Custom `agents:` key without `role:`/`lens:` → `RegistryValidationError` (`(?i)role\|lens\|unknown`); must not silently become reviewer (PR #231) |
+| 18 | `test_custom_keyed_override_with_explicit_role_does_not_clobber_reviewer` | integration | happy | Custom key with explicit `role: verifier` binds verifier as `senior-reviewer`; reviewer stays `mergecraft-reviewer` |
 
-### `tests/cli/test_agents_verbs.py` — 3 tests
+### `tests/cli/test_agents_verbs.py` — 4 tests
 
 | # | Test | Layer | Scenario | Contract |
 |---|------|-------|----------|----------|
 | 14 | `test_agents_list_shows_model_prompt_and_tools` | functional | happy | `agents list` shows role, model, prompt, tools |
 | 15 | `test_agents_show_prints_the_resolved_prompt_and_exact_tool_names` | functional | happy | `agents show reviewer` prints prompt body + exact tool names |
 | 16 | `test_agents_set_overrides_one_binding` | functional | happy | `agents set reviewer --model …` persists override; reload shows new chain head |
+| 19 | `test_agents_set_rejects_unknown_role` | functional | error / guard-deletion | `agents set senior-reviewer` exits non-zero, mentions unknown/role, and does not persist the typo key (PR #231) |
 
 ## Imports of not-yet-existing symbols
 
@@ -84,4 +90,6 @@ AP1.2.
 ## Status
 
 AP1.1 RED suite authored; AP1.2 implementation green; xfail markers removed
-post-AP1.2 reconciliation. All 16 tests pass.
+post-AP1.2 reconciliation. Original 16 tests pass. Rows 17–19 pin the PR #231
+review finding (non-role key without `role:`/`lens:` must not overwrite the
+default reviewer). Collected count is 19.

@@ -86,3 +86,25 @@ def test_agents_set_overrides_one_binding(tmp_path: Path, monkeypatch: MonkeyPat
     binding = registry.resolve_role("reviewer")
     assert override_model in binding.model_chain
     assert binding.model_chain[0] == override_model
+
+
+def test_agents_set_rejects_unknown_role(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """``agents set`` bails on an unknown role before writing ``.mergecraft/config.yaml``.
+
+    Guard-deletion pin (PR #231): without the ``AgentRole`` check the typo key
+    would be persisted and this assertion would fail.
+    """
+    _write_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / ".mergecraft" / "config.yaml"
+
+    result = runner.invoke(
+        app,
+        ["agents", "set", "senior-reviewer", "--model", "google/gemini-3.1-pro-preview"],
+    )
+
+    assert result.exit_code != 0
+    output = (result.stdout + result.stderr).lower()
+    assert "unknown" in output or "role" in output
+    yaml_text = config_path.read_text(encoding="utf-8")
+    assert "senior-reviewer" not in yaml_text

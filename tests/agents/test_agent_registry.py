@@ -412,3 +412,52 @@ agents:
     registry = _load_registry(tmp_path)
     with pytest.raises(RegistryValidationError, match=r"(?i)lens|unreachable|unknown"):
         registry.validate()
+
+
+def test_non_role_override_without_role_or_lens_raises(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A custom ``agents:`` key without ``role:`` or ``lens:`` must not become reviewer.
+
+    Guard-deletion pin (PR #231): a silent ``AgentRole.reviewer`` fallback would
+    overwrite ``_by_role[reviewer]`` and this assertion would fail.
+    """
+    _write_config(
+        tmp_path,
+        _DEFAULT_MODELS_YAML
+        + """
+agents:
+  senior-reviewer:
+    modelChain:
+      - anthropic/claude-sonnet
+""",
+    )
+    monkeypatch.chdir(tmp_path)
+    from mergecraft.agents.registry import RegistryValidationError
+
+    with pytest.raises(RegistryValidationError, match=r"(?i)role|lens|unknown"):
+        _load_registry(tmp_path)
+
+
+def test_custom_keyed_override_with_explicit_role_does_not_clobber_reviewer(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Explicit ``role:`` on a custom key binds that role and leaves reviewer intact."""
+    _write_config(
+        tmp_path,
+        _DEFAULT_MODELS_YAML
+        + """
+agents:
+  senior-reviewer:
+    role: verifier
+    modelChain:
+      - anthropic/claude-sonnet
+""",
+    )
+    monkeypatch.chdir(tmp_path)
+    registry = _load_registry(tmp_path)
+
+    reviewer = _resolve_role(registry, "reviewer")
+    verifier = _resolve_role(registry, "verifier")
+    assert reviewer.agent_id == "mergecraft-reviewer"
+    assert verifier.agent_id == "senior-reviewer"
