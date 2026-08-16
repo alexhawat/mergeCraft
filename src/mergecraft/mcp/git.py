@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, repository_mutation_class_for_push, tool
 from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
@@ -205,6 +205,7 @@ def git_tool(ctx: ToolContext):
 
     return tool(
         name="git",
+        tool_class=ToolClass.REPOSITORY_READ,
         description=(
             "Run a git subcommand. `command` is the subcommand ONLY. "
             "For push/fetch use push_branch / git_fetch."
@@ -241,6 +242,7 @@ def git_fetch_tool(ctx: ToolContext):
 
     return tool(
         name="git_fetch",
+        tool_class=ToolClass.REPOSITORY_READ,
         description="Fetch from the remote (handles authentication).",
         input_schema={
             "type": "object",
@@ -302,8 +304,10 @@ def push_branch_tool(ctx: ToolContext):
         logger.info("pushed branch {}", branch)
         return {"success": True, "branch": branch, "output": output}
 
+    repo_class = repository_mutation_class_for_push(ctx.payload.push)
     return tool(
         name="push_branch",
+        tool_class=repo_class,
         mutates=True,
         description="Push a branch to the remote (handles authentication).",
         input_schema={
@@ -337,8 +341,10 @@ def push_tags_tool(ctx: ToolContext):
         )
         return {"success": True, "tags": tags, "output": output}
 
+    repo_class = repository_mutation_class_for_push(ctx.payload.push)
     return tool(
         name="push_tags",
+        tool_class=repo_class,
         mutates=True,
         description="Push one or more tags to the remote.",
         input_schema={
@@ -371,8 +377,10 @@ def delete_branch_tool(ctx: ToolContext):
             output = _run_git(["branch", "-D", branch], cwd=cwd)
         return {"success": True, "branch": branch, "remote": remote, "output": output}
 
+    repo_class = repository_mutation_class_for_push(ctx.payload.push)
     return tool(
         name="delete_branch",
+        tool_class=repo_class,
         mutates=True,
         description="Delete a local or remote branch.",
         input_schema={
@@ -425,8 +433,10 @@ def commit_changes_tool(ctx: ToolContext):
             logger.info("API ref update skipped/failed: {}", err)
         return {"success": True, "sha": sha, "branch": branch, "message": message}
 
+    repo_class = repository_mutation_class_for_push(ctx.payload.push)
     return tool(
         name="commit_changes",
+        tool_class=repo_class,
         mutates=True,
         description=(
             "Commit working-tree changes as a GitHub-signed commit (signed-commits mode)."

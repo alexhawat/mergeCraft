@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import TerminalSubmission, primary_repo_state
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
 from mergecraft.tracing.redaction import redact_attrs
@@ -504,6 +504,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
             "additionalProperties": False,
         },
         mutates=False,
+        tool_class=ToolClass.TERMINAL_PROTOCOL,
         execute=execute(_run, "submit_review_verdict"),
     )
 

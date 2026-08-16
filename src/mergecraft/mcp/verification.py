@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
 from mergecraft.utils.learnings import learnings_file_path
 
@@ -207,6 +207,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
 
     return tool(
         name="verify_agent_findings",
+        tool_class=ToolClass.VERIFICATION,
         description=(
             "Queue the Critical/Major findings you wrote yourself for the "
             "mergecraft-verifier subagent, before you publish them. Returns one dispatch "
@@ -306,6 +307,7 @@ def record_finding_verdict_tool(ctx: ToolContext):
 
     return tool(
         name="record_finding_verdict",
+        tool_class=ToolClass.REVIEW_WRITE,
         mutates=True,
         description=(
             "Record one mergecraft-verifier verdict for a finding. confirm and downgrade "

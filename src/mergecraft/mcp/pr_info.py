@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -67,6 +67,7 @@ def get_pull_request_tool(ctx: ToolContext):
 
     return tool(
         name="get_pull_request",
+        tool_class=ToolClass.REPOSITORY_READ,
         description=(
             "Retrieve PR metadata (title, body, state, branches, author, labels, "
             "linked issues). To checkout a PR branch locally, use checkout_pr instead."

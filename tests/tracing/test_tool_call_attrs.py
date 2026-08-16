@@ -122,7 +122,7 @@ def test_mcp_tool_call_span_has_request_attrs(
     from fastapi.testclient import TestClient
 
     from mergecraft.mcp.server import MCP_ENDPOINT, create_mcp_app
-    from mergecraft.mcp.shared import ToolResult, ToolSpec
+    from mergecraft.mcp.shared import ToolClass, ToolResult, ToolSpec
     from mergecraft.tracing import MemorySink, Tracer
 
     sink = MemorySink()
@@ -146,6 +146,7 @@ def test_mcp_tool_call_span_has_request_attrs(
         description="Echo a value back.",
         input_schema={"type": "object", "properties": {"q": {"type": "string"}}},
         execute=_echo,
+        tool_class=ToolClass.ANALYSIS,
     )
     client = TestClient(create_mcp_app([spec]))
     client.post(
@@ -200,7 +201,7 @@ def test_mcp_tool_call_span_has_error_attrs(
     from fastapi.testclient import TestClient
 
     from mergecraft.mcp.server import MCP_ENDPOINT, create_mcp_app
-    from mergecraft.mcp.shared import ToolResult, ToolSpec
+    from mergecraft.mcp.shared import ToolClass, ToolResult, ToolSpec
     from mergecraft.tracing import MemorySink, Tracer
 
     class _BoomError(RuntimeError):
@@ -221,6 +222,7 @@ def test_mcp_tool_call_span_has_error_attrs(
         description="Always fails.",
         input_schema={"type": "object", "properties": {}},
         execute=_boom,
+        tool_class=ToolClass.ANALYSIS,
     )
     # ``raise_server_exceptions=False`` so the TestClient surfaces the
     # tool's exception as a 500 rather than bubbling it through the test

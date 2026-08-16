@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.mcp.shared import execute, get_http_status, tool
+from mergecraft.mcp.shared import ToolClass, execute, get_http_status, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -22,6 +22,7 @@ def add_labels_tool(ctx: ToolContext):
 
     return tool(
         name="add_labels",
+        tool_class=ToolClass.GITHUB_MUTATION,
         mutates=True,
         description=(
             "Add labels to a GitHub issue or pull request. "
@@ -65,6 +66,7 @@ def remove_labels_tool(ctx: ToolContext):
 
     return tool(
         name="remove_labels",
+        tool_class=ToolClass.GITHUB_MUTATION,
         mutates=True,
         description="Remove labels from a GitHub issue or pull request.",
         input_schema={

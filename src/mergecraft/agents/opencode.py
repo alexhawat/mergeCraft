@@ -35,7 +35,7 @@ from mergecraft.agents.shared import (
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.http import instrument_httpx
-from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.types import MERGECRAFT_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
 from mergecraft.utils.process_group import (
     kill_process_group,
@@ -154,6 +154,30 @@ def _custom_provider_ids(model: str | None) -> list[str]:
     return [endpoint[0]]
 
 
+def _reviewer_agent_config(ctx: AgentRunContext) -> dict[str, object]:
+    config: dict[str, object] = {
+        "description": ("Read-only review subagent for lens-based code review."),
+        "prompt": REVIEWER_SYSTEM_PROMPT,
+        "mode": "subagent",
+    }
+    denied = {format_mcp_tool_ref("opencode", name): "deny" for name in ctx.subagent_denied_tools}
+    if denied:
+        config["permission"] = denied
+    return config
+
+
+def _verifier_agent_config(ctx: AgentRunContext) -> dict[str, object]:
+    config: dict[str, object] = {
+        "description": ("Read-only verification subagent for Critical/Major analyzer findings."),
+        "prompt": VERIFIER_SYSTEM_PROMPT,
+        "mode": "subagent",
+    }
+    denied = {format_mcp_tool_ref("opencode", name): "deny" for name in ctx.verifier_denied_tools}
+    if denied:
+        config["permission"] = denied
+    return config
+
+
 def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
     fs_perm = build_opencode_native_fs_permission()
     config: dict[str, object] = {
@@ -173,18 +197,8 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
             }
         },
         "agent": {
-            REVIEWER_AGENT_NAME: {
-                "description": ("Read-only review subagent for lens-based code review."),
-                "prompt": REVIEWER_SYSTEM_PROMPT,
-                "mode": "subagent",
-            },
-            VERIFIER_AGENT_NAME: {
-                "description": (
-                    "Read-only verification subagent for Critical/Major analyzer findings."
-                ),
-                "prompt": VERIFIER_SYSTEM_PROMPT,
-                "mode": "subagent",
-            },
+            REVIEWER_AGENT_NAME: _reviewer_agent_config(ctx),
+            VERIFIER_AGENT_NAME: _verifier_agent_config(ctx),
         },
     }
     if model:

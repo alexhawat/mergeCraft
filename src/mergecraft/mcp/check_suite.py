@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from mergecraft.ci.log_excerpt import analyze_log as _analyze_log
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -21,6 +21,7 @@ def get_check_suite_logs_tool(ctx: ToolContext):
 
     return tool(
         name="get_check_suite_logs",
+        tool_class=ToolClass.REPOSITORY_READ,
         description=(
             "Get workflow run logs for a failed check suite. Returns a log_index, "
             "excerpt, and full_log_path."

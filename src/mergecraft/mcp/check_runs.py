@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -22,6 +22,7 @@ def list_check_runs_tool(ctx: ToolContext):
 
     return tool(
         name="list_check_runs",
+        tool_class=ToolClass.REPOSITORY_READ,
         description=(
             "List GitHub check suites for a commit ref. Returns check suite ids, "
             "status, and conclusions so you can pick a check_suite_id for "
@@ -48,6 +49,7 @@ def get_check_suite_tool(ctx: ToolContext):
 
     return tool(
         name="get_check_suite",
+        tool_class=ToolClass.REPOSITORY_READ,
         description="Fetch one GitHub check suite by id (status, conclusion, head SHA).",
         input_schema={
             "type": "object",

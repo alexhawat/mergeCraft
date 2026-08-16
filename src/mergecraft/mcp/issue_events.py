@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
@@ -69,6 +69,7 @@ def get_issue_events_tool(ctx: ToolContext):
 
     return tool(
         name="get_issue_events",
+        tool_class=ToolClass.REPOSITORY_READ,
         description=(
             "Get timeline events for a GitHub issue that aren't reflected in current "
             "state (cross-references and commit references)."

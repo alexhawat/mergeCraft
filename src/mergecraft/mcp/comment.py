@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ProgressComment, ReviewReplyRecord, primary_repo_state
 from mergecraft.utils.learnings import (
     ensure_learnings_review_delta,
@@ -61,6 +61,7 @@ def create_issue_comment_tool(ctx: ToolContext):
 
     return tool(
         name="create_issue_comment",
+        tool_class=ToolClass.GITHUB_MUTATION,
         mutates=True,
         description=(
             "Create a comment on a GitHub issue or PR. "
@@ -101,6 +102,7 @@ def edit_issue_comment_tool(ctx: ToolContext):
 
     return tool(
         name="edit_issue_comment",
+        tool_class=ToolClass.GITHUB_MUTATION,
         mutates=True,
         description="Edit a GitHub issue comment by its ID",
         input_schema={
@@ -157,6 +159,7 @@ def reply_to_review_comment_tool(ctx: ToolContext):
 
     return tool(
         name="reply_to_review_comment",
+        tool_class=ToolClass.GITHUB_MUTATION,
         mutates=True,
         description=("Reply to a pull request review comment. Keep replies to one short sentence."),
         input_schema={
@@ -238,6 +241,7 @@ def report_progress_tool(ctx: ToolContext):
 
     return tool(
         name="report_progress",
+        tool_class=ToolClass.REVIEW_WRITE,
         mutates=True,
         description=(
             "Share progress on the associated GitHub issue/PR. "

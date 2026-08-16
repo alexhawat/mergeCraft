@@ -13,7 +13,7 @@ from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.mcp.git import _git_env, _run_git
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
 
@@ -328,6 +328,7 @@ def checkout_pr_tool(ctx: ToolContext):
 
     return tool(
         name="checkout_pr",
+        tool_class=ToolClass.SCOPE,
         mutates=True,
         timeout_ms=600_000,
         description=(

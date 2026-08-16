@@ -49,6 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (PR G2): the README table documented 9 of 24 real `action.yml` inputs and
   neither declared output anywhere
 
+### Security
+
+- Reviewer and verifier now hold distinct, class-derived MCP toolsets; the live
+  MCP server exposes those surfaces at `/mcp/reviewer` and `/mcp/verifier`,
+  mutating tools stay off both except `checkout_pr` on the reviewer, and
+  finding-verdict persistence stays orchestrator-only
+
 ### Fixed
 
 - Fixed: terminal-verdict shadow mode now records a predicted outcome beside the legacy result on the live finalize path

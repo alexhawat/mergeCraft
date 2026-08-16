@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.types import format_mcp_tool_ref
 
 if TYPE_CHECKING:
@@ -58,6 +58,7 @@ def select_mode_tool(ctx: ToolContext):
 
     return tool(
         name="select_mode",
+        tool_class=ToolClass.SCOPE,
         mutates=True,
         description=("Select a mode and receive step-by-step guidance on how to handle the task."),
         input_schema={

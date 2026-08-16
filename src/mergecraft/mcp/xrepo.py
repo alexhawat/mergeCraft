@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.mcp.git import _git_env, _run_git
-from mergecraft.mcp.shared import EMPTY_SCHEMA, execute, tool
+from mergecraft.mcp.shared import EMPTY_SCHEMA, ToolClass, execute, tool
 from mergecraft.mcp.tool_state import RepoAccess, ensure_repo_state, repo_key
 from mergecraft.utils.workspace import register_workspace_root
 
@@ -64,6 +64,7 @@ def list_repos_tool(ctx: ToolContext):
 
     return tool(
         name="list_repos",
+        tool_class=ToolClass.SCOPE,
         annotations={"readOnlyHint": True},
         description=("List repositories available for cross-repo (--xrepo) work in this run."),
         input_schema=EMPTY_SCHEMA,
@@ -148,6 +149,7 @@ def checkout_repo_tool(ctx: ToolContext):
 
     return tool(
         name="checkout_repo",
+        tool_class=ToolClass.SCOPE,
         description=(
             "Clone a secondary repository into a temporary working tree and return "
             "its absolute path."

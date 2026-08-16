@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import BackgroundProcess, primary_repo_state
 from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import resolve_env
@@ -309,6 +309,7 @@ def shell_tool(ctx: ToolContext):
 
     return tool(
         name="shell",
+        tool_class=ToolClass.SHELL,
         timeout_ms=120_000,
         description=(
             f"Execute shell commands securely. Environment is filtered to remove API "
@@ -352,6 +353,7 @@ def kill_background_tool(ctx: ToolContext):
 
     return tool(
         name="kill_background",
+        tool_class=ToolClass.SHELL,
         mutates=True,
         description="Kill a background process by its handle.",
         input_schema={

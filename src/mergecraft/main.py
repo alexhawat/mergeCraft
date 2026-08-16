@@ -15,6 +15,7 @@ from mergecraft.action.inputs import apply_setup_overrides, apply_tracing_overri
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import Agent, AgentResult, AgentRunContext
+from mergecraft.agents.verifier import verifier_denied_tool_names
 from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_secrets
 from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
 from mergecraft.analyzers.trust import (
@@ -163,6 +164,7 @@ class RunContext:
     mcp_url: str = ""
     stop_mcp: Callable[[], None] | None = None
     subagent_denied: list[str] = field(default_factory=list)
+    verifier_denied: list[str] = field(default_factory=list)
     instructions: Any = None
     run_ctx: AgentRunContext | None = None
 
@@ -857,6 +859,8 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
 
     subagent_denied = subagent_denied_tool_names(tool_context, ctx.output_schema)
     ctx.subagent_denied = subagent_denied
+    verifier_denied = verifier_denied_tool_names(tool_context, ctx.output_schema)
+    ctx.verifier_denied = verifier_denied
 
     try:
         learnings_path = await seed_learnings_file(tmpdir=tmpdir, current=settings.learnings)
@@ -919,6 +923,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         mcp_server_url=mcp_url,
         tmpdir=tmpdir,
         subagent_denied_tools=subagent_denied,
+        verifier_denied_tools=verifier_denied,
         instructions=instructions,
         tool_state=tool_state,
         api_token=run_context.api_token,
@@ -1044,11 +1049,16 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 replace(tool_context, agent_id=attempt_agent_id),
                 output_schema,
             )
+            attempt_verifier_denied = verifier_denied_tool_names(
+                replace(tool_context, agent_id=attempt_agent_id),
+                output_schema,
+            )
             attempt_ctx = replace(
                 run_ctx,
                 resolved_model=attempt_model,
                 instructions=attempt_instructions,
                 subagent_denied_tools=attempt_denied,
+                verifier_denied_tools=attempt_verifier_denied,
             )
             tool_context.agent_id = attempt_agent_id
             tool_context.modes = attempt_modes
