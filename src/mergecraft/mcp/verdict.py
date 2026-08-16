@@ -293,6 +293,34 @@ def record_validated_terminal_submission(
     return recorded
 
 
+def recorded_submission_payload(submission: Any) -> dict[str, Any]:
+    findings: list[Any] = []
+    for item in submission.findings:
+        if hasattr(item, "model_dump"):
+            findings.append(item.model_dump(mode="json"))
+        else:
+            findings.append(item)
+    return {
+        "verdict": submission.verdict,
+        "summary": submission.summary,
+        "findings": findings,
+    }
+
+
+def revalidate_recorded_submission(ctx: ToolContext) -> None:
+    """Reject a stored verdict that current evidence has made unusable."""
+    submission = ctx.tool_state.terminal_submission
+    if submission is None:
+        return
+    validation = validate_submission(
+        recorded_submission_payload(submission),
+        state=validation_state_from_tool_context(ctx),
+    )
+    if not validation.accepted:
+        msg = f"terminal submission rejected: {validation.rejection_reason}"
+        raise ValueError(msg)
+
+
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         existing = ctx.tool_state.terminal_submission
@@ -383,6 +411,8 @@ __all__ = [
     "SubmissionValidation",
     "SubmitReviewVerdictParams",
     "record_validated_terminal_submission",
+    "recorded_submission_payload",
+    "revalidate_recorded_submission",
     "submit_review_verdict_tool",
     "validate_submission",
     "validation_state_from_tool_context",

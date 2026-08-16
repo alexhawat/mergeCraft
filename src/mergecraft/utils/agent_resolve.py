@@ -396,10 +396,12 @@ def _is_incomplete_review_success(
     """
     if tool_state is None or not result.success or result.terminal_submission_received:
         return False
-    from mergecraft.main_outcome import _is_review_mode
+    from mergecraft.main_outcome import _is_incremental_review, _is_review_mode
 
     mode = tool_state.selected_mode
     if mode is not None and not _is_review_mode(mode):
+        return False
+    if _is_incremental_review(mode) and tool_state.final_summary_written:
         return False
     submission = tool_state.terminal_submission
     if submission is not None and not tool_state.terminal_submission_conflict:

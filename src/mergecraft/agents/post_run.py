@@ -176,20 +176,6 @@ def build_reflection_prompt(issues: PostRunIssues) -> str:
     return f"{base}\n\nThis is a reflection turn — address the issues above, then stop."
 
 
-def _submission_as_payload(submission: Any) -> dict[str, Any]:
-    findings: list[Any] = []
-    for item in submission.findings:
-        if hasattr(item, "model_dump"):
-            findings.append(item.model_dump(mode="json"))
-        else:
-            findings.append(item)
-    return {
-        "verdict": submission.verdict,
-        "summary": submission.summary,
-        "findings": findings,
-    }
-
-
 def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None, dict[str, Any]]:
     """Copy the recorded terminal submission onto ``AgentResult``.
 
@@ -209,10 +195,14 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
             diagnostics["attempt_id"] = submission.attempt_id
         return False, None, diagnostics
 
-    from mergecraft.mcp.verdict import validate_submission, validation_state_from_tool_state
+    from mergecraft.mcp.verdict import (
+        recorded_submission_payload,
+        validate_submission,
+        validation_state_from_tool_state,
+    )
 
     validation = validate_submission(
-        _submission_as_payload(submission),
+        recorded_submission_payload(submission),
         state=validation_state_from_tool_state(ctx.tool_state),
     )
     if not validation.accepted:

@@ -912,6 +912,101 @@ async def test_existing_review_and_comment_behaviour_unchanged(tmp_path: Path) -
     assert ctx.tool_state.last_progress_body == "still working"
 
 
+@pytest.mark.asyncio
+async def test_body_only_comment_is_not_recorded_as_request_changes(tmp_path: Path) -> None:
+    """A plain COMMENT review must not fabricate a terminal ``request_changes``."""
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path)
+    ctx.github = github
+    primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
+
+    result = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": "Leaving a comment only."},
+    )
+    assert result.is_error is False
+    assert ctx.tool_state.terminal_submission is None
+    assert github.review_payloads[0]["event"] == "COMMENT"
+
+
+@pytest.mark.asyncio
+async def test_body_only_request_changes_is_rejected_without_findings(tmp_path: Path) -> None:
+    """Body-only ``request_changes`` must not evade D9 with a fabricated finding."""
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path)
+    ctx.github = github
+    primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
+
+    result = await create_pull_request_review_tool(ctx).execute(
+        {
+            "pull_number": 7,
+            "body": "Please change things.",
+            "request_changes": True,
+        }
+    )
+    assert result.is_error is True
+    assert _REASON_REQUEST_CHANGES_NO_FINDINGS in result.content[0]["text"]
+    assert ctx.tool_state.terminal_submission is None
+    assert github.review_payloads == []
+
+
+@pytest.mark.asyncio
+async def test_publication_cannot_flip_recorded_request_changes_to_approve(
+    tmp_path: Path,
+) -> None:
+    """A recorded ``request_changes`` must not publish as ``approved=True``."""
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path)
+    ctx.github = github
+    primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
+
+    recorded = await _submit_verdict(
+        ctx,
+        {
+            "verdict": "request_changes",
+            "summary": "One critical finding stands.",
+            "findings": [_agent_blocker().model_dump()],
+        },
+    )
+    assert recorded.is_error is False
+    assert ctx.tool_state.terminal_submission is not None
+    assert ctx.tool_state.terminal_submission.verdict == "request_changes"
+
+    published = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": "Actually LGTM.", "approved": True},
+    )
+    assert published.is_error is True
+    assert "does not match recorded terminal verdict" in published.content[0]["text"]
+    assert github.review_payloads == []
+
+
+@pytest.mark.asyncio
+async def test_publication_revalidates_stale_approve_after_failed_gate(
+    tmp_path: Path,
+) -> None:
+    """An earlier ``approve`` must not publish after a later failed required gate."""
+    github = _RecordingGitHub()
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="python -c 'raise SystemExit(1)'")],
+        static_checks_enabled=True,
+    )
+    ctx.github = github
+    primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
+
+    first = await _submit_verdict(ctx, _approve_payload())
+    assert first.is_error is False
+    checks = await run_static_checks_tool(ctx).execute({})
+    assert checks.is_error is False
+    assert any(row.get("status") == "failed" for row in ctx.tool_state.static_checks)
+
+    published = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": "Looks good.", "approved": True},
+    )
+    assert published.is_error is True
+    assert _REASON_APPROVE_FAILED_GATE in published.content[0]["text"]
+    assert github.review_payloads == []
+
+
 def test_both_harness_paths_obey_the_same_contract() -> None:
     """An OpenCode-shaped and a Codex-shaped ``AgentResult`` reach the same outcome."""
     opencode = AgentResult(

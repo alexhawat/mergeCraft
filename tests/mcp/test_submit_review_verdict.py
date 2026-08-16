@@ -472,3 +472,46 @@ async def test_model_chain_advances_when_first_success_has_no_terminal_verdict(
     recorded = ctx.tool_state.terminal_submission
     assert recorded is not None
     assert recorded.attempt_id == 1
+
+
+@pytest.mark.asyncio
+async def test_model_chain_does_not_advance_after_incremental_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """IncrementalReview ``report_progress`` is a complete result; do not fallback."""
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.utils.agent_resolve import run_with_model_chain
+
+    monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve._agent_binary_available",
+        lambda _slug: True,
+    )
+
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.selected_mode = "IncrementalReview"
+    calls: list[str] = []
+
+    async def run_once(slug: str) -> AgentResult:
+        calls.append(slug)
+        if not slug.startswith("openai/"):
+            raise AssertionError(f"fallback model {slug} must not run")
+        ctx.tool_state.final_summary_written = True
+        return AgentResult(success=True, output="no new findings")
+
+    settings = RepoSettings.model_validate(
+        {"models": ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]}
+    )
+    winning_slug, result = await run_with_model_chain(
+        settings=settings,
+        run_once=run_once,
+        tool_state=ctx.tool_state,
+    )
+
+    assert calls == ["openai/gpt-5.3-codex"]
+    assert winning_slug == "openai/gpt-5.3-codex"
+    assert result.success is True
+    assert ctx.tool_state.final_summary_written is True
+    assert ctx.tool_state.terminal_submission is None

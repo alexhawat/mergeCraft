@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed: a body-only COMMENT is no longer recorded as `request_changes`, and body-only `request_changes` is rejected unless it has real findings
+- Fixed: publication must match the recorded terminal verdict and is re-validated before sending `APPROVE`
+- Fixed: IncrementalReview `report_progress` no longer advances the model chain
 - Fixed: Review completion via `create_pull_request_review` now records a terminal verdict, and IncrementalReview may complete via `report_progress` without mapping to `inconclusive`
 - Fixed: verifier confirms persist outside replaceable analyzer run state, including agent-authored findings
 - Fixed: a verifier `confirm` now persists the finding fingerprint so `approve` over a confirmed blocker is rejected on the live tool path, not only in unit tests that seed `verified_ids`
