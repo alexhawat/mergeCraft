@@ -401,8 +401,8 @@ def test_registry_validation_rejects_an_unreachable_lens(
         _DEFAULT_MODELS_YAML
         + """
 agents:
-  lens-security:
-    lens: security
+  lens-nonexistent:
+    lens: nonexistent-lens
     role: reviewer
 """,
     )
