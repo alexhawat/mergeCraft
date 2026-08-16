@@ -66,7 +66,7 @@ def _coerce_confirmed_finding(item: Any) -> Any | None:
     if isinstance(item, dict):
         try:
             return Finding.model_validate(item)
-        except FindingValidationError, ValueError, TypeError:
+        except (FindingValidationError, ValueError, TypeError):  # fmt: skip
             severity = item.get("severity")
             if not severity:
                 return None
