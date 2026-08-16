@@ -1,7 +1,7 @@
 """VP4 publication split — ``create_pull_request_review`` delegates; publisher is internal.
 
 Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP4.1 RED,
-VP4.2 impl; xfail markers cleared after VP4.2; VP4.4 stale-replay pin).
+VP4.2 impl; xfail markers cleared after VP4.2 / VP4.3 / VP4.4).
 
 Pinned contracts (W0):
     D7 — ``create_pull_request_review`` is adapted, not deleted; thin delegate
@@ -250,10 +250,6 @@ async def test_body_only_unapproved_legacy_review_does_not_github_approve(
         assert submission.verdict != "approve"
 
 
-@pytest.mark.xfail(
-    reason="green after VP4.4: re-validate before publish on hash match",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_stale_approve_replay_does_not_github_approve_after_blocker(
     tmp_path: Path,

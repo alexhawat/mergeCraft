@@ -13,7 +13,7 @@ Worktree: `mergecraft-vp4-enforce-publish` @ `wave/vp4-enforce-publish` (stacked
 | **VP4.2** | `tests/review/test_phase_guards.py` (both) | *(markers removed 2026-08-16 after VP4.2)* |
 | **VP4.3** | `tests/review/test_publication_split.py::test_body_only_unapproved_legacy_review_does_not_github_approve` | *(markers removed 2026-08-16 after VP4.3)* |
 | **VP4.3** | `tests/review/test_phase_guards.py::test_create_pull_request_review_before_scope_is_rejected` | *(markers removed 2026-08-16 after VP4.3)* |
-| **VP4.4** | `tests/review/test_publication_split.py::test_stale_approve_replay_does_not_github_approve_after_blocker` | `@pytest.mark.xfail(reason="green after VP4.4: re-validate before publish on hash match", strict=False)` |
+| **VP4.4** | `tests/review/test_publication_split.py::test_stale_approve_replay_does_not_github_approve_after_blocker` | *(markers removed 2026-08-16 after VP4.4)* |
 
 Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a later XPASS into a hard failure the impl wave cannot touch.
 
@@ -32,6 +32,7 @@ Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a l
 | 2026-08-16 | VP4.2 | `_VP42_DELEGATE`, `_VP42_PUBLISH`, `_VP42_INTERNAL` on `test_publication_split.py`; `_VP42` on `test_enforcement_flip.py`; `_VP42_REVIEW`, `_VP42_INCREMENTAL` on `test_terminal_protocol_prompt.py`; `_VP42_SCOPE`, `_VP42_TRACE` on `test_phase_guards.py` | Suite is now 11/11 real passes (0 xfail / 0 XPASS). Direct pins added: `record_validated_terminal_submission`, `stamp_review_phase_on_active_span`. `pending_review_publication` pinned as a `ToolState` field. VP4 Final not flipped. |
 | 2026-08-16 | coverage-gate (Job A) | n/a (real passes, not xfails) | `test_shadow_records_prediction_without_changing_outcome` now pins `default_settings().gates.terminal_verdict == "enforce"` (D6); shadow-escape-hatch behaviour still driven via `_classify(..., verdict_protocol="shadow")`. `test_mode_prompt_text_is_byte_identical_after_split` compares Review / IncrementalReview **outside** the File 3/4 terminal-protocol paragraph (same markers as `test_terminal_protocol_prompt.py`); every other mode and both descriptions stay byte-identical. Snapshot fixture not rewritten. |
 | 2026-08-16 | VP4.3 | body-only `approved=false` xfail on `test_publication_split.py`; before-scope xfail on `test_phase_guards.py` | Suite scoped modules are real passes (0 xfail / 0 XPASS). Direct pin added: `ensure_review_scope_for_terminal`. IncrementalReview INIT + `incremental_changed_paths` exemption not pinned (would expand the suite). VP4 Final `security-review` and `make ci-resume` not flipped. |
+| 2026-08-16 | VP4.4 | stale-approve replay xfail on `test_publication_split.py::test_stale_approve_replay_does_not_github_approve_after_blocker` | `test_publication_split.py` is now real passes (0 xfail / 0 XPASS). Hash-match replay must re-validate before GitHub publish. VP4 Final `security-review` not flipped. |
 
 ## Named symbols this suite pins
 
@@ -127,9 +128,16 @@ Two medium findings. Markers cleared after VP4.3 impl (`e39f55b`). Product code 
 
 Residual medium from `security-review`. Idempotent replay in `record_validated_terminal_submission` returns the existing `approve` when `payload_hash` matches and skips `validate_submission`. Then `create_pull_request_review` can GitHub-`APPROVE` after a Critical blocker was confirmed later.
 
-- `tests/review/test_publication_split.py::test_stale_approve_replay_does_not_github_approve_after_blocker` is xfail pending VP4.4 impl (`strict=False`). Existing tests in that file stay real passes.
+- `tests/review/test_publication_split.py::test_stale_approve_replay_does_not_github_approve_after_blocker` is a real pass after VP4.4 impl (`90adb66`). Existing tests in that file stay real passes.
 - Setup: `selected_mode = "Review"`, `review_phase = ESTABLISH_SCOPE` (D10 must not fire), empty analyzer state, `pr_approve_enabled=True`, `trust_tier="trusted"`.
 - Live sequence: `submit_review_verdict({verdict: "approve", summary: "Looks good.", findings: []})` must succeed (fixture error if not) → attach `_blocker()` as confirmed (`analyzer_run` + `verified_ids`) → live `create_pull_request_review({pull_number: 7, body: "Looks good.", approved: True})`.
 - The security finding assumes hashes match when `summary == body`. If they would not (submit hashing raw params vs mapped `{verdict,summary,findings}`), the live sequence still runs; a D4 conflict instead of replay is still a pass for **no GitHub APPROVE**.
 - D4 (identical retry is idempotent) is **not** weakened for `submit_review_verdict` when state has not changed. This pin is publication-time re-validation when blockers now exist.
 - Product code is not edited in this wave. VP4 Final `security-review` is not flipped.
+
+## VP4.4 xfail reconciliation
+
+Marker cleared after VP4.4 impl (`90adb66`). Product code is not edited in this wave. VP4 Final `security-review` stays open.
+
+- Hash-match replay in `record_validated_terminal_submission` must re-run `validate_submission` (or equivalent publish-time policy) before any GitHub post.
+- `test_stale_approve_replay_does_not_github_approve_after_blocker` is imported against the live tools; leftover W9/W10 xfails in other packages are untouched.
