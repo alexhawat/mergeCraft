@@ -10,7 +10,8 @@ Target API (HA3.2): ``RepoSettings.harness`` is
     ``Literal["opencode", "codex", "claude", "gemini", "cursor"] | None = None``.
 ``resolve_harness(settings, slug)`` honours the explicit value (validated
 against HA1 capabilities) and otherwise delegates to
-``_agent_mode_for_slug``.
+``_agent_mode_for_slug``. ``resolve_runtime_agent(..., settings=)`` uses
+that result so dispatch — not only span labels — honours the override.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from mergecraft.utils.agent_resolve import (
     _agent_mode_for_slug,
     _harness_supports_provider,
     resolve_harness,
+    resolve_runtime_agent,
 )
 
 if TYPE_CHECKING:
@@ -175,18 +177,33 @@ def test_opencode_with_non_nous_provider_resolves() -> None:
     """OpenAI-compatible model under OpenCode — no review-logic duplication.
 
     An openai-prefixed slug infers Codex today. Explicit ``harness: opencode``
-    must select the same ``opencode`` agent the Nous path already uses.
+    must select ``agents["opencode"]`` on the runtime dispatch path
+    (``resolve_runtime_agent``), not only via ``resolve_harness`` →
+    ``resolve_agent``.
     """
-    from mergecraft.agents import agents, resolve_agent
+    import asyncio
+
+    from mergecraft.agents import agents
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.utils.agent_resolve import run_with_model_chain
 
     assert _agent_mode_for_slug(OPENAI_SLUG) == "codex"
     settings = RepoSettings.model_validate({"model": OPENAI_SLUG, "harness": "opencode"})
-    resolved = resolve_harness(settings, OPENAI_SLUG)
-    assert resolved == "opencode"
-    agent = resolve_agent(resolved)
-    assert agent.name == "opencode"
-    assert agent is agents["opencode"]
-    assert agent is resolve_agent("opencode")
+    assert resolve_harness(settings, OPENAI_SLUG) == "opencode"
+
+    chosen: list[object] = []
+
+    async def run_once(slug: str) -> AgentResult:
+        agent = resolve_runtime_agent(model=slug, settings=settings)
+        chosen.append(agent)
+        return AgentResult(success=True)
+
+    asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
+    assert chosen == [agents["opencode"]], (
+        "D11 dispatch must run agents['opencode'] for harness: opencode + "
+        f"an openai slug; got {chosen!r}"
+    )
+    assert chosen[0] is agents["opencode"]
 
 
 def test_unsupported_combination_is_a_configuration_error() -> None:
@@ -219,6 +236,31 @@ def test_unsupported_combination_is_a_configuration_error() -> None:
         "unsupported combo must reuse an existing configuration_error mapping; "
         f"got {_classify_error_outcome(exc_info.value)!r} for {exc_info.value!r}"
     )
+
+
+def test_unsupported_combination_fails_on_runtime_agent() -> None:
+    """D11 fail-closed on the single-model dispatch path, not only ``resolve_harness``.
+
+    ``harness: claude`` + a Nous slug must raise before an agent is returned,
+    so ``_run_agent_once`` / ``offline_review`` cannot silently run OpenCode.
+    """
+    from mergecraft.main import _classify_error_outcome
+    from mergecraft.run_outcome import RunOutcome
+
+    harness = "claude"
+    slug = NOUS_CATALOG_SLUG
+    settings = RepoSettings.model_validate({"model": slug, "harness": harness})
+
+    with pytest.raises(_configuration_error_types()) as exc_info:
+        resolve_runtime_agent(model=slug, settings=settings)
+
+    message = str(exc_info.value)
+    lowered = message.lower()
+    assert harness in lowered, f"error must name the harness {harness!r}: {message}"
+    assert "nous" in lowered or "deepseek" in lowered or slug.lower() in lowered, (
+        f"error must name the provider/model half ({slug!r}): {message}"
+    )
+    assert _classify_error_outcome(exc_info.value) is RunOutcome.configuration_error
 
 
 def test_unknown_harness_value_fails_closed() -> None:
@@ -285,3 +327,68 @@ def test_harness_reaches_telemetry() -> None:
         "resolved harness opencode must appear on the attempt span or result "
         f"metadata; got attrs={attrs!r} metadata={result.metadata!r}"
     )
+
+
+def test_not_visited_spans_stamp_explicit_harness() -> None:
+    """Follow-on ``not_visited`` spans stamp ``harness:``, not inferred modes.
+
+    A two-entry chain that wins on the first slug must not label the unused
+    tail with ``_agent_mode_for_slug`` while visited entries say ``opencode``.
+    """
+    import asyncio
+
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.tracing.sinks import sink_factory
+    from mergecraft.utils.agent_resolve import run_with_model_chain
+
+    settings = RepoSettings.model_validate(
+        {
+            "harness": "opencode",
+            "models": [OPENAI_SLUG, ANTHROPIC_SLUG],
+            "tracing": {"enabled": True, "sinks": [{"type": "memory"}]},
+        }
+    )
+    wrapper = sink_factory(settings.tracing)
+    memory = wrapper.inner.sinks[0]
+
+    async def run_once(_slug: str) -> AgentResult:
+        return AgentResult(success=True)
+
+    asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
+
+    attempts = [event for event in memory.events if getattr(event, "kind", None) == "agent.attempt"]
+    assert len(attempts) >= 2, f"expected visited + not_visited attempts; got {attempts!r}"
+    statuses = {getattr(event, "status", None) for event in attempts}
+    assert "not_visited" in statuses, f"expected a not_visited follow-on; statuses={statuses!r}"
+    modes = {
+        event.attrs.get("agent.mode")
+        or event.attrs.get("model.mode")
+        or event.attrs.get("gen_ai.agent.name")
+        or event.attrs.get("harness")
+        for event in attempts
+    }
+    assert modes == {"opencode"}, (
+        "every attempt span (visited and not_visited) must stamp the explicit "
+        f"harness; got modes={modes!r} attrs={[e.attrs for e in attempts]!r}"
+    )
+
+
+def test_runtime_agent_still_fail_loud_when_harness_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Passing ``settings`` with ``harness`` unset must keep inference + fail-loud.
+
+    Guard: if dispatch always ``resolve_agent(resolve_harness(...))``, an
+    openai slug with no Codex/OpenAI creds would silently become Codex
+    (or OpenCode) instead of raising.
+    """
+    for key in ("MERGECRAFT_AGENT", "CODEX_AUTH_JSON", "OPENAI_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = RepoSettings.model_validate({"model": OPENAI_SLUG})
+    assert settings.harness is None
+    with pytest.raises((ValueError, RuntimeError)) as exc_info:
+        resolve_runtime_agent(model=OPENAI_SLUG, settings=settings)
+    lowered = str(exc_info.value).lower()
+    assert "opencode" not in lowered
+    assert "openai" in lowered or "codex" in lowered
