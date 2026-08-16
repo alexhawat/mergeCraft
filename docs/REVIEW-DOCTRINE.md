@@ -302,8 +302,16 @@ mergeCraft separates three layers that older review flows conflated:
 2. **Structural verdict** — `decide_approval(findings, *, run_succeeded, tier)`
    is a pure function of typed findings and run state. It never reads agent
    prose, `result.output`, or `ApprovalRecord.would_approve`.
-3. **Publication** — `create_pull_request_review` posts to GitHub and writes an
-   advisory `ApprovalRecord`. It cannot bypass the structural gate.
+3. **Publication** — an internal `publish_pull_request_review` path posts to
+   GitHub after a validated terminal submission. `create_pull_request_review`
+   remains registered for backward compatibility: it maps legacy params through
+   `validate_submission`, then publishes. It cannot write
+   `ApprovalRecord.would_approve` without a passing submission.
+
+**Enforcement default (VP4).** `gates.terminal_verdict` defaults to `enforce`.
+A provider success without a usable terminal submission maps to
+`RunOutcome.inconclusive`. Operators can set `gates.terminal_verdict: shadow` to
+keep diagnostics-only rollout.
 
 **Schema vs semantic validation.** Pydantic enforces the wire shape (closed
 verdict enum, `extra="forbid"`). `validate_submission` then applies semantic

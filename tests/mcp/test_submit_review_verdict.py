@@ -428,6 +428,7 @@ async def test_model_chain_advances_when_first_success_has_no_terminal_verdict(
     """A process-successful first slug with no submit must not win the chain."""
     from mergecraft.agents.shared import AgentResult
     from mergecraft.config.settings import RepoSettings
+    from mergecraft.mcp.verdict import ReviewPhase
     from mergecraft.utils.agent_resolve import run_with_model_chain
 
     monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
@@ -439,6 +440,7 @@ async def test_model_chain_advances_when_first_success_has_no_terminal_verdict(
 
     ctx = _ctx(tmp_path)
     ctx.tool_state.selected_mode = "Review"
+    ctx.tool_state.review_phase = ReviewPhase.ESTABLISH_SCOPE.value
     calls: list[str] = []
 
     async def run_once(slug: str) -> AgentResult:

@@ -158,7 +158,8 @@ def test_shadow_records_prediction_without_changing_outcome(tmp_path: Path) -> N
     )
     from mergecraft.mcp.verdict import VerdictDiagnostic
 
-    assert default_settings().gates.terminal_verdict == "shadow"
+    # D6: VP4 flipped the default to enforce. Shadow is the explicit escape hatch.
+    assert default_settings().gates.terminal_verdict == "enforce"
 
     result = _missing_verdict_result()
     outcome, _reason = _classify(result, verdict_protocol="shadow")

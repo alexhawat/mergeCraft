@@ -226,6 +226,23 @@ _PRE_SPLIT_PROMPTS_PATH: Final[Path] = (
     Path(__file__).parent / "_fixtures" / "pre_split_prompts.json"
 )
 
+# VP4 File 3/4 may rewrite only the terminal-protocol paragraph. Same markers as
+# ``tests/prompts/test_terminal_protocol_prompt.py``; duplicated here so this
+# snapshot pin does not import another test module.
+_REVIEW_TERMINAL_START = "7. **submit**:"
+_REVIEW_TERMINAL_KEEP = "   The review body is structured as:"
+_INCREMENTAL_TERMINAL_START = "10. Submit —"
+_INCREMENTAL_TERMINAL_KEEP = "   Same callout ladder as Review mode"
+
+
+def _outside_terminal(template: str, *, start: str, keep: str) -> str:
+    start_at = template.index(start)
+    keep_at = template.index(keep)
+    if keep_at < start_at:
+        msg = f"keep marker {keep!r} precedes start marker {start!r}"
+        raise AssertionError(msg)
+    return template[:start_at] + template[keep_at:]
+
 
 def _load_pre_split_snapshot() -> Mapping[str, Mapping[str, str]]:
     """Load the snapshot fixture captured on the pre-split tree.
@@ -400,6 +417,10 @@ def test_mode_prompt_text_is_byte_identical_after_split() -> None:
     ``modes/<name>.py`` with no rewording, no reflowing, no "while I'm here"
     prompt edits. If this test fails, the move drifted text — restore the
     verbatim text; do NOT rewrite prompts.
+
+    VP4 File 3/4 is allowed to change only the Review / IncrementalReview
+    terminal-protocol paragraph. Those two modes compare *outside* that
+    paragraph; every other mode, and both descriptions, stay byte-identical.
     """
     snapshot = _load_pre_split_snapshot()
     current = {m.name: (m.description, m.prompt) for m in compute_modes("opencode")}
@@ -409,10 +430,22 @@ def test_mode_prompt_text_is_byte_identical_after_split() -> None:
         f"current modes {set(current) - set(snapshot)} extra"
     )
 
+    terminal_markers = {
+        "Review": (_REVIEW_TERMINAL_START, _REVIEW_TERMINAL_KEEP),
+        "IncrementalReview": (_INCREMENTAL_TERMINAL_START, _INCREMENTAL_TERMINAL_KEEP),
+    }
+
     for name, (description, prompt) in current.items():
         expected = snapshot[name]
         assert description == expected["description"], (f"{name}: description drifted",)
-        assert prompt == expected["prompt"], f"{name}: prompt drifted"
+        markers = terminal_markers.get(name)
+        if markers is None:
+            assert prompt == expected["prompt"], f"{name}: prompt drifted"
+            continue
+        start, keep = markers
+        live = _outside_terminal(prompt or "", start=start, keep=keep)
+        frozen = _outside_terminal(expected["prompt"], start=start, keep=keep)
+        assert live == frozen, f"{name}: prompt drifted outside the terminal-protocol paragraph"
 
 
 def test_custom_modes_from_config_still_merge() -> None:
