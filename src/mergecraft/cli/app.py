@@ -20,6 +20,7 @@ from mergecraft.cli import (
     gha_cmd,
     init_cmd,
     learnings_cmd,
+    lens_cmd,
     models_cmd,
     tracing_cmd,
     tracing_logfire_cmd,
@@ -36,6 +37,7 @@ app = typer.Typer(
 console = Console(stderr=True)
 
 app.add_typer(agents_cmd.app, name="agents")
+app.add_typer(lens_cmd.app, name="lens")
 app.add_typer(auth_cmd.app, name="auth")
 app.add_typer(models_cmd.app, name="models")
 app.add_typer(analyzers_cmd.app, name="analyzers")
