@@ -419,3 +419,56 @@ async def test_model_chain_resets_terminal_submission_on_fallback(
     assert recorded.attempt_id == 1
     assert recorded.summary == "Fallback model recorded the verdict."
     assert ctx.tool_state.terminal_submission_conflict is False
+
+
+@pytest.mark.asyncio
+async def test_model_chain_advances_when_first_success_has_no_terminal_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A process-successful first slug with no submit must not win the chain."""
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.utils.agent_resolve import run_with_model_chain
+
+    monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve._agent_binary_available",
+        lambda _slug: True,
+    )
+
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.selected_mode = "Review"
+    calls: list[str] = []
+
+    async def run_once(slug: str) -> AgentResult:
+        calls.append(slug)
+        if slug.startswith("openai/"):
+            return AgentResult(success=True, output="LGTM — looks good to me.")
+        recorded = await _submit(ctx, _valid_payload())
+        assert recorded.is_error is False
+        submission = ctx.tool_state.terminal_submission
+        assert submission is not None
+        return AgentResult(
+            success=True,
+            output="review complete",
+            terminal_submission_received=True,
+            terminal_submission_id=submission.id,
+        )
+
+    settings = RepoSettings.model_validate(
+        {"models": ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]}
+    )
+    winning_slug, result = await run_with_model_chain(
+        settings=settings,
+        run_once=run_once,
+        tool_state=ctx.tool_state,
+    )
+
+    assert calls == ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]
+    assert winning_slug == "google/gemini-3.1-pro-preview"
+    assert result.success is True
+    assert result.terminal_submission_received is True
+    recorded = ctx.tool_state.terminal_submission
+    assert recorded is not None
+    assert recorded.attempt_id == 1

@@ -81,11 +81,10 @@ def _static_checks_from_state(state: Any) -> list[dict[str, str]]:
     return []
 
 
-def validation_state_from_tool_context(ctx: ToolContext) -> Any:
+def validation_state_from_tool_state(tool_state: Any) -> Any:
     """Build the duck-typed consultation object ``validate_submission`` reads."""
     from types import SimpleNamespace
 
-    tool_state = ctx.tool_state
     state = SimpleNamespace(
         terminal_submission=tool_state.terminal_submission,
         terminal_submission_conflict=tool_state.terminal_submission_conflict,
@@ -93,10 +92,15 @@ def validation_state_from_tool_context(ctx: ToolContext) -> Any:
         static_checks=[dict(row) for row in tool_state.static_checks if isinstance(row, dict)],
         withdrawn_fingerprints=set(),
         tool_state=tool_state,
-        analyzer_run=tool_state.analyzer_run,
+        analyzer_run=getattr(tool_state, "analyzer_run", None),
     )
     state.confirmed_findings = _confirmed_findings_from_state(state)
     return state
+
+
+def validation_state_from_tool_context(ctx: ToolContext) -> Any:
+    """Build the consultation object from a live ``ToolContext``."""
+    return validation_state_from_tool_state(ctx.tool_state)
 
 
 def validate_submission(submission: dict[str, Any], *, state: Any) -> SubmissionValidation:

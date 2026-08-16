@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.mcp.shared import execute, tool
-from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
 from mergecraft.utils.learnings import learnings_file_path
 
 if TYPE_CHECKING:
@@ -62,6 +62,15 @@ def _learnings_text(ctx: ToolContext) -> str:
     if not candidate.is_file():
         return ""
     return candidate.read_text(encoding="utf-8")
+
+
+def _persist_confirmed_fingerprint(ctx: ToolContext, fingerprint: str) -> None:
+    """Record a live confirm so ``validate_submission`` can see the blocker."""
+    run = ctx.tool_state.analyzer_run
+    if run is None:
+        run = AnalyzerRunState(ran=True)
+        ctx.tool_state.analyzer_run = run
+    run.verified_ids.add(fingerprint)
 
 
 def _run_lane(ctx: ToolContext) -> str | None:
@@ -215,6 +224,16 @@ def record_finding_verdict_tool(ctx: ToolContext):
         outcome = record_verifier_verdict(verdict, learnings_path=Path(path))
         if outcome.recorded_withdrawn:
             ctx.tool_state.was_updated = True
+        if outcome.verdict == "confirm" and outcome.publishable:
+            _persist_confirmed_fingerprint(ctx, outcome.fingerprint)
+        elif outcome.verdict == "downgrade" and outcome.publishable:
+            from mergecraft.agents.gates import BLOCKING_SEVERITIES
+
+            new_severity = verdict.new_severity
+            if new_severity in BLOCKING_SEVERITIES:
+                _persist_confirmed_fingerprint(ctx, outcome.fingerprint)
+            elif ctx.tool_state.analyzer_run is not None:
+                ctx.tool_state.analyzer_run.verified_ids.discard(outcome.fingerprint)
         return {
             "recorded": True,
             "fingerprint": outcome.fingerprint,

@@ -174,12 +174,29 @@ def build_reflection_prompt(issues: PostRunIssues) -> str:
     return f"{base}\n\nThis is a reflection turn — address the issues above, then stop."
 
 
+def _submission_as_payload(submission: Any) -> dict[str, Any]:
+    findings: list[Any] = []
+    for item in submission.findings:
+        if hasattr(item, "model_dump"):
+            findings.append(item.model_dump(mode="json"))
+        else:
+            findings.append(item)
+    return {
+        "verdict": submission.verdict,
+        "summary": submission.summary,
+        "findings": findings,
+    }
+
+
 def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None, dict[str, Any]]:
     """Copy the recorded terminal submission onto ``AgentResult``.
 
     Diagnostics stay thin in VP1: ``attempt_id`` is the only field the
     submission carries that finalize does not already promote as a first-class
     attribute. VP3 fills the rest of the attempt envelope.
+
+    A stored ``approve`` is re-validated against current evidence so a later
+    failed gate or verifier confirm cannot leave a stale usable verdict.
     """
     submission = ctx.tool_state.terminal_submission
     if submission is None or ctx.tool_state.terminal_submission_conflict:
@@ -188,6 +205,19 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
             diagnostics["rejection_reason"] = "conflicting_submission"
         if submission is not None:
             diagnostics["attempt_id"] = submission.attempt_id
+        return False, None, diagnostics
+
+    from mergecraft.mcp.verdict import validate_submission, validation_state_from_tool_state
+
+    validation = validate_submission(
+        _submission_as_payload(submission),
+        state=validation_state_from_tool_state(ctx.tool_state),
+    )
+    if not validation.accepted:
+        diagnostics = {
+            "rejection_reason": validation.rejection_reason,
+            "attempt_id": submission.attempt_id,
+        }
         return False, None, diagnostics
     return True, submission.id, {"attempt_id": submission.attempt_id}
 
