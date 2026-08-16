@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import TerminalSubmission
+from mergecraft.review_taxonomy import FINDING_SEVERITIES
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -179,32 +180,36 @@ class SubmitReviewVerdictParams(BaseModel):
     def _coerce_findings(cls, value: object) -> list[Any]:
         from mergecraft.agents.verifier import AgentFinding
 
-        if not value:
-            return []
         if not isinstance(value, list):
             msg = "findings must be a list"
-            raise TypeError(msg)
+            raise ValueError(msg)
         coerced: list[Any] = []
         for item in value:
             if isinstance(item, AgentFinding):
-                coerced.append(item)
+                finding = item
             elif isinstance(item, dict):
-                coerced.append(AgentFinding.model_validate(item))
+                finding = AgentFinding.model_validate(item)
             else:
                 msg = "each finding must be an object"
-                raise TypeError(msg)
+                raise ValueError(msg)
+            if finding.severity not in FINDING_SEVERITIES:
+                msg = f"severity must be one of {FINDING_SEVERITIES!r}, got {finding.severity!r}"
+                raise ValueError(msg)
+            coerced.append(finding)
         return coerced
 
 
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         validated = SubmitReviewVerdictParams.model_validate(params)
-        payload_hash = _canonical_payload_hash(dict(params))
+        payload_hash = _canonical_payload_hash(validated.model_dump(mode="json"))
         existing = ctx.tool_state.terminal_submission
 
         if existing is not None:
             if existing.payload_hash == payload_hash:
-                ctx.tool_state.terminal_submission_conflict = False
+                # Conflict stays sticky for this attempt. VP2 treats the flag as
+                # "this attempt is unusable"; a later identical replay must not
+                # wash that out. `_prepare_chain_attempt` is the only reset.
                 return {
                     "recorded": True,
                     "id": existing.id,
@@ -274,7 +279,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
                             "line": {"type": "number"},
                             "severity": {
                                 "type": "string",
-                                "enum": ["Critical", "Major", "Minor", "Trivial"],
+                                "enum": list(FINDING_SEVERITIES),
                             },
                             "body": {"type": "string"},
                             "fingerprint": {"type": "string"},

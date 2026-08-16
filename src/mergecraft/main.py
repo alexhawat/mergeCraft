@@ -1064,6 +1064,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 run_once=_run_agent_once,
                 head=model_head,
                 pin=model_pin,
+                tool_state=tool_state,
             )
             return winning_slug, chain_result
         return selected_slug, await agent.run(run_ctx)

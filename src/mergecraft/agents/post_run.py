@@ -175,13 +175,21 @@ def build_reflection_prompt(issues: PostRunIssues) -> str:
 
 
 def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None, dict[str, Any]]:
+    """Copy the recorded terminal submission onto ``AgentResult``.
+
+    Diagnostics stay thin in VP1: ``attempt_id`` is the only field the
+    submission carries that finalize does not already promote as a first-class
+    attribute. VP3 fills the rest of the attempt envelope.
+    """
     submission = ctx.tool_state.terminal_submission
     if submission is None or ctx.tool_state.terminal_submission_conflict:
         diagnostics: dict[str, Any] = {}
         if ctx.tool_state.terminal_submission_conflict:
             diagnostics["rejection_reason"] = "conflicting_submission"
+        if submission is not None:
+            diagnostics["attempt_id"] = submission.attempt_id
         return False, None, diagnostics
-    return True, submission.id, {}
+    return True, submission.id, {"attempt_id": submission.attempt_id}
 
 
 async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> AgentResult:
