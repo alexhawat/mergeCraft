@@ -26,7 +26,13 @@ def _resolve_tier(ctx: ToolContext) -> str:
 
 
 def _store_run_state(ctx: ToolContext, state: AnalyzerRunState) -> None:
+    session_ids = set(ctx.tool_state.verified_ids)
+    prior = ctx.tool_state.analyzer_run
+    if prior is not None:
+        session_ids |= set(prior.verified_ids)
+    state.verified_ids = set(state.verified_ids) | session_ids
     ctx.tool_state.analyzer_run = state
+    ctx.tool_state.verified_ids = session_ids | set(state.verified_ids)
 
 
 def run_analyzers_tool(ctx: ToolContext):

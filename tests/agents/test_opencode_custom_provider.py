@@ -172,7 +172,7 @@ INDEXED_BASE_URL_FMT = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_{n}"
 
 
 @pytest.mark.xfail(
-    reason="green after W3: indexed env-var pairs populate a dict[str, ProviderRecord]",
+    reason="green after W3: indexed env-var pairs populate a dict[str, ProviderConfig]",
     strict=False,
 )
 def test_opencode_emits_provider_blocks_for_each_indexed_pair(

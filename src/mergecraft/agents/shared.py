@@ -131,6 +131,9 @@ class AgentResult:
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     usage: AgentUsage | None = None
+    terminal_submission_received: bool = False
+    terminal_submission_id: str | None = None
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

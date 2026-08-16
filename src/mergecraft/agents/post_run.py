@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -29,12 +30,10 @@ if TYPE_CHECKING:
 
 def get_unsubmitted_review(tool_state: ToolState) -> str | None:
     mode = tool_state.selected_mode
-    if not tool_state.had_progress_comment:
-        return None
     if mode == "Review":
-        return None if tool_state.review else "Review"
+        return None if tool_state.terminal_submission else "Review"
     if mode == "IncrementalReview":
-        if tool_state.review or tool_state.final_summary_written:
+        if tool_state.terminal_submission or tool_state.final_summary_written:
             return None
         return "IncrementalReview"
     return None
@@ -90,21 +89,23 @@ def build_unsubmitted_review_prompt(mode: str) -> str:
         return "\n".join(
             [
                 "MISSING REVIEW OUTPUT — you selected Review mode but stopped without "
-                "calling `create_pull_request_review`.",
+                "recording a terminal verdict via `submit_review_verdict`.",
                 "",
-                "call `create_pull_request_review` now with your aggregated review.",
+                "call `submit_review_verdict` now (approve or request_changes), then "
+                "call `create_pull_request_review` with the same outcome.",
                 "",
-                "do NOT stop again until `create_pull_request_review` has been called "
-                "successfully.",
+                "do NOT stop again until `submit_review_verdict` has been called successfully.",
             ]
         )
     return "\n".join(
         [
             "MISSING REVIEW OUTPUT — you selected IncrementalReview mode but stopped "
-            "without calling `create_pull_request_review` or `report_progress`.",
+            "without calling `submit_review_verdict` / `create_pull_request_review` "
+            "or `report_progress`.",
             "",
             "do exactly one of:",
-            "- if you have findings: call `create_pull_request_review`",
+            "- if you have findings: call `submit_review_verdict` then "
+            "`create_pull_request_review`",
             "- if no review warranted: call `report_progress` with a short summary",
         ]
     )
@@ -175,28 +176,71 @@ def build_reflection_prompt(issues: PostRunIssues) -> str:
     return f"{base}\n\nThis is a reflection turn — address the issues above, then stop."
 
 
+def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None, dict[str, Any]]:
+    """Copy the recorded terminal submission onto ``AgentResult``.
+
+    A stored ``approve`` is re-validated against current evidence so a later
+    failed gate or verifier confirm cannot leave a stale usable verdict. A
+    submission whose ``attempt_id`` does not match the active attempt does not
+    satisfy this attempt (V7).
+    """
+    from mergecraft.mcp.verdict import (
+        recorded_submission_payload,
+        validate_submission,
+        validation_state_from_tool_state,
+        verdict_satisfies_attempt,
+    )
+
+    submission = ctx.tool_state.terminal_submission
+    if submission is None or ctx.tool_state.terminal_submission_conflict:
+        diagnostics: dict[str, Any] = {}
+        if ctx.tool_state.terminal_submission_conflict:
+            diagnostics["rejection_reason"] = "conflicting_submission"
+        if submission is not None:
+            diagnostics["attempt_id"] = submission.attempt_id
+        return False, None, diagnostics
+    if not verdict_satisfies_attempt(
+        submission,
+        current_attempt_id=ctx.tool_state.attempt_id,
+    ):
+        return (
+            False,
+            None,
+            {
+                "rejection_reason": "stale_attempt",
+                "attempt_id": submission.attempt_id,
+            },
+        )
+
+    validation = validate_submission(
+        recorded_submission_payload(submission),
+        state=validation_state_from_tool_state(ctx.tool_state),
+    )
+    if not validation.accepted:
+        diagnostics = {
+            "rejection_reason": validation.rejection_reason,
+            "attempt_id": submission.attempt_id,
+        }
+        return False, None, diagnostics
+    return True, submission.id, {"attempt_id": submission.attempt_id}
+
+
 async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> AgentResult:
     """Terminal hard-fail if stopHook / unsubmittedReview still open."""
+    received, submission_id, diagnostics = _terminal_submission_fields(ctx)
     if not result.success:
-        return result
-    issues = await collect_post_run_issues(ctx, skip_summary_stale=True)
-    if issues.unsubmitted_review:
-        expected = (
-            "create_pull_request_review"
-            if issues.unsubmitted_review == "Review"
-            else "create_pull_request_review or report_progress"
+        return replace(
+            result,
+            terminal_submission_received=received,
+            terminal_submission_id=submission_id,
+            diagnostics=diagnostics,
         )
-        return AgentResult(
-            success=False,
-            output=result.output,
-            error=(
-                f"post-run gate failed: selected {issues.unsubmitted_review} mode but "
-                f"never called {expected}"
-            ),
-            usage=result.usage,
-            metadata=result.metadata,
-        )
-    return result
+    return replace(
+        result,
+        terminal_submission_received=received,
+        terminal_submission_id=submission_id,
+        diagnostics=diagnostics,
+    )
 
 
 async def run_post_run_retry_loop(

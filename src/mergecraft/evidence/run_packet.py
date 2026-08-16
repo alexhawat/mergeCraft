@@ -448,6 +448,8 @@ def emit_run_packet(
     change_id: str | None = None,
     extra_findings: list[Finding] | None = None,
     output_path: Path | None = None,
+    verdict_prediction: Any | None = None,
+    actual_outcome: str | None = None,
 ) -> Path | None:
     """Build and write this run's evidence packet; return its path.
 
@@ -497,6 +499,22 @@ def emit_run_packet(
                 )
             except Exception as shadow_err:  # a shadow record never fails the run
                 logger.warning("shadow record: emission failed — {}", shadow_err)
+        if verdict_prediction is not None:
+            from mergecraft.evidence.shadow import record_shadow_prediction
+
+            shadow_path = path.with_name("merge-evidence-shadow.jsonl")
+            try:
+                record_shadow_prediction(
+                    packet,
+                    change_id=resolved_change_id,
+                    run_id=_shadow_run_id(ctx),
+                    policy_id="verdict-protocol",
+                    output_path=shadow_path,
+                    prediction=verdict_prediction,
+                    actual_outcome=actual_outcome,
+                )
+            except Exception as shadow_err:  # a shadow record never fails the run
+                logger.warning("verdict-protocol shadow record: emission failed — {}", shadow_err)
     except Exception as err:  # an audit artifact never fails the run
         logger.warning("evidence packet: emission failed — {}", err)
         return None

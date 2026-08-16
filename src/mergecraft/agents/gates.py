@@ -52,6 +52,9 @@ GIT_NATIVE_READ_DENY_CLAUDE: list[str] = [f"{tool}(.git/config)" for tool in CLA
 # one source of truth.
 BLOCKING_SEVERITIES: Final[frozenset[str]] = frozenset({"Critical", "Major"})
 
+# Terminal-protocol tools are orchestrator-only even when ``mutates=False``.
+TERMINAL_PROTOCOL_DENIED_TOOL_NAMES: Final[frozenset[str]] = frozenset({"submit_review_verdict"})
+
 
 def _denied_tool_names_for_allowed_classes(
     ctx: ToolContext,
@@ -75,13 +78,21 @@ def subagent_denied_tool_names(
     ctx: ToolContext,
     output_schema: JsonSchema | None = None,
 ) -> list[str]:
-    """Canonical bare names denied to reviewer-like subagents (class complement)."""
-    return _denied_tool_names_for_allowed_classes(
+    """Canonical bare names denied to reviewer-like subagents (class complement).
+
+    ``TERMINAL_PROTOCOL_DENIED_TOOL_NAMES`` is unioned so a ``mutates=False``
+    terminal tool cannot drop off the deny list if it is misclassified.
+    """
+    names = _denied_tool_names_for_allowed_classes(
         ctx,
         REVIEWER_ALLOWED_TOOL_CLASSES,
         role="subagent",
         output_schema=output_schema,
     )
+    for terminal_name in TERMINAL_PROTOCOL_DENIED_TOOL_NAMES:
+        if terminal_name not in names:
+            names.append(terminal_name)
+    return names
 
 
 def build_claude_native_fs_denies(
@@ -104,6 +115,16 @@ def build_opencode_native_fs_permission() -> dict[str, object]:
 def _has_blocker(findings: list[Finding]) -> bool:
     """True iff any finding carries a severity the gate treats as blocking."""
     return any(f.severity in BLOCKING_SEVERITIES for f in findings)
+
+
+def has_failed_required_static_check(static_checks: list[dict[str, str]]) -> bool:
+    """True when any ``run_static_checks`` row reports ``status: failed``.
+
+    The terminal-verdict validator consults this for ``approve`` submissions.
+    Only ``failed`` is a negative gate signal — ``unavailable`` and friends are
+    honest skips, not blockers.
+    """
+    return any(row.get("status") == "failed" for row in static_checks)
 
 
 @overload
@@ -503,6 +524,7 @@ __all__ = [
     "decide_action",
     "decide_approval",
     "decision_summary_lines",
+    "has_failed_required_static_check",
     "log_decision",
     "select_rule_id",
     "subagent_denied_tool_names",
