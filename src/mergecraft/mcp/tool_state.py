@@ -285,6 +285,11 @@ class ToolState:
     agent_diagnostic: Any = None
     browser_daemon: Any = None
     analyzer_run: AnalyzerRunState | None = None
+    # Session-scoped verifier confirms. ``run_analyzers`` replaces
+    # ``analyzer_run`` wholesale, so confirmations must not live only there.
+    verified_ids: set[str] = field(default_factory=set)
+    confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
+    agent_findings: list[dict[str, Any]] = field(default_factory=list)
     # Evidence normalised from the consumer's finished CI (#36). ``None`` until
     # a CI source is actually read, so a run that consulted no CI records
     # nothing rather than an empty section.
@@ -293,6 +298,10 @@ class ToolState:
     # verification tools (D14): an LLM judge may not evaluate a finding before
     # the deterministic checks it is meant to supplement have had their turn.
     static_checks_ran: bool = False
+    # Last ``run_static_checks`` report — ``{name, status}`` rows, replaced (not
+    # appended) on each call. Read by ``validation_state_from_tool_context`` so
+    # ``approve`` is rejected when a required gate recorded ``status: failed``.
+    static_checks: list[dict[str, Any]] = field(default_factory=list)
 
 
 def repo_key(owner: str, name: str) -> str:

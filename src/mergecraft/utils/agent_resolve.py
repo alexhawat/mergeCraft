@@ -385,6 +385,30 @@ def _is_retryable_failure(result: AgentResult) -> bool:
     return retryable is True
 
 
+def _is_incomplete_review_success(
+    result: AgentResult,
+    tool_state: ToolState | None,
+) -> bool:
+    """True when a successful provider result is not a usable review winner.
+
+    Scripted chain tests that omit ``tool_state`` keep success=True winner
+    semantics. The live orchestrator always passes ``tool_state``.
+    """
+    if tool_state is None or not result.success or result.terminal_submission_received:
+        return False
+    from mergecraft.main_outcome import _is_incremental_review, _is_review_mode
+
+    mode = tool_state.selected_mode
+    if mode is not None and not _is_review_mode(mode):
+        return False
+    if _is_incremental_review(mode) and tool_state.final_summary_written:
+        return False
+    submission = tool_state.terminal_submission
+    if submission is not None and not tool_state.terminal_submission_conflict:
+        return bool((result.diagnostics or {}).get("rejection_reason"))
+    return True
+
+
 def _attach_model_evidence(
     result: AgentResult,
     *,
@@ -583,10 +607,32 @@ async def run_with_model_chain(
                 ) as _call_span:
                     pass
 
-                if result.success:
+                incomplete = _is_incomplete_review_success(result, tool_state)
+                can_advance_incomplete = (
+                    incomplete and settings.allow_fallback and chain_index < len(chain) - 1
+                )
+                if result.success and not can_advance_incomplete:
                     attempt_span.set_status("ok")
                     terminal_status = "ok"
-                    logger.info("» model chain succeeded slug={}", slug)
+                    if incomplete:
+                        logger.warning(
+                            "» model chain slug={} succeeded without a usable terminal verdict",
+                            slug,
+                        )
+                    else:
+                        logger.info("» model chain succeeded slug={}", slug)
+                elif result.success and can_advance_incomplete:
+                    nxt = chain[chain_index + 1]
+                    attempt_span.set_status("retryable", "no terminal review verdict")
+                    terminal_status = "retryable"
+                    logger.warning(
+                        "model fallback occurred: requested={} skipped "
+                        "(no terminal verdict); advancing to executed={} "
+                        "(fallback_index={})",
+                        requested_model or slug,
+                        nxt,
+                        chain_index + 1,
+                    )
                 elif not _is_retryable_failure(result):
                     attempt_span.set_status("error", result.error or "unknown error")
                     terminal_status = "error"

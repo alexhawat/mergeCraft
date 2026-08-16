@@ -20,6 +20,25 @@ if TYPE_CHECKING:
     from mergecraft.agents.shared import AgentResult
     from mergecraft.modes import Mode
 
+_REVIEW_MODE_NAMES = frozenset({"Review", "IncrementalReview"})
+_INCREMENTAL_REVIEW_NAMES = frozenset({"IncrementalReview"})
+_MISSING_TERMINAL_VERDICT_REASON = "no terminal review verdict was submitted for this attempt"
+
+
+def _is_review_mode(mode: str | Mode | None) -> bool:
+    if mode is None:
+        return False
+    if isinstance(mode, str):
+        return mode in _REVIEW_MODE_NAMES
+    return mode.name in _REVIEW_MODE_NAMES
+
+
+def _is_incremental_review(mode: str | Mode | None) -> bool:
+    if mode is None:
+        return False
+    name = mode if isinstance(mode, str) else mode.name
+    return name in _INCREMENTAL_REVIEW_NAMES
+
 
 def _publish_span_attrs(outcome: RunOutcome, mode: Mode | None) -> dict[str, Any]:
     """Build the attrs dict the ``mergecraft.publish`` span emits.
@@ -39,6 +58,8 @@ def _classify_outcome(
     setup_reason: str,
     setup_policy: SetupFailurePolicy,
     prep_reason: str | None,
+    mode: str | Mode | None = None,
+    final_summary_written: bool = False,
 ) -> tuple[RunOutcome, str | None]:
     """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
 
@@ -69,6 +90,11 @@ def _classify_outcome(
     if prep_reason:
         logger.warning("» prep failure mapped run to inconclusive: {}", prep_reason)
         return RunOutcome.inconclusive, prep_reason
+    if _is_review_mode(mode) and not result.terminal_submission_received:
+        if _is_incremental_review(mode) and final_summary_written:
+            return RunOutcome.passed, None
+        logger.warning("» {}", _MISSING_TERMINAL_VERDICT_REASON)
+        return RunOutcome.inconclusive, _MISSING_TERMINAL_VERDICT_REASON
     # ``setup_policy`` is the closed ``SetupFailurePolicy`` vocabulary; any
     # value other than ``fail`` / ``inconclusive`` (i.e. ``warn``, or the
     # Pydantic default the action-input resolver accepted) means "proceed
@@ -76,4 +102,4 @@ def _classify_outcome(
     return RunOutcome.passed, None
 
 
-__all__ = ["_classify_outcome", "_publish_span_attrs"]
+__all__ = ["_classify_outcome", "_is_review_mode", "_publish_span_attrs"]
