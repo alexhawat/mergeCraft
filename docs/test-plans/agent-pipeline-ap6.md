@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/03-agent-pipeline-wave-plan.md` (PR AP6)
 Worktree: `../mergecraft-agent-pipeline` @ `feature/agent-pipeline-ap6`
 Authoring wave: **AP6.1** (tests-first). Implementation: **AP6.2**.
-xfail-reconciliation: **post-AP6.2**.
+xfail-reconciliation: **post-AP6.2** (complete).
 
 Locked decisions: **D9** (repo-supplied pipeline is executable configuration — untrusted
 sources use the operator's pipeline), **D10** (`orchestrator: llm` stays the default),
@@ -11,7 +11,10 @@ sources use the operator's pipeline), **D10** (`orchestrator: llm` stays the def
 reaching a terminal node is not approval), **convention 7** (predicates are declarative and
 non-executable).
 
-## xfail schedule
+## xfail schedule (historical)
+
+AP6.2 markers (`strict=True`, reason `AP6.2`) were removed post-AP6.2 reconciliation.
+Previously:
 
 | Test file | Tests | Marker | Status at AP6.1 |
 |-----------|-------|--------|-----------------|
@@ -20,10 +23,12 @@ non-executable).
 | `tests/orchestrator/test_pipeline_trust.py` | 3 | `strict=True`, reason `AP6.2` | **RED (xfail)** |
 | `tests/cli/test_pipeline_verbs.py` | 2 | `strict=True`, reason `AP6.2` | **RED (xfail)** |
 
-`test_llm_is_the_default` is never xfailing — it pins D10 compatibility (unset config
+`test_llm_is_the_default` was never xfailing — it pins D10 compatibility (unset config
 behaves as today's LLM orchestrator).
 
-**Acceptance (AP6.1):** 15 collected; 1 pass; 14 xfail; `make lint` + `make typecheck` clean.
+**Acceptance (post-AP6.2 reconciliation):** 15 collected; 15 pass; 0 xfail/xpass.
+`make lint` + `make typecheck` clean. Shared pipeline fixtures exposed via
+`pytest_plugins` in `tests/conftest.py` so `tests/cli/` can use orchestrator fixtures.
 
 ## Target API AP6.2 must satisfy
 
@@ -116,4 +121,12 @@ Registered on `mergecraft.cli.app` as `pipeline`.
 
 ## Status
 
-AP6.1 RED suite authored; awaiting AP6.2 implementation.
+AP6.1 RED suite authored; AP6.2 implementation green; xfail markers removed
+post-AP6.2 reconciliation (AP6.1.5).
+
+### AP6.1.5 reconciliation notes
+
+- `test_pipeline_lint_rejects_a_missing_agent_id` also asserts on
+  `result.exception` — CliRunner captures the unknown-agent `ValueError` rather
+  than printing it to stdout/stderr.
+- Shared pipeline fixtures registered via `pytest_plugins` in `tests/conftest.py`.
