@@ -61,6 +61,11 @@ class ProviderTimeoutError(RuntimeError):
     """
 
 
+def _api_key_from_env(api_key_env: str) -> str:
+    """Read a provider API key from the environment at emit time (HA1 / D16)."""
+    return os.environ.get(api_key_env, "").strip()
+
+
 def build_custom_provider(model: str | None) -> dict[str, object] | None:
     """Describe an OpenAI-compatible provider (or several) for opencode.
 
@@ -105,7 +110,7 @@ def build_custom_provider(model: str | None) -> dict[str, object] | None:
                     "name": record.provider_id,
                     "options": {
                         "baseURL": record.base_url,
-                        "apiKey": record.api_key,
+                        "apiKey": _api_key_from_env(record.api_key_env),
                     },
                     "models": models,
                 }

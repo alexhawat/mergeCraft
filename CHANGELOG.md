@@ -142,6 +142,7 @@ Full pre-release development history: see
 
 ### Changed
 
+- Typed `ProviderConfig` for OpenAI-compatible gateways (capabilities declarative; API keys stay in env vars). No wire-format change to generated `opencode.json`
 - **BREAKING** — `with: model:` is now the head of the effective model
   chain rather than a replacement for it; set `model_pin: enabled` (or
   `modelPin: true`) to restore the old single-model behavior
