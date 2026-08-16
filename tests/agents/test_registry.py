@@ -1,13 +1,10 @@
-"""AP1.1 RED suite — agent registry binding model, prompt, toolset and budget.
+"""AP1 agent registry suite — binding model, prompt, toolset and budget.
 
-Wave plan: ``.ignorelocal/03-agent-pipeline-wave-plan.md`` (PR AP1 / AP1.1).
-Fifteen tests are ``@pytest.mark.xfail(strict=False)`` pending AP1.2; one
-compatibility pin passes today (run-level model chain).
-
-Target API (AP1.2): ``mergecraft.agents.registry`` — frozen ``AgentBinding``,
-``Registry`` loading defaults + ``.mergecraft/config.yaml`` overrides, per-agent
-chain resolution reusing ``pick_runnable_slug_from_chain``, and
-``resolve_agent_model`` recording the executed slug (D4).
+Wave plan: ``.ignorelocal/03-agent-pipeline-wave-plan.md`` (PR AP1).
+Covers ``mergecraft.agents.registry`` — frozen ``AgentBinding``, ``Registry``
+loading defaults + ``.mergecraft/config.yaml`` overrides, per-agent chain
+resolution reusing ``pick_runnable_slug_from_chain``, and ``resolve_agent_model``
+recording the executed slug (D4). Reconciled green after AP1.2.
 """
 
 from __future__ import annotations
@@ -36,8 +33,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
-
-_AP12_XFAIL = pytest.mark.xfail(reason="green after AP1.2: agent registry", strict=False)
 
 _ROLES: tuple[str, ...] = (
     "orchestrator",
@@ -133,7 +128,6 @@ def test_agent_chain_defaults_to_the_run_chain(tmp_path: Path, monkeypatch: Monk
     assert effective_model_chain(settings) == expected
 
 
-@_AP12_XFAIL
 def test_every_role_resolves_to_a_binding(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Each core role — orchestrator, reviewer, verifier, judge, classifier — has a binding."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
@@ -150,7 +144,6 @@ def test_every_role_resolves_to_a_binding(tmp_path: Path, monkeypatch: MonkeyPat
         assert binding.tool_classes
 
 
-@_AP12_XFAIL
 def test_reviewer_and_verifier_have_different_toolsets(tmp_path: Path) -> None:
     """P2 regression pin — reviewer and verifier tool-name sets must differ via the registry."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
@@ -173,7 +166,6 @@ def test_reviewer_and_verifier_have_different_toolsets(tmp_path: Path) -> None:
     assert "verify_agent_findings" not in reviewer_names
 
 
-@_AP12_XFAIL
 def test_per_agent_model_chain_falls_back(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """P3/D3 — an agent's own fallback runs when its primary slug is unavailable."""
     _write_config(
@@ -209,7 +201,6 @@ agents:
     assert resolved.executed_model == fallback
 
 
-@_AP12_XFAIL
 def test_executed_model_is_recorded_not_requested(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """D4 — the executed slug is recorded, never the unavailable requested head."""
     _write_config(
@@ -244,7 +235,6 @@ agents:
     assert resolved.recorded_model == executed
 
 
-@_AP12_XFAIL
 def test_verifier_pin_invariant_survives_fallback(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """#45 — the recorded judge model always matches the dispatched verifier slug."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
@@ -274,7 +264,6 @@ def test_verifier_pin_invariant_survives_fallback(tmp_path: Path, monkeypatch: M
     assert resolved.dispatched_model == resolved.executed_model
 
 
-@_AP12_XFAIL
 def test_prompt_id_and_version_are_bound(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Each binding carries a prompt id/version that resolves to the live prompt text."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
@@ -294,7 +283,6 @@ def test_prompt_id_and_version_are_bound(tmp_path: Path, monkeypatch: MonkeyPatc
     assert reviewer.prompt_id != verifier.prompt_id
 
 
-@_AP12_XFAIL
 def test_toolset_derives_from_tool_classes(tmp_path: Path) -> None:
     """HA4 integration — registry tool names are the class-filtered MCP surface."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
@@ -317,7 +305,6 @@ def test_toolset_derives_from_tool_classes(tmp_path: Path) -> None:
     assert ToolClass.VERIFICATION not in reviewer.tool_classes
 
 
-@_AP12_XFAIL
 def test_no_read_only_agent_gets_a_terminal_protocol_tool(tmp_path: Path) -> None:
     """Read-only roles must never receive ``terminal-protocol`` tools."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
@@ -330,7 +317,6 @@ def test_no_read_only_agent_gets_a_terminal_protocol_tool(tmp_path: Path) -> Non
         assert _TERMINAL_PROTOCOL_TOOL not in names, f"{role} received terminal protocol tool"
 
 
-@_AP12_XFAIL
 def test_per_agent_budget_and_timeout_apply(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Per-agent ``budget`` and ``timeout_s`` overrides apply from config."""
     _write_config(
@@ -358,7 +344,6 @@ agents:
     assert limits.timeout_s == 120
 
 
-@_AP12_XFAIL
 def test_registry_validation_rejects_a_missing_model(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -381,7 +366,6 @@ agents:
         registry.validate()
 
 
-@_AP12_XFAIL
 def test_registry_validation_rejects_an_unknown_prompt_id(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -404,7 +388,6 @@ agents:
         registry.validate()
 
 
-@_AP12_XFAIL
 def test_registry_validation_rejects_an_unreachable_lens(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

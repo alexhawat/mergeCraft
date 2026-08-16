@@ -3,28 +3,28 @@
 Wave plan: `.ignorelocal/03-agent-pipeline-wave-plan.md` (PR AP1)
 Worktree: `../mergecraft-agent-pipeline` @ `feature/agent-pipeline`
 Authoring wave: **AP1.1** (tests-first). Implementation: **AP1.2**.
-xfail-reconciliation: **post-AP1.2**.
+xfail-reconciliation: **post-AP1.2** (complete).
 
 Locked decisions: **D3** (per-agent model chain defaults to run chain, reuses
 `pick_runnable_slug_from_chain`), **D4** (record executed model, fail loudly when
 a harness cannot express a binding), **D2** (full roster is config — only routed
 agents render per run; AP1 loads defaults + overrides).
 
-## xfail schedule
+## xfail schedule (historical)
 
-All AP1.2 markers use `strict=False` (`pyproject.toml` sets `xfail_strict = true`).
-Reason prefix: `green after AP1.2`.
+AP1.2 markers (`strict=False`, reason prefix `green after AP1.2`) were removed
+post-AP1.2 reconciliation. Previously:
 
 | Test file | Tests | Marker | Status at AP1.1 |
 |-----------|-------|--------|-----------------|
 | `tests/agents/test_registry.py` | 12 registry tests (all except `test_agent_chain_defaults_to_the_run_chain`) | `green after AP1.2: agent registry` | **RED (xfail)** |
 | `tests/cli/test_agents_verbs.py` | 3 CLI tests | `green after AP1.2: agents CLI` | **RED (xfail)** |
 
-`test_agent_chain_defaults_to_the_run_chain` is never xfailing — it pins today's
-run-level `effective_model_chain` behaviour that AP1 defaults must preserve.
+`test_agent_chain_defaults_to_the_run_chain` was never xfailing — it pins run-level
+`effective_model_chain` behaviour that AP1 defaults must preserve.
 
-**Acceptance (AP1.1):** 16 collected; 1 pass; 15 xfail. Zero collection errors.
-`make lint` + `make typecheck` clean. No `src/` edits.
+**Acceptance (post-AP1.2 reconciliation):** 16 collected; 16 pass; 0 xfail/xpass.
+`make lint` + `make typecheck` clean.
 
 ## Target API AP1.2 must satisfy
 
@@ -83,4 +83,5 @@ AP1.2.
 
 ## Status
 
-AP1.1 RED suite authored. Pending AP1.2 implementation and xfail reconciliation.
+AP1.1 RED suite authored; AP1.2 implementation green; xfail markers removed
+post-AP1.2 reconciliation. All 16 tests pass.

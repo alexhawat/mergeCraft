@@ -1,14 +1,13 @@
-"""AP1.1 RED suite — ``mergecraft agents list|show|set`` (PR AP1).
+"""AP1 agents CLI suite — ``mergecraft agents list|show|set`` (PR AP1).
 
-Wave plan: ``.ignorelocal/03-agent-pipeline-wave-plan.md`` (AP1.1).
-All three tests are ``@pytest.mark.xfail(strict=False)`` pending AP1.2.
+Wave plan: ``.ignorelocal/03-agent-pipeline-wave-plan.md`` (PR AP1).
+Reconciled green after AP1.2.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
@@ -20,8 +19,6 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 runner = CliRunner()
-
-_AP12_XFAIL = pytest.mark.xfail(reason="green after AP1.2: agents CLI", strict=False)
 
 _DEFAULT_MODELS_YAML = """
 models:
@@ -36,7 +33,6 @@ def _write_config(tmp_path: Path, body: str = _DEFAULT_MODELS_YAML) -> None:
     (cfg_dir / "config.yaml").write_text(body.strip() + "\n", encoding="utf-8")
 
 
-@_AP12_XFAIL
 def test_agents_list_shows_model_prompt_and_tools(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``agents list`` surfaces model chain, prompt id, and tool count per binding."""
     _write_config(tmp_path)
@@ -53,7 +49,6 @@ def test_agents_list_shows_model_prompt_and_tools(tmp_path: Path, monkeypatch: M
     assert "tool" in output
 
 
-@_AP12_XFAIL
 def test_agents_show_prints_the_resolved_prompt_and_exact_tool_names(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -71,7 +66,6 @@ def test_agents_show_prints_the_resolved_prompt_and_exact_tool_names(
     assert "verify_agent_findings" not in output
 
 
-@_AP12_XFAIL
 def test_agents_set_overrides_one_binding(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``agents set`` writes a single binding override into ``.mergecraft/config.yaml``."""
     _write_config(tmp_path)
@@ -85,7 +79,6 @@ def test_agents_set_overrides_one_binding(tmp_path: Path, monkeypatch: MonkeyPat
     assert result.exit_code == 0, result.stdout + result.stderr
 
     from mergecraft.agents.registry import load_registry
-
     from mergecraft.config.settings import load_repo_settings
 
     settings = load_repo_settings(root=tmp_path)
