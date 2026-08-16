@@ -108,6 +108,42 @@ steps:
     kind: terminal
 """
 
+_HYBRID_TRIVIALITY_PIPELINE_YAML = """
+steps:
+  - id: triviality
+    kind: decision
+    decision: triviality_gate
+  - id: review
+    kind: agent
+    agent: reviewer
+    when: "decision.triviality_gate is not_trivial"
+  - id: verify
+    kind: agent
+    agent: verifier
+    when: "decision.triviality_gate is not_trivial"
+  - id: submit
+    kind: terminal
+"""
+
+_DOC_TYPO_DIFF = """diff --git a/README.md b/README.md
+index 1111111..2222222 100644
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,3 @@
+-# mergeCraft
++# mergeCraftt
+"""
+
+_BILLING_ONE_LINER_DIFF = """diff --git a/src/billing/charge.py b/src/billing/charge.py
+index 1111111..2222222 100644
+--- a/src/billing/charge.py
++++ b/src/billing/charge.py
+@@ -10,4 +10,4 @@
+ def compute_total(amount: float, rate: float) -> float:
+-    return amount * rate
++    return amount * rate * tax_multiplier
+"""
+
 _SAMPLE_DIFF = """diff --git a/src/widget.py b/src/widget.py
 index 1111111..2222222 100644
 --- a/src/widget.py
@@ -182,3 +218,25 @@ def operator_pipeline_yaml() -> str:
 @pytest.fixture
 def invalid_agent_pipeline_yaml() -> str:
     return _INVALID_AGENT_PIPELINE_YAML
+
+
+@pytest.fixture
+def hybrid_triviality_pipeline_yaml() -> str:
+    return _HYBRID_TRIVIALITY_PIPELINE_YAML
+
+
+@pytest.fixture
+def doc_typo_diff() -> str:
+    return _DOC_TYPO_DIFF
+
+
+@pytest.fixture
+def billing_one_liner_diff() -> str:
+    return _BILLING_ONE_LINER_DIFF
+
+
+def write_diff(tmp_path: Path, body: str, *, name: str = "sample.diff") -> Path:
+    """Write a unified diff fixture under ``tmp_path``."""
+    diff_path = tmp_path / name
+    diff_path.write_text(body.strip() + "\n", encoding="utf-8")
+    return diff_path
