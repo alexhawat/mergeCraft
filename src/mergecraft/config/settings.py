@@ -174,6 +174,9 @@ class LensTriggerOverride(BaseModel):
     min_risk_band: RiskBand | None = Field(default=None, alias="minRiskBand")
 
 
+OrchestratorKind = Literal["llm", "deterministic", "hybrid"]
+
+
 class AgentBindingOverride(BaseModel):
     """Partial override for one agent entry under ``agents:`` in config (AP1)."""
 
@@ -381,6 +384,15 @@ class RepoSettings(BaseModel):
     ci_evidence: CiEvidenceSettings = Field(default_factory=CiEvidenceSettings, alias="ciEvidence")
     analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
     agents: dict[str, AgentBindingOverride] = Field(default_factory=dict)
+    # AP6 / D10 — orchestrator kind. Default ``llm`` preserves today's prompt-driven
+    # orchestrator; ``deterministic`` walks a declarative pipeline file; ``hybrid``
+    # is the AP7 decision-node seam (declared here for forward compatibility).
+    orchestrator: OrchestratorKind = "llm"
+    # AP6 / D9 — operator-authored pipeline used when the repo pipeline is untrusted
+    # or absent. Path relative to repo root or absolute.
+    operator_pipeline: str | None = Field(default=None, alias="operatorPipeline")
+    # AP6 — optional repo-local pipeline file path (default ``.mergecraft/pipeline.yaml``).
+    pipeline: str | None = None
     learnings: str | None = None
     learnings_headings: list[LearningsHeading] = Field(
         default_factory=list, alias="learningsHeadings"
