@@ -59,7 +59,9 @@ def _gemini_home(ctx: AgentRunContext) -> Path:
     return Path(ctx.tmpdir) / ".gemini"
 
 
-def _build_subagent_instructions() -> str:
+def _build_subagent_instructions(subagent_block: str | None = None) -> str:
+    if subagent_block is not None:
+        return subagent_block
     return "\n\n".join(
         [
             "Registered read-only subagents (spawn when needed):",
@@ -71,11 +73,11 @@ def _build_subagent_instructions() -> str:
     )
 
 
-def _build_instruction_text(ctx: AgentRunContext) -> str:
+def _build_instruction_text(ctx: AgentRunContext, *, subagent_block: str | None = None) -> str:
     instructions_parts: list[str] = []
     if ctx.instructions.system:
         instructions_parts.append(ctx.instructions.system)
-    instructions_parts.append(_build_subagent_instructions())
+    instructions_parts.append(_build_subagent_instructions(subagent_block))
     return "\n\n".join(instructions_parts)
 
 
@@ -87,12 +89,19 @@ def _build_gemini_prompt(ctx: AgentRunContext, prompt: str) -> str:
     return "\n\n".join(sections)
 
 
-def write_mcp_config(ctx: AgentRunContext) -> str:
+def write_mcp_config(
+    ctx: AgentRunContext,
+    *,
+    subagent_block: str | None = None,
+) -> str:
     """Write Gemini ``settings.json`` under the run temp dir and return its path."""
     gemini_home = _gemini_home(ctx)
     gemini_home.mkdir(parents=True, exist_ok=True)
     instructions_path = gemini_home / "GEMINI.md"
-    instructions_path.write_text(_build_instruction_text(ctx), encoding="utf-8")
+    instructions_path.write_text(
+        _build_instruction_text(ctx, subagent_block=subagent_block),
+        encoding="utf-8",
+    )
 
     server_config: dict[str, object] = {
         "httpUrl": ctx.mcp_server_url,
@@ -549,12 +558,16 @@ def _gemini_stream_event_handler(
 
 
 async def _run(ctx: AgentRunContext) -> AgentResult:
+    from mergecraft.agents.harness_render import merge_manifest_metadata, render_for_run
+
     try:
         cli = await _install(None)
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
-    write_mcp_config(ctx)
+    render_result = render_for_run(ctx, "gemini")
+    subagent_block = render_result.payload if isinstance(render_result.payload, str) else None
+    write_mcp_config(ctx, subagent_block=subagent_block)
     # Blocking Popen/wait/stream consume runs in a worker thread so
     # ``asyncio.wait_for`` in ``main`` can preempt the coroutine (W9.2).
     initial = await asyncio.to_thread(
@@ -576,7 +589,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         )
 
     result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
-    return await finalize_agent_result(ctx, result)
+    finalized = await finalize_agent_result(ctx, result)
+    return merge_manifest_metadata(finalized, render_result)
 
 
 gemini = agent(name="gemini", install=_install, run=_run, build_env=_build_env)
