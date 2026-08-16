@@ -11,8 +11,8 @@ Worktree: `mergecraft-vp4-enforce-publish` @ `wave/vp4-enforce-publish` (stacked
 | **VP4.2** | `tests/review/test_enforcement_flip.py::test_enforce_is_default_after_this_pr` | *(markers removed 2026-08-16 after VP4.2)* |
 | **VP4.2** | `tests/prompts/test_terminal_protocol_prompt.py` — Review + IncrementalReview contract tests | *(markers removed 2026-08-16 after VP4.2)* |
 | **VP4.2** | `tests/review/test_phase_guards.py` (both) | *(markers removed 2026-08-16 after VP4.2)* |
-| **VP4.3** | `tests/review/test_publication_split.py::test_body_only_unapproved_legacy_review_does_not_github_approve` | `green after VP4.3: body-only approved=false must not map to approve` |
-| **VP4.3** | `tests/review/test_phase_guards.py::test_create_pull_request_review_before_scope_is_rejected` | `green after VP4.3: create_pull_request_review requires established scope` |
+| **VP4.3** | `tests/review/test_publication_split.py::test_body_only_unapproved_legacy_review_does_not_github_approve` | *(markers removed 2026-08-16 after VP4.3)* |
+| **VP4.3** | `tests/review/test_phase_guards.py::test_create_pull_request_review_before_scope_is_rejected` | *(markers removed 2026-08-16 after VP4.3)* |
 
 Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a later XPASS into a hard failure the impl wave cannot touch.
 
@@ -30,6 +30,7 @@ Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a l
 |------|-----------|-----------------|-------|
 | 2026-08-16 | VP4.2 | `_VP42_DELEGATE`, `_VP42_PUBLISH`, `_VP42_INTERNAL` on `test_publication_split.py`; `_VP42` on `test_enforcement_flip.py`; `_VP42_REVIEW`, `_VP42_INCREMENTAL` on `test_terminal_protocol_prompt.py`; `_VP42_SCOPE`, `_VP42_TRACE` on `test_phase_guards.py` | Suite is now 11/11 real passes (0 xfail / 0 XPASS). Direct pins added: `record_validated_terminal_submission`, `stamp_review_phase_on_active_span`. `pending_review_publication` pinned as a `ToolState` field. VP4 Final not flipped. |
 | 2026-08-16 | coverage-gate (Job A) | n/a (real passes, not xfails) | `test_shadow_records_prediction_without_changing_outcome` now pins `default_settings().gates.terminal_verdict == "enforce"` (D6); shadow-escape-hatch behaviour still driven via `_classify(..., verdict_protocol="shadow")`. `test_mode_prompt_text_is_byte_identical_after_split` compares Review / IncrementalReview **outside** the File 3/4 terminal-protocol paragraph (same markers as `test_terminal_protocol_prompt.py`); every other mode and both descriptions stay byte-identical. Snapshot fixture not rewritten. |
+| 2026-08-16 | VP4.3 | body-only `approved=false` xfail on `test_publication_split.py`; before-scope xfail on `test_phase_guards.py` | Suite scoped modules are real passes (0 xfail / 0 XPASS). Direct pin added: `ensure_review_scope_for_terminal`. IncrementalReview INIT + `incremental_changed_paths` exemption not pinned (would expand the suite). VP4 Final `security-review` and `make ci-resume` not flipped. |
 
 ## Named symbols this suite pins
 
@@ -50,12 +51,13 @@ Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a l
 | `ReviewPhase` | `mcp/verdict.py` | `test_phase_reaches_the_trace` (closed member sequence) |
 | `ToolState.review_phase` | `mcp/tool_state.py` | `test_phase_reaches_the_trace` (advanced by live `checkout_pr`) |
 | `submit_review_verdict_tool` | `mcp/verdict.py` | `test_submit_before_scope_is_rejected` |
+| `ensure_review_scope_for_terminal` | `mcp/verdict.py` | `test_create_pull_request_review_before_scope_is_rejected` (`callable` pin on the D10 guard the legacy tool shares with `submit_review_verdict`) |
 | `checkout_pr_tool` | `mcp/checkout.py` | `test_phase_reaches_the_trace` |
 | `ApprovalRecord` / `ToolState.approval` | `mcp/tool_state.py` | `test_create_pull_request_review_delegates_to_recorder` (must stay unset on rejection) |
 | `ToolState.terminal_submission` | `mcp/tool_state.py` | delegate + publication + submit-before-scope (D8: unset on reject) |
 | `ToolState.pending_review_publication` | `mcp/tool_state.py` | `test_publication_requires_a_validated_submission` (unset when no validated submission) |
 
-`ReviewPhase`, `publish_pull_request_review`, `validate_submission`, `record_validated_terminal_submission`, `stamp_review_phase_on_active_span`, and `_legacy_params_to_submission` are imported **inside test bodies**.
+`ReviewPhase`, `publish_pull_request_review`, `validate_submission`, `record_validated_terminal_submission`, `stamp_review_phase_on_active_span`, `ensure_review_scope_for_terminal`, and `_legacy_params_to_submission` are imported **inside test bodies**.
 
 ### Closed `ReviewPhase` vocabulary
 
@@ -111,9 +113,10 @@ No source-grep assertions. Delegate and phase tests drive the real tools. Prompt
 
 11 collected; 11 pass; 0 xfail / 0 XPASS on `tests/review/test_publication_split.py` + `tests/review/test_enforcement_flip.py` + `tests/prompts/test_terminal_protocol_prompt.py` + `tests/review/test_phase_guards.py`. Markers cleared; `record_validated_terminal_submission` and `stamp_review_phase_on_active_span` directly pinned; `pending_review_publication` pinned as a `ToolState` field. Product code is not edited in this wave. VP4 Final remains open.
 
-## VP4.3 xfail schedule (security-review follow-up)
+## VP4.3 xfail reconciliation
 
-Two medium findings. Both tests are `@pytest.mark.xfail(..., strict=False)` until the impl wave. Product code is not edited in this wave. VP4 Final `security-review` and `make ci-resume` stay open.
+Two medium findings. Markers cleared after VP4.3 impl (`e39f55b`). Product code is not edited in this wave. VP4 Final `security-review` and `make ci-resume` stay open.
 
 - `_legacy_params_to_submission` is imported **inside the test body**.
 - `create_pull_request_review_tool` before-scope is the D10 pin the new-tool path already has (`test_submit_before_scope_is_rejected`); the legacy tool must obey it too.
+- `ensure_review_scope_for_terminal` is imported **inside the before-scope test body** (`callable` pin).

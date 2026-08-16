@@ -175,14 +175,13 @@ async def test_submit_before_scope_is_rejected(tmp_path: Path) -> None:
     assert getattr(ctx.tool_state, "terminal_submission", None) is None
 
 
-@pytest.mark.xfail(
-    reason="green after VP4.3: create_pull_request_review requires established scope",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_create_pull_request_review_before_scope_is_rejected(tmp_path: Path) -> None:
     """D10: the legacy tool must not record or publish before ``checkout_pr``."""
     from mergecraft.mcp.review import create_pull_request_review_tool
+    from mergecraft.mcp.verdict import ensure_review_scope_for_terminal
+
+    assert callable(ensure_review_scope_for_terminal)
 
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path)

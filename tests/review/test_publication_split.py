@@ -211,10 +211,6 @@ async def test_publication_requires_a_validated_submission(tmp_path: Path) -> No
     assert github.review_payloads == []
 
 
-@pytest.mark.xfail(
-    reason="green after VP4.3: body-only approved=false must not map to approve",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_body_only_unapproved_legacy_review_does_not_github_approve(
     tmp_path: Path,
