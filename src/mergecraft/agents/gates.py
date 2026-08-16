@@ -96,6 +96,16 @@ def _has_blocker(findings: list[Finding]) -> bool:
     return any(f.severity in BLOCKING_SEVERITIES for f in findings)
 
 
+def has_failed_required_static_check(static_checks: list[dict[str, str]]) -> bool:
+    """True when any ``run_static_checks`` row reports ``status: failed``.
+
+    The terminal-verdict validator consults this for ``approve`` submissions.
+    Only ``failed`` is a negative gate signal — ``unavailable`` and friends are
+    honest skips, not blockers.
+    """
+    return any(row.get("status") == "failed" for row in static_checks)
+
+
 @overload
 def decide_approval(
     findings: list[Finding],
@@ -493,6 +503,7 @@ __all__ = [
     "decide_action",
     "decide_approval",
     "decision_summary_lines",
+    "has_failed_required_static_check",
     "log_decision",
     "select_rule_id",
     "subagent_denied_tool_names",

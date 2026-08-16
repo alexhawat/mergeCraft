@@ -370,8 +370,9 @@ async def _run_agent_review(
         # offline packet classifies blast radius from the same diff the agent
         # read — exactly as the Action path does via ``checkout_pr``.
         primary_repo_state(tool_state).diff_path = str(materialization.path)
+        settings = load_repo_settings(root=cwd, load_learnings_files=False)
         resolved_model = resolve_model(slug=model)
-        agent = resolve_runtime_agent(model=resolved_model)
+        agent = resolve_runtime_agent(model=resolved_model, settings=settings)
         modes = compute_modes(agent.name, signed_commits=False)
 
         payload = ResolvedPayload(
@@ -385,7 +386,6 @@ async def _run_agent_review(
             status_checks=False,
             suggest_eval_add=False,
         )
-        settings = load_repo_settings(root=cwd, load_learnings_files=False)
         tool_context = ToolContext(
             agent_id=agent.name,
             repo=RepoIdentity(owner="local", name=cwd.name),

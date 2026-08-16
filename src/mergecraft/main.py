@@ -23,7 +23,11 @@ from mergecraft.analyzers.trust import (
     resolve_analyzers_mode,
 )
 from mergecraft.evidence.run_packet import emit_run_packet
-from mergecraft.main_outcome import _classify_outcome, _publish_span_attrs
+from mergecraft.main_outcome import (
+    _classify_outcome,
+    _publish_span_attrs,
+    _verdict_protocol_publish,
+)
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
@@ -303,6 +307,8 @@ async def _publish(
     outcome: RunOutcome,
     failure_reason: str | None,
     attrs_source: Callable[[], dict[str, Any]],
+    verdict_prediction: Any | None = None,
+    actual_outcome: str | None = None,
 ) -> str | None:
     """Tracer span + status check + evidence packet — the run's publish block.
 
@@ -335,7 +341,11 @@ async def _publish(
         # final state. A blocked or failed run is exactly when the
         # evidence matters most, so this runs on both branches below.
         written = await asyncio.to_thread(
-            emit_run_packet, tool_context, run_succeeded=outcome is RunOutcome.passed
+            emit_run_packet,
+            tool_context,
+            run_succeeded=outcome is RunOutcome.passed,
+            verdict_prediction=verdict_prediction,
+            actual_outcome=actual_outcome,
         )
         return str(written) if written else None
 
@@ -595,7 +605,7 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
         )
         resolved_model = resolve_model(slug=only_slug, respect_env_override=False)
         selected_slug = only_slug
-    agent = resolve_runtime_agent(model=resolved_model)
+    agent = resolve_runtime_agent(model=resolved_model, settings=settings)
     agent_id = agent.name
     ctx.agent = agent
     ctx.agent_id = agent_id
@@ -1005,7 +1015,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
 
     async def _run_agent_once(slug: str) -> AgentResult:
         attempt_model = resolve_model(slug=slug, respect_env_override=False)
-        attempt_agent = resolve_runtime_agent(model=attempt_model)
+        attempt_agent = resolve_runtime_agent(model=attempt_model, settings=settings)
         attempt_agent_id = attempt_agent.name
 
         if attempt_agent_id == agent_id:
@@ -1064,6 +1074,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 run_once=_run_agent_once,
                 head=model_head,
                 pin=model_pin,
+                tool_state=tool_state,
             )
             return winning_slug, chain_result
         return selected_slug, await agent.run(run_ctx)
@@ -1215,6 +1226,18 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         setup_reason=setup_reason,
         setup_policy=settings.setup_failure_policy,
         prep_reason=prep_reason,
+        mode=tool_state.selected_mode,
+        verdict_protocol=settings.gates.terminal_verdict,
+        final_summary_written=tool_state.final_summary_written,
+    )
+    diagnostic_attrs, verdict_prediction = _verdict_protocol_publish(
+        result=result,
+        mode=tool_state.selected_mode,
+        setup_reason=setup_reason,
+        setup_policy=settings.setup_failure_policy,
+        prep_reason=prep_reason,
+        final_summary_written=tool_state.final_summary_written,
+        terminal_verdict=settings.gates.terminal_verdict,
     )
 
     selected_mode_obj = next(
@@ -1225,7 +1248,9 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         ctx,
         outcome=outcome,
         failure_reason=failure_reason,
-        attrs_source=lambda: _publish_span_attrs(outcome, selected_mode_obj),
+        attrs_source=lambda: _publish_span_attrs(outcome, selected_mode_obj) | diagnostic_attrs,
+        verdict_prediction=verdict_prediction,
+        actual_outcome=str(outcome) if verdict_prediction is not None else None,
     )
 
     if outcome is not RunOutcome.passed:

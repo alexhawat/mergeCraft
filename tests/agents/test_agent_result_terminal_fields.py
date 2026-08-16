@@ -94,3 +94,4 @@ async def test_fields_populate_from_tool_state(tmp_path: Path) -> None:
     assert finalized.terminal_submission_id == submission_id
     diagnostics: dict[str, Any] = finalized.diagnostics
     assert isinstance(diagnostics, dict)
+    assert diagnostics.get("attempt_id") == submission.attempt_id

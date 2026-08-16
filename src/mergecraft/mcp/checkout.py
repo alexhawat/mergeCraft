@@ -320,6 +320,10 @@ def checkout_pr_tool(ctx: ToolContext):
             logger.info("impact extraction soft-failed: {}", imp_err)
 
         logger.info("checked out PR #{} -> {}", pull_number, local_branch)
+        ctx.tool_state.review_phase = "ESTABLISH_SCOPE"
+        from mergecraft.mcp.verdict import ReviewPhase, stamp_review_phase_on_active_span
+
+        stamp_review_phase_on_active_span(ReviewPhase.ESTABLISH_SCOPE)
         return result
 
     return tool(

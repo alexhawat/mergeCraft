@@ -310,7 +310,7 @@ async def run_main_for_test(
     agent_map: dict[str, FakeAgent] = dict(agents_by_slug or {})
     default_agent = agent if agent is not None else FakeAgent()
 
-    def _fake_resolve_runtime_agent(model: str | None = None) -> FakeAgent:
+    def _fake_resolve_runtime_agent(model: str | None = None, **_kwargs: object) -> FakeAgent:
         if model is not None and model in agent_map:
             return agent_map[model]
         return default_agent
