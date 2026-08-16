@@ -8,14 +8,17 @@ and :func:`pick_runnable_slug_from_chain` (D3).
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.structured_handoff import agent_finding_output_schema_id
 from mergecraft.agents.verifier import VERIFIER_SYSTEM_PROMPT, pinned_judge_model
-from mergecraft.config.settings import AgentBindingOverride, DispatchMode  # noqa: TC001
+from mergecraft.config.settings import (  # noqa: TC001
+    AgentBindingOverride,
+    DispatchMode,
+)
 from mergecraft.mcp.server import build_orchestrator_tools
 from mergecraft.mcp.shared import (
     REVIEWER_ALLOWED_TOOL_CLASSES,
@@ -46,9 +49,6 @@ _PROMPT_CATALOG: Final[dict[str, tuple[str, str]]] = {
     "mergecraft.classifier": ("", _DEFAULT_PROMPT_VERSION),
 }
 
-# Lenses ship in AP5 — until then the set is empty and any lens binding fails validation.
-_KNOWN_LENS_IDS: Final[frozenset[str]] = frozenset()
-
 _ORCHESTRATOR_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(ToolClass)
 
 
@@ -62,6 +62,15 @@ class AgentRole(StrEnum):
 
 class RegistryValidationError(ValueError):
     """Raised when a registry binding fails structural validation."""
+
+
+class LensTriggers(BaseModel):
+    """Resolved trigger metadata for risk-based lens routing (AP4)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    categories: tuple[str, ...] = ()
+    min_risk_band: Literal["low", "medium", "high"] | None = None
 
 
 class AgentBinding(BaseModel):
@@ -80,6 +89,7 @@ class AgentBinding(BaseModel):
     timeout_s: int
     dispatch: DispatchMode = "single"
     output_schema: str | None = None
+    triggers: LensTriggers | None = None
 
 
 class ResolvedAgentModel(BaseModel):
@@ -201,6 +211,15 @@ def _build_default_binding(settings: RepoSettings, role: AgentRole) -> AgentBind
     )
 
 
+def _resolve_triggers(override: AgentBindingOverride | None) -> LensTriggers | None:
+    if override is None or override.triggers is None:
+        return None
+    return LensTriggers(
+        categories=tuple(override.triggers.categories),
+        min_risk_band=override.triggers.min_risk_band,
+    )
+
+
 def _apply_override(
     base: AgentBinding,
     override: AgentBindingOverride,
@@ -226,6 +245,7 @@ def _apply_override(
         timeout_s=override.timeout_s if override.timeout_s is not None else base.timeout_s,
         dispatch=override.dispatch or base.dispatch,
         output_schema=base.output_schema,
+        triggers=_resolve_triggers(override) if override.triggers is not None else base.triggers,
     )
 
 
@@ -256,6 +276,14 @@ class Registry:
     def all_bindings(self) -> tuple[AgentBinding, ...]:
         return tuple(self._bindings.values())
 
+    def iter_lens_bindings(self) -> tuple[AgentBinding, ...]:
+        """Yield lens-scoped reviewer bindings in stable order."""
+        return tuple(
+            binding
+            for binding in sorted(self._bindings.values(), key=lambda item: item.agent_id)
+            if binding.lens is not None
+        )
+
     def validate(self) -> None:
         for binding in self._bindings.values():
             if not binding.model_chain:
@@ -268,10 +296,10 @@ class Registry:
             if binding.prompt_id not in _PROMPT_CATALOG:
                 msg = f"unknown prompt id {binding.prompt_id!r} on agent {binding.agent_id!r}"
                 raise RegistryValidationError(msg)
-            if binding.lens is not None and binding.lens not in _KNOWN_LENS_IDS:
+            if binding.lens is not None and binding.triggers is None:
                 msg = (
                     f"unreachable lens {binding.lens!r} on agent {binding.agent_id!r} "
-                    "(lens not in registry)"
+                    "(lens missing trigger metadata)"
                 )
                 raise RegistryValidationError(msg)
             if binding.role is not AgentRole.orchestrator:
