@@ -30,7 +30,8 @@ _ALLOWED_PREDICATE_RE = re.compile(
     r"^(changed_paths matches '([^']*)'"
     r"|risk_band >= (low|medium|high|critical)"
     r"|languages includes ([a-zA-Z0-9_.+-]+)"
-    r"|analyzer_findings\.severity >= (Minor|Major|Critical))$"
+    r"|analyzer_findings\.severity >= (Minor|Major|Critical)"
+    r"|decision\.([a-z_]+) is (trivial|not_trivial))$"
 )
 
 
@@ -42,6 +43,7 @@ class PipelineStepKind(StrEnum):
     agent = "agent"
     terminal = "terminal"
     fan_out = "fan_out"
+    decision = "decision"
 
 
 OnErrorPolicy = Literal["continue", "fail"]
@@ -57,6 +59,7 @@ class PipelineStep(BaseModel):
     kind: PipelineStepKind
     agent: str | None = None
     agents: tuple[str, ...] = Field(default_factory=tuple)
+    decision: str | None = None
     when: str | None = None
     on_error: OnErrorPolicy = "fail"
     budget: int | None = None
@@ -121,11 +124,22 @@ def evaluate_predicate(
     expression: str,
     *,
     classifier_signals: dict[str, Any] | None = None,
+    decision_answers: dict[str, Any] | None = None,
 ) -> bool:
     """Evaluate a validated predicate against classifier / diff signals."""
     validate_predicate(expression)
     signals = classifier_signals or {}
+    answers = decision_answers or {}
     expr = expression.strip()
+
+    if expr.startswith("decision."):
+        node_id, _, outcome = expr.partition(" is ")
+        node_id = node_id.removeprefix("decision.").strip()
+        answer = answers.get(node_id)
+        if answer is None:
+            return False
+        actual = getattr(answer, "outcome", None)
+        return str(actual) == outcome.strip()
 
     if expr.startswith("changed_paths matches "):
         pattern = expr.split("'", 2)[1]
@@ -182,6 +196,9 @@ def parse_pipeline(text: str, *, source: PipelineSource = "repo") -> PipelineDef
             raise PipelineValidationError(msg)
         if step.kind is PipelineStepKind.fan_out and not step.agents:
             msg = f"fan_out step {step.id!r} missing agents list"
+            raise PipelineValidationError(msg)
+        if step.kind is PipelineStepKind.decision and not step.decision:
+            msg = f"decision step {step.id!r} missing decision reference"
             raise PipelineValidationError(msg)
         steps.append(step)
 

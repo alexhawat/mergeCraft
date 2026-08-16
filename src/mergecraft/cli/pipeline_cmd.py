@@ -107,7 +107,7 @@ def explain_cmd(
         console.print(f"  - {step_id}")
     console.print(
         "predicates: changed_paths matches, risk_band >=, languages includes, "
-        "analyzer_findings.severity >="
+        "analyzer_findings.severity >=, decision.<id> is trivial|not_trivial"
     )
 
 

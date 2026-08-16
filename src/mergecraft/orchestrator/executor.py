@@ -16,6 +16,11 @@ from mergecraft.mcp.context import (
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.mcp.verdict import record_validated_terminal_submission
 from mergecraft.modes import compute_modes
+from mergecraft.orchestrator.decisions import (
+    DecisionNodeKind,
+    StructuredDecisionClient,
+    run_decision_node,
+)
 from mergecraft.orchestrator.pipeline import (
     PipelineDefinition,
     PipelineStepKind,
@@ -59,6 +64,7 @@ class PipelineRunResult:
     structural_approval: bool = False
     policy_verdict: str = "neutral"
     verifier_skipped_by_repo_pipeline: bool = False
+    decision_answers: dict[DecisionNodeKind, Any] = field(default_factory=dict)
 
 
 def _tool_ctx(repo_root: Path) -> ToolContext:
@@ -111,9 +117,16 @@ def _infer_classifier_signals(
 class PipelineExecutor:
     """Walk a declarative pipeline, dispatching registry agents without an LLM loop."""
 
-    def __init__(self, *, registry: Registry, settings: RepoSettings) -> None:
+    def __init__(
+        self,
+        *,
+        registry: Registry,
+        settings: RepoSettings,
+        decision_client: StructuredDecisionClient | None = None,
+    ) -> None:
         self._registry = registry
         self._settings = settings
+        self._decision_client = decision_client
 
     def run(
         self,
@@ -123,6 +136,7 @@ class PipelineExecutor:
         classifier_signals: dict[str, Any] | None = None,
         inject_failures: set[str] | None = None,
         diff_path: Path | None = None,
+        decision_overrides: dict[DecisionNodeKind, StructuredDecisionClient] | None = None,
     ) -> PipelineRunResult:
         kind = self._settings.orchestrator
         ctx = _tool_ctx(repo_root)
@@ -130,18 +144,26 @@ class PipelineExecutor:
             classifier_signals=classifier_signals,
             diff_path=diff_path,
         )
+        diff_text = (
+            diff_path.read_text(encoding="utf-8") if diff_path and diff_path.is_file() else ""
+        )
         failures = inject_failures or set()
         records: list[StepRecord] = []
+        decision_by_id: dict[str, Any] = {}
+        decision_by_kind: dict[DecisionNodeKind, Any] = {}
+        overrides = decision_overrides or {}
         verifier_ran = False
         verifier_in_repo_pipeline = any(
             step.kind is PipelineStepKind.agent and step.agent == AgentRole.verifier.value
             for step in pipeline.steps
         )
-        tokens = 0 if kind == "deterministic" else 1
+        tokens = 1 if kind == "llm" else 0
 
         for step in pipeline.steps:
             if step.when is not None and not evaluate_predicate(
-                step.when, classifier_signals=signals
+                step.when,
+                classifier_signals=signals,
+                decision_answers=decision_by_id,
             ):
                 records.append(
                     StepRecord(
@@ -166,6 +188,26 @@ class PipelineExecutor:
                     raise PipelineExecutionError(msg)
                 continue
 
+            if step.kind is PipelineStepKind.decision and step.decision:
+                node_kind = DecisionNodeKind(step.decision)
+                client = overrides.get(node_kind, self._decision_client)
+                if client is None:
+                    msg = f"decision step {step.id!r} requires a structured decision client"
+                    raise PipelineExecutionError(msg)
+                answer = run_decision_node(
+                    node_kind,
+                    client=client,
+                    diff_text=diff_text,
+                    registry=self._registry,
+                    classifier_signals=signals,
+                )
+                decision_by_id[step.decision] = answer
+                decision_by_kind[node_kind] = answer
+                if kind in {"hybrid", "llm"}:
+                    tokens += 1
+                records.append(StepRecord(step_id=step.id, status="ran"))
+                continue
+
             if step.kind is PipelineStepKind.terminal:
                 submission = record_validated_terminal_submission(
                     ctx,
@@ -185,6 +227,7 @@ class PipelineExecutor:
                     verifier_skipped_by_repo_pipeline=(
                         pipeline.source == "repo" and verifier_in_repo_pipeline and not verifier_ran
                     ),
+                    decision_answers=decision_by_kind,
                 )
 
             if step.kind is PipelineStepKind.fan_out:
@@ -224,6 +267,7 @@ class PipelineExecutor:
             verifier_skipped_by_repo_pipeline=(
                 pipeline.source == "repo" and verifier_in_repo_pipeline and not verifier_ran
             ),
+            decision_answers=decision_by_kind,
         )
 
 
