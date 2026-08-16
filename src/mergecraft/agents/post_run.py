@@ -203,7 +203,14 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
         submission,
         current_attempt_id=ctx.tool_state.attempt_id,
     ):
-        return False, None, {}
+        return (
+            False,
+            None,
+            {
+                "rejection_reason": "stale_attempt",
+                "attempt_id": submission.attempt_id,
+            },
+        )
 
     validation = validate_submission(
         recorded_submission_payload(submission),

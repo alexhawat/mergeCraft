@@ -134,3 +134,5 @@ async def test_stale_structural_result_is_not_reused(tmp_path: Path) -> None:
         "stale TerminalSubmission must not satisfy the current attempt"
     )
     assert finalized.terminal_submission_id is None
+    assert finalized.diagnostics.get("rejection_reason") == "stale_attempt"
+    assert finalized.diagnostics.get("attempt_id") == 0

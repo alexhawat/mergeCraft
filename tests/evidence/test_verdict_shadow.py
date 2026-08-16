@@ -81,6 +81,7 @@ def _classify(
     *,
     verdict_protocol: str,
     mode: str = "Review",
+    final_summary_written: bool = False,
 ) -> tuple[RunOutcome, str | None]:
     """Drive the real ``_classify_outcome`` with the VP3 protocol-mode kwarg."""
     from mergecraft.main_outcome import _classify_outcome
@@ -92,6 +93,7 @@ def _classify(
         prep_reason=None,
         mode=mode,
         verdict_protocol=verdict_protocol,
+        final_summary_written=final_summary_written,
     )
     return outcome, reason
 
@@ -191,6 +193,7 @@ def test_shadow_records_prediction_without_changing_outcome(tmp_path: Path) -> N
     )
     assert _as_outcome(row_outcome) is RunOutcome.inconclusive
     assert _row_diagnostic(row) is not None
+    assert getattr(row, "lane", None) == "review"
 
 
 def test_shadow_records_agreement_when_verdict_present(tmp_path: Path) -> None:
@@ -328,3 +331,84 @@ def test_disagreement_is_queryable() -> None:
         str(VerdictDiagnostic.provider_success_without_submission),
     }
     assert predicted == str(RunOutcome.inconclusive)
+
+
+def test_predictor_matches_enforce_for_incremental_progress() -> None:
+    """IncrementalReview + ``final_summary_written`` is complete under enforce and shadow."""
+    from mergecraft.evidence.shadow import predict_verdict_protocol
+    from mergecraft.mcp.verdict import VerdictDiagnostic
+
+    result = _missing_verdict_result()
+    outcome, reason = _classify(
+        result,
+        verdict_protocol="enforce",
+        mode="IncrementalReview",
+        final_summary_written=True,
+    )
+    assert outcome is RunOutcome.passed
+    assert reason is None
+
+    prediction = predict_verdict_protocol(
+        result,
+        mode="IncrementalReview",
+        final_summary_written=True,
+    )
+    assert _as_outcome(_prediction_outcome(prediction)) is RunOutcome.passed
+    diagnostic = _prediction_diagnostic(prediction)
+    assert diagnostic == VerdictDiagnostic.approved or (
+        str(diagnostic) == VerdictDiagnostic.approved.value
+    )
+
+
+def test_predictor_mirrors_setup_and_prep_branches() -> None:
+    """Setup/prep failures must not be predicted as a missing-verdict inconclusive."""
+    from mergecraft.evidence.shadow import predict_verdict_protocol
+
+    result = _present_verdict_result()
+    failed = predict_verdict_protocol(
+        result,
+        mode="Review",
+        setup_reason="setup script failed",
+        setup_policy="fail",
+    )
+    assert _as_outcome(_prediction_outcome(failed)) is RunOutcome.configuration_error
+
+    prep = predict_verdict_protocol(
+        result,
+        mode="Review",
+        prep_reason="dependency installation failed",
+    )
+    assert _as_outcome(_prediction_outcome(prep)) is RunOutcome.inconclusive
+
+
+def test_verdict_protocol_publish_records_only_in_shadow_mode() -> None:
+    """The live finalize helper predicts always and records only under shadow."""
+    from mergecraft.main_outcome import _verdict_protocol_publish
+    from mergecraft.mcp.verdict import VerdictDiagnostic
+
+    result = _missing_verdict_result()
+    attrs, prediction = _verdict_protocol_publish(
+        result=result,
+        mode="Review",
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        final_summary_written=False,
+        terminal_verdict="shadow",
+    )
+    assert prediction is not None
+    assert _as_outcome(_prediction_outcome(prediction)) is RunOutcome.inconclusive
+    assert attrs.get("verdict.diagnostic") == (
+        VerdictDiagnostic.provider_success_without_submission.value
+    )
+
+    _enforce_attrs, enforce_prediction = _verdict_protocol_publish(
+        result=result,
+        mode="Review",
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        final_summary_written=False,
+        terminal_verdict="enforce",
+    )
+    assert enforce_prediction is None

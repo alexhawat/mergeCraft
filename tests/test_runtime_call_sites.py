@@ -220,6 +220,22 @@ _CONTRACTS: Final[tuple[_Contract, ...]] = (
             "report has no data and W10.4 cannot render anything (#50)"
         ),
     ),
+    _Contract(
+        symbol="predict_verdict_protocol",
+        defined_in="evidence/shadow.py",
+        why=(
+            "no reachable caller means terminal-verdict shadow mode never records a prediction "
+            "beside the legacy outcome, so a later enforce flip has nothing to compare (VP3)"
+        ),
+    ),
+    _Contract(
+        symbol="span_attrs_for_verdict_diagnostic",
+        defined_in="mcp/verdict.py",
+        why=(
+            "no reachable caller means VerdictDiagnostic never reaches the mergecraft.publish "
+            "span, so shadow/enforce runs have no diagnostic on the trace (VP3)"
+        ),
+    ),
 )
 
 

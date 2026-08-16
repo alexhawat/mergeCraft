@@ -107,4 +107,44 @@ def _classify_outcome(
     return RunOutcome.passed, None
 
 
-__all__ = ["_classify_outcome", "_is_review_mode", "_publish_span_attrs"]
+def _verdict_protocol_publish(
+    *,
+    result: AgentResult,
+    mode: str | Mode | None,
+    setup_reason: str,
+    setup_policy: SetupFailurePolicy,
+    prep_reason: str | None,
+    final_summary_written: bool,
+    terminal_verdict: str,
+) -> tuple[dict[str, Any], Any | None]:
+    """Predict the enforce-path verdict protocol and build publish span attrs.
+
+    The prediction is always computed so the ``mergecraft.publish`` span
+    carries a closed ``VerdictDiagnostic``. The shadow recorder only
+    receives the prediction when ``terminal_verdict == "shadow"``.
+    """
+    from mergecraft.evidence.shadow import predict_verdict_protocol
+    from mergecraft.mcp.verdict import VerdictDiagnostic, span_attrs_for_verdict_diagnostic
+
+    mode_name = mode if isinstance(mode, str) else (mode.name if mode is not None else "")
+    prediction = predict_verdict_protocol(
+        result,
+        mode=mode_name,
+        setup_reason=setup_reason,
+        setup_policy=str(setup_policy),
+        prep_reason=prep_reason,
+        final_summary_written=final_summary_written,
+    )
+    diagnostic = VerdictDiagnostic(prediction.diagnostic)
+    attrs = span_attrs_for_verdict_diagnostic(diagnostic, summary=result.output or "")
+    if terminal_verdict != "shadow":
+        return attrs, None
+    return attrs, prediction
+
+
+__all__ = [
+    "_classify_outcome",
+    "_is_review_mode",
+    "_publish_span_attrs",
+    "_verdict_protocol_publish",
+]
