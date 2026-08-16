@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from mergecraft.modes import Mode
 
 _REVIEW_MODE_NAMES = frozenset({"Review", "IncrementalReview"})
+_INCREMENTAL_REVIEW_NAMES = frozenset({"IncrementalReview"})
 _MISSING_TERMINAL_VERDICT_REASON = "no terminal review verdict was submitted for this attempt"
 
 
@@ -30,6 +31,13 @@ def _is_review_mode(mode: str | Mode | None) -> bool:
     if isinstance(mode, str):
         return mode in _REVIEW_MODE_NAMES
     return mode.name in _REVIEW_MODE_NAMES
+
+
+def _is_incremental_review(mode: str | Mode | None) -> bool:
+    if mode is None:
+        return False
+    name = mode if isinstance(mode, str) else mode.name
+    return name in _INCREMENTAL_REVIEW_NAMES
 
 
 def _publish_span_attrs(outcome: RunOutcome, mode: Mode | None) -> dict[str, Any]:
@@ -52,6 +60,7 @@ def _classify_outcome(
     prep_reason: str | None,
     mode: str | Mode | None = None,
     verdict_protocol: Literal["shadow", "enforce"] | None = None,
+    final_summary_written: bool = False,
 ) -> tuple[RunOutcome, str | None]:
     """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
 
@@ -87,6 +96,8 @@ def _classify_outcome(
         and not result.terminal_submission_received
         and verdict_protocol != "shadow"
     ):
+        if _is_incremental_review(mode) and final_summary_written:
+            return RunOutcome.passed, None
         logger.warning("» {}", _MISSING_TERMINAL_VERDICT_REASON)
         return RunOutcome.inconclusive, _MISSING_TERMINAL_VERDICT_REASON
     # ``setup_policy`` is the closed ``SetupFailurePolicy`` vocabulary; any
@@ -96,4 +107,44 @@ def _classify_outcome(
     return RunOutcome.passed, None
 
 
-__all__ = ["_classify_outcome", "_is_review_mode", "_publish_span_attrs"]
+def _verdict_protocol_publish(
+    *,
+    result: AgentResult,
+    mode: str | Mode | None,
+    setup_reason: str,
+    setup_policy: SetupFailurePolicy,
+    prep_reason: str | None,
+    final_summary_written: bool,
+    terminal_verdict: str,
+) -> tuple[dict[str, Any], Any | None]:
+    """Predict the enforce-path verdict protocol and build publish span attrs.
+
+    The prediction is always computed so the ``mergecraft.publish`` span
+    carries a closed ``VerdictDiagnostic``. The shadow recorder only
+    receives the prediction when ``terminal_verdict == "shadow"``.
+    """
+    from mergecraft.evidence.shadow import predict_verdict_protocol
+    from mergecraft.mcp.verdict import VerdictDiagnostic, span_attrs_for_verdict_diagnostic
+
+    mode_name = mode if isinstance(mode, str) else (mode.name if mode is not None else "")
+    prediction = predict_verdict_protocol(
+        result,
+        mode=mode_name,
+        setup_reason=setup_reason,
+        setup_policy=str(setup_policy),
+        prep_reason=prep_reason,
+        final_summary_written=final_summary_written,
+    )
+    diagnostic = VerdictDiagnostic(prediction.diagnostic)
+    attrs = span_attrs_for_verdict_diagnostic(diagnostic, summary=result.output or "")
+    if terminal_verdict != "shadow":
+        return attrs, None
+    return attrs, prediction
+
+
+__all__ = [
+    "_classify_outcome",
+    "_is_review_mode",
+    "_publish_span_attrs",
+    "_verdict_protocol_publish",
+]

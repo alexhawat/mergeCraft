@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.mcp.shared import execute, tool
-from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
 from mergecraft.utils.learnings import learnings_file_path
 
 if TYPE_CHECKING:
@@ -62,6 +62,49 @@ def _learnings_text(ctx: ToolContext) -> str:
     if not candidate.is_file():
         return ""
     return candidate.read_text(encoding="utf-8")
+
+
+def _persist_confirmed_fingerprint(
+    ctx: ToolContext,
+    fingerprint: str,
+    *,
+    severity: str | None = None,
+) -> None:
+    """Record a live confirm outside replaceable ``analyzer_run`` state."""
+    ctx.tool_state.verified_ids.add(fingerprint)
+    run = ctx.tool_state.analyzer_run
+    if run is None:
+        run = AnalyzerRunState(ran=True)
+        ctx.tool_state.analyzer_run = run
+    run.verified_ids.add(fingerprint)
+    row = _finding_row_for_fingerprint(ctx, fingerprint)
+    if row is None:
+        if not severity:
+            return
+        row = {"fingerprint": fingerprint, "severity": severity}
+    else:
+        row.setdefault("fingerprint", fingerprint)
+        if severity:
+            row["severity"] = severity
+    existing = {
+        item.get("fingerprint")
+        for item in ctx.tool_state.confirmed_findings
+        if isinstance(item, dict)
+    }
+    if fingerprint not in existing:
+        ctx.tool_state.confirmed_findings.append(row)
+
+
+def _finding_row_for_fingerprint(ctx: ToolContext, fingerprint: str) -> dict[str, Any] | None:
+    run = ctx.tool_state.analyzer_run
+    if run is not None:
+        for item in run.findings:
+            if isinstance(item, dict) and item.get("fingerprint") == fingerprint:
+                return dict(item)
+    for item in ctx.tool_state.agent_findings:
+        if item.get("fingerprint") == fingerprint:
+            return dict(item)
+    return None
 
 
 def _run_lane(ctx: ToolContext) -> str | None:
@@ -114,6 +157,16 @@ def verify_agent_findings_tool(ctx: ToolContext):
             )
             for row in (params.get("findings") or [])
         ]
+        stored: dict[str, dict[str, Any]] = {}
+        for item in ctx.tool_state.agent_findings:
+            fingerprint = item.get("fingerprint") if isinstance(item, dict) else None
+            if isinstance(fingerprint, str) and fingerprint:
+                stored[fingerprint] = item
+        for finding in findings:
+            row = finding.model_dump(mode="json")
+            row["fingerprint"] = finding.identity()
+            stored[str(row["fingerprint"])] = row
+        ctx.tool_state.agent_findings = list(stored.values())
         plan = plan_agent_verifications(
             findings,
             budget=settings.inline_budget,
@@ -215,6 +268,27 @@ def record_finding_verdict_tool(ctx: ToolContext):
         outcome = record_verifier_verdict(verdict, learnings_path=Path(path))
         if outcome.recorded_withdrawn:
             ctx.tool_state.was_updated = True
+        if outcome.verdict == "confirm" and outcome.publishable:
+            _persist_confirmed_fingerprint(ctx, outcome.fingerprint)
+        elif outcome.verdict == "downgrade" and outcome.publishable:
+            from mergecraft.agents.gates import BLOCKING_SEVERITIES
+
+            new_severity = verdict.new_severity
+            if new_severity in BLOCKING_SEVERITIES:
+                _persist_confirmed_fingerprint(
+                    ctx,
+                    outcome.fingerprint,
+                    severity=new_severity,
+                )
+            else:
+                ctx.tool_state.verified_ids.discard(outcome.fingerprint)
+                if ctx.tool_state.analyzer_run is not None:
+                    ctx.tool_state.analyzer_run.verified_ids.discard(outcome.fingerprint)
+                ctx.tool_state.confirmed_findings = [
+                    row
+                    for row in ctx.tool_state.confirmed_findings
+                    if row.get("fingerprint") != outcome.fingerprint
+                ]
         return {
             "recorded": True,
             "fingerprint": outcome.fingerprint,

@@ -67,16 +67,10 @@ _VALID_ACTIONS: Final[frozenset[str]] = frozenset(GATE_ACTIONS)
 # Run-outcome strings compared by the verdict-protocol shadow path. Each maps
 # to its own direction so ``passed`` vs ``inconclusive`` disagreements stay
 # visible — folding both onto a generic "review" direction would hide them.
-_PROTOCOL_OUTCOMES: Final[frozenset[str]] = frozenset(
-    {
-        str(RunOutcome.passed),
-        str(RunOutcome.inconclusive),
-        str(RunOutcome.failed),
-        str(RunOutcome.configuration_error),
-    }
-)
+_PROTOCOL_OUTCOMES: Final[frozenset[str]] = frozenset(str(value) for value in RunOutcome)
 
 _REVIEW_MODE_NAMES: Final[frozenset[str]] = frozenset({"Review", "IncrementalReview"})
+_INCREMENTAL_REVIEW_NAMES: Final[frozenset[str]] = frozenset({"IncrementalReview"})
 
 
 # Map a packet's blast radius lane to a coarse repo area for the
@@ -179,8 +173,18 @@ def predict_verdict_protocol(
     result: AgentResult,
     *,
     mode: str,
+    setup_reason: str = "",
+    setup_policy: str = "warn",
+    prep_reason: str | None = None,
+    final_summary_written: bool = False,
 ) -> VerdictProtocolPrediction:
-    """Read the terminal-verdict protocol prediction without recording it (VP3)."""
+    """Read the terminal-verdict protocol prediction without recording it (VP3).
+
+    Mirrors the enforce path of ``_classify_outcome`` so a later flip is
+    comparable: IncrementalReview + ``final_summary_written`` is complete,
+    and setup/prep failures map to the same outcomes the resolver would
+    produce with ``verdict_protocol="enforce"``.
+    """
     from mergecraft.mcp.verdict import VerdictDiagnostic
 
     if not result.success:
@@ -188,7 +192,27 @@ def predict_verdict_protocol(
             outcome=RunOutcome.failed,
             diagnostic=VerdictDiagnostic.provider_failure.value,
         )
+    if setup_reason and setup_policy == "fail":
+        return VerdictProtocolPrediction(
+            outcome=RunOutcome.configuration_error,
+            diagnostic=VerdictDiagnostic.policy_rejection.value,
+        )
+    if setup_reason and setup_policy == "inconclusive":
+        return VerdictProtocolPrediction(
+            outcome=RunOutcome.inconclusive,
+            diagnostic=VerdictDiagnostic.policy_rejection.value,
+        )
+    if prep_reason:
+        return VerdictProtocolPrediction(
+            outcome=RunOutcome.inconclusive,
+            diagnostic=VerdictDiagnostic.policy_rejection.value,
+        )
     if mode in _REVIEW_MODE_NAMES and not result.terminal_submission_received:
+        if mode in _INCREMENTAL_REVIEW_NAMES and final_summary_written:
+            return VerdictProtocolPrediction(
+                outcome=RunOutcome.passed,
+                diagnostic=VerdictDiagnostic.approved.value,
+            )
         return VerdictProtocolPrediction(
             outcome=RunOutcome.inconclusive,
             diagnostic=VerdictDiagnostic.provider_success_without_submission.value,
@@ -267,6 +291,7 @@ def record_shadow_prediction(
             policy_id=policy_id,
             rule_id=diagnostic,
             action=predicted_outcome,
+            lane="review",
             repo_area=policy_id,
             outcome=predicted_outcome,
             predicted_outcome=predicted_outcome,

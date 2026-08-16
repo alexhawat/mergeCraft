@@ -15,6 +15,7 @@ from mergecraft.mcp.verdict import (
     ReviewPhase,
     ensure_review_scope_for_terminal,
     record_validated_terminal_submission,
+    revalidate_recorded_submission,
     stamp_review_phase_on_active_span,
 )
 from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
@@ -166,7 +167,7 @@ def _comments_to_findings(comments: list[dict[str, Any]]) -> list[dict[str, Any]
     findings: list[dict[str, Any]] = []
     for comment in comments:
         row: dict[str, Any] = {
-            "path": comment["path"],
+            "path": str(comment["path"]),
             "body": str(comment.get("body") or ""),
             "severity": "Major",
         }
@@ -176,8 +177,15 @@ def _comments_to_findings(comments: list[dict[str, Any]]) -> list[dict[str, Any]
     return findings
 
 
-def _legacy_params_to_submission(params: dict[str, Any]) -> dict[str, Any]:
-    """Construct the VP1 submission shape from legacy review params (D7)."""
+def _legacy_params_to_submission(params: dict[str, Any]) -> dict[str, Any] | None:
+    """Map ``create_pull_request_review`` params onto the terminal-verdict shape.
+
+    A plain COMMENT (no ``approved`` / ``request_changes`` and no inline
+    comments) is not a terminal verdict. Explicit ``approved: false`` must
+    not fall through to ``approve``. ``request_changes`` with no findings
+    is left empty so ``validate_submission`` can apply D9 rather than
+    fabricating a ``path="."`` row.
+    """
     approved = bool(params.get("approved"))
     request_changes = bool(params.get("request_changes"))
     body = str(params.get("body") or "")
@@ -188,24 +196,27 @@ def _legacy_params_to_submission(params: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(msg)
 
     if approved:
-        return {"verdict": "approve", "summary": body, "findings": []}
+        return {"verdict": "approve", "summary": body or "Approve", "findings": []}
+    findings = _comments_to_findings(comments)
     if request_changes:
         return {
             "verdict": "request_changes",
             "summary": body or "Request changes",
-            "findings": _comments_to_findings(comments),
+            "findings": findings,
         }
-    if comments:
+    if findings:
         return {
             "verdict": "request_changes",
             "summary": body or "Review findings",
-            "findings": _comments_to_findings(comments),
+            "findings": findings,
         }
-    return {
-        "verdict": "request_changes",
-        "summary": body or "Review comment",
-        "findings": [],
-    }
+    if "approved" in params:
+        return {
+            "verdict": "request_changes",
+            "summary": body or "Review comment",
+            "findings": [],
+        }
+    return None
 
 
 async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -346,9 +357,31 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
     return result
 
 
+def _requested_publication_verdict(params: dict[str, Any]) -> str | None:
+    if bool(params.get("approved")):
+        return "approve"
+    if bool(params.get("request_changes")):
+        return "request_changes"
+    return None
+
+
+def _reject_mismatched_publication(submission: Any, params: dict[str, Any]) -> None:
+    wanted = _requested_publication_verdict(params)
+    if wanted is None or wanted == submission.verdict:
+        return
+    msg = f"publication {wanted} does not match recorded terminal verdict {submission.verdict}"
+    raise ValueError(msg)
+
+
 def create_pull_request_review_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         pull_number = int(params["pull_number"])
+        approved = bool(params.get("approved"))
+        request_changes = bool(params.get("request_changes"))
+        if approved and request_changes:
+            msg = "approved and request_changes are mutually exclusive"
+            raise ValueError(msg)
+
         body = params.get("body")
         comments = list(params.get("comments") or [])
         if not body and not comments:
@@ -375,8 +408,13 @@ def create_pull_request_review_tool(ctx: ToolContext):
 
         ensure_review_scope_for_terminal(ctx.tool_state, "create_pull_request_review")
 
-        submission_payload = _legacy_params_to_submission(params)
-        record_validated_terminal_submission(ctx, submission_payload)
+        if ctx.tool_state.terminal_submission is None:
+            submission_payload = _legacy_params_to_submission(params)
+            if submission_payload is not None:
+                record_validated_terminal_submission(ctx, submission_payload)
+        else:
+            _reject_mismatched_publication(ctx.tool_state.terminal_submission, params)
+            revalidate_recorded_submission(ctx)
 
         publication_params = dict(params)
         publication_params["pull_number"] = pull_number

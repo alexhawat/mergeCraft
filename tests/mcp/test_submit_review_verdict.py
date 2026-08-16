@@ -110,7 +110,9 @@ async def test_valid_submission_is_recorded(tmp_path: Path) -> None:
     assert recorded.verdict == "approve"
     assert recorded.summary == payload["summary"]
     assert recorded.findings == []
-    assert recorded.payload_hash == _canonical_payload_hash(payload)
+    assert recorded.payload_hash == _canonical_payload_hash(
+        _params_model().model_validate(payload).model_dump(mode="json")
+    )
     assert recorded.submitted_at
     assert hasattr(recorded, "attempt_id")
 
@@ -201,6 +203,49 @@ async def test_findings_use_agent_finding_shape(tmp_path: Path) -> None:
     assert round_tripped.line == finding.line
 
 
+def test_unknown_finding_severity_is_rejected() -> None:
+    """Terminal findings must use the closed taxonomy, not a free-form string."""
+    payload = {
+        "verdict": "request_changes",
+        "summary": "One finding stands.",
+        "findings": [
+            {
+                "path": "src/app.py",
+                "body": "token logged in plaintext",
+                "severity": "Blocker",
+            }
+        ],
+    }
+    with pytest.raises(ValidationError) as excinfo:
+        _params_model().model_validate(payload)
+    message = str(excinfo.value)
+    assert "Blocker" in message
+    assert "severity" in message.lower()
+
+
+@pytest.mark.asyncio
+async def test_unknown_finding_severity_is_rejected_at_the_tool(tmp_path: Path) -> None:
+    """MCP dispatch does not schema-validate arguments — the tool must still reject."""
+    ctx = _ctx(tmp_path)
+    result = await _submit(
+        ctx,
+        {
+            "verdict": "request_changes",
+            "summary": "One finding stands.",
+            "findings": [
+                {
+                    "path": "src/app.py",
+                    "body": "token logged in plaintext",
+                    "severity": "Blocker",
+                }
+            ],
+        },
+    )
+    assert result.is_error is True
+    assert "blocker" in _error_text(result).lower()
+    assert getattr(ctx.tool_state, "terminal_submission", None) is None
+
+
 @pytest.mark.asyncio
 async def test_second_identical_submission_is_idempotent(tmp_path: Path) -> None:
     """D4: the same payload hash returns the original id; no second record."""
@@ -240,6 +285,27 @@ async def test_second_conflicting_submission_is_rejected(tmp_path: Path) -> None
     assert ctx.tool_state.terminal_submission.id == original_id
 
 
+@pytest.mark.asyncio
+async def test_conflict_flag_stays_set_after_identical_replay(tmp_path: Path) -> None:
+    """A → conflict B → A must leave the attempt marked unusable for VP2."""
+    ctx = _ctx(tmp_path)
+    first = await _submit(ctx, _valid_payload())
+    assert first.is_error is False
+    original_id = ctx.tool_state.terminal_submission.id  # type: ignore[union-attr]
+
+    conflicting = {**_valid_payload(), "summary": "Actually this needs changes."}
+    second = await _submit(ctx, conflicting)
+    assert second.is_error is True
+    assert ctx.tool_state.terminal_submission_conflict is True
+
+    third = await _submit(ctx, _valid_payload())
+    assert third.is_error is False
+    replayed = ctx.tool_state.terminal_submission
+    assert replayed is not None
+    assert replayed.id == original_id
+    assert ctx.tool_state.terminal_submission_conflict is True
+
+
 def test_tool_is_registered_for_orchestrator_only(tmp_path: Path) -> None:
     """Present on the orchestrator toolset; absent from the read-only common set."""
     ctx = _ctx(tmp_path)
@@ -257,3 +323,197 @@ def test_tool_is_in_subagent_deny_list(tmp_path: Path) -> None:
     assert _TOOL_NAME in TERMINAL_PROTOCOL_DENIED_TOOL_NAMES
     assert _TOOL_NAME in subagent_denied_tool_names(ctx)
     assert _TOOL_NAME in verifier_denied_tool_names(ctx)
+
+
+@pytest.mark.parametrize("value", [{}, False, 0, "", None])
+def test_non_list_findings_are_rejected(value: object) -> None:
+    """Malformed falsy findings must not canonicalize to an empty list."""
+    payload = {**_valid_payload(), "findings": value}
+    with pytest.raises(ValidationError) as excinfo:
+        _params_model().model_validate(payload)
+    assert "findings" in str(excinfo.value).lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [{}, False, 0, "", None])
+async def test_non_list_findings_are_rejected_at_the_tool(tmp_path: Path, value: object) -> None:
+    """MCP dispatch does not schema-validate arguments — the tool must still reject."""
+    ctx = _ctx(tmp_path)
+    result = await _submit(ctx, {**_valid_payload(), "findings": value})
+    assert result.is_error is True
+    assert "findings" in _error_text(result).lower()
+    assert getattr(ctx.tool_state, "terminal_submission", None) is None
+
+
+@pytest.mark.asyncio
+async def test_omitted_findings_matches_empty_list_idempotency(tmp_path: Path) -> None:
+    """D4: omitting ``findings`` and sending ``findings: []`` are the same payload."""
+    ctx = _ctx(tmp_path)
+    omitted = {"verdict": "approve", "summary": "No blocking issues in the diff."}
+    first = await _submit(ctx, omitted)
+    assert first.is_error is False
+    original_id = ctx.tool_state.terminal_submission.id  # type: ignore[union-attr]
+
+    second = await _submit(ctx, {**omitted, "findings": []})
+    assert second.is_error is False
+    replayed = ctx.tool_state.terminal_submission
+    assert replayed is not None
+    assert replayed.id == original_id
+    assert ctx.tool_state.terminal_submission_conflict is False
+
+
+@pytest.mark.asyncio
+async def test_model_chain_resets_terminal_submission_on_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A retryable first attempt's submit must not conflict-reject the fallback."""
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.utils.agent_resolve import run_with_model_chain
+
+    monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve._agent_binary_available",
+        lambda _slug: True,
+    )
+
+    ctx = _ctx(tmp_path)
+    seen_indexes: list[int] = []
+
+    async def run_once(slug: str) -> AgentResult:
+        seen_indexes.append(ctx.tool_state.fallback_index)
+        if slug.startswith("openai/"):
+            recorded = await _submit(ctx, _valid_payload())
+            assert recorded.is_error is False
+            assert ctx.tool_state.fallback_index == 0
+            return AgentResult(
+                success=False,
+                error="provider rate limited",
+                metadata={"retryable": True},
+            )
+        assert ctx.tool_state.fallback_index == 1
+        assert ctx.tool_state.terminal_submission is None
+        assert ctx.tool_state.terminal_submission_conflict is False
+        recorded = await _submit(
+            ctx,
+            {**_valid_payload(), "summary": "Fallback model recorded the verdict."},
+        )
+        assert recorded.is_error is False
+        return AgentResult(success=True, output="review complete")
+
+    settings = RepoSettings.model_validate(
+        {"models": ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]}
+    )
+    winning_slug, result = await run_with_model_chain(
+        settings=settings,
+        run_once=run_once,
+        tool_state=ctx.tool_state,
+    )
+
+    assert seen_indexes == [0, 1]
+    assert winning_slug == "google/gemini-3.1-pro-preview"
+    assert result.success is True
+    recorded = ctx.tool_state.terminal_submission
+    assert recorded is not None
+    assert recorded.attempt_id == 1
+    assert recorded.summary == "Fallback model recorded the verdict."
+    assert ctx.tool_state.terminal_submission_conflict is False
+
+
+@pytest.mark.asyncio
+async def test_model_chain_advances_when_first_success_has_no_terminal_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A process-successful first slug with no submit must not win the chain."""
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.mcp.verdict import ReviewPhase
+    from mergecraft.utils.agent_resolve import run_with_model_chain
+
+    monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve._agent_binary_available",
+        lambda _slug: True,
+    )
+
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.selected_mode = "Review"
+    ctx.tool_state.review_phase = ReviewPhase.ESTABLISH_SCOPE.value
+    calls: list[str] = []
+
+    async def run_once(slug: str) -> AgentResult:
+        calls.append(slug)
+        if slug.startswith("openai/"):
+            return AgentResult(success=True, output="LGTM — looks good to me.")
+        recorded = await _submit(ctx, _valid_payload())
+        assert recorded.is_error is False
+        submission = ctx.tool_state.terminal_submission
+        assert submission is not None
+        return AgentResult(
+            success=True,
+            output="review complete",
+            terminal_submission_received=True,
+            terminal_submission_id=submission.id,
+        )
+
+    settings = RepoSettings.model_validate(
+        {"models": ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]}
+    )
+    winning_slug, result = await run_with_model_chain(
+        settings=settings,
+        run_once=run_once,
+        tool_state=ctx.tool_state,
+    )
+
+    assert calls == ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]
+    assert winning_slug == "google/gemini-3.1-pro-preview"
+    assert result.success is True
+    assert result.terminal_submission_received is True
+    recorded = ctx.tool_state.terminal_submission
+    assert recorded is not None
+    assert recorded.attempt_id == 1
+
+
+@pytest.mark.asyncio
+async def test_model_chain_does_not_advance_after_incremental_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """IncrementalReview ``report_progress`` is a complete result; do not fallback."""
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.utils.agent_resolve import run_with_model_chain
+
+    monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve._agent_binary_available",
+        lambda _slug: True,
+    )
+
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.selected_mode = "IncrementalReview"
+    calls: list[str] = []
+
+    async def run_once(slug: str) -> AgentResult:
+        calls.append(slug)
+        if not slug.startswith("openai/"):
+            raise AssertionError(f"fallback model {slug} must not run")
+        ctx.tool_state.final_summary_written = True
+        return AgentResult(success=True, output="no new findings")
+
+    settings = RepoSettings.model_validate(
+        {"models": ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]}
+    )
+    winning_slug, result = await run_with_model_chain(
+        settings=settings,
+        run_once=run_once,
+        tool_state=ctx.tool_state,
+    )
+
+    assert calls == ["openai/gpt-5.3-codex"]
+    assert winning_slug == "openai/gpt-5.3-codex"
+    assert result.success is True
+    assert ctx.tool_state.final_summary_written is True
+    assert ctx.tool_state.terminal_submission is None
