@@ -110,7 +110,9 @@ async def test_valid_submission_is_recorded(tmp_path: Path) -> None:
     assert recorded.verdict == "approve"
     assert recorded.summary == payload["summary"]
     assert recorded.findings == []
-    assert recorded.payload_hash == _canonical_payload_hash(payload)
+    assert recorded.payload_hash == _canonical_payload_hash(
+        _params_model().model_validate(payload).model_dump(mode="json")
+    )
     assert recorded.submitted_at
     assert hasattr(recorded, "attempt_id")
 
@@ -257,3 +259,99 @@ def test_tool_is_in_subagent_deny_list(tmp_path: Path) -> None:
     assert _TOOL_NAME in TERMINAL_PROTOCOL_DENIED_TOOL_NAMES
     assert _TOOL_NAME in subagent_denied_tool_names(ctx)
     assert _TOOL_NAME in verifier_denied_tool_names(ctx)
+
+
+@pytest.mark.parametrize("value", [{}, False, 0, "", None])
+def test_non_list_findings_are_rejected(value: object) -> None:
+    """Malformed falsy findings must not canonicalize to an empty list."""
+    payload = {**_valid_payload(), "findings": value}
+    with pytest.raises(ValidationError) as excinfo:
+        _params_model().model_validate(payload)
+    assert "findings" in str(excinfo.value).lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [{}, False, 0, "", None])
+async def test_non_list_findings_are_rejected_at_the_tool(tmp_path: Path, value: object) -> None:
+    """MCP dispatch does not schema-validate arguments — the tool must still reject."""
+    ctx = _ctx(tmp_path)
+    result = await _submit(ctx, {**_valid_payload(), "findings": value})
+    assert result.is_error is True
+    assert "findings" in _error_text(result).lower()
+    assert getattr(ctx.tool_state, "terminal_submission", None) is None
+
+
+@pytest.mark.asyncio
+async def test_omitted_findings_matches_empty_list_idempotency(tmp_path: Path) -> None:
+    """D4: omitting ``findings`` and sending ``findings: []`` are the same payload."""
+    ctx = _ctx(tmp_path)
+    omitted = {"verdict": "approve", "summary": "No blocking issues in the diff."}
+    first = await _submit(ctx, omitted)
+    assert first.is_error is False
+    original_id = ctx.tool_state.terminal_submission.id  # type: ignore[union-attr]
+
+    second = await _submit(ctx, {**omitted, "findings": []})
+    assert second.is_error is False
+    replayed = ctx.tool_state.terminal_submission
+    assert replayed is not None
+    assert replayed.id == original_id
+    assert ctx.tool_state.terminal_submission_conflict is False
+
+
+@pytest.mark.asyncio
+async def test_model_chain_resets_terminal_submission_on_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A retryable first attempt's submit must not conflict-reject the fallback."""
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.utils.agent_resolve import run_with_model_chain
+
+    monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve._agent_binary_available",
+        lambda _slug: True,
+    )
+
+    ctx = _ctx(tmp_path)
+    seen_indexes: list[int] = []
+
+    async def run_once(slug: str) -> AgentResult:
+        seen_indexes.append(ctx.tool_state.fallback_index)
+        if slug.startswith("openai/"):
+            recorded = await _submit(ctx, _valid_payload())
+            assert recorded.is_error is False
+            assert ctx.tool_state.fallback_index == 0
+            return AgentResult(
+                success=False,
+                error="provider rate limited",
+                metadata={"retryable": True},
+            )
+        assert ctx.tool_state.fallback_index == 1
+        assert ctx.tool_state.terminal_submission is None
+        assert ctx.tool_state.terminal_submission_conflict is False
+        recorded = await _submit(
+            ctx,
+            {**_valid_payload(), "summary": "Fallback model recorded the verdict."},
+        )
+        assert recorded.is_error is False
+        return AgentResult(success=True, output="review complete")
+
+    settings = RepoSettings.model_validate(
+        {"models": ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]}
+    )
+    winning_slug, result = await run_with_model_chain(
+        settings=settings,
+        run_once=run_once,
+        tool_state=ctx.tool_state,
+    )
+
+    assert seen_indexes == [0, 1]
+    assert winning_slug == "google/gemini-3.1-pro-preview"
+    assert result.success is True
+    recorded = ctx.tool_state.terminal_submission
+    assert recorded is not None
+    assert recorded.attempt_id == 1
+    assert recorded.summary == "Fallback model recorded the verdict."
+    assert ctx.tool_state.terminal_submission_conflict is False

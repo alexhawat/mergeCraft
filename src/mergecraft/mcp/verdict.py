@@ -39,11 +39,9 @@ class SubmitReviewVerdictParams(BaseModel):
     def _coerce_findings(cls, value: object) -> list[Any]:
         from mergecraft.agents.verifier import AgentFinding
 
-        if not value:
-            return []
         if not isinstance(value, list):
             msg = "findings must be a list"
-            raise TypeError(msg)
+            raise ValueError(msg)
         coerced: list[Any] = []
         for item in value:
             if isinstance(item, AgentFinding):
@@ -52,14 +50,14 @@ class SubmitReviewVerdictParams(BaseModel):
                 coerced.append(AgentFinding.model_validate(item))
             else:
                 msg = "each finding must be an object"
-                raise TypeError(msg)
+                raise ValueError(msg)
         return coerced
 
 
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         validated = SubmitReviewVerdictParams.model_validate(params)
-        payload_hash = _canonical_payload_hash(dict(params))
+        payload_hash = _canonical_payload_hash(validated.model_dump(mode="json"))
         existing = ctx.tool_state.terminal_submission
 
         if existing is not None:

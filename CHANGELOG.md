@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `submit_review_verdict` now rejects non-list `findings` (including `{}`, `false`,
+  and `0`) instead of recording them as an empty list, hashes the validated payload
+  so omitting `findings` matches `findings: []`, and scopes the recorded submit to
+  the active model-chain attempt so a fallback cannot inherit or conflict-reject
+  the failed attempt's verdict
 - `README.md`'s CLI table documented `mergecraft traces <run-id>`, but the real
   registered command is `mergecraft traces show <run-id>` — the stale
   invocation is now generated from the live CLI app instead of hand-maintained
