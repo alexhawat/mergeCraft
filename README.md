@@ -566,6 +566,9 @@ of them for its full flag set):
 <!-- BEGIN:cli-commands -->
 | Command | Description |
 |---------|-------------|
+| `mergecraft agents list` | List agent bindings with model chain, prompt id, and tool count. |
+| `mergecraft agents set <role>` | Write a single agent binding override into `.mergecraft/config.yaml`. |
+| `mergecraft agents show <role>` | Show resolved prompt text and MCP tool names for one role. |
 | `mergecraft analyzers detect` | Show analyzers that would run for changed paths in this repo. |
 | `mergecraft analyzers docs` | Regenerate `docs/ANALYZERS.md` from manifests. |
 | `mergecraft analyzers explain <analyzer-id>` | Print manifest fields and notes for one analyzer. |
