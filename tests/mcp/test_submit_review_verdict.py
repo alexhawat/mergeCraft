@@ -203,6 +203,49 @@ async def test_findings_use_agent_finding_shape(tmp_path: Path) -> None:
     assert round_tripped.line == finding.line
 
 
+def test_unknown_finding_severity_is_rejected() -> None:
+    """Terminal findings must use the closed taxonomy, not a free-form string."""
+    payload = {
+        "verdict": "request_changes",
+        "summary": "One finding stands.",
+        "findings": [
+            {
+                "path": "src/app.py",
+                "body": "token logged in plaintext",
+                "severity": "Blocker",
+            }
+        ],
+    }
+    with pytest.raises(ValidationError) as excinfo:
+        _params_model().model_validate(payload)
+    message = str(excinfo.value)
+    assert "Blocker" in message
+    assert "severity" in message.lower()
+
+
+@pytest.mark.asyncio
+async def test_unknown_finding_severity_is_rejected_at_the_tool(tmp_path: Path) -> None:
+    """MCP dispatch does not schema-validate arguments — the tool must still reject."""
+    ctx = _ctx(tmp_path)
+    result = await _submit(
+        ctx,
+        {
+            "verdict": "request_changes",
+            "summary": "One finding stands.",
+            "findings": [
+                {
+                    "path": "src/app.py",
+                    "body": "token logged in plaintext",
+                    "severity": "Blocker",
+                }
+            ],
+        },
+    )
+    assert result.is_error is True
+    assert "blocker" in _error_text(result).lower()
+    assert getattr(ctx.tool_state, "terminal_submission", None) is None
+
+
 @pytest.mark.asyncio
 async def test_second_identical_submission_is_idempotent(tmp_path: Path) -> None:
     """D4: the same payload hash returns the original id; no second record."""
@@ -240,6 +283,27 @@ async def test_second_conflicting_submission_is_rejected(tmp_path: Path) -> None
     assert ctx.tool_state.terminal_submission_conflict is True
     assert ctx.tool_state.terminal_submission is not None
     assert ctx.tool_state.terminal_submission.id == original_id
+
+
+@pytest.mark.asyncio
+async def test_conflict_flag_stays_set_after_identical_replay(tmp_path: Path) -> None:
+    """A → conflict B → A must leave the attempt marked unusable for VP2."""
+    ctx = _ctx(tmp_path)
+    first = await _submit(ctx, _valid_payload())
+    assert first.is_error is False
+    original_id = ctx.tool_state.terminal_submission.id  # type: ignore[union-attr]
+
+    conflicting = {**_valid_payload(), "summary": "Actually this needs changes."}
+    second = await _submit(ctx, conflicting)
+    assert second.is_error is True
+    assert ctx.tool_state.terminal_submission_conflict is True
+
+    third = await _submit(ctx, _valid_payload())
+    assert third.is_error is False
+    replayed = ctx.tool_state.terminal_submission
+    assert replayed is not None
+    assert replayed.id == original_id
+    assert ctx.tool_state.terminal_submission_conflict is True
 
 
 def test_tool_is_registered_for_orchestrator_only(tmp_path: Path) -> None:
