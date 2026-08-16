@@ -128,6 +128,13 @@ def record_validated_terminal_submission(
     if existing is not None:
         if existing.payload_hash == payload_hash:
             ctx.tool_state.terminal_submission_conflict = False
+            validation = validate_submission(
+                submission,
+                state=validation_state_from_tool_context(ctx),
+            )
+            if not validation.accepted:
+                msg = f"terminal submission rejected: {validation.rejection_reason}"
+                raise ValueError(msg)
             return existing
         ctx.tool_state.terminal_submission_conflict = True
         msg = (
