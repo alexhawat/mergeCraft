@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import TerminalSubmission
+from mergecraft.review_taxonomy import FINDING_SEVERITIES
 from mergecraft.tracing.redaction import redact_attrs
 
 if TYPE_CHECKING:
@@ -87,28 +88,73 @@ class SubmissionValidation:
     rejection_reason: str | None
 
 
+def _finding_fingerprint(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("fingerprint") or "")
+    return str(getattr(item, "fingerprint", "") or "")
+
+
+def _coerce_confirmed_finding(item: Any) -> Any | None:
+    from mergecraft.analyzers.finding import Finding, FindingValidationError
+
+    if isinstance(item, Finding):
+        return item
+    if hasattr(item, "severity") and not isinstance(item, dict):
+        return item
+    if isinstance(item, dict):
+        try:
+            return Finding.model_validate(item)
+        except (FindingValidationError, ValueError, TypeError):  # fmt: skip
+            severity = item.get("severity")
+            if not severity:
+                return None
+            from types import SimpleNamespace
+
+            return SimpleNamespace(
+                fingerprint=str(item.get("fingerprint") or ""),
+                severity=str(severity),
+            )
+    return None
+
+
 def _confirmed_findings_from_state(state: Any) -> list[Any]:
+    collected: list[Any] = []
+    seen: set[str] = set()
+
+    def _add(item: Any) -> None:
+        coerced = _coerce_confirmed_finding(item)
+        if coerced is None:
+            return
+        fingerprint = _finding_fingerprint(coerced)
+        if fingerprint:
+            if fingerprint in seen:
+                return
+            seen.add(fingerprint)
+        collected.append(coerced)
+
     explicit = getattr(state, "confirmed_findings", None)
     if explicit:
-        return list(explicit)
-    analyzer_run = getattr(state, "analyzer_run", None)
-    if analyzer_run is None:
-        return []
-    verified_ids = getattr(analyzer_run, "verified_ids", None) or set()
-    findings_raw = getattr(analyzer_run, "findings", None) or []
-    from mergecraft.analyzers.finding import Finding
+        for item in explicit:
+            _add(item)
+        return collected
 
-    confirmed: list[Any] = []
-    for item in findings_raw:
-        if isinstance(item, Finding):
-            finding = item
-        elif isinstance(item, dict):
-            finding = Finding.model_validate(item)
-        else:
-            continue
-        if finding.fingerprint in verified_ids:
-            confirmed.append(finding)
-    return confirmed
+    tool_state = getattr(state, "tool_state", None)
+    if tool_state is not None:
+        for item in getattr(tool_state, "confirmed_findings", None) or []:
+            _add(item)
+
+    analyzer_run = getattr(state, "analyzer_run", None)
+    if analyzer_run is None and tool_state is not None:
+        analyzer_run = getattr(tool_state, "analyzer_run", None)
+    verified_ids: set[str] = set()
+    if tool_state is not None:
+        verified_ids |= set(getattr(tool_state, "verified_ids", None) or set())
+    if analyzer_run is not None:
+        verified_ids |= set(getattr(analyzer_run, "verified_ids", None) or set())
+        for item in getattr(analyzer_run, "findings", None) or []:
+            if _finding_fingerprint(item) in verified_ids:
+                _add(item)
+    return collected
 
 
 def _static_checks_from_state(state: Any) -> list[dict[str, str]]:
@@ -118,11 +164,10 @@ def _static_checks_from_state(state: Any) -> list[dict[str, str]]:
     return []
 
 
-def validation_state_from_tool_context(ctx: ToolContext) -> Any:
+def validation_state_from_tool_state(tool_state: Any) -> Any:
     """Build the duck-typed consultation object ``validate_submission`` reads."""
     from types import SimpleNamespace
 
-    tool_state = ctx.tool_state
     state = SimpleNamespace(
         terminal_submission=tool_state.terminal_submission,
         terminal_submission_conflict=tool_state.terminal_submission_conflict,
@@ -130,10 +175,15 @@ def validation_state_from_tool_context(ctx: ToolContext) -> Any:
         static_checks=[dict(row) for row in tool_state.static_checks if isinstance(row, dict)],
         withdrawn_fingerprints=set(),
         tool_state=tool_state,
-        analyzer_run=tool_state.analyzer_run,
+        analyzer_run=getattr(tool_state, "analyzer_run", None),
     )
     state.confirmed_findings = _confirmed_findings_from_state(state)
     return state
+
+
+def validation_state_from_tool_context(ctx: ToolContext) -> Any:
+    """Build the consultation object from a live ``ToolContext``."""
+    return validation_state_from_tool_state(ctx.tool_state)
 
 
 def validate_submission(submission: dict[str, Any], *, state: Any) -> SubmissionValidation:
@@ -217,32 +267,108 @@ class SubmitReviewVerdictParams(BaseModel):
     def _coerce_findings(cls, value: object) -> list[Any]:
         from mergecraft.agents.verifier import AgentFinding
 
-        if not value:
-            return []
         if not isinstance(value, list):
             msg = "findings must be a list"
-            raise TypeError(msg)
+            raise ValueError(msg)
         coerced: list[Any] = []
         for item in value:
             if isinstance(item, AgentFinding):
-                coerced.append(item)
+                finding = item
             elif isinstance(item, dict):
-                coerced.append(AgentFinding.model_validate(item))
+                finding = AgentFinding.model_validate(item)
             else:
                 msg = "each finding must be an object"
-                raise TypeError(msg)
+                raise ValueError(msg)
+            if finding.severity not in FINDING_SEVERITIES:
+                msg = f"severity must be one of {FINDING_SEVERITIES!r}, got {finding.severity!r}"
+                raise ValueError(msg)
+            coerced.append(finding)
         return coerced
+
+
+def record_validated_terminal_submission(
+    ctx: ToolContext,
+    submission: dict[str, Any],
+) -> TerminalSubmission:
+    """Validate and record a terminal submission on ``ToolState``."""
+    validated = SubmitReviewVerdictParams.model_validate(submission)
+    payload_hash = _canonical_payload_hash(validated.model_dump(mode="json"))
+    existing = ctx.tool_state.terminal_submission
+    if existing is not None:
+        if existing.payload_hash == payload_hash:
+            return existing
+        ctx.tool_state.terminal_submission_conflict = True
+        msg = (
+            "terminal submission conflict: a different verdict payload was already "
+            "recorded for this run"
+        )
+        raise ValueError(msg)
+
+    payload = {
+        "verdict": validated.verdict,
+        "summary": validated.summary,
+        "findings": [item.model_dump(mode="json") for item in validated.findings],
+    }
+    validation = validate_submission(
+        payload,
+        state=validation_state_from_tool_context(ctx),
+    )
+    if not validation.accepted:
+        msg = f"terminal submission rejected: {validation.rejection_reason}"
+        raise ValueError(msg)
+
+    recorded = TerminalSubmission(
+        id=uuid.uuid4().hex,
+        verdict=validated.verdict,
+        summary=validated.summary,
+        findings=list(validated.findings),
+        payload_hash=payload_hash,
+        submitted_at=datetime.now(UTC).isoformat(),
+        attempt_id=ctx.tool_state.attempt_id,
+    )
+    ctx.tool_state.terminal_submission = recorded
+    ctx.tool_state.terminal_submission_conflict = False
+    return recorded
+
+
+def recorded_submission_payload(submission: Any) -> dict[str, Any]:
+    findings: list[Any] = []
+    for item in submission.findings:
+        if hasattr(item, "model_dump"):
+            findings.append(item.model_dump(mode="json"))
+        else:
+            findings.append(item)
+    return {
+        "verdict": submission.verdict,
+        "summary": submission.summary,
+        "findings": findings,
+    }
+
+
+def revalidate_recorded_submission(ctx: ToolContext) -> None:
+    """Reject a stored verdict that current evidence has made unusable."""
+    submission = ctx.tool_state.terminal_submission
+    if submission is None:
+        return
+    validation = validate_submission(
+        recorded_submission_payload(submission),
+        state=validation_state_from_tool_context(ctx),
+    )
+    if not validation.accepted:
+        msg = f"terminal submission rejected: {validation.rejection_reason}"
+        raise ValueError(msg)
 
 
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        validated = SubmitReviewVerdictParams.model_validate(params)
-        payload_hash = _canonical_payload_hash(dict(params))
         existing = ctx.tool_state.terminal_submission
-
         if existing is not None:
+            validated = SubmitReviewVerdictParams.model_validate(params)
+            payload_hash = _canonical_payload_hash(validated.model_dump(mode="json"))
             if existing.payload_hash == payload_hash:
-                ctx.tool_state.terminal_submission_conflict = False
+                # Conflict stays sticky for this attempt. VP2 treats the flag as
+                # "this attempt is unusable"; a later identical replay must not
+                # wash that out. `_prepare_chain_attempt` is the only reset.
                 return {
                     "recorded": True,
                     "id": existing.id,
@@ -256,29 +382,11 @@ def submit_review_verdict_tool(ctx: ToolContext):
             )
             raise ValueError(msg)
 
-        validation = validate_submission(
-            dict(params),
-            state=validation_state_from_tool_context(ctx),
-        )
-        if not validation.accepted:
-            msg = f"terminal submission rejected: {validation.rejection_reason}"
-            raise ValueError(msg)
-
-        submission = TerminalSubmission(
-            id=uuid.uuid4().hex,
-            verdict=validated.verdict,
-            summary=validated.summary,
-            findings=list(validated.findings),
-            payload_hash=payload_hash,
-            submitted_at=datetime.now(UTC).isoformat(),
-            attempt_id=ctx.tool_state.attempt_id,
-        )
-        ctx.tool_state.terminal_submission = submission
-        ctx.tool_state.terminal_submission_conflict = False
+        recorded = record_validated_terminal_submission(ctx, dict(params))
         return {
             "recorded": True,
-            "id": submission.id,
-            "verdict": submission.verdict,
+            "id": recorded.id,
+            "verdict": recorded.verdict,
             "replayed": False,
         }
 
@@ -312,7 +420,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
                             "line": {"type": "number"},
                             "severity": {
                                 "type": "string",
-                                "enum": ["Critical", "Major", "Minor", "Trivial"],
+                                "enum": list(FINDING_SEVERITIES),
                             },
                             "body": {"type": "string"},
                             "fingerprint": {"type": "string"},
@@ -341,9 +449,13 @@ __all__ = [
     "SubmissionValidation",
     "SubmitReviewVerdictParams",
     "VerdictDiagnostic",
+    "record_validated_terminal_submission",
+    "recorded_submission_payload",
+    "revalidate_recorded_submission",
     "span_attrs_for_verdict_diagnostic",
     "submit_review_verdict_tool",
     "validate_submission",
     "validation_state_from_tool_context",
+    "validation_state_from_tool_state",
     "verdict_satisfies_attempt",
 ]

@@ -286,6 +286,11 @@ class ToolState:
     agent_diagnostic: Any = None
     browser_daemon: Any = None
     analyzer_run: AnalyzerRunState | None = None
+    # Session-scoped verifier confirms. ``run_analyzers`` replaces
+    # ``analyzer_run`` wholesale, so confirmations must not live only there.
+    verified_ids: set[str] = field(default_factory=set)
+    confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
+    agent_findings: list[dict[str, Any]] = field(default_factory=list)
     # Evidence normalised from the consumer's finished CI (#36). ``None`` until
     # a CI source is actually read, so a run that consulted no CI records
     # nothing rather than an empty section.

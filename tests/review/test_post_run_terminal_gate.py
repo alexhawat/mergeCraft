@@ -61,7 +61,9 @@ def _run_ctx(tool_ctx: ToolContext) -> AgentRunContext:
     )
 
 
-def _classify(result: AgentResult, *, mode: str = "Review") -> tuple[RunOutcome, str | None]:
+def _classify(
+    result: AgentResult, *, mode: str = "Review", final_summary_written: bool = False
+) -> tuple[RunOutcome, str | None]:
     from mergecraft.main_outcome import _classify_outcome
 
     outcome, reason = _classify_outcome(
@@ -70,6 +72,7 @@ def _classify(result: AgentResult, *, mode: str = "Review") -> tuple[RunOutcome,
         setup_policy="warn",
         prep_reason=None,
         mode=mode,
+        final_summary_written=final_summary_written,
     )
     return outcome, reason
 
@@ -109,6 +112,31 @@ def test_unsubmitted_review_without_progress_comment_still_gates(tmp_path: Path)
     assert get_unsubmitted_review(state) is None
     state.selected_mode = "IncrementalReview"
     assert get_unsubmitted_review(state) is None
+
+
+def test_incremental_review_progress_without_terminal_is_complete(tmp_path: Path) -> None:
+    """IncrementalReview may complete via ``report_progress`` without a terminal verdict."""
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    state.selected_mode = "IncrementalReview"
+    state.final_summary_written = True
+    assert state.terminal_submission is None
+    assert get_unsubmitted_review(state) is None
+
+    result = AgentResult(success=True, terminal_submission_received=False)
+    outcome, reason = _classify(result, mode="IncrementalReview", final_summary_written=True)
+    assert outcome is RunOutcome.passed
+    assert reason is None
+    assert run_succeeded_for_outcome(outcome) is True
+
+
+def test_review_nudge_instructs_submit_review_verdict() -> None:
+    from mergecraft.agents.post_run import build_unsubmitted_review_prompt
+
+    review_prompt = build_unsubmitted_review_prompt("Review")
+    assert "submit_review_verdict" in review_prompt
+    incremental_prompt = build_unsubmitted_review_prompt("IncrementalReview")
+    assert "submit_review_verdict" in incremental_prompt
+    assert "report_progress" in incremental_prompt
 
 
 @pytest.mark.asyncio

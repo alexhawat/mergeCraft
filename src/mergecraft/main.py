@@ -1064,6 +1064,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 run_once=_run_agent_once,
                 head=model_head,
                 pin=model_pin,
+                tool_state=tool_state,
             )
             return winning_slug, chain_result
         return selected_slug, await agent.run(run_ctx)
@@ -1217,6 +1218,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         prep_reason=prep_reason,
         mode=tool_state.selected_mode,
         verdict_protocol=settings.gates.terminal_verdict,
+        final_summary_written=tool_state.final_summary_written,
     )
 
     selected_mode_obj = next(

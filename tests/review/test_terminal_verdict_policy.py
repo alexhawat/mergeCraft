@@ -117,6 +117,7 @@ def _classify(
     result: AgentResult,
     *,
     mode: str = "Review",
+    final_summary_written: bool = False,
 ) -> tuple[RunOutcome, str | None]:
     """Drive the real ``_classify_outcome`` with the VP2 ``mode`` parameter."""
     from mergecraft.main_outcome import _classify_outcome
@@ -127,6 +128,7 @@ def _classify(
         setup_policy="warn",
         prep_reason=None,
         mode=mode,
+        final_summary_written=final_summary_written,
     )
     return outcome, reason
 
@@ -322,6 +324,125 @@ def test_agent_approve_with_verified_blocker_fails_structurally(tmp_path: Path) 
 
     conclusion = decide_approval([blocker], run_succeeded=True, tier="trusted")
     assert conclusion == "failure"
+
+
+@pytest.mark.asyncio
+async def test_live_confirm_blocks_approve_via_verified_ids(tmp_path: Path) -> None:
+    """Live path: ``record_finding_verdict(confirm)`` must populate ``verified_ids``.
+
+    Does not seed ``verified_ids``. The fingerprint must come from the verdict
+    tool so ``validation_state_from_tool_context`` sees the confirmed blocker.
+    """
+    from mergecraft.mcp.verdict import (
+        submit_review_verdict_tool,
+        validation_state_from_tool_context,
+    )
+    from mergecraft.mcp.verification import record_finding_verdict_tool
+
+    blocker = _blocker_finding()
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[blocker.model_dump()],
+        verified_ids=set(),
+    )
+    recorded = await record_finding_verdict_tool(ctx).execute(
+        {
+            "fingerprint": blocker.fingerprint,
+            "verdict": "confirm",
+            "reason": "Reproduced the secret leak.",
+        }
+    )
+    assert recorded.is_error is False
+    from mergecraft.mcp.verification import _persist_confirmed_fingerprint
+
+    assert callable(_persist_confirmed_fingerprint)
+    assert blocker.fingerprint in ctx.tool_state.analyzer_run.verified_ids
+    assert blocker.fingerprint in ctx.tool_state.verified_ids
+
+    derived = validation_state_from_tool_context(ctx)
+    _assert_typed_rejection(
+        _validate(_approve_payload(), state=derived),
+        _REASON_APPROVE_CONFIRMED_BLOCKER,
+    )
+    verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert verdict.is_error is True
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in verdict.content[0]["text"]
+    assert ctx.tool_state.terminal_submission is None
+
+
+@pytest.mark.asyncio
+async def test_live_agent_confirm_blocks_approve_without_analyzer_findings(
+    tmp_path: Path,
+) -> None:
+    """A confirmed agent-authored blocker must reject approve without seeding analyzer findings."""
+    from mergecraft.mcp.verdict import (
+        submit_review_verdict_tool,
+        validation_state_from_tool_context,
+    )
+    from mergecraft.mcp.verification import record_finding_verdict_tool, verify_agent_findings_tool
+
+    finding = _agent_blocker()
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.analyzer_run = AnalyzerRunState(ran=True, findings=[], verified_ids=set())
+    planned = await verify_agent_findings_tool(ctx).execute({"findings": [finding.model_dump()]})
+    assert planned.is_error is False
+    recorded = await record_finding_verdict_tool(ctx).execute(
+        {
+            "fingerprint": finding.fingerprint,
+            "verdict": "confirm",
+            "reason": "Reproduced the secret leak.",
+        }
+    )
+    assert recorded.is_error is False
+    assert finding.fingerprint in ctx.tool_state.verified_ids
+    assert ctx.tool_state.analyzer_run.findings == []
+
+    derived = validation_state_from_tool_context(ctx)
+    _assert_typed_rejection(
+        _validate(_approve_payload(), state=derived),
+        _REASON_APPROVE_CONFIRMED_BLOCKER,
+    )
+    verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert verdict.is_error is True
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in verdict.content[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_confirm_survives_analyzer_rerun(tmp_path: Path) -> None:
+    """A later ``run_analyzers`` replace must not drop a confirmed blocker."""
+    from mergecraft.mcp.analyzers import _store_run_state
+    from mergecraft.mcp.verdict import (
+        submit_review_verdict_tool,
+        validation_state_from_tool_context,
+    )
+    from mergecraft.mcp.verification import record_finding_verdict_tool
+
+    blocker = _blocker_finding()
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[blocker.model_dump()],
+        verified_ids=set(),
+    )
+    recorded = await record_finding_verdict_tool(ctx).execute(
+        {
+            "fingerprint": blocker.fingerprint,
+            "verdict": "confirm",
+            "reason": "Reproduced the secret leak.",
+        }
+    )
+    assert recorded.is_error is False
+    _store_run_state(ctx, AnalyzerRunState(ran=True, findings=[], verified_ids=set()))
+    assert blocker.fingerprint in ctx.tool_state.verified_ids
+    derived = validation_state_from_tool_context(ctx)
+    _assert_typed_rejection(
+        _validate(_approve_payload(), state=derived),
+        _REASON_APPROVE_CONFIRMED_BLOCKER,
+    )
+    verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert verdict.is_error is True
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in verdict.content[0]["text"]
 
 
 def test_request_changes_with_verified_blocker_blocks(tmp_path: Path) -> None:
@@ -618,6 +739,37 @@ async def test_approve_after_failed_run_static_checks_tool_is_rejected(
 
 
 @pytest.mark.asyncio
+async def test_approve_then_failed_static_check_is_unusable_at_finalize(
+    tmp_path: Path,
+) -> None:
+    """A stored ``approve`` must not stay usable after a later failed gate."""
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="python -c 'raise SystemExit(1)'")],
+        static_checks_enabled=True,
+    )
+    first = await _submit_verdict(ctx, _approve_payload())
+    assert first.is_error is False
+    original = ctx.tool_state.terminal_submission
+    assert original is not None
+    original_id = original.id
+
+    checks_result = await run_static_checks_tool(ctx).execute({})
+    assert checks_result.is_error is False
+    assert any(row.get("status") == "failed" for row in ctx.tool_state.static_checks)
+
+    finalized = await finalize_agent_result(_run_ctx(ctx), AgentResult(success=True))
+    assert finalized.terminal_submission_received is False
+    assert finalized.terminal_submission_id is None
+    assert finalized.diagnostics.get("rejection_reason") == _REASON_APPROVE_FAILED_GATE
+    assert ctx.tool_state.terminal_submission is not None
+    assert ctx.tool_state.terminal_submission.id == original_id
+    outcome, _reason = _classify(finalized, mode="Review")
+    assert outcome is RunOutcome.inconclusive
+    assert run_succeeded_for_outcome(outcome) is False
+
+
+@pytest.mark.asyncio
 async def test_failed_static_check_survives_empty_plan_rerun(
     tmp_path: Path,
 ) -> None:
@@ -735,6 +887,8 @@ async def test_existing_review_and_comment_behaviour_unchanged(tmp_path: Path) -
     assert first.is_error is False
     assert ctx.tool_state.review is not None
     assert ctx.tool_state.review.id == 1
+    assert ctx.tool_state.terminal_submission is not None
+    assert ctx.tool_state.terminal_submission.verdict == "request_changes"
     inline = github.review_payloads[0].get("comments") or []
     assert inline
     expected_fp = finding_fingerprint(path="src/app.py", body="A finding.")
@@ -756,6 +910,101 @@ async def test_existing_review_and_comment_behaviour_unchanged(tmp_path: Path) -
     progress = await report_progress_tool(ctx).execute({"body": "still working"})
     assert progress.is_error is False
     assert ctx.tool_state.last_progress_body == "still working"
+
+
+@pytest.mark.asyncio
+async def test_body_only_comment_is_not_recorded_as_request_changes(tmp_path: Path) -> None:
+    """A plain COMMENT review must not fabricate a terminal ``request_changes``."""
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path)
+    ctx.github = github
+    primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
+
+    result = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": "Leaving a comment only."},
+    )
+    assert result.is_error is False
+    assert ctx.tool_state.terminal_submission is None
+    assert github.review_payloads[0]["event"] == "COMMENT"
+
+
+@pytest.mark.asyncio
+async def test_body_only_request_changes_is_rejected_without_findings(tmp_path: Path) -> None:
+    """Body-only ``request_changes`` must not evade D9 with a fabricated finding."""
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path)
+    ctx.github = github
+    primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
+
+    result = await create_pull_request_review_tool(ctx).execute(
+        {
+            "pull_number": 7,
+            "body": "Please change things.",
+            "request_changes": True,
+        }
+    )
+    assert result.is_error is True
+    assert _REASON_REQUEST_CHANGES_NO_FINDINGS in result.content[0]["text"]
+    assert ctx.tool_state.terminal_submission is None
+    assert github.review_payloads == []
+
+
+@pytest.mark.asyncio
+async def test_publication_cannot_flip_recorded_request_changes_to_approve(
+    tmp_path: Path,
+) -> None:
+    """A recorded ``request_changes`` must not publish as ``approved=True``."""
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path)
+    ctx.github = github
+    primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
+
+    recorded = await _submit_verdict(
+        ctx,
+        {
+            "verdict": "request_changes",
+            "summary": "One critical finding stands.",
+            "findings": [_agent_blocker().model_dump()],
+        },
+    )
+    assert recorded.is_error is False
+    assert ctx.tool_state.terminal_submission is not None
+    assert ctx.tool_state.terminal_submission.verdict == "request_changes"
+
+    published = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": "Actually LGTM.", "approved": True},
+    )
+    assert published.is_error is True
+    assert "does not match recorded terminal verdict" in published.content[0]["text"]
+    assert github.review_payloads == []
+
+
+@pytest.mark.asyncio
+async def test_publication_revalidates_stale_approve_after_failed_gate(
+    tmp_path: Path,
+) -> None:
+    """An earlier ``approve`` must not publish after a later failed required gate."""
+    github = _RecordingGitHub()
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="python -c 'raise SystemExit(1)'")],
+        static_checks_enabled=True,
+    )
+    ctx.github = github
+    primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
+
+    first = await _submit_verdict(ctx, _approve_payload())
+    assert first.is_error is False
+    checks = await run_static_checks_tool(ctx).execute({})
+    assert checks.is_error is False
+    assert any(row.get("status") == "failed" for row in ctx.tool_state.static_checks)
+
+    published = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": "Looks good.", "approved": True},
+    )
+    assert published.is_error is True
+    assert _REASON_APPROVE_FAILED_GATE in published.content[0]["text"]
+    assert github.review_payloads == []
 
 
 def test_both_harness_paths_obey_the_same_contract() -> None:

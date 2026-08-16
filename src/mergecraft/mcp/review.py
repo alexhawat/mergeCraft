@@ -155,6 +155,66 @@ async def _resolve_fixed_finding_threads(
     return resolved
 
 
+def _comments_to_findings(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for comment in comments:
+        row: dict[str, Any] = {
+            "path": str(comment["path"]),
+            "body": str(comment.get("body") or ""),
+            "severity": "Major",
+        }
+        if "line" in comment:
+            row["line"] = int(comment["line"])
+        findings.append(row)
+    return findings
+
+
+def _legacy_params_to_submission(params: dict[str, Any]) -> dict[str, Any] | None:
+    """Map ``create_pull_request_review`` params onto the terminal-verdict shape.
+
+    A plain COMMENT (no ``approved`` / ``request_changes`` and no inline
+    comments) is not a terminal verdict. ``request_changes`` with no findings
+    is left empty so ``validate_submission`` can apply D9 rather than
+    fabricating a ``path="."`` row.
+    """
+    approved = bool(params.get("approved"))
+    request_changes = bool(params.get("request_changes"))
+    body = str(params.get("body") or "")
+    comments = list(params.get("comments") or [])
+    if approved:
+        return {"verdict": "approve", "summary": body or "Approve", "findings": []}
+    findings = _comments_to_findings(comments)
+    if request_changes:
+        return {
+            "verdict": "request_changes",
+            "summary": body or "Request changes",
+            "findings": findings,
+        }
+    if findings:
+        return {
+            "verdict": "request_changes",
+            "summary": body or "Review findings",
+            "findings": findings,
+        }
+    return None
+
+
+def _requested_publication_verdict(params: dict[str, Any]) -> str | None:
+    if bool(params.get("approved")):
+        return "approve"
+    if bool(params.get("request_changes")):
+        return "request_changes"
+    return None
+
+
+def _reject_mismatched_publication(submission: Any, params: dict[str, Any]) -> None:
+    wanted = _requested_publication_verdict(params)
+    if wanted is None or wanted == submission.verdict:
+        return
+    msg = f"publication {wanted} does not match recorded terminal verdict {submission.verdict}"
+    raise ValueError(msg)
+
+
 def create_pull_request_review_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         pull_number = int(params["pull_number"])
@@ -187,6 +247,18 @@ def create_pull_request_review_tool(ctx: ToolContext):
                     ),
                     "reviewId": ctx.tool_state.review.id,
                 }
+
+        if ctx.tool_state.terminal_submission is None:
+            from mergecraft.mcp.verdict import record_validated_terminal_submission
+
+            submission_payload = _legacy_params_to_submission(params)
+            if submission_payload is not None:
+                record_validated_terminal_submission(ctx, submission_payload)
+        else:
+            from mergecraft.mcp.verdict import revalidate_recorded_submission
+
+            _reject_mismatched_publication(ctx.tool_state.terminal_submission, params)
+            revalidate_recorded_submission(ctx)
 
         event = "COMMENT"
         if approved and ctx.pr_approve_enabled and ctx.trust_tier == "trusted":
