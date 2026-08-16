@@ -13,11 +13,11 @@ executor and closed predicate vocabulary.
 
 ## xfail schedule
 
-| Test file | Tests | Marker | Status at AP7.1 |
-|-----------|-------|--------|-----------------|
-| `tests/orchestrator/test_decision_nodes.py` | 7 | `strict=True`, reason `AP7.2` | **RED (xfail)** |
+| Test file | Tests | Marker | Status |
+|-----------|-------|--------|--------|
+| `tests/orchestrator/test_decision_nodes.py` | 7 | — | **GREEN (AP7.1.5)** |
 
-**Acceptance (AP7.1):** 7 collected; 0 pass; 7 xfail. `make lint` + `make typecheck` clean.
+**Acceptance (AP7.1.5):** 7 collected; 7 pass; 0 xfail. `make lint` + `make typecheck` clean.
 
 ## Target API AP7.2 must satisfy
 
@@ -84,5 +84,5 @@ AP7.2.
 
 ## Status
 
-AP7.1 RED suite authored; AP7.2 implementation pending; xfail markers to be
-removed post-AP7.2 reconciliation (AP7.1.5).
+AP7.1 RED suite authored; AP7.2 implementation complete; AP7.1.5 xfail
+reconciliation done — all seven decision-node tests pass without markers.

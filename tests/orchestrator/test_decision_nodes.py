@@ -18,8 +18,6 @@ if TYPE_CHECKING:
 
     from _pytest.monkeypatch import MonkeyPatch
 
-_XFAIL = pytest.mark.xfail(strict=True, reason="AP7.2")
-
 _DOC_TYPO_DIFF = """diff --git a/README.md b/README.md
 index 1111111..2222222 100644
 --- a/README.md
@@ -61,7 +59,6 @@ class _StubDecisionClient:
         return dict(self._payload)
 
 
-@_XFAIL
 def test_triviality_gate_returns_a_typed_answer() -> None:
     """Triviality gate emits a closed ``TrivialityAnswer``, not prose."""
     from mergecraft.orchestrator.decisions import (
@@ -85,18 +82,17 @@ def test_triviality_gate_returns_a_typed_answer() -> None:
     assert client.calls, "decision nodes must be a single structured-output call"
 
 
-@_XFAIL
 def test_lens_selection_returns_registry_ids(tmp_path: Path) -> None:
     """Lens selection returns registry agent ids that resolve."""
+    from tests.orchestrator.conftest import write_repo_config
+
+    from mergecraft.agents.registry import load_registry, resolve_agent_ref
+    from mergecraft.config.settings import load_repo_settings
     from mergecraft.orchestrator.decisions import (
         DecisionNodeKind,
         LensSelectionAnswer,
         run_decision_node,
     )
-    from tests.orchestrator.conftest import write_repo_config
-
-    from mergecraft.agents.registry import load_registry, resolve_agent_ref
-    from mergecraft.config.settings import load_repo_settings
 
     write_repo_config(tmp_path)
     settings = load_repo_settings(root=tmp_path)
@@ -123,16 +119,14 @@ def test_lens_selection_returns_registry_ids(tmp_path: Path) -> None:
         resolve_agent_ref(registry, lens_id)
 
 
-@_XFAIL
 def test_finding_disposition_returns_a_closed_verdict() -> None:
     """Finding disposition is a routing verdict, not a terminal approval."""
+    from mergecraft.agents.verifier import AgentFinding
     from mergecraft.orchestrator.decisions import (
         DecisionNodeKind,
         FindingDispositionAnswer,
         run_decision_node,
     )
-
-    from mergecraft.agents.verifier import AgentFinding
 
     finding = AgentFinding(
         path="src/billing/charge.py",
@@ -152,18 +146,17 @@ def test_finding_disposition_returns_a_closed_verdict() -> None:
     assert answer.verdict not in {"approve", "request_changes"}
 
 
-@_XFAIL
 def test_pipeline_owns_control_flow_not_the_model(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     hybrid_triviality_pipeline_yaml: str,
 ) -> None:
     """The model answers; the pipeline routes on the typed answer only."""
-    from mergecraft.orchestrator.decisions import DecisionNodeKind
     from tests.orchestrator.conftest import write_diff, write_pipeline_file, write_repo_config
 
     from mergecraft.agents.registry import load_registry
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.decisions import DecisionNodeKind
     from mergecraft.orchestrator.executor import PipelineExecutor
     from mergecraft.orchestrator.pipeline import parse_pipeline
 
@@ -204,7 +197,6 @@ def test_pipeline_owns_control_flow_not_the_model(
     assert result.structural_approval is False
 
 
-@_XFAIL
 def test_decision_node_answer_outside_the_schema_fails_closed() -> None:
     """Malformed structured output aborts routing — fail closed."""
     from mergecraft.orchestrator.decisions import (
@@ -222,7 +214,6 @@ def test_decision_node_answer_outside_the_schema_fails_closed() -> None:
         )
 
 
-@_XFAIL
 def test_each_decision_is_independently_evaluable() -> None:
     """File 4 — each decision node can be scored in isolation for eval replay."""
     from mergecraft.orchestrator.decisions import (
@@ -248,18 +239,17 @@ def test_each_decision_is_independently_evaluable() -> None:
         assert case.inputs, "each decision must declare isolated fixture inputs"
 
 
-@_XFAIL
 def test_hybrid_preserves_the_trivial_skip_behaviour(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     hybrid_triviality_pipeline_yaml: str,
 ) -> None:
     """Doc typo skips specialists; a billing one-liner does not."""
-    from mergecraft.orchestrator.decisions import DecisionNodeKind, TrivialityAnswer
     from tests.orchestrator.conftest import write_diff, write_pipeline_file, write_repo_config
 
     from mergecraft.agents.registry import load_registry
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.decisions import DecisionNodeKind, TrivialityAnswer
     from mergecraft.orchestrator.executor import PipelineExecutor
     from mergecraft.orchestrator.pipeline import parse_pipeline
 
