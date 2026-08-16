@@ -1,5 +1,8 @@
 """AP1 agent registry suite — binding model, prompt, toolset and budget.
 
+Module: ``tests/agents/test_agent_registry.py`` (renamed from ``test_registry.py``
+to avoid pytest import collision with ``tests/mcp/test_registry.py``).
+
 Wave plan: ``.ignorelocal/03-agent-pipeline-wave-plan.md`` (PR AP1).
 Covers ``mergecraft.agents.registry`` — frozen ``AgentBinding``, ``Registry``
 loading defaults + ``.mergecraft/config.yaml`` overrides, per-agent chain

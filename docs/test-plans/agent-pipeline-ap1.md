@@ -17,7 +17,7 @@ post-AP1.2 reconciliation. Previously:
 
 | Test file | Tests | Marker | Status at AP1.1 |
 |-----------|-------|--------|-----------------|
-| `tests/agents/test_registry.py` | 12 registry tests (all except `test_agent_chain_defaults_to_the_run_chain`) | `green after AP1.2: agent registry` | **RED (xfail)** |
+| `tests/agents/test_agent_registry.py` | 12 registry tests (all except `test_agent_chain_defaults_to_the_run_chain`) | `green after AP1.2: agent registry` | **RED (xfail)** |
 | `tests/cli/test_agents_verbs.py` | 3 CLI tests | `green after AP1.2: agents CLI` | **RED (xfail)** |
 
 `test_agent_chain_defaults_to_the_run_chain` was never xfailing — it pins run-level
@@ -49,7 +49,7 @@ post-AP1.2 reconciliation. Previously:
 
 ## Contract → coverage matrix
 
-### `tests/agents/test_registry.py` — 13 tests
+### `tests/agents/test_agent_registry.py` — 13 tests
 
 | # | Test | Layer | Scenario | Contract |
 |---|------|-------|----------|----------|
