@@ -16,8 +16,6 @@ if TYPE_CHECKING:
 
     from _pytest.monkeypatch import MonkeyPatch
 
-_XFAIL = pytest.mark.xfail(strict=True, reason="AP6.2")
-
 _ALLOWED_PREDICATES = (
     "changed_paths matches '**/*.py'",
     "risk_band >= medium",
@@ -33,19 +31,18 @@ _FORBIDDEN_PREDICATES = (
 )
 
 
-@_XFAIL
 def test_steps_execute_in_order(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     ordered_pipeline_yaml: str,
 ) -> None:
     """Steps run in declaration order; each dispatch is recorded."""
-    from mergecraft.orchestrator.executor import PipelineExecutor
-    from mergecraft.orchestrator.pipeline import parse_pipeline
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
 
     from mergecraft.agents.registry import load_registry
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.executor import PipelineExecutor
+    from mergecraft.orchestrator.pipeline import parse_pipeline
 
     write_repo_config(tmp_path, extra_yaml="orchestrator: deterministic")
     write_pipeline_file(tmp_path, ordered_pipeline_yaml)
@@ -63,19 +60,18 @@ def test_steps_execute_in_order(
     assert ran == ["classify", "review", "verify", "submit"]
 
 
-@_XFAIL
 def test_conditional_step_is_skipped_with_a_recorded_reason(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     conditional_pipeline_yaml: str,
 ) -> None:
     """A false ``when`` predicate skips the step and records why."""
-    from mergecraft.orchestrator.executor import PipelineExecutor
-    from mergecraft.orchestrator.pipeline import parse_pipeline
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
 
     from mergecraft.agents.registry import load_registry
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.executor import PipelineExecutor
+    from mergecraft.orchestrator.pipeline import parse_pipeline
 
     write_repo_config(tmp_path, extra_yaml="orchestrator: deterministic")
     write_pipeline_file(tmp_path, conditional_pipeline_yaml)
@@ -102,19 +98,18 @@ def test_conditional_step_is_skipped_with_a_recorded_reason(
     }
 
 
-@_XFAIL
 def test_fan_out_dispatches_registry_agents(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     fan_out_pipeline_yaml: str,
 ) -> None:
     """``fan_out`` dispatches each listed registry agent in parallel."""
-    from mergecraft.orchestrator.executor import PipelineExecutor
-    from mergecraft.orchestrator.pipeline import parse_pipeline
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
 
     from mergecraft.agents.registry import load_registry
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.executor import PipelineExecutor
+    from mergecraft.orchestrator.pipeline import parse_pipeline
 
     write_repo_config(tmp_path, extra_yaml="orchestrator: deterministic")
     write_pipeline_file(tmp_path, fan_out_pipeline_yaml)
@@ -133,19 +128,18 @@ def test_fan_out_dispatches_registry_agents(
     assert set(fan_out.dispatched_agents) == {"reviewer", "verifier"}
 
 
-@_XFAIL
 def test_on_error_policies_apply(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     on_error_pipeline_yaml: str,
 ) -> None:
     """Per-step ``on_error`` policies (``continue`` vs ``fail``) are honoured."""
-    from mergecraft.orchestrator.executor import PipelineExecutor
-    from mergecraft.orchestrator.pipeline import parse_pipeline
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
 
     from mergecraft.agents.registry import load_registry
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.executor import PipelineExecutor
+    from mergecraft.orchestrator.pipeline import parse_pipeline
 
     write_repo_config(tmp_path, extra_yaml="orchestrator: deterministic")
     write_pipeline_file(tmp_path, on_error_pipeline_yaml)
@@ -174,7 +168,6 @@ def test_on_error_policies_apply(
         )
 
 
-@_XFAIL
 def test_predicate_vocabulary_is_closed() -> None:
     """Convention 7 — allowed predicates parse; unknown operators are config errors."""
     from mergecraft.orchestrator.pipeline import PipelineValidationError, validate_predicate
@@ -186,7 +179,6 @@ def test_predicate_vocabulary_is_closed() -> None:
             validate_predicate(f"{predicate} OR drop database")
 
 
-@_XFAIL
 def test_predicate_cannot_execute_code() -> None:
     """Predicates are declarative only — no ``eval``, shell, or import surfaces."""
     from mergecraft.orchestrator.pipeline import PipelineValidationError, validate_predicate

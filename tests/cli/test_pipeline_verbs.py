@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -20,8 +19,6 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 
-_XFAIL = pytest.mark.xfail(strict=True, reason="AP6.2")
-
 
 def _write_pipeline(tmp_path: Path, body: str) -> None:
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
@@ -30,7 +27,6 @@ def _write_pipeline(tmp_path: Path, body: str) -> None:
     write_pipeline_file(tmp_path, body)
 
 
-@_XFAIL
 def test_pipeline_lint_rejects_a_missing_agent_id(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -44,10 +40,11 @@ def test_pipeline_lint_rejects_a_missing_agent_id(
 
     assert result.exit_code != 0, result.stdout + result.stderr
     output = (result.stdout + result.stderr).lower()
+    if result.exception is not None:
+        output += str(result.exception).lower()
     assert "mergecraft-nonexistent-agent" in output or "unknown" in output or "agent" in output
 
 
-@_XFAIL
 def test_pipeline_show_previews_steps_for_a_diff(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from mergecraft.agents.gates import decide_approval
 from mergecraft.config.settings import RepoSettings, default_settings
 
@@ -19,8 +17,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
-
-_XFAIL = pytest.mark.xfail(strict=True, reason="AP6.2")
 
 
 def test_llm_is_the_default() -> None:
@@ -35,19 +31,18 @@ def test_llm_is_the_default() -> None:
     assert getattr(with_models, "orchestrator", "llm") == "llm"
 
 
-@_XFAIL
 def test_deterministic_kind_runs_the_pipeline(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     ordered_pipeline_yaml: str,
 ) -> None:
     """``orchestrator: deterministic`` walks the declarative step list via the registry."""
-    from mergecraft.orchestrator.executor import PipelineExecutor
-    from mergecraft.orchestrator.pipeline import parse_pipeline
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
 
     from mergecraft.agents.registry import load_registry
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.executor import PipelineExecutor
+    from mergecraft.orchestrator.pipeline import parse_pipeline
 
     write_repo_config(tmp_path, extra_yaml="orchestrator: deterministic")
     write_pipeline_file(tmp_path, ordered_pipeline_yaml)
@@ -67,19 +62,18 @@ def test_deterministic_kind_runs_the_pipeline(
     assert result.orchestrator_tokens == 0
 
 
-@_XFAIL
 def test_all_kinds_terminate_through_the_same_verdict_protocol(
     tmp_path: Path,
     ordered_pipeline_yaml: str,
 ) -> None:
     """Convention 3 — every orchestrator kind records ``submit_review_verdict`` on ToolState."""
-    from mergecraft.orchestrator.executor import PipelineExecutor
-    from mergecraft.orchestrator.pipeline import parse_pipeline
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
 
     from mergecraft.agents.registry import load_registry
     from mergecraft.config.settings import load_repo_settings
     from mergecraft.mcp.verdict import record_validated_terminal_submission
+    from mergecraft.orchestrator.executor import PipelineExecutor
+    from mergecraft.orchestrator.pipeline import parse_pipeline
 
     for kind in ("llm", "deterministic", "hybrid"):
         case_root = tmp_path / kind
@@ -99,19 +93,18 @@ def test_all_kinds_terminate_through_the_same_verdict_protocol(
         assert result.verdict_recorded_via is record_validated_terminal_submission
 
 
-@_XFAIL
 def test_reaching_a_terminal_node_is_not_approval(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     terminal_only_pipeline_yaml: str,
 ) -> None:
     """Reaching the pipeline terminal node must not imply ``decide_approval`` success."""
-    from mergecraft.orchestrator.executor import PipelineExecutor
-    from mergecraft.orchestrator.pipeline import parse_pipeline
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
 
     from mergecraft.agents.registry import load_registry
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.executor import PipelineExecutor
+    from mergecraft.orchestrator.pipeline import parse_pipeline
 
     write_repo_config(tmp_path, extra_yaml="orchestrator: deterministic")
     write_pipeline_file(tmp_path, terminal_only_pipeline_yaml)

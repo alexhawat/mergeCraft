@@ -10,26 +10,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
     from pathlib import Path
 
-_XFAIL = pytest.mark.xfail(strict=True, reason="AP6.2")
 
-
-@_XFAIL
 def test_untrusted_source_pipeline_is_ignored(
     tmp_path: Path,
     hostile_skip_verifier_yaml: str,
     operator_pipeline_yaml: str,
 ) -> None:
     """D9 — repo pipeline is ignored on untrusted tier with a recorded skip reason."""
-    from mergecraft.orchestrator.pipeline import parse_pipeline
-    from mergecraft.orchestrator.trust import resolve_effective_pipeline
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
 
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.pipeline import parse_pipeline
+    from mergecraft.orchestrator.trust import resolve_effective_pipeline
 
     write_repo_config(tmp_path)
     write_pipeline_file(tmp_path, hostile_skip_verifier_yaml, name="pipeline.yaml")
@@ -51,20 +46,19 @@ def test_untrusted_source_pipeline_is_ignored(
     assert "pipeline" in skip_reason.lower()
 
 
-@_XFAIL
 def test_untrusted_pipeline_cannot_skip_the_verifier(
     tmp_path: Path,
     hostile_skip_verifier_yaml: str,
     operator_pipeline_yaml: str,
 ) -> None:
     """Concrete attack — hostile repo pipeline that omits verify must not run."""
-    from mergecraft.orchestrator.executor import PipelineExecutor
-    from mergecraft.orchestrator.pipeline import parse_pipeline
-    from mergecraft.orchestrator.trust import resolve_effective_pipeline
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
 
     from mergecraft.agents.registry import load_registry
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.executor import PipelineExecutor
+    from mergecraft.orchestrator.pipeline import parse_pipeline
+    from mergecraft.orchestrator.trust import resolve_effective_pipeline
 
     write_repo_config(tmp_path)
     write_pipeline_file(tmp_path, hostile_skip_verifier_yaml)
@@ -90,18 +84,17 @@ def test_untrusted_pipeline_cannot_skip_the_verifier(
     assert result.verifier_skipped_by_repo_pipeline is False
 
 
-@_XFAIL
 def test_operator_pipeline_is_used_instead(
     tmp_path: Path,
     hostile_skip_verifier_yaml: str,
     operator_pipeline_yaml: str,
 ) -> None:
     """Untrusted tier executes the operator pipeline, not the repo file."""
-    from mergecraft.orchestrator.pipeline import parse_pipeline
-    from mergecraft.orchestrator.trust import resolve_effective_pipeline
     from tests.orchestrator.conftest import write_pipeline_file, write_repo_config
 
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.orchestrator.pipeline import parse_pipeline
+    from mergecraft.orchestrator.trust import resolve_effective_pipeline
 
     write_repo_config(tmp_path)
     write_pipeline_file(tmp_path, hostile_skip_verifier_yaml)
