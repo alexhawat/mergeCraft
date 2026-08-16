@@ -117,6 +117,7 @@ def _classify(
     result: AgentResult,
     *,
     mode: str = "Review",
+    final_summary_written: bool = False,
 ) -> tuple[RunOutcome, str | None]:
     """Drive the real ``_classify_outcome`` with the VP2 ``mode`` parameter."""
     from mergecraft.main_outcome import _classify_outcome
@@ -127,6 +128,7 @@ def _classify(
         setup_policy="warn",
         prep_reason=None,
         mode=mode,
+        final_summary_written=final_summary_written,
     )
     return outcome, reason
 
@@ -356,6 +358,7 @@ async def test_live_confirm_blocks_approve_via_verified_ids(tmp_path: Path) -> N
 
     assert callable(_persist_confirmed_fingerprint)
     assert blocker.fingerprint in ctx.tool_state.analyzer_run.verified_ids
+    assert blocker.fingerprint in ctx.tool_state.verified_ids
 
     derived = validation_state_from_tool_context(ctx)
     _assert_typed_rejection(
@@ -366,6 +369,80 @@ async def test_live_confirm_blocks_approve_via_verified_ids(tmp_path: Path) -> N
     assert verdict.is_error is True
     assert _REASON_APPROVE_CONFIRMED_BLOCKER in verdict.content[0]["text"]
     assert ctx.tool_state.terminal_submission is None
+
+
+@pytest.mark.asyncio
+async def test_live_agent_confirm_blocks_approve_without_analyzer_findings(
+    tmp_path: Path,
+) -> None:
+    """A confirmed agent-authored blocker must reject approve without seeding analyzer findings."""
+    from mergecraft.mcp.verdict import (
+        submit_review_verdict_tool,
+        validation_state_from_tool_context,
+    )
+    from mergecraft.mcp.verification import record_finding_verdict_tool, verify_agent_findings_tool
+
+    finding = _agent_blocker()
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.analyzer_run = AnalyzerRunState(ran=True, findings=[], verified_ids=set())
+    planned = await verify_agent_findings_tool(ctx).execute({"findings": [finding.model_dump()]})
+    assert planned.is_error is False
+    recorded = await record_finding_verdict_tool(ctx).execute(
+        {
+            "fingerprint": finding.fingerprint,
+            "verdict": "confirm",
+            "reason": "Reproduced the secret leak.",
+        }
+    )
+    assert recorded.is_error is False
+    assert finding.fingerprint in ctx.tool_state.verified_ids
+    assert ctx.tool_state.analyzer_run.findings == []
+
+    derived = validation_state_from_tool_context(ctx)
+    _assert_typed_rejection(
+        _validate(_approve_payload(), state=derived),
+        _REASON_APPROVE_CONFIRMED_BLOCKER,
+    )
+    verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert verdict.is_error is True
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in verdict.content[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_confirm_survives_analyzer_rerun(tmp_path: Path) -> None:
+    """A later ``run_analyzers`` replace must not drop a confirmed blocker."""
+    from mergecraft.mcp.analyzers import _store_run_state
+    from mergecraft.mcp.verdict import (
+        submit_review_verdict_tool,
+        validation_state_from_tool_context,
+    )
+    from mergecraft.mcp.verification import record_finding_verdict_tool
+
+    blocker = _blocker_finding()
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[blocker.model_dump()],
+        verified_ids=set(),
+    )
+    recorded = await record_finding_verdict_tool(ctx).execute(
+        {
+            "fingerprint": blocker.fingerprint,
+            "verdict": "confirm",
+            "reason": "Reproduced the secret leak.",
+        }
+    )
+    assert recorded.is_error is False
+    _store_run_state(ctx, AnalyzerRunState(ran=True, findings=[], verified_ids=set()))
+    assert blocker.fingerprint in ctx.tool_state.verified_ids
+    derived = validation_state_from_tool_context(ctx)
+    _assert_typed_rejection(
+        _validate(_approve_payload(), state=derived),
+        _REASON_APPROVE_CONFIRMED_BLOCKER,
+    )
+    verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert verdict.is_error is True
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in verdict.content[0]["text"]
 
 
 def test_request_changes_with_verified_blocker_blocks(tmp_path: Path) -> None:
@@ -810,6 +887,8 @@ async def test_existing_review_and_comment_behaviour_unchanged(tmp_path: Path) -
     assert first.is_error is False
     assert ctx.tool_state.review is not None
     assert ctx.tool_state.review.id == 1
+    assert ctx.tool_state.terminal_submission is not None
+    assert ctx.tool_state.terminal_submission.verdict == "request_changes"
     inline = github.review_payloads[0].get("comments") or []
     assert inline
     expected_fp = finding_fingerprint(path="src/app.py", body="A finding.")

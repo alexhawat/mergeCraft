@@ -155,6 +155,37 @@ async def _resolve_fixed_finding_threads(
     return resolved
 
 
+def _comments_to_findings(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for comment in comments:
+        row: dict[str, Any] = {
+            "path": str(comment["path"]),
+            "body": str(comment.get("body") or ""),
+            "severity": "Major",
+        }
+        if "line" in comment:
+            row["line"] = int(comment["line"])
+        findings.append(row)
+    return findings
+
+
+def _legacy_params_to_submission(params: dict[str, Any]) -> dict[str, Any]:
+    """Map ``create_pull_request_review`` params onto the terminal-verdict shape."""
+    approved = bool(params.get("approved"))
+    body = str(params.get("body") or "")
+    comments = list(params.get("comments") or [])
+    if approved:
+        return {"verdict": "approve", "summary": body or "Approve", "findings": []}
+    findings = _comments_to_findings(comments)
+    if not findings:
+        findings = [{"path": ".", "body": body or "Review comment", "severity": "Minor"}]
+    return {
+        "verdict": "request_changes",
+        "summary": body or "Request changes",
+        "findings": findings,
+    }
+
+
 def create_pull_request_review_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         pull_number = int(params["pull_number"])
@@ -187,6 +218,11 @@ def create_pull_request_review_tool(ctx: ToolContext):
                     ),
                     "reviewId": ctx.tool_state.review.id,
                 }
+
+        if ctx.tool_state.terminal_submission is None:
+            from mergecraft.mcp.verdict import record_validated_terminal_submission
+
+            record_validated_terminal_submission(ctx, _legacy_params_to_submission(params))
 
         event = "COMMENT"
         if approved and ctx.pr_approve_enabled and ctx.trust_tier == "trusted":

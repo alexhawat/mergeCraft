@@ -89,21 +89,23 @@ def build_unsubmitted_review_prompt(mode: str) -> str:
         return "\n".join(
             [
                 "MISSING REVIEW OUTPUT — you selected Review mode but stopped without "
-                "calling `create_pull_request_review`.",
+                "recording a terminal verdict via `submit_review_verdict`.",
                 "",
-                "call `create_pull_request_review` now with your aggregated review.",
+                "call `submit_review_verdict` now (approve or request_changes), then "
+                "call `create_pull_request_review` with the same outcome.",
                 "",
-                "do NOT stop again until `create_pull_request_review` has been called "
-                "successfully.",
+                "do NOT stop again until `submit_review_verdict` has been called successfully.",
             ]
         )
     return "\n".join(
         [
             "MISSING REVIEW OUTPUT — you selected IncrementalReview mode but stopped "
-            "without calling `create_pull_request_review` or `report_progress`.",
+            "without calling `submit_review_verdict` / `create_pull_request_review` "
+            "or `report_progress`.",
             "",
             "do exactly one of:",
-            "- if you have findings: call `create_pull_request_review`",
+            "- if you have findings: call `submit_review_verdict` then "
+            "`create_pull_request_review`",
             "- if no review warranted: call `report_progress` with a short summary",
         ]
     )
