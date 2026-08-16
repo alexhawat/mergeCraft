@@ -114,3 +114,10 @@ prose for the 13 prompt lenses (captured before AP5.2 removed bullets from
 
 AP5.1 RED suite authored; AP5.2 implementation landed; post-AP5.2 xfail
 reconciliation complete — all nine tests GREEN.
+
+Post-AP5.2 prompt snapshot refresh (2026-08-16): `Review.TEMPLATE` step 4 now
+references the registry-backed lens catalog instead of inline starter-menu
+bullets. Updated `tests/prompts/fixtures/review_template_vp4_1.txt` and the
+Review entry in `tests/_fixtures/pre_split_prompts.json`. Registry validation
+pin `test_registry_validation_rejects_an_unreachable_lens` uses
+`lens: nonexistent-lens` (bundled `security` lens now has triggers).
