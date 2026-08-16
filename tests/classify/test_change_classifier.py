@@ -10,11 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from mergecraft.classify.blast_radius import classify_blast_radius
-
-_AP4_XFAIL = pytest.mark.xfail(reason="AP4.2", strict=True)
 
 
 def _change(*paths: str, **signals: object) -> dict[str, object]:
@@ -27,7 +23,6 @@ def _classify_change(*args: Any, **kwargs: Any) -> Any:
     return classify_change(*args, **kwargs)
 
 
-@_AP4_XFAIL
 def test_emits_typed_risk_and_change_map() -> None:
     """Classifier returns a typed change/risk map with blast-radius alignment."""
     change = _change(
@@ -47,7 +42,6 @@ def test_emits_typed_risk_and_change_map() -> None:
     assert isinstance(result.is_trivial, bool)
 
 
-@_AP4_XFAIL
 def test_detects_generated_and_vendored_files() -> None:
     """Generated and vendored paths are surfaced explicitly in the change map."""
     change = _change(
@@ -67,7 +61,6 @@ def test_detects_generated_and_vendored_files() -> None:
     assert "third_party/lib/foo.c" in vendored
 
 
-@_AP4_XFAIL
 def test_risk_band_reflects_blast_radius() -> None:
     """``risk_band`` is derived from ``classify_blast_radius``, not a second rule set."""
     change = _change(
@@ -83,7 +76,6 @@ def test_risk_band_reflects_blast_radius() -> None:
     assert result.blast_radius == expected
 
 
-@_AP4_XFAIL
 def test_classifier_makes_one_cheap_call() -> None:
     """The classifier agent runs exactly once per classification (cheap gate)."""
     change = _change("docs/guide.md", files_changed=1, lines_added=1, lines_deleted=1)
