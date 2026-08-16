@@ -10,7 +10,7 @@ from loguru import logger
 
 from mergecraft.prep.node import install_node_dependencies
 from mergecraft.prep.python import install_python_dependencies
-from mergecraft.prep.types import PrepOptions, PrepResult
+from mergecraft.prep.types import PrepOptions, PrepResult, is_prep_install_failure
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -77,8 +77,10 @@ async def run_prep_phase(options: PrepOptions | None = None) -> list[PrepResult]
     Individual step failures are recorded on :class:`PrepResult` (issues +
     ``dependencies_installed=False``) rather than raising — the live Action
     path maps a failed install to ``RunOutcome.inconclusive`` (W6.1 / D4).
-    Callers that need fail-closed behaviour must inspect the returned results
-    (see ``main._prep_failure_reason`` / ``mcp.dependencies``).
+    A policy skip (``skipped=True``, e.g. Python install with ``shell:
+    disabled``) is not a failure. Callers that need fail-closed behaviour
+    must inspect results via ``is_prep_install_failure`` (see
+    ``main._prep_failure_reason`` / ``mcp.dependencies``).
     """
     opts = options or PrepOptions()
     logger.debug("» starting prep phase...")
@@ -109,6 +111,12 @@ async def run_prep_phase(options: PrepOptions | None = None) -> list[PrepResult]
                 results.append(result)
                 if result.dependencies_installed:
                     logger.debug("» {}: dependencies installed", step.name)
+                elif result.skipped:
+                    logger.info(
+                        "» {}: {}",
+                        step.name,
+                        result.issues[0] if result.issues else "skipped",
+                    )
                 elif result.issues:
                     logger.warning("» {}: {}", step.name, result.issues[0])
         finally:
@@ -122,4 +130,4 @@ async def run_prep_phase(options: PrepOptions | None = None) -> list[PrepResult]
     return results
 
 
-__all__ = ["PrepOptions", "PrepResult", "run_prep_phase"]
+__all__ = ["PrepOptions", "PrepResult", "is_prep_install_failure", "run_prep_phase"]

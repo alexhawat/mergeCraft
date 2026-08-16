@@ -34,6 +34,7 @@ from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import ProgressComment, ToolState, init_tool_state
 from mergecraft.modes import _custom_modes, compute_modes
+from mergecraft.prep.types import is_prep_install_failure
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
 from mergecraft.utils.agent_resolve import (
@@ -381,7 +382,7 @@ async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
         return None
     reasons: list[str] = []
     for result in state.results or []:
-        if not result.dependencies_installed and result.issues:
+        if is_prep_install_failure(result):
             reasons.extend(str(item) for item in result.issues)
     if reasons:
         return "; ".join(reasons)
