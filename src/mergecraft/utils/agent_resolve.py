@@ -574,19 +574,22 @@ async def run_with_model_chain(
             _prepare_chain_attempt(tool_state, chain_index)
             logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
 
+            resolved_harness = resolve_harness(settings, slug)
             attempt_attrs = {
                 "model.id": slug,
                 "model.provider": _agent_provider_for_slug(slug),
-                "model.mode": _agent_mode_for_slug(slug),
+                "model.mode": resolved_harness,
                 "model.fallback_index": chain_index,
                 "model.attempt_number": attempts,
                 "agent.provider": _agent_provider_for_slug(slug),
-                "agent.mode": _agent_mode_for_slug(slug),
+                "agent.mode": resolved_harness,
+                "harness": resolved_harness,
+                "agent.harness": resolved_harness,
                 # OTel GenAI semantic-convention names so Logfire's native
                 # GenAI dashboard populates. ``gen_ai.system`` is the provider
                 # slug (anthropic/openai/google/opencode/...).
                 "gen_ai.system": _agent_provider_for_slug(slug),
-                "gen_ai.agent.name": _agent_mode_for_slug(slug),
+                "gen_ai.agent.name": resolved_harness,
                 "gen_ai.request.model": slug,
                 "agent.cli_argv": cli_argv,
             }
@@ -703,6 +706,7 @@ async def run_with_model_chain(
                         parent_span_id=root_parent_id,
                         slug=follow_on_slug,
                         fallback_index=chain_index,
+                        settings=settings,
                     )
                 # Propagate the terminal status to the root span so the
                 # trace tree's top-level ``mergecraft.run`` span reflects
@@ -753,6 +757,66 @@ def _agent_mode_for_slug(slug: str) -> str:
     if provider == "cursor":
         return "cursor"
     return "opencode"
+
+
+_NATIVE_HARNESS_PROVIDERS: dict[str, frozenset[str]] = {
+    "codex": frozenset({"openai"}),
+    "claude": frozenset({"anthropic"}),
+    "gemini": frozenset({"google"}),
+    "cursor": frozenset({"cursor"}),
+}
+
+# OpenCode is the generic multi-provider harness: gateway presets, custom
+# slugs, and explicit overrides (openai / anthropic under ``harness: opencode``).
+_OPENCODE_NATIVE_PROVIDERS = frozenset({"nous", "tokenhub", "minimax", "openai", "anthropic"})
+_KNOWN_CATALOG_PROVIDERS = frozenset(
+    {
+        "anthropic",
+        "openai",
+        "google",
+        "cursor",
+        "bedrock",
+        "vertex",
+        "nous",
+        "tokenhub",
+        "minimax",
+    }
+)
+
+
+def _harness_supports_provider(harness: str, provider: str) -> bool:
+    """Return whether ``harness`` may run models from ``provider``."""
+    if harness == "opencode":
+        if provider in _OPENCODE_NATIVE_PROVIDERS:
+            return True
+        # Custom / unknown catalog prefixes route through OpenCode today.
+        return provider not in _KNOWN_CATALOG_PROVIDERS
+    native = _NATIVE_HARNESS_PROVIDERS.get(harness)
+    return native is not None and provider in native
+
+
+def resolve_harness(settings: RepoSettings, slug: str) -> str:
+    """Resolve the agent harness for ``slug`` under ``settings`` (HA3 / D11).
+
+    When ``settings.harness`` is unset, delegates to today's
+    :func:`_agent_mode_for_slug` inference. When set, validates the
+    (harness, provider, model) triple and returns the explicit value.
+    Unsupported combinations raise :class:`ModelFallbackPolicyError` so
+    ``main._classify_error_outcome`` maps them to ``configuration_error``.
+    """
+    if settings.harness is None:
+        return _agent_mode_for_slug(slug)
+
+    harness = settings.harness
+    provider = _agent_provider_for_slug(slug)
+    if _harness_supports_provider(harness, provider):
+        return harness
+
+    msg = (
+        f"configuration error: harness {harness!r} is incompatible with "
+        f"model {slug!r} (provider {provider!r})"
+    )
+    raise ModelFallbackPolicyError(msg)
 
 
 def _cost_attrs_from_usage(usage: Any) -> dict[str, Any]:
@@ -826,12 +890,26 @@ def _snapshot_attrs(
     return _snap
 
 
+def _attempt_harness_label(settings: RepoSettings | None, slug: str) -> str:
+    """Harness name stamped on an attempt span, including synthetic follow-ons.
+
+    Visited attempts validate via :func:`resolve_harness`. Not-visited
+    follow-ons must not re-validate (an unused tail slug can be an
+    unsupported combo) but still stamp the operator's explicit ``harness:``
+    so the trace does not mix override labels with inferred ones.
+    """
+    if settings is not None and settings.harness is not None:
+        return settings.harness
+    return _agent_mode_for_slug(slug)
+
+
 def _emit_advanced_attempt(
     tracer: Any,
     *,
     parent_span_id: str | None,
     slug: str,
     fallback_index: int,
+    settings: RepoSettings | None = None,
 ) -> None:
     """Emit a synthetic ``agent.attempt`` span for a chain entry the runtime loop skipped past.
 
@@ -842,15 +920,18 @@ def _emit_advanced_attempt(
     ``"not_visited"`` so consumers can distinguish it from a real
     ``"skipped"`` (no credentials/binary) entry.
     """
+    harness = _attempt_harness_label(settings, slug)
     attrs = {
         "model.id": slug,
         "model.provider": _agent_provider_for_slug(slug),
-        "model.mode": _agent_mode_for_slug(slug),
+        "model.mode": harness,
         "model.fallback_index": fallback_index,
         "agent.provider": _agent_provider_for_slug(slug),
-        "agent.mode": _agent_mode_for_slug(slug),
+        "agent.mode": harness,
+        "harness": harness,
+        "agent.harness": harness,
         "gen_ai.system": _agent_provider_for_slug(slug),
-        "gen_ai.agent.name": _agent_mode_for_slug(slug),
+        "gen_ai.agent.name": harness,
         "gen_ai.request.model": slug,
         "agent.cli_argv": _redacted_cli_argv(),
     }
@@ -953,8 +1034,19 @@ def resolve_model(*, slug: str | None = None, respect_env_override: bool = True)
     return None
 
 
-def resolve_runtime_agent(*, model: str | None = None) -> Agent:
-    """Pick claude vs opencode based on model + available credentials."""
+def resolve_runtime_agent(
+    *,
+    model: str | None = None,
+    settings: RepoSettings | None = None,
+) -> Agent:
+    """Pick the runtime agent from model, credentials, and optional ``harness:``.
+
+    ``MERGECRAFT_AGENT`` still wins when set. When ``settings.harness`` is
+    set, the explicit harness is validated against the model (D11) and
+    returned — so ``harness: opencode`` with an OpenAI slug runs OpenCode
+    instead of Codex. When unset, today's provider/credential inference
+    applies, including fail-loud for missing native-harness credentials.
+    """
     env_agent = os.environ.get("MERGECRAFT_AGENT", "").strip()
     if env_agent:
         if env_agent in agents:
@@ -962,6 +1054,10 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
         logger.warning(
             '» unknown MERGECRAFT_AGENT="{}" — falling through to auto-select', env_agent
         )
+
+    if settings is not None and settings.harness is not None:
+        harness = resolve_harness(settings, model) if model else settings.harness
+        return resolve_agent(harness)
 
     if model and _has_bedrock_auth() and os.environ.get(BEDROCK_MODEL_ID_ENV, "").strip() == model:
         return agents["claude"] if is_bedrock_anthropic_id(model) else agents["opencode"]
@@ -1040,6 +1136,7 @@ __all__ = [
     "pick_runnable_slug_from_chain",
     "promote_model_evidence",
     "resolve_effective_model_slug",
+    "resolve_harness",
     "resolve_model",
     "resolve_runtime_agent",
     "run_with_model_chain",

@@ -295,6 +295,9 @@ class RepoSettings(BaseModel):
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
+    # HA3 / D11 — explicit harness selection. When unset, ``utils/agent_resolve``
+    # infers the runtime from the model slug (today's behaviour).
+    harness: Literal["opencode", "codex", "claude", "gemini", "cursor"] | None = None
     model: str | None = None
     models: list[str] | None = None
     model_fallbacks: dict[str, list[str]] | None = Field(default=None, alias="modelFallbacks")

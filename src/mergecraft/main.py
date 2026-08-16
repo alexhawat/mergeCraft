@@ -605,7 +605,7 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
         )
         resolved_model = resolve_model(slug=only_slug, respect_env_override=False)
         selected_slug = only_slug
-    agent = resolve_runtime_agent(model=resolved_model)
+    agent = resolve_runtime_agent(model=resolved_model, settings=settings)
     agent_id = agent.name
     ctx.agent = agent
     ctx.agent_id = agent_id
@@ -1015,7 +1015,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
 
     async def _run_agent_once(slug: str) -> AgentResult:
         attempt_model = resolve_model(slug=slug, respect_env_override=False)
-        attempt_agent = resolve_runtime_agent(model=attempt_model)
+        attempt_agent = resolve_runtime_agent(model=attempt_model, settings=settings)
         attempt_agent_id = attempt_agent.name
 
         if attempt_agent_id == agent_id:
