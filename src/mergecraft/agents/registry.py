@@ -8,10 +8,11 @@ and :func:`pick_runnable_slug_from_chain` (D3).
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final
 
 from pydantic import BaseModel, ConfigDict
 
+from mergecraft.agents.lens_triggers import LensTriggers
 from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.structured_handoff import agent_finding_output_schema_id
 from mergecraft.agents.verifier import VERIFIER_SYSTEM_PROMPT, pinned_judge_model
@@ -41,12 +42,23 @@ _DEFAULT_BUDGET: Final[int] = 8
 _DEFAULT_TIMEOUT_S: Final[int] = 600
 _DEFAULT_PROMPT_VERSION: Final[str] = "1.0.0"
 
+
+def _lens_prompt_catalog() -> dict[str, tuple[str, str]]:
+    from mergecraft.agents.lenses._definitions import LENS_DEFINITIONS
+
+    return {
+        f"mergecraft.lens.{lens_id}": (lens.rubric, _DEFAULT_PROMPT_VERSION)
+        for lens_id, lens in LENS_DEFINITIONS.items()
+    }
+
+
 _PROMPT_CATALOG: Final[dict[str, tuple[str, str]]] = {
     "mergecraft.reviewer": (REVIEWER_SYSTEM_PROMPT, _DEFAULT_PROMPT_VERSION),
     "mergecraft.verifier": (VERIFIER_SYSTEM_PROMPT, _DEFAULT_PROMPT_VERSION),
     "mergecraft.orchestrator": ("", _DEFAULT_PROMPT_VERSION),
     "mergecraft.judge": (VERIFIER_SYSTEM_PROMPT, _DEFAULT_PROMPT_VERSION),
     "mergecraft.classifier": ("", _DEFAULT_PROMPT_VERSION),
+    **_lens_prompt_catalog(),
 }
 
 _ORCHESTRATOR_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(ToolClass)
@@ -62,15 +74,6 @@ class AgentRole(StrEnum):
 
 class RegistryValidationError(ValueError):
     """Raised when a registry binding fails structural validation."""
-
-
-class LensTriggers(BaseModel):
-    """Resolved trigger metadata for risk-based lens routing (AP4)."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    categories: tuple[str, ...] = ()
-    min_risk_band: Literal["low", "medium", "high"] | None = None
 
 
 class AgentBinding(BaseModel):
@@ -315,10 +318,20 @@ def load_registry(
     repo_root: Path | None = None,
 ) -> Registry:
     """Load defaults merged with ``settings.agents`` overrides."""
-    del repo_root  # reserved for future repo-local agent manifests (AP5)
+    del repo_root  # reserved for future repo-local agent manifests
     bindings: dict[str, AgentBinding] = {}
     for role in AgentRole:
         bindings[role.value] = _build_default_binding(settings, role)
+
+    bindings.update(
+        __import__(
+            "mergecraft.agents.lenses._bindings",
+            fromlist=["bundled_lens_bindings"],
+        ).bundled_lens_bindings(settings=settings)
+    )
+    lens_keys: dict[str, str] = {
+        binding.lens: key for key, binding in bindings.items() if binding.lens is not None
+    }
 
     for agent_key, override in settings.agents.items():
         key_role = _parse_role(agent_key)
@@ -329,11 +342,19 @@ def load_registry(
                 "so it does not silently replace a default role binding"
             )
             raise RegistryValidationError(msg)
-        base_role = declared_role or key_role or AgentRole.reviewer
-        base = bindings.get(base_role.value) or _build_default_binding(settings, base_role)
-        bindings[agent_key] = _apply_override(
-            base, override, agent_key=agent_key, settings=settings
-        )
+        if override.lens is not None and override.lens in lens_keys:
+            base = bindings[lens_keys[override.lens]]
+        else:
+            base_role = declared_role or key_role or AgentRole.reviewer
+            base = bindings.get(base_role.value) or _build_default_binding(settings, base_role)
+        merged = _apply_override(base, override, agent_key=agent_key, settings=settings)
+        if merged.lens is not None and merged.lens in lens_keys:
+            stale_key = lens_keys[merged.lens]
+            if stale_key != agent_key:
+                bindings.pop(stale_key, None)
+        if merged.lens is not None:
+            lens_keys[merged.lens] = agent_key
+        bindings[agent_key] = merged
 
     return Registry(bindings)
 
