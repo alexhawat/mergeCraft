@@ -233,7 +233,7 @@ def record_finding_verdict_tool(ctx: ToolContext):
 
     return tool(
         name="record_finding_verdict",
-        tool_class=ToolClass.VERIFICATION,
+        tool_class=ToolClass.REVIEW_WRITE,
         mutates=True,
         description=(
             "Record one mergecraft-verifier verdict for a finding. confirm and downgrade "

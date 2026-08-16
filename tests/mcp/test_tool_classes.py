@@ -322,3 +322,66 @@ def test_deny_list_derivation_is_not_empty(tool_ctx: ToolContext) -> None:
         "or no tool is classified as denied"
     )
     assert set(verifier_denied) <= registered_names
+
+
+def test_record_finding_verdict_is_absent_from_verifier_surface(tool_ctx: ToolContext) -> None:
+    """Verdict persistence is orchestrator-only — the verifier prompt returns a verdict."""
+    from mergecraft.mcp.server import build_verifier_tools
+
+    verifier_names = {spec.name for spec in build_verifier_tools(tool_ctx)}
+    orchestrator_names = {spec.name for spec in build_orchestrator_tools(tool_ctx)}
+    assert "record_finding_verdict" not in verifier_names
+    assert "record_finding_verdict" in orchestrator_names
+    assert "verify_agent_findings" in verifier_names
+    assert "record_finding_verdict" in verifier_denied_tool_names(tool_ctx)
+
+
+def test_live_verifier_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> None:
+    """Runtime ``tools/list`` on the live verifier endpoint is class-filtered (H4)."""
+    import json
+    from urllib.request import Request, urlopen
+
+    from mergecraft.mcp.server import MCP_ENDPOINT, MCP_VERIFIER_ENDPOINT, start_mcp_http_server
+
+    url, stop = start_mcp_http_server(tool_ctx)
+    try:
+        verifier_url = url[: -len(MCP_ENDPOINT)] + MCP_VERIFIER_ENDPOINT
+        list_body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
+        headers = {"Content-Type": "application/json"}
+        with urlopen(
+            Request(verifier_url, data=list_body, headers=headers, method="POST"),
+            timeout=5,
+        ) as resp:
+            listed = json.loads(resp.read().decode())
+        names = {entry["name"] for entry in listed["result"]["tools"]}
+        assert "verify_agent_findings" in names
+        assert "record_finding_verdict" not in names
+        assert "push_branch" not in names
+        assert "checkout_pr" not in names
+
+        with urlopen(
+            Request(url, data=list_body, headers=headers, method="POST"),
+            timeout=5,
+        ) as resp:
+            orchestrator = json.loads(resp.read().decode())
+        orch_names = {entry["name"] for entry in orchestrator["result"]["tools"]}
+        assert "record_finding_verdict" in orch_names
+        assert "push_branch" in orch_names
+
+        call_body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "record_finding_verdict", "arguments": {}},
+            }
+        ).encode()
+        with urlopen(
+            Request(verifier_url, data=call_body, headers=headers, method="POST"),
+            timeout=5,
+        ) as resp:
+            called = json.loads(resp.read().decode())
+        assert called["error"]["code"] == -32601
+        assert "record_finding_verdict" in called["error"]["message"]
+    finally:
+        stop()

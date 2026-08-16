@@ -48,14 +48,14 @@ from mergecraft.tracing.tracer import (
     _close_provider_llm_pair,
     _open_provider_llm_pair,
 )
-from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.types import MERGECRAFT_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.privilege import prepare_workspace_for_agent, wrap_agent_command
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from mergecraft.tracing.tracer import Tracer
 
@@ -96,7 +96,23 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     return str(config_path)
 
 
-def build_agents_json() -> str:
+def build_agents_json(*, verifier_denied_tools: Sequence[str] = ()) -> str:
+    verifier: dict[str, Any] = {
+        "description": (
+            "Read-only verification subagent for Critical/Major analyzer, CI and "
+            "agent-authored findings. Confirms, downgrades, or drops before "
+            f"publication against rubric v{VERIFIER_RUBRIC_VERSION}."
+        ),
+        "prompt": VERIFIER_SYSTEM_PROMPT,
+        # Pinned in agents/verifier.py so the judge model recorded with a
+        # verdict and the judge model actually dispatched cannot diverge
+        # (#45). Sonnet is deliberately a different tier from the
+        # orchestrator that wrote the finding.
+        "model": pinned_judge_model("claude") or "claude-sonnet-5",
+    }
+    denied = [format_mcp_tool_ref("claude", name) for name in verifier_denied_tools]
+    if denied:
+        verifier["disallowedTools"] = denied
     agents = {
         REVIEWER_AGENT_NAME: {
             "description": (
@@ -106,19 +122,7 @@ def build_agents_json() -> str:
             "prompt": REVIEWER_SYSTEM_PROMPT,
             "model": "claude-sonnet-5",
         },
-        VERIFIER_AGENT_NAME: {
-            "description": (
-                "Read-only verification subagent for Critical/Major analyzer, CI and "
-                "agent-authored findings. Confirms, downgrades, or drops before "
-                f"publication against rubric v{VERIFIER_RUBRIC_VERSION}."
-            ),
-            "prompt": VERIFIER_SYSTEM_PROMPT,
-            # Pinned in agents/verifier.py so the judge model recorded with a
-            # verdict and the judge model actually dispatched cannot diverge
-            # (#45). Sonnet is deliberately a different tier from the
-            # orchestrator that wrote the finding.
-            "model": pinned_judge_model("claude") or "claude-sonnet-5",
-        },
+        VERIFIER_AGENT_NAME: verifier,
     }
     return json.dumps(agents)
 
@@ -631,7 +635,7 @@ def _run_claude_once(
         "--disallowedTools",
         CLAUDE_DISALLOWED_TOOLS,
         "--agents",
-        build_agents_json(),
+        build_agents_json(verifier_denied_tools=ctx.verifier_denied_tools),
         "--effort",
         "high",
     ]

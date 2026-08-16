@@ -92,6 +92,7 @@ MCP_PORT_START = 3764
 MCP_PORT_ATTEMPTS = 100
 MCP_HOST = "127.0.0.1"
 MCP_ENDPOINT = "/mcp"
+MCP_VERIFIER_ENDPOINT = "/mcp/verifier"
 
 
 def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None) -> list[ToolSpec]:
@@ -293,20 +294,14 @@ def _record_trajectory(
         logger.debug("trajectory: failed to record {} — {}", name, exc)
 
 
-def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> FastAPI:
-    """Build the MCP app.
-
-    ``ctx`` is optional so a test can stand the app up with bare tool specs;
-    when it is supplied — which is what ``start_mcp_http_server`` does on every
-    real run — each ``tools/call`` is appended to the run's trajectory record.
-    """
-    tool_ctx = ctx
+def _register_mcp_route(
+    app: FastAPI,
+    path: str,
+    tools: list[ToolSpec],
+    tool_ctx: ToolContext | None,
+) -> None:
+    """Mount one JSON-RPC MCP endpoint with a fixed tool surface."""
     by_name = {t.name: t for t in tools}
-    app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.1.0")
-
-    @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
 
     async def handle_rpc(body: dict[str, Any]) -> dict[str, Any]:
         req_id = body.get("id")
@@ -387,7 +382,6 @@ def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> Fas
             "error": {"code": -32601, "message": f"Method not found: {method}"},
         }
 
-    @app.api_route(MCP_ENDPOINT, methods=["GET", "POST", "DELETE"])
     async def mcp_endpoint(request: Request) -> Response:
         if request.method == "GET":
             # Streamable HTTP / SSE clients may probe with GET — reply with tool list.
@@ -421,6 +415,39 @@ def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> Fas
             return JSONResponse([await handle_rpc(item) for item in items])
         return JSONResponse(await handle_rpc(body))
 
+    app.add_api_route(
+        path,
+        mcp_endpoint,
+        methods=["GET", "POST", "DELETE"],
+        name=f"mcp_{path.strip('/').replace('/', '_')}",
+    )
+
+
+def create_mcp_app(
+    tools: list[ToolSpec],
+    ctx: ToolContext | None = None,
+    *,
+    role_tools: dict[str, list[ToolSpec]] | None = None,
+) -> FastAPI:
+    """Build the MCP app.
+
+    ``ctx`` is optional so a test can stand the app up with bare tool specs;
+    when it is supplied — which is what ``start_mcp_http_server`` does on every
+    real run — each ``tools/call`` is appended to the run's trajectory record.
+
+    ``role_tools`` mounts extra class-filtered surfaces at ``{MCP_ENDPOINT}/{role}``
+    (the verifier lives at ``MCP_VERIFIER_ENDPOINT``). The primary endpoint
+    stays the orchestrator set.
+    """
+    app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.1.0")
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    _register_mcp_route(app, MCP_ENDPOINT, tools, ctx)
+    for role, role_tool_list in (role_tools or {}).items():
+        _register_mcp_route(app, f"{MCP_ENDPOINT}/{role}", role_tool_list, ctx)
     return app
 
 
@@ -444,8 +471,9 @@ def start_mcp_http_server(
     Returns ``(url, stop)`` where ``stop`` is an idempotent disposer.
     """
     tools = build_orchestrator_tools(ctx, output_schema)
+    verifier_tools = build_verifier_tools(ctx, output_schema)
+    app = create_mcp_app(tools, ctx, role_tools={"verifier": verifier_tools})
     port = _select_port()
-    app = create_mcp_app(tools)
     config = uvicorn.Config(
         app,
         host=MCP_HOST,

@@ -150,6 +150,22 @@ def test_dispatched_claude_judge_model_matches_the_recorded_pin() -> None:
     assert dispatched == verifier.judge_pin(provider="claude").model
 
 
+def test_claude_verifier_agent_receives_class_derived_disallowed_tools(tmp_path: Path) -> None:
+    """Live Claude dispatch applies the verifier complement, not the reviewer one."""
+    import json
+
+    from mergecraft.types import format_mcp_tool_ref
+
+    verifier = import_module("mergecraft.agents.verifier")
+    claude = import_module("mergecraft.agents.claude")
+    denied = verifier.verifier_denied_tool_names(_ctx(tmp_path))
+    agents = json.loads(claude.build_agents_json(verifier_denied_tools=denied))
+    disallowed = agents[verifier.VERIFIER_AGENT_NAME]["disallowedTools"]
+    assert format_mcp_tool_ref("claude", "record_finding_verdict") in disallowed
+    assert format_mcp_tool_ref("claude", "push_branch") in disallowed
+    assert format_mcp_tool_ref("claude", "checkout_pr") in disallowed
+
+
 def test_verdict_is_refused_when_no_deterministic_check_ran(tmp_path: Path) -> None:
     """W13.3 — tools settle checkable facts before any judge evaluation counts."""
     verifier = import_module("mergecraft.agents.verifier")
