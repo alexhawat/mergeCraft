@@ -1,13 +1,17 @@
 """VP4 publication split — ``create_pull_request_review`` delegates; publisher is internal.
 
 Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP4.1 RED,
-VP4.2 impl; xfail markers cleared after VP4.2).
+VP4.2 impl; xfail markers cleared after VP4.2; VP4.4 stale-replay pin).
 
 Pinned contracts (W0):
     D7 — ``create_pull_request_review`` is adapted, not deleted; thin delegate
          to ``validate_submission`` + the same recorder as ``submit_review_verdict``.
     D8 — a rejected attempt leaves ``terminal_submission`` unset.
     V6 — GitHub posting moves to an internal publisher that is not a ``ToolSpec``.
+    VP4.4 — a hash-matching replay must re-validate before any GitHub post;
+         a later confirmed blocker must not GitHub-APPROVE. D4 (identical
+         retry is idempotent) still applies to ``submit_review_verdict`` when
+         state has not changed.
 """
 
 from __future__ import annotations
@@ -244,6 +248,92 @@ async def test_body_only_unapproved_legacy_review_does_not_github_approve(
     submission = getattr(ctx.tool_state, "terminal_submission", None)
     if submission is not None:
         assert submission.verdict != "approve"
+
+
+@pytest.mark.xfail(
+    reason="green after VP4.4: re-validate before publish on hash match",
+    strict=False,
+)
+@pytest.mark.asyncio
+async def test_stale_approve_replay_does_not_github_approve_after_blocker(
+    tmp_path: Path,
+) -> None:
+    """Replay + publish after state changed must not GitHub-APPROVE (VP4.4).
+
+    Guard-deletion: ``record_validated_terminal_submission`` returning the
+    stored ``approve`` on a matching ``payload_hash`` without calling
+    ``validate_submission``, then ``create_pull_request_review`` posting
+    GitHub ``APPROVE``, must fail this test.
+
+    Fresh approve+blocker already fails closed
+    (``test_create_pull_request_review_delegates_to_recorder``). This pin is
+    publication-time re-validation when a confirmed blocker appears *after*
+    a valid submit. D4 still applies to ``submit_review_verdict`` when state
+    has not changed. D8 (wipe ``terminal_submission``) is for a rejected
+    first attempt; a prior valid submit may remain.
+    """
+    from mergecraft.mcp.verdict import (
+        ReviewPhase,
+        submit_review_verdict_tool,
+        validate_submission,
+        validation_state_from_tool_context,
+    )
+
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path, github=github)
+    ctx.tool_state.selected_mode = "Review"
+    ctx.tool_state.review_phase = ReviewPhase.ESTABLISH_SCOPE.value
+    assert ctx.tool_state.analyzer_run is None
+    assert ctx.pr_approve_enabled is True
+    assert ctx.trust_tier == "trusted"
+
+    submit_params = {
+        "verdict": "approve",
+        "summary": "Looks good.",
+        "findings": [],
+    }
+    recorded = await submit_review_verdict_tool(ctx).execute(submit_params)
+    assert recorded.is_error is False, (
+        f"fixture error: approve with empty analyzer state must record; got {_error_text(recorded)}"
+    )
+    assert getattr(ctx.tool_state, "terminal_submission", None) is not None
+
+    blocker = _blocker()
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[blocker.model_dump()],
+        verified_ids={blocker.fingerprint},
+    )
+    mapped = {
+        "verdict": "approve",
+        "summary": "Looks good.",
+        "findings": [],
+    }
+    validation = validate_submission(mapped, state=validation_state_from_tool_context(ctx))
+    assert validation.accepted is False, (
+        "fixture error: mapped approve + confirmed blocker must fail validate_submission"
+    )
+
+    result = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": "Looks good.", "approved": True},
+    )
+
+    assert not any(payload.get("event") == "APPROVE" for payload in github.review_payloads), (
+        "stale approve replay must not GitHub-APPROVE after a confirmed blocker, "
+        f"got {github.review_payloads!r}"
+    )
+    if not result.is_error:
+        text = _error_text(result).lower()
+        assert "skip" in text or "reject" in text, (
+            "create_pull_request_review must error or skip/reject publication "
+            "when a confirmed blocker now stands; "
+            f"got success: {result.content!r}"
+        )
+    approval = ctx.tool_state.approval
+    assert approval is None or approval.would_approve is False, (
+        "second call must not record a successful GitHub approve on ApprovalRecord; "
+        f"got {approval!r}"
+    )
 
 
 def test_publisher_is_not_an_mcp_tool(tmp_path: Path) -> None:

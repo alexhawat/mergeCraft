@@ -13,6 +13,7 @@ Worktree: `mergecraft-vp4-enforce-publish` @ `wave/vp4-enforce-publish` (stacked
 | **VP4.2** | `tests/review/test_phase_guards.py` (both) | *(markers removed 2026-08-16 after VP4.2)* |
 | **VP4.3** | `tests/review/test_publication_split.py::test_body_only_unapproved_legacy_review_does_not_github_approve` | *(markers removed 2026-08-16 after VP4.3)* |
 | **VP4.3** | `tests/review/test_phase_guards.py::test_create_pull_request_review_before_scope_is_rejected` | *(markers removed 2026-08-16 after VP4.3)* |
+| **VP4.4** | `tests/review/test_publication_split.py::test_stale_approve_replay_does_not_github_approve_after_blocker` | `@pytest.mark.xfail(reason="green after VP4.4: re-validate before publish on hash match", strict=False)` |
 
 Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a later XPASS into a hard failure the impl wave cannot touch.
 
@@ -36,10 +37,10 @@ Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a l
 
 | Symbol | Module | Direct test |
 |--------|--------|-------------|
-| `create_pull_request_review_tool` | `mcp/review.py` | `test_create_pull_request_review_delegates_to_recorder`, `test_legacy_tool_still_registered`, `test_body_only_unapproved_legacy_review_does_not_github_approve`, `test_create_pull_request_review_before_scope_is_rejected` |
+| `create_pull_request_review_tool` | `mcp/review.py` | `test_create_pull_request_review_delegates_to_recorder`, `test_legacy_tool_still_registered`, `test_body_only_unapproved_legacy_review_does_not_github_approve`, `test_create_pull_request_review_before_scope_is_rejected`, `test_stale_approve_replay_does_not_github_approve_after_blocker` |
 | `_legacy_params_to_submission` | `mcp/review.py` | `test_body_only_unapproved_legacy_review_does_not_github_approve` (mapped `verdict` is not `"approve"`; guard-deletion: fallthrough `return {"verdict": "approve", ...}` must fail) |
-| `validate_submission` | `mcp/verdict.py` | `test_create_pull_request_review_delegates_to_recorder` (mapped approve + confirmed blocker is rejected; live tool must not bypass) |
-| `record_validated_terminal_submission` | `mcp/verdict.py` | `test_create_pull_request_review_delegates_to_recorder` (`callable` pin on the public recorder the delegate uses) |
+| `validate_submission` | `mcp/verdict.py` | `test_create_pull_request_review_delegates_to_recorder` (mapped approve + confirmed blocker is rejected; live tool must not bypass); `test_stale_approve_replay_does_not_github_approve_after_blocker` (same mapped payload must fail after the blocker is attached) |
+| `record_validated_terminal_submission` | `mcp/verdict.py` | `test_create_pull_request_review_delegates_to_recorder` (`callable` pin on the public recorder the delegate uses); `test_stale_approve_replay_does_not_github_approve_after_blocker` (hash-match replay must not skip re-validation before GitHub publish) |
 | `stamp_review_phase_on_active_span` | `mcp/verdict.py` | `test_phase_reaches_the_trace` (`callable` pin; live `checkout_pr` stamps `review.phase`) |
 | `publish_pull_request_review` | `mcp/review.py` | `test_publication_requires_a_validated_submission`, `test_publisher_is_not_an_mcp_tool` |
 | `ToolSpec` | `mcp/shared.py` | `test_publisher_is_not_an_mcp_tool` (publisher is callable and is not a `ToolSpec`) |
@@ -50,10 +51,10 @@ Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a l
 | `compute_modes` / `format_mcp_tool_ref` | `modes/__init__.py`, `types.py` | both prompt contract tests (`${t("submit_review_verdict")}` interpolates) |
 | `ReviewPhase` | `mcp/verdict.py` | `test_phase_reaches_the_trace` (closed member sequence) |
 | `ToolState.review_phase` | `mcp/tool_state.py` | `test_phase_reaches_the_trace` (advanced by live `checkout_pr`) |
-| `submit_review_verdict_tool` | `mcp/verdict.py` | `test_submit_before_scope_is_rejected` |
+| `submit_review_verdict_tool` | `mcp/verdict.py` | `test_submit_before_scope_is_rejected`, `test_stale_approve_replay_does_not_github_approve_after_blocker` (first-call success with empty analyzer state) |
 | `ensure_review_scope_for_terminal` | `mcp/verdict.py` | `test_create_pull_request_review_before_scope_is_rejected` (`callable` pin on the D10 guard the legacy tool shares with `submit_review_verdict`) |
 | `checkout_pr_tool` | `mcp/checkout.py` | `test_phase_reaches_the_trace` |
-| `ApprovalRecord` / `ToolState.approval` | `mcp/tool_state.py` | `test_create_pull_request_review_delegates_to_recorder` (must stay unset on rejection) |
+| `ApprovalRecord` / `ToolState.approval` | `mcp/tool_state.py` | `test_create_pull_request_review_delegates_to_recorder` (must stay unset on rejection); `test_stale_approve_replay_does_not_github_approve_after_blocker` (second call must not record a successful GitHub approve) |
 | `ToolState.terminal_submission` | `mcp/tool_state.py` | delegate + publication + submit-before-scope (D8: unset on reject) |
 | `ToolState.pending_review_publication` | `mcp/tool_state.py` | `test_publication_requires_a_validated_submission` (unset when no validated submission) |
 
@@ -95,6 +96,7 @@ D10: a `ReviewPhase` StrEnum plus guard clauses in four existing tools — no ne
 | **D10** phase on the trace | Integration | Happy: live `checkout_pr` advances `ToolState.review_phase` to `ESTABLISH_SCOPE` and `review.phase` (or equivalent) appears on a span attr | `test_phase_reaches_the_trace` |
 | **VP4.3** body-only `approved: false` | Functional | Error / guard-deletion: `_legacy_params_to_submission` must not map body-only `approved=False` to `verdict="approve"`; live `create_pull_request_review` must not GitHub-APPROVE. Rejecting the attempt (D8 unset + empty payloads) is also a pass | `test_body_only_unapproved_legacy_review_does_not_github_approve` |
 | **VP4.3 / D10** legacy tool before scope | Functional | Error: live `create_pull_request_review(approved=True)` while `review_phase` is still `INIT` errors (text names scope/phase/checkout); D8 `terminal_submission` unset; no `ApprovalRecord`; GitHub payloads empty | `test_create_pull_request_review_before_scope_is_rejected` |
+| **VP4.4** stale approve replay after blocker | Functional | Error / guard-deletion: live `submit_review_verdict(approve)` with empty analyzer state, then attach a confirmed Critical blocker, then live `create_pull_request_review(approved=True, body=same summary)`. No GitHub payload may have `event=APPROVE` (empty payloads pass). Tool result is an error **or** publication is skipped/rejected. `ApprovalRecord` must not show a successful GitHub approve from the second call. Do not require wiping the earlier `terminal_submission` (D8 is for a rejected first attempt). D4 still applies to `submit_review_verdict` when state has **not** changed. If submit hashes raw params vs mapped `{verdict,summary,findings}` and the second call conflicts instead of replaying, assert no APPROVE anyway | `test_stale_approve_replay_does_not_github_approve_after_blocker` |
 
 No source-grep assertions. Delegate and phase tests drive the real tools. Prompt tests drive `compute_modes` (the same `${t("...")}` expansion the modes already use). The byte-diff pin snapshots **this branch at VP4.1**, not `origin/pre-0.0.1`, because VP1–VP3 already sit on this stack; the excluded region is Review step 7's opening (through the coverage-nudge note, keeping the callout ladder) and IncrementalReview step 10's opening (keeping the callout ladder / IF–ELSE).
 
@@ -120,3 +122,14 @@ Two medium findings. Markers cleared after VP4.3 impl (`e39f55b`). Product code 
 - `_legacy_params_to_submission` is imported **inside the test body**.
 - `create_pull_request_review_tool` before-scope is the D10 pin the new-tool path already has (`test_submit_before_scope_is_rejected`); the legacy tool must obey it too.
 - `ensure_review_scope_for_terminal` is imported **inside the before-scope test body** (`callable` pin).
+
+## VP4.4 RED (stale approve replay)
+
+Residual medium from `security-review`. Idempotent replay in `record_validated_terminal_submission` returns the existing `approve` when `payload_hash` matches and skips `validate_submission`. Then `create_pull_request_review` can GitHub-`APPROVE` after a Critical blocker was confirmed later.
+
+- `tests/review/test_publication_split.py::test_stale_approve_replay_does_not_github_approve_after_blocker` is xfail pending VP4.4 impl (`strict=False`). Existing tests in that file stay real passes.
+- Setup: `selected_mode = "Review"`, `review_phase = ESTABLISH_SCOPE` (D10 must not fire), empty analyzer state, `pr_approve_enabled=True`, `trust_tier="trusted"`.
+- Live sequence: `submit_review_verdict({verdict: "approve", summary: "Looks good.", findings: []})` must succeed (fixture error if not) → attach `_blocker()` as confirmed (`analyzer_run` + `verified_ids`) → live `create_pull_request_review({pull_number: 7, body: "Looks good.", approved: True})`.
+- The security finding assumes hashes match when `summary == body`. If they would not (submit hashing raw params vs mapped `{verdict,summary,findings}`), the live sequence still runs; a D4 conflict instead of replay is still a pass for **no GitHub APPROVE**.
+- D4 (identical retry is idempotent) is **not** weakened for `submit_review_verdict` when state has not changed. This pin is publication-time re-validation when blockers now exist.
+- Product code is not edited in this wave. VP4 Final `security-review` is not flipped.
