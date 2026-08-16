@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed: body-only `create_pull_request_review` with `approved: false` no longer posts a GitHub `APPROVE`
+- Fixed: `create_pull_request_review` now requires established review scope in Review modes, matching `submit_review_verdict`
+
 ### Changed
 
 - Changed: `gates.terminal_verdict` now defaults to `enforce`; missing terminal verdict reports `inconclusive`. Operators can still set `shadow`

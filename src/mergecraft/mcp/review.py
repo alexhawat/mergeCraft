@@ -13,6 +13,7 @@ from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
 from mergecraft.mcp.verdict import (
     ReviewPhase,
+    ensure_review_scope_for_terminal,
     record_validated_terminal_submission,
     stamp_review_phase_on_active_span,
 )
@@ -200,7 +201,11 @@ def _legacy_params_to_submission(params: dict[str, Any]) -> dict[str, Any]:
             "summary": body or "Review findings",
             "findings": _comments_to_findings(comments),
         }
-    return {"verdict": "approve", "summary": body, "findings": []}
+    return {
+        "verdict": "request_changes",
+        "summary": body or "Review comment",
+        "findings": [],
+    }
 
 
 async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -367,6 +372,8 @@ def create_pull_request_review_tool(ctx: ToolContext):
                     ),
                     "reviewId": ctx.tool_state.review.id,
                 }
+
+        ensure_review_scope_for_terminal(ctx.tool_state, "create_pull_request_review")
 
         submission_payload = _legacy_params_to_submission(params)
         record_validated_terminal_submission(ctx, submission_payload)

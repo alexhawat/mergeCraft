@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mergecraft.mcp.shared import execute, tool
-from mergecraft.mcp.tool_state import TerminalSubmission
+from mergecraft.mcp.tool_state import TerminalSubmission, primary_repo_state
 from mergecraft.tracing.redaction import redact_attrs
 
 if TYPE_CHECKING:
@@ -97,6 +97,22 @@ def _current_review_phase(tool_state: Any) -> ReviewPhase:
     if isinstance(raw, ReviewPhase):
         return raw
     return ReviewPhase(str(raw))
+
+
+def ensure_review_scope_for_terminal(tool_state: Any, tool_name: str) -> None:
+    """Raise when a Review-mode terminal tool runs before ``checkout_pr`` (D10)."""
+    mode = getattr(tool_state, "selected_mode", None)
+    if mode not in _REVIEW_MODES or _current_review_phase(tool_state) != ReviewPhase.INIT:
+        return
+    if mode == "IncrementalReview":
+        primary = primary_repo_state(tool_state)
+        if primary.incremental_changed_paths:
+            return
+    msg = (
+        f"{tool_name} requires checkout_pr to establish review scope "
+        "before the terminal verdict can be recorded"
+    )
+    raise ValueError(msg)
 
 
 def record_validated_terminal_submission(
@@ -333,13 +349,7 @@ class SubmitReviewVerdictParams(BaseModel):
 
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        mode = ctx.tool_state.selected_mode
-        if mode in _REVIEW_MODES and _current_review_phase(ctx.tool_state) == ReviewPhase.INIT:
-            msg = (
-                "submit_review_verdict requires checkout_pr to establish review scope "
-                "before the terminal verdict can be recorded"
-            )
-            raise ValueError(msg)
+        ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
 
         validated = SubmitReviewVerdictParams.model_validate(params)
         payload_hash = _canonical_payload_hash(dict(params))
@@ -434,6 +444,7 @@ __all__ = [
     "SubmissionValidation",
     "SubmitReviewVerdictParams",
     "VerdictDiagnostic",
+    "ensure_review_scope_for_terminal",
     "record_validated_terminal_submission",
     "span_attrs_for_verdict_diagnostic",
     "stamp_review_phase_on_active_span",
