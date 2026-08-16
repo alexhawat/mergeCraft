@@ -14,7 +14,12 @@ from mergecraft.evidence.gate_policy import GateActionPolicy as GateActionPolicy
 from mergecraft.evidence.packet import Decision as PacketDecision
 from mergecraft.evidence.packet import MergeEvidencePacket
 from mergecraft.mcp.server import build_orchestrator_tools
-from mergecraft.mcp.shared import REVIEWER_ALLOWED_TOOL_CLASSES, JsonSchema, ToolClass
+from mergecraft.mcp.shared import (
+    REVIEWER_ALLOWED_TOOL_CLASSES,
+    JsonSchema,
+    ToolClass,
+    admits_readonly_role,
+)
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -64,11 +69,11 @@ def _denied_tool_names_for_allowed_classes(
     output_schema: JsonSchema | None = None,
 ) -> list[str]:
     registered = build_orchestrator_tools(ctx, output_schema)
-    names = [spec.name for spec in registered if spec.tool_class not in allowed]
+    names = [spec.name for spec in registered if not admits_readonly_role(spec, allowed)]
     if not names:
         msg = (
             f"{role} deny list derived empty — no MCP tool is outside the role's "
-            "allowed classes. refusing to start with the gate effectively disabled."
+            "allowed read-only surface. refusing to start with the gate effectively disabled."
         )
         raise RuntimeError(msg)
     return names
@@ -78,10 +83,12 @@ def subagent_denied_tool_names(
     ctx: ToolContext,
     output_schema: JsonSchema | None = None,
 ) -> list[str]:
-    """Canonical bare names denied to reviewer-like subagents (class complement).
+    """Canonical bare names denied to reviewer-like subagents.
 
-    ``TERMINAL_PROTOCOL_DENIED_TOOL_NAMES`` is unioned so a ``mutates=False``
-    terminal tool cannot drop off the deny list if it is misclassified.
+    Derivation is the complement of ``admits_readonly_role`` (class filter
+    intersected with ``mutates``). ``TERMINAL_PROTOCOL_DENIED_TOOL_NAMES`` is
+    unioned so a ``mutates=False`` terminal tool cannot drop off the deny list
+    if it is misclassified.
     """
     names = _denied_tool_names_for_allowed_classes(
         ctx,

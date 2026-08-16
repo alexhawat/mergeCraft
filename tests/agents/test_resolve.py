@@ -71,6 +71,10 @@ def test_subagent_denied_tools_derived_from_class_complement(tmp_path: Path) -> 
     assert "commit_changes" in denied
     # `checkout_pr` is class `scope` — reviewer-allowed, so off the subagent deny list.
     assert "checkout_pr" not in denied
+    # Mutating tools whose class is otherwise reviewer-allowed stay denied.
+    assert "set_output" in denied
+    assert "start_dependency_installation" in denied
+    assert "select_mode" in denied
     # Verification is not in the reviewer allow-list.
     assert "verify_agent_findings" in denied
     assert "git" not in denied

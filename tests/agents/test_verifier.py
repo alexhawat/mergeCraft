@@ -166,6 +166,49 @@ def test_claude_verifier_agent_receives_class_derived_disallowed_tools(tmp_path:
     assert format_mcp_tool_ref("claude", "checkout_pr") in disallowed
 
 
+def test_claude_reviewer_agent_receives_class_derived_disallowed_tools(tmp_path: Path) -> None:
+    """Live Claude dispatch applies the reviewer complement to the reviewer agent."""
+    import json
+
+    from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME
+    from mergecraft.types import format_mcp_tool_ref
+
+    claude = import_module("mergecraft.agents.claude")
+    denied = subagent_denied_tool_names(_ctx(tmp_path))
+    agents = json.loads(claude.build_agents_json(subagent_denied_tools=denied))
+    disallowed = agents[REVIEWER_AGENT_NAME]["disallowedTools"]
+    assert format_mcp_tool_ref("claude", "select_mode") in disallowed
+    assert format_mcp_tool_ref("claude", "start_dependency_installation") in disallowed
+    assert format_mcp_tool_ref("claude", "push_branch") in disallowed
+    assert format_mcp_tool_ref("claude", "checkout_pr") not in disallowed
+
+
+def test_opencode_reviewer_agent_receives_class_derived_permission_denies(
+    tmp_path: Path,
+) -> None:
+    """Live OpenCode dispatch applies the reviewer complement to the reviewer agent."""
+    import json
+    from dataclasses import replace
+
+    from tests.agents.conftest import make_agent_run_context
+
+    from mergecraft.agents.opencode import build_security_config
+    from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME
+    from mergecraft.types import format_mcp_tool_ref
+
+    denied = subagent_denied_tool_names(_ctx(tmp_path))
+    ctx = replace(
+        make_agent_run_context(tmp_path, resolved_model=None),
+        subagent_denied_tools=tuple(denied),
+    )
+    config = json.loads(build_security_config(ctx, None))
+    permission = config["agent"][REVIEWER_AGENT_NAME]["permission"]
+    assert permission[format_mcp_tool_ref("opencode", "select_mode")] == "deny"
+    assert permission[format_mcp_tool_ref("opencode", "start_dependency_installation")] == "deny"
+    assert permission[format_mcp_tool_ref("opencode", "push_branch")] == "deny"
+    assert format_mcp_tool_ref("opencode", "checkout_pr") not in permission
+
+
 def test_verdict_is_refused_when_no_deterministic_check_ran(tmp_path: Path) -> None:
     """W13.3 — tools settle checkable facts before any judge evaluation counts."""
     verifier = import_module("mergecraft.agents.verifier")

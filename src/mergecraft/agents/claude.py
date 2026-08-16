@@ -96,7 +96,11 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     return str(config_path)
 
 
-def build_agents_json(*, verifier_denied_tools: Sequence[str] = ()) -> str:
+def build_agents_json(
+    *,
+    verifier_denied_tools: Sequence[str] = (),
+    subagent_denied_tools: Sequence[str] = (),
+) -> str:
     verifier: dict[str, Any] = {
         "description": (
             "Read-only verification subagent for Critical/Major analyzer, CI and "
@@ -113,15 +117,19 @@ def build_agents_json(*, verifier_denied_tools: Sequence[str] = ()) -> str:
     denied = [format_mcp_tool_ref("claude", name) for name in verifier_denied_tools]
     if denied:
         verifier["disallowedTools"] = denied
+    reviewer: dict[str, Any] = {
+        "description": (
+            "Read-only review subagent for lens-based code review. "
+            "Reads only — no writes, no state-changing shell or MCP calls."
+        ),
+        "prompt": REVIEWER_SYSTEM_PROMPT,
+        "model": "claude-sonnet-5",
+    }
+    reviewer_denied = [format_mcp_tool_ref("claude", name) for name in subagent_denied_tools]
+    if reviewer_denied:
+        reviewer["disallowedTools"] = reviewer_denied
     agents = {
-        REVIEWER_AGENT_NAME: {
-            "description": (
-                "Read-only review subagent for lens-based code review. "
-                "Reads only — no writes, no state-changing shell or MCP calls."
-            ),
-            "prompt": REVIEWER_SYSTEM_PROMPT,
-            "model": "claude-sonnet-5",
-        },
+        REVIEWER_AGENT_NAME: reviewer,
         VERIFIER_AGENT_NAME: verifier,
     }
     return json.dumps(agents)
@@ -635,7 +643,10 @@ def _run_claude_once(
         "--disallowedTools",
         CLAUDE_DISALLOWED_TOOLS,
         "--agents",
-        build_agents_json(verifier_denied_tools=ctx.verifier_denied_tools),
+        build_agents_json(
+            verifier_denied_tools=ctx.verifier_denied_tools,
+            subagent_denied_tools=ctx.subagent_denied_tools,
+        ),
         "--effort",
         "high",
     ]

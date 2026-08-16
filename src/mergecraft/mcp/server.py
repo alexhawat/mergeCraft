@@ -65,6 +65,7 @@ from mergecraft.mcp.shared import (
     ToolClass,
     ToolResult,
     ToolSpec,
+    admits_readonly_role,
 )
 from mergecraft.mcp.shell import kill_background_tool, shell_tool
 from mergecraft.mcp.static_checks import run_static_checks_tool
@@ -93,6 +94,7 @@ MCP_PORT_START = 3764
 MCP_PORT_ATTEMPTS = 100
 MCP_HOST = "127.0.0.1"
 MCP_ENDPOINT = "/mcp"
+MCP_REVIEWER_ENDPOINT = "/mcp/reviewer"
 MCP_VERIFIER_ENDPOINT = "/mcp/verifier"
 
 
@@ -149,7 +151,7 @@ def _filter_tools_by_class(
     tools: list[ToolSpec],
     allowed: frozenset[ToolClass],
 ) -> list[ToolSpec]:
-    filtered = [spec for spec in tools if spec.tool_class in allowed]
+    filtered = [spec for spec in tools if admits_readonly_role(spec, allowed)]
     if not filtered:
         msg = "class filter yielded an empty toolset"
         raise RuntimeError(msg)
@@ -438,8 +440,8 @@ def create_mcp_app(
     real run — each ``tools/call`` is appended to the run's trajectory record.
 
     ``role_tools`` mounts extra class-filtered surfaces at ``{MCP_ENDPOINT}/{role}``
-    (the verifier lives at ``MCP_VERIFIER_ENDPOINT``). The primary endpoint
-    stays the orchestrator set.
+    (the reviewer lives at ``MCP_REVIEWER_ENDPOINT``, the verifier at
+    ``MCP_VERIFIER_ENDPOINT``). The primary endpoint stays the orchestrator set.
     """
     app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.1.0")
 
@@ -473,8 +475,13 @@ def start_mcp_http_server(
     Returns ``(url, stop)`` where ``stop`` is an idempotent disposer.
     """
     tools = build_orchestrator_tools(ctx, output_schema)
+    reviewer_tools = build_reviewer_tools(ctx, output_schema)
     verifier_tools = build_verifier_tools(ctx, output_schema)
-    app = create_mcp_app(tools, ctx, role_tools={"verifier": verifier_tools})
+    app = create_mcp_app(
+        tools,
+        ctx,
+        role_tools={"reviewer": reviewer_tools, "verifier": verifier_tools},
+    )
     port = _select_port()
     config = uvicorn.Config(
         app,

@@ -52,8 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Reviewer and verifier now hold distinct, class-derived MCP toolsets; the live
-  MCP server exposes the verifier surface at `/mcp/verifier`, and finding-verdict
-  persistence stays orchestrator-only
+  MCP server exposes those surfaces at `/mcp/reviewer` and `/mcp/verifier`,
+  mutating tools stay off both except `checkout_pr` on the reviewer, and
+  finding-verdict persistence stays orchestrator-only
 
 ### Fixed
 

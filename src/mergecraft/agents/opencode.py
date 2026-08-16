@@ -154,6 +154,18 @@ def _custom_provider_ids(model: str | None) -> list[str]:
     return [endpoint[0]]
 
 
+def _reviewer_agent_config(ctx: AgentRunContext) -> dict[str, object]:
+    config: dict[str, object] = {
+        "description": ("Read-only review subagent for lens-based code review."),
+        "prompt": REVIEWER_SYSTEM_PROMPT,
+        "mode": "subagent",
+    }
+    denied = {format_mcp_tool_ref("opencode", name): "deny" for name in ctx.subagent_denied_tools}
+    if denied:
+        config["permission"] = denied
+    return config
+
+
 def _verifier_agent_config(ctx: AgentRunContext) -> dict[str, object]:
     config: dict[str, object] = {
         "description": ("Read-only verification subagent for Critical/Major analyzer findings."),
@@ -185,11 +197,7 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
             }
         },
         "agent": {
-            REVIEWER_AGENT_NAME: {
-                "description": ("Read-only review subagent for lens-based code review."),
-                "prompt": REVIEWER_SYSTEM_PROMPT,
-                "mode": "subagent",
-            },
+            REVIEWER_AGENT_NAME: _reviewer_agent_config(ctx),
             VERIFIER_AGENT_NAME: _verifier_agent_config(ctx),
         },
     }

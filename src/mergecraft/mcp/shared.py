@@ -46,6 +46,10 @@ VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
         ToolClass.VERIFICATION,
     }
 )
+# ``checkout_pr`` is SCOPE + mutates=True but must stay on the reviewer surface
+# (HA4.2 / D14). Every other mutating tool is orchestrator-only even when its
+# class is otherwise allowed on a read-only role.
+READONLY_MUTATING_ALLOWLIST: Final[frozenset[str]] = frozenset({"checkout_pr"})
 
 
 def repository_mutation_class_for_push(
@@ -67,8 +71,9 @@ class ToolResult:
 class ToolSpec:
     """A mergeCraft MCP tool definition.
 
-    ``mutates`` marks a named state-changing tool that must be reserved for the
-    orchestrator and denied to subagents.
+    ``mutates`` marks a named state-changing tool. Read-only role filters
+    intersect class membership with this flag: mutating tools stay off
+    reviewer/verifier unless the name is in ``READONLY_MUTATING_ALLOWLIST``.
     """
 
     name: str
@@ -89,6 +94,18 @@ class ToolSpec:
         if self.annotations:
             entry["annotations"] = self.annotations
         return entry
+
+
+def admits_readonly_role(spec: ToolSpec, allowed: frozenset[ToolClass]) -> bool:
+    """True when ``spec`` may appear on a class-filtered read-only surface.
+
+    Class membership is necessary but not sufficient: ``mutates=True`` tools
+    stay off reviewer/verifier unless they are on
+    ``READONLY_MUTATING_ALLOWLIST`` (today: ``checkout_pr``, HA4.2 / D14).
+    """
+    if spec.tool_class not in allowed:
+        return False
+    return not spec.mutates or spec.name in READONLY_MUTATING_ALLOWLIST
 
 
 def tool(

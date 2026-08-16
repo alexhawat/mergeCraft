@@ -336,6 +336,25 @@ def test_record_finding_verdict_is_absent_from_verifier_surface(tool_ctx: ToolCo
     assert "record_finding_verdict" in verifier_denied_tool_names(tool_ctx)
 
 
+def test_read_only_roles_exclude_mutating_tools_except_checkout_pr(tool_ctx: ToolContext) -> None:
+    """Class membership is not enough: mutates=True tools stay off read-only surfaces.
+
+    ``checkout_pr`` is the HA4.2 / D14 exception on the reviewer. Verifier gets none.
+    """
+    reviewer, verifier = _read_only_toolsets(tool_ctx)
+    reviewer_mutating = [spec.name for spec in reviewer if spec.mutates]
+    assert reviewer_mutating == ["checkout_pr"]
+    assert not [spec.name for spec in verifier if spec.mutates]
+
+    subagent_denied = subagent_denied_tool_names(tool_ctx)
+    verifier_denied = verifier_denied_tool_names(tool_ctx)
+    for name in ("set_output", "start_dependency_installation", "select_mode"):
+        assert name in subagent_denied
+        assert name in verifier_denied
+    assert "checkout_pr" not in subagent_denied
+    assert "checkout_pr" in verifier_denied
+
+
 def test_live_verifier_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> None:
     """Runtime ``tools/list`` on the live verifier endpoint is class-filtered (H4)."""
     import json
@@ -383,5 +402,53 @@ def test_live_verifier_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
             called = json.loads(resp.read().decode())
         assert called["error"]["code"] == -32601
         assert "record_finding_verdict" in called["error"]["message"]
+    finally:
+        stop()
+
+
+def test_live_reviewer_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> None:
+    """Runtime ``tools/list`` on the live reviewer endpoint is class-filtered (H4)."""
+    import json
+    from urllib.request import Request, urlopen
+
+    from mergecraft.mcp.server import MCP_ENDPOINT, MCP_REVIEWER_ENDPOINT, start_mcp_http_server
+
+    url, stop = start_mcp_http_server(tool_ctx)
+    try:
+        reviewer_url = url[: -len(MCP_ENDPOINT)] + MCP_REVIEWER_ENDPOINT
+        list_body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
+        headers = {"Content-Type": "application/json"}
+        with urlopen(
+            Request(reviewer_url, data=list_body, headers=headers, method="POST"),
+            timeout=5,
+        ) as resp:
+            listed = json.loads(resp.read().decode())
+        names = {entry["name"] for entry in listed["result"]["tools"]}
+        assert "checkout_pr" in names
+        assert "git" in names
+        for denied in (
+            "set_output",
+            "start_dependency_installation",
+            "select_mode",
+            "record_finding_verdict",
+            "push_branch",
+        ):
+            assert denied not in names
+
+        call_body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "select_mode", "arguments": {}},
+            }
+        ).encode()
+        with urlopen(
+            Request(reviewer_url, data=call_body, headers=headers, method="POST"),
+            timeout=5,
+        ) as resp:
+            called = json.loads(resp.read().decode())
+        assert called["error"]["code"] == -32601
+        assert "select_mode" in called["error"]["message"]
     finally:
         stop()
