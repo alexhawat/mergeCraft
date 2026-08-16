@@ -5,7 +5,7 @@ Covers ``mergecraft.agents.model_diversity`` — generalizes #45 /
 ``PINNED_JUDGE_MODELS`` from a single hard-coded Claude entry into a
 declared policy that holds for every harness.
 
-AP3.1: two tests; all ``xfail`` until AP3.2.
+AP3.1: two tests; green after AP3.2.
 """
 
 from __future__ import annotations
@@ -20,8 +20,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
-
-_AP3_XFAIL = pytest.mark.xfail(reason="AP3.2", strict=True)
 
 _DEFAULT_MODELS_YAML = """
 models:
@@ -66,7 +64,6 @@ def _stub_slug_runnability(monkeypatch: MonkeyPatch) -> None:
     )
 
 
-@_AP3_XFAIL
 def test_verification_never_runs_on_the_authoring_family(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -77,7 +74,6 @@ def test_verification_never_runs_on_the_authoring_family(
         assert_verification_diverse,
         resolve_diverse_verification_model,
     )
-
     from mergecraft.agents.registry import AgentRole, resolve_agent_model
 
     _stub_slug_runnability(monkeypatch)
@@ -107,7 +103,6 @@ def test_verification_never_runs_on_the_authoring_family(
     )
 
 
-@_AP3_XFAIL
 def test_policy_holds_across_harnesses(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

@@ -15,13 +15,13 @@ predict/record/disagree machinery.
 
 ## xfail schedule
 
-| Test file | Tests | Marker | Status at AP3.1 |
-|-----------|-------|--------|-------------------|
-| `tests/agents/test_structured_handoff.py` | 3 | `green after AP3.2: structured handoff` | **RED (xfail)** |
-| `tests/agents/test_model_diversity.py` | 2 | `green after AP3.2: model diversity` | **RED (xfail)** |
-| `tests/agents/test_ensemble.py` | 6 | `green after AP3.2: ensemble dispatch` | **RED (xfail)** |
+| Test file | Tests | Marker | Status |
+|-----------|-------|--------|--------|
+| `tests/agents/test_structured_handoff.py` | 3 | — | **GREEN** |
+| `tests/agents/test_model_diversity.py` | 2 | — | **GREEN** |
+| `tests/agents/test_ensemble.py` | 6 | — | **GREEN** |
 
-**Acceptance (AP3.1):** 11 collected; 0 pass; 11 xfail. `make lint` + `make typecheck` clean.
+**Acceptance (post-AP3.2):** 11 collected; 11 passed; 0 xfail. `make lint` + `make typecheck` clean.
 
 ## Target API AP3.2 must satisfy
 
@@ -93,4 +93,4 @@ collection succeeds before AP3.2.
 
 ## Status
 
-AP3.1 RED suite authored; awaiting AP3.2 implementation and xfail reconciliation.
+AP3.1 suite authored; AP3.2 implementation landed; xfail markers removed (11 passed).

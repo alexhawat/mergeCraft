@@ -6,21 +6,17 @@ free-form prose and emit typed ``AgentFinding`` values at the boundary;
 discovery dispatch prompts carry no finding schema; typed findings feed
 ``plan_agent_verifications`` without orchestrator prose re-judgement.
 
-AP3.1: three tests; all ``xfail`` until AP3.2.
+AP3.1: three tests; green after AP3.2.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from mergecraft.config.settings import load_repo_settings
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_AP3_XFAIL = pytest.mark.xfail(reason="AP3.2", strict=True)
 
 _DEFAULT_MODELS_YAML = """
 models:
@@ -58,12 +54,10 @@ def _load_registry(tmp_path: Path) -> object:
     return load_registry(settings=settings, repo_root=tmp_path)
 
 
-@_AP3_XFAIL
 def test_specialist_returns_typed_findings(tmp_path: Path) -> None:
     """D6 — prose reasoning is preserved; findings at the boundary are typed."""
-    from mergecraft.agents.structured_handoff import parse_specialist_handoff
-
     from mergecraft.agents.registry import AgentRole
+    from mergecraft.agents.structured_handoff import parse_specialist_handoff
     from mergecraft.agents.verifier import AgentFinding
 
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
@@ -82,12 +76,10 @@ def test_specialist_returns_typed_findings(tmp_path: Path) -> None:
     assert "double-spend" in finding.body
 
 
-@_AP3_XFAIL
 def test_free_form_discovery_is_not_constrained(tmp_path: Path) -> None:
     """Discovery dispatch must not pre-shape output with a finding schema (D6)."""
-    from mergecraft.agents.structured_handoff import build_specialist_dispatch_prompt
-
     from mergecraft.agents.registry import AgentRole
+    from mergecraft.agents.structured_handoff import build_specialist_dispatch_prompt
 
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
     registry = _load_registry(tmp_path)
@@ -101,14 +93,12 @@ def test_free_form_discovery_is_not_constrained(tmp_path: Path) -> None:
     assert "typed-findings" not in lowered
 
 
-@_AP3_XFAIL
 def test_typed_findings_feed_the_verifier_directly(tmp_path: Path) -> None:
     """Typed handoff findings queue verifier dispatches without prose aggregation."""
     from mergecraft.agents.structured_handoff import (
         parse_specialist_handoff,
         verification_plan_from_handoff,
     )
-
     from mergecraft.agents.verifier import VERIFIER_SEVERITIES
 
     handoff = parse_specialist_handoff(_SAMPLE_HANDOFF)

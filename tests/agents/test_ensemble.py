@@ -5,7 +5,7 @@ Covers ``mergecraft.agents.ensemble`` — ``dispatch`` modes ``single`` (default
 ``ensemble``, and ``shadow`` (reusing ``evidence/shadow.py`` record machinery).
 Locked decision **D7**: orchestrator cannot be ensembled.
 
-AP3.1: six tests; all ``xfail`` until AP3.2.
+AP3.1: six tests; green after AP3.2.
 """
 
 from __future__ import annotations
@@ -20,8 +20,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
-
-_AP3_XFAIL = pytest.mark.xfail(reason="AP3.2", strict=True)
 
 _DEFAULT_MODELS_YAML = """
 models:
@@ -68,14 +66,12 @@ def _stub_slug_runnability(monkeypatch: MonkeyPatch) -> None:
     )
 
 
-@_AP3_XFAIL
 def test_ensemble_runs_the_same_agent_on_two_models(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
     """``dispatch: ensemble`` runs one binding on two models from its chain."""
     from mergecraft.agents.ensemble import plan_ensemble_models, run_ensemble_dispatch
-
     from mergecraft.agents.registry import AgentRole
 
     _stub_slug_runnability(monkeypatch)
@@ -106,7 +102,6 @@ def test_ensemble_runs_the_same_agent_on_two_models(
     assert run.model_runs[1].model in {primary, secondary}
 
 
-@_AP3_XFAIL
 def test_agreement_raises_confidence(tmp_path: Path) -> None:
     """When both ensemble models agree, the merged signal gains confidence."""
     from mergecraft.agents.ensemble import EnsembleRun, ModelRun, reconcile_ensemble
@@ -130,7 +125,6 @@ def test_agreement_raises_confidence(tmp_path: Path) -> None:
     assert len(reconciliation.merged_findings) == 1
 
 
-@_AP3_XFAIL
 def test_disagreement_is_routed_to_the_judge(tmp_path: Path) -> None:
     """Disagreeing ensemble outputs escalate to the judge role."""
     from mergecraft.agents.ensemble import EnsembleRun, ModelRun, reconcile_ensemble
@@ -168,14 +162,12 @@ def test_disagreement_is_routed_to_the_judge(tmp_path: Path) -> None:
     assert "benign logging noise" in reconciliation.judge_dispatch.brief
 
 
-@_AP3_XFAIL
 def test_shadow_model_output_is_recorded_but_never_acted_on(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
     """``dispatch: shadow`` records alternate output without changing the primary result."""
     from mergecraft.agents.ensemble import run_shadow_dispatch
-
     from mergecraft.agents.registry import AgentRole
     from mergecraft.evidence.shadow import load_shadow_records
 
@@ -217,11 +209,9 @@ agents:
     assert records[0].metadata["shadow_model_findings"] == shadow_findings
 
 
-@_AP3_XFAIL
 def test_orchestrator_cannot_be_ensembled(tmp_path: Path) -> None:
     """D7 — ensemble/shadow apply to discovery and verification agents only."""
     from mergecraft.agents.ensemble import EnsembleCardinalityError, validate_ensemble_eligible
-
     from mergecraft.agents.registry import AgentRole
 
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
@@ -231,14 +221,12 @@ def test_orchestrator_cannot_be_ensembled(tmp_path: Path) -> None:
         validate_ensemble_eligible(orchestrator)
 
 
-@_AP3_XFAIL
 def test_ensemble_respects_the_agent_budget(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Ensemble fan-out honours the binding budget (file 2 CC3 integration)."""
     from mergecraft.agents.ensemble import run_ensemble_dispatch
-
     from mergecraft.agents.registry import AgentRole
 
     _stub_slug_runnability(monkeypatch)
