@@ -11,14 +11,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
 from mergecraft.config.settings import load_repo_settings
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
-
-_AP4_XFAIL = pytest.mark.xfail(reason="AP4.2", strict=True)
 
 _DEFAULT_MODELS_YAML = """
 models:
@@ -121,7 +117,6 @@ def _route_lenses(classification: Any, registry: Any) -> Any:
     return route_lenses(classification, registry=registry)
 
 
-@_AP4_XFAIL
 def test_routing_selects_from_the_registry(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Selected lens ids must come from registry lens bindings only."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML + _LENS_CATALOG_YAML)
@@ -143,7 +138,6 @@ def test_routing_selects_from_the_registry(tmp_path: Path, monkeypatch: MonkeyPa
     assert set(decision.selected_lens_ids).issubset(registry_lens_ids)
 
 
-@_AP4_XFAIL
 def test_trivial_change_routes_zero_lenses(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Genuinely trivial doc typo changes skip all specialist lenses."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML + _LENS_CATALOG_YAML)
@@ -158,7 +152,6 @@ def test_trivial_change_routes_zero_lenses(tmp_path: Path, monkeypatch: MonkeyPa
     assert decision.selected_lens_ids == ()
 
 
-@_AP4_XFAIL
 def test_one_line_billing_change_is_not_trivial(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """One-line billing edits must not be skipped by a file-count heuristic."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML + _LENS_CATALOG_YAML)
@@ -179,7 +172,6 @@ def test_one_line_billing_change_is_not_trivial(tmp_path: Path, monkeypatch: Mon
     assert len(decision.selected_lens_ids) >= 1
 
 
-@_AP4_XFAIL
 def test_migration_diff_routes_the_migration_lens(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Schema migration diffs must route the migration lens from the registry."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML + _LENS_CATALOG_YAML)
@@ -197,7 +189,6 @@ def test_migration_diff_routes_the_migration_lens(tmp_path: Path, monkeypatch: M
     assert "schema-migration" in decision.selected_lens_ids
 
 
-@_AP4_XFAIL
 def test_no_fixed_cap_on_lens_count(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Convention 6 — routing selects every matching lens; no fixed specialist cap."""
     _write_config(tmp_path, _DEFAULT_MODELS_YAML + _LENS_CATALOG_YAML)
@@ -220,7 +211,6 @@ def test_no_fixed_cap_on_lens_count(tmp_path: Path, monkeypatch: MonkeyPatch) ->
     )
 
 
-@_AP4_XFAIL
 def test_routing_decision_is_recorded_with_its_reason(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

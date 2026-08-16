@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/03-agent-pipeline-wave-plan.md` (PR AP4)
 Worktree: `../mergecraft-agent-pipeline` @ `feature/agent-pipeline-ap4`
 Authoring wave: **AP4.1** (tests-first). Implementation: **AP4.2**.
-xfail-reconciliation: **post-AP4.2** (pending).
+xfail-reconciliation: **post-AP4.2** (complete).
 
 Locked decisions: **D2** (registry selects 3–8 per run in typical cases; only routed
 agents render — routing must not invent ids outside the registry), **convention 6**
@@ -11,15 +11,15 @@ agents render — routing must not invent ids outside the registry), **conventio
 
 ## xfail schedule
 
-All ten AP4.1 tests use `@pytest.mark.xfail(reason="AP4.2", strict=True)` until
-AP4.2 lands. Post-AP4.2 reconciliation removes the markers.
+All ten AP4.1 tests were `@pytest.mark.xfail(reason="AP4.2", strict=True)` until
+AP4.2 landed. Post-AP4.2 reconciliation removed the markers.
 
-| Test file | Tests | Marker | Status at AP4.1 |
-|-----------|-------|--------|-----------------|
-| `tests/classify/test_change_classifier.py` | 4 | `AP4.2` | **RED (xfail)** |
-| `tests/review/test_lens_routing.py` | 6 | `AP4.2` | **RED (xfail)** |
+| Test file | Tests | Marker | Status post-AP4.2 |
+|-----------|-------|--------|-------------------|
+| `tests/classify/test_change_classifier.py` | 4 | *(removed)* | **GREEN** |
+| `tests/review/test_lens_routing.py` | 6 | *(removed)* | **GREEN** |
 
-**Acceptance (AP4.1):** 10 collected; 0 pass; 10 xfail. `make lint` + `make typecheck`
+**Acceptance (post-AP4.2):** 10 collected; 10 pass; 0 xfail. `make lint` + `make typecheck`
 clean.
 
 ## Target API AP4.2 must satisfy
@@ -79,5 +79,5 @@ collection succeeds before AP4.2.
 
 ## Status
 
-AP4.1 RED suite authored; AP4.2 implementation pending; xfail markers remain
-until post-AP4.2 reconciliation.
+AP4.1 RED suite authored; AP4.2 implementation green; xfail markers removed
+post-AP4.2 reconciliation. All 10 tests pass.
