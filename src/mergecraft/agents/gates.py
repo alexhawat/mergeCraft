@@ -52,6 +52,9 @@ GIT_NATIVE_READ_DENY_CLAUDE: list[str] = [f"{tool}(.git/config)" for tool in CLA
 # one source of truth.
 BLOCKING_SEVERITIES: Final[frozenset[str]] = frozenset({"Critical", "Major"})
 
+# Terminal-protocol tools are orchestrator-only even when ``mutates=False``.
+TERMINAL_PROTOCOL_DENIED_TOOL_NAMES: Final[frozenset[str]] = frozenset({"submit_review_verdict"})
+
 
 def subagent_denied_tool_names(
     ctx: ToolContext,
@@ -59,6 +62,9 @@ def subagent_denied_tool_names(
 ) -> list[str]:
     """Canonical bare names of every state-mutating MCP tool for this run."""
     names = [t.name for t in build_orchestrator_tools(ctx, output_schema) if t.mutates]
+    for terminal_name in TERMINAL_PROTOCOL_DENIED_TOOL_NAMES:
+        if terminal_name not in names:
+            names.append(terminal_name)
     if not names:
         msg = (
             "subagent deny list derived empty — no MCP tool is marked mutates=True. "

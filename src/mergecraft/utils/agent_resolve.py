@@ -439,6 +439,15 @@ def promote_model_evidence(
         )
 
 
+def _prepare_chain_attempt(tool_state: ToolState | None, fallback_index: int) -> None:
+    """Stamp the active chain index and drop any prior attempt's terminal submit."""
+    if tool_state is None:
+        return
+    tool_state.fallback_index = fallback_index
+    tool_state.terminal_submission = None
+    tool_state.terminal_submission_conflict = False
+
+
 async def run_with_model_chain(
     *,
     settings: RepoSettings,
@@ -447,6 +456,7 @@ async def run_with_model_chain(
     correlation: dict[str, Any] | None = None,
     head: str | None = None,
     pin: bool = False,
+    tool_state: ToolState | None = None,
 ) -> tuple[str, AgentResult]:
     """Walk the model chain, advancing on retryable failures.
 
@@ -476,6 +486,10 @@ async def run_with_model_chain(
         pin (bool, optional): #37 / W4 — collapse to ``[head]`` (or the first
             configured entry) and skip the fallback tail. The escape hatch for
             operators who explicitly want "use exactly this model".
+        tool_state (ToolState | None, optional): Shared MCP state for this run.
+            When supplied, ``fallback_index`` is updated *before* ``run_once``
+            and any terminal submission from a prior chain entry is cleared so
+            a fallback cannot inherit or conflict-reject the failed attempt.
 
     Returns:
         tuple[str, AgentResult]: The winning slug and its agent result.
@@ -517,6 +531,7 @@ async def run_with_model_chain(
         while attempts < max_attempts:
             slug = chain[chain_index]
             attempts += 1
+            _prepare_chain_attempt(tool_state, chain_index)
             logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
 
             attempt_attrs = {

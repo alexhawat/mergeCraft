@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added: `submit_review_verdict` — a typed MCP operation that records a review's terminal verdict
+  (`approve` / `request_changes`), summary and structured findings. Unknown fields and invalid
+  verdict values are rejected; an identical re-submission is idempotent, a conflicting one is an
+  error. Not yet enforced — the run outcome is unchanged in this release
 - `mergecraft tracing logfire wire-workflow` / `unwire-workflow` — surgical
   YAML mutation of `.github/workflows/*.yml` to wire (or strip) the four
   Logfire keys (`tracing: "true"`, `tracing-to: logfire`,
@@ -31,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `submit_review_verdict` now rejects non-list `findings` and severities outside
+  the review taxonomy, hashes the validated payload so omitting `findings` matches
+  `findings: []`, keeps a conflict flag sticky for the attempt, and scopes the
+  recorded submit to the active model-chain attempt so a fallback cannot inherit
+  or conflict-reject the failed attempt's verdict
 - `README.md`'s CLI table documented `mergecraft traces <run-id>`, but the real
   registered command is `mergecraft traces show <run-id>` — the stale
   invocation is now generated from the live CLI app instead of hand-maintained
