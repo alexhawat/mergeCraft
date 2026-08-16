@@ -179,13 +179,18 @@ def build_reflection_prompt(issues: PostRunIssues) -> str:
 def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None, dict[str, Any]]:
     """Copy the recorded terminal submission onto ``AgentResult``.
 
-    Diagnostics stay thin in VP1: ``attempt_id`` is the only field the
-    submission carries that finalize does not already promote as a first-class
-    attribute. VP3 fills the rest of the attempt envelope.
-
     A stored ``approve`` is re-validated against current evidence so a later
-    failed gate or verifier confirm cannot leave a stale usable verdict.
+    failed gate or verifier confirm cannot leave a stale usable verdict. A
+    submission whose ``attempt_id`` does not match the active attempt does not
+    satisfy this attempt (V7).
     """
+    from mergecraft.mcp.verdict import (
+        recorded_submission_payload,
+        validate_submission,
+        validation_state_from_tool_state,
+        verdict_satisfies_attempt,
+    )
+
     submission = ctx.tool_state.terminal_submission
     if submission is None or ctx.tool_state.terminal_submission_conflict:
         diagnostics: dict[str, Any] = {}
@@ -194,12 +199,18 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
         if submission is not None:
             diagnostics["attempt_id"] = submission.attempt_id
         return False, None, diagnostics
-
-    from mergecraft.mcp.verdict import (
-        recorded_submission_payload,
-        validate_submission,
-        validation_state_from_tool_state,
-    )
+    if not verdict_satisfies_attempt(
+        submission,
+        current_attempt_id=ctx.tool_state.attempt_id,
+    ):
+        return (
+            False,
+            None,
+            {
+                "rejection_reason": "stale_attempt",
+                "attempt_id": submission.attempt_id,
+            },
+        )
 
     validation = validate_submission(
         recorded_submission_payload(submission),

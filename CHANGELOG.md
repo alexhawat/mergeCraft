@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added: terminal-verdict protocol shadow mode (`gates.terminal_verdict`, default `shadow`) with a closed `VerdictDiagnostic` vocabulary; enforce still applies the fail-closed missing-verdict branch
 - Added: server-side semantic validation of the terminal verdict — `request_changes` with no findings, `approve` over a verifier-confirmed blocker, and `approve` with a failing required deterministic check are all rejected and fail closed
 - Added: `submit_review_verdict` — a typed MCP operation that records a review's terminal verdict
   (`approve` / `request_changes`), summary and structured findings. Unknown fields and invalid
@@ -36,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed: terminal-verdict shadow mode now records a predicted outcome beside the legacy result on the live finalize path
 - Fixed: a body-only COMMENT is no longer recorded as `request_changes`, and body-only `request_changes` is rejected unless it has real findings
 - Fixed: publication must match the recorded terminal verdict and is re-validated before sending `APPROVE`
 - Fixed: IncrementalReview `report_progress` no longer advances the model chain

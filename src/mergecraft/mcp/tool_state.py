@@ -276,6 +276,7 @@ class ToolState:
     # the live path so the packet can prove which model actually ran).
     requested_model: str | None = None
     fallback_index: int = 0
+    attempt_id: int = 0
     fallback_occurred: bool = False
     unselected_proxy_default: bool | None = None
     model_clamped: dict[str, str] | None = None

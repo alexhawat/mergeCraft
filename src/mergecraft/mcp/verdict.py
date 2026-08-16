@@ -13,6 +13,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -20,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import TerminalSubmission
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
+from mergecraft.tracing.redaction import redact_attrs
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -35,6 +37,42 @@ REJECTION_REQUEST_CHANGES_NO_FINDINGS = "request_changes_without_findings"
 REJECTION_APPROVE_CONFIRMED_BLOCKER = "approve_with_confirmed_blocker"
 REJECTION_APPROVE_FAILED_GATE = "approve_with_failed_required_gate"
 REJECTION_CONFLICTING_SUBMISSION = "conflicting_submission"
+
+
+class VerdictDiagnostic(StrEnum):
+    """Closed vocabulary for terminal-verdict shadow diagnostics (VP3)."""
+
+    provider_failure = "provider_failure"
+    provider_success_without_submission = "provider_success_without_submission"
+    schema_invalid = "schema_invalid"
+    semantic_invalid = "semantic_invalid"
+    policy_rejection = "policy_rejection"
+    agent_approved_but_blocked = "agent_approved_but_blocked"
+    approved = "approved"
+    fallback_triggered = "fallback_triggered"
+
+
+def span_attrs_for_verdict_diagnostic(
+    diagnostic: VerdictDiagnostic,
+    *,
+    summary: str,
+) -> dict[str, Any]:
+    """Build redacted span attrs carrying a closed ``VerdictDiagnostic`` code."""
+    return redact_attrs(
+        {
+            "verdict.diagnostic": diagnostic.value,
+            "summary": summary,
+        }
+    )
+
+
+def verdict_satisfies_attempt(
+    submission: TerminalSubmission,
+    *,
+    current_attempt_id: int,
+) -> bool:
+    """Return whether ``submission`` belongs to the active model-chain attempt (V7)."""
+    return submission.attempt_id == current_attempt_id
 
 
 def _canonical_payload_hash(payload: dict[str, Any]) -> str:
@@ -286,7 +324,7 @@ def record_validated_terminal_submission(
         findings=list(validated.findings),
         payload_hash=payload_hash,
         submitted_at=datetime.now(UTC).isoformat(),
-        attempt_id=ctx.tool_state.fallback_index,
+        attempt_id=ctx.tool_state.attempt_id,
     )
     ctx.tool_state.terminal_submission = recorded
     ctx.tool_state.terminal_submission_conflict = False
@@ -410,11 +448,14 @@ __all__ = [
     "REJECTION_UNKNOWN_FIELDS",
     "SubmissionValidation",
     "SubmitReviewVerdictParams",
+    "VerdictDiagnostic",
     "record_validated_terminal_submission",
     "recorded_submission_payload",
     "revalidate_recorded_submission",
+    "span_attrs_for_verdict_diagnostic",
     "submit_review_verdict_tool",
     "validate_submission",
     "validation_state_from_tool_context",
     "validation_state_from_tool_state",
+    "verdict_satisfies_attempt",
 ]
