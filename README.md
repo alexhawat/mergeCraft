@@ -601,6 +601,9 @@ of them for its full flag set):
 | `mergecraft learnings active` | List only the active (promoted) learning entries. |
 | `mergecraft learnings influence` | List active + staging learning entries with their provenance. |
 | `mergecraft learnings staging` | List only the staging (quarantined) learning entries. |
+| `mergecraft lens list` | List bundled lens ids and display titles. |
+| `mergecraft lens show <lens-id>` | Show rubric, triggers, evidence, and tool classes for one lens. |
+| `mergecraft lens test <lens-id>` | Preview one lens dispatch (rubric + routing context) for a diff fixture. |
 | `mergecraft models list` | List curated model slugs and whether credentials are detected locally. |
 | `mergecraft models set <slugs>` | Write an ordered `models:` list to `.mergecraft/config.yaml`. |
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |
