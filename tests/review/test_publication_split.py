@@ -211,6 +211,45 @@ async def test_publication_requires_a_validated_submission(tmp_path: Path) -> No
     assert github.review_payloads == []
 
 
+@pytest.mark.xfail(
+    reason="green after VP4.3: body-only approved=false must not map to approve",
+    strict=False,
+)
+@pytest.mark.asyncio
+async def test_body_only_unapproved_legacy_review_does_not_github_approve(
+    tmp_path: Path,
+) -> None:
+    """Body-only ``approved: false`` must not GitHub-APPROVE (security-review).
+
+    Guard-deletion: a fallthrough ``return {"verdict": "approve", ...}`` in
+    ``_legacy_params_to_submission`` must fail this test. Rejecting the
+    attempt (D8 ``terminal_submission`` unset + empty ``review_payloads``)
+    is also a pass.
+    """
+    from mergecraft.mcp.review import _legacy_params_to_submission
+
+    params = {
+        "pull_number": 7,
+        "body": "> [!IMPORTANT]\n> Please fix the tests.",
+        "approved": False,
+    }
+    mapped = _legacy_params_to_submission(params)
+    assert mapped["verdict"] != "approve", (
+        "body-only approved=false must not fall through to verdict=approve"
+    )
+
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path, github=github)
+    await create_pull_request_review_tool(ctx).execute(params)
+
+    assert not any(payload.get("event") == "APPROVE" for payload in github.review_payloads), (
+        f"body-only approved=false must not GitHub-APPROVE, got {github.review_payloads!r}"
+    )
+    submission = getattr(ctx.tool_state, "terminal_submission", None)
+    if submission is not None:
+        assert submission.verdict != "approve"
+
+
 def test_publisher_is_not_an_mcp_tool(tmp_path: Path) -> None:
     """The internal publisher exists as a function and is not in any toolset."""
     from mergecraft.mcp.review import publish_pull_request_review

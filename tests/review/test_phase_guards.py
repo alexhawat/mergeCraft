@@ -45,6 +45,21 @@ _PHASES: tuple[str, ...] = (
 _SPAN_PHASE_KEYS: tuple[str, ...] = ("review.phase", "mergecraft.review.phase")
 
 
+class _RecordingGitHub(GitHubClient):
+    """GitHub client that captures review payloads instead of sending them."""
+
+    def __init__(self) -> None:
+        super().__init__(token="test-token")
+        self.review_payloads: list[dict[str, Any]] = []
+
+    async def create_review(
+        self, owner: str, repo: str, pull_number: int, **payload: Any
+    ) -> dict[str, Any]:
+        del owner, repo, pull_number
+        self.review_payloads.append(payload)
+        return {"id": 1, "node_id": "n1", "html_url": "https://x/1", "state": "COMMENTED"}
+
+
 class _StubGitHub(GitHubClient):
     """Serves one PR without touching the network."""
 
@@ -158,6 +173,34 @@ async def test_submit_before_scope_is_rejected(tmp_path: Path) -> None:
         f"rejection must name the missing scope/phase, got {text!r}"
     )
     assert getattr(ctx.tool_state, "terminal_submission", None) is None
+
+
+@pytest.mark.xfail(
+    reason="green after VP4.3: create_pull_request_review requires established scope",
+    strict=False,
+)
+@pytest.mark.asyncio
+async def test_create_pull_request_review_before_scope_is_rejected(tmp_path: Path) -> None:
+    """D10: the legacy tool must not record or publish before ``checkout_pr``."""
+    from mergecraft.mcp.review import create_pull_request_review_tool
+
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path)
+    ctx.github = github
+    assert ctx.tool_state.selected_mode == "Review"
+    assert str(getattr(ctx.tool_state, "review_phase", "INIT")) == "INIT"
+
+    result = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 1, "body": "Looks good.", "approved": True},
+    )
+    assert result.is_error is True
+    text = _error_text(result).lower()
+    assert "scope" in text or "phase" in text or "checkout" in text, (
+        f"rejection must name the missing scope/phase, got {text!r}"
+    )
+    assert getattr(ctx.tool_state, "terminal_submission", None) is None
+    assert ctx.tool_state.approval is None
+    assert github.review_payloads == []
 
 
 @pytest.mark.asyncio
