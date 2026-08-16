@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/03-agent-pipeline-wave-plan.md` (PR AP2)
 Worktree: `../mergecraft-agent-pipeline` @ `feature/agent-pipeline-ap2`
 Authoring wave: **AP2.1** (tests-first). Implementation: **AP2.2**.
-xfail-reconciliation: **post-AP2.2** (pending).
+xfail-reconciliation: **AP2.1.5** (post-AP2.2).
 
 Locked decisions: **D2** (registry is config — only routed agents render per run),
 **D4** (where a harness cannot express a binding, fail loudly),
@@ -11,15 +11,13 @@ Locked decisions: **D2** (registry is config — only routed agents render per r
 
 ## xfail schedule
 
-All cross-wave markers are **non-strict** (`strict=False`). Reason prefix:
-`green after AP2.2: harness render`.
+All cross-wave markers removed at **AP2.1.5** (post-AP2.2).
 
-| Test file | Tests | Marker | Status at AP2.1 |
-|-----------|-------|--------|-----------------|
-| `tests/agents/test_harness_render.py` | 6 harness-render tests | `green after AP2.2: harness render` | **RED (xfail)** |
-| `tests/agents/test_harness_render.py::test_claude_agents_json_renders_from_registry` | 1 | none | **green today** — byte-identical pin |
+| Test file | Tests | Marker | Status |
+|-----------|-------|--------|--------|
+| `tests/agents/test_harness_render.py` | 7 harness-render tests | none | **green** — 7 pass; 0 xfail |
 
-**Acceptance (AP2.1):** 7 collected; 1 pass; 6 xfail. `make lint` + `make typecheck` clean.
+**Acceptance (AP2.1.5):** 7 collected; 7 pass; 0 xfail. `make lint` + `make typecheck` clean.
 
 ## Target API AP2.2 must satisfy
 
@@ -61,11 +59,13 @@ evidence packets can distinguish prose-only collapse from toolset parity.
 
 ## Imports of not-yet-existing symbols
 
-`mergecraft.agents.harness_render` symbols are imported **inside test bodies**
-(or under the xfail-marked tests) so collection succeeds before AP2.2.
+`mergecraft.agents.harness_render` symbols are imported inside test bodies so
+collection succeeds before AP2.2 lands on branches that have not yet merged
+the implementation.
 
 ## Status
 
-AP2.1 RED suite authored; AP2.2 implementation pending. Six tests xfail;
-`test_claude_agents_json_renders_from_registry` passes as the byte-identical
-compatibility pin.
+AP2.1 RED suite authored (`d96c9dd`); AP2.2 implementation landed locally;
+AP2.1.5 reconciled — seven tests pass with no xfail markers. OpenCode model
+test stubs `has_credentials_for_slug` so per-binding chain resolution is
+deterministic without live provider credentials.

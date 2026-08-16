@@ -8,9 +8,7 @@ degradation). Locked decisions: **D2** (only routed agents render),
 **D4** (unrenderable bindings fail loudly), **D5** (Codex degradation is
 declared in run metadata, not hidden).
 
-AP2.1: seven tests; ``test_claude_agents_json_renders_from_registry`` passes
-today as the byte-identical compatibility pin. Six implementation-dependent
-tests are ``xfail`` until AP2.2.
+AP2.1: seven tests; reconciled post-AP2.2 — all pass with no xfail markers.
 """
 
 from __future__ import annotations
@@ -44,9 +42,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from mergecraft.agents.registry import Registry
+    from _pytest.monkeypatch import MonkeyPatch
 
-_AP2_XFAIL = pytest.mark.xfail(reason="green after AP2.2: harness render", strict=False)
+    from mergecraft.agents.registry import Registry
 
 _DEFAULT_MODELS_YAML = """
 models:
@@ -65,6 +63,18 @@ _VERIFIER_DESCRIPTION = (
     "agent-authored findings. Confirms, downgrades, or drops before "
     f"publication against rubric v{VERIFIER_RUBRIC_VERSION}."
 )
+
+
+def _stub_slug_runnability(monkeypatch: MonkeyPatch) -> None:
+    """Deterministic model-chain resolution without live credentials or binaries."""
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve.has_credentials_for_slug",
+        lambda _slug: True,
+    )
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve._agent_binary_available",
+        lambda _slug: True,
+    )
 
 
 def _write_config(tmp_path: Path, body: str) -> None:
@@ -169,12 +179,15 @@ def test_claude_agents_json_renders_from_registry(tmp_path: Path) -> None:
     assert from_registry == legacy
 
 
-@_AP2_XFAIL
-def test_opencode_subagents_carry_per_agent_models(tmp_path: Path) -> None:
+def test_opencode_subagents_carry_per_agent_models(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
     """P4 — OpenCode subagent blocks carry each binding's dispatched model."""
-    from mergecraft.agents.harness_render import render_agents
-
+    from mergecraft.agents.harness_render import HarnessRenderResult, render_agents
     from mergecraft.agents.registry import resolve_agent_model
+
+    _stub_slug_runnability(monkeypatch)
 
     body = (
         _DEFAULT_MODELS_YAML
@@ -202,18 +215,17 @@ agents:
         harness="opencode",
         ctx=ctx,
     )
+    assert isinstance(result, HarnessRenderResult)
     config = json.loads(result.payload) if isinstance(result.payload, str) else result.payload
     agents = config["agent"]
     assert agents[REVIEWER_AGENT_NAME]["model"] == reviewer_model
     assert agents[VERIFIER_AGENT_NAME]["model"] == verifier_model
 
 
-@_AP2_XFAIL
 def test_codex_renders_real_subagents_or_declares_degradation(tmp_path: Path) -> None:
     """D5 — Codex either renders real subagents or records declared degradation."""
-    from mergecraft.agents.harness_render import render_agents
-
     from mergecraft.agents.codex import CODEX_SUBAGENT_DEGRADATION
+    from mergecraft.agents.harness_render import HarnessRenderResult, render_agents
 
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
     registry = _load_registry(tmp_path)
@@ -224,6 +236,7 @@ def test_codex_renders_real_subagents_or_declares_degradation(tmp_path: Path) ->
         harness="codex",
         ctx=ctx,
     )
+    assert isinstance(result, HarnessRenderResult)
     payload_text = result.payload if isinstance(result.payload, str) else json.dumps(result.payload)
     has_real_subagents = (
         REVIEWER_AGENT_NAME in payload_text
@@ -239,10 +252,9 @@ def test_codex_renders_real_subagents_or_declares_degradation(tmp_path: Path) ->
         assert CODEX_SUBAGENT_DEGRADATION.kind in kinds
 
 
-@_AP2_XFAIL
 def test_gemini_and_cursor_render_or_declare(tmp_path: Path) -> None:
     """Gemini and Cursor harnesses render subagents or declare degradation like Codex."""
-    from mergecraft.agents.harness_render import render_agents
+    from mergecraft.agents.harness_render import HarnessRenderResult, render_agents
 
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
     registry = _load_registry(tmp_path)
@@ -256,6 +268,7 @@ def test_gemini_and_cursor_render_or_declare(tmp_path: Path) -> None:
             harness=harness,
             ctx=ctx,
         )
+        assert isinstance(result, HarnessRenderResult)
         payload_text = (
             result.payload if isinstance(result.payload, str) else json.dumps(result.payload)
         )
@@ -269,7 +282,6 @@ def test_gemini_and_cursor_render_or_declare(tmp_path: Path) -> None:
         assert has_subagent_surface or has_declared
 
 
-@_AP2_XFAIL
 def test_unrenderable_binding_fails_loudly(tmp_path: Path) -> None:
     """D4 — bindings a harness cannot express raise instead of silently collapsing."""
     from mergecraft.agents.harness_render import UnrenderableBindingError, render_agents
@@ -286,10 +298,11 @@ def test_unrenderable_binding_fails_loudly(tmp_path: Path) -> None:
         )
 
 
-@_AP2_XFAIL
-def test_only_routed_agents_are_rendered(tmp_path: Path) -> None:
+def test_only_routed_agents_are_rendered(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """D2 — only the selected roster is rendered, not the full registry."""
-    from mergecraft.agents.harness_render import render_agents
+    from mergecraft.agents.harness_render import HarnessRenderResult, render_agents
+
+    _stub_slug_runnability(monkeypatch)
 
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
     registry = _load_registry(tmp_path)
@@ -301,6 +314,7 @@ def test_only_routed_agents_are_rendered(tmp_path: Path) -> None:
         harness="claude",
         ctx=ctx,
     )
+    assert isinstance(result, HarnessRenderResult)
     agents = json.loads(result.payload) if isinstance(result.payload, str) else result.payload
     assert len(agents) == 3
     rendered_ids = set(agents)
@@ -313,12 +327,14 @@ def test_only_routed_agents_are_rendered(tmp_path: Path) -> None:
     assert len(registry.all_bindings()) > len(agents)
 
 
-@_AP2_XFAIL
 def test_declared_degradation_reaches_the_run_manifest(tmp_path: Path) -> None:
     """Declared harness degradation must flow into run-manifest metadata."""
-    from mergecraft.agents.harness_render import render_agents, run_manifest_metadata
-
     from mergecraft.agents.codex import CODEX_SUBAGENT_DEGRADATION
+    from mergecraft.agents.harness_render import (
+        HarnessRenderResult,
+        render_agents,
+        run_manifest_metadata,
+    )
     from mergecraft.agents.shared import AgentResult
 
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
@@ -330,6 +346,7 @@ def test_declared_degradation_reaches_the_run_manifest(tmp_path: Path) -> None:
         harness="codex",
         ctx=ctx,
     )
+    assert isinstance(render_result, HarnessRenderResult)
     manifest_meta = run_manifest_metadata(render_result)
     assert "harness_degradations" in manifest_meta
     degradations = manifest_meta["harness_degradations"]
