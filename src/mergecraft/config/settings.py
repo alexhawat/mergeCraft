@@ -151,6 +151,7 @@ class GatesSettings(BaseModel):
 
     gate_action: GateMode = "shadow"
     thermostat: GateMode = "shadow"
+    terminal_verdict: GateMode = "enforce"
     override: dict[str, str] = Field(default_factory=dict)
 
 

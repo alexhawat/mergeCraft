@@ -33,7 +33,28 @@ def _serialize(outcome: StaticCheckOutcome) -> dict[str, Any]:
     }
 
 
+def _persist_static_checks(ctx: ToolContext, outcomes: list[StaticCheckOutcome]) -> None:
+    """Update ``ToolState.static_checks`` with this run's rows.
+
+    Same-name outcomes replace prior rows. Prior ``failed`` rows whose gate was
+    not in this plan stay — a suffix-filtered or partial rerun must not clear an
+    earlier failure the session already recorded.
+    """
+    incoming = {
+        outcome.name: {"name": outcome.name, "status": outcome.status} for outcome in outcomes
+    }
+    retained_failed = [
+        row
+        for row in ctx.tool_state.static_checks
+        if isinstance(row, dict)
+        and row.get("status") == "failed"
+        and row.get("name") not in incoming
+    ]
+    ctx.tool_state.static_checks = [*retained_failed, *incoming.values()]
+
+
 def _report(
+    ctx: ToolContext,
     outcomes: list[StaticCheckOutcome],
     substitutions: list[GateSubstitution],
     *,
@@ -45,6 +66,7 @@ def _report(
     declared CI check run proved counts, which is exactly how #36 removes the
     duplicate ``unavailable`` row without inventing a second reporting shape.
     """
+    _persist_static_checks(ctx, outcomes)
     executed = [outcome for outcome in outcomes if outcome.ran]
     payload: dict[str, Any] = {"checks": [_serialize(o) for o in outcomes]}
     if substitutions:
@@ -135,7 +157,7 @@ def run_static_checks_tool(ctx: ToolContext):
             )
             declared = declared_cannot_run_outcomes(checks, reason=reason)
             outcomes, substitutions = await _apply_ci_evidence(ctx, declared)
-            return _report(outcomes, substitutions, reason=reason)
+            return _report(ctx, outcomes, substitutions, reason=reason)
 
         outcomes = run_checks(checks, root=root)
         outcomes, substitutions = await _apply_ci_evidence(ctx, outcomes)
@@ -147,6 +169,7 @@ def run_static_checks_tool(ctx: ToolContext):
             len(outcomes) - len(executed),
         )
         return _report(
+            ctx,
             outcomes,
             substitutions,
             reason=(

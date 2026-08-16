@@ -104,6 +104,11 @@ class ProviderConfig(BaseModel):
 
     API keys are read through ``api_key_env`` at emit/use time and are never
     stored on this model (convention 5 / HA1).
+
+    ``model_id``, ``adapter``, ``extra_options``, and ``context_limit`` are
+    declared target-API fields. The env-derived constructors currently leave
+    them at defaults; ``require_capabilities`` is the D12 fail-closed gate and
+    is not yet called from a production harness path.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -129,7 +134,11 @@ class ProviderConfig(BaseModel):
 
 
 def require_capabilities(config: ProviderConfig, required: frozenset[str]) -> None:
-    """Fail closed when ``config`` lacks a declared capability (D12)."""
+    """Fail closed when ``config`` lacks a declared capability (D12).
+
+    Production harnesses do not call this yet; HA1 lands the gate so a later
+    wiring wave can require capabilities at resolve time without a new type.
+    """
     from mergecraft.main import _ConfigurationError
 
     missing = required - config.capabilities
@@ -147,25 +156,6 @@ class GatewayPreset:
     api_key_env: str
     base_url_env: str
     default_base_url: str
-
-
-@dataclass(frozen=True, slots=True)
-class ProviderRecord:
-    """One configured OpenAI-compatible provider, sourced from env vars.
-
-    Carries the env-var names (``base_url_env`` / ``api_key_env``) that sourced
-    the resolved values so loguru redaction can target the env-var *names*
-    rather than the resolved key values (convention 7 / D11). The resolved
-    ``api_key`` is never logged by the harness writers — this record exists so
-    the writers can pass the env-var name to a redactor and still call the
-    resolved value to populate a generated config file.
-    """
-
-    provider_id: str
-    base_url: str
-    api_key: str
-    base_url_env: str
-    api_key_env: str
 
 
 GATEWAY_PRESETS: dict[str, GatewayPreset] = {
@@ -371,7 +361,6 @@ __all__ = [
     "TOKENHUB_BASE_URL_ENV",
     "GatewayPreset",
     "ProviderConfig",
-    "ProviderRecord",
     "has_custom_provider_env",
     "has_gateway_credentials",
     "require_capabilities",

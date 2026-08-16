@@ -197,6 +197,11 @@ outputs:
       write the output to a file in a later step. Schema:
       `docs/evidence-packet.md`.
     value: ${{ steps.run.outputs.evidence_packet }}
+  verdict_diagnostic:
+    description: |
+      Closed VerdictDiagnostic code from the terminal-verdict policy path for
+      this run. Empty when the run did not evaluate terminal protocol policy.
+    value: ${{ steps.run.outputs.verdict_diagnostic }}
 
 runs:
   using: "docker"

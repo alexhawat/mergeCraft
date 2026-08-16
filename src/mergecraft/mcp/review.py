@@ -11,6 +11,13 @@ from mergecraft.mcp.comment import add_footer
 from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
 from mergecraft.mcp.shared import execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
+from mergecraft.mcp.verdict import (
+    ReviewPhase,
+    ensure_review_scope_for_terminal,
+    record_validated_terminal_submission,
+    revalidate_recorded_submission,
+    stamp_review_phase_on_active_span,
+)
 from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
 from mergecraft.review_taxonomy import stamp_finding_fingerprint
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
@@ -155,6 +162,217 @@ async def _resolve_fixed_finding_threads(
     return resolved
 
 
+def _comments_to_findings(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map legacy inline comments to terminal-submission finding dicts."""
+    findings: list[dict[str, Any]] = []
+    for comment in comments:
+        row: dict[str, Any] = {
+            "path": str(comment["path"]),
+            "body": str(comment.get("body") or ""),
+            "severity": "Major",
+        }
+        if "line" in comment:
+            row["line"] = int(comment["line"])
+        findings.append(row)
+    return findings
+
+
+def _legacy_params_to_submission(params: dict[str, Any]) -> dict[str, Any] | None:
+    """Map ``create_pull_request_review`` params onto the terminal-verdict shape.
+
+    A plain COMMENT (no ``approved`` / ``request_changes`` and no inline
+    comments) is not a terminal verdict. Explicit ``approved: false`` must
+    not fall through to ``approve``. ``request_changes`` with no findings
+    is left empty so ``validate_submission`` can apply D9 rather than
+    fabricating a ``path="."`` row.
+    """
+    approved = bool(params.get("approved"))
+    request_changes = bool(params.get("request_changes"))
+    body = str(params.get("body") or "")
+    comments = list(params.get("comments") or [])
+
+    if approved and request_changes:
+        msg = "approved and request_changes are mutually exclusive"
+        raise ValueError(msg)
+
+    if approved:
+        return {"verdict": "approve", "summary": body or "Approve", "findings": []}
+    findings = _comments_to_findings(comments)
+    if request_changes:
+        return {
+            "verdict": "request_changes",
+            "summary": body or "Request changes",
+            "findings": findings,
+        }
+    if findings:
+        return {
+            "verdict": "request_changes",
+            "summary": body or "Review findings",
+            "findings": findings,
+        }
+    if "approved" in params:
+        return {
+            "verdict": "request_changes",
+            "summary": body or "Review comment",
+            "findings": [],
+        }
+    return None
+
+
+async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> dict[str, Any]:
+    """Post a GitHub review after a validated terminal submission exists (V6)."""
+    pull_number = int(params["pull_number"])
+    approved = bool(params.get("approved"))
+    request_changes = bool(params.get("request_changes"))
+    submission = ctx.tool_state.terminal_submission
+    if submission is not None:
+        approved = submission.verdict == "approve"
+        request_changes = submission.verdict == "request_changes"
+
+    body = params.get("body")
+    comments = list(params.get("comments") or [])
+
+    primary = primary_repo_state(ctx.tool_state)
+    primary.issue_number = pull_number
+
+    event = "COMMENT"
+    if approved and ctx.pr_approve_enabled and ctx.trust_tier == "trusted":
+        event = "APPROVE"
+    elif request_changes:
+        event = "REQUEST_CHANGES"
+
+    payload: dict[str, Any] = {"event": event}
+    if body:
+        await ensure_learnings_review_delta(ctx.tool_state)
+        body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body))
+        payload["body"] = add_footer(ctx, body_with_delta)
+    if params.get("commit_id"):
+        payload["commit_id"] = params["commit_id"]
+    elif primary.checkout_sha:
+        payload["commit_id"] = primary.checkout_sha
+
+    inline: list[dict[str, Any]] = []
+    for c in comments:
+        item: dict[str, Any] = {
+            "path": c["path"],
+            "body": c.get("body") or "",
+        }
+        if c.get("suggestion"):
+            suggestion = str(c["suggestion"])
+            item["body"] = (
+                f"{item['body']}\n```suggestion\n{suggestion}\n```"
+                if item["body"]
+                else f"```suggestion\n{suggestion}\n```"
+            )
+        item["body"] = stamp_finding_fingerprint(path=item["path"], body=item["body"])
+        if "line" in c:
+            item["line"] = int(c["line"])
+        if "side" in c:
+            item["side"] = c["side"]
+        if "start_line" in c:
+            item["start_line"] = int(c["start_line"])
+            item["start_side"] = c.get("start_side") or c.get("side") or "RIGHT"
+        inline.append(item)
+    if inline:
+        payload["comments"] = inline
+
+    approve_fallback = False
+    try:
+        result = await ctx.github.create_review(
+            ctx.repo.owner, ctx.repo.name, pull_number, **payload
+        )
+    except httpx.HTTPStatusError as exc:
+        if event != "APPROVE" or exc.response.status_code != 422:
+            raise
+        logger.info(
+            "APPROVE review rejected with 422 on PR #{}; falling back to COMMENT",
+            pull_number,
+        )
+        fallback = dict(payload)
+        fallback["event"] = "COMMENT"
+        result = await ctx.github.create_review(
+            ctx.repo.owner, ctx.repo.name, pull_number, **fallback
+        )
+        approve_fallback = True
+    review_id = int(result["id"])
+    ctx.tool_state.review = ReviewRecord(
+        id=review_id,
+        node_id=str(result.get("node_id") or ""),
+        reviewed_sha=payload.get("commit_id"),
+    )
+    _maybe_suggest_eval_add(ctx)
+    ctx.tool_state.approval = ApprovalRecord(
+        would_approve=approved,
+        sha=payload.get("commit_id"),
+    )
+    ctx.tool_state.was_updated = True
+    logger.info("submitted review {} on PR #{}", review_id, pull_number)
+    response: dict[str, Any] = {
+        "success": True,
+        "reviewId": review_id,
+        "url": result.get("html_url"),
+        "state": result.get("state"),
+        "commitId": payload.get("commit_id"),
+    }
+    if approve_fallback:
+        response["approveFallbackDueTo422"] = True
+        response["requestedReviewState"] = "APPROVE"
+    resolved = await _resolve_fixed_finding_threads(
+        ctx,
+        pull_number=pull_number,
+        posted_bodies=[str(item.get("body") or "") for item in inline],
+    )
+    if resolved:
+        response["resolvedThreads"] = resolved
+    return response
+
+
+async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
+    """Publish the validated terminal submission to GitHub (internal, not an MCP tool)."""
+    if ctx.tool_state.terminal_submission is None:
+        msg = "no validated terminal submission available for publication"
+        raise ValueError(msg)
+
+    pending = ctx.tool_state.pending_review_publication
+    if pending is None:
+        submission = ctx.tool_state.terminal_submission
+        primary = primary_repo_state(ctx.tool_state)
+        pull_number = primary.issue_number or ctx.tool_state.pr_number
+        if pull_number is None:
+            msg = "no pull number available for validated terminal submission publication"
+            raise ValueError(msg)
+        pending = {
+            "pull_number": pull_number,
+            "body": submission.summary,
+            "comments": [],
+            "approved": submission.verdict == "approve",
+            "request_changes": submission.verdict == "request_changes",
+        }
+
+    ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
+    stamp_review_phase_on_active_span(ReviewPhase.PUBLISH)
+    result = await _publish_github_review(ctx, pending)
+    ctx.tool_state.review_phase = ReviewPhase.COMPLETE.value
+    stamp_review_phase_on_active_span(ReviewPhase.COMPLETE)
+    return result
+
+
+def _requested_publication_verdict(params: dict[str, Any]) -> str | None:
+    if bool(params.get("approved")):
+        return "approve"
+    if bool(params.get("request_changes")):
+        return "request_changes"
+    return None
+
+
+def _reject_mismatched_publication(submission: Any, params: dict[str, Any]) -> None:
+    wanted = _requested_publication_verdict(params)
+    if wanted is None or wanted == submission.verdict:
+        return
+    msg = f"publication {wanted} does not match recorded terminal verdict {submission.verdict}"
+    raise ValueError(msg)
+
+
 def create_pull_request_review_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         pull_number = int(params["pull_number"])
@@ -188,113 +406,26 @@ def create_pull_request_review_tool(ctx: ToolContext):
                     "reviewId": ctx.tool_state.review.id,
                 }
 
-        event = "COMMENT"
-        if approved and ctx.pr_approve_enabled and ctx.trust_tier == "trusted":
-            # D14 — prApproveEnabled is inert for untrusted runs (fork PR /
-            # pull_request_target). One config knob, one inert path. The
-            # advisory ApprovalRecord is still written below (W8.3), so the
-            # trajectory/evidence work in the merge-evidence plan (#41) reads
-            # the agent's stored boolean after the fact.
-            event = "APPROVE"
-        elif request_changes:
-            event = "REQUEST_CHANGES"
+        ensure_review_scope_for_terminal(ctx.tool_state, "create_pull_request_review")
 
-        payload: dict[str, Any] = {"event": event}
-        if body:
-            await ensure_learnings_review_delta(ctx.tool_state)
-            body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body))
-            payload["body"] = add_footer(ctx, body_with_delta)
-        if params.get("commit_id"):
-            payload["commit_id"] = params["commit_id"]
-        elif primary.checkout_sha:
-            payload["commit_id"] = primary.checkout_sha
+        if ctx.tool_state.terminal_submission is None:
+            submission_payload = _legacy_params_to_submission(params)
+            if submission_payload is not None:
+                record_validated_terminal_submission(ctx, submission_payload)
+        else:
+            _reject_mismatched_publication(ctx.tool_state.terminal_submission, params)
+            revalidate_recorded_submission(ctx)
 
-        inline: list[dict[str, Any]] = []
-        for c in comments:
-            item: dict[str, Any] = {
-                "path": c["path"],
-                "body": c.get("body") or "",
-            }
-            if c.get("suggestion"):
-                suggestion = str(c["suggestion"])
-                item["body"] = (
-                    f"{item['body']}\n```suggestion\n{suggestion}\n```"
-                    if item["body"]
-                    else f"```suggestion\n{suggestion}\n```"
-                )
-            # Stamped server-side so every finding is dedup-able across runs even
-            # when the model forgets — an IncrementalReview can then tell a
-            # re-raised finding from a new one without re-reading every thread.
-            item["body"] = stamp_finding_fingerprint(path=item["path"], body=item["body"])
-            if "line" in c:
-                item["line"] = int(c["line"])
-            if "side" in c:
-                item["side"] = c["side"]
-            if "start_line" in c:
-                item["start_line"] = int(c["start_line"])
-                item["start_side"] = c.get("start_side") or c.get("side") or "RIGHT"
-            inline.append(item)
-        if inline:
-            payload["comments"] = inline
+        publication_params = dict(params)
+        publication_params["pull_number"] = pull_number
+        ctx.tool_state.pending_review_publication = publication_params
 
-        approve_fallback = False
-        try:
-            result = await ctx.github.create_review(
-                ctx.repo.owner, ctx.repo.name, pull_number, **payload
-            )
-        except httpx.HTTPStatusError as exc:
-            if event != "APPROVE" or exc.response.status_code != 422:
-                raise
-            logger.info(
-                "APPROVE review rejected with 422 on PR #{}; falling back to COMMENT",
-                pull_number,
-            )
-            fallback = dict(payload)
-            fallback["event"] = "COMMENT"
-            result = await ctx.github.create_review(
-                ctx.repo.owner, ctx.repo.name, pull_number, **fallback
-            )
-            approve_fallback = True
-        review_id = int(result["id"])
-        ctx.tool_state.review = ReviewRecord(
-            id=review_id,
-            node_id=str(result.get("node_id") or ""),
-            reviewed_sha=payload.get("commit_id"),
-        )
-        _maybe_suggest_eval_add(ctx)
-        # #41 / W2.1 — the agent's ``approved`` boolean is recorded here as
-        # the legacy ``ApprovalRecord`` and (separately, when the packet is
-        # built at the end of the run) as the packet's ``self_assessment``
-        # row. The two are populated from the same call but kept
-        # structurally distinct so the structural verdict (``Decision``)
-        # can never be derived from the agent's prose. The legacy field
-        # stays for backward compatibility with consumers that still
-        # read ``tool_state.approval.would_approve``; ``build_packet()``
-        # translates it into the packet's ``self_assessment`` row.
-        ctx.tool_state.approval = ApprovalRecord(
-            would_approve=approved,
-            sha=payload.get("commit_id"),
-        )
-        ctx.tool_state.was_updated = True
-        logger.info("submitted review {} on PR #{}", review_id, pull_number)
-        response: dict[str, Any] = {
-            "success": True,
-            "reviewId": review_id,
-            "url": result.get("html_url"),
-            "state": result.get("state"),
-            "commitId": payload.get("commit_id"),
-        }
-        if approve_fallback:
-            response["approveFallbackDueTo422"] = True
-            response["requestedReviewState"] = "APPROVE"
-        resolved = await _resolve_fixed_finding_threads(
-            ctx,
-            pull_number=pull_number,
-            posted_bodies=[str(item.get("body") or "") for item in inline],
-        )
-        if resolved:
-            response["resolvedThreads"] = resolved
-        return response
+        ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
+        stamp_review_phase_on_active_span(ReviewPhase.PUBLISH)
+        result = await _publish_github_review(ctx, publication_params)
+        ctx.tool_state.review_phase = ReviewPhase.COMPLETE.value
+        stamp_review_phase_on_active_span(ReviewPhase.COMPLETE)
+        return result
 
     return tool(
         name="create_pull_request_review",

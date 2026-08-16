@@ -63,7 +63,7 @@ def _clear_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.xfail(
     reason="green after W3: shared helper exposes a multi-provider resolver "
-    "(dict/sequence of ProviderRecord keyed by provider id)",
+    "(dict of ProviderConfig keyed by provider id)",
     strict=False,
 )
 def test_shared_helper_exposes_multi_provider_resolver() -> None:
@@ -71,7 +71,7 @@ def test_shared_helper_exposes_multi_provider_resolver() -> None:
 
     Today the module exposes ``resolve_gateway_endpoint(model) -> tuple | None``
     (a singleton). W3 must add a multi-provider resolver. Acceptable shapes:
-    ``dict[str, ProviderRecord]`` or a sequence of records; the test asserts
+    ``dict[str, ProviderConfig]`` or a sequence of records; the test asserts
     either, by name, is importable from the module.
     """
     gateways = _load_gateways_module()
@@ -326,36 +326,21 @@ def test_both_harnesses_consume_the_shared_helper() -> None:
     assert "openai_compatible_gateways" in codex_src
 
 
-# -- W1.4 (structural): ProviderRecord exposes fields for log redaction -----
+# -- W1.4 (structural): ProviderConfig exposes fields for log redaction -----
 #
-# The helper's record must carry the env-var names that sourced it so the
-# harness can pass them to loguru's redactor without ever emitting the
-# resolved value. W3 lands a typed record (e.g. ``ProviderRecord``) with
-# those fields; today no such type exists, so the import is xfailed.
+# The helper's record must carry the env-var *name* that sourced the key so
+# the harness can pass it to loguru's redactor without ever storing the
+# resolved value (convention 5 / HA1).
 
 
-@pytest.mark.xfail(
-    reason="green after W3: shared helper exposes a typed ProviderRecord with env-var provenance",
-    strict=False,
-)
-def test_provider_record_carries_env_var_provenance() -> None:
-    """A typed ``ProviderRecord`` (or equivalent) must carry the env-var
-    names that sourced ``base_url`` and ``api_key`` — required for log
-    redaction (convention 7).
-    """
-    gateways = _load_gateways_module()
-    record_type = getattr(gateways, "ProviderRecord", None)
-    assert record_type is not None, (
-        "shared helper must expose a typed ProviderRecord with env-var provenance"
-    )
+def test_provider_config_carries_env_var_provenance() -> None:
+    """``ProviderConfig`` carries ``api_key_env``, never a resolved ``api_key``."""
+    from mergecraft.agents.openai_compatible_gateways import ProviderConfig
 
-    fields = getattr(record_type, "__dataclass_fields__", None) or getattr(
-        record_type, "model_fields", None
-    )
-    assert fields is not None, "ProviderRecord must be a dataclass or pydantic model"
-    names = set(fields.keys())
-    for required in ("provider_id", "base_url", "api_key", "base_url_env", "api_key_env"):
-        assert required in names, f"ProviderRecord must carry field {required!r}"
+    names = set(ProviderConfig.model_fields)
+    for required in ("provider_id", "base_url", "api_key_env"):
+        assert required in names, f"ProviderConfig must carry field {required!r}"
+    assert "api_key" not in names
 
 
 # Avoid unused-import warning when TYPE_CHECKING is collapsed.

@@ -62,6 +62,7 @@ from mergecraft.mcp.shared import JsonSchema, ToolResult, ToolSpec
 from mergecraft.mcp.shell import kill_background_tool, shell_tool
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.upload import upload_file_tool
+from mergecraft.mcp.verdict import submit_review_verdict_tool
 from mergecraft.mcp.verification import (
     record_finding_verdict_tool,
     verify_agent_findings_tool,
@@ -143,6 +144,7 @@ def build_orchestrator_tools(
         *build_common_tools(ctx, output_schema),
         report_progress_tool(ctx),
         select_mode_tool(ctx),
+        submit_review_verdict_tool(ctx),
         push_branch_tool(ctx),
         push_tags_tool(ctx),
         delete_branch_tool(ctx),
