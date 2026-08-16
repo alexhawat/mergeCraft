@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added typed specialist handoff, model-diversity policy for verification, and ensemble or shadow dispatch modes on agent bindings
 - Added change classifier and risk-based lens routing with recorded per-lens reasons in Review mode
 - Promoted 20 themed review lenses from Review prose into registry entries with `mergecraft lens list|show|test`
+- Added pluggable orchestrator with declarative pipeline file, trust gate for untrusted sources, and `mergecraft pipeline lint|show|explain`
 
 ### Fixed
 

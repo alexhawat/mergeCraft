@@ -270,6 +270,22 @@ class Registry:
             msg = f"no binding for role {key!r}"
             raise KeyError(msg) from exc
 
+    def resolve_agent_ref(self, ref: str) -> AgentBinding:
+        """Resolve a pipeline agent reference (role name or custom agent id)."""
+        try:
+            role = AgentRole(ref)
+        except ValueError:
+            role = None
+        if role is not None:
+            try:
+                return self.resolve_role(role)
+            except KeyError:
+                pass
+        if ref in self._bindings:
+            return self._bindings[ref]
+        msg = f"no binding for agent ref {ref!r}"
+        raise KeyError(msg)
+
     def resolve_tool_names(self, binding: AgentBinding, ctx: ToolContext) -> list[str]:
         tools = build_orchestrator_tools(ctx)
         if binding.role is AgentRole.orchestrator:
@@ -310,6 +326,11 @@ class Registry:
                 if terminal in binding.tool_classes:
                     msg = f"read-only agent {binding.agent_id!r} holds terminal-protocol tool"
                     raise RegistryValidationError(msg)
+
+
+def resolve_agent_ref(registry: Registry, ref: str) -> AgentBinding:
+    """Resolve a pipeline step agent reference against a registry."""
+    return registry.resolve_agent_ref(ref)
 
 
 def load_registry(
