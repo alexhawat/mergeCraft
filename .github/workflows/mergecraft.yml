@@ -440,7 +440,14 @@ jobs:
         # second PR just to consume the first. 3bf6d7b survives merge intact — this repo
         # merges PRs with a merge commit, never squash — so once #204 lands this pin is
         # already correct; no follow-up bump needed.
-        uses: alexhawat/mergeCraft@3bf6d7bba38cfeb7966b78316bdc5a150c43ce0d # pre-0.0.1
+        # 2026-08-17 (sixth bump): re-bumped to 0592d72 — prep treated a skipped
+        # Python install (`shell: disabled`) as a hard failure, so this repo's own
+        # self-review job (which sets `shell: disabled`) never reached a verdict.
+        # Fixed in #231 (src/mergecraft/prep/). Same self-review limitation as #204:
+        # pull_request_target is resolved from `main`, so #231 cannot consume this
+        # pin until it lands there; pin the product-fix commit now so a follow-up
+        # bump PR is not required after merge. 0592d72 survives merge intact.
+        uses: alexhawat/mergeCraft@0592d72828797005fdc5af1da9e413b0a98bd8a0 # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: 25m
@@ -535,8 +542,10 @@ jobs:
         # f5b070b (#194: $CODEX_HOME/.gemini/.claude also created root-owned before the
         # drop, same bug shape), then to 3bf6d7b (#204: checkout_pr fetch failure on a
         # shared workspace when Nous falls back to Codex, fixed by detaching HEAD before
-        # the fetch) — see the matching comment on the Nous step above for why.
-        uses: alexhawat/mergeCraft@3bf6d7bba38cfeb7966b78316bdc5a150c43ce0d # pre-0.0.1
+        # the fetch), then to 0592d72 (#231: skipped Python install under `shell:
+        # disabled` must not fail prep) — see the matching comment on the Nous step
+        # above for why.
+        uses: alexhawat/mergeCraft@0592d72828797005fdc5af1da9e413b0a98bd8a0 # pre-0.0.1
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job

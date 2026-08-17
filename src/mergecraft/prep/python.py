@@ -110,6 +110,7 @@ class InstallPythonDependencies:
                 package_manager=config.tool,
                 config_file=config.file,
                 dependencies_installed=False,
+                skipped=True,
                 issues=[
                     "skipped: python dependency installation can execute arbitrary code "
                     "(setup.py, build backends, local path references), which is blocked "
