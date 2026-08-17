@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mergecraft plan` previews model chain, toolset, analyzer detection, and token estimate without provider calls
 - Run manifest fingerprints (model/CLI versions plus prompt, config, and policy hashes) for reproducible offline reviews
 - `mergecraft review` machine contract: distinct process exit codes per `RunOutcome`, `--format text|json|jsonl|sarif`, and `--agent` JSONL streaming with an explicit `protocol_version`
+- Added review-wide trace correlation: a `review.id` on every span across every process and agent of one logical review, plus a deterministic `review.correlation_key` (`sha256(repo|pr|head_sha)`) that groups re-reviews of the same commit; `trace_id` remains per agent run
+- Added tracer baseline attributes (`mergecraft.run_id`, `mergecraft.version`, `mergecraft.trust_tier`, VCS and CI fields) merged into spans at close time, with explicit attributes taking precedence
+- Added review-context env propagation into spawned agent CLI subprocesses, so subagent runs join the parent review's trace identity
+- Added agent registry binding model, prompt, toolset and budget per role with `mergecraft agents list|show|set` and `make agents-check`
 - Added registry-driven harness render for Claude, OpenCode, Codex, Gemini, and Cursor with per-agent models and declared Codex degradation in run metadata
 - Added typed specialist handoff, model-diversity policy for verification, and ensemble or shadow dispatch modes on agent bindings
 - Added change classifier and risk-based lens routing with recorded per-lens reasons in Review mode
