@@ -9,7 +9,6 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -19,8 +18,6 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-_CC2_2_XFAIL = pytest.mark.xfail(reason="green after CC2.2: doctor command", strict=False)
 
 _REQUIRED_PROBE_LABELS = ("git", "provider", "analyzer", "auth", "config", "mcp")
 
@@ -55,7 +52,6 @@ def _init_git_repo(tmp_path: Path) -> None:
     )
 
 
-@_CC2_2_XFAIL
 def test_reports_git_provider_analyzer_auth_config_rows(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -75,7 +71,6 @@ def test_reports_git_provider_analyzer_auth_config_rows(
         assert label in output, f"missing doctor probe row for {label!r}: {output}"
 
 
-@_CC2_2_XFAIL
 def test_exits_nonzero_on_a_hard_failure(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """A hard probe failure (unparseable config) yields a non-zero exit code."""
     _init_git_repo(tmp_path)
@@ -95,7 +90,6 @@ def test_exits_nonzero_on_a_hard_failure(tmp_path: Path, monkeypatch: MonkeyPatc
     assert "config" in output.lower(), output
 
 
-@_CC2_2_XFAIL
 def test_never_prints_a_credential_value(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Doctor reports auth presence but never echoes credential material."""
     _init_git_repo(tmp_path)

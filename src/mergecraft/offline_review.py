@@ -286,6 +286,15 @@ def _emit_offline_packet(
         extra_findings=extra,
         output_path=output_path,
     )
+    from mergecraft.evidence.run_manifest import build_run_manifest
+
+    manifest = build_run_manifest(
+        cwd=cwd,
+        model=tool_context.resolved_model or tool_context.tool_state.model or "(unresolved)",
+        agent_id=tool_context.agent_id,
+        prompt_text=materialization.path.read_text(encoding="utf-8"),
+    )
+    logger.info("» run manifest fingerprints: {}", manifest)
     return str(written) if written else None
 
 
@@ -389,6 +398,13 @@ async def run_offline_diff_review(
 
     cwd = workspace.cwd
     cloned = workspace.cloned or cloned
+    try:
+        from mergecraft.cli.config_surface_cmd import validate_repo_config_or_raise
+
+        validate_repo_config_or_raise(cwd=cwd)
+    except ValueError as exc:
+        return _offline_failure(error=str(exc), outcome=RunOutcome.configuration_error)
+
     if not (cwd / ".git").exists() and diff_file is None:
         return _offline_failure(
             error=f"not a git repository: {cwd} (pass --diff for a standalone patch file)",
@@ -399,6 +415,9 @@ async def run_offline_diff_review(
     # overrides so the agent stream tracers (which resolve from
     # ``os.environ``) honor CLI > env precedence. Restored in the ``finally``
     # block so the override never leaks into the caller's environment.
+    from mergecraft.evidence.run_manifest import apply_local_telemetry_defaults
+
+    telemetry_env_previous = apply_local_telemetry_defaults(private_repo=True)
     tracing_env_previous = _apply_tracing_cli_overrides(tracing_cli)
     review_root = (invocation_root or cwd).resolve()
     trust_tier = resolve_offline_review_trust_tier(
@@ -490,6 +509,11 @@ async def run_offline_diff_review(
         # Restore the operator's ``.env`` tracing vars so the ``diff-review``
         # overrides never leak into the caller's environment.
         for key, value in tracing_env_previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        for key, value in telemetry_env_previous.items():
             if value is None:
                 os.environ.pop(key, None)
             else:

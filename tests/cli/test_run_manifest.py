@@ -13,10 +13,6 @@ import pytest
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
-_CC2_2_XFAIL = pytest.mark.xfail(
-    reason="green after CC2.2: run manifest + D11 telemetry default", strict=False
-)
-
 
 def _manifest_mod() -> object:
     try:
@@ -26,7 +22,6 @@ def _manifest_mod() -> object:
     return mod
 
 
-@_CC2_2_XFAIL
 def test_manifest_carries_model_cli_and_prompt_hashes(tmp_path: Path) -> None:
     """Run manifest records model/CLI versions and prompt/config/policy hashes."""
     mod = _manifest_mod()
@@ -50,7 +45,6 @@ def test_manifest_carries_model_cli_and_prompt_hashes(tmp_path: Path) -> None:
         assert field in hashes or field in manifest, f"missing {field} in manifest: {manifest}"
 
 
-@_CC2_2_XFAIL
 def test_local_run_defaults_to_no_remote_telemetry(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

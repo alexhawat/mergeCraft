@@ -253,6 +253,13 @@ def run(
     except ValueError as exc:
         _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
 
+    try:
+        from mergecraft.cli.config_surface_cmd import validate_repo_config_or_raise
+
+        validate_repo_config_or_raise(cwd=root)
+    except ValueError as exc:
+        _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
+
     # Build the tracing CLI tokens (CLI > env > config precedence) and forward
     tracing_cli: list[str] = []
     if tracing is True:

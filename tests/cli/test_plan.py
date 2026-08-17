@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -20,8 +19,6 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-_CC2_2_XFAIL = pytest.mark.xfail(reason="green after CC2.2: plan command", strict=False)
 
 _SAMPLE_PATCH = (
     "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
@@ -58,7 +55,6 @@ def _init_git_repo(tmp_path: Path) -> None:
     )
 
 
-@_CC2_2_XFAIL
 def test_plan_lists_model_chain_toolset_and_analyzers(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -85,7 +81,6 @@ def test_plan_lists_model_chain_toolset_and_analyzers(
     assert "analyzer" in output.lower()
 
 
-@_CC2_2_XFAIL
 def test_plan_makes_no_provider_call(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``plan`` is a local preview and must not call provider HTTP APIs."""
     _init_git_repo(tmp_path)
@@ -106,7 +101,6 @@ def test_plan_makes_no_provider_call(tmp_path: Path, monkeypatch: MonkeyPatch) -
         return real_client(*args, **kwargs)
 
     monkeypatch.setattr(httpx, "Client", _factory)
-    monkeypatch.setattr("mergecraft.agents.shared.httpx.Client", _factory, raising=False)
 
     result = runner.invoke(
         app,

@@ -9,7 +9,6 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -20,8 +19,6 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-_CC2_2_XFAIL = pytest.mark.xfail(reason="green after CC2.2: config surface verbs", strict=False)
 
 _SAMPLE_PATCH = (
     "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
@@ -40,7 +37,6 @@ def _write_config(tmp_path: Path, body: str) -> Path:
     return path
 
 
-@_CC2_2_XFAIL
 def test_config_show_reports_resolved_values_with_source(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -64,7 +60,6 @@ def test_config_show_reports_resolved_values_with_source(
     assert "env" in output.lower() or "environment" in output.lower()
 
 
-@_CC2_2_XFAIL
 def test_config_explain_names_the_winning_layer(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``config explain`` names the winning precedence layer (CLI > env > YAML > default)."""
     _write_config(
@@ -86,7 +81,6 @@ def test_config_explain_names_the_winning_layer(tmp_path: Path, monkeypatch: Mon
     assert "yaml" in output.lower() or "config" in output.lower()
 
 
-@_CC2_2_XFAIL
 def test_config_validate_rejects_an_unknown_key(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``config validate`` rejects unknown keys (``extra='forbid'`` surface)."""
     _write_config(tmp_path, "unknown_future_key: true\n")
@@ -103,7 +97,6 @@ def test_config_validate_rejects_an_unknown_key(tmp_path: Path, monkeypatch: Mon
     assert "unknown" in output.lower() or "forbid" in output.lower()
 
 
-@_CC2_2_XFAIL
 def test_config_validate_runs_before_expensive_execution(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

@@ -600,8 +600,12 @@ of them for its full flag set):
 | `mergecraft auth minimax` | Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY. |
 | `mergecraft auth nous` | Save a Nous Portal API key as NOUS_API_KEY. |
 | `mergecraft auth tokenhub` | Save a Tencent TokenHub API key as TOKENHUB_API_KEY. |
+| `mergecraft config explain <key>` | Explain which precedence layer wins for a config key. |
+| `mergecraft config show <key>` | Show a resolved config value and the precedence layer that supplied it. |
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
+| `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
 | `mergecraft diff-review` | Review a local git diff offline (no GitHub Action / PR posting). |
+| `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval gate` | Check the eval bank's integrity — the CI-safe half of the eval loop. |
@@ -626,6 +630,7 @@ of them for its full flag set):
 | `mergecraft pipeline explain` | Print pipeline step ids and predicate vocabulary. |
 | `mergecraft pipeline lint` | Validate the pipeline file and registry agent references. |
 | `mergecraft pipeline show --diff DIFF` | Preview which pipeline steps would run or skip for a diff. |
+| `mergecraft plan` | Preview model chain, toolset, analyzers, and token estimate without provider calls. |
 | `mergecraft review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft traces show <run-id>` | Read back the local JSONL traces for the given run id (re-redacts on render). |
 | `mergecraft tracing logfire disable` | Disable Logfire tracing by removing the token + project locally and on GitHub. |

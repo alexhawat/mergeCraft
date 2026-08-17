@@ -289,4 +289,9 @@ Target API (CC2.2):
 - 11 tests collected across `tests/cli/test_doctor.py`,
   `tests/cli/test_config_surface.py`, `tests/cli/test_plan.py`,
   `tests/cli/test_run_manifest.py`
-- 0 pass; 11 RED via `xfail(strict=False)` — pending CC2.2
+- 0 pass; 11 RED via `xfail(strict=False)` — **cleared post-CC2.2 (2026-08-17)**
+
+## CC2.2 xfail reconciliation (2026-08-17)
+
+Removed impl-pending xfail markers from CC2 test modules. Suite is 11 real passes.
+Adjusted `test_plan_makes_no_provider_call` to patch only `httpx.Client` (plan is local-only).
