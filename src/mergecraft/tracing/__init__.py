@@ -14,6 +14,14 @@ from mergecraft.tracing.exporters import (
     resolve_token_ref,
 )
 from mergecraft.tracing.redaction import DENY_KEYS, redact_attrs, redact_event
+from mergecraft.tracing.review_context import (
+    ReviewContext,
+    bind_review_context,
+    correlation_key_for,
+    current_review_context,
+    resolve_review_id,
+    review_env_for_subprocess,
+)
 from mergecraft.tracing.sinks import (
     JSONLFileSink,
     MemorySink,
@@ -29,6 +37,7 @@ from mergecraft.tracing.tracer import (
     NullTracer,
     Span,
     Tracer,
+    baseline_run_attrs,
     get_tracer_from_settings,
     resolve_correlation_from_env,
     resolve_session_id,
@@ -62,17 +71,24 @@ __all__ = [
     "NullTracer",
     "OTLPSink",
     "RedactingSink",
+    "ReviewContext",
     "Span",
     "TraceEvent",
     "Tracer",
+    "baseline_run_attrs",
+    "bind_review_context",
     "cap_event_attrs",
+    "correlation_key_for",
+    "current_review_context",
     "current_tracer",
     "get_tracer_from_settings",
     "read_jsonl_events",
     "redact_attrs",
     "redact_event",
     "resolve_correlation_from_env",
+    "resolve_review_id",
     "resolve_session_id",
     "resolve_token_ref",
+    "review_env_for_subprocess",
     "sink_factory",
 ]

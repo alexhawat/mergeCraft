@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -62,6 +62,9 @@ from mergecraft.utils.source_resolve import (
     materialize_resolved_diff,
     resolve_workspace,
 )
+
+if TYPE_CHECKING:
+    from mergecraft.tracing.review_context import ReviewContext
 
 
 @dataclass(slots=True)
@@ -419,6 +422,54 @@ async def run_offline_diff_review(
     except ValueError as exc:
         return _offline_failure(error=str(exc), outcome=RunOutcome.configuration_error)
 
+    from mergecraft.tracing.review_context import bind_review_context
+
+    with bind_review_context(_offline_review_context()):
+        return await _run_offline_diff_review(
+            cwd=cwd,
+            base=base,
+            diff_file=diff_file,
+            model=model,
+            prompt_extra=prompt_extra,
+            dry_run=dry_run,
+            json_path=json_path,
+            evidence_packet_path=evidence_packet_path,
+            tracing_cli=tracing_cli,
+        )
+
+
+def _offline_review_context() -> ReviewContext:
+    """Build the run's ``ReviewContext`` for a local diff review (OB1/O1).
+
+    A local patch review has no repo/pr/head identity, so the correlation
+    key stays empty (D3 — no misleading constant) and the review id resolves
+    from ``MERGECRAFT_REVIEW_ID`` (inherited) or a fresh uuid4.
+    """
+    from mergecraft.tracing.review_context import ReviewContext, resolve_review_id
+
+    return ReviewContext(
+        review_id=resolve_review_id(),
+        source="cli",
+        mode="review",
+        trigger="cli",
+        trust_tier=os.environ.get("MERGECRAFT_TRUST_TIER") or "trusted",
+    )
+
+
+async def _run_offline_diff_review(
+    *,
+    cwd: Path,
+    base: str | None = None,
+    diff_file: Path | None = None,
+    model: str | None = None,
+    prompt_extra: str | None = None,
+    dry_run: bool = False,
+    json_path: Path | None = None,
+    evidence_packet_path: Path | None = None,
+    tracing_cli: list[str] | None = None,
+) -> OfflineReviewResult:
+    """Body of :func:`run_offline_diff_review`, run under the bound review context."""
+    cwd = cwd.resolve()
     if not (cwd / ".git").exists() and diff_file is None:
         return _offline_failure(
             error=f"not a git repository: {cwd} (pass --diff for a standalone patch file)",

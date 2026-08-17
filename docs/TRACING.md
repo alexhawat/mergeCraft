@@ -480,6 +480,50 @@ without the caller having to know about mergeCraft's tracer. The
 any nested OTel operation inside an agent's per-event handler inherits
 the run's trace.
 
+## Three identifiers: review.id, trace_id, review.correlation_key (OB1)
+
+One logical review fans out into several processes: the orchestrating run
+plus one spawned agent CLI per subagent. Three identifiers — not two —
+describe that shape (D2):
+
+| Identifier | Scope | Source |
+| --- | --- | --- |
+| `review.id` | **One logical review**, across every process and agent run | `tracing/review_context.py::resolve_review_id()` — `MERGECRAFT_REVIEW_ID` inherited verbatim, else a fresh `uuid4` per review |
+| `trace_id` | **One agent run** (one process) | `tracing/tracer.py::resolve_trace_id()` — see *One trace per run (T3)* above |
+| `review.correlation_key` | **Every attempt at one commit** — deliberately collides | `correlation_key_for()` — deterministic `sha256(repo\|pr\|head_sha)` (D3) |
+
+The shape to remember: **one review with three agent runs has one
+`review.id` and three `trace_id` values.** One `review.id` filter returns
+the entire review — every agent, every tool call, the verdict — across
+every process. `review.correlation_key` answers the orthogonal query:
+"every attempt at this commit", because two reviews of one commit are two
+reviews (distinct `review.id`s) but share the key (D3). A local patch
+review has no repo/pr/head context, so its key is empty and the attribute
+is omitted rather than emitted as a misleading constant.
+
+### How the identity travels
+
+- **Within a process:** both entry points — the CLI
+  (`offline_review.py::run_offline_diff_review`) and the Action
+  (`main.py::main`) — bind a frozen `ReviewContext` via
+  `bind_review_context(...)`. `Span.close()` reads the bound context at
+  **close time** (D4), so a context bound after the tracer was built still
+  reaches spans that are already open. Merge precedence: tracer baseline →
+  review context → lazy `attrs_source` → explicit `set_attribute`.
+- **Across the process boundary (O2):** `agents/shared.py::spawn_agent_cli`
+  — the single choke point for all five drivers — exports
+  `MERGECRAFT_REVIEW_ID` + `MERGECRAFT_REVIEW_CORRELATION_KEY` into the
+  child env via `setdefault`, after the privilege-drop env patch. A
+  driver-pinned value wins; a fail-closed `setpriv` error still surfaces
+  first. The child's `resolve_review_id()` then inherits the parent's
+  review verbatim.
+- **Baseline attrs (O3):** `baseline_run_attrs()` stamps every span with
+  `mergecraft.version`, `mergecraft.run_id`, `mergecraft.trust_tier`, and
+  the VCS/CI fields (`vcs.repository.name`, `vcs.change.id`,
+  `vcs.revision`, `ci.workflow_run_id`, `ci.job_id`) so a span can say
+  which build and which change produced it. The `Tracer` carries them in a
+  `baseline_attrs` field with `repr=False` (D5).
+
 ## What's next
 
 | Batch | Wave  | Scope                                                |

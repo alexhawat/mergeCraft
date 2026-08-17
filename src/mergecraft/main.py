@@ -37,6 +37,13 @@ from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
+from mergecraft.tracing.review_context import (
+    ReviewContext,
+    bind_review_context,
+    correlation_key_for,
+    resolve_review_id,
+)
+from mergecraft.tracing.tracer import resolve_correlation_from_env
 from mergecraft.utils.agent_resolve import (
     ModelFallbackPolicyError,
     effective_model_chain,
@@ -1326,6 +1333,42 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
     )
 
 
+def _action_review_context() -> ReviewContext:
+    """Build the run's ``ReviewContext`` from the Actions environment (OB1/O1).
+
+    Resolved from the same env correlation fields the tracer baseline uses,
+    so both agree on repo/pr/revision. ``GITHUB_SHA`` is the best head-sha
+    proxy available at bind time (before the event payload is parsed); the
+    correlation key is empty when there is no full repo context (D3).
+    """
+    correlation = resolve_correlation_from_env()
+    repo_raw = correlation.get("repo")
+    repo = repo_raw if isinstance(repo_raw, str) else None
+    pr_number_raw = correlation.get("pr_number")
+    pr_number = pr_number_raw if isinstance(pr_number_raw, (int, str)) else None
+    head_sha_raw = correlation.get("commit_sha")
+    head_sha = head_sha_raw if isinstance(head_sha_raw, str) else None
+    attempt_raw = os.environ.get("GITHUB_RUN_ATTEMPT")
+    try:
+        attempt = int(attempt_raw) if attempt_raw else None
+    except ValueError:
+        attempt = None
+    return ReviewContext(
+        review_id=resolve_review_id(),
+        correlation_key=correlation_key_for(repo=repo, pr_number=pr_number, head_sha=head_sha),
+        attempt=attempt,
+        source="action",
+        repo=repo,
+        pr_number=pr_number,
+        base_ref=os.environ.get("GITHUB_BASE_REF") or None,
+        head_ref=os.environ.get("GITHUB_HEAD_REF") or None,
+        head_sha=head_sha,
+        mode="review",
+        trigger=os.environ.get("GITHUB_EVENT_NAME") or "",
+        trust_tier=os.environ.get("MERGECRAFT_TRUST_TIER") or "",
+    )
+
+
 async def main() -> MainResult:
     """Run the mergecraft action flow using local ``.mergecraft/config.yaml``.
 
@@ -1357,42 +1400,46 @@ async def main() -> MainResult:
             )
 
     ctx = RunContext()
-    try:
-        ctx = await _setup_run(ctx)
-        ctx = await _resolve_credentials(ctx)
-        agent_result = await _execute_agent(ctx)
-    except _ShortCircuit as short_circuit:
-        return short_circuit.result
-    except Exception as error:
-        error_message = str(error) if error else "unknown error occurred"
-        logger.error("{}", error_message)
-        error_outcome = _classify_error_outcome(error)
-        if ctx.tool_context:
-            try:
-                await persist_learnings(ctx.tool_context)
-                await report_status_checks(
-                    ctx.tool_context,
-                    run_succeeded=run_succeeded_for_outcome(error_outcome),
-                    failure_reason=error_message,
-                    conclusion=RUN_OUTCOME_CONCLUSION[error_outcome],
-                )
-            except Exception as cleanup_exc:
-                logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
-        return MainResult(success=False, error=error_message, outcome=error_outcome)
-    else:
-        return await _finalize(ctx, agent_result)
-    finally:
-        if ctx.stop_mcp is not None:
+    # OB1 / O1 — bind the review-wide identity for the whole run so every
+    # span closed in this process (and, via the exported review env, every
+    # spawned agent CLI) carries the same ``review.id``.
+    with bind_review_context(_action_review_context()):
+        try:
+            ctx = await _setup_run(ctx)
+            ctx = await _resolve_credentials(ctx)
+            agent_result = await _execute_agent(ctx)
+        except _ShortCircuit as short_circuit:
+            return short_circuit.result
+        except Exception as error:
+            error_message = str(error) if error else "unknown error occurred"
+            logger.error("{}", error_message)
+            error_outcome = _classify_error_outcome(error)
+            if ctx.tool_context:
+                try:
+                    await persist_learnings(ctx.tool_context)
+                    await report_status_checks(
+                        ctx.tool_context,
+                        run_succeeded=run_succeeded_for_outcome(error_outcome),
+                        failure_reason=error_message,
+                        conclusion=RUN_OUTCOME_CONCLUSION[error_outcome],
+                    )
+                except Exception as cleanup_exc:
+                    logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
+            return MainResult(success=False, error=error_message, outcome=error_outcome)
+        else:
+            return await _finalize(ctx, agent_result)
+        finally:
+            if ctx.stop_mcp is not None:
+                with contextlib.suppress(Exception):
+                    ctx.stop_mcp()
             with contextlib.suppress(Exception):
-                ctx.stop_mcp()
-        with contextlib.suppress(Exception):
-            cleanup_temp_directory()
-        if ctx.token_ref is not None:
-            with contextlib.suppress(Exception):
-                await ctx.token_ref.aclose()
-        if ctx.github is not None:
-            with contextlib.suppress(Exception):
-                await ctx.github.aclose()
+                cleanup_temp_directory()
+            if ctx.token_ref is not None:
+                with contextlib.suppress(Exception):
+                    await ctx.token_ref.aclose()
+            if ctx.github is not None:
+                with contextlib.suppress(Exception):
+                    await ctx.github.aclose()
 
 
 __all__ = ["MainResult", "RunOutcome", "main"]
