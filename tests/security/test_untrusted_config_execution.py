@@ -284,6 +284,68 @@ def test_action_path_behaviour_unchanged(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_untrusted_offline_review_withholds_makefile_static_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D7 — Makefile discovery must not be reachable on untrusted CLI offline reviews."""
+    import mergecraft.offline_review as offline_mod
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.mcp.server import build_common_tools
+    from mergecraft.utils.offline_diff import DiffMaterialization
+
+    repo = _init_git_repo(tmp_path, name="hostile-make")
+    (repo / "Makefile").write_text("lint:\n\techo hostile\n", encoding="utf-8")
+    _git(repo, "add", "Makefile")
+    _git(repo, "commit", "-m", "add makefile")
+
+    captured: dict[str, object] = {}
+
+    def fake_start_mcp(ctx: object, **kwargs: object) -> tuple[str, object]:
+        from mergecraft.mcp.context import ToolContext
+
+        assert isinstance(ctx, ToolContext)
+        captured["static_checks_enabled"] = ctx.static_checks_enabled
+        captured["tool_names"] = {tool.name for tool in build_common_tools(ctx)}
+        return "http://127.0.0.1:1/mcp", lambda: None
+
+    class FakeAgent:
+        name = "claude"
+
+        async def install(self) -> None:
+            return None
+
+        async def run(self, _ctx: object) -> AgentResult:
+            return AgentResult(success=True, output="ok")
+
+    monkeypatch.setattr(offline_mod, "start_mcp_http_server", fake_start_mcp)
+    monkeypatch.setattr(offline_mod, "resolve_runtime_agent", lambda **_: FakeAgent())
+    monkeypatch.setattr(offline_mod, "resolve_model", lambda slug: slug or "claude")
+    monkeypatch.setattr(offline_mod, "install_bundled_skills", lambda **_: None)
+
+    diff_file = tmp_path / "diff.patch"
+    diff_file.write_text("diff --git a/Makefile b/Makefile\n", encoding="utf-8")
+    materialization = DiffMaterialization(
+        path=diff_file,
+        base_ref="origin/main",
+        line_count=1,
+        empty=False,
+    )
+
+    await offline_mod._run_agent_review(
+        cwd=repo,
+        materialization=materialization,
+        prompt="review",
+        model=None,
+        tmpdir=tmp_path / "tmpdir",
+        trust_tier="untrusted",
+    )
+
+    assert captured["static_checks_enabled"] is False
+    assert "run_static_checks" not in captured["tool_names"]
+
+
+@pytest.mark.asyncio
 async def test_config_cannot_escalate_its_own_tier(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

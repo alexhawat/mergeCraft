@@ -21,6 +21,7 @@ from mergecraft.analyzers.finding import (
     write_findings_json,
 )
 from mergecraft.analyzers.trust import (
+    allow_repo_command_overrides,
     build_review_source,
     derive_source_trust_tier,
 )
@@ -644,8 +645,9 @@ async def _run_agent_review(
                 )
                 for check in settings.static_checks
             ],
-            # Local run, operator's own tree and own config — no PR author in the loop.
-            static_checks_enabled=True,
+            # D7 — untrusted CLI sources must not run repo-authored commands,
+            # including Makefile-discovery fallback in ``plan_checks``.
+            static_checks_enabled=allow_repo_command_overrides(trust_tier),  # type: ignore[arg-type]
             analyzers_mode="auto",
             trust_tier=trust_tier,  # type: ignore[arg-type]
             analyzers_settings_enabled=settings.analyzers.enabled,
