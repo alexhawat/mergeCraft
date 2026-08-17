@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from mergecraft.review_checks import StaticCheckConfig
     from mergecraft.types import AgentId, XrepoConfig
     from mergecraft.utils.github import GitHubClient
+    from mergecraft.utils.run_bounds import BudgetTracker
 
 AccountPlan = Literal["free", "pro", "team", "enterprise", "unknown"]
 
@@ -76,9 +77,8 @@ class ToolContext:
     static_checks: list[StaticCheckConfig] = field(default_factory=list)
     # Whether `run_static_checks` is offered at all. Gates run repo-declared
     # commands, so on a pull request they are commands the PR author controls —
-    # that is exactly what `shell: disabled` exists to forbid. The offline
-    # `diff-review` path sets this True regardless, because there the config and
-    # the working tree both belong to the operator who started the run.
+    # that is exactly what `shell: disabled` exists to forbid. Offline reviews
+    # gate this on trust tier (D7) like the MCP serve path.
     static_checks_enabled: bool = False
     # #36 / D10 — repo-declared mapping from a mergeCraft gate name to the CI
     # check-run name that proves it, and the workflow artifacts whose SARIF may
@@ -105,3 +105,4 @@ class ToolContext:
     # and the trigger is a re-review (not a fresh PR). Default False
     # (no suggestion). mergeCraft never auto-adds (#44).
     suggest_eval_add: bool = False
+    budget_tracker: BudgetTracker | None = None

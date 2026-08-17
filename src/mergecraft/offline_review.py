@@ -45,10 +45,13 @@ from mergecraft.utils.instructions import resolve_instructions
 from mergecraft.utils.offline_diff import DiffMaterialization, summarize_diff
 from mergecraft.utils.run_bounds import (
     BudgetExhausted,
+    BudgetTracker,
+    RunBounds,
     ScopeReduction,
     apply_diff_line_budget,
     budget_exhaustion_outcome,
     outcome_with_scope_reduction,
+    record_agent_usage,
     resolve_run_bounds,
 )
 from mergecraft.utils.skills import install_bundled_skills
@@ -580,7 +583,7 @@ async def _run_agent_review(
     output_schema: dict[str, Any] | None = None,
     evidence_packet_path: Path | None = None,
     trust_tier: str = "trusted",
-    run_bounds: object | None = None,
+    run_bounds: RunBounds | None = None,
 ) -> OfflineReviewResult:
     stop_mcp = None
     github: GitHubClient | None = None
@@ -610,6 +613,8 @@ async def _run_agent_review(
         resolved_model = resolve_model(slug=model)
         agent = resolve_runtime_agent(model=resolved_model, settings=settings)
         modes = compute_modes(agent.name, signed_commits=False)
+        bounds = run_bounds or resolve_run_bounds(settings=settings)
+        budget_tracker = BudgetTracker(bounds)
 
         payload = ResolvedPayload(
             event=PayloadEvent(trigger="unknown", title="offline diff-review"),
@@ -656,6 +661,7 @@ async def _run_agent_review(
             # model that actually produced them (#96); previously unset, which
             # left the packet's agent.model reading "(unresolved)".
             resolved_model=resolved_model,
+            budget_tracker=budget_tracker,
         )
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
@@ -691,6 +697,17 @@ async def _run_agent_review(
         logger.info("» offline diff-review via agent={}", agent.name)
         await agent.install()
         result = await agent.run(run_ctx)
+        try:
+            record_agent_usage(budget_tracker, result.usage)
+        except BudgetExhausted as exc:
+            return OfflineReviewResult(
+                success=False,
+                output=result.output,
+                structured_output=tool_state.output,
+                error=str(exc),
+                diff_path=str(materialization.path),
+                outcome=budget_exhaustion_outcome(exc),
+            )
         structured_output = tool_state.output
         markdown_output = result.output
         packet_path = await asyncio.to_thread(

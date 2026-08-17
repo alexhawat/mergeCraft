@@ -18,6 +18,7 @@ from mergecraft.run_outcome import RunOutcome
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from mergecraft.agents.shared import AgentUsage
     from mergecraft.config.settings import RepoSettings, RunBoundsSettings
 
 BudgetKind = Literal["token", "cost", "tool_call"]
@@ -111,6 +112,20 @@ class BudgetTracker:
         if self.tool_calls > self.bounds.tool_call_budget:
             msg = f"tool-call budget exhausted ({self.tool_calls} > {self.bounds.tool_call_budget})"
             raise BudgetExhausted("tool_call", msg)
+
+
+def record_agent_usage(tracker: BudgetTracker | None, usage: AgentUsage | None) -> None:
+    """Charge resolved agent usage against the per-run budget tracker."""
+    if tracker is None or usage is None:
+        return
+    token_total = usage.input_tokens + usage.output_tokens
+    if usage.cache_read_tokens:
+        token_total += usage.cache_read_tokens
+    if usage.cache_write_tokens:
+        token_total += usage.cache_write_tokens
+    tracker.record_tokens(token_total)
+    if usage.cost_usd is not None:
+        tracker.record_cost(usage.cost_usd)
 
 
 def _env_float(env: Mapping[str, str], key: str) -> float | None:
@@ -291,6 +306,7 @@ __all__ = [
     "budget_exhaustion_outcome",
     "enumerate_unbounded_external_operations",
     "outcome_with_scope_reduction",
+    "record_agent_usage",
     "resolve_run_bounds",
     "timeout_for_external_operation",
 ]

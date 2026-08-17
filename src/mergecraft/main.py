@@ -728,6 +728,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         plan="unknown",
         resolved_model=ctx.resolved_model,
         suggest_eval_add=bool(payload.get("suggestEvalAdd")),
+        budget_tracker=ctx.budget_tracker,
     )
 
 
@@ -1004,6 +1005,9 @@ def _promote_and_finalize_agent_result(
 
     if result.usage:
         tool_state.usage_entries.append(result.usage)
+        from mergecraft.utils.run_bounds import record_agent_usage
+
+        record_agent_usage(ctx.budget_tracker, result.usage)
 
     if output_schema and not tool_state.output:
         msg = (

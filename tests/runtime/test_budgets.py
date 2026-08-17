@@ -13,6 +13,7 @@ from mergecraft.utils.run_bounds import (
     BudgetTracker,
     RunBounds,
     budget_exhaustion_outcome,
+    record_agent_usage,
     resolve_run_bounds,
 )
 
@@ -66,3 +67,20 @@ def test_budget_exhaustion_yields_inconclusive_not_a_partial_approval() -> None:
     assert outcome is RunOutcome.inconclusive
     assert outcome is not RunOutcome.passed
     assert bounds.token_budget is not None or bounds.tool_call_budget is not None
+
+
+def test_record_agent_usage_charges_token_and_cost_budgets() -> None:
+    """Agent usage is charged against the per-run budget tracker."""
+    from mergecraft.agents.shared import AgentUsage
+
+    tracker = BudgetTracker(_tight_bounds())
+    record_agent_usage(
+        tracker,
+        AgentUsage(agent="test", input_tokens=50, output_tokens=49, cost_usd=0.005),
+    )
+    with pytest.raises(BudgetExhausted) as exc_info:
+        record_agent_usage(
+            tracker,
+            AgentUsage(agent="test", input_tokens=2, output_tokens=0, cost_usd=0.0),
+        )
+    assert exc_info.value.kind == "token"

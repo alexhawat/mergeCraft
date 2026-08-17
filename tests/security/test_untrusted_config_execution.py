@@ -307,6 +307,7 @@ async def test_untrusted_offline_review_withholds_makefile_static_checks(
         assert isinstance(ctx, ToolContext)
         captured["static_checks_enabled"] = ctx.static_checks_enabled
         captured["tool_names"] = {tool.name for tool in build_common_tools(ctx)}
+        captured["budget_tracker"] = ctx.budget_tracker
         return "http://127.0.0.1:1/mcp", lambda: None
 
     class FakeAgent:
@@ -343,6 +344,7 @@ async def test_untrusted_offline_review_withholds_makefile_static_checks(
 
     assert captured["static_checks_enabled"] is False
     assert "run_static_checks" not in captured["tool_names"]
+    assert captured.get("budget_tracker") is not None
 
 
 @pytest.mark.asyncio
