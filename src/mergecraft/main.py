@@ -1402,6 +1402,17 @@ def _action_review_context() -> ReviewContext:
         attempt = int(attempt_raw) if attempt_raw else None
     except ValueError:
         attempt = None
+    # Derive the tier from the same event payload `_resolve_credentials` uses
+    # (`derive_trust_tier`, fail-closed `untrusted`) — never the
+    # `MERGECRAFT_TRUST_TIER` env var, which only the CLI path sets; reading it
+    # here would omit the tier on Action runs.
+    from mergecraft.analyzers.trust import derive_trust_tier
+    from mergecraft.utils.payload import read_github_event
+
+    try:
+        event = read_github_event()
+    except Exception:
+        event = None
     return ReviewContext(
         review_id=resolve_review_id(),
         correlation_key=correlation_key_for(repo=repo, pr_number=pr_number, head_sha=head_sha),
@@ -1414,7 +1425,7 @@ def _action_review_context() -> ReviewContext:
         head_sha=head_sha,
         mode="review",
         trigger=os.environ.get("GITHUB_EVENT_NAME") or "",
-        trust_tier=os.environ.get("MERGECRAFT_TRUST_TIER") or "",
+        trust_tier=derive_trust_tier(event=event),
     )
 
 

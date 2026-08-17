@@ -79,6 +79,12 @@ jobs:
             --baseline evals/results/latest.json \
             --candidate "$RUNNER_TEMP/candidate.json" \
             --tolerance 0.02
+        # NOTE: the committed baseline is currently perfect
+        # (unsafe_approval_rate 0.0 / clean_block_rate 0.0 over ~46 cases), so
+        # a single case flipping can exceed the 0.02 band. When the eval bank
+        # changes, regenerate the baseline from the same commit
+        # (`mergecraft eval replay-bank` → `evals/results/latest.json`) so the
+        # gate measures drift, not corpus edits.
 
   # W8.2 publish gate — read-only reminder that CI/CD signs digests before
   # `craft publish` (PyPI + GHCR SHA→version retag via .craft.yml).
