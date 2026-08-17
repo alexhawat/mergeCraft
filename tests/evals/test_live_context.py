@@ -17,10 +17,12 @@ EV1.2 adds a materialize-case-repo step:
   and the review's ``cwd`` is the materialized tree — never the empty scratch
   directory and never the corpus checkout itself.
 
-The new ``materialize_case_repo`` symbol is imported lazily inside the test so
-collection stays clean while the symbol does not exist yet (per the EV1.1
-brief). The wiring test needs no live provider: the review itself is stubbed at
-the ``mergecraft.offline_review.run_offline_diff_review`` boundary, so
+The ``materialize_case_repo`` import is lazy inside the test, which kept
+collection clean at RED-suite time. Reconciled post-EV1.2 (2026-08-17): EV1.2
+(commit ``b1b5452``) made both tests XPASS; the non-strict ``green after EV1.2``
+xfail markers were removed, so both tests are now clean real passes. The wiring
+test needs no live provider: the review itself is stubbed at the
+``mergecraft.offline_review.run_offline_diff_review`` boundary, so
 ``skipped: no live gate`` does not apply to this file either.
 """
 
@@ -29,9 +31,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING, Any
 
 from mergecraft.evals.live_run import (
     BASELINE_FILENAME,
@@ -39,10 +39,8 @@ from mergecraft.evals.live_run import (
     run_detection,
 )
 
-_XFAIL_EV1_2 = pytest.mark.xfail(
-    reason="green after EV1.2: materialize the case repo before the live review (#220)",
-    strict=False,
-)
+if TYPE_CHECKING:
+    from _pytest.monkeypatch import MonkeyPatch
 
 _REPO_A_PY = "old\n"
 
@@ -74,7 +72,6 @@ def _write_detection_case_with_repo(corpus_dir: Path, case_id: str) -> Path:
 # ── #220: materialization contract ──
 
 
-@_XFAIL_EV1_2
 def test_live_review_runs_with_real_repo_context(tmp_path: Path) -> None:
     """The materialized review cwd contains the case's repo files — it is never
     an empty scratch directory."""
@@ -91,10 +88,7 @@ def test_live_review_runs_with_real_repo_context(tmp_path: Path) -> None:
     assert (review_cwd / "src" / "a.py").read_text(encoding="utf-8") == _REPO_A_PY
 
 
-@_XFAIL_EV1_2
-def test_case_repo_is_materialized_before_review(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_case_repo_is_materialized_before_review(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Ordering contract: at the moment the review runs, its cwd *already*
     contains the materialized case repo — materialization happens before the
     review on the production default path (``review_fn=None``), not after and

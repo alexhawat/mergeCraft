@@ -11,6 +11,10 @@ directories* (#219), so the published evidence path no longer names one flat run
 directory per run. EV1.2 sanitizes the slug so the run dir is always exactly one
 path component under ``raw-findings/``.
 
+Reconciled post-EV1.2 (2026-08-17): EV1.2 (commit ``b1b5452``) made both tests
+XPASS; the non-strict ``green after EV1.2`` xfail markers were removed, so both
+tests are now clean real passes.
+
 The contract is pinned **behaviourally** through ``run_live_detection`` — no new
 symbol is named here, so EV1.2 may place the sanitizing helper anywhere on the
 path (a ``sanitize_run_id_component``-style helper in ``evals/live_run.py`` is
@@ -27,20 +31,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from mergecraft.evals.live_run import (
     BASELINE_FILENAME,
     DetectionCase,
     discover_detection_cases,
     run_live_detection,
 )
-
-_XFAIL_EV1_2 = pytest.mark.xfail(
-    reason="green after EV1.2: slug sanitization for the raw-findings run dir (#219)",
-    strict=False,
-)
-
 
 # ── fixtures (mirrors tests/evals/test_live_run.py's detection-corpus helpers) ──
 
@@ -71,7 +67,6 @@ def _stub_review_fn() -> Any:
 # ── #219: slash-bearing slugs ──
 
 
-@_XFAIL_EV1_2
 def test_model_slug_with_slash_does_not_split_the_run_dir(tmp_path: Path) -> None:
     """A routed slug (``openrouter/openai/gpt-5``) yields exactly one directory
     directly under ``raw-findings/`` — never a ``provider/model`` nesting."""
@@ -100,7 +95,6 @@ def test_model_slug_with_slash_does_not_split_the_run_dir(tmp_path: Path) -> Non
         assert segment in raw_dir.name
 
 
-@_XFAIL_EV1_2
 def test_run_dir_is_stable_across_providers(tmp_path: Path) -> None:
     """The run-dir naming convention is one flat component for *every* provider —
     the shape must not change just because one provider routes its slugs — and

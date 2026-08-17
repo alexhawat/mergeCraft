@@ -17,9 +17,12 @@ Two contracts block #140's "publish reproducible numbers":
    version* (``mergecraft.__version__``). A commit is not a release; #140's
    "full version pins" needs ``VersionPins.mergecraft_version`` (EV1.2).
 
-Both new symbols fail at attribute-access time today (``AttributeError``), so
-collection is clean and the RED signature is exactly the missing EV1.2
-contract. Structural replay is pure and keyless — no live gate involved.
+Both new symbols failed at attribute-access time at RED-suite time
+(``AttributeError``), keeping collection clean with the RED signature naming
+exactly the missing EV1.2 contract. Reconciled post-EV1.2 (2026-08-17): EV1.2
+(commit ``b1b5452``) made both tests XPASS; the non-strict ``green after EV1.2``
+xfail markers were removed, so both tests are now clean real passes. Structural
+replay is pure and keyless — no live gate involved.
 """
 
 from __future__ import annotations
@@ -27,17 +30,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 import mergecraft
 from mergecraft.evals.benchmark import run_structural_replay
 from mergecraft.evals.store import Case, add_case
 from mergecraft.utils.learnings import LearningProvenance
-
-_XFAIL_EV1_2 = pytest.mark.xfail(
-    reason="green after EV1.2: reproducible result set with full version pins (#140)",
-    strict=False,
-)
 
 _WHEN = datetime(2026, 8, 17, 12, 0, 0, tzinfo=UTC)
 
@@ -81,7 +77,6 @@ def _bank_case(case_id: str) -> Case:
 # ── #140: reproducibility + pins ──
 
 
-@_XFAIL_EV1_2
 def test_same_commit_yields_the_same_result_set(tmp_path: Path) -> None:
     """Two structural replays of one bank at one commit produce the same result
     set — pinned via ``reproducibility_digest``, which must exclude the
@@ -98,7 +93,6 @@ def test_same_commit_yields_the_same_result_set(tmp_path: Path) -> None:
     assert first.reproducibility_digest == second.reproducibility_digest
 
 
-@_XFAIL_EV1_2
 def test_result_set_records_every_version_pin(tmp_path: Path) -> None:
     """The published result set records *every* version pin #140 requires —
     including the mergeCraft distribution version, not just its commit."""
