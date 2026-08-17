@@ -334,3 +334,35 @@ Target API (CC3.2):
 ## CC3.2 xfail reconciliation (2026-08-17)
 
 Removed impl-pending xfail markers from CC3 runtime test modules. Suite is 10 real passes.
+
+## CC4 — interop (PR CC4)
+
+Wave plan: `.ignorelocal/02-cli-sources-trust-wave-plan.md` (PR CC4)
+Authoring wave: **CC4.1**. Implementation: **CC4.2**.
+
+Target API (CC4.2):
+
+- ``mergecraft mcp serve|list`` on `src/mergecraft/cli/mcp_serve.py`
+- ``--profile fast|deep|security`` bundles on `src/mergecraft/cli/profiles.py`
+- ``mergecraft cache info|clear|prune`` on `src/mergecraft/cli/cache_cmd.py`
+
+Inspection verbs (`agents` / `lens` / `pipeline`) already ship from file 3 — CC4
+defers duplicate front-ends.
+
+## Contract matrix (CC4)
+
+| # | Contract | Layer | Primary test |
+|---|----------|-------|--------------|
+| CC4.1a | mcp serve role toolset | integration | `test_serves_the_toolset_for_a_named_role` |
+| CC4.1b | HA4 read-only class filter | integration | `test_served_toolset_honours_tool_classes` |
+| CC4.1c | D13 trust tier not widened | integration | `test_served_toolset_honours_source_trust_tier` |
+| CC4.1d | mcp list output | integration | `test_mcp_list_prints_the_toolset` |
+| CC4.1e | named profile bundle | integration | `test_named_profile_selects_a_bundle` |
+| CC4.1f | profile flag precedence | integration | `test_profile_can_be_overridden_by_explicit_flags` |
+| CC4.1g | cache verbs | integration | `test_cache_info_clear_prune` |
+
+## Acceptance (CC4.1)
+
+- 7 tests collected across `tests/cli/test_mcp_serve.py`,
+  `tests/cli/test_profiles.py`, `tests/cli/test_cache_verbs.py`
+- 0 pass; 7 RED via `xfail(strict=False)` — pending CC4.2
