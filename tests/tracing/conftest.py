@@ -96,3 +96,15 @@ def genai_module() -> Any:
     still fails RED at runtime under its non-strict ``xfail`` marker.
     """
     return importlib.import_module("mergecraft.tracing.genai")
+
+
+@pytest.fixture
+def signals_module() -> Any:
+    """Lazily import the OB4.2 outcome-spans module (``tracing/signals.py``).
+
+    The module does not exist until the OB4.2 implementation wave lands it.
+    Importing inside the fixture (rather than at module top level) keeps test
+    collection clean — zero collection errors — while every dependent test
+    still fails RED at runtime under its non-strict ``xfail`` marker.
+    """
+    return importlib.import_module("mergecraft.tracing.signals")

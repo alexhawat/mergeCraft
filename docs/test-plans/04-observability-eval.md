@@ -5,9 +5,10 @@ Worktree: session worktree on branch `alexhawat-observability-eval-waves` (based
 
 This doc is appended to per sub-wave. So far: **PR OB1 (sub-wave OB1.1,
 reconciled post-OB1.2)**, **PR OB2 (sub-wave OB2.1, reconciled post-OB2.2)**
-and **PR OB3 (sub-wave OB3.1)**, **PR EV1 (sub-wave EV1.1, reconciled
-post-EV1.2)**, **PR EV2 (sub-wave EV2.1)**. The OB4 / EV3 sections will be
-appended by their own `test-creator` sub-waves as those PRs start.
+**PR OB3 (sub-wave OB3.1, reconciled post-OB3.2, one amended test)**,
+**PR EV1 (sub-wave EV1.1, reconciled post-EV1.2)**, **PR EV2 (sub-wave
+EV2.1)** and **PR OB4 (sub-wave OB4.1)**. The EV3 section will be appended by
+its own `test-creator` sub-wave when that PR starts.
 
 ## PR OB1 — review-wide correlation on every span (test plan OB1.1)
 
