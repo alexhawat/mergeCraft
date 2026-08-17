@@ -309,6 +309,19 @@ class TracingSettings(BaseModel):
 
     D4/W6.2 — ``extra="forbid"``. W6.4 — ``enabled`` is tri-state
     (``None`` = unset / defer; the tracer treats unset as off).
+
+    OB2 / D6 — ``content`` selects the model-payload capture level
+    (``off`` / ``metadata`` / ``redacted`` / ``full``, default
+    ``redacted``). It is deliberately a plain ``str``: the closed vocabulary
+    and the D7 untrusted cap live in
+    ``tracing.content.resolve_content_capture`` so an invalid value fails
+    safe to the default at resolution time rather than rejecting the whole
+    config block, and ``MERGECRAFT_TRACING_CONTENT`` overrides it (env →
+    configured → default), never overriding the untrusted cap.
+    ``exclude_if`` keeps the W1.1 round-trip contract (cf.
+    ``TraceSinkEntry._drop_unset``): a config that never mentions
+    ``content`` dumps exactly as before — the field only serializes when it
+    differs from the default.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
@@ -317,6 +330,7 @@ class TracingSettings(BaseModel):
     retention_days: int = Field(default=30, alias="retentionDays")
     sinks: list[TraceSinkEntry] = Field(default_factory=list)
     redaction: bool = True
+    content: str = Field(default="redacted", exclude_if=lambda value: value == "redacted")
 
     @model_validator(mode="before")
     @classmethod

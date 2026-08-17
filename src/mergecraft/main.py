@@ -37,6 +37,13 @@ from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
+from mergecraft.tracing.review_context import (
+    ReviewContext,
+    bind_review_context,
+    correlation_key_for,
+    resolve_review_id,
+)
+from mergecraft.tracing.tracer import resolve_correlation_from_env
 from mergecraft.utils.agent_resolve import (
     ModelFallbackPolicyError,
     effective_model_chain,
@@ -1106,7 +1113,21 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 attempt_agent_id,
                 attempt_model or "(auto)",
             )
-        return await attempt_agent.run(attempt_ctx)
+        # O8/D10 (OB4) — issue the per-agent identity at dispatch: the span
+        # carries it and ``spawn_agent_cli`` exports it as
+        # ``MERGECRAFT_AGENT_ID`` so the MCP server can attribute this
+        # agent's tool calls.
+        from mergecraft.tracing import get_tracer_from_settings
+        from mergecraft.tracing.signals import agent_run_span
+
+        with agent_run_span(
+            get_tracer_from_settings(settings),
+            agent_id=str(attempt_agent_id),
+            role="reviewer",
+            lens=str(tool_state.selected_mode or "") or None,
+            executed_model=attempt_model,
+        ):
+            return await attempt_agent.run(attempt_ctx)
 
     # Named ``_execute_agent`` deliberately — same name as the top-level
     # phase function that calls this one, shadowed locally. A pre-G4 test
@@ -1124,7 +1145,17 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 tool_state=tool_state,
             )
             return winning_slug, chain_result
-        return selected_slug, await agent.run(run_ctx)
+        from mergecraft.tracing import get_tracer_from_settings
+        from mergecraft.tracing.signals import agent_run_span
+
+        with agent_run_span(
+            get_tracer_from_settings(settings),
+            agent_id=str(agent.name),
+            role="reviewer",
+            lens=str(tool_state.selected_mode or "") or None,
+            executed_model=ctx.resolved_model,
+        ):
+            return selected_slug, await agent.run(run_ctx)
 
     agent_task = asyncio.create_task(_execute_agent())
 
@@ -1308,6 +1339,31 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         actual_outcome=str(outcome) if verdict_prediction is not None else None,
     )
 
+    # O9 (OB4) — the verdict span at the publish convergence point. Emitted
+    # only when the agent actually submitted a terminal verdict: a run that
+    # never submitted has no verdict, and the missing span is the signal
+    # (the same diagnostic philosophy as the phase spans). The disagreement
+    # flag is derived by the emitter, never supplied here.
+    submission = tool_state.terminal_submission
+    if submission is not None:
+        try:
+            from mergecraft.tracing import get_tracer_from_settings
+            from mergecraft.tracing.signals import emit_verdict
+
+            fallback_reason = (result.metadata or {}).get("fallback_reason")
+            published_count = len(submission.findings)
+            emit_verdict(
+                get_tracer_from_settings(settings),
+                agent_verdict=submission.verdict,
+                structural_verdict="pass" if outcome is RunOutcome.passed else "fail",
+                published_count=published_count,
+                # Withdrawn ≈ proposed by the agent but not published.
+                withdrawn_count=max(len(tool_state.agent_findings) - published_count, 0),
+                fallback_reason=str(fallback_reason) if fallback_reason else None,
+            )
+        except Exception as exc:
+            logger.debug("verdict span emission skipped: {}", exc)
+
     if outcome is not RunOutcome.passed:
         return MainResult(
             success=False,
@@ -1323,6 +1379,53 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         result=output,
         evidence_packet_path=packet_path,
         outcome=outcome,
+    )
+
+
+def _action_review_context() -> ReviewContext:
+    """Build the run's ``ReviewContext`` from the Actions environment (OB1/O1).
+
+    Resolved from the same env correlation fields the tracer baseline uses,
+    so both agree on repo/pr/revision. ``GITHUB_SHA`` is the best head-sha
+    proxy available at bind time (before the event payload is parsed); the
+    correlation key is empty when there is no full repo context (D3).
+    """
+    correlation = resolve_correlation_from_env()
+    repo_raw = correlation.get("repo")
+    repo = repo_raw if isinstance(repo_raw, str) else None
+    pr_number_raw = correlation.get("pr_number")
+    pr_number = pr_number_raw if isinstance(pr_number_raw, (int, str)) else None
+    head_sha_raw = correlation.get("commit_sha")
+    head_sha = head_sha_raw if isinstance(head_sha_raw, str) else None
+    attempt_raw = os.environ.get("GITHUB_RUN_ATTEMPT")
+    try:
+        attempt = int(attempt_raw) if attempt_raw else None
+    except ValueError:
+        attempt = None
+    # Derive the tier from the same event payload `_resolve_credentials` uses
+    # (`derive_trust_tier`, fail-closed `untrusted`) — never the
+    # `MERGECRAFT_TRUST_TIER` env var, which only the CLI path sets; reading it
+    # here would omit the tier on Action runs.
+    from mergecraft.analyzers.trust import derive_trust_tier
+    from mergecraft.utils.payload import read_github_event
+
+    try:
+        event = read_github_event()
+    except Exception:
+        event = None
+    return ReviewContext(
+        review_id=resolve_review_id(),
+        correlation_key=correlation_key_for(repo=repo, pr_number=pr_number, head_sha=head_sha),
+        attempt=attempt,
+        source="action",
+        repo=repo,
+        pr_number=pr_number,
+        base_ref=os.environ.get("GITHUB_BASE_REF") or None,
+        head_ref=os.environ.get("GITHUB_HEAD_REF") or None,
+        head_sha=head_sha,
+        mode="review",
+        trigger=os.environ.get("GITHUB_EVENT_NAME") or "",
+        trust_tier=derive_trust_tier(event=event),
     )
 
 
@@ -1357,42 +1460,46 @@ async def main() -> MainResult:
             )
 
     ctx = RunContext()
-    try:
-        ctx = await _setup_run(ctx)
-        ctx = await _resolve_credentials(ctx)
-        agent_result = await _execute_agent(ctx)
-    except _ShortCircuit as short_circuit:
-        return short_circuit.result
-    except Exception as error:
-        error_message = str(error) if error else "unknown error occurred"
-        logger.error("{}", error_message)
-        error_outcome = _classify_error_outcome(error)
-        if ctx.tool_context:
-            try:
-                await persist_learnings(ctx.tool_context)
-                await report_status_checks(
-                    ctx.tool_context,
-                    run_succeeded=run_succeeded_for_outcome(error_outcome),
-                    failure_reason=error_message,
-                    conclusion=RUN_OUTCOME_CONCLUSION[error_outcome],
-                )
-            except Exception as cleanup_exc:
-                logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
-        return MainResult(success=False, error=error_message, outcome=error_outcome)
-    else:
-        return await _finalize(ctx, agent_result)
-    finally:
-        if ctx.stop_mcp is not None:
+    # OB1 / O1 — bind the review-wide identity for the whole run so every
+    # span closed in this process (and, via the exported review env, every
+    # spawned agent CLI) carries the same ``review.id``.
+    with bind_review_context(_action_review_context()):
+        try:
+            ctx = await _setup_run(ctx)
+            ctx = await _resolve_credentials(ctx)
+            agent_result = await _execute_agent(ctx)
+        except _ShortCircuit as short_circuit:
+            return short_circuit.result
+        except Exception as error:
+            error_message = str(error) if error else "unknown error occurred"
+            logger.error("{}", error_message)
+            error_outcome = _classify_error_outcome(error)
+            if ctx.tool_context:
+                try:
+                    await persist_learnings(ctx.tool_context)
+                    await report_status_checks(
+                        ctx.tool_context,
+                        run_succeeded=run_succeeded_for_outcome(error_outcome),
+                        failure_reason=error_message,
+                        conclusion=RUN_OUTCOME_CONCLUSION[error_outcome],
+                    )
+                except Exception as cleanup_exc:
+                    logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
+            return MainResult(success=False, error=error_message, outcome=error_outcome)
+        else:
+            return await _finalize(ctx, agent_result)
+        finally:
+            if ctx.stop_mcp is not None:
+                with contextlib.suppress(Exception):
+                    ctx.stop_mcp()
             with contextlib.suppress(Exception):
-                ctx.stop_mcp()
-        with contextlib.suppress(Exception):
-            cleanup_temp_directory()
-        if ctx.token_ref is not None:
-            with contextlib.suppress(Exception):
-                await ctx.token_ref.aclose()
-        if ctx.github is not None:
-            with contextlib.suppress(Exception):
-                await ctx.github.aclose()
+                cleanup_temp_directory()
+            if ctx.token_ref is not None:
+                with contextlib.suppress(Exception):
+                    await ctx.token_ref.aclose()
+            if ctx.github is not None:
+                with contextlib.suppress(Exception):
+                    await ctx.github.aclose()
 
 
 __all__ = ["MainResult", "RunOutcome", "main"]

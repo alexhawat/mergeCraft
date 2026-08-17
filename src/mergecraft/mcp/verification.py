@@ -21,6 +21,7 @@ Exports:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -129,6 +130,82 @@ def _run_lane(ctx: ToolContext) -> str | None:
     return None
 
 
+def _emit_finding_stage(
+    ctx: ToolContext,
+    findings: Any,
+    *,
+    stage: str,
+) -> None:
+    """Emit one ``mergecraft.finding`` lifecycle span per finding (O9/OB4).
+
+    Resolves the tracer from the active span (the ``mergecraft.run`` span is
+    open for the whole run, so the finding span inherits ``review.id`` via
+    the D4 close-time merge). Total and non-throwing per the tracing
+    contract (#56 D6): any failure degrades to a missing span, never a
+    failed tool call.
+    """
+    try:
+        from mergecraft.tracing import Span
+        from mergecraft.tracing.tracer import _ACTIVE_SPAN
+
+        active = _ACTIVE_SPAN.get()
+        if not isinstance(active, Span):
+            return
+        from mergecraft.tracing.genai import resolve_capture_policy
+        from mergecraft.tracing.signals import emit_finding
+
+        policy = resolve_capture_policy(ctx.tool_state.trust_tier)
+        for finding in findings or []:
+            emit_finding(
+                active.tracer,
+                fingerprint=str(getattr(finding, "fingerprint", "") or ""),
+                stage=stage,
+                severity=str(getattr(finding, "severity", "") or "") or None,
+                message=str(getattr(finding, "body", "") or "") or None,
+                policy=policy,
+            )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("finding span emission failed ({}): {}", stage, exc)
+
+
+@dataclass(slots=True)
+class AgentFindingLike:
+    """Minimal row shape for lifecycle span emission (OB4)."""
+
+    fingerprint: str
+    severity: str = ""
+    body: str = ""
+
+    def __init__(self, fingerprint: str, severity: str = "", body: str = "", **_: Any) -> None:
+        # Tolerate extra stored-row keys (path/line/…) — only the three
+        # lifecycle fields are read.
+        self.fingerprint = fingerprint
+        self.severity = severity
+        self.body = body
+
+
+def emit_published_findings(ctx: ToolContext) -> None:
+    """Emit the ``published`` lifecycle stage for every confirmed finding.
+
+    Called at the publish seam (``create_pull_request_review``) so the
+    documented ``proposed`` → ``verified`` → ``published``/``withdrawn``
+    lifecycle is complete in the trace. Non-throwing.
+    """
+    _emit_finding_stage(
+        ctx,
+        [
+            AgentFindingLike(
+                fingerprint=str(row.get("fingerprint", "") or ""),
+                severity=str(row.get("severity", "") or ""),
+                body=str(row.get("body", "") or ""),
+            )
+            for row in ctx.tool_state.confirmed_findings
+            if isinstance(row, dict) and row.get("fingerprint")
+        ],
+        stage="published",
+    )
+
+
 def verify_agent_findings_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         from mergecraft.agents.verifier import (
@@ -167,6 +244,9 @@ def verify_agent_findings_tool(ctx: ToolContext):
             row["fingerprint"] = finding.identity()
             stored[str(row["fingerprint"])] = row
         ctx.tool_state.agent_findings = list(stored.values())
+        _emit_finding_stage(
+            ctx, [AgentFindingLike(**row) for row in stored.values()], stage="proposed"
+        )
         plan = plan_agent_verifications(
             findings,
             budget=settings.inline_budget,
@@ -267,6 +347,25 @@ def record_finding_verdict_tool(ctx: ToolContext):
         )
         path = ctx.tool_state.learnings_file_path or learnings_file_path(ctx.tmpdir)
         outcome = record_verifier_verdict(verdict, learnings_path=Path(path))
+        stored_row = next(
+            (
+                row
+                for row in ctx.tool_state.agent_findings
+                if isinstance(row, dict) and row.get("fingerprint") == outcome.fingerprint
+            ),
+            None,
+        )
+        _emit_finding_stage(
+            ctx,
+            [
+                AgentFindingLike(
+                    fingerprint=outcome.fingerprint,
+                    severity=str((stored_row or {}).get("severity", "") or ""),
+                    body=str((stored_row or {}).get("body", "") or ""),
+                )
+            ],
+            stage="withdrawn" if outcome.recorded_withdrawn else "verified",
+        )
         if outcome.recorded_withdrawn:
             ctx.tool_state.was_updated = True
         if outcome.verdict == "confirm" and outcome.publishable:

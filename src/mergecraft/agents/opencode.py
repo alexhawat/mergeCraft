@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 from loguru import logger
@@ -32,6 +33,13 @@ from mergecraft.agents.shared import (
     spawn_agent_cli,
 )
 from mergecraft.tracing import current_tracer
+from mergecraft.tracing.genai import (
+    input_messages_attrs,
+    output_messages_attrs,
+    request_attrs,
+    resolve_capture_policy,
+    usage_attrs,
+)
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
@@ -44,6 +52,9 @@ from mergecraft.utils.process_group import (
 )
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
+
+if TYPE_CHECKING:
+    from mergecraft.tracing.content import ContentCapture
 
 # Re-exported for tests / callers that import these names from opencode.
 __all_gateway_envs__ = (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV)
@@ -280,6 +291,68 @@ async def _prompt_session(
     session_id: str,
     text: str,
     model: dict[str, str] | None,
+    capture_policy: ContentCapture | None = None,
+) -> AgentResult:
+    """Prompt the opencode session — the one harness path with full payload visibility.
+
+    OB3: unlike the CLI harnesses (whose NDJSON streams surface only
+    agent-level text), this HTTP path sees the actual prompt sent and the
+    completion returned, so it wraps the exchange in an ``llm.call`` span
+    carrying the request model, the policy-gated input/output messages
+    (O5), and the token usage. The executed model is NOT stamped: the
+    opencode session response does not reliably report it, and a guessed
+    value would fake the D11 fallback signal (coverage recorded in
+    ``agents/_stream_consumer.py``). Tracing never fails the run
+    (convention 3) — every capture step degrades to missing attrs.
+    """
+    tracer = current_tracer()
+    if tracer is None:
+        return await _prompt_session_http(
+            base_url=base_url, session_id=session_id, text=text, model=model
+        )
+    model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
+    with tracer.start_span("llm.call") as span:
+        try:
+            for key, value in request_attrs(model=model_slug).items():
+                span.set_attribute(key, value)
+            if capture_policy is not None:
+                for key, value in input_messages_attrs(
+                    [{"role": "user", "content": text}], policy=capture_policy
+                ).items():
+                    span.set_attribute(key, value)
+        except Exception as exc:
+            logger.debug("opencode llm.call request attrs failed: {}", exc)
+        result = await _prompt_session_http(
+            base_url=base_url, session_id=session_id, text=text, model=model
+        )
+        try:
+            if result.usage is not None:
+                for key, value in usage_attrs(
+                    input_tokens=result.usage.input_tokens,
+                    output_tokens=result.usage.output_tokens,
+                    cache_read_input_tokens=result.usage.cache_read_tokens,
+                    cost_usd=result.usage.cost_usd,
+                ).items():
+                    span.set_attribute(key, value)
+            if capture_policy is not None and result.output:
+                for key, value in output_messages_attrs(
+                    [{"role": "assistant", "content": result.output}],
+                    policy=capture_policy,
+                ).items():
+                    span.set_attribute(key, value)
+            if not result.success and result.error:
+                span.set_status("error", result.error[:200])
+        except Exception as exc:
+            logger.debug("opencode llm.call response attrs failed: {}", exc)
+        return result
+
+
+async def _prompt_session_http(
+    *,
+    base_url: str,
+    session_id: str,
+    text: str,
+    model: dict[str, str] | None,
 ) -> AgentResult:
     payload: dict[str, object] = {
         "parts": [{"type": "text", "text": text}],
@@ -419,11 +492,17 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         user = ctx.instructions.user
         prompt = f"{system}\n\n{user}".strip() if system else user
 
+        # OB3 — the trust tier is ``derive_trust_tier()``'s output carried on
+        # the tool state, never an env fallback (D7 — the untrusted content
+        # cap must not be defeatable by environment control).
+        capture_policy = resolve_capture_policy(ctx.tool_state.trust_tier)
+
         initial = await _prompt_session(
             base_url=handle.base_url,
             session_id=session_id,
             text=prompt,
             model=model_obj,
+            capture_policy=capture_policy,
         )
 
         async def resume(followup: str) -> AgentResult:
@@ -432,6 +511,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 session_id=session_id,
                 text=followup,
                 model=model_obj,
+                capture_policy=capture_policy,
             )
 
         try:

@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -62,6 +62,10 @@ from mergecraft.utils.source_resolve import (
     materialize_resolved_diff,
     resolve_workspace,
 )
+
+if TYPE_CHECKING:
+    from mergecraft.tracing.review_context import ReviewContext
+    from mergecraft.utils.source_resolve import ResolvedWorkspace
 
 
 @dataclass(slots=True)
@@ -419,6 +423,84 @@ async def run_offline_diff_review(
     except ValueError as exc:
         return _offline_failure(error=str(exc), outcome=RunOutcome.configuration_error)
 
+    from mergecraft.tracing.review_context import bind_review_context
+
+    review_root = (invocation_root or cwd).resolve()
+    with bind_review_context(
+        _offline_review_context(
+            cwd=cwd, review_root=review_root, trust_override=trust_override, cloned=cloned
+        )
+    ):
+        return await _run_offline_diff_review(
+            cwd=cwd,
+            base=base,
+            diff_file=diff_file,
+            model=model,
+            prompt_extra=prompt_extra,
+            dry_run=dry_run,
+            json_path=json_path,
+            evidence_packet_path=evidence_packet_path,
+            tracing_cli=tracing_cli,
+            workspace=workspace,
+            spec=spec,
+            review_root=review_root,
+            trust_override=trust_override,
+            cloned=cloned,
+        )
+
+
+def _offline_review_context(
+    *,
+    cwd: Path,
+    review_root: Path,
+    trust_override: CliTrustOverride | None = None,
+    cloned: bool = False,
+) -> ReviewContext:
+    """Build the run's ``ReviewContext`` for a local diff review (OB1/O1).
+
+    A local patch review has no repo/pr/head identity, so the correlation
+    key stays empty (D3 — no misleading constant) and the review id resolves
+    from ``MERGECRAFT_REVIEW_ID`` (inherited) or a fresh uuid4. The trust
+    tier comes from ``resolve_offline_review_trust_tier`` — an explicit
+    derivation from source provenance, never an env fallback (the OB2
+    security gate: env-controlled tiers would silently neutralize the D7
+    content cap).
+    """
+    from mergecraft.tracing.review_context import ReviewContext, resolve_review_id
+
+    return ReviewContext(
+        review_id=resolve_review_id(),
+        source="cli",
+        mode="review",
+        trigger="cli",
+        trust_tier=resolve_offline_review_trust_tier(
+            cwd=cwd,
+            invocation_root=review_root,
+            trust_override=trust_override,
+            cloned=cloned,
+        ),
+    )
+
+
+async def _run_offline_diff_review(
+    *,
+    cwd: Path,
+    base: str | None = None,
+    diff_file: Path | None = None,
+    model: str | None = None,
+    prompt_extra: str | None = None,
+    dry_run: bool = False,
+    json_path: Path | None = None,
+    evidence_packet_path: Path | None = None,
+    tracing_cli: list[str] | None = None,
+    workspace: ResolvedWorkspace,
+    spec: SourceResolverSpec,
+    review_root: Path,
+    trust_override: CliTrustOverride | None = None,
+    cloned: bool = False,
+) -> OfflineReviewResult:
+    """Body of :func:`run_offline_diff_review`, run under the bound review context."""
+    cwd = cwd.resolve()
     if not (cwd / ".git").exists() and diff_file is None:
         return _offline_failure(
             error=f"not a git repository: {cwd} (pass --diff for a standalone patch file)",
@@ -433,7 +515,6 @@ async def run_offline_diff_review(
 
     telemetry_env_previous = apply_local_telemetry_defaults(private_repo=True, cwd=cwd)
     tracing_env_previous = _apply_tracing_cli_overrides(tracing_cli)
-    review_root = (invocation_root or cwd).resolve()
     trust_tier = resolve_offline_review_trust_tier(
         cwd=cwd,
         invocation_root=review_root,
@@ -593,6 +674,9 @@ async def _run_agent_review(
         # the prompt forbids them.
         github = GitHubClient(token="")
         tool_state = init_tool_state(owner="local", name=cwd.name, dir=str(cwd))
+        # Carry the review's resolved trust tier so drivers resolving the OB2
+        # content policy via ``ctx.tool_state.trust_tier`` get the honest
+        # derived tier (the OB2 security gate) rather than an env fallback.
         tool_state.trust_tier = trust_tier
         # Point the shared evidence seam at the patch this run reviewed, so the
         # offline packet classifies blast radius from the same diff the agent
@@ -697,7 +781,18 @@ async def _run_agent_review(
 
         logger.info("» offline diff-review via agent={}", agent.name)
         await agent.install()
-        result = await agent.run(run_ctx)
+        # O8/D10 (OB4) — issue the per-agent identity at dispatch, exactly as
+        # the Action path does in main.py, so the CLI and Action traces agree.
+        from mergecraft.tracing import get_tracer_from_settings
+        from mergecraft.tracing.signals import agent_run_span
+
+        with agent_run_span(
+            get_tracer_from_settings(settings),
+            agent_id=str(agent.name),
+            role="reviewer",
+            executed_model=resolved_model,
+        ):
+            result = await agent.run(run_ctx)
         try:
             record_agent_usage(budget_tracker, result.usage)
         except BudgetExhausted as exc:

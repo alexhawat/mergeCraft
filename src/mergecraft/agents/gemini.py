@@ -29,6 +29,7 @@ from mergecraft.tracing._tool_attrs import (
     enrich_tool_request,
     enrich_tool_response,
 )
+from mergecraft.tracing.genai import output_messages_attrs, resolve_capture_policy
 from mergecraft.tracing.redaction import redact_tool_payload
 from mergecraft.tracing.tracer import (
     ProviderLLMPair,
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+    from mergecraft.tracing.content import ContentCapture
     from mergecraft.tracing.tracer import Tracer
 
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
@@ -107,6 +109,13 @@ def write_mcp_config(
         "httpUrl": ctx.mcp_server_url,
         "trust": True,
     }
+    # D10 (OB4) — forward the dispatch-issued agent id as a header on every
+    # MCP call so the server can attribute this agent's tool.call spans.
+    from mergecraft.tracing.signals import current_agent_id
+
+    agent_id = current_agent_id()
+    if agent_id:
+        server_config["headers"] = {"X-MergeCraft-Agent-Id": agent_id}
     excluded_tools = [str(name) for name in ctx.subagent_denied_tools]
     if excluded_tools:
         server_config["excludeTools"] = excluded_tools
@@ -301,9 +310,15 @@ def _run_gemini_streaming(
     except Exception as exc:
         logger.debug("gemini stream tracer resolution failed: {}", exc)
 
+    # OB3 — see codex: the trust tier is ``derive_trust_tier()``'s output
+    # from the tool state, never an env fallback (D7).
+    capture_policy = (
+        resolve_capture_policy(ctx.tool_state.trust_tier) if tracer is not None else None
+    )
     handler, close_all_open_spans = _gemini_stream_event_handler(
         tracer=tracer,
         model_id=model or "default",
+        capture_policy=capture_policy,
     )
 
     try:
@@ -360,6 +375,7 @@ def _gemini_stream_event_handler(
     *,
     tracer: Tracer | None,
     model_id: str,
+    capture_policy: ContentCapture | None = None,
 ) -> tuple[
     Callable[[StreamSpanAccumulator, dict[str, Any]], None],
     Callable[[], None],
@@ -443,6 +459,17 @@ def _gemini_stream_event_handler(
             role = event.get("role")
             if role == "assistant" and isinstance(content, str) and content:
                 accumulator.set_output(content)
+                # O5 (OB3) — the assistant message text is the completion
+                # payload; capture it on the open llm span under the content
+                # policy. ``capture_policy=None`` keeps the pre-OB3 surface.
+                if capture_policy is not None:
+                    pair = open_pairs.get("default")
+                    if pair is not None:
+                        for attr_key, attr_value in output_messages_attrs(
+                            [{"role": "assistant", "content": content}],
+                            policy=capture_policy,
+                        ).items():
+                            pair.llm.set_attribute(attr_key, attr_value)
             return
 
         if event_type == "tool_use":
