@@ -6,8 +6,8 @@ Worktree: session worktree on branch `alexhawat-observability-eval-waves` (based
 This doc is appended to per sub-wave. So far: **PR OB1 (sub-wave OB1.1,
 reconciled post-OB1.2)**, **PR OB2 (sub-wave OB2.1, reconciled post-OB2.2)**
 and **PR OB3 (sub-wave OB3.1)**, **PR EV1 (sub-wave EV1.1, reconciled
-post-EV1.2)**. The OB4 / EV2–EV3 sections will be appended by their own
-`test-creator` sub-waves as those PRs start.
+post-EV1.2)**, **PR EV2 (sub-wave EV2.1)**. The OB4 / EV3 sections will be
+appended by their own `test-creator` sub-waves as those PRs start.
 
 ## PR OB1 — review-wide correlation on every span (test plan OB1.1)
 
@@ -370,3 +370,166 @@ reviewer the operator's real checkout.
 (stub `review_fn` / stubbed `run_offline_diff_review` boundary), so
 `skipped: no live gate` applies cleanly; the live-provider proof is the EV1
 Final gate.
+
+## PR OB4 — phase, agent, finding, verdict and eval spans (test plan OB4.1)
+
+Authoring wave: **OB4.1** (tests-first, RED). Implementation: **OB4.2**.
+xfail-reconciliation: **post-OB4.2** (orchestrator re-dispatches test-creator to
+remove the satisfied markers).
+
+Locked decisions covered: **D10** (per-agent attribution from the MCP side —
+identity issued at dispatch, exported across the `spawn_agent_cli` boundary as
+`MERGECRAFT_AGENT_ID`; nothing asserted inside the harness subprocess, which is
+out of scope), **D12** (eval scores are spans AND files; the span inherits the
+active `review.id` via the OB1 D4 close-time merge — the free eval↔trace join).
+Findings covered: **O8** (tool calls unattributed), **O9** (no outcome or score
+spans). Conventions pinned: 3 (all emitters total and non-throwing — NullTracer
+no-op), 4 (finding bodies route through OB2's `capture_text`), 5 (span cap not
+approached by a normal review).
+
+### xfail schedule
+
+All 14 tests carry `@pytest.mark.xfail(reason="green after OB4.2: …",
+strict=False)` — `strict=False` is explicit because the repo pins
+`xfail_strict = true`. The `mergecraft.tracing.signals` import is lazy (shared
+fixture in `tests/tracing/conftest.py`) so collection stays clean. After OB4.2
+lands, the markers are removed in reconciliation so the suite ends with 14
+clean real passes.
+
+### Env-var contract pinned by these tests (not fixed in prose by the plan)
+
+| Env var | Meaning |
+| --- | --- |
+| `MERGECRAFT_AGENT_ID` | The dispatch-issued per-agent identity, exported into the spawned agent CLI's env (setdefault — caller value wins) so the MCP server can attribute that agent's `tool.call`s (D10). |
+
+### Span-kind and attribute contract pinned by these tests
+
+| Span kind | Emitted by | Key attributes |
+| --- | --- | --- |
+| `mergecraft.phase` | `emit_phase(tracer, phase=)` | `mergecraft.phase.name` — value from the EXISTING `mcp/verdict.py::ReviewPhase` enum (no second vocabulary) |
+| `mergecraft.agent.run` | `agent_run_span(tracer, agent_id=, role=, lens=, executed_model=, prompt_version=, toolset=)` | `mergecraft.agent.{id,role,lens,executed_model,prompt_version,toolset}` + `gen_ai.agent.name` (mirrors the id for Logfire AI views) |
+| `mergecraft.finding` | `emit_finding(tracer, fingerprint=, stage=, …, policy=)` | `mergecraft.finding.{fingerprint,stage,severity,category}`; body via `capture_text` at `mergecraft.finding.body` (`.chars`/`.bytes`/`.sha256`/`.truncated`) |
+| `mergecraft.verdict` | `emit_verdict(tracer, agent_verdict=, structural_verdict=, published_count=, withdrawn_count=, fallback_reason=None)` | `mergecraft.verdict.{agent,structural,disagreement,findings_published,findings_withdrawn,fallback_reason}` — `disagreement` DERIVED by the emitter; `fallback_reason` omitted when unset |
+| `mergecraft.eval.score` | `emit_eval_score(tracer, case_id=, metrics=)` | `mergecraft.eval.case_id` + one `mergecraft.eval.<metric>` attr per metric; inherits `review.id` (D12) |
+
+Verdict vocabularies reuse the existing ones: agent verdict
+`approve`/`request_changes` (`mcp/verdict.py`), structural verdict
+`pass`/`fail`.
+
+### Contract → test mapping
+
+| Contract | Test | File |
+| --- | --- | --- |
+| O9 — every review lifecycle phase emits a span (+ NullTracer no-op) | `test_each_review_phase_emits_a_span` | `tests/tracing/test_phase_spans.py` |
+| O9 — a run that never submits visibly stops before SUBMIT/PUBLISH/COMPLETE | `test_a_run_that_never_submits_shows_the_missing_phase` | `tests/tracing/test_phase_spans.py` |
+| O8 — agent run span carries id, role, lens, executed model, prompt version, toolset | `test_agent_run_span_carries_identity` | `tests/tracing/test_agent_spans.py` |
+| O8/D10 — tool calls parent under their agent and carry its identity; binding ends with the span | `test_tool_calls_chain_under_their_agent` | `tests/tracing/test_agent_spans.py` |
+| O8 — two agents are distinguishable in one trace | `test_two_agents_are_distinguishable_in_one_trace` | `tests/tracing/test_agent_spans.py` |
+| D10 — agent id crosses the `spawn_agent_cli` env boundary (setdefault; no caller-env mutation) | `test_attribution_survives_the_subprocess_boundary` | `tests/tracing/test_agent_spans.py` |
+| O9 — finding lifecycle proposed → verified → published/withdrawn, keyed by fingerprint | `test_finding_lifecycle_is_recorded` | `tests/tracing/test_finding_spans.py` |
+| O9 + D6 — finding bodies respect the content policy (redacted/metadata) | `test_finding_bodies_respect_the_content_policy` | `tests/tracing/test_finding_spans.py` |
+| O9 — verdict span carries agent + structural verdict | `test_carries_agent_and_structural_verdict` | `tests/tracing/test_verdict_span.py` |
+| O9 — disagreement flag is derived, never caller-supplied | `test_disagreement_flag_is_derived` | `tests/tracing/test_verdict_span.py` |
+| O9/D11 — findings counts + fallback reason recorded (omitted when unset) | `test_counts_and_fallback_reason_recorded` | `tests/tracing/test_verdict_span.py` |
+| O9 — each eval metric is its own attribute (zero is real data) | `test_eval_score_emits_each_metric_as_an_attribute` | `tests/tracing/test_eval_spans.py` |
+| D12 — eval span inherits the active review.id (free join) | `test_eval_span_inherits_the_review_id` | `tests/tracing/test_eval_spans.py` |
+| Convention 5 — a normal review's signal spans are O(dozens) (37 ≪ 10 000 cap) | `test_span_cap_not_approached_by_a_normal_review` | `tests/tracing/test_eval_spans.py` |
+
+### Target API OB4.2 must satisfy (as pinned by these tests)
+
+`src/mergecraft/tracing/signals.py` (new) — all emitters total and
+non-throwing (convention 3), following `_tool_attrs.emit_verb_subevent`'s
+open-decorate-close discipline:
+
+| Symbol | Contract |
+| --- | --- |
+| `emit_phase(tracer, *, phase)` | Point span `mergecraft.phase` with `mergecraft.phase.name`; accepts `mcp/verdict.py::ReviewPhase` |
+| `agent_run_span(tracer, *, agent_id, role, lens=None, executed_model=None, prompt_version=None, toolset=())` | Context manager opening `mergecraft.agent.run` with the identity attrs above; binds the identity for the dynamic scope |
+| `current_agent_id()` | Returns the bound agent id inside `agent_run_span`, `None` outside |
+| `emit_finding(tracer, *, fingerprint, stage, severity=None, category=None, message=None, policy=…)` | Point span `mergecraft.finding`; body via `capture_text` under the given `ContentCapture` policy |
+| `emit_verdict(tracer, *, agent_verdict, structural_verdict, published_count=None, withdrawn_count=None, fallback_reason=None)` | Point span `mergecraft.verdict`; derives `disagreement`; omits `fallback_reason` when unset |
+| `emit_eval_score(tracer, *, case_id, metrics)` | Point span `mergecraft.eval.score`; one attr per metric |
+
+`src/mergecraft/agents/shared.py::spawn_agent_cli`: exports
+`MERGECRAFT_AGENT_ID` (from the bound agent identity) into the child env after
+`agent_subprocess_env`, via `setdefault` — same discipline as OB1's review env.
+
+### Acceptance (plan §OB4.1)
+
+14 collected; **0 pass**; **14 RED** (non-strict xfail — failures at runtime,
+zero collection errors). `make lint` + `make typecheck` clean. Live gates:
+none in OB4.1 — `skipped: no live gate` (the runtime proof is the OB4 Final
+gate).
+
+## PR EV2 — blocker precision, duplicate rate, per-lens and judge value (test plan EV2.1)
+
+Authoring wave: **EV2.1** (tests-first, RED). Implementation: **EV2.2**.
+All eight contracts pin the *scoring* side (global convention 7 — production
+emits normalized fields/attribution, `evals/` scores); per-lens and judge
+value consume typed attribution inputs, not OB4 spans. Every test is keyless
+and pure (`score_findings` / typed models only), so `skipped: no live gate`
+applies to the whole file set.
+
+### xfail schedule
+
+All 8 contract tests carry `@pytest.mark.xfail(reason="green after EV2.2: …",
+strict=False)` — `strict=False` is explicit because the repo pins
+`xfail_strict = true`. Post-EV2.2 the orchestrator re-dispatches test-creator
+to remove the satisfied markers. Each test fails for exactly one intended
+reason today (verified with `--runxfail`): `AttributeError` on
+`ScoreReport.blocker_precision` / `ScoreReport.duplicate_finding_indexes`
+(existing models, new attributes), `ImportError` on the new symbols
+(`unique_accepted_findings_per_lens`, `judge_value`, `summarize_latencies`,
+`rollup_by_orchestrator_kind`) — imported lazily inside the test bodies so
+collection stays clean.
+
+### Pinned definitions (not fixed in prose by the plan)
+
+| Contract | Pinned definition |
+| --- | --- |
+| Blocker band | Severity normalizing to `"Critical"` via `normalize_severity` (`blocker`/`critical` both map there) |
+| `ScoreReport.blocker_precision` | (blocker findings that matched a baseline issue) / (blocker findings reported); `None` when no blocker findings reported (honest-`None` precedent: `DetectionCaseResult.strict_precision`) |
+| Semantic duplicate | Same normalized path **and** line ranges overlapping within `DEFAULT_LINE_SLACK` — the locality rule `score_findings` already uses; first occurrence canonical, later ones counted |
+| `ScoreReport.duplicate_rate` | `len(duplicate_finding_indexes) / total_reported`; `0.0` (never `NaN`) when nothing reported |
+| Lens value | Across per-lens runs (matching is 1:1 within one run, so "unique" is only meaningful across runs); the `findings_by_lens` dict key is the lens attribution |
+| Judge value | Pure before/after over two closed-world `ScoreReport`s: `noise_removed` = FPs filtered, `recall_lost` = located issues lost |
+| Percentile method | Linear interpolation between closest ranks over the sorted sample (the numpy default) — pinned so two implementations cannot disagree |
+| Orchestrator-kind rollup | Mirrors `by_corpus_class`'s `CorpusClassRollup` shape; row `status` mapping: `passed`→correct, `regression`→incorrect, `blocked`→inconclusive |
+
+### Contract → test mapping
+
+| Contract | Test(s) | File |
+| --- | --- | --- |
+| Blocker precision is its own number (moves independently of overall precision) | `test_scored_separately_from_overall_precision` | `tests/evals/test_blocker_precision.py` |
+| Blocker-band regression detectable when overall precision is unchanged | `test_blocker_precision_regression_is_detectable` | `tests/evals/test_blocker_precision.py` |
+| Semantic duplicates counted (paraphrase at same location), rate reported | `test_semantic_duplicates_are_counted` | `tests/evals/test_duplicate_rate.py` |
+| Per-lens value: unique accepted findings per lens | `test_unique_accepted_findings_per_lens` | `tests/evals/test_agent_value.py` |
+| A lens that finds nothing unique is visible as a zero, never omitted | `test_a_lens_that_finds_nothing_unique_is_visible` | `tests/evals/test_agent_value.py` |
+| Judge value: noise removed AND recall lost both reported (precision-gain/recall-loss judge must look bad) | `test_noise_removed_and_recall_lost_are_both_reported` | `tests/evals/test_judge_value.py` |
+| Cost/latency: p50 and p95 reported, percentile method pinned | `test_p50_and_p95_reported` | `tests/evals/test_cost_latency.py` |
+| `orchestrator_kind` is a scored dimension (W-23: hybrid vs llm) | `test_orchestrator_kind_is_a_scored_dimension` | `tests/evals/test_orchestrator_dimension.py` |
+
+### Target API EV2.2 must satisfy (as pinned by these tests)
+
+`src/mergecraft/evals/scoring.py`:
+
+| Symbol | Contract |
+| --- | --- |
+| `ScoreReport.blocker_precision` | `float \| None` — see pinned definition above |
+| `ScoreReport.duplicate_finding_indexes` / `ScoreReport.duplicate_rate` | `list[int]` ledger + `float` rate — see pinned definitions above |
+| `LensValue` | Model: `lens: str`, `accepted: int`, `unique_accepted: int` |
+| `unique_accepted_findings_per_lens(findings_by_lens, issues, *, slack=DEFAULT_LINE_SLACK)` | `dict[str, LensValue]`; every submitted lens present, even all-zero |
+| `JudgeValue` / `judge_value(before, after)` | Model `noise_removed: int`, `recall_lost: int`; pure before/after comparison |
+
+`src/mergecraft/evals/benchmark.py`:
+
+| Symbol | Contract |
+| --- | --- |
+| `LatencySummary` / `summarize_latencies(durations_ms)` | `p50_ms` / `p95_ms`, linear-interpolation percentile method |
+| `rollup_by_orchestrator_kind(rows_by_kind)` | `dict[str, CorpusClassRollup]` with the pinned status mapping |
+
+### Acceptance (plan §EV2.1)
+
+8 collected; **0 pass**; **8 RED** (non-strict xfail — failures at runtime,
+zero collection errors). `make lint` + `make typecheck` clean. Live gates:
+none — `skipped: no live gate`.
