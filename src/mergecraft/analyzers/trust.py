@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path  # noqa: TC003 — used at runtime by ReviewSource / build_review_source
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
 AnalyzersMode = Literal["off", "auto", "full", "untrusted-only"]
+
+ReviewSourceKind = Literal["local_cwd", "local_path", "cloned_remote"]
 
 #: Every value the ``analyzers:`` Action input accepts.
 ANALYZERS_MODES: frozenset[str] = frozenset({"off", "auto", "full", "untrusted-only"})
@@ -53,6 +56,75 @@ IN_PROCESS_ANALYZER_IDS: frozenset[str] = frozenset({"agentsec"})
 class ManifestTierDecision:
     skipped: bool
     reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewSource:
+    """Provenance descriptor for a CLI-supplied review source (TS1 / D2)."""
+
+    kind: ReviewSourceKind
+    path: Path
+    invocation_root: Path
+
+
+def build_review_source(
+    *,
+    cwd: Path,
+    invocation_root: Path,
+    cloned: bool = False,
+) -> ReviewSource:
+    """Construct a :class:`ReviewSource` from a review cwd and invocation root."""
+    resolved_cwd = cwd.resolve()
+    resolved_root = invocation_root.resolve()
+    if cloned:
+        return ReviewSource(
+            kind="cloned_remote",
+            path=resolved_cwd,
+            invocation_root=resolved_root,
+        )
+    if resolved_cwd == resolved_root:
+        return ReviewSource(
+            kind="local_cwd",
+            path=resolved_cwd,
+            invocation_root=resolved_root,
+        )
+    return ReviewSource(
+        kind="local_path",
+        path=resolved_cwd,
+        invocation_root=resolved_root,
+    )
+
+
+def derive_source_trust_tier(
+    source: object | None,
+    *,
+    trust_override: TrustTier | None = None,
+) -> TrustTier:
+    """Derive trust tier for a CLI-supplied review source from provenance (TS1 / D2).
+
+    Unlike :func:`derive_trust_tier`, this never inspects GitHub event payloads.
+    An explicit ``trust_override`` (``--trust`` on the CLI, D3) wins and is
+    logged at warning. Unknown source shapes fail closed to ``untrusted``.
+    """
+    if trust_override is not None:
+        logger.warning(
+            "operator trust override applied: tier={!r} (--trust; explicit only, never from repo config)",
+            trust_override,
+        )
+        return trust_override
+
+    if not isinstance(source, ReviewSource):
+        return "untrusted"
+
+    if source.kind == "cloned_remote":
+        return "untrusted"
+
+    try:
+        source.path.resolve().relative_to(source.invocation_root.resolve())
+    except ValueError:
+        return "untrusted"
+
+    return "trusted"
 
 
 def _event_name() -> str:
@@ -324,10 +396,14 @@ __all__ = [
     "UNKNOWN_MODE_FALLBACK",
     "AnalyzersMode",
     "ManifestTierDecision",
+    "ReviewSource",
+    "ReviewSourceKind",
     "allow_repo_command_overrides",
     "allow_repo_provided_binaries",
     "analyzers_enabled",
     "build_analyzer_env",
+    "build_review_source",
+    "derive_source_trust_tier",
     "derive_trust_tier",
     "evaluate_manifest_for_mode",
     "evaluate_manifest_for_shell",

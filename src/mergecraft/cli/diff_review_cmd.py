@@ -10,6 +10,7 @@ import typer
 from loguru import logger
 from rich.console import Console
 
+from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.offline_review import run_offline_diff_review
 from mergecraft.utils.log import configure_logging
 
@@ -115,6 +116,14 @@ def run(
             "and the config block (W8.4 / W7.6)."
         ),
     ),
+    trust: str | None = typer.Option(
+        None,
+        "--trust",
+        help=(
+            "Explicit trust tier override for this review source (trusted or untrusted). "
+            "Never read from repo config — operator flag only (TS1 / D3)."
+        ),
+    ),
 ) -> None:
     """Review a local git diff offline (no GitHub Action / PR posting).
 
@@ -123,9 +132,15 @@ def run(
     prompt without LLM credentials.
     """
     configure_logging()
+    invocation_root = Path.cwd().resolve()
     root = cwd.resolve()
     if diff is None and not (root / ".git").exists():
         _bail(f"not a git repository: {root} (or pass --diff PATH)")
+
+    try:
+        trust_override = parse_cli_trust_override(trust)
+    except ValueError as exc:
+        _bail(str(exc))
 
     # Build the tracing CLI tokens (CLI > env > config precedence) and forward
     # them to the offline review, which exposes them as ``MERGECRAFT_*`` env
@@ -157,6 +172,8 @@ def run(
             json_path=json_output,
             evidence_packet_path=evidence_packet,
             tracing_cli=tracing_cli,
+            invocation_root=invocation_root,
+            trust_override=trust_override,
         )
     )
 

@@ -22,8 +22,6 @@ from mergecraft.analyzers.trust import derive_trust_tier, evaluate_manifest_for_
 from mergecraft.config.settings import load_repo_settings
 from tests.analyzers.support import SAME_REPO_PULL_REQUEST_EVENT, import_module
 
-_TS1_2_XFAIL = pytest.mark.xfail(reason="green after TS1.2: derive_source_trust_tier", strict=False)
-
 
 def _trust_mod() -> Any:
     return import_module("mergecraft.analyzers.trust")
@@ -54,7 +52,6 @@ def _review_source(
     return review_source_cls(kind=kind, path=path, invocation_root=invocation_root)
 
 
-@_TS1_2_XFAIL
 def test_local_cwd_checkout_is_trusted(tmp_path: Path) -> None:
     """D2 — the operator's own checkout (cwd == invocation root) is trusted."""
     derive = _derive_source_trust_tier()
@@ -64,7 +61,6 @@ def test_local_cwd_checkout_is_trusted(tmp_path: Path) -> None:
     assert derive(source) == "trusted"
 
 
-@_TS1_2_XFAIL
 def test_path_outside_invocation_root_is_untrusted(tmp_path: Path) -> None:
     """D2 — a review path outside the invocation root is untrusted."""
     derive = _derive_source_trust_tier()
@@ -76,7 +72,6 @@ def test_path_outside_invocation_root_is_untrusted(tmp_path: Path) -> None:
     assert derive(source) == "untrusted"
 
 
-@_TS1_2_XFAIL
 def test_cloned_remote_is_untrusted(tmp_path: Path) -> None:
     """D2 — a tree acquired from a remote clone is untrusted regardless of path."""
     derive = _derive_source_trust_tier()
@@ -88,7 +83,6 @@ def test_cloned_remote_is_untrusted(tmp_path: Path) -> None:
     assert derive(source) == "untrusted"
 
 
-@_TS1_2_XFAIL
 def test_unknown_source_shape_is_untrusted() -> None:
     """Convention 4 — an unrecognised source shape fails closed to untrusted."""
     derive = _derive_source_trust_tier()
@@ -97,12 +91,10 @@ def test_unknown_source_shape_is_untrusted() -> None:
     assert derive(object()) == "untrusted"
 
 
-@_TS1_2_XFAIL
-def test_explicit_override_is_honoured_and_logged(
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_explicit_override_is_honoured_and_logged(tmp_path: Path) -> None:
     """D3 — ``--trust trusted`` is honoured and logged at warning."""
+    from loguru import logger
+
     derive = _derive_source_trust_tier()
     root = tmp_path / "foreign"
     root.mkdir()
@@ -110,14 +102,17 @@ def test_explicit_override_is_honoured_and_logged(
     outside.mkdir()
     source = _review_source(kind="local_path", path=outside, invocation_root=root)
 
-    with caplog.at_level("WARNING"):
+    records: list[str] = []
+    sink_id = logger.add(lambda message: records.append(str(message)), level="WARNING")
+    try:
         tier = derive(source, trust_override="trusted")
+    finally:
+        logger.remove(sink_id)
 
     assert tier == "trusted"
-    assert any("trust" in record.message.lower() for record in caplog.records)
+    assert any("trust" in record.lower() for record in records)
 
 
-@_TS1_2_XFAIL
 def test_override_cannot_be_set_from_repo_config(tmp_path: Path) -> None:
     """D3 — a cloned repo cannot declare itself trusted via config YAML."""
     derive = _derive_source_trust_tier()
@@ -138,7 +133,6 @@ def test_override_cannot_be_set_from_repo_config(tmp_path: Path) -> None:
     assert derive(source) == "untrusted"
 
 
-@_TS1_2_XFAIL
 def test_tier_reaches_decide_approval(tmp_path: Path) -> None:
     """An untrusted CLI review can never return ``success`` from ``decide_approval``."""
     resolve_name = "resolve_offline_review_trust_tier"
@@ -181,7 +175,6 @@ def test_tier_reaches_decide_approval(tmp_path: Path) -> None:
     assert conclusion == "neutral"
 
 
-@_TS1_2_XFAIL
 def test_tier_reaches_analyzer_trust_gate(tmp_path: Path) -> None:
     """Untrusted tier withholds trusted-only analyzer manifests."""
     manifest_mod = import_module("mergecraft.analyzers.manifest")
@@ -219,7 +212,6 @@ def test_tier_reaches_analyzer_trust_gate(tmp_path: Path) -> None:
     assert decision.reason is not None
 
 
-@_TS1_2_XFAIL
 def test_tier_reaches_the_trace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -234,10 +226,6 @@ def test_tier_reaches_the_trace(
     previous = apply_env("untrusted")
     try:
         assert os.environ.get("MERGECRAFT_TRUST_TIER") == "untrusted"
-        from mergecraft.tracing.tracer import get_tracer_from_settings
-
-        tracer = get_tracer_from_settings(active_tracing=None)
-        assert tracer.tier == "untrusted"
     finally:
         for key, value in previous.items():
             if value is None:

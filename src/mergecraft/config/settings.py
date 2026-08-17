@@ -23,6 +23,7 @@ from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 
 AccountPlan = Literal["none", "payg"]
 HeadingDepth = Literal[1, 2, 3, 4, 5, 6]
+CliTrustOverride = Literal["trusted", "untrusted"]
 
 # D4 / D8 / W6.2 — security/runtime and optional-feature models both use
 # ``extra="forbid"``. The optional-feature one-release warning shim has ended
@@ -661,3 +662,20 @@ def load_repo_settings(
     if update:
         settings = settings.model_copy(update=update)
     return settings
+
+
+def parse_cli_trust_override(raw: str | None) -> CliTrustOverride | None:
+    """Parse the CLI-only ``--trust`` override (D3).
+
+    Repo config cannot declare trust — this parser is for explicit operator
+    flags on ``mergecraft diff-review`` only.
+    """
+    if raw is None:
+        return None
+    value = raw.strip().lower()
+    if not value:
+        return None
+    if value in {"trusted", "untrusted"}:
+        return value  # type: ignore[return-value]
+    msg = f"invalid --trust value: {raw!r} (expected trusted or untrusted)"
+    raise ValueError(msg)

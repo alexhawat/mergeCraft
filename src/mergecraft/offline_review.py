@@ -20,8 +20,12 @@ from mergecraft.analyzers.finding import (
     parse_findings_payload,
     write_findings_json,
 )
+from mergecraft.analyzers.trust import (
+    build_review_source,
+    derive_source_trust_tier,
+)
 from mergecraft.config import load_repo_settings
-from mergecraft.config.settings import RepoInfo
+from mergecraft.config.settings import CliTrustOverride, RepoInfo
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
@@ -261,6 +265,29 @@ def _apply_tracing_cli_overrides(
     return previous
 
 
+def resolve_offline_review_trust_tier(
+    *,
+    cwd: Path,
+    invocation_root: Path,
+    trust_override: CliTrustOverride | None = None,
+    cloned: bool = False,
+) -> str:
+    """Resolve the trust tier for an offline CLI review from source provenance."""
+    source = build_review_source(
+        cwd=cwd,
+        invocation_root=invocation_root,
+        cloned=cloned,
+    )
+    return derive_source_trust_tier(source, trust_override=trust_override)
+
+
+def apply_cli_trust_tier_env(tier: str) -> dict[str, str | None]:
+    """Set ``MERGECRAFT_TRUST_TIER`` for the duration of a CLI review run."""
+    previous = {"MERGECRAFT_TRUST_TIER": os.environ.get("MERGECRAFT_TRUST_TIER")}
+    os.environ["MERGECRAFT_TRUST_TIER"] = tier
+    return previous
+
+
 async def run_offline_diff_review(
     *,
     cwd: Path,
@@ -272,6 +299,9 @@ async def run_offline_diff_review(
     json_path: Path | None = None,
     evidence_packet_path: Path | None = None,
     tracing_cli: list[str] | None = None,
+    invocation_root: Path | None = None,
+    trust_override: CliTrustOverride | None = None,
+    cloned: bool = False,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
     cwd = cwd.resolve()
@@ -286,6 +316,14 @@ async def run_offline_diff_review(
     # ``os.environ``) honor CLI > env precedence. Restored in the ``finally``
     # block so the override never leaks into the caller's environment.
     tracing_env_previous = _apply_tracing_cli_overrides(tracing_cli)
+    review_root = (invocation_root or cwd).resolve()
+    trust_tier = resolve_offline_review_trust_tier(
+        cwd=cwd,
+        invocation_root=review_root,
+        trust_override=trust_override,
+        cloned=cloned,
+    )
+    trust_env_previous = apply_cli_trust_tier_env(trust_tier)
 
     out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
     try:
@@ -334,6 +372,7 @@ async def run_offline_diff_review(
             tmpdir=out_dir,
             output_schema=output_schema,
             evidence_packet_path=evidence_packet_path,
+            trust_tier=trust_tier,
         )
         if json_path is None:
             return result
@@ -343,6 +382,11 @@ async def run_offline_diff_review(
         # Restore the operator's ``.env`` tracing vars so the ``diff-review``
         # overrides never leak into the caller's environment.
         for key, value in tracing_env_previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        for key, value in trust_env_previous.items():
             if value is None:
                 os.environ.pop(key, None)
             else:
@@ -358,6 +402,7 @@ async def _run_agent_review(
     tmpdir: Path,
     output_schema: dict[str, Any] | None = None,
     evidence_packet_path: Path | None = None,
+    trust_tier: str = "trusted",
 ) -> OfflineReviewResult:
     stop_mcp = None
     github: GitHubClient | None = None
@@ -366,6 +411,7 @@ async def _run_agent_review(
         # the prompt forbids them.
         github = GitHubClient(token="")
         tool_state = init_tool_state(owner="local", name=cwd.name, dir=str(cwd))
+        tool_state.trust_tier = trust_tier
         # Point the shared evidence seam at the patch this run reviewed, so the
         # offline packet classifies blast radius from the same diff the agent
         # read — exactly as the Action path does via ``checkout_pr``.
@@ -412,7 +458,7 @@ async def _run_agent_review(
             # Local run, operator's own tree and own config — no PR author in the loop.
             static_checks_enabled=True,
             analyzers_mode="auto",
-            trust_tier="trusted",
+            trust_tier=trust_tier,  # type: ignore[arg-type]
             analyzers_settings_enabled=settings.analyzers.enabled,
             suggest_eval_add=False,
             # Carried so the evidence packet can attribute findings to the
