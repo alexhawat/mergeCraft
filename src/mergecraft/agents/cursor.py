@@ -83,11 +83,13 @@ def _starting_ref_from_ctx(ctx: AgentRunContext) -> str:
     return "main"
 
 
-def _build_review_prompt(ctx: AgentRunContext) -> str:
+def _build_review_prompt(ctx: AgentRunContext, *, subagent_block: str | None = None) -> str:
     parts: list[str] = []
     system = getattr(ctx.instructions, "system", "")
     if isinstance(system, str) and system.strip():
         parts.append(system.strip())
+    if subagent_block:
+        parts.append(subagent_block)
     user = getattr(ctx.instructions, "user", "")
     if isinstance(user, str) and user.strip():
         parts.append(user.strip())
@@ -171,7 +173,11 @@ async def _poll_run_to_terminal(
     raise TimeoutError(msg)
 
 
-async def _run_cursor_once(*, ctx: AgentRunContext) -> AgentResult:
+async def _run_cursor_once(
+    *,
+    ctx: AgentRunContext,
+    subagent_block: str | None = None,
+) -> AgentResult:
     api_key = resolve_cursor_api_key()
     if not api_key:
         return AgentResult(
@@ -183,7 +189,7 @@ async def _run_cursor_once(*, ctx: AgentRunContext) -> AgentResult:
         )
 
     client = CursorCloudClient(api_key=api_key)
-    prompt = _build_review_prompt(ctx)
+    prompt = _build_review_prompt(ctx, subagent_block=subagent_block)
     repo_url = _repo_url_from_ctx(ctx)
     starting_ref = _starting_ref_from_ctx(ctx)
     model_id = _resolve_cloud_model_id(ctx)
@@ -275,13 +281,18 @@ async def _install(_token: str | None = None) -> str:
 
 
 async def _run(ctx: AgentRunContext) -> AgentResult:
+    from mergecraft.agents.harness_render import merge_manifest_metadata, render_for_run
+
     try:
         await _install(None)
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
-    result = await _run_cursor_once(ctx=ctx)
-    return await finalize_agent_result(ctx, result)
+    render_result = render_for_run(ctx, "cursor")
+    subagent_block = render_result.payload if isinstance(render_result.payload, str) else None
+    result = await _run_cursor_once(ctx=ctx, subagent_block=subagent_block)
+    finalized = await finalize_agent_result(ctx, result)
+    return merge_manifest_metadata(finalized, render_result)
 
 
 cursor = agent(name="cursor", install=_install, run=_run)

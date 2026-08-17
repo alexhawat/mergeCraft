@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import BaseModel, ConfigDict
 
 from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
+from mergecraft.agents.structured_handoff import agent_finding_output_schema_id
 from mergecraft.agents.verifier import VERIFIER_SYSTEM_PROMPT, pinned_judge_model
 from mergecraft.config.settings import AgentBindingOverride, DispatchMode  # noqa: TC001
 from mergecraft.mcp.server import build_orchestrator_tools
@@ -179,6 +180,12 @@ def _default_prompt_id(role: AgentRole) -> str:
     return f"mergecraft.{role.value}"
 
 
+def _default_output_schema(role: AgentRole) -> str | None:
+    if role is AgentRole.reviewer:
+        return agent_finding_output_schema_id()
+    return None
+
+
 def _build_default_binding(settings: RepoSettings, role: AgentRole) -> AgentBinding:
     return AgentBinding(
         agent_id=_default_agent_id(role),
@@ -190,6 +197,7 @@ def _build_default_binding(settings: RepoSettings, role: AgentRole) -> AgentBind
         tool_classes=_default_tool_classes(role),
         budget=_DEFAULT_BUDGET,
         timeout_s=_DEFAULT_TIMEOUT_S,
+        output_schema=_default_output_schema(role),
     )
 
 

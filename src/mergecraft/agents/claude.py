@@ -100,7 +100,15 @@ def build_agents_json(
     *,
     verifier_denied_tools: Sequence[str] = (),
     subagent_denied_tools: Sequence[str] = (),
+    agents_json: str | None = None,
 ) -> str:
+    """Return Claude ``--agents`` JSON for reviewer and verifier subagents.
+
+    When ``agents_json`` is supplied (registry render from AP2), return it
+    verbatim for backward-compatible call sites.
+    """
+    if agents_json is not None:
+        return agents_json
     verifier: dict[str, Any] = {
         "description": (
             "Read-only verification subagent for Critical/Major analyzer, CI and "
@@ -630,9 +638,17 @@ def _run_claude_once(
     mcp_config: str,
     continue_session: bool = False,
 ) -> AgentResult:
+    from mergecraft.agents.harness_render import render_for_run
+
+    harness_render = render_for_run(ctx, "claude")
     model = None
     if ctx.resolved_model:
         model = _strip_provider_prefix(ctx.resolved_model)
+    agents_payload = (
+        harness_render.payload
+        if isinstance(harness_render.payload, str)
+        else json.dumps(harness_render.payload)
+    )
     cmd = [
         cli,
         "--print",
@@ -646,6 +662,7 @@ def _run_claude_once(
         build_agents_json(
             verifier_denied_tools=ctx.verifier_denied_tools,
             subagent_denied_tools=ctx.subagent_denied_tools,
+            agents_json=agents_payload,
         ),
         "--effort",
         "high",
