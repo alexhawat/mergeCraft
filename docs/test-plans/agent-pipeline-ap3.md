@@ -19,9 +19,9 @@ predict/record/disagree machinery.
 |-----------|-------|--------|--------|
 | `tests/agents/test_structured_handoff.py` | 3 | — | **GREEN** |
 | `tests/agents/test_model_diversity.py` | 2 | — | **GREEN** |
-| `tests/agents/test_ensemble.py` | 6 | — | **GREEN** |
+| `tests/agents/test_ensemble.py` | 7 | — | **GREEN** |
 
-**Acceptance (post-AP3.2):** 11 collected; 11 passed; 0 xfail. `make lint` + `make typecheck` clean.
+**Acceptance (post-AP3.2 + #238 review pin):** 12 collected; 12 passed; 0 xfail. `make lint` + `make typecheck` clean.
 
 ## Target API AP3.2 must satisfy
 
@@ -74,16 +74,17 @@ Default reviewer binding sets ``output_schema == "mergecraft.agent_finding"``.
 | 4 | `test_verification_never_runs_on_the_authoring_family` | integration | #45 generalized | Same-family override rejected; diverse resolver succeeds |
 | 5 | `test_policy_holds_across_harnesses` | integration | happy | ``enforce_policy_for_harness`` for `claude`, `opencode`, `codex` |
 
-### `tests/agents/test_ensemble.py` — 6 tests
+### `tests/agents/test_ensemble.py` — 7 tests
 
 | # | Test | Layer | Scenario | Contract |
 |---|------|-------|----------|----------|
 | 6 | `test_ensemble_runs_the_same_agent_on_two_models` | integration | happy | ``dispatch: ensemble`` runs two chain slugs |
 | 7 | `test_agreement_raises_confidence` | unit | happy | ``reconcile_ensemble`` → ``agreement=True``, ``confidence_boost > 0`` |
 | 8 | `test_disagreement_is_routed_to_the_judge` | unit | edge | Disagreement → ``judge_dispatch`` with both briefs |
-| 9 | `test_shadow_model_output_is_recorded_but_never_acted_on` | integration | shadow | Shadow row on disk; ``acted_findings`` == primary only |
-| 10 | `test_orchestrator_cannot_be_ensembled` | unit | D7 guard-deletion | Orchestrator → ``EnsembleCardinalityError`` |
-| 11 | `test_ensemble_respects_the_agent_budget` | integration | CC3 | Total findings ≤ binding ``budget`` |
+| 9 | `test_empty_vs_empty_is_agreement_without_confidence_boost` | unit | edge (#238) | Empty-vs-empty → ``agreement=True``, ``confidence_boost == 0``, ``judge_dispatch is None``, empty ``merged_findings`` |
+| 10 | `test_shadow_model_output_is_recorded_but_never_acted_on` | integration | shadow | Shadow row on disk; ``acted_findings`` == primary only |
+| 11 | `test_orchestrator_cannot_be_ensembled` | unit | D7 guard-deletion | Orchestrator → ``EnsembleCardinalityError`` |
+| 12 | `test_ensemble_respects_the_agent_budget` | integration | CC3 | Total findings ≤ binding ``budget`` |
 
 ## Imports of not-yet-existing symbols
 
@@ -93,4 +94,6 @@ collection succeeds before AP3.2.
 
 ## Status
 
-AP3.1 suite authored; AP3.2 implementation landed; xfail markers removed (11 passed).
+AP3.1 suite authored; AP3.2 implementation landed; xfail markers removed.
+#238 review pin: empty-vs-empty ensemble is agreement without a confidence boost
+(12 collected: 3+2+7).

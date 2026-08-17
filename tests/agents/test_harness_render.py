@@ -15,17 +15,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
 from mergecraft.agents.claude import build_agents_json
 from mergecraft.agents.gates import subagent_denied_tool_names
-from mergecraft.agents.verifier import (
-    VERIFIER_RUBRIC_VERSION,
-    pinned_judge_model,
-    verifier_denied_tool_names,
-)
+from mergecraft.agents.verifier import verifier_denied_tool_names
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -35,11 +31,10 @@ from mergecraft.mcp.context import (
 )
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
-from mergecraft.types import REVIEWER_AGENT_NAME, VERIFIER_AGENT_NAME, format_mcp_tool_ref
+from mergecraft.types import REVIEWER_AGENT_NAME, VERIFIER_AGENT_NAME
 from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
@@ -52,17 +47,6 @@ models:
   - openai/gpt-5.3-codex
   - google/gemini-3.1-pro-preview
 """
-
-_REVIEWER_DESCRIPTION = (
-    "Read-only review subagent for lens-based code review. "
-    "Reads only — no writes, no state-changing shell or MCP calls."
-)
-
-_VERIFIER_DESCRIPTION = (
-    "Read-only verification subagent for Critical/Major analyzer, CI and "
-    "agent-authored findings. Confirms, downgrades, or drops before "
-    f"publication against rubric v{VERIFIER_RUBRIC_VERSION}."
-)
 
 
 def _stub_slug_runnability(monkeypatch: MonkeyPatch) -> None:
@@ -114,69 +98,26 @@ def _load_registry(tmp_path: Path) -> Registry:
     return load_registry(settings=settings, repo_root=tmp_path)
 
 
-def _registry_claude_agents_json(
-    registry: Registry,
-    *,
-    verifier_denied_tools: Sequence[str],
-    subagent_denied_tools: Sequence[str],
-) -> str:
-    """Reconstruct Claude ``agents.json`` from registry bindings (AP2 contract)."""
-    from mergecraft.agents.registry import resolve_prompt_text
-
-    reviewer_binding = registry.resolve_role("reviewer")
-    verifier_binding = registry.resolve_role("verifier")
-    # Claude harness dispatch format — AP2 maps registry chains to these fields.
-    reviewer_model = "claude-sonnet-5"
-    verifier_model = pinned_judge_model("claude") or "claude-sonnet-5"
-
-    verifier: dict[str, Any] = {
-        "description": _VERIFIER_DESCRIPTION,
-        "prompt": resolve_prompt_text(
-            verifier_binding.prompt_id,
-            version=verifier_binding.prompt_version,
-        ),
-        "model": verifier_model,
-    }
-    denied_verifier = [format_mcp_tool_ref("claude", name) for name in verifier_denied_tools]
-    if denied_verifier:
-        verifier["disallowedTools"] = denied_verifier
-
-    reviewer: dict[str, Any] = {
-        "description": _REVIEWER_DESCRIPTION,
-        "prompt": resolve_prompt_text(
-            reviewer_binding.prompt_id,
-            version=reviewer_binding.prompt_version,
-        ),
-        "model": reviewer_model,
-    }
-    denied_reviewer = [format_mcp_tool_ref("claude", name) for name in subagent_denied_tools]
-    if denied_reviewer:
-        reviewer["disallowedTools"] = denied_reviewer
-
-    agents = {
-        REVIEWER_AGENT_NAME: reviewer,
-        VERIFIER_AGENT_NAME: verifier,
-    }
-    return json.dumps(agents)
-
-
 def test_claude_agents_json_renders_from_registry(tmp_path: Path) -> None:
-    """Default registry bindings must reproduce today's ``build_agents_json`` bytes."""
+    """Production ``render_agents(..., harness="claude")`` must match legacy bytes."""
+    from mergecraft.agents.harness_render import default_subagent_selection, render_agents
+
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
     ctx = _tool_ctx(tmp_path)
     denied_verifier = verifier_denied_tool_names(ctx)
     denied_reviewer = subagent_denied_tool_names(ctx)
+    registry = _load_registry(tmp_path)
+    result = render_agents(
+        registry,
+        selected=default_subagent_selection(registry),
+        harness="claude",
+        ctx=ctx,
+    )
     legacy = build_agents_json(
         verifier_denied_tools=denied_verifier,
         subagent_denied_tools=denied_reviewer,
     )
-    registry = _load_registry(tmp_path)
-    from_registry = _registry_claude_agents_json(
-        registry,
-        verifier_denied_tools=denied_verifier,
-        subagent_denied_tools=denied_reviewer,
-    )
-    assert from_registry == legacy
+    assert result.payload == legacy
 
 
 def test_opencode_subagents_carry_per_agent_models(

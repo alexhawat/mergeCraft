@@ -5,7 +5,7 @@ Covers ``mergecraft.agents.ensemble`` — ``dispatch`` modes ``single`` (default
 ``ensemble``, and ``shadow`` (reusing ``evidence/shadow.py`` record machinery).
 Locked decision **D7**: orchestrator cannot be ensembled.
 
-AP3.1: six tests; green after AP3.2.
+AP3.1: seven tests; green after AP3.2. #238 pins empty-vs-empty as agreement.
 """
 
 from __future__ import annotations
@@ -160,6 +160,24 @@ def test_disagreement_is_routed_to_the_judge(tmp_path: Path) -> None:
     assert reconciliation.judge_dispatch.role == "judge"
     assert "race on session refresh" in reconciliation.judge_dispatch.brief
     assert "benign logging noise" in reconciliation.judge_dispatch.brief
+
+
+def test_empty_vs_empty_is_agreement_without_confidence_boost(tmp_path: Path) -> None:
+    """Two empty finding sets agree without a confidence boost or judge dispatch."""
+    from mergecraft.agents.ensemble import EnsembleRun, ModelRun, reconcile_ensemble
+
+    run = EnsembleRun(
+        agent_id="mergecraft-reviewer",
+        model_runs=(
+            ModelRun(model="anthropic/claude-sonnet", findings=()),
+            ModelRun(model="openai/gpt-5.3-codex", findings=()),
+        ),
+    )
+    reconciliation = reconcile_ensemble(run)
+    assert reconciliation.agreement is True
+    assert reconciliation.confidence_boost == 0
+    assert reconciliation.judge_dispatch is None
+    assert reconciliation.merged_findings == ()
 
 
 def test_shadow_model_output_is_recorded_but_never_acted_on(

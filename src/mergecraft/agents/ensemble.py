@@ -183,14 +183,14 @@ def reconcile_ensemble(run: EnsembleRun) -> EnsembleReconciliation:
     left, right = run.model_runs[0], run.model_runs[1]
     left_keys = {_finding_key(row) for row in left.findings}
     right_keys = {_finding_key(row) for row in right.findings}
-    agreement = left_keys == right_keys and bool(left_keys)
-
-    if agreement:
-        merged = left.findings
+    if left_keys == right_keys:
+        # Empty-vs-empty is agreement (both found nothing) but not a
+        # confidence boost — there is no corroborated finding set.
+        boost = 0.25 if left_keys else 0.0
         return EnsembleReconciliation(
             agreement=True,
-            confidence_boost=0.25,
-            merged_findings=merged,
+            confidence_boost=boost,
+            merged_findings=left.findings,
         )
 
     brief_parts = [

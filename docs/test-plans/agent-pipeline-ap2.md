@@ -49,7 +49,7 @@ evidence packets can distinguish prose-only collapse from toolset parity.
 
 | # | Test | Layer | Scenario | Contract |
 |---|------|-------|----------|----------|
-| 1 | `test_claude_agents_json_renders_from_registry` | integration | compatibility pin | Registry-derived Claude JSON matches `build_agents_json()` bytes for default config + class-derived deny lists |
+| 1 | `test_claude_agents_json_renders_from_registry` | integration | compatibility pin (#238) | Production ``render_agents(..., harness="claude")`` (``_render_claude``) payload matches legacy ``build_agents_json()`` bytes for default config + class-derived deny lists — not a hand-rolled registry JSON helper |
 | 2 | `test_opencode_subagents_carry_per_agent_models` | integration | P4 | Two-model override → OpenCode subagent `model` fields match `resolve_agent_model` per binding |
 | 3 | `test_codex_renders_real_subagents_or_declares_degradation` | integration | D5 | Codex payload has real subagents **or** `harness_degradations` lists `CODEX_SUBAGENT_DEGRADATION.kind` |
 | 4 | `test_gemini_and_cursor_render_or_declare` | integration | D5 parity | Gemini and Cursor each render subagent surface **or** declare per-harness degradation |
@@ -68,4 +68,5 @@ the implementation.
 AP2.1 RED suite authored (`d96c9dd`); AP2.2 implementation landed locally;
 AP2.1.5 reconciled — seven tests pass with no xfail markers. OpenCode model
 test stubs `has_credentials_for_slug` so per-binding chain resolution is
-deterministic without live provider credentials.
+deterministic without live provider credentials. #238 review pin: Claude
+byte-compat goes through production ``render_agents(..., harness="claude")``.

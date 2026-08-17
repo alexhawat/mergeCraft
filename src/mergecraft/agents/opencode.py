@@ -23,7 +23,6 @@ from mergecraft.agents.openai_compatible_gateways import (
     resolve_gateway_endpoints,
 )
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
-from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
     AgentResult,
     AgentRunContext,
@@ -32,10 +31,9 @@ from mergecraft.agents.shared import (
     log_token_table,
     spawn_agent_cli,
 )
-from mergecraft.agents.verifier import VERIFIER_SYSTEM_PROMPT
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.http import instrument_httpx
-from mergecraft.types import MERGECRAFT_MCP_NAME, format_mcp_tool_ref
+from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
 from mergecraft.utils.process_group import (
     kill_process_group,
@@ -152,30 +150,6 @@ def _custom_provider_ids(model: str | None) -> list[str]:
     if endpoint is None:
         return []
     return [endpoint[0]]
-
-
-def _reviewer_agent_config(ctx: AgentRunContext) -> dict[str, object]:
-    config: dict[str, object] = {
-        "description": ("Read-only review subagent for lens-based code review."),
-        "prompt": REVIEWER_SYSTEM_PROMPT,
-        "mode": "subagent",
-    }
-    denied = {format_mcp_tool_ref("opencode", name): "deny" for name in ctx.subagent_denied_tools}
-    if denied:
-        config["permission"] = denied
-    return config
-
-
-def _verifier_agent_config(ctx: AgentRunContext) -> dict[str, object]:
-    config: dict[str, object] = {
-        "description": ("Read-only verification subagent for Critical/Major analyzer findings."),
-        "prompt": VERIFIER_SYSTEM_PROMPT,
-        "mode": "subagent",
-    }
-    denied = {format_mcp_tool_ref("opencode", name): "deny" for name in ctx.verifier_denied_tools}
-    if denied:
-        config["permission"] = denied
-    return config
 
 
 def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
