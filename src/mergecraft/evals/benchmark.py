@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import subprocess
 import uuid
 from datetime import UTC, datetime
@@ -27,6 +28,7 @@ from mergecraft.agents.verifier import (
 )
 from mergecraft.evals.scoring import DEFAULT_LINE_SLACK, AggregateScoreReport
 from mergecraft.evals.store import (
+    CASE_STATUS_BLOCKED,
     CASE_STATUS_PASSED,
     CASE_STATUS_REGRESSION,
     DEFAULT_BANK_DIR,
@@ -294,6 +296,76 @@ class BenchmarkResultSet(BaseModel):
         payload["pins"].pop("recorded_at", None)
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class LatencySummary(BaseModel):
+    """Percentile latency story of a benchmark run (EV2) — the tail, not the mean."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    p50_ms: float
+    p95_ms: float
+
+
+def _linear_percentile(sorted_sample: list[float], percentile: float) -> float:
+    """Linear interpolation between closest ranks over the sorted sample.
+
+    The percentile method is pinned (the numpy default) so two
+    implementations cannot disagree on a published number (EV2): rank =
+    ``p/100 * (n - 1)``, then interpolate between the bracketing ranks.
+    """
+    rank = (percentile / 100.0) * (len(sorted_sample) - 1)
+    lower = math.floor(rank)
+    upper = math.ceil(rank)
+    if lower == upper:
+        return sorted_sample[lower]
+    fraction = rank - lower
+    return sorted_sample[lower] + fraction * (sorted_sample[upper] - sorted_sample[lower])
+
+
+def summarize_latencies(durations_ms: list[float]) -> LatencySummary:
+    """Fold per-case durations into a p50/p95 summary (EV2).
+
+    Raises on an empty sample — a latency summary over nothing is a missing
+    row, never a fabricated 0.0 (D9).
+    """
+    if not durations_ms:
+        msg = "summarize_latencies needs at least one duration"
+        raise ValueError(msg)
+    ordered = sorted(durations_ms)
+    return LatencySummary(
+        p50_ms=_linear_percentile(ordered, 50.0),
+        p95_ms=_linear_percentile(ordered, 95.0),
+    )
+
+
+# EV2 rollup mapping, derived purely from a row's replay `status` (W-23).
+_REPLAY_STATUS_TO_ROLLUP: Final[dict[str, str]] = {
+    CASE_STATUS_PASSED: "correct",
+    CASE_STATUS_REGRESSION: "incorrect",
+    CASE_STATUS_BLOCKED: "inconclusive",
+}
+
+
+def rollup_by_orchestrator_kind(
+    rows_by_kind: dict[str, list[CaseReplayRow]],
+) -> dict[str, CorpusClassRollup]:
+    """Roll replay rows up per orchestrator kind (EV2, W-23).
+
+    Mirrors ``BenchmarkMetrics.by_corpus_class``'s ``CorpusClassRollup``
+    shape, but keyed by orchestrator kind (``hybrid`` vs ``llm``), so the
+    W-23 comparison is a lookup, not a re-run. A status outside the known
+    replay vocabulary folds into ``inconclusive`` — the honest bucket for an
+    outcome the rollup cannot classify.
+    """
+    rollups: dict[str, CorpusClassRollup] = {}
+    for kind, rows in rows_by_kind.items():
+        counts = {"total": 0, "correct": 0, "incorrect": 0, "inconclusive": 0}
+        for row in rows:
+            counts["total"] += 1
+            counts[_REPLAY_STATUS_TO_ROLLUP.get(row.status, "inconclusive")] += 1
+        rollups[kind] = CorpusClassRollup(**counts)
+    return rollups
 
 
 def corpus_class_for(case: Case) -> str:
@@ -603,10 +675,13 @@ __all__ = [
     "DetectionCaseResult",
     "DetectionMetrics",
     "GateMatrix",
+    "LatencySummary",
     "ReviewingModelPin",
     "VersionPins",
     "corpus_class_for",
     "replay_bank",
+    "rollup_by_orchestrator_kind",
     "run_structural_replay",
+    "summarize_latencies",
     "write_result_set",
 ]

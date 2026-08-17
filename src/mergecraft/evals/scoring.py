@@ -41,14 +41,18 @@ __all__ = [
     "AggregateScoreReport",
     "BaselineIssue",
     "Breakdown",
+    "JudgeValue",
+    "LensValue",
     "Match",
     "ReportedFinding",
     "ScoreReport",
     "fold_score_reports",
+    "judge_value",
     "load_baseline_issues",
     "load_reported_findings",
     "normalize_severity",
     "score_findings",
+    "unique_accepted_findings_per_lens",
 ]
 
 # Catch-all buckets for a category/severity that does not fall into
@@ -150,6 +154,19 @@ class ScoreReport(BaseModel):
     # Per-`review_taxonomy.FINDING_SEVERITIES` issue/match counts. Sums back
     # to `total_issues` / `found` (D9).
     by_severity: dict[str, Breakdown] = Field(default_factory=dict)
+    # EV2: precision over the blocker band only (findings whose severity
+    # normalizes to "Critical" via `normalize_severity`) — merge gating
+    # deserves its own number, since it can regress while overall precision
+    # holds. `None` — never a fabricated number — when the run reported no
+    # blocker-severity findings (honest-None precedent:
+    # `DetectionCaseResult.strict_precision`). Defaulted so reports scored
+    # before EV2 still validate.
+    blocker_precision: float | None = None
+    # EV2: indexes of findings that repeat an earlier finding — same
+    # normalized path and line ranges overlapping within the scoring slack
+    # (the locality rule `score_findings` already uses). The first occurrence
+    # is canonical; every later overlapping finding lands here.
+    duplicate_finding_indexes: list[int] = Field(default_factory=list)
 
     @property
     def found(self) -> int:
@@ -233,6 +250,96 @@ class ScoreReport(BaseModel):
         if not self.matches:
             return 1.0
         return sum(1 for m in self.matches if m.severity_agrees) / len(self.matches)
+
+    @property
+    def duplicate_rate(self) -> float:
+        """Fraction of reported findings that duplicate an earlier finding.
+
+        ``0.0`` (never ``NaN``) when nothing was reported.
+        """
+        if self.total_reported == 0:
+            return 0.0
+        return len(self.duplicate_finding_indexes) / self.total_reported
+
+
+class LensValue(BaseModel):
+    """One lens's contribution to a corpus run (EV2).
+
+    A lens (one review agent/perspective) earns its cost only by finding
+    things no other lens found. ``accepted`` counts baseline issues this
+    lens's run located; ``unique_accepted`` counts located issues **no other
+    lens's** run located. A lens with zero unique value is present with
+    zeros — visible as a zero, never omitted (a missing key reads as
+    "not run", which is a different claim).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    lens: str
+    accepted: int
+    unique_accepted: int
+
+
+class JudgeValue(BaseModel):
+    """What a judge pass did to a run's score (EV2).
+
+    A judge that improves precision only by destroying recall must look bad,
+    so both halves of the trade are reported: ``noise_removed`` (false
+    positives filtered out) and ``recall_lost`` (baseline issues the
+    pre-judge run located that the post-judge run no longer does).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    noise_removed: int
+    recall_lost: int
+
+
+def unique_accepted_findings_per_lens(
+    findings_by_lens: dict[str, list[ReportedFinding]],
+    issues: list[BaselineIssue],
+    *,
+    slack: int = DEFAULT_LINE_SLACK,
+) -> dict[str, LensValue]:
+    """Score each lens's run against the baseline and count its unique value (EV2).
+
+    ``score_findings``' matching is one-to-one within a single run, so
+    "unique" is only meaningful **across** per-lens runs: an issue is unique
+    to a lens when no other lens's run located it. The ``findings_by_lens``
+    key is the lens attribution (production tags findings with it — global
+    convention 7); every submitted lens is a key in the result, even one
+    that contributed nothing.
+    """
+    matched_by_lens: dict[str, set[str]] = {}
+    for lens, findings in findings_by_lens.items():
+        report = score_findings(issues, findings, slack=slack)
+        matched_by_lens[lens] = {match.issue_id for match in report.matches}
+
+    values: dict[str, LensValue] = {}
+    for lens, issue_ids in matched_by_lens.items():
+        others = set().union(*(ids for other, ids in matched_by_lens.items() if other != lens))
+        values[lens] = LensValue(
+            lens=lens,
+            accepted=len(issue_ids),
+            unique_accepted=len(issue_ids - others),
+        )
+    return values
+
+
+def judge_value(before: ScoreReport, after: ScoreReport) -> JudgeValue:
+    """Compare the pre-judge and post-judge scorings of one run (EV2).
+
+    Pure before/after over two ``ScoreReport``\\ s of the same run:
+    ``noise_removed`` is the drop in unmatched (false-positive) findings;
+    ``recall_lost`` counts baseline issues located before but not after.
+    """
+    noise_removed = len(before.unmatched_finding_indexes) - len(after.unmatched_finding_indexes)
+    before_found = {match.issue_id for match in before.matches}
+    after_found = {match.issue_id for match in after.matches}
+    return JudgeValue(
+        noise_removed=noise_removed,
+        recall_lost=len(before_found - after_found),
+    )
 
 
 class AggregateScoreReport(BaseModel):
@@ -422,6 +529,17 @@ def _distance(issue: BaselineIssue, finding: ReportedFinding) -> int:
     return 0
 
 
+def _findings_overlap(first: ReportedFinding, second: ReportedFinding, *, slack: int) -> bool:
+    """True when two findings share a normalized path and their line spans
+    touch within ``slack`` — the same locality rule `_overlaps` uses to match
+    a finding to a baseline issue, reused for duplicate detection (EV2)."""
+    if first.path != second.path:
+        return False
+    return (
+        second.start_line <= first.end_line + slack and first.start_line - slack <= second.end_line
+    )
+
+
 def _empty_breakdowns() -> tuple[dict[str, Breakdown], dict[str, Breakdown]]:
     """Pre-seed one zero-count bucket per known category and severity.
 
@@ -529,6 +647,28 @@ def score_findings(
             by_severity=by_severity,
         )
 
+    # EV2 blocker band: severity normalizing to "Critical" via
+    # `normalize_severity` (blocker/critical both map there) — the taxonomy's
+    # top band, reused rather than re-invented (global convention 4).
+    blocker_indexes = {
+        index
+        for index, finding in enumerate(findings)
+        if normalize_severity(finding.severity) == "Critical"
+    }
+    blocker_precision: float | None = None
+    if blocker_indexes:
+        matched_blockers = sum(1 for match in matches if match.finding_index in blocker_indexes)
+        blocker_precision = matched_blockers / len(blocker_indexes)
+
+    # EV2 duplicate ledger: the first occurrence is canonical; every later
+    # finding overlapping an earlier one at the same normalized path (within
+    # slack) is the duplicate — so a paraphrase at the same location counts.
+    duplicate_finding_indexes = [
+        index
+        for index, finding in enumerate(findings)
+        if any(_findings_overlap(earlier, finding, slack=slack) for earlier in findings[:index])
+    ]
+
     return ScoreReport(
         total_issues=len(issues),
         total_reported=len(findings),
@@ -538,6 +678,8 @@ def score_findings(
         closed_world=closed_world,
         by_category=by_category,
         by_severity=by_severity,
+        blocker_precision=blocker_precision,
+        duplicate_finding_indexes=duplicate_finding_indexes,
     )
 
 
