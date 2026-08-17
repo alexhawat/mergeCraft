@@ -9,6 +9,7 @@ are a separate future publication path — not populated by ``run_structural_rep
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import uuid
@@ -18,6 +19,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+import mergecraft
 from mergecraft.agents.verifier import (
     VERIFIER_RUBRIC_VERSION,
     judge_pin,
@@ -118,6 +120,12 @@ class VersionPins(BaseModel):
     # former role as a fallback-only value to a first-class required pin —
     # #140 requires "mergeCraft commit included with published numbers".
     mergecraft_commit: str
+    # #140: a commit identifies code, not a release — the distribution
+    # version is pinned alongside the commit so published numbers name both.
+    # Defaulted to the installed distribution version (not a placeholder) so
+    # pre-#140 result sets still validate; `run_structural_replay` passes it
+    # explicitly.
+    mergecraft_version: str = Field(default_factory=lambda: mergecraft.__version__)
     # D12: every provider a published number covers, pinned by model id +
     # model_pin, never averaged. A missing/empty pin is a hard failure (D9) —
     # a published report never has zero pinned reviewing models. An entry can
@@ -270,6 +278,22 @@ class BenchmarkResultSet(BaseModel):
     # pre-B3 committed result set with neither key still validates (D3).
     detection: DetectionMetrics | None = None
     skipped_reason: str | None = None
+
+    @property
+    def reproducibility_digest(self) -> str:
+        """Content hash of this result set, excluding volatile wall-clock fields (#140).
+
+        ``pins.recorded_at`` is the one field allowed to differ between two
+        structural replays of the same commit + corpus — everything else must
+        compare equal, so the digest is computed over the canonical JSON dump
+        with ``recorded_at`` dropped. Two replays at one commit then answer
+        "did these runs agree?" with a string compare instead of an eyeball
+        diff.
+        """
+        payload = self.model_dump(mode="json")
+        payload["pins"].pop("recorded_at", None)
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def corpus_class_for(case: Case) -> str:
@@ -502,6 +526,7 @@ def run_structural_replay(
         corpus_commit=_git_corpus_commit(),
         recorded_at=datetime.now(UTC),
         mergecraft_commit=_git_head_sha(),
+        mergecraft_version=mergecraft.__version__,
         reviewing_model=_reviewing_model_pins(providers),
         scorer_version=SCORER_VERSION,
         line_slack=DEFAULT_LINE_SLACK,
