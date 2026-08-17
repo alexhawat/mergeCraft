@@ -109,7 +109,16 @@ def build_plan_report(
             json_mode=False,
         )
         base_ref = materialization.base_ref
-        diff_path = str(materialization.path)
+        # PR #242 review finding ``e8bc195570ae6f1cc8ab5bc6`` — the
+        # ``TemporaryDirectory`` closes as soon as the ``with`` block ends,
+        # so the raw ``materialization.path`` would point at a missing file.
+        # Persist the materialized diff to a path the consumer of the
+        # report can read after return (sibling to ``.mergecraft/`` per S1).
+        diff_dir = repo_root / ".mergecraft"
+        diff_dir.mkdir(parents=True, exist_ok=True)
+        stable_diff = diff_dir / "plan-review.diff"
+        stable_diff.write_text(materialization.path.read_text(encoding="utf-8"), encoding="utf-8")
+        diff_path = str(stable_diff)
     return {
         "model_chain": model_slugs,
         "agent": agent_label,

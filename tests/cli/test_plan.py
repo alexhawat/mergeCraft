@@ -111,3 +111,33 @@ def test_plan_makes_no_provider_call(tmp_path: Path, monkeypatch: MonkeyPatch) -
     output = _plain(result.stdout + result.stderr)
     assert result.exit_code == 0, output
     assert not calls, f"plan must not call provider HTTP APIs, saw: {calls}"
+
+
+def test_plan_report_diff_path_survives_tempdir_teardown(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """``build_plan_report`` returns a ``diff_path`` that still exists on disk.
+
+    mergeCraft review (PR #242, finding ``e8bc195570ae6f1cc8ab5bc6``) found
+    the report's ``diff_path`` pointed at a path inside a torn-down
+    ``TemporaryDirectory`` — unreachable for any programmatic consumer of
+    the report. The fix persists the materialized diff to a stable
+    location so consumers can read it after return.
+    """
+    from mergecraft.cli.plan_cmd import build_plan_report
+
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    report = build_plan_report(cwd=tmp_path)
+
+    diff_path_value = report["diff_path"]
+    assert diff_path_value, "plan report must carry a diff_path"
+    diff_path = Path(diff_path_value)
+    assert diff_path.is_file(), (
+        f"plan report diff_path must still point at an existing file; got {diff_path}"
+    )
+    # The diff file may be empty (zero changes since HEAD) — that's fine.
+    # What matters is that the path resolves to a readable file the caller
+    # can open after the report returns.
+    diff_path.read_text(encoding="utf-8")
