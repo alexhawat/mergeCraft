@@ -71,3 +71,24 @@ def test_local_run_defaults_to_no_remote_telemetry(
     assert tracing_to not in remote_sinks, (
         f"local private run must not default to remote sink: {defaults}"
     )
+
+
+def test_yaml_remote_tracing_is_honored_for_local_review(tmp_path: Path) -> None:
+    """D11 — YAML-configured remote tracing is honored for local private reviews."""
+    mod = _manifest_mod()
+    resolve = getattr(mod, "resolve_local_telemetry_defaults", None)
+    if resolve is None:
+        pytest.fail(
+            "resolve_local_telemetry_defaults not defined in mergecraft.evidence.run_manifest"
+        )
+
+    config_dir = tmp_path / ".mergecraft"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.yaml").write_text(
+        "tracing:\n  enabled: true\n  sinks:\n    - type: logfire\n      project: demo\n",
+        encoding="utf-8",
+    )
+
+    defaults = resolve(cwd=tmp_path, private_repo=True)
+    assert defaults.get("enabled") is True
+    assert defaults.get("tracing_to") == "logfire"

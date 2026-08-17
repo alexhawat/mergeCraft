@@ -450,8 +450,6 @@ def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
     if not local.exists():
         msg = f"repository path does not exist: {local}"
         raise SourceResolveError(msg)
-    if spec.head:
-        _run_git(["checkout", spec.head], cwd=str(local))
     return ResolvedWorkspace(
         cwd=local,
         git_common_dir=resolve_git_common_dir(local),

@@ -75,22 +75,46 @@ def resolve_local_telemetry_defaults(
     Private/local runs ship nothing remotely by default. Remote sinks require
     explicit operator opt-in via env, YAML, or CLI flags.
     """
-    del cwd  # reserved for future repo-aware policy
+    config_path: str | None = None
+    if cwd is not None:
+        candidate = cwd / _DEFAULT_CONFIG_REL
+        if candidate.is_file():
+            config_path = str(candidate)
+
     if not private_repo:
-        return resolve_tracing_settings(cli_args=[], env={**os.environ})
+        return resolve_tracing_settings(
+            cli_args=[],
+            env={**os.environ},
+            config_path=config_path,
+            cwd=cwd,
+        )
     explicit_remote = os.environ.get("MERGECRAFT_TRACING_TO", "").strip().lower() in _REMOTE_SINKS
     explicit_token = bool(os.environ.get("MERGECRAFT_LOGFIRE_TOKEN", "").strip())
     if explicit_remote or explicit_token:
-        return resolve_tracing_settings(cli_args=[], env={**os.environ})
+        return resolve_tracing_settings(
+            cli_args=[],
+            env={**os.environ},
+            config_path=config_path,
+            cwd=cwd,
+        )
+    if config_path:
+        resolved = resolve_tracing_settings(cli_args=[], env={}, config_path=config_path, cwd=cwd)
+        tracing_to = str(resolved.get("tracing_to") or "").strip().lower()
+        if resolved.get("enabled") and tracing_to in _REMOTE_SINKS:
+            return resolved
     return {"enabled": False, "tracing_to": None}
 
 
-def apply_local_telemetry_defaults(*, private_repo: bool = True) -> dict[str, str | None]:
+def apply_local_telemetry_defaults(
+    *,
+    private_repo: bool = True,
+    cwd: Path | None = None,
+) -> dict[str, str | None]:
     """Apply D11 defaults to ``os.environ`` when remote telemetry is not opted in.
 
     Returns the previous values for keys touched so callers can restore them.
     """
-    defaults = resolve_local_telemetry_defaults(private_repo=private_repo)
+    defaults = resolve_local_telemetry_defaults(private_repo=private_repo, cwd=cwd)
     if defaults.get("enabled"):
         return {}
     previous: dict[str, str | None] = {}

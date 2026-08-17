@@ -68,13 +68,14 @@ RUN_OUTCOME_CONCLUSION: Final[dict[RunOutcome, CompletionConclusion]] = {
 # via :func:`exit_code_for_outcome` / :func:`cli_exit_code_for_review`.
 RUN_OUTCOME_EXIT_CODE: Final[dict[RunOutcome, int]] = {
     RunOutcome.passed: 0,
-    RunOutcome.failed: 10,
+    RunOutcome.failed: 12,
     RunOutcome.inconclusive: 20,
     RunOutcome.configuration_error: 30,
     RunOutcome.infra_error: 40,
     RunOutcome.timed_out: 50,
 }
 
+CLI_FINDINGS_EXIT_CODE: Final[int] = 10
 CLI_BLOCKED_EXIT_CODE: Final[int] = 11
 
 
@@ -101,14 +102,24 @@ def error_code_for_outcome(outcome: RunOutcome) -> str:
     return f"mergecraft.{outcome.value}"
 
 
-def exit_code_for_outcome(outcome: RunOutcome, *, blocked: bool = False) -> int:
+def exit_code_for_outcome(
+    outcome: RunOutcome,
+    *,
+    blocked: bool = False,
+    findings_only: bool = False,
+) -> int:
     """Map a ``RunOutcome`` to a distinct CLI process exit code (CC1).
 
     ``RunOutcome.failed`` with blocking severities uses :data:`CLI_BLOCKED_EXIT_CODE`
     so merge gates can distinguish blockers from non-blocking findings.
+    Non-blocking findings use :data:`CLI_FINDINGS_EXIT_CODE` (10); bare ``failed``
+    outcomes use :data:`RUN_OUTCOME_EXIT_CODE` (12).
     """
-    if outcome is RunOutcome.failed and blocked:
-        return CLI_BLOCKED_EXIT_CODE
+    if outcome is RunOutcome.failed:
+        if blocked:
+            return CLI_BLOCKED_EXIT_CODE
+        if findings_only:
+            return CLI_FINDINGS_EXIT_CODE
     return RUN_OUTCOME_EXIT_CODE[outcome]
 
 
@@ -121,12 +132,13 @@ def cli_exit_code_for_review(
     if rows and any(row.severity in BLOCKING_SEVERITIES for row in rows):
         return exit_code_for_outcome(RunOutcome.failed, blocked=True)
     if rows and outcome is RunOutcome.passed:
-        return exit_code_for_outcome(RunOutcome.failed, blocked=False)
+        return exit_code_for_outcome(RunOutcome.failed, findings_only=True)
     return exit_code_for_outcome(outcome)
 
 
 __all__ = [
     "CLI_BLOCKED_EXIT_CODE",
+    "CLI_FINDINGS_EXIT_CODE",
     "RUN_OUTCOME_CONCLUSION",
     "RUN_OUTCOME_EXIT_CODE",
     "CompletionConclusion",

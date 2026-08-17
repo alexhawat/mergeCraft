@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NoReturn
@@ -260,6 +259,12 @@ def run(
     except ValueError as exc:
         _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
 
+    if output_format == "json" and json_output is None and output is None:
+        _exit_with_message(
+            "--output is required for --format json (or use --json PATH)",
+            cli_exit_code_for_review(RunOutcome.configuration_error),
+        )
+
     # Build the tracing CLI tokens (CLI > env > config precedence) and forward
     tracing_cli: list[str] = []
     if tracing is True:
@@ -280,13 +285,13 @@ def run(
         output_format=output_format,
     )
     json_path_for_run = json_output
-    temp_json_dir: str | None = None
-    if needs_structured and json_path_for_run is None:
-        if output_format == "json" and output is not None:
-            json_path_for_run = output
-        else:
-            temp_json_dir = tempfile.mkdtemp(prefix="mergecraft-review-json-")
-            json_path_for_run = Path(temp_json_dir) / "findings.json"
+    if (
+        needs_structured
+        and json_path_for_run is None
+        and output_format == "json"
+        and output is not None
+    ):
+        json_path_for_run = output
 
     result = asyncio.run(
         run_offline_diff_review(

@@ -49,6 +49,10 @@ def _agent_finding_dict() -> dict[str, object]:
     return finding.model_dump()
 
 
+def _write_findings_file(path: Path, payload: str) -> None:
+    path.write_text(payload, encoding="utf-8")
+
+
 def _install_fake_review(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -58,6 +62,9 @@ def _install_fake_review(
         materialization_path = kwargs.get("diff_file")
         diff_path = str(materialization_path) if materialization_path else None
         payload = json.dumps({"findings": findings})
+        json_path = kwargs.get("json_path")
+        if json_path is not None:
+            _write_findings_file(Path(json_path), payload)
         return OfflineReviewResult(
             success=True,
             output="# Review\n\nWith findings.",
@@ -87,6 +94,36 @@ def test_text_format_default(tmp_path: Path) -> None:
     combined = _plain(result.stdout + result.stderr)
     assert result.exit_code == 0, combined
     assert "offline" in combined.lower() or "review" in combined.lower()
+
+
+def test_json_format_requires_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--format json`` without ``--output`` or ``--json`` is rejected."""
+    _install_fake_review(monkeypatch, findings=[_agent_finding_dict()])
+    result = runner.invoke(
+        app,
+        _review_argv(tmp_path, "--format", "json"),
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == 30, combined
+    assert "--output is required" in combined.lower() or "output" in combined.lower()
+
+
+def test_json_format_writes_output_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--format json --output`` writes findings to the requested path."""
+    finding = _agent_finding_dict()
+    _install_fake_review(monkeypatch, findings=[finding])
+    json_out = tmp_path / "report.json"
+    result = runner.invoke(
+        app,
+        _review_argv(tmp_path, "--format", "json", "--output", str(json_out)),
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == 10, combined
+    assert json_out.is_file(), combined
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+    assert payload["findings"][0]["rule_id"] == finding["rule_id"]
 
 
 def test_json_format_matches_existing_findings_schema(

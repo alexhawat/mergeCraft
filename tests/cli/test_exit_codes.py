@@ -144,7 +144,25 @@ def test_findings_exit_code_distinct_from_clean(
     result = _invoke_review(tmp_path, monkeypatch)
     clean_code = _exit_code_for_outcome()(RunOutcome.passed)
     assert result.exit_code != clean_code, _plain(result.stdout + result.stderr)
-    assert result.exit_code == _exit_code_for_outcome()(RunOutcome.failed)
+    assert result.exit_code == _exit_code_for_outcome()(RunOutcome.failed, findings_only=True)
+
+
+def test_bare_failed_exit_code_distinct_from_findings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bare ``RunOutcome.failed`` (no findings) exits distinctly from findings-only."""
+    _patch_offline_review(
+        monkeypatch,
+        outcome=RunOutcome.failed,
+        findings=[],
+        success=False,
+        error="review failed",
+    )
+    result = _invoke_review(tmp_path, monkeypatch)
+    findings_code = _exit_code_for_outcome()(RunOutcome.failed, findings_only=True)
+    bare_failed = _exit_code_for_outcome()(RunOutcome.failed)
+    assert bare_failed != findings_code
+    assert result.exit_code == bare_failed, _plain(result.stdout + result.stderr)
 
 
 def test_blocked_exit_code_distinct_from_findings(
@@ -159,7 +177,7 @@ def test_blocked_exit_code_distinct_from_findings(
         error="blocking findings",
     )
     result = _invoke_review(tmp_path, monkeypatch)
-    findings_only = _exit_code_for_outcome()(RunOutcome.failed, blocked=False)
+    findings_only = _exit_code_for_outcome()(RunOutcome.failed, findings_only=True)
     blocked = _exit_code_for_outcome()(RunOutcome.failed, blocked=True)
     assert blocked != findings_only
     assert result.exit_code == blocked, _plain(result.stdout + result.stderr)

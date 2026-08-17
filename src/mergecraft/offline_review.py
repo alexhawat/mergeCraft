@@ -427,7 +427,7 @@ async def run_offline_diff_review(
     # block so the override never leaks into the caller's environment.
     from mergecraft.evidence.run_manifest import apply_local_telemetry_defaults
 
-    telemetry_env_previous = apply_local_telemetry_defaults(private_repo=True)
+    telemetry_env_previous = apply_local_telemetry_defaults(private_repo=True, cwd=cwd)
     tracing_env_previous = _apply_tracing_cli_overrides(tracing_cli)
     review_root = (invocation_root or cwd).resolve()
     trust_tier = resolve_offline_review_trust_tier(

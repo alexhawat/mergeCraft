@@ -244,6 +244,48 @@ def test_private_repo_with_token(
     assert workspace.cwd.is_dir()
 
 
+def test_head_does_not_checkout_local_branch(tmp_path: Path) -> None:
+    """``--head`` resolves the diff range without mutating the local checkout."""
+    repo = _init_repo(tmp_path)
+    _git(repo, "checkout", "-b", "feature")
+    (repo / "head.txt").write_text("head change\n", encoding="utf-8")
+    _git(repo, "add", "head.txt")
+    _git(repo, "commit", "-m", "feature commit")
+    _git(repo, "checkout", "main")
+
+    spec_cls = _spec_cls()
+    resolve = _resolve_workspace()
+    materialize = _materialize_resolved_diff()
+
+    before = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert before == "main"
+
+    spec = spec_cls(
+        repo=str(repo),
+        head="feature",
+        base="main",
+        invocation_root=tmp_path,
+    )
+    workspace = resolve(spec)
+    result = materialize(workspace, spec=spec, out_dir=tmp_path / "no-checkout-out")
+    assert "head.txt" in result.path.read_text(encoding="utf-8")
+
+    after = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert after == "main"
+
+
 def test_head_and_base_refs_select_the_diff(tmp_path: Path) -> None:
     """``--head`` and ``--base`` select the diff range explicitly."""
     repo = _init_repo(tmp_path)

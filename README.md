@@ -204,7 +204,8 @@ mergecraft review --agent                              # JSONL agent protocol on
 ```
 
 Process exit codes: `0` clean pass; `10` non-blocking findings; `11` blocking severities;
-`20` inconclusive; `30` configuration error; `40` infra error; `50` timed out.
+`12` review failed (no findings); `20` inconclusive; `30` configuration error; `40` infra error;
+`50` timed out.
 
 `diff-review` is a hidden alias of `review` (Harbor and existing scripts keep working).
 
