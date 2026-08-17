@@ -244,7 +244,9 @@ def verify_agent_findings_tool(ctx: ToolContext):
             row["fingerprint"] = finding.identity()
             stored[str(row["fingerprint"])] = row
         ctx.tool_state.agent_findings = list(stored.values())
-        _emit_finding_stage(ctx, [AgentFindingLike(**row) for row in stored.values()], stage="proposed")
+        _emit_finding_stage(
+            ctx, [AgentFindingLike(**row) for row in stored.values()], stage="proposed"
+        )
         plan = plan_agent_verifications(
             findings,
             budget=settings.inline_budget,
