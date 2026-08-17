@@ -5,8 +5,9 @@ Worktree: session worktree on branch `alexhawat-observability-eval-waves` (based
 
 This doc is appended to per sub-wave. So far: **PR OB1 (sub-wave OB1.1,
 reconciled post-OB1.2)**, **PR OB2 (sub-wave OB2.1, reconciled post-OB2.2)**
-and **PR OB3 (sub-wave OB3.1)**. The OB4 / EV1–EV3 sections will be appended
-by their own `test-creator` sub-waves as those PRs start.
+and **PR OB3 (sub-wave OB3.1)**, **PR EV1 (sub-wave EV1.1)**. The OB4 /
+EV2–EV3 sections will be appended by their own `test-creator` sub-waves as
+those PRs start.
 
 ## PR OB1 — review-wide correlation on every span (test plan OB1.1)
 
@@ -285,3 +286,72 @@ clean real passes.
 (non-strict xfail — failures at runtime, zero collection errors). `make lint` +
 `make typecheck` clean. Live gates: none in OB3.1 — `skipped: no live gate`
 (the reasoning-model Logfire proof is the OB3 Final gate).
+
+## PR EV1 — repair the corpus run path and publish reproducible numbers (test plan EV1.1)
+
+Authoring wave: **EV1.1** (tests-first, RED). Implementation: **EV1.2**.
+Closes **#219** (raw-findings run dir splits on slashes in model slugs),
+**#220** (live corpus review runs in an empty scratch cwd and loses repo
+context), **#140** (publish reproducible benchmark numbers with full version
+pins). Finding covered: **O10**.
+
+### xfail schedule
+
+All 6 contract tests carry `@pytest.mark.xfail(reason="green after EV1.2: …",
+strict=False)` — `strict=False` is explicit because the repo pins
+`xfail_strict = true`. Post-EV1.2 the orchestrator re-dispatches test-creator
+to remove the satisfied markers. Each test fails for exactly one intended
+reason today (verified with `--runxfail`):
+
+- `test_run_dir.py` — assertion failures: the run dir is nested
+  (`raw-findings/openrouter-openrouter/openai/gpt-5-…`) instead of one flat
+  component (#219).
+- `test_live_context.py` — `ImportError: materialize_case_repo` (lazy import,
+  collection stays clean) and an assertion that the case repo file is absent
+  from the review cwd at review time (#220).
+- `test_reproducibility.py` — `AttributeError`:
+  `BenchmarkResultSet.reproducibility_digest` and `VersionPins.mergecraft_version`
+  do not exist yet (#140).
+
+### Detection-corpus layout contract pinned by these tests
+
+A detection case (already: `<case_dir>/<patch>` + `<case_dir>/baseline.json`)
+may additionally carry **`<case_dir>/repo/`** — the case's pre-patch file tree.
+This is the EV1.2 corpus-format addition that closes #220 without handing the
+reviewer the operator's real checkout.
+
+### Contract → test mapping
+
+| Contract | Test(s) | File |
+| --- | --- | --- |
+| #219 — slash-bearing slug → exactly one flat run dir under `raw-findings/`; sanitized, not truncated (every slug segment survives) | `test_model_slug_with_slash_does_not_split_the_run_dir` | `tests/evals/test_run_dir.py` |
+| #219 — run-dir naming shape is uniform across providers (incl. routed slugs) and run dirs stay distinct | `test_run_dir_is_stable_across_providers` | `tests/evals/test_run_dir.py` |
+| #220 — materialized review cwd contains the case's repo files; never an empty scratch dir | `test_live_review_runs_with_real_repo_context` | `tests/evals/test_live_context.py` |
+| #220 — ordering: repo is materialized *before* the review on the production default path (`review_fn=None`) | `test_case_repo_is_materialized_before_review` | `tests/evals/test_live_context.py` |
+| #140 — same commit + same corpus ⇒ same result set, via a digest that excludes `pins.recorded_at` | `test_same_commit_yields_the_same_result_set` | `tests/evals/test_reproducibility.py` |
+| #140 — every version pin recorded, incl. the mergeCraft distribution version | `test_result_set_records_every_version_pin` | `tests/evals/test_reproducibility.py` |
+
+### Target API EV1.2 must satisfy (as pinned by these tests)
+
+`src/mergecraft/evals/live_run.py`:
+
+| Symbol | Contract |
+| --- | --- |
+| run-id construction in `run_live_detection` | Slug sanitized so the run dir is always one path component under `raw-findings/`; all slug segments preserved (no truncation collisions) |
+| `materialize_case_repo(case, dest) -> Path` (new) | Copies `<case_dir>/repo/` into `dest`, returns `dest` |
+| production `ReviewFn` (`_default_review_fn` path) | Materializes the case repo *before* calling `run_offline_diff_review`; the review `cwd` is the materialized tree |
+
+`src/mergecraft/evals/benchmark.py`:
+
+| Symbol | Contract |
+| --- | --- |
+| `BenchmarkResultSet.reproducibility_digest` (new) | Non-empty content hash over the result set excluding volatile wall-clock fields (`pins.recorded_at`); equal for two replays at one commit + corpus |
+| `VersionPins.mergecraft_version` (new) | The installed mergeCraft distribution version (`mergecraft.__version__`), alongside the existing commit pin |
+
+### Acceptance (plan §EV1.1)
+
+6 collected; **0 pass**; **6 RED** (non-strict xfail — failures at runtime,
+zero collection errors). `make lint` + `make typecheck` clean. Live gates:
+none in EV1.1 — all six tests are keyless (stub `review_fn` / stubbed
+`run_offline_diff_review` boundary), so `skipped: no live gate` applies
+cleanly; the live-provider proof is the EV1 Final gate.
