@@ -162,6 +162,19 @@ class AnalyzerPatternSettings(_OptionalFeatureModel):
 
 
 DispatchMode = Literal["single", "ensemble", "shadow"]
+RiskBand = Literal["low", "medium", "high"]
+
+
+class LensTriggerOverride(BaseModel):
+    """Declarative routing triggers for a registry lens entry (AP4)."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    categories: list[str] = Field(default_factory=list)
+    min_risk_band: RiskBand | None = Field(default=None, alias="minRiskBand")
+
+
+OrchestratorKind = Literal["llm", "deterministic", "hybrid"]
 
 
 class AgentBindingOverride(BaseModel):
@@ -178,6 +191,7 @@ class AgentBindingOverride(BaseModel):
     budget: int | None = None
     timeout_s: int | None = Field(default=None, alias="timeoutS")
     dispatch: DispatchMode | None = None
+    triggers: LensTriggerOverride | None = None
 
     @field_validator("role", mode="before")
     @classmethod
@@ -370,6 +384,15 @@ class RepoSettings(BaseModel):
     ci_evidence: CiEvidenceSettings = Field(default_factory=CiEvidenceSettings, alias="ciEvidence")
     analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
     agents: dict[str, AgentBindingOverride] = Field(default_factory=dict)
+    # AP6 / D10 — orchestrator kind. Default ``llm`` preserves today's prompt-driven
+    # orchestrator; ``deterministic`` walks a declarative pipeline file; ``hybrid``
+    # is the AP7 decision-node seam (declared here for forward compatibility).
+    orchestrator: OrchestratorKind = "llm"
+    # AP6 / D9 — operator-authored pipeline used when the repo pipeline is untrusted
+    # or absent. Path relative to repo root or absolute.
+    operator_pipeline: str | None = Field(default=None, alias="operatorPipeline")
+    # AP6 — optional repo-local pipeline file path (default ``.mergecraft/pipeline.yaml``).
+    pipeline: str | None = None
     learnings: str | None = None
     learnings_headings: list[LearningsHeading] = Field(
         default_factory=list, alias="learningsHeadings"

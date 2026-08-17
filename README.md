@@ -601,9 +601,15 @@ of them for its full flag set):
 | `mergecraft learnings active` | List only the active (promoted) learning entries. |
 | `mergecraft learnings influence` | List active + staging learning entries with their provenance. |
 | `mergecraft learnings staging` | List only the staging (quarantined) learning entries. |
+| `mergecraft lens list` | List bundled lens ids and display titles. |
+| `mergecraft lens show <lens-id>` | Show rubric, triggers, evidence, and tool classes for one lens. |
+| `mergecraft lens test <lens-id>` | Preview one lens dispatch (rubric + routing context) for a diff fixture. |
 | `mergecraft models list` | List curated model slugs and whether credentials are detected locally. |
 | `mergecraft models set <slugs>` | Write an ordered `models:` list to `.mergecraft/config.yaml`. |
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |
+| `mergecraft pipeline explain` | Print pipeline step ids and predicate vocabulary. |
+| `mergecraft pipeline lint` | Validate the pipeline file and registry agent references. |
+| `mergecraft pipeline show --diff DIFF` | Preview which pipeline steps would run or skip for a diff. |
 | `mergecraft traces show <run-id>` | Read back the local JSONL traces for the given run id (re-redacts on render). |
 | `mergecraft tracing logfire disable` | Disable Logfire tracing by removing the token + project locally and on GitHub. |
 | `mergecraft tracing logfire enable` | Enable Logfire tracing by writing the token + project locally and on GitHub. |

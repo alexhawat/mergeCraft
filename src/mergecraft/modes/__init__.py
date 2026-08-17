@@ -138,6 +138,12 @@ def prompt_version_for(name: str) -> str:
     raise KeyError(msg)
 
 
+def _render_lens_menu_block() -> str:
+    from mergecraft.agents.lenses._menu import render_lens_menu_block
+
+    return render_lens_menu_block()
+
+
 def _expand_template(
     template: str,
     *,
@@ -153,6 +159,7 @@ def _expand_template(
     text = text.replace("${commitStep}", commit_step)
     text = text.replace("${finalizeStep}", finalize_step)
     text = text.replace("${PR_SUMMARY_FORMAT}", PR_SUMMARY_FORMAT)
+    text = text.replace("${LENS_MENU_BLOCK}", _render_lens_menu_block())
     text = text.replace("${REVIEWER_AGENT_NAME}", REVIEWER_AGENT_NAME)
     text = text.replace("${VERIFIER_AGENT_NAME}", VERIFIER_AGENT_NAME)
 

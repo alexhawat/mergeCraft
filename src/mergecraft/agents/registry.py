@@ -12,10 +12,14 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import BaseModel, ConfigDict
 
+from mergecraft.agents.lens_triggers import LensTriggers
 from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.structured_handoff import agent_finding_output_schema_id
 from mergecraft.agents.verifier import VERIFIER_SYSTEM_PROMPT, pinned_judge_model
-from mergecraft.config.settings import AgentBindingOverride, DispatchMode  # noqa: TC001
+from mergecraft.config.settings import (  # noqa: TC001
+    AgentBindingOverride,
+    DispatchMode,
+)
 from mergecraft.mcp.server import build_orchestrator_tools
 from mergecraft.mcp.shared import (
     REVIEWER_ALLOWED_TOOL_CLASSES,
@@ -38,16 +42,24 @@ _DEFAULT_BUDGET: Final[int] = 8
 _DEFAULT_TIMEOUT_S: Final[int] = 600
 _DEFAULT_PROMPT_VERSION: Final[str] = "1.0.0"
 
+
+def _lens_prompt_catalog() -> dict[str, tuple[str, str]]:
+    from mergecraft.agents.lenses._definitions import LENS_DEFINITIONS
+
+    return {
+        f"mergecraft.lens.{lens_id}": (lens.rubric, _DEFAULT_PROMPT_VERSION)
+        for lens_id, lens in LENS_DEFINITIONS.items()
+    }
+
+
 _PROMPT_CATALOG: Final[dict[str, tuple[str, str]]] = {
     "mergecraft.reviewer": (REVIEWER_SYSTEM_PROMPT, _DEFAULT_PROMPT_VERSION),
     "mergecraft.verifier": (VERIFIER_SYSTEM_PROMPT, _DEFAULT_PROMPT_VERSION),
     "mergecraft.orchestrator": ("", _DEFAULT_PROMPT_VERSION),
     "mergecraft.judge": (VERIFIER_SYSTEM_PROMPT, _DEFAULT_PROMPT_VERSION),
     "mergecraft.classifier": ("", _DEFAULT_PROMPT_VERSION),
+    **_lens_prompt_catalog(),
 }
-
-# Lenses ship in AP5 — until then the set is empty and any lens binding fails validation.
-_KNOWN_LENS_IDS: Final[frozenset[str]] = frozenset()
 
 _ORCHESTRATOR_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(ToolClass)
 
@@ -80,6 +92,7 @@ class AgentBinding(BaseModel):
     timeout_s: int
     dispatch: DispatchMode = "single"
     output_schema: str | None = None
+    triggers: LensTriggers | None = None
 
 
 class ResolvedAgentModel(BaseModel):
@@ -201,6 +214,15 @@ def _build_default_binding(settings: RepoSettings, role: AgentRole) -> AgentBind
     )
 
 
+def _resolve_triggers(override: AgentBindingOverride | None) -> LensTriggers | None:
+    if override is None or override.triggers is None:
+        return None
+    return LensTriggers(
+        categories=tuple(override.triggers.categories),
+        min_risk_band=override.triggers.min_risk_band,
+    )
+
+
 def _apply_override(
     base: AgentBinding,
     override: AgentBindingOverride,
@@ -226,6 +248,7 @@ def _apply_override(
         timeout_s=override.timeout_s if override.timeout_s is not None else base.timeout_s,
         dispatch=override.dispatch or base.dispatch,
         output_schema=base.output_schema,
+        triggers=_resolve_triggers(override) if override.triggers is not None else base.triggers,
     )
 
 
@@ -247,6 +270,22 @@ class Registry:
             msg = f"no binding for role {key!r}"
             raise KeyError(msg) from exc
 
+    def resolve_agent_ref(self, ref: str) -> AgentBinding:
+        """Resolve a pipeline agent reference (role name or custom agent id)."""
+        try:
+            role = AgentRole(ref)
+        except ValueError:
+            role = None
+        if role is not None:
+            try:
+                return self.resolve_role(role)
+            except KeyError:
+                pass
+        if ref in self._bindings:
+            return self._bindings[ref]
+        msg = f"no binding for agent ref {ref!r}"
+        raise KeyError(msg)
+
     def resolve_tool_names(self, binding: AgentBinding, ctx: ToolContext) -> list[str]:
         tools = build_orchestrator_tools(ctx)
         if binding.role is AgentRole.orchestrator:
@@ -255,6 +294,14 @@ class Registry:
 
     def all_bindings(self) -> tuple[AgentBinding, ...]:
         return tuple(self._bindings.values())
+
+    def iter_lens_bindings(self) -> tuple[AgentBinding, ...]:
+        """Yield lens-scoped reviewer bindings in stable order."""
+        return tuple(
+            binding
+            for binding in sorted(self._bindings.values(), key=lambda item: item.agent_id)
+            if binding.lens is not None
+        )
 
     def validate(self) -> None:
         for binding in self._bindings.values():
@@ -268,10 +315,10 @@ class Registry:
             if binding.prompt_id not in _PROMPT_CATALOG:
                 msg = f"unknown prompt id {binding.prompt_id!r} on agent {binding.agent_id!r}"
                 raise RegistryValidationError(msg)
-            if binding.lens is not None and binding.lens not in _KNOWN_LENS_IDS:
+            if binding.lens is not None and binding.triggers is None:
                 msg = (
                     f"unreachable lens {binding.lens!r} on agent {binding.agent_id!r} "
-                    "(lens not in registry)"
+                    "(lens missing trigger metadata)"
                 )
                 raise RegistryValidationError(msg)
             if binding.role is not AgentRole.orchestrator:
@@ -281,16 +328,31 @@ class Registry:
                     raise RegistryValidationError(msg)
 
 
+def resolve_agent_ref(registry: Registry, ref: str) -> AgentBinding:
+    """Resolve a pipeline step agent reference against a registry."""
+    return registry.resolve_agent_ref(ref)
+
+
 def load_registry(
     *,
     settings: RepoSettings,
     repo_root: Path | None = None,
 ) -> Registry:
     """Load defaults merged with ``settings.agents`` overrides."""
-    del repo_root  # reserved for future repo-local agent manifests (AP5)
+    del repo_root  # reserved for future repo-local agent manifests
     bindings: dict[str, AgentBinding] = {}
     for role in AgentRole:
         bindings[role.value] = _build_default_binding(settings, role)
+
+    bindings.update(
+        __import__(
+            "mergecraft.agents.lenses._bindings",
+            fromlist=["bundled_lens_bindings"],
+        ).bundled_lens_bindings(settings=settings)
+    )
+    lens_keys: dict[str, str] = {
+        binding.lens: key for key, binding in bindings.items() if binding.lens is not None
+    }
 
     for agent_key, override in settings.agents.items():
         key_role = _parse_role(agent_key)
@@ -301,11 +363,19 @@ def load_registry(
                 "so it does not silently replace a default role binding"
             )
             raise RegistryValidationError(msg)
-        base_role = declared_role or key_role or AgentRole.reviewer
-        base = bindings.get(base_role.value) or _build_default_binding(settings, base_role)
-        bindings[agent_key] = _apply_override(
-            base, override, agent_key=agent_key, settings=settings
-        )
+        if override.lens is not None and override.lens in lens_keys:
+            base = bindings[lens_keys[override.lens]]
+        else:
+            base_role = declared_role or key_role or AgentRole.reviewer
+            base = bindings.get(base_role.value) or _build_default_binding(settings, base_role)
+        merged = _apply_override(base, override, agent_key=agent_key, settings=settings)
+        if merged.lens is not None and merged.lens in lens_keys:
+            stale_key = lens_keys[merged.lens]
+            if stale_key != agent_key:
+                bindings.pop(stale_key, None)
+        if merged.lens is not None:
+            lens_keys[merged.lens] = agent_key
+        bindings[agent_key] = merged
 
     return Registry(bindings)
 
