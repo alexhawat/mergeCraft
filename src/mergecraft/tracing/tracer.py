@@ -434,13 +434,18 @@ def resolve_correlation_from_env() -> dict[str, Any]:
 def baseline_run_attrs() -> dict[str, Any]:
     """Self-describing run attributes for every span in the process (O3).
 
-    Populates ``mergecraft.run_id`` / ``mergecraft.version`` /
-    ``mergecraft.trust_tier`` plus the VCS/CI fields
-    (``vcs.repository.name``, ``vcs.change.id``, ``vcs.revision``,
+    Populates ``mergecraft.run_id`` / ``mergecraft.version`` plus the VCS/CI
+    fields (``vcs.repository.name``, ``vcs.change.id``, ``vcs.revision``,
     ``ci.workflow_run_id``, ``ci.job_id``) from
     :func:`resolve_correlation_from_env` and the package version, so a trace
     can say which build and which change produced it. Absent values are
     dropped rather than emitted as nulls.
+
+    ``mergecraft.trust_tier`` is deliberately NOT set here: the only
+    process-wide source is the CLI-only ``MERGECRAFT_TRUST_TIER`` env var, so
+    a baseline value would silently omit the tier on Action runs. The bound
+    :class:`ReviewContext` carries the honestly derived tier and lands on the
+    span via the D4 close-time merge (baseline → review context → …).
 
     Returns:
         dict[str, Any]: Baseline attributes (never empty — the version is
@@ -453,9 +458,6 @@ def baseline_run_attrs() -> dict[str, Any]:
     run_id = correlation.get("run_id")
     if run_id:
         attrs["mergecraft.run_id"] = run_id
-    trust_tier = os.environ.get("MERGECRAFT_TRUST_TIER")
-    if trust_tier:
-        attrs["mergecraft.trust_tier"] = trust_tier
     repo = correlation.get("repo")
     if repo:
         attrs["vcs.repository.name"] = repo

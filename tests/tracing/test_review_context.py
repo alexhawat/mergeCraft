@@ -253,8 +253,19 @@ def test_precedence_explicit_attr_beats_review_context(
     assert sink.events[0].attrs["review.id"] == "review-explicit"
 
 
-def test_baseline_attrs_carry_version_and_vcs_fields(monkeypatch: MonkeyPatch) -> None:
-    """O3 — baseline attrs make a span self-describing: build version + VCS/CI fields."""
+def test_baseline_attrs_carry_version_and_vcs_fields(
+    monkeypatch: MonkeyPatch,
+    review_context_factory: Callable[..., Any],
+) -> None:
+    """O3 — baseline attrs make a span self-describing: build version + VCS/CI fields.
+
+    Amended post-review (PR #241): the baseline deliberately does NOT read
+    ``MERGECRAFT_TRUST_TIER`` — that env var is CLI-only, so a baseline value
+    would silently omit the tier on Action runs. The honestly derived tier
+    reaches the span from the bound ``ReviewContext`` instead (asserted
+    below), which mirrors it as both ``review.trust_tier`` and
+    ``mergecraft.trust_tier``.
+    """
     monkeypatch.setenv("GITHUB_REPOSITORY", "octo/mergecraft")
     monkeypatch.setenv("GITHUB_PR_NUMBER", "42")
     monkeypatch.setenv("GITHUB_SHA", "f" * 40)
@@ -270,7 +281,7 @@ def test_baseline_attrs_carry_version_and_vcs_fields(monkeypatch: MonkeyPatch) -
     baseline = baseline_run_attrs()
     assert baseline["mergecraft.version"] == mergecraft.__version__
     assert baseline["mergecraft.run_id"] == "424242"
-    assert baseline["mergecraft.trust_tier"] == "trusted"
+    assert "mergecraft.trust_tier" not in baseline  # env guess removed; see docstring
     assert baseline["vcs.repository.name"] == "octo/mergecraft"
     assert baseline["vcs.change.id"] == 42
     assert baseline["vcs.revision"] == "f" * 40
@@ -285,12 +296,19 @@ def test_baseline_attrs_carry_version_and_vcs_fields(monkeypatch: MonkeyPatch) -
         trace_id="trace-ob1",
         baseline_attrs=baseline,
     )
-    with tracer.start_span("mergecraft.run"):
+    from mergecraft.tracing.review_context import bind_review_context
+
+    ctx = review_context_factory(review_id="r-trust", trust_tier="untrusted")
+    with bind_review_context(ctx), tracer.start_span("mergecraft.run"):
         pass
 
     event_attrs = sink.events[0].attrs
     assert event_attrs["mergecraft.version"] == mergecraft.__version__
     assert event_attrs["vcs.repository.name"] == "octo/mergecraft"
+    # The derived tier lands via the D4 review-context merge, not the env var
+    # (which says "trusted" here — proof the baseline no longer reads it).
+    assert event_attrs["review.trust_tier"] == "untrusted"
+    assert event_attrs["mergecraft.trust_tier"] == "untrusted"
 
 
 def test_tracer_repr_is_unchanged() -> None:

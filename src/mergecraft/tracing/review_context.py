@@ -105,6 +105,10 @@ class ReviewContext:
             attrs["review.trigger"] = self.trigger
         if self.trust_tier:
             attrs["review.trust_tier"] = self.trust_tier
+            # Mirror under mergecraft.* — the tier is honestly derived at the
+            # entry point (never the CLI-only env guess), so both spellings
+            # reach Action and CLI spans alike.
+            attrs["mergecraft.trust_tier"] = self.trust_tier
         return attrs
 
 

@@ -176,6 +176,35 @@ class AgentFindingLike:
     severity: str = ""
     body: str = ""
 
+    def __init__(self, fingerprint: str, severity: str = "", body: str = "", **_: Any) -> None:
+        # Tolerate extra stored-row keys (path/line/…) — only the three
+        # lifecycle fields are read.
+        self.fingerprint = fingerprint
+        self.severity = severity
+        self.body = body
+
+
+def emit_published_findings(ctx: ToolContext) -> None:
+    """Emit the ``published`` lifecycle stage for every confirmed finding.
+
+    Called at the publish seam (``create_pull_request_review``) so the
+    documented ``proposed`` → ``verified`` → ``published``/``withdrawn``
+    lifecycle is complete in the trace. Non-throwing.
+    """
+    _emit_finding_stage(
+        ctx,
+        [
+            AgentFindingLike(
+                fingerprint=str(row.get("fingerprint", "") or ""),
+                severity=str(row.get("severity", "") or ""),
+                body=str(row.get("body", "") or ""),
+            )
+            for row in ctx.tool_state.confirmed_findings
+            if isinstance(row, dict) and row.get("fingerprint")
+        ],
+        stage="published",
+    )
+
 
 def verify_agent_findings_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
@@ -215,7 +244,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
             row["fingerprint"] = finding.identity()
             stored[str(row["fingerprint"])] = row
         ctx.tool_state.agent_findings = list(stored.values())
-        _emit_finding_stage(ctx, findings, stage="proposed")
+        _emit_finding_stage(ctx, [AgentFindingLike(**row) for row in stored.values()], stage="proposed")
         plan = plan_agent_verifications(
             findings,
             budget=settings.inline_budget,
