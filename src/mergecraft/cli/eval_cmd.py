@@ -36,6 +36,7 @@ from mergecraft.evals.benchmark import (
     replay_bank,
     write_result_set,
 )
+from mergecraft.evals.gate import DEFAULT_GATE_TOLERANCE, eval_gate, load_result_set
 from mergecraft.evals.live_run import (
     DEFAULT_DETECTION_CORPUS_DIR,
     run_full_benchmark,
@@ -723,6 +724,21 @@ def gate(
         "--require-promoted",
         help="Also fail when a case has no permanent test (default: warn only).",
     ),
+    baseline: Path | None = typer.Option(
+        None,
+        "--baseline",
+        help="Baseline benchmark result set (JSON) for the release regression gate (EV3).",
+    ),
+    candidate: Path | None = typer.Option(
+        None,
+        "--candidate",
+        help="Candidate benchmark result set (JSON) for the release regression gate (EV3).",
+    ),
+    tolerance: float = typer.Option(
+        DEFAULT_GATE_TOLERANCE,
+        "--tolerance",
+        help="Declared tolerance band for the release regression gate.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -745,7 +761,24 @@ def gate(
 
     An empty bank passes with a notice, so the target can be wired into CI now
     and grow teeth as cases accumulate.
+
+    With ``--baseline`` and ``--candidate`` (both required together) the
+    command also runs the **release regression gate** (EV3): the candidate
+    result set is compared against the published baseline with the declared
+    ``--tolerance`` band via ``mergecraft.evals.gate.eval_gate`` — a metric
+    that regresses beyond the band fails the release, noise inside it passes.
     """
+    if (baseline is None) != (candidate is None):
+        _bail("--baseline and --candidate must be given together")
+
+    gate_report = None
+    if baseline is not None and candidate is not None:
+        gate_report = eval_gate(
+            candidate=load_result_set(candidate),
+            baseline=load_result_set(baseline),
+            tolerance=tolerance,
+        )
+
     bank_dir = _bank_dir(bank)
     permanent_dir = _default_permanent_dir()
 
@@ -754,6 +787,8 @@ def gate(
             typer.echo(json.dumps({"status": "empty", "bank": str(bank_dir), "cases": 0}, indent=2))
         else:
             console.print(f"[yellow]eval bank {bank_dir} does not exist yet[/yellow]")
+        if gate_report is not None and not gate_report.passed:
+            raise typer.Exit(code=1)
         return
 
     paths = sorted(bank_dir.glob(f"*{CASE_FILE_SUFFIX}"))
@@ -778,26 +813,27 @@ def gate(
         if not permanent_test_path(permanent_dir, case.id).is_file():
             unpromoted.append(case.id)
 
+    gate_failed = gate_report is not None and not gate_report.passed
+
     failures = len(broken) + len(duplicates)
     if require_promoted:
         failures += len(unpromoted)
+    if gate_failed:
+        failures += 1
 
     if json_output:
-        typer.echo(
-            json.dumps(
-                {
-                    "status": "fail" if failures else "pass",
-                    "bank": str(bank_dir),
-                    "cases": len(paths),
-                    "loaded": len(seen),
-                    "broken": broken,
-                    "duplicates": duplicates,
-                    "unpromoted": unpromoted,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
+        payload: dict[str, Any] = {
+            "status": "fail" if failures else "pass",
+            "bank": str(bank_dir),
+            "cases": len(paths),
+            "loaded": len(seen),
+            "broken": broken,
+            "duplicates": duplicates,
+            "unpromoted": unpromoted,
+        }
+        if gate_report is not None:
+            payload["regression_gate"] = gate_report.model_dump(mode="json")
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
     else:
         console.print(f"eval bank: {bank_dir}")
         console.print(f"  cases    : {len(paths)}")
@@ -812,6 +848,17 @@ def gate(
         if unpromoted:
             colour = "red" if require_promoted else "yellow"
             console.print(f"  [{colour}]not promoted[/{colour}]: {', '.join(unpromoted)}")
+        if gate_report is not None:
+            console.print(
+                f"release regression gate (tolerance {gate_report.tolerance:.2%}): "
+                + ("[green]passed[/green]" if gate_report.passed else "[red]failed[/red]")
+            )
+            for delta in gate_report.deltas:
+                marker = " [red]REGRESSED[/red]" if delta.regressed else ""
+                console.print(
+                    f"  {delta.metric}: {delta.baseline:.2%} → {delta.candidate:.2%} "
+                    f"(Δ {delta.delta:+.2%}){marker}"
+                )
         if not paths:
             console.print(
                 "  [yellow]bank is empty — the gate passes, but it is not yet "
