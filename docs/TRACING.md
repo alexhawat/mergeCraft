@@ -64,6 +64,7 @@ tracing:
   enabled: true                # default: unset (treated as off); bool | null
   retentionDays: 30            # default: 30
   redaction: true              # default: true
+  content: redacted            # default: redacted; off | metadata | redacted | full (OB2/D6)
   sinks:
     - type: jsonl_file
       path: .mergecraft/traces/
@@ -203,6 +204,37 @@ does hit it, raise the `Final` constant; it is a single line to change.
 There is no config-level trust gate. D15's hard requirement is that the
 statement above appears plainly in this document, so the operator sees
 it the first time they reach for a remote sink.
+
+## Content-capture policy for model payloads (OB2 — D6/D7/D8)
+
+D15 warns that remote sinks export reviewed-repo content; the `content`
+policy is the **level control** that decides how much of it leaves the
+runner. It governs model payloads (prompts, completions, reasoning) via
+`tracing/content.py`, with four levels (D6):
+
+| Level | Body | Metadata (`.chars` / `.bytes` / `.sha256`) | Use |
+| --- | --- | --- | --- |
+| `off` | — | — | Nothing is captured, hash included |
+| `metadata` | — | ✓ | Counts + hash only — the untrusted-tier ceiling |
+| `redacted` (default) | ✓, through the secret matcher (`analyzers.redact.redact_secrets`), capped | ✓ | Safe default |
+| `full` | ✓, verbatim, capped only | ✓ | Local debugging |
+
+Resolution (`resolve_content_capture(configured, trust_tier)`):
+`MERGECRAFT_TRACING_CONTENT` env → the YAML `tracing.content` field → the
+default `redacted`. An unrecognised value at any step falls through to the
+next, ending at the default — fail safe, never `full`. Bodies are
+byte-capped at the shared `TRACE_ATTRS_JSON_MAX_BYTES` budget and flagged
+`.truncated`; `.chars` / `.bytes` / `.sha256` always describe the
+**original** payload (D8), so the hash detects prompt drift between two
+runs even when neither shipped a body.
+
+**D7 — the untrusted cap cannot be configured away.** At any trust tier
+other than `trusted`, a body-emitting level is lowered to `metadata`
+**after** precedence resolution: `content: full` in YAML and
+`MERGECRAFT_TRACING_CONTENT=full` both yield `metadata` on a fork-PR-shaped
+run. The cap only ever lowers a level — `off` stays `off`, and nothing is
+ever raised. Shipping a fork PR's prompt bodies to a remote sink is
+exactly the exfiltration path trust tiers exist to close.
 
 ## Span tree (W4 — Batch B)
 

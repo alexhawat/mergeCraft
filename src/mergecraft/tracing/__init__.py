@@ -8,6 +8,11 @@ behind the optional ``[tracing]`` extra (D6).
 from __future__ import annotations
 
 from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES, cap_event_attrs
+from mergecraft.tracing.content import (
+    ContentCapture,
+    capture_text,
+    resolve_content_capture,
+)
 from mergecraft.tracing.event import TraceEvent
 from mergecraft.tracing.exporters import (
     OTLPSink,
@@ -63,6 +68,7 @@ def current_tracer() -> Tracer | NullTracer | None:
 __all__ = [
     "DENY_KEYS",
     "TRACE_ATTRS_JSON_MAX_BYTES",
+    "ContentCapture",
     "JSONLFileSink",
     "MemorySink",
     "MultiSink",
@@ -78,6 +84,7 @@ __all__ = [
     "baseline_run_attrs",
     "bind_review_context",
     "cap_event_attrs",
+    "capture_text",
     "correlation_key_for",
     "current_review_context",
     "current_tracer",
@@ -85,6 +92,7 @@ __all__ = [
     "read_jsonl_events",
     "redact_attrs",
     "redact_event",
+    "resolve_content_capture",
     "resolve_correlation_from_env",
     "resolve_review_id",
     "resolve_session_id",
