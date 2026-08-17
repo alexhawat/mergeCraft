@@ -295,3 +295,38 @@ Target API (CC2.2):
 
 Removed impl-pending xfail markers from CC2 test modules. Suite is 11 real passes.
 Adjusted `test_plan_makes_no_provider_call` to patch only `httpx.Client` (plan is local-only).
+
+## CC3 — runtime bounds (PR CC3)
+
+Wave plan: `.ignorelocal/02-cli-sources-trust-wave-plan.md` (PR CC3)
+Authoring wave: **CC3.1**. Implementation: **CC3.2**.
+
+Target API (CC3.2):
+
+- ``RunBounds``, ``BudgetTracker``, ``ScopeReduction``, ``resolve_run_bounds``,
+  ``apply_diff_line_budget``, ``outcome_with_scope_reduction`` on
+  `src/mergecraft/utils/run_bounds.py`
+- ``EXTERNAL_OPERATION_TIMEOUTS`` / ``timeout_for_external_operation`` registry
+- ``RunCache`` on `src/mergecraft/utils/run_cache.py`
+
+## Contract matrix (CC3)
+
+| # | Contract | Layer | Primary test |
+|---|----------|-------|--------------|
+| CC3.1a | token budget enforced | unit | `test_token_budget_per_run_is_enforced` |
+| CC3.1b | cost budget enforced | unit | `test_cost_budget_per_run_is_enforced` |
+| CC3.1c | tool-call budget enforced | unit | `test_tool_call_budget_is_enforced` |
+| CC3.1d | exhaustion → inconclusive | unit | `test_budget_exhaustion_yields_inconclusive_not_a_partial_approval` |
+| CC3.1e | external ops bounded | unit | `test_every_external_operation_has_a_timeout` |
+| CC3.1f | context retrieval timeout | unit | `test_context_retrieval_timeout_is_bounded` |
+| CC3.1g | D12 reduced scope reported | unit | `test_oversized_diff_degrades_and_reports_reduced_scope` |
+| CC3.1h | D12 outcome downgrade | unit | `test_reduced_scope_downgrades_the_outcome` |
+| CC3.1i | cache ceiling + eviction | unit | `test_cache_has_a_size_ceiling_and_eviction` |
+| CC3.1j | concurrent cache safety | integration | `test_concurrent_cli_runs_do_not_corrupt_the_cache` |
+
+## Acceptance (CC3.1)
+
+- 10 tests collected across `tests/runtime/test_budgets.py`,
+  `tests/runtime/test_timeouts.py`, `tests/runtime/test_large_inputs.py`,
+  `tests/runtime/test_cache.py`
+- 0 pass; 10 RED via `xfail(strict=False)` — pending CC3.2
