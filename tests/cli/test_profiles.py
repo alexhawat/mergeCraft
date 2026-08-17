@@ -10,7 +10,6 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -20,7 +19,6 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_CC4_2_XFAIL = pytest.mark.xfail(reason="green after CC4.2: review profiles", strict=False)
 
 
 def _plain(text: str) -> str:
@@ -51,7 +49,6 @@ def _init_git_repo(tmp_path: Path) -> None:
     )
 
 
-@_CC4_2_XFAIL
 def test_named_profile_selects_a_bundle(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``--profile`` selects a model-chain, analyzer, and budget bundle."""
     _init_git_repo(tmp_path)
@@ -90,7 +87,6 @@ def test_named_profile_selects_a_bundle(tmp_path: Path, monkeypatch: MonkeyPatch
     assert "security" in security_out.lower()
 
 
-@_CC4_2_XFAIL
 def test_profile_can_be_overridden_by_explicit_flags(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

@@ -600,6 +600,9 @@ of them for its full flag set):
 | `mergecraft auth minimax` | Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY. |
 | `mergecraft auth nous` | Save a Nous Portal API key as NOUS_API_KEY. |
 | `mergecraft auth tokenhub` | Save a Tencent TokenHub API key as TOKENHUB_API_KEY. |
+| `mergecraft cache clear` | Remove every entry from the run cache. |
+| `mergecraft cache info` | Show cache location, byte ceiling, and current usage. |
+| `mergecraft cache prune` | Evict oldest entries until usage is within the byte ceiling. |
 | `mergecraft config explain <key>` | Explain which precedence layer wins for a config key. |
 | `mergecraft config show <key>` | Show a resolved config value and the precedence layer that supplied it. |
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
@@ -624,6 +627,8 @@ of them for its full flag set):
 | `mergecraft lens list` | List bundled lens ids and display titles. |
 | `mergecraft lens show <lens-id>` | Show rubric, triggers, evidence, and tool classes for one lens. |
 | `mergecraft lens test <lens-id>` | Preview one lens dispatch (rubric + routing context) for a diff fixture. |
+| `mergecraft mcp list` | Print the resolved MCP tool names for a role. |
+| `mergecraft mcp serve` | Start the MCP HTTP server for a resolved workspace and role. |
 | `mergecraft models list` | List curated model slugs and whether credentials are detected locally. |
 | `mergecraft models set <slugs>` | Write an ordered `models:` list to `.mergecraft/config.yaml`. |
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |

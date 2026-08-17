@@ -6,6 +6,7 @@ import contextlib
 import fcntl
 import hashlib
 import json
+import os
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -121,5 +122,45 @@ class RunCache:
             with contextlib.suppress(OSError):
                 Path(victim.path).unlink(missing_ok=True)
 
+    def info(self) -> dict[str, Any]:
+        with self._locked():
+            entries = self._load_index()
+            total = sum(entry.size for entry in entries)
+            return {
+                "root": str(self.root),
+                "entries": len(entries),
+                "bytes": total,
+                "max_bytes": self.max_bytes,
+            }
 
-__all__ = ["RunCache"]
+    def clear(self) -> int:
+        with self._locked():
+            entries = self._load_index()
+            for entry in entries:
+                with contextlib.suppress(OSError):
+                    Path(entry.path).unlink(missing_ok=True)
+            self._save_index([])
+            return len(entries)
+
+    def prune(self) -> int:
+        with self._locked():
+            entries = self._load_index()
+            before = len(entries)
+            self._evict_if_needed(entries)
+            self._save_index(entries)
+            return before - len(entries)
+
+
+def default_cache_root() -> Path:
+    """Return the on-disk run-cache root (``MERGECRAFT_CACHE_DIR`` or XDG default)."""
+    raw = os.environ.get("MERGECRAFT_CACHE_DIR")
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / ".cache" / "mergecraft" / "run-cache"
+
+
+def open_run_cache(*, root: Path, max_bytes: int) -> RunCache:
+    return RunCache(root=root, max_bytes=max_bytes)
+
+
+__all__ = ["RunCache", "default_cache_root", "open_run_cache"]

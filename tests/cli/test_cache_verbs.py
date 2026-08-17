@@ -6,28 +6,26 @@ Authoring wave: **CC4.1** (RED). Implementation: **CC4.2**.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 from mergecraft.utils.run_cache import RunCache
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from _pytest.monkeypatch import MonkeyPatch
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_CC4_2_XFAIL = pytest.mark.xfail(reason="green after CC4.2: cache verbs", strict=False)
 
 
 def _plain(text: str) -> str:
     return _ANSI.sub("", text)
 
 
-@_CC4_2_XFAIL
 def test_cache_info_clear_prune(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``cache info``, ``cache clear``, and ``cache prune`` manage the run cache."""
     cache_root = tmp_path / "run-cache"

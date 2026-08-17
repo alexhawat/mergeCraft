@@ -14,6 +14,7 @@ from mergecraft.cli import (
     agents_cmd,
     analyzers_cmd,
     auth_cmd,
+    cache_cmd,
     config_surface_cmd,
     diff_review_cmd,
     doctor_cmd,
@@ -23,6 +24,7 @@ from mergecraft.cli import (
     init_cmd,
     learnings_cmd,
     lens_cmd,
+    mcp_cmd,
     models_cmd,
     pipeline_cmd,
     plan_cmd,
@@ -43,6 +45,8 @@ console = Console(stderr=True)
 app.add_typer(agents_cmd.app, name="agents")
 app.add_typer(lens_cmd.app, name="lens")
 app.add_typer(pipeline_cmd.app, name="pipeline")
+app.add_typer(mcp_cmd.app, name="mcp")
+app.add_typer(cache_cmd.app, name="cache")
 app.add_typer(auth_cmd.app, name="auth")
 app.add_typer(models_cmd.app, name="models")
 app.add_typer(analyzers_cmd.app, name="analyzers")

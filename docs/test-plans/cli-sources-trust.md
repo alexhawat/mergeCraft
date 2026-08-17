@@ -365,4 +365,9 @@ defers duplicate front-ends.
 
 - 7 tests collected across `tests/cli/test_mcp_serve.py`,
   `tests/cli/test_profiles.py`, `tests/cli/test_cache_verbs.py`
-- 0 pass; 7 RED via `xfail(strict=False)` — pending CC4.2
+- 0 pass; 7 RED via `xfail(strict=False)` — **cleared post-CC4.2 (2026-08-17)**
+
+## CC4.2 xfail reconciliation (2026-08-17)
+
+Removed impl-pending xfail markers from CC4 CLI test modules. Suite is 7 real passes.
+Inspection verbs (`agents` / `lens` / `pipeline`) deferred — already shipped from file 3.
