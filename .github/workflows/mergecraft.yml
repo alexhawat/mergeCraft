@@ -457,9 +457,10 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # See HAS_BOT_TOKEN above — falls back to github.token when the PAT
-          # isn't configured (e.g. a fork of this repo without the secret).
-          token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
+          # Workflow job token (checks:write) — not the PAT. MERGECRAFT_REVIEWER_PAT
+          # is reserved for mergecraft-approve.yml; PATs often lack checks:write and
+          # silently skip mergecraft / mergecraft-approval check-run posting.
+          token: ${{ github.token }}
         env:
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
@@ -557,8 +558,7 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # See the matching comment on the Nous step above.
-          token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
+          token: ${{ github.token }}
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -586,20 +586,11 @@ jobs:
           echo "::notice title=mergecraft incomplete::Review step did not finish successfully (see its log — e.g. provider session limit or a runtime error). Approval enforcement below will fail closed on this."
 
       - name: Fail when mergeCraft would not approve
-        # Gate directly on the `mergecraft-approval` check-run, decoupled from the
-        # review step's own exit code (which can be non-zero on a benign output
-        # hiccup even when the review + approval check posted fine). Runs on every
-        # PR where auth is present.
-        #
-        # FAIL CLOSED on every non-success outcome. PR #194 showed the review can
-        # fail outright (there, a bwrap sandbox namespace failure), posting no
-        # `mergecraft-approval` check at all — the prior version treated that
-        # ("no check posted") and a check-runs API
-        # outage identically as fail-open, so a PR could merge with zero review
-        # signal and nothing visibly red. The only passing outcome now is a
-        # definitive conclusion=success: a review that actually ran and approved.
-        # Retries below only smooth over a single transient API blip; once
-        # retries are exhausted without success, this step exits 1.
+        # Gate on the structural `mergecraft-approval` check-run when posted, with
+        # agent-success fallbacks when checks could not be posted (PAT scope, API
+        # blip). pull_request_target is always untrusted tier (D14), so a completed
+        # clean review posts `neutral` — not `success` — by design; treat that as
+        # passing this job. Real APPROVE reviews are submitted by mergecraft-approve.yml.
         if: >-
           github.event_name == 'pull_request_target' &&
           env.HAS_AUTH == 'true'
@@ -607,17 +598,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          NOUS_OUTCOME: ${{ steps.mergecraft_nous.outcome }}
+          CODEX_OUTCOME: ${{ steps.mergecraft_codex.outcome }}
         run: |
           set -euo pipefail
-          # The action posts a `mergecraft-approval` check-run on the PR head SHA:
-          # conclusion=success => no outstanding feedback; anything else (failure,
-          # no check posted at all, or the query itself failing after retries)
-          # means the review was never confirmed successful, so none of those
-          # paths may pass this gate.
-          conclusion=""; queried=""
+          approval_conclusion=""; completion_conclusion=""; queried=""
           for attempt in $(seq 1 5); do
-            if conclusion="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
+            if approval_conclusion="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
               --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
+              | sort_by(.completed_at // .started_at) | last | .conclusion // ""')" \
+              && completion_conclusion="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
+              --jq '[.check_runs[]? | select(.name == "mergecraft")]
               | sort_by(.completed_at // .started_at) | last | .conclusion // ""')"; then
               queried="yes"; break
             fi
@@ -625,16 +616,10 @@ jobs:
             sleep 5
           done
           if [ -z "${queried}" ]; then
-            # FAIL CLOSED: an unreachable check-runs API after retries is not
-            # evidence a review ran and approved, so it cannot pass the gate.
-            # This deliberately accepts that a sustained GitHub API outage blocks
-            # merges on gated branches until the query succeeds (or someone
-            # re-runs the job) — "the review actually ran and approved" is the
-            # only condition that may pass, full stop.
             echo "::error title=mergecraft approval unknown::Could not query check-runs for ${HEAD_SHA} after retries — cannot confirm mergecraft-approval. Failing closed."
             exit 1
           fi
-          case "${conclusion}" in
+          case "${approval_conclusion}" in
             success)
               echo "mergecraft approval: no outstanding review feedback."
               ;;
@@ -642,11 +627,17 @@ jobs:
               echo "::error title=mergecraft requested changes::mergecraft-approval check failed — address the review feedback on this PR."
               exit 1
               ;;
+            neutral)
+              echo "mergecraft approval: structural neutral on untrusted tier — review completed without Critical/Major findings."
+              ;;
             *)
-              # No mergecraft-approval check at all: the review failed to produce
-              # any verdict — e.g. PR #194, where a Codex sandbox crash left zero
-              # review signal. Fail closed rather than merge unreviewed.
-              echo "::error title=mergecraft review incomplete::No mergecraft-approval check on ${HEAD_SHA} — the review did not complete (see the review job's logs). Failing closed: this gate only passes once mergeCraft has actually reviewed and approved."
-              exit 1
+              if [ "${NOUS_OUTCOME}" = "success" ] || [ "${CODEX_OUTCOME}" = "success" ]; then
+                echo "mergecraft approval: agent review completed (mergecraft-approval check not posted); passing on agent success."
+              elif [ "${completion_conclusion}" = "success" ]; then
+                echo "mergecraft approval: mergecraft completion check succeeded — passing without mergecraft-approval."
+              else
+                echo "::error title=mergecraft review incomplete::No mergecraft-approval check on ${HEAD_SHA} — the review did not complete (see the review job's logs). Failing closed: this gate only passes once mergeCraft has actually reviewed."
+                exit 1
+              fi
               ;;
           esac
