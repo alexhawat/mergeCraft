@@ -204,7 +204,7 @@ def test_cli_diff_review_json_validates_findings(
 
     combined = _plain(result.stdout + result.stderr)
     if expect_ok:
-        assert result.exit_code == 0, combined
+        assert result.exit_code == 10, combined
         assert json_out.is_file(), combined
         payload = json.loads(json_out.read_text(encoding="utf-8"))
         assert isinstance(payload.get("findings"), list)

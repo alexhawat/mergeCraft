@@ -168,6 +168,9 @@ class RunContext:
     verifier_denied: list[str] = field(default_factory=list)
     instructions: Any = None
     run_ctx: AgentRunContext | None = None
+    run_bounds: Any = None
+    budget_tracker: Any = None
+    budget_exhaustion: Any = None
 
 
 def _first_runnable_in_chain(chain: list[str]) -> str:
@@ -404,6 +407,10 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     ctx.run_context = run_context
     settings = apply_tracing_overrides(run_context.repo_settings)
     ctx.settings = settings
+    from mergecraft.utils.run_bounds import BudgetTracker, resolve_run_bounds
+
+    ctx.run_bounds = resolve_run_bounds(settings=settings)
+    ctx.budget_tracker = BudgetTracker(ctx.run_bounds)
 
     github_event = read_github_event()
     ctx.github_event = github_event
@@ -509,6 +516,27 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     trust_tier = derive_trust_tier(event=ctx.github_event)
     ctx.trust_tier = trust_tier
     ctx.tool_state.trust_tier = trust_tier
+
+    assert ctx.settings is not None
+    from mergecraft.config.settings import (
+        apply_trust_tier_to_repo_settings,
+        build_executable_config_skip_reason,
+    )
+
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "unknown")
+    settings, drops = apply_trust_tier_to_repo_settings(
+        ctx.settings,
+        trust_tier,
+        source_label=f"{event_name} event",
+    )
+    ctx.settings = settings
+    if drops:
+        for reason in drops.values():
+            logger.warning("» {}", reason)
+        skip_reason = build_executable_config_skip_reason(drops)
+        if skip_reason:
+            ctx.setup_script_skip_reason = skip_reason
+            ctx.tool_state.setup_script_skip_reason = skip_reason
 
     token_ref = await resolve_tokens(
         push=ctx.payload.get("push") or "restricted", xrepo=ctx.payload.get("xrepo")
@@ -701,6 +729,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         plan="unknown",
         resolved_model=ctx.resolved_model,
         suggest_eval_add=bool(payload.get("suggestEvalAdd")),
+        budget_tracker=ctx.budget_tracker,
     )
 
 
@@ -825,7 +854,8 @@ async def _run_setup_script_phase(ctx: RunContext) -> None:
             logger.warning("» {}", setup_script_skip_reason)
     setup_elapsed_s = time.monotonic() - setup_started_at
     ctx.setup_hook_failure = setup_hook_failure
-    ctx.setup_script_skip_reason = setup_script_skip_reason
+    if setup_script_skip_reason:
+        ctx.setup_script_skip_reason = setup_script_skip_reason
     ctx.setup_elapsed_s = setup_elapsed_s
 
 
@@ -976,6 +1006,12 @@ def _promote_and_finalize_agent_result(
 
     if result.usage:
         tool_state.usage_entries.append(result.usage)
+        from mergecraft.utils.run_bounds import BudgetExhausted, record_agent_usage
+
+        try:
+            record_agent_usage(ctx.budget_tracker, result.usage)
+        except BudgetExhausted as exc:
+            ctx.budget_exhaustion = exc
 
     if output_schema and not tool_state.output:
         msg = (
@@ -1232,15 +1268,23 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
     # ``setup_failure_policy`` to the resolution.
     prep_reason = await _prep_failure_reason(tool_context)
     setup_reason = tool_state.setup_hook_failure or ""
-    outcome, failure_reason = _classify_outcome(
-        result=result,
-        setup_reason=setup_reason,
-        setup_policy=settings.setup_failure_policy,
-        prep_reason=prep_reason,
-        mode=tool_state.selected_mode,
-        verdict_protocol=settings.gates.terminal_verdict,
-        final_summary_written=tool_state.final_summary_written,
-    )
+    outcome: RunOutcome
+    failure_reason: str | None
+    if ctx.budget_exhaustion is not None:
+        from mergecraft.utils.run_bounds import budget_exhaustion_outcome
+
+        outcome = budget_exhaustion_outcome(ctx.budget_exhaustion)
+        failure_reason = str(ctx.budget_exhaustion)
+    else:
+        outcome, failure_reason = _classify_outcome(
+            result=result,
+            setup_reason=setup_reason,
+            setup_policy=settings.setup_failure_policy,
+            prep_reason=prep_reason,
+            mode=tool_state.selected_mode,
+            verdict_protocol=settings.gates.terminal_verdict,
+            final_summary_written=tool_state.final_summary_written,
+        )
     diagnostic_attrs, verdict_prediction = _verdict_protocol_publish(
         result=result,
         mode=tool_state.selected_mode,

@@ -59,7 +59,7 @@ Inspired by [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 | 🛡️ **Trust tiers** | Fork PRs and `pull_request_target` runs resolve to an untrusted tier: no secrets, no network, read-only analyzers |
 | 📡 **SARIF upload (opt-in)** | Publish analyzer findings to GitHub code scanning with one flag |
 | 📈 **Tracing (opt-in)** | Per-run span trees to local JSONL, Logfire, or any OTLP collector — with redaction |
-| 💻 **Offline mode** | `mergecraft diff-review` reviews local diffs or patch files, no PR required — `--json` for benchmarks |
+| 💻 **Offline mode** | `mergecraft review` reviews local diffs, worktrees, or cloned repos — `--json` for benchmarks |
 | 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in — benchmark numbers unpublished; run `make eval-replay` locally (see [evals/README.md](evals/README.md)) |
 
 **Terminal verdict (default: enforce).** `gates.terminal_verdict` defaults to `enforce`: a run without a validated `submit_review_verdict` submission reports `inconclusive`. Set `gates.terminal_verdict: shadow` in `.mergecraft/config.yaml` to log diagnostics only. `create_pull_request_review` records through the same validator as `submit_review_verdict` and cannot approve without a validated terminal submission.
@@ -191,10 +191,27 @@ approval check to blocking.
 ### Example 3 — local review before you push
 
 ```bash
-mergecraft diff-review                                   # uncommitted + branch changes vs origin/main
-mergecraft diff-review --diff changes.patch --dry-run    # inspect the prompt, no LLM call
-mergecraft diff-review --json findings.json              # machine-readable Finding[] for scoring
+mergecraft review                                        # uncommitted + branch changes vs origin/main
+mergecraft review --repo .                               # explicit local checkout
+mergecraft review --repo owner/repo --head feature       # public GitHub repo at a branch
+mergecraft review --repo https://github.com/o/r --token "$GH_TOKEN"  # private repo
+mergecraft review --staged                               # staged changes only
+mergecraft review --diff changes.patch --dry-run         # inspect the prompt, no LLM call
+mergecraft review --json findings.json                 # machine-readable Finding[] for scoring
+mergecraft review --format sarif --output report.sarif.json
+mergecraft review --format jsonl --output stream.jsonl
+mergecraft review --agent                              # JSONL agent protocol on stdout
 ```
+
+Process exit codes: `0` clean pass; `10` non-blocking findings; `11` blocking severities;
+`12` review failed (no findings); `20` inconclusive; `30` configuration error; `40` infra error;
+`50` timed out.
+
+`diff-review` is a hidden alias of `review` (Harbor and existing scripts keep working).
+
+**Auth precedence for private clones:** `--token` → `GH_TOKEN` / `GITHUB_TOKEN` →
+`gh auth token` → anonymous (public repos only). Cloned third-party repositories
+review at **untrusted** tier unless you pass an explicit `--trust trusted` override.
 
 ### Example 4 — multi-model with fallback
 
@@ -584,8 +601,15 @@ of them for its full flag set):
 | `mergecraft auth minimax` | Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY. |
 | `mergecraft auth nous` | Save a Nous Portal API key as NOUS_API_KEY. |
 | `mergecraft auth tokenhub` | Save a Tencent TokenHub API key as TOKENHUB_API_KEY. |
+| `mergecraft cache clear` | Remove every entry from the run cache. |
+| `mergecraft cache info` | Show cache location, byte ceiling, and current usage. |
+| `mergecraft cache prune` | Evict oldest entries until usage is within the byte ceiling. |
+| `mergecraft config explain <key>` | Explain which precedence layer wins for a config key. |
+| `mergecraft config show <key>` | Show a resolved config value and the precedence layer that supplied it. |
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
+| `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
 | `mergecraft diff-review` | Review a local git diff offline (no GitHub Action / PR posting). |
+| `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval gate` | Check the eval bank's integrity — the CI-safe half of the eval loop. |
@@ -604,12 +628,16 @@ of them for its full flag set):
 | `mergecraft lens list` | List bundled lens ids and display titles. |
 | `mergecraft lens show <lens-id>` | Show rubric, triggers, evidence, and tool classes for one lens. |
 | `mergecraft lens test <lens-id>` | Preview one lens dispatch (rubric + routing context) for a diff fixture. |
+| `mergecraft mcp list` | Print the resolved MCP tool names for a role. |
+| `mergecraft mcp serve` | Start the MCP HTTP server for a resolved workspace and role. |
 | `mergecraft models list` | List curated model slugs and whether credentials are detected locally. |
 | `mergecraft models set <slugs>` | Write an ordered `models:` list to `.mergecraft/config.yaml`. |
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |
 | `mergecraft pipeline explain` | Print pipeline step ids and predicate vocabulary. |
 | `mergecraft pipeline lint` | Validate the pipeline file and registry agent references. |
 | `mergecraft pipeline show --diff DIFF` | Preview which pipeline steps would run or skip for a diff. |
+| `mergecraft plan` | Preview model chain, toolset, analyzers, and token estimate without provider calls. |
+| `mergecraft review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft traces show <run-id>` | Read back the local JSONL traces for the given run id (re-redacts on render). |
 | `mergecraft tracing logfire disable` | Disable Logfire tracing by removing the token + project locally and on GitHub. |
 | `mergecraft tracing logfire enable` | Enable Logfire tracing by writing the token + project locally and on GitHub. |

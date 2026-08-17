@@ -52,6 +52,10 @@ CLAUDE.md
 # Analyzer adapter test artifacts
 tests/analyzers/fixtures/repo/.mergecraft/
 
+# TS5 adversarial corpus (built via tests/security/fixtures/build_hostile_repo.sh)
+tests/security/fixtures/hostile-repo/
+tests/security/fixtures/outside-target/
+
 # Regenerable verifier/tool output (never source of truth)
 /evidence/
 

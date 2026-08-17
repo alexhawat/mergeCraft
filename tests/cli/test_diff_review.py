@@ -29,10 +29,12 @@ def test_cli_diff_review_help() -> None:
     assert "--dry-run" in out
 
 
-def test_cli_help_lists_diff_review() -> None:
+def test_cli_help_lists_review() -> None:
     result = runner.invoke(app, ["--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0
-    assert "diff-review" in _plain(result.stdout)
+    out = _plain(result.stdout)
+    assert "review" in out
+    assert "diff-review" not in out
 
 
 def test_summarize_diff_lists_paths() -> None:

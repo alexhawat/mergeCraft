@@ -265,6 +265,13 @@ def _span_tool_call_id() -> str:
     return uuid.uuid4().hex
 
 
+def _charge_tool_call_budget(ctx: ToolContext | None) -> None:
+    """Increment the per-run tool-call budget before executing an MCP tool."""
+    if ctx is None or ctx.budget_tracker is None:
+        return
+    ctx.budget_tracker.record_tool_call()
+
+
 def _record_trajectory(
     ctx: ToolContext | None,
     name: str,
@@ -344,6 +351,16 @@ def _register_mcp_route(
                     "jsonrpc": "2.0",
                     "id": req_id,
                     "error": {"code": -32601, "message": f"Unknown tool: {name}"},
+                }
+            try:
+                from mergecraft.utils.run_bounds import BudgetExhausted
+
+                _charge_tool_call_budget(tool_ctx)
+            except BudgetExhausted as exc:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32000, "message": str(exc)},
                 }
             from mergecraft.config.settings import RepoSettings
 

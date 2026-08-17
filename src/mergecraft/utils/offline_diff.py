@@ -9,6 +9,7 @@ from pathlib import Path
 from loguru import logger
 
 _DEFAULT_BASES = ("main", "master", "develop", "trunk")
+_MAX_UNTRACKED_FILE_BYTES = 256 * 1024
 
 
 @dataclass(slots=True)
@@ -21,21 +22,33 @@ class DiffMaterialization:
     empty: bool
 
 
-def _run_git(args: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+def _run_git(
+    args: list[str],
+    *,
+    cwd: Path,
+    timeout_s: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    if timeout_s is None:
+        from mergecraft.utils.run_bounds import timeout_for_external_operation
+
+        timeout_s = timeout_for_external_operation("git_diff")
     return subprocess.run(
         ["git", *args],
         cwd=cwd,
         check=False,
         capture_output=True,
         text=True,
+        timeout=timeout_s,
     )
 
 
-def detect_default_base(cwd: Path) -> str:
+def detect_default_base(cwd: Path, *, git_dir: Path | None = None) -> str:
     """Pick a sensible merge-base ref for offline review."""
+    _ = git_dir  # reserved for worktree callers; git discovers metadata from ``cwd``.
     # Prefer upstream of current branch when set.
     upstream = _run_git(
-        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cwd=cwd
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+        cwd=cwd,
     )
     if upstream.returncode == 0:
         ref = upstream.stdout.strip()
@@ -59,7 +72,12 @@ def detect_default_base(cwd: Path) -> str:
     raise RuntimeError(msg)
 
 
-def git_merge_base_diff(*, cwd: Path, base: str) -> str:
+def git_merge_base_diff(
+    *,
+    cwd: Path,
+    base: str,
+    git_dir: Path | None = None,
+) -> str:
     """Return unified diff of working tree + commits since merge-base with ``base``.
 
     Uses ``git diff --merge-base <base>`` so uncommitted edits are included and
@@ -97,12 +115,95 @@ def git_merge_base_diff(*, cwd: Path, base: str) -> str:
     return result.stdout
 
 
+def git_ref_diff(
+    *,
+    cwd: Path,
+    base: str,
+    head: str,
+    git_dir: Path | None = None,
+) -> str:
+    """Return unified diff between ``base`` and ``head``."""
+    _ = git_dir
+    resolved_base = base
+    probe = _run_git(["rev-parse", "--verify", base], cwd=cwd)
+    if probe.returncode != 0 and not base.startswith("origin/"):
+        candidate = f"origin/{base}"
+        origin_probe = _run_git(["rev-parse", "--verify", candidate], cwd=cwd)
+        if origin_probe.returncode == 0:
+            resolved_base = candidate
+    result = _run_git(["diff", f"{resolved_base}...{head}"], cwd=cwd)
+    if result.returncode != 0 and "no merge base" in (result.stderr or "").lower():
+        result = _run_git(["diff", f"{resolved_base}..{head}"], cwd=cwd)
+    if result.returncode != 0:
+        msg = f"failed to compute diff {base!r}...{head!r}: {result.stderr.strip()}"
+        raise RuntimeError(msg)
+    return result.stdout
+
+
+def git_staged_diff(*, cwd: Path) -> str:
+    """Return staged diff via ``git diff --cached``."""
+    result = _run_git(["diff", "--cached"], cwd=cwd)
+    if result.returncode != 0:
+        msg = f"failed to compute staged diff: {result.stderr.strip()}"
+        raise RuntimeError(msg)
+    return result.stdout
+
+
+def git_unstaged_diff(*, cwd: Path) -> str:
+    """Return unstaged working-tree diff (tracked edits plus untracked adds)."""
+    result = _run_git(["diff"], cwd=cwd)
+    if result.returncode != 0:
+        msg = f"failed to compute unstaged diff: {result.stderr.strip()}"
+        raise RuntimeError(msg)
+    untracked = _run_git(
+        ["ls-files", "--others", "--exclude-standard", "-z"],
+        cwd=cwd,
+    )
+    text = result.stdout
+    if untracked.returncode == 0 and untracked.stdout.strip("\0"):
+        for rel in untracked.stdout.strip("\0").split("\0"):
+            if not rel:
+                continue
+            path = cwd / rel
+            if not path.is_file():
+                continue
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                continue
+            if len(raw) > _MAX_UNTRACKED_FILE_BYTES:
+                logger.info("skipped oversized untracked file in unstaged diff: {}", rel)
+                continue
+            if b"\0" in raw:
+                logger.info("skipped binary untracked file in unstaged diff: {}", rel)
+                continue
+            contents = raw.decode("utf-8", errors="replace")
+            text += (
+                f"diff --git a/{rel} b/{rel}\nnew file mode 100644\n--- /dev/null\n+++ b/{rel}\n"
+            )
+            for line in contents.splitlines():
+                text += f"+{line}\n"
+            if contents and not contents.endswith("\n"):
+                text += "\n"
+    return text
+
+
+def git_range_diff(*, cwd: Path, range_spec: str) -> str:
+    """Return unified diff for an explicit ``left..right`` range."""
+    result = _run_git(["diff", range_spec], cwd=cwd)
+    if result.returncode != 0:
+        msg = f"failed to compute diff for range {range_spec!r}: {result.stderr.strip()}"
+        raise RuntimeError(msg)
+    return result.stdout
+
+
 def materialize_diff(
     *,
     cwd: Path,
     out_dir: Path,
     base: str | None = None,
     diff_file: Path | None = None,
+    git_dir: Path | None = None,
 ) -> DiffMaterialization:
     """Write the reviewable unified diff to ``out_dir/review.diff``."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -113,8 +214,8 @@ def materialize_diff(
         text = diff_file.read_text(encoding="utf-8")
         base_ref = None
     else:
-        base_ref = base or detect_default_base(cwd)
-        text = git_merge_base_diff(cwd=cwd, base=base_ref)
+        base_ref = base or detect_default_base(cwd, git_dir=git_dir)
+        text = git_merge_base_diff(cwd=cwd, base=base_ref, git_dir=git_dir)
 
     # Normalize trailing newline for stable line counts.
     if text and not text.endswith("\n"):

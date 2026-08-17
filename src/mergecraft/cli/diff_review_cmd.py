@@ -3,22 +3,77 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, Literal, NoReturn
 
 import typer
 from loguru import logger
 from rich.console import Console
 
-from mergecraft.offline_review import run_offline_diff_review
+from mergecraft.analyzers.sarif import export_sarif
+from mergecraft.cli.agent_protocol import AgentProtocolStream
+from mergecraft.config.settings import parse_cli_trust_override
+from mergecraft.offline_review import (
+    OfflineReviewResult,
+    parse_offline_review_findings,
+    run_offline_diff_review,
+)
+from mergecraft.run_outcome import RunOutcome, cli_exit_code_for_review
 from mergecraft.utils.log import configure_logging
+from mergecraft.utils.source_resolve import SourceResolverSpec
+
+if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
 
 console = Console()
+error_console = Console(stderr=True)
+
+OutputFormat = Literal["text", "json", "jsonl", "sarif"]
 
 
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+def _exit_with_message(msg: str, exit_code: int, *, agent_mode: bool = False) -> NoReturn:
+    target = error_console if agent_mode else console
+    target.print(f"[red]{msg}[/red]")
+    raise typer.Exit(exit_code)
+
+
+def _resolve_outcome(result: OfflineReviewResult) -> RunOutcome:
+    if result.outcome is not None:
+        return result.outcome
+    return RunOutcome.passed if result.success else RunOutcome.failed
+
+
+def _needs_structured_output(
+    *,
+    json_output: Path | None,
+    output_format: OutputFormat,
+) -> bool:
+    return json_output is not None or output_format in {"json", "jsonl", "sarif"}
+
+
+def _write_jsonl_findings(path: Path, findings: Sequence[Finding]) -> None:
+    lines: list[str] = []
+    for row in findings:
+        lines.append(json.dumps({"finding": row.model_dump()}, ensure_ascii=False))
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def _emit_agent_protocol(
+    *,
+    outcome: RunOutcome,
+    exit_code: int,
+    findings: Sequence[Finding],
+) -> None:
+    stream = AgentProtocolStream()
+    stream.run_started()
+    stream.phase("materialize")
+    stream.phase("review")
+    for row in findings:
+        stream.finding(row.model_dump())
+    stream.verdict(outcome.value, exit_code)
+    stream.run_finished(exit_code)
 
 
 def run(
@@ -27,6 +82,40 @@ def run(
         "--base",
         "-b",
         help="Git base ref for merge-base diff (default: upstream or origin/main|master).",
+    ),
+    repo: str | None = typer.Option(
+        None,
+        "--repo",
+        help=(
+            "Review source: local path, https://github.com/owner/repo URL, or owner/repo shorthand."
+        ),
+    ),
+    head: str | None = typer.Option(
+        None,
+        "--head",
+        help="Head ref to review (default: current HEAD or clone ref).",
+    ),
+    staged: bool = typer.Option(
+        False,
+        "--staged",
+        help="Review only staged changes (`git diff --cached`).",
+    ),
+    unstaged: bool = typer.Option(
+        False,
+        "--unstaged",
+        help="Review only unstaged working-tree changes.",
+    ),
+    commit_range: str | None = typer.Option(
+        None,
+        "--range",
+        help="Explicit commit range (e.g. HEAD~3..HEAD).",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help=(
+            "GitHub token for private clone (wins over GH_TOKEN/GITHUB_TOKEN and `gh auth token`)."
+        ),
     ),
     diff: Path | None = typer.Option(
         None,
@@ -52,12 +141,22 @@ def run(
         None,
         "--output",
         "-o",
-        help="Write the review markdown (or dry-run prompt) to this file.",
+        help="Write review markdown or structured output (depends on --format) to this file.",
     ),
     json_output: Path | None = typer.Option(
         None,
         "--json",
         help="Write structured findings JSON to this file.",
+    ),
+    output_format: OutputFormat = typer.Option(
+        "text",
+        "--format",
+        help="Machine output format: text (default), json, jsonl, or sarif.",
+    ),
+    agent_mode: bool = typer.Option(
+        False,
+        "--agent",
+        help="Stream the agent JSONL protocol on stdout (orchestrator mode).",
     ),
     evidence_packet: Path | None = typer.Option(
         None,
@@ -115,6 +214,14 @@ def run(
             "and the config block (W8.4 / W7.6)."
         ),
     ),
+    trust: str | None = typer.Option(
+        None,
+        "--trust",
+        help=(
+            "Explicit trust tier override for this review source (trusted or untrusted). "
+            "Never read from repo config — operator flag only (TS1 / D3)."
+        ),
+    ),
 ) -> None:
     """Review a local git diff offline (no GitHub Action / PR posting).
 
@@ -123,15 +230,44 @@ def run(
     prompt without LLM credentials.
     """
     configure_logging()
+    invocation_root = Path.cwd().resolve()
     root = cwd.resolve()
-    if diff is None and not (root / ".git").exists():
-        _bail(f"not a git repository: {root} (or pass --diff PATH)")
+    source_spec = SourceResolverSpec(
+        repo=repo,
+        head=head,
+        base=base,
+        staged=staged,
+        unstaged=unstaged,
+        commit_range=commit_range,
+        token=token,
+        cwd=root,
+        invocation_root=invocation_root,
+    )
+    if diff is None and repo is None and not (root / ".git").exists():
+        _exit_with_message(
+            f"not a git repository: {root} (or pass --diff PATH or --repo)",
+            cli_exit_code_for_review(RunOutcome.configuration_error),
+        )
+
+    try:
+        trust_override = parse_cli_trust_override(trust)
+    except ValueError as exc:
+        _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
+
+    try:
+        from mergecraft.cli.config_surface_cmd import validate_repo_config_or_raise
+
+        validate_repo_config_or_raise(cwd=root)
+    except ValueError as exc:
+        _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
+
+    if output_format == "json" and json_output is None and output is None:
+        _exit_with_message(
+            "--output is required for --format json (or use --json PATH)",
+            cli_exit_code_for_review(RunOutcome.configuration_error),
+        )
 
     # Build the tracing CLI tokens (CLI > env > config precedence) and forward
-    # them to the offline review, which exposes them as ``MERGECRAFT_*`` env
-    # overrides so the agent stream tracers honor the operator's flags. The
-    # ``--no-tracing`` / ``--tracing`` pair is a Typer bool flag (``None`` when
-    # the operator left it at default), so we only emit a token when it was set.
     tracing_cli: list[str] = []
     if tracing is True:
         tracing_cli.append("--tracing")
@@ -146,6 +282,19 @@ def run(
     if otel_endpoint is not None:
         tracing_cli.extend(["--otel-endpoint", otel_endpoint])
 
+    needs_structured = _needs_structured_output(
+        json_output=json_output,
+        output_format=output_format,
+    )
+    json_path_for_run = json_output
+    if (
+        needs_structured
+        and json_path_for_run is None
+        and output_format == "json"
+        and output is not None
+    ):
+        json_path_for_run = output
+
     result = asyncio.run(
         run_offline_diff_review(
             cwd=root,
@@ -154,9 +303,12 @@ def run(
             model=model,
             prompt_extra=prompt,
             dry_run=dry_run,
-            json_path=json_output,
+            json_path=json_path_for_run,
             evidence_packet_path=evidence_packet,
             tracing_cli=tracing_cli,
+            invocation_root=invocation_root,
+            trust_override=trust_override,
+            source_spec=source_spec,
         )
     )
 
@@ -166,20 +318,48 @@ def run(
     if result.evidence_packet_path:
         logger.info("» evidence packet: {}", result.evidence_packet_path)
 
+    outcome = _resolve_outcome(result)
+    findings = parse_offline_review_findings(result)
+    exit_code = cli_exit_code_for_review(outcome, findings)
+
     if not result.success:
-        if result.output:
+        if result.output and not agent_mode:
             console.print(result.output)
-        _bail(result.error or "diff-review failed")
+        if agent_mode:
+            _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
+        _exit_with_message(result.error or "diff-review failed", exit_code, agent_mode=agent_mode)
+
+    if agent_mode:
+        _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
+        raise typer.Exit(exit_code)
 
     text = result.output or ""
-    if output is not None:
-        output.write_text(text, encoding="utf-8")
-        console.print(f"[green]wrote[/green] {output}")
-    elif json_output is None:
-        console.print(text)
+
+    if output_format == "text":
+        if output is not None:
+            output.write_text(text, encoding="utf-8")
+            console.print(f"[green]wrote[/green] {output}")
+        elif json_output is None:
+            console.print(text)
+    elif output_format == "json":
+        target = json_output or output
+        if target is not None and target.is_file():
+            console.print(f"[green]wrote[/green] {target}")
+    elif output_format == "jsonl":
+        target = output
+        if target is None:
+            _exit_with_message("--output is required for --format jsonl", exit_code)
+        _write_jsonl_findings(target, findings)
+        console.print(f"[green]wrote[/green] {target}")
+    elif output_format == "sarif":
+        target = output
+        if target is None:
+            _exit_with_message("--output is required for --format sarif", exit_code)
+        document = export_sarif(findings)
+        target.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        console.print(f"[green]wrote[/green] {target}")
 
     if json_output is not None and result.success and not dry_run:
         console.print(f"[green]wrote[/green] {json_output}")
 
-    if result.empty_diff:
-        raise typer.Exit(0)
+    raise typer.Exit(exit_code)
