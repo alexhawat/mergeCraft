@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NoReturn
@@ -50,7 +52,15 @@ def _needs_structured_output(
     json_output: Path | None,
     output_format: OutputFormat,
 ) -> bool:
-    return json_output is not None or output_format in {"json", "jsonl", "sarif"}
+    # The agent's structured findings are read for two reasons: (a) writing
+    # --json/--format json/jsonl/sarif, (b) computing the CC1 exit codes
+    # 10/11 (which key off the parsed findings list). Default text ``review``
+    # therefore *also* requests structured findings — the temp file is
+    # cleaned up at end of run — so a CI script running `review` and
+    # blocking on exit 10/11 sees the contract applied uniformly. PR #242
+    # review findings ``3f363546e98dad517048b8b9`` and
+    # ``7a3cdf5ef1994610113e8e37``.
+    return True
 
 
 def _write_jsonl_findings(path: Path, findings: Sequence[Finding]) -> None:
@@ -282,84 +292,118 @@ def run(
     if otel_endpoint is not None:
         tracing_cli.extend(["--otel-endpoint", otel_endpoint])
 
-    needs_structured = _needs_structured_output(
-        json_output=json_output,
-        output_format=output_format,
-    )
+    # The CLI always asks the agent for structured findings (see
+    # ``_needs_structured_output`` — always True now). Precedence of the
+    # structured sink path:
+    # 1. ``--json PATH`` if supplied — that is the canonical findings file.
+    # 2. ``--output PATH`` for ``--format json|jsonl|sarif`` — the writer is
+    #    the same JSON in the requested container (jsonl/sarif readers get
+    #    *real* findings instead of an empty file — PR #242 / 3f363546…).
+    # 3. Default text mode — a temp file inside the run tmpdir that is parsed
+    #    into the exit-code resolution and removed on exit (so the default
+    #    text ``review`` can still exit 10/11 — PR #242 / 7a3cdf5e…; no
+    #    findings.json is left next to the diff).
     json_path_for_run = json_output
     if (
-        needs_structured
-        and json_path_for_run is None
-        and output_format == "json"
+        json_path_for_run is None
         and output is not None
+        and output_format
+        in {
+            "json",
+            "jsonl",
+            "sarif",
+        }
     ):
         json_path_for_run = output
-
-    result = asyncio.run(
-        run_offline_diff_review(
-            cwd=root,
-            base=base,
-            diff_file=diff,
-            model=model,
-            prompt_extra=prompt,
-            dry_run=dry_run,
-            json_path=json_path_for_run,
-            evidence_packet_path=evidence_packet,
-            tracing_cli=tracing_cli,
-            invocation_root=invocation_root,
-            trust_override=trust_override,
-            source_spec=source_spec,
+    if json_path_for_run is None:
+        # ``needs_structured`` is always True now (default-text also asks).
+        # Allocate a temp sink under our own ``tmpdir`` so cleanup is
+        # straightforward; the file is removed at end of run regardless of
+        # the text-format branch taken below.
+        json_path_for_run = Path(
+            tempfile.mkstemp(prefix="mergecraft-review-findings-", suffix=".json")[1]
         )
+
+    internal_json_sink = json_output is None and not (
+        output is not None and output_format in {"json", "jsonl", "sarif"}
     )
 
-    if result.diff_path:
-        logger.info("» diff path: {}", result.diff_path)
+    try:
+        result = asyncio.run(
+            run_offline_diff_review(
+                cwd=root,
+                base=base,
+                diff_file=diff,
+                model=model,
+                prompt_extra=prompt,
+                dry_run=dry_run,
+                json_path=json_path_for_run,
+                evidence_packet_path=evidence_packet,
+                tracing_cli=tracing_cli,
+                invocation_root=invocation_root,
+                trust_override=trust_override,
+                source_spec=source_spec,
+            )
+        )
 
-    if result.evidence_packet_path:
-        logger.info("» evidence packet: {}", result.evidence_packet_path)
+        if result.diff_path:
+            logger.info("» diff path: {}", result.diff_path)
 
-    outcome = _resolve_outcome(result)
-    findings = parse_offline_review_findings(result)
-    exit_code = cli_exit_code_for_review(outcome, findings)
+        if result.evidence_packet_path:
+            logger.info("» evidence packet: {}", result.evidence_packet_path)
 
-    if not result.success:
-        if result.output and not agent_mode:
-            console.print(result.output)
+        outcome = _resolve_outcome(result)
+        findings = parse_offline_review_findings(result)
+        exit_code = cli_exit_code_for_review(outcome, findings)
+
+        if not result.success:
+            if result.output and not agent_mode:
+                console.print(result.output)
+            if agent_mode:
+                _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
+            _exit_with_message(
+                result.error or "diff-review failed", exit_code, agent_mode=agent_mode
+            )
+
         if agent_mode:
             _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
-        _exit_with_message(result.error or "diff-review failed", exit_code, agent_mode=agent_mode)
+            raise typer.Exit(exit_code)
 
-    if agent_mode:
-        _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
-        raise typer.Exit(exit_code)
+        text = result.output or ""
 
-    text = result.output or ""
-
-    if output_format == "text":
-        if output is not None:
-            output.write_text(text, encoding="utf-8")
-            console.print(f"[green]wrote[/green] {output}")
-        elif json_output is None:
-            console.print(text)
-    elif output_format == "json":
-        target = json_output or output
-        if target is not None and target.is_file():
+        if output_format == "text":
+            if output is not None:
+                output.write_text(text, encoding="utf-8")
+                console.print(f"[green]wrote[/green] {output}")
+            elif json_output is None:
+                console.print(text)
+        elif output_format == "json":
+            target = json_output or output
+            if target is not None and target.is_file():
+                console.print(f"[green]wrote[/green] {target}")
+        elif output_format == "jsonl":
+            target = output
+            if target is None:
+                _exit_with_message("--output is required for --format jsonl", exit_code)
+            _write_jsonl_findings(target, findings)
             console.print(f"[green]wrote[/green] {target}")
-    elif output_format == "jsonl":
-        target = output
-        if target is None:
-            _exit_with_message("--output is required for --format jsonl", exit_code)
-        _write_jsonl_findings(target, findings)
-        console.print(f"[green]wrote[/green] {target}")
-    elif output_format == "sarif":
-        target = output
-        if target is None:
-            _exit_with_message("--output is required for --format sarif", exit_code)
-        document = export_sarif(findings)
-        target.write_text(json.dumps(document, indent=2), encoding="utf-8")
-        console.print(f"[green]wrote[/green] {target}")
+        elif output_format == "sarif":
+            target = output
+            if target is None:
+                _exit_with_message("--output is required for --format sarif", exit_code)
+            document = export_sarif(findings)
+            target.write_text(json.dumps(document, indent=2), encoding="utf-8")
+            console.print(f"[green]wrote[/green] {target}")
 
-    if json_output is not None and result.success and not dry_run:
-        console.print(f"[green]wrote[/green] {json_output}")
+        if json_output is not None and result.success and not dry_run:
+            console.print(f"[green]wrote[/green] {json_output}")
 
-    raise typer.Exit(exit_code)
+        raise typer.Exit(exit_code)
+    finally:
+        # Default-text reviews borrow an internal JSON sink to populate the
+        # exit-code resolution (PR #242 / 7a3cdf5e…). That file is never a
+        # user-visible artifact — clean it up so the run leaves no side
+        # effects behind. User-supplied sinks (``--json``, ``--output``) stay.
+        if internal_json_sink:
+            with contextlib.suppress(OSError):
+                json_path_for_run.unlink(missing_ok=True)
