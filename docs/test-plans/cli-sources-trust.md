@@ -97,3 +97,43 @@ Target API (TS2.2):
 
 Removed impl-pending xfail markers from `tests/security/test_untrusted_config_execution.py`.
 Suite is 9 real passes.
+
+## TS3 — clone hardening (PR TS3)
+
+Wave plan: `.ignorelocal/02-cli-sources-trust-wave-plan.md` (PR TS3)
+Authoring wave: **TS3.1**. Implementation: **TS3.2**.
+
+Target API (TS3.2):
+
+- ``ReviewSource``, ``AcquiredSource``, ``acquire``, ``validate_clone_url``,
+  ``confine_path``, ``filter_confined_paths``, ``cli_analyzer_sandbox_applies`` on
+  `src/mergecraft/utils/source_resolve.py`
+- Credential scrub + redirect/submodule hardening on `src/mergecraft/mcp/xrepo.py`
+
+## Contract matrix (TS3)
+
+| # | Decision / convention | Layer | Primary test |
+|---|----------------------|-------|--------------|
+| TS3.1a | scheme allowlist | unit | `test_file_scheme_is_rejected` |
+| TS3.1b | SSH rejected | unit | `test_ssh_scheme_is_rejected` |
+| TS3.1c | host allowlist | unit | `test_non_allowlisted_host_is_rejected` |
+| TS3.1d | no redirects | unit | `test_redirect_chain_is_not_followed` |
+| TS3.1e | D5 token not in config | integration | `test_token_never_written_to_git_config` |
+| TS3.1f | D5 token not in argv | integration | `test_token_never_appears_in_process_argv` |
+| TS3.1g | D6 no submodule recurse | integration | `test_submodules_are_not_recursed_by_default` |
+| TS3.1h | D6 size ceiling | integration | `test_clone_size_ceiling_aborts_cleanly` |
+| TS3.1i | D6 file-count ceiling | integration | `test_file_count_ceiling_aborts_cleanly` |
+| TS3.1j | D7 symlink containment | unit | `test_symlink_escaping_workspace_is_dropped` |
+| TS3.1k | D7 diff path containment | unit | `test_diff_path_escaping_workspace_is_dropped` |
+| TS3.1l | D10 clear auth error | unit | `test_anonymous_clone_of_private_repo_is_a_clear_error` |
+| TS3.1m | sandbox on CLI path | integration | `test_analyzer_sandbox_applies_on_the_cli_path` |
+
+## Acceptance (TS3.1)
+
+- 13 tests collected
+- 0 pass; 13 RED via `xfail(strict=False)` — **cleared post-TS3.2 (2026-08-17)**
+
+## TS3.2 xfail reconciliation (2026-08-17)
+
+Removed impl-pending xfail markers from `tests/security/test_clone_hardening.py`.
+Suite is 13 real passes.
