@@ -10,6 +10,7 @@ Depends: mergecraft.tracing.{event,sinks}, loguru
         NullTracer — Disabled tracing implementation.
         NullSpan — Disabled span implementation.
     Functions:
+        baseline_run_attrs — Self-describing run attrs (version, VCS, CI) (O3).
         resolve_correlation_from_env — Read GitHub correlation fields from the environment.
         resolve_session_id — Resolve or generate the trace session identifier.
         resolve_trace_id — Resolve or generate the per-run trace identifier.
@@ -33,6 +34,7 @@ from loguru import logger
 
 from mergecraft.tracing.event import TraceEvent
 from mergecraft.tracing.resolve import resolve_active_tracing
+from mergecraft.tracing.review_context import current_review_context
 from mergecraft.tracing.sinks import claim_sink
 
 if TYPE_CHECKING:
@@ -59,6 +61,9 @@ class Tracer:
     run_id: str
     tier: str = "balanced"
     trace_id: str = ""
+    # D5 — ``repr=False``: the dataclass repr is pinned by the module
+    # docstring example and by tests, so the baseline attrs must not join it.
+    baseline_attrs: dict[str, Any] = field(default_factory=dict, repr=False)
     _span_count: int = 0
     _cap_warned: bool = False
 
@@ -288,7 +293,19 @@ class Span:
             self._closed = True
             return
 
-        attrs: dict[str, Any] = {}
+        # D4 — review attrs merge here, at close time (not at creation), so a
+        # ReviewContext bound after the tracer was built still reaches open
+        # spans. Precedence: tracer baseline → review context → lazy
+        # ``attrs_source`` → explicit ``set_attribute``.
+        attrs: dict[str, Any] = dict(self.tracer.baseline_attrs)
+        try:
+            review_ctx = current_review_context()
+            if review_ctx is not None:
+                attrs.update(review_ctx.attrs())
+        except Exception as review_exc:
+            logger.warning(
+                "trace span {} review-context attributes failed: {}", self.kind, review_exc
+            )
         if self._attrs_source is not None:
             try:
                 attrs.update(self._attrs_source())
@@ -412,6 +429,51 @@ def resolve_correlation_from_env() -> dict[str, Any]:
         "workflow_run_id": github_run_id,
         "job_id": os.environ.get("GITHUB_JOB"),
     }
+
+
+def baseline_run_attrs() -> dict[str, Any]:
+    """Self-describing run attributes for every span in the process (O3).
+
+    Populates ``mergecraft.run_id`` / ``mergecraft.version`` plus the VCS/CI
+    fields (``vcs.repository.name``, ``vcs.change.id``, ``vcs.revision``,
+    ``ci.workflow_run_id``, ``ci.job_id``) from
+    :func:`resolve_correlation_from_env` and the package version, so a trace
+    can say which build and which change produced it. Absent values are
+    dropped rather than emitted as nulls.
+
+    ``mergecraft.trust_tier`` is deliberately NOT set here: the only
+    process-wide source is the CLI-only ``MERGECRAFT_TRUST_TIER`` env var, so
+    a baseline value would silently omit the tier on Action runs. The bound
+    :class:`ReviewContext` carries the honestly derived tier and lands on the
+    span via the D4 close-time merge (baseline → review context → …).
+
+    Returns:
+        dict[str, Any]: Baseline attributes (never empty — the version is
+        always known).
+    """
+    from mergecraft import __version__
+
+    correlation = resolve_correlation_from_env()
+    attrs: dict[str, Any] = {"mergecraft.version": __version__}
+    run_id = correlation.get("run_id")
+    if run_id:
+        attrs["mergecraft.run_id"] = run_id
+    repo = correlation.get("repo")
+    if repo:
+        attrs["vcs.repository.name"] = repo
+    pr_number = correlation.get("pr_number")
+    if pr_number is not None:
+        attrs["vcs.change.id"] = pr_number
+    commit_sha = correlation.get("commit_sha")
+    if commit_sha:
+        attrs["vcs.revision"] = commit_sha
+    workflow_run_id = correlation.get("workflow_run_id")
+    if workflow_run_id:
+        attrs["ci.workflow_run_id"] = workflow_run_id
+    job_id = correlation.get("job_id")
+    if job_id:
+        attrs["ci.job_id"] = job_id
+    return attrs
 
 
 def _int_or_text(value: str | None) -> int | str | None:
@@ -713,7 +775,14 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     run_id = str(correlation.get("run_id") or session_id)
     trace_id = resolve_trace_id()
     tier = os.environ.get("MERGECRAFT_TRUST_TIER") or "balanced"
-    return Tracer(sink=sink, session_id=session_id, run_id=run_id, tier=tier, trace_id=trace_id)
+    return Tracer(
+        sink=sink,
+        session_id=session_id,
+        run_id=run_id,
+        tier=tier,
+        trace_id=trace_id,
+        baseline_attrs=baseline_run_attrs(),
+    )
 
 
 __all__ = [
@@ -722,6 +791,7 @@ __all__ = [
     "Span",
     "Tracer",
     "active_span_for",
+    "baseline_run_attrs",
     "get_tracer_from_settings",
     "provider_llm_pair",
     "resolve_correlation_from_env",

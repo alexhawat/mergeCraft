@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import shutil
 import tempfile
 import uuid
 from collections.abc import Callable
@@ -62,6 +64,11 @@ PATCH_CANDIDATES: Final[tuple[str, ...]] = (
 )
 BASELINE_FILENAME: Final[str] = "baseline.json"
 DEFAULT_DETECTION_CORPUS_DIR: Final[Path] = Path("evals/bench/mergecraft")
+
+# Optional per-case subtree holding the case's pre-patch file tree (#220).
+CASE_REPO_DIRNAME: Final[str] = "repo"
+
+_RUN_ID_UNSAFE_CHARS: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]+")
 
 # Two distinct skip reasons (B3.0 finding 3) — never conflated. Case
 # discovery is checked before credentials, so an empty corpus always reports
@@ -119,6 +126,33 @@ def discover_detection_cases(
     return cases
 
 
+def sanitize_run_id_component(value: str) -> str:
+    """Flatten ``value`` into one safe path component for a run directory (#219).
+
+    A routed model slug such as ``openrouter/openai/gpt-5`` would otherwise
+    split the run id into nested directories when joined onto
+    ``raw-findings/``. Every run of unsafe characters collapses to a single
+    ``-`` — sanitized, never truncated, so every slug segment survives and
+    two different routed models can never collapse into one directory name.
+    """
+    return _RUN_ID_UNSAFE_CHARS.sub("-", value).strip("-")
+
+
+def materialize_case_repo(case: DetectionCase, dest: Path) -> Path:
+    """Copy the case's ``repo/`` subtree (its pre-patch file tree) into ``dest`` (#220).
+
+    Returns ``dest``. A case without a ``repo/`` subtree yields an empty
+    ``dest`` — the corpus-format addition is opt-in per case, and the
+    reviewer's cwd stays an isolated scratch directory either way (never
+    the corpus checkout or the operator's real tree).
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    repo_dir = case.patch_path.parent / CASE_REPO_DIRNAME
+    if repo_dir.is_dir():
+        shutil.copytree(repo_dir, dest, dirs_exist_ok=True)
+    return dest
+
+
 def run_live_detection(
     cases: list[DetectionCase],
     *,
@@ -147,7 +181,10 @@ def run_live_detection(
     # append a short random suffix so the directory is collision-resistant,
     # not just usually-distinct (mergeCraft self-review, PR #216).
     run_stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    run_id = f"{provider}-{model}-{run_stamp}-{uuid.uuid4().hex[:8]}"
+    run_id = (
+        f"{sanitize_run_id_component(provider)}-{sanitize_run_id_component(model)}"
+        f"-{run_stamp}-{uuid.uuid4().hex[:8]}"
+    )
     raw_dir = results_dir / "raw-findings" / run_id
     raw_dir.mkdir(parents=True, exist_ok=True)
 
@@ -172,6 +209,30 @@ def run_live_detection(
         findings = load_reported_findings({"findings": raw_rows})
 
         report = score_findings(issues, findings, slack=slack, closed_world=case.closed_world)
+        # D12 (OB4) — eval scores are spans AND files: the span inherits the
+        # active review.id via the OB1 close-time merge, making the
+        # eval↔trace join free. Best-effort; scoring never depends on it.
+        try:
+            from mergecraft.tracing import current_tracer, get_tracer_from_settings
+            from mergecraft.tracing.signals import emit_eval_score
+
+            tracer = current_tracer()
+            if tracer is None:
+                from mergecraft.config import load_repo_settings
+
+                tracer = get_tracer_from_settings(load_repo_settings(load_learnings_files=False))
+            metrics: dict[str, Any] = {
+                "recall": report.recall,
+                "corpus_confirmed_precision": report.corpus_confirmed_precision,
+                "f1": report.f1,
+            }
+            if case.closed_world:
+                metrics["strict_precision"] = report.strict_precision
+            if report.blocker_precision is not None:
+                metrics["blocker_precision"] = report.blocker_precision
+            emit_eval_score(tracer, case_id=case.case_id, metrics=metrics)
+        except Exception as exc:
+            logger.debug("eval score span skipped for {}: {}", case.case_id, exc)
         reports.append(report)
         case_results.append(
             DetectionCaseResult(
@@ -205,23 +266,25 @@ def _default_review_fn(model: str) -> ReviewFn:
     Not exercised by the RED suite (needs a live provider) — the seam this
     plugs into is what the tests inject a stub at instead (B3.0 finding 4).
 
-    ``cwd`` is a fresh empty scratch directory per case, not the caller's
+    ``cwd`` is a fresh scratch directory per case, not the caller's
     real checkout: this in-repo corpus's patches are self-contained diff
     text (B3.0 finding 4 — ``materialize_diff`` never applies a ``--diff``
     file against ``cwd``, it just relays the raw text), several of them name
     paths that do not exist in *any* real tree, and handing the reviewer the
     operator's actual mergeCraft checkout would let real, unrelated source
     and ``.mergecraft/config.yaml`` settings leak into what is supposed to
-    be an isolated case (mergeCraft self-review, PR #216). An empty
-    directory means the reviewer finds nothing extra rather than something
-    misleading. Materializing a worktree with the case's true pre-patch
-    file state is a larger corpus-format change, deferred.
+    be an isolated case (mergeCraft self-review, PR #216). Instead, when the
+    case carries a ``repo/`` subtree (its pre-patch file tree), that tree is
+    materialized into the scratch directory *before* the review runs, so the
+    reviewer sees the case's real repo context (#220) — never the corpus
+    checkout, never the operator's tree, and never an empty scratch
+    directory when the case provides one.
     """
     from mergecraft.offline_review import run_offline_diff_review
 
     def _fn(case: DetectionCase) -> list[dict[str, Any]]:
         with tempfile.TemporaryDirectory(prefix="mergecraft-detect-") as tmp:
-            scratch = Path(tmp)
+            scratch = materialize_case_repo(case, Path(tmp))
             json_path = scratch / "findings.json"
             result = asyncio.run(
                 run_offline_diff_review(
@@ -316,6 +379,7 @@ def run_full_benchmark(
 
 __all__ = [
     "BASELINE_FILENAME",
+    "CASE_REPO_DIRNAME",
     "DEFAULT_DETECTION_CORPUS_DIR",
     "PATCH_CANDIDATES",
     "SKIP_REASON_NO_CASES",
@@ -325,7 +389,9 @@ __all__ = [
     "DetectionMetrics",
     "ReviewFn",
     "discover_detection_cases",
+    "materialize_case_repo",
     "run_detection",
     "run_full_benchmark",
     "run_live_detection",
+    "sanitize_run_id_component",
 ]

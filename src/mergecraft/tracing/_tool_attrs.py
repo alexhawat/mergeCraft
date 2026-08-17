@@ -90,7 +90,13 @@ def _safe_json_bytes(value: Any) -> int:
         return len(str(value))
 
 
-def enrich_tool_request(span: Span | NullSpan, *, arguments: Any) -> None:
+def enrich_tool_request(
+    span: Span | NullSpan,
+    *,
+    arguments: Any,
+    call_id: str | None = None,
+    tool_origin: str | None = None,
+) -> None:
     """Stamp the open-side ``tool.call`` attrs (request).
 
     Args:
@@ -100,7 +106,17 @@ def enrich_tool_request(span: Span | NullSpan, *, arguments: Any) -> None:
             gemini, string for codex). Sets ``tool.arguments`` /
             ``tool.argument_count`` / ``tool.argument_bytes`` /
             ``tool.input_bytes`` (always) and ``tool.input_keys`` (dict-only).
+        call_id: Provider/harness tool-call id; emitted as
+            ``gen_ai.tool.call.id`` so a tool row joins its request to its
+            response (OB3). ``None`` emits nothing.
+        tool_origin: ``"mcp"`` or ``"native"`` — whether the call went to
+            the mergeCraft MCP server or stayed harness-native (OB3);
+            emitted as ``tool.origin``. ``None`` emits nothing.
     """
+    if call_id:
+        span.set_attribute("gen_ai.tool.call.id", call_id)
+    if tool_origin:
+        span.set_attribute("tool.origin", tool_origin)
     if arguments is None:
         return
     arguments_bytes = _safe_json_bytes(arguments)
@@ -119,6 +135,8 @@ def enrich_tool_response(
     *,
     output: Any,
     error: BaseException | None = None,
+    call_id: str | None = None,
+    duration_ms: int | float | None = None,
 ) -> None:
     """Stamp the close-side ``tool.call`` attrs (response).
 
@@ -131,7 +149,16 @@ def enrich_tool_response(
             is recorded as ``tool.error_class``; ``str(error)`` is redacted
             and capped as ``tool.error_message``; ``gen_ai.tool.output`` is
             still set so the GenAI dashboard sees the row.
+        call_id: Provider/harness tool-call id; emitted as
+            ``gen_ai.tool.call.id`` so the response joins its request (OB3).
+            ``None`` emits nothing.
+        duration_ms: Wall-clock duration of the tool call; emitted as
+            ``tool.duration_ms`` (OB3). ``None`` emits nothing.
     """
+    if call_id:
+        span.set_attribute("gen_ai.tool.call.id", call_id)
+    if duration_ms is not None:
+        span.set_attribute("tool.duration_ms", duration_ms)
     if error is not None:
         span.set_attribute("tool.exit_code", "error")
         span.set_attribute("tool.error_class", type(error).__name__)

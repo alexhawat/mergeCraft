@@ -82,16 +82,9 @@ def _run_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) ->
 
 
 def _git_env(token: str) -> dict[str, str]:
-    env = os.environ.copy()
-    # Prefer askpass-style injection when available; otherwise embed in URL via
-    # temporary insteadOf is complex — use GIT_ASKPASS stub via Authorization header
-    # for https remotes via http.extraHeader.
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    if token:
-        env["GIT_CONFIG_COUNT"] = "1"
-        env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
-        env["GIT_CONFIG_VALUE_0"] = f"Authorization: Bearer {token}"
-    return env
+    from mergecraft.utils.git_setup import git_env_for_token
+
+    return git_env_for_token(token)
 
 
 # Git global options that may precede the subcommand. `-C`/`-c` take a

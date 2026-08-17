@@ -422,6 +422,9 @@ def create_pull_request_review_tool(ctx: ToolContext):
 
         ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
         stamp_review_phase_on_active_span(ReviewPhase.PUBLISH)
+        from mergecraft.mcp.verification import emit_published_findings
+
+        emit_published_findings(ctx)
         result = await _publish_github_review(ctx, publication_params)
         ctx.tool_state.review_phase = ReviewPhase.COMPLETE.value
         stamp_review_phase_on_active_span(ReviewPhase.COMPLETE)

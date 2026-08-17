@@ -7,8 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- CLI offline reviews now derive a trust tier from review-source provenance; cloned or out-of-root paths review at untrusted tier unless the operator passes an explicit `--trust` override
+- Executable repo config (`setupScript`, `prepushScript`, `stopScript`, `staticChecks[].command`) from an untrusted review source is ignored; declarative config still applies
+- Third-party clone acquisition is bounded and credential-safe: HTTPS GitHub URLs only, no redirect following, no submodule recursion by default, size and file-count ceilings, symlink/path containment, tokens never persisted in `.git/config` or process argv
+- Added `mergecraft review` to target any local worktree, public GitHub repo, or private repo (with `--token` / `GH_TOKEN` / `gh auth token`), with `--head`, `--base`, `--staged`, `--unstaged`, and `--range` diff selection; `diff-review` remains as a hidden alias
+
 ### Added
 
+- Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews
+- `mergecraft mcp serve` and `mergecraft mcp list` expose the reviewer's MCP tool surface to external clients without widening trust tier or tool-class policy (D13)
+- Named review profiles (`--profile fast|deep|security`) bundle model chain, analyzer focus, and run budgets; explicit CLI flags still win
+- `mergecraft cache info|clear|prune` inspect and maintain the byte-bounded on-disk run cache
+- `mergecraft doctor` diagnoses git, provider credentials, analyzer detection, auth, config, and MCP port availability without printing secrets
+- `mergecraft config show|explain|validate` generalizes precedence inspection beyond tracing; local private-repo reviews ship no remote telemetry by default (D11)
+- `mergecraft plan` previews model chain, toolset, analyzer detection, and token estimate without provider calls
+- Run manifest fingerprints (model/CLI versions plus prompt, config, and policy hashes) for reproducible offline reviews
+- `mergecraft review` machine contract: distinct process exit codes per `RunOutcome`, `--format text|json|jsonl|sarif`, and `--agent` JSONL streaming with an explicit `protocol_version`
+- Added review-wide trace correlation: a `review.id` on every span across every process and agent of one logical review, plus a deterministic `review.correlation_key` (`sha256(repo|pr|head_sha)`) that groups re-reviews of the same commit; `trace_id` remains per agent run
+- Added tracer baseline attributes (`mergecraft.run_id`, `mergecraft.version`, `mergecraft.trust_tier`, VCS and CI fields) merged into spans at close time, with explicit attributes taking precedence
+- Added review-context env propagation into spawned agent CLI subprocesses, so subagent runs join the parent review's trace identity
+- Added a content-capture policy for model payloads (`tracing.content`: `off` / `metadata` / `redacted` / `full`, default `redacted`; env `MERGECRAFT_TRACING_CONTENT`) gating whether LLM bodies may be emitted onto spans, with per-payload size counts and a sha256 of the original at every level above `off`
+- Security: spans from untrusted sources are hard-capped at `metadata` content capture — prompt/completion bodies can never be shipped to a sink for an untrusted review, and the cap cannot be overridden by config or env
+- Added model-parameter and payload capture on LLM spans (`gen_ai.request.*` / `gen_ai.response.*` / `gen_ai.usage.*`), recording both the requested and executed model so fallbacks are visible, with extended-thinking capture gated by the content policy and per-harness coverage documented (CLI harnesses have no payload visibility; the OpenCode HTTP path and stream consumer do)
+- Added richer tool-call tracing: `gen_ai.tool.call.id` correlating request and response, per-call duration, and an MCP-vs-native origin distinction
+- Added outcome spans: review-phase spans, per-agent run spans with MCP-stamped attribution (`MERGECRAFT_AGENT_ID`) so tool calls chain under their agent, fingerprint-keyed finding lifecycle spans, a verdict span with a derived disagreement flag, and eval-score spans that inherit the active `review.id`
+- Added benchmark quality metrics: blocker precision scored separately from overall precision, semantic duplicate rate, unique accepted findings per lens, judge value (noise removed and recall lost), p50/p95 cost-latency summaries, and orchestrator kind as a scored dimension
+- Added an adversarial eval corpus (`evals/cases/adversarial/`) proving the prompt-injection fence holds against hostile PR bodies, review comments, and commit messages, and that poisoned context can neither suppress real findings nor manufacture approvals
+- Added `mergecraft eval gate` — a release regression gate comparing a candidate result set against baseline with a declared tolerance band, wired as a blocking job in the release workflow
 - Added agent registry binding model, prompt, toolset and budget per role with `mergecraft agents list|show|set` and `make agents-check`
 - Added registry-driven harness render for Claude, OpenCode, Codex, Gemini, and Cursor with per-agent models and declared Codex degradation in run metadata
 - Added typed specialist handoff, model-diversity policy for verification, and ensemble or shadow dispatch modes on agent bindings
@@ -19,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed `mergecraft review --format jsonl|sarif` writing empty output files and exiting 0 even with blockers — the CLI now threads a structured-findings sink through to the review so jsonl/sarif writers see real findings (#242 / `mergecraft-finding:v1:3f363546e98dad517048b8b9`)
+- Fixed the empty-diff early return in `run_offline_diff_review` silently reporting `RunOutcome.passed` when `apply_diff_line_budget` fully truncated (or untrusted-path filtering emptied) the diff; the run now applies the scope-reduction downgrade and reports `inconclusive` (D12) (#242 / `mergecraft-finding:v1:2e1cb9c2153087658c3481bd`)
+- Fixed `mergecraft review` default text mode never producing exit codes 10/11 — the CLI now requests structured findings internally so a CI script running `review` can block on the documented exit-code contract (#242 / `mergecraft-finding:v1:7a3cdf5ef1994610113e8e37`)
+- Fixed `mergecraft plan` reporting `diff_path` that pointed at a path inside a torn-down `TemporaryDirectory`; the materialized diff is now persisted to `<repo>/.mergecraft/plan-review.diff` so the report's `diff_path` is reachable after return (#242 / `mergecraft-finding:v1:e8bc195570ae6f1cc8ab5bc6`)
+- Fixed tool-call budget exhaustion only surfacing as a JSON-RPC error to the agent — `BudgetTracker` now records the `BudgetExhausted` it raises (`last_exhausted`) and `main._finalize` drains the tracker at finalize time, so a run that exhausts its tool-call budget is tagged `inconclusive` rather than approving on a partial signal (D12) (#242 / `mergecraft-finding:v1:aeb5d964c1d35e5a41784ded`)
+- Fixed eval corpus run directories splitting on slashes in model slugs (e.g. `openrouter/openai/gpt-5`) — run ids are sanitized to a single flat component (#219)
+- Fixed live corpus reviews running in an empty scratch directory — the case's repo context is materialized before the review (#220)
+- Benchmark result sets now record full version pins and a reproducibility digest, so same-commit runs are comparable (#140)
 - Two ensemble models that both report no findings no longer escalate to a judge (#238)
 - Reviews of Python repositories with `shell: disabled` no longer fail closed after a completed review just because dependency installation was skipped as a security policy
 - Fixed: model-chain fallback now advances when the provider succeeds without a terminal verdict; a valid `request_changes` is a usable result and does not trigger fallback

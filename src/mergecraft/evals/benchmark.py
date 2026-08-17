@@ -9,7 +9,9 @@ are a separate future publication path — not populated by ``run_structural_rep
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import subprocess
 import uuid
 from datetime import UTC, datetime
@@ -18,6 +20,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+import mergecraft
 from mergecraft.agents.verifier import (
     VERIFIER_RUBRIC_VERSION,
     judge_pin,
@@ -25,6 +28,7 @@ from mergecraft.agents.verifier import (
 )
 from mergecraft.evals.scoring import DEFAULT_LINE_SLACK, AggregateScoreReport
 from mergecraft.evals.store import (
+    CASE_STATUS_BLOCKED,
     CASE_STATUS_PASSED,
     CASE_STATUS_REGRESSION,
     DEFAULT_BANK_DIR,
@@ -118,6 +122,12 @@ class VersionPins(BaseModel):
     # former role as a fallback-only value to a first-class required pin —
     # #140 requires "mergeCraft commit included with published numbers".
     mergecraft_commit: str
+    # #140: a commit identifies code, not a release — the distribution
+    # version is pinned alongside the commit so published numbers name both.
+    # Defaulted to the installed distribution version (not a placeholder) so
+    # pre-#140 result sets still validate; `run_structural_replay` passes it
+    # explicitly.
+    mergecraft_version: str = Field(default_factory=lambda: mergecraft.__version__)
     # D12: every provider a published number covers, pinned by model id +
     # model_pin, never averaged. A missing/empty pin is a hard failure (D9) —
     # a published report never has zero pinned reviewing models. An entry can
@@ -270,6 +280,92 @@ class BenchmarkResultSet(BaseModel):
     # pre-B3 committed result set with neither key still validates (D3).
     detection: DetectionMetrics | None = None
     skipped_reason: str | None = None
+
+    @property
+    def reproducibility_digest(self) -> str:
+        """Content hash of this result set, excluding volatile wall-clock fields (#140).
+
+        ``pins.recorded_at`` is the one field allowed to differ between two
+        structural replays of the same commit + corpus — everything else must
+        compare equal, so the digest is computed over the canonical JSON dump
+        with ``recorded_at`` dropped. Two replays at one commit then answer
+        "did these runs agree?" with a string compare instead of an eyeball
+        diff.
+        """
+        payload = self.model_dump(mode="json")
+        payload["pins"].pop("recorded_at", None)
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class LatencySummary(BaseModel):
+    """Percentile latency story of a benchmark run (EV2) — the tail, not the mean."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    p50_ms: float
+    p95_ms: float
+
+
+def _linear_percentile(sorted_sample: list[float], percentile: float) -> float:
+    """Linear interpolation between closest ranks over the sorted sample.
+
+    The percentile method is pinned (the numpy default) so two
+    implementations cannot disagree on a published number (EV2): rank =
+    ``p/100 * (n - 1)``, then interpolate between the bracketing ranks.
+    """
+    rank = (percentile / 100.0) * (len(sorted_sample) - 1)
+    lower = math.floor(rank)
+    upper = math.ceil(rank)
+    if lower == upper:
+        return sorted_sample[lower]
+    fraction = rank - lower
+    return sorted_sample[lower] + fraction * (sorted_sample[upper] - sorted_sample[lower])
+
+
+def summarize_latencies(durations_ms: list[float]) -> LatencySummary:
+    """Fold per-case durations into a p50/p95 summary (EV2).
+
+    Raises on an empty sample — a latency summary over nothing is a missing
+    row, never a fabricated 0.0 (D9).
+    """
+    if not durations_ms:
+        msg = "summarize_latencies needs at least one duration"
+        raise ValueError(msg)
+    ordered = sorted(durations_ms)
+    return LatencySummary(
+        p50_ms=_linear_percentile(ordered, 50.0),
+        p95_ms=_linear_percentile(ordered, 95.0),
+    )
+
+
+# EV2 rollup mapping, derived purely from a row's replay `status` (W-23).
+_REPLAY_STATUS_TO_ROLLUP: Final[dict[str, str]] = {
+    CASE_STATUS_PASSED: "correct",
+    CASE_STATUS_REGRESSION: "incorrect",
+    CASE_STATUS_BLOCKED: "inconclusive",
+}
+
+
+def rollup_by_orchestrator_kind(
+    rows_by_kind: dict[str, list[CaseReplayRow]],
+) -> dict[str, CorpusClassRollup]:
+    """Roll replay rows up per orchestrator kind (EV2, W-23).
+
+    Mirrors ``BenchmarkMetrics.by_corpus_class``'s ``CorpusClassRollup``
+    shape, but keyed by orchestrator kind (``hybrid`` vs ``llm``), so the
+    W-23 comparison is a lookup, not a re-run. A status outside the known
+    replay vocabulary folds into ``inconclusive`` — the honest bucket for an
+    outcome the rollup cannot classify.
+    """
+    rollups: dict[str, CorpusClassRollup] = {}
+    for kind, rows in rows_by_kind.items():
+        counts = {"total": 0, "correct": 0, "incorrect": 0, "inconclusive": 0}
+        for row in rows:
+            counts["total"] += 1
+            counts[_REPLAY_STATUS_TO_ROLLUP.get(row.status, "inconclusive")] += 1
+        rollups[kind] = CorpusClassRollup(**counts)
+    return rollups
 
 
 def corpus_class_for(case: Case) -> str:
@@ -502,6 +598,7 @@ def run_structural_replay(
         corpus_commit=_git_corpus_commit(),
         recorded_at=datetime.now(UTC),
         mergecraft_commit=_git_head_sha(),
+        mergecraft_version=mergecraft.__version__,
         reviewing_model=_reviewing_model_pins(providers),
         scorer_version=SCORER_VERSION,
         line_slack=DEFAULT_LINE_SLACK,
@@ -578,10 +675,13 @@ __all__ = [
     "DetectionCaseResult",
     "DetectionMetrics",
     "GateMatrix",
+    "LatencySummary",
     "ReviewingModelPin",
     "VersionPins",
     "corpus_class_for",
     "replay_bank",
+    "rollup_by_orchestrator_kind",
     "run_structural_replay",
+    "summarize_latencies",
     "write_result_set",
 ]

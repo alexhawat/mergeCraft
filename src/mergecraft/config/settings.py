@@ -23,6 +23,20 @@ from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 
 AccountPlan = Literal["none", "payg"]
 HeadingDepth = Literal[1, 2, 3, 4, 5, 6]
+CliTrustOverride = Literal["trusted", "untrusted"]
+TrustTier = Literal["trusted", "untrusted"]
+
+# TS2 / D4 — executable repo-declared keys that may run only on trusted tier.
+TIER_GATED_EXECUTABLE_FIELDS: frozenset[str] = frozenset(
+    {"setup_script", "prepush_script", "stop_script"}
+)
+
+
+def _tier_gated_field(*, default: Any = None, alias: str | None = None, **kwargs: Any) -> Any:
+    extra = dict(kwargs.pop("json_schema_extra", {}) or {})
+    extra["tier_gated"] = True
+    return Field(default=default, alias=alias, json_schema_extra=extra, **kwargs)
+
 
 # D4 / D8 / W6.2 — security/runtime and optional-feature models both use
 # ``extra="forbid"``. The optional-feature one-release warning shim has ended
@@ -90,7 +104,7 @@ class StaticCheckDefinition(_OptionalFeatureModel):
     """
 
     name: str
-    command: str
+    command: str = Field(json_schema_extra={"tier_gated": True})
     suffixes: list[str] = Field(default_factory=list)
 
 
@@ -295,6 +309,19 @@ class TracingSettings(BaseModel):
 
     D4/W6.2 — ``extra="forbid"``. W6.4 — ``enabled`` is tri-state
     (``None`` = unset / defer; the tracer treats unset as off).
+
+    OB2 / D6 — ``content`` selects the model-payload capture level
+    (``off`` / ``metadata`` / ``redacted`` / ``full``, default
+    ``redacted``). It is deliberately a plain ``str``: the closed vocabulary
+    and the D7 untrusted cap live in
+    ``tracing.content.resolve_content_capture`` so an invalid value fails
+    safe to the default at resolution time rather than rejecting the whole
+    config block, and ``MERGECRAFT_TRACING_CONTENT`` overrides it (env →
+    configured → default), never overriding the untrusted cap.
+    ``exclude_if`` keeps the W1.1 round-trip contract (cf.
+    ``TraceSinkEntry._drop_unset``): a config that never mentions
+    ``content`` dumps exactly as before — the field only serializes when it
+    differs from the default.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
@@ -303,6 +330,7 @@ class TracingSettings(BaseModel):
     retention_days: int = Field(default=30, alias="retentionDays")
     sinks: list[TraceSinkEntry] = Field(default_factory=list)
     redaction: bool = True
+    content: str = Field(default="redacted", exclude_if=lambda value: value == "redacted")
 
     @model_validator(mode="before")
     @classmethod
@@ -325,6 +353,27 @@ class TracingSettings(BaseModel):
             return data
         msg = f"unknown tracing shorthand: {shorthand!r}"
         raise ValueError(msg)
+
+
+class RunBoundsSettings(BaseModel):
+    """Per-run budget and degradation ceilings (CC3 / N-05, R-08)."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    token_budget: int = Field(default=2_000_000, alias="tokenBudget", gt=0)
+    cost_budget_usd: float = Field(default=50.0, alias="costBudgetUsd", gt=0)
+    tool_call_budget: int = Field(default=500, alias="toolCallBudget", gt=0)
+    max_diff_lines: int = Field(default=50_000, alias="maxDiffLines", gt=0)
+    context_retrieval_timeout_s: int = Field(
+        default=30,
+        alias="contextRetrievalTimeoutS",
+        gt=0,
+    )
+    cache_max_bytes: int = Field(
+        default=512 * 1024 * 1024,
+        alias="cacheMaxBytes",
+        gt=0,
+    )
 
 
 class RepoSettings(BaseModel):
@@ -352,9 +401,9 @@ class RepoSettings(BaseModel):
     # Default ``True`` preserves today's fallback behaviour.
     allow_fallback: bool = Field(default=True, alias="allowFallback")
     modes: list[ModeDefinition] = Field(default_factory=list)
-    setup_script: str | None = Field(default=None, alias="setupScript")
-    prepush_script: str | None = Field(default=None, alias="prepushScript")
-    stop_script: str | None = Field(default=None, alias="stopScript")
+    setup_script: str | None = _tier_gated_field(default=None, alias="setupScript")
+    prepush_script: str | None = _tier_gated_field(default=None, alias="prepushScript")
+    stop_script: str | None = _tier_gated_field(default=None, alias="stopScript")
     # S1 / D10 — ``setup_failure_policy`` decides what a trusted-tier
     # ``setup_script`` failure means. Closed vocabulary
     # (``inconclusive`` | ``fail`` | ``warn``); default ``inconclusive``
@@ -421,6 +470,7 @@ class RepoSettings(BaseModel):
         default_factory=list, alias="xrepoLearningsHeadings"
     )
     tracing: TracingSettings = Field(default_factory=TracingSettings)
+    run_bounds: RunBoundsSettings = Field(default_factory=RunBoundsSettings, alias="runBounds")
 
     @field_validator("push", "shell", mode="before")
     @classmethod
@@ -428,6 +478,57 @@ class RepoSettings(BaseModel):
         if isinstance(value, str):
             return value.lower()
         return value
+
+
+def _executable_drop_reason(field: str, source_label: str) -> str:
+    if field == "setup_script":
+        return f"skipped setup_script on untrusted tier ({source_label})"
+    return f"dropped {field} on untrusted tier ({source_label})"
+
+
+def build_executable_config_skip_reason(drops: dict[str, str]) -> str:
+    """Combine per-key drop reasons for prompt threading (TS2 / F3 shape)."""
+    if not drops:
+        return ""
+    if "setup_script" in drops:
+        return drops["setup_script"]
+    return "; ".join(sorted(drops.values()))
+
+
+def apply_trust_tier_to_repo_settings(
+    settings: RepoSettings,
+    tier: TrustTier | str,
+    *,
+    source_label: str,
+) -> tuple[RepoSettings, dict[str, str]]:
+    """Drop tier-gated executable config when the review source is untrusted (D4)."""
+    if tier == "trusted":
+        return settings, {}
+
+    drops: dict[str, str] = {}
+    updates: dict[str, Any] = {}
+
+    for field_name in TIER_GATED_EXECUTABLE_FIELDS:
+        value = getattr(settings, field_name)
+        if value is not None:
+            drops[field_name] = _executable_drop_reason(field_name, source_label)
+            updates[field_name] = None
+
+    if settings.static_checks:
+        stripped_checks: list[StaticCheckDefinition] = []
+        for check in settings.static_checks:
+            if check.command:
+                key = f"static_checks.{check.name}.command"
+                drops[key] = _executable_drop_reason(key, source_label)
+                stripped_checks.append(check.model_copy(update={"command": ""}))
+            else:
+                stripped_checks.append(check)
+        updates["static_checks"] = stripped_checks
+
+    if not updates:
+        return settings, drops
+
+    return settings.model_copy(update=updates), drops
 
 
 class RepoInfo(BaseModel):
@@ -661,3 +762,20 @@ def load_repo_settings(
     if update:
         settings = settings.model_copy(update=update)
     return settings
+
+
+def parse_cli_trust_override(raw: str | None) -> CliTrustOverride | None:
+    """Parse the CLI-only ``--trust`` override (D3).
+
+    Repo config cannot declare trust — this parser is for explicit operator
+    flags on ``mergecraft diff-review`` only.
+    """
+    if raw is None:
+        return None
+    value = raw.strip().lower()
+    if not value:
+        return None
+    if value in {"trusted", "untrusted"}:
+        return value  # type: ignore[return-value]
+    msg = f"invalid --trust value: {raw!r} (expected trusted or untrusted)"
+    raise ValueError(msg)

@@ -195,6 +195,14 @@ _CONTRACTS: Final[tuple[_Contract, ...]] = (
             "record is empty and every check stays silent (#43, D8)"
         ),
     ),
+    _Contract(
+        symbol="record_agent_usage",
+        defined_in="utils/run_bounds.py",
+        why=(
+            "no reachable caller means token/cost budgets are declared but never enforced "
+            "during a run (CC3)"
+        ),
+    ),
     # #46 — the thermostat's `decide_action` is the closed-vocabulary action
     # map. A library implementation with no reachable caller would be exactly
     # the #96 failure mode again: a unit-tested dead function never lights up

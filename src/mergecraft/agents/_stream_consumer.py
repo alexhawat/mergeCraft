@@ -15,6 +15,34 @@ from a stream, parse them as JSON, skip malformed lines (W6.5), echo lines
 to stdout so the activity monitor stays armed (D13), and surface a classifier
 callback for driver-specific span emission.
 
+Per-harness payload coverage (OB3 — recorded, not faked; plan §OB3.1 note):
+    - **OpenCode HTTP path** (``opencode.py::_prompt_session``): full
+      visibility — mergeCraft sends the prompt and reads the completion over
+      HTTP, so ``gen_ai.input.messages`` / ``gen_ai.output.messages`` /
+      ``gen_ai.usage.*`` are all populated. The executed model is NOT
+      reliably reported by the session response, so ``gen_ai.response.model``
+      is left unset there rather than guessed (D11 — a guessed value would
+      fake the fallback signal). The ``opencode run`` CLI fallback is not
+      payload-wired.
+    - **claude** (``stream-json``): assistant message snapshots carry text +
+      thinking blocks → output messages and reasoning (incl.
+      ``redacted_thinking`` → ``provider_redacted``); ``--effort`` is the one
+      exposed request knob. The raw API request (system prompt, tools) is
+      never seen.
+    - **codex** (``exec --json``): ``message.completed`` carries assistant
+      text → output messages; ``reasoning`` items carry reasoning text;
+      ``turn.completed`` usage carries ``output_tokens_details.reasoning_tokens``;
+      ``model_reasoning_effort`` (written into ``config.toml`` by mergeCraft)
+      is the one exposed request knob.
+    - **gemini** (``--output-format stream-json``): assistant ``message``
+      events carry text → output messages. No reasoning or request-parameter
+      visibility.
+    - **cursor / other CLI harnesses**: no payload visibility at all — nothing
+      is emitted rather than faked.
+    In every case the bodies route through OB2's ``capture_text`` under the
+    policy resolved from ``derive_trust_tier()`` output (D7/D9); where a
+    harness cannot supply a payload, no attribute is emitted.
+
 Exports:
     StreamSpanAccumulator -- per-run aggregator for usage + final output.
     consume_stream -- iterate a line stream and dispatch events to a classifier.

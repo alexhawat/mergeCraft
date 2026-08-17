@@ -41,6 +41,13 @@ from mergecraft.tracing._tool_attrs import (
     enrich_tool_request,
     enrich_tool_response,
 )
+from mergecraft.tracing.genai import (
+    ModelParams,
+    output_messages_attrs,
+    request_attrs,
+    resolve_capture_policy,
+    thinking_attrs,
+)
 from mergecraft.tracing.redaction import redact_tool_payload
 from mergecraft.tracing.sinks import claim_sink
 from mergecraft.tracing.tracer import (
@@ -57,6 +64,7 @@ from mergecraft.utils.secrets import build_agent_env
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from mergecraft.tracing.content import ContentCapture
     from mergecraft.tracing.tracer import Tracer
 
 CLAUDE_EXEC_TOOLS = ("Bash", "Monitor", "REPL", "Workflow")
@@ -65,6 +73,10 @@ CLAUDE_EXEC_TOOL_DENY_RULES = [
     *[f"Agent({t})" for t in CLAUDE_EXEC_TOOLS],
 ]
 CLAUDE_DISALLOWED_TOOLS = ",".join(CLAUDE_EXEC_TOOL_DENY_RULES)
+# O4 (OB3) — the effort level passed as ``--effort`` is the one request
+# parameter the claude harness exposes; the constant keeps the CLI flag and
+# the span attribute (``mergecraft.reasoning_effort``) from drifting apart.
+_CLAUDE_EFFORT = "high"
 
 
 def _strip_provider_prefix(specifier: str) -> str:
@@ -73,14 +85,22 @@ def _strip_provider_prefix(specifier: str) -> str:
 
 
 def write_mcp_config(ctx: AgentRunContext) -> str:
+    from mergecraft.tracing.signals import current_agent_id
+
     config_dir = Path(ctx.tmpdir) / ".claude"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "mcp.json"
+    server_entry: dict[str, Any] = {"type": "http", "url": ctx.mcp_server_url}
+    # D10 (OB4) — forward the dispatch-issued agent id as a header on every
+    # MCP call so the server can attribute this agent's tool.call spans.
+    agent_id = current_agent_id()
+    if agent_id:
+        server_entry["headers"] = {"X-MergeCraft-Agent-Id": agent_id}
     config_path.write_text(
         json.dumps(
             {
                 "mcpServers": {
-                    MERGECRAFT_MCP_NAME: {"type": "http", "url": ctx.mcp_server_url},
+                    MERGECRAFT_MCP_NAME: server_entry,
                 }
             }
         ),
@@ -238,11 +258,85 @@ def _build_claude_streaming_usage(payload: dict[str, Any]) -> AgentUsage:
     )
 
 
+def _capture_claude_assistant_message(
+    event: dict[str, Any],
+    open_pairs: dict[str, ProviderLLMPair | None],
+    policy: ContentCapture,
+) -> None:
+    """Capture an ``assistant`` event's payloads on the open ``llm.call`` span (OB3).
+
+    Claude's ``stream-json`` emits a full ``assistant`` message snapshot per
+    turn — the only payload visibility a CLI harness gives mergeCraft (the
+    raw API request/response is never seen; the note in
+    ``agents/_stream_consumer.py`` records the per-harness coverage). Text
+    blocks become ``gen_ai.output.messages`` and ``thinking`` blocks become
+    ``mergecraft.thinking``, both through the OB2 content gate (D9 —
+    reasoning inherits the prompt gate, never a looser one). A
+    ``redacted_thinking`` block is marked ``provider_redacted`` so it reads
+    differently from "no reasoning happened".
+
+    Total and non-throwing (convention 3): any malformed shape degrades to
+    no payload attrs, never an exception into the stream loop.
+    """
+    try:
+        message = event.get("message")
+        if not isinstance(message, dict):
+            return
+        content = message.get("content")
+        if not isinstance(content, list):
+            return
+        message_id = str(message.get("id") or "")
+        pair = open_pairs.get(message_id)
+        if pair is None:
+            # The stream does not always key cleanly — fall back to the
+            # sole open pair (the typical shape is one message at a time).
+            live = [candidate for candidate in open_pairs.values() if candidate is not None]
+            pair = live[0] if len(live) == 1 else None
+        if pair is None:
+            return
+        span = pair.llm
+        texts = [
+            block["text"]
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+            and block.get("text")
+        ]
+        thinking = [
+            block["thinking"]
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "thinking"
+            and isinstance(block.get("thinking"), str)
+            and block.get("thinking")
+        ]
+        has_redacted_thinking = any(
+            isinstance(block, dict) and block.get("type") == "redacted_thinking"
+            for block in content
+        )
+        if texts:
+            for key, value in output_messages_attrs(
+                [{"role": "assistant", "content": text} for text in texts],
+                policy=policy,
+            ).items():
+                span.set_attribute(key, value)
+        if thinking:
+            for key, value in thinking_attrs("\n\n".join(thinking), policy=policy).items():
+                span.set_attribute(key, value)
+        elif has_redacted_thinking:
+            for key, value in thinking_attrs(None, policy=policy, provider_redacted=True).items():
+                span.set_attribute(key, value)
+    except Exception as exc:
+        logger.debug("claude assistant payload capture failed: {}", exc)
+
+
 def _claude_stream_event_handler(
     *,
     tracer: Tracer | None,
     parent_span_id: str | None,
     model_id: str,
+    capture_policy: ContentCapture | None = None,
 ) -> tuple[Any, Callable[[], None]]:
     """Build a per-event handler that emits ``tool.call`` / ``llm.call`` spans.
 
@@ -324,6 +418,14 @@ def _claude_stream_event_handler(
                 span.set_attribute("gen_ai.operation.name", "chat")
                 span.set_attribute("gen_ai.request.model", model_id)
                 span.set_attribute("gen_ai.response.model", model_id)
+                # O4 (OB3) — the one request knob the claude harness
+                # exposes: the effort level mergeCraft itself passes as
+                # ``--effort``. No stable OTel name → mergecraft.*.
+                for attr_key, attr_value in request_attrs(
+                    model=None,
+                    params=ModelParams(reasoning_effort=_CLAUDE_EFFORT),
+                ).items():
+                    span.set_attribute(attr_key, attr_value)
                 span.set_attribute(
                     "gen_ai.usage.input_tokens", int(usage_payload.get("input_tokens") or 0)
                 )
@@ -392,6 +494,14 @@ def _claude_stream_event_handler(
                 _close_provider_llm_pair(pair)
             open_pairs.clear()
             open_pair_bookkeeping.clear()
+            return
+
+        if event_type == "assistant":
+            # O5/O6 (OB3) — full assistant message snapshot; the harness's
+            # only payload visibility. ``capture_policy=None`` keeps the
+            # pre-OB3 attribute surface byte-identical.
+            if tracer is not None and capture_policy is not None:
+                _capture_claude_assistant_message(event, open_pairs, capture_policy)
             return
 
         if event_type == "content_block_start":
@@ -665,7 +775,7 @@ def _run_claude_once(
             agents_json=agents_payload,
         ),
         "--effort",
-        "high",
+        _CLAUDE_EFFORT,
     ]
     if model:
         cmd.extend(["--model", model])
@@ -706,10 +816,17 @@ def _run_claude_once(
     assert process.stdout is not None
     assert process.stderr is not None
 
+    # OB3 — resolve the content-capture policy only when a tracer is live;
+    # the trust tier is ``derive_trust_tier()``'s output carried on the tool
+    # state, never an env fallback (D7 — the cap must not be env-defeatable).
+    capture_policy = (
+        resolve_capture_policy(ctx.tool_state.trust_tier) if tracer is not None else None
+    )
     handler, close_all_open_spans = _claude_stream_event_handler(
         tracer=tracer,
         parent_span_id=None,
         model_id=model or "default",
+        capture_policy=capture_policy,
     )
 
     stderr_text = ""

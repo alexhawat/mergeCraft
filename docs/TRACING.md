@@ -64,6 +64,7 @@ tracing:
   enabled: true                # default: unset (treated as off); bool | null
   retentionDays: 30            # default: 30
   redaction: true              # default: true
+  content: redacted            # default: redacted; off | metadata | redacted | full (OB2/D6)
   sinks:
     - type: jsonl_file
       path: .mergecraft/traces/
@@ -203,6 +204,37 @@ does hit it, raise the `Final` constant; it is a single line to change.
 There is no config-level trust gate. D15's hard requirement is that the
 statement above appears plainly in this document, so the operator sees
 it the first time they reach for a remote sink.
+
+## Content-capture policy for model payloads (OB2 — D6/D7/D8)
+
+D15 warns that remote sinks export reviewed-repo content; the `content`
+policy is the **level control** that decides how much of it leaves the
+runner. It governs model payloads (prompts, completions, reasoning) via
+`tracing/content.py`, with four levels (D6):
+
+| Level | Body | Metadata (`.chars` / `.bytes` / `.sha256`) | Use |
+| --- | --- | --- | --- |
+| `off` | — | — | Nothing is captured, hash included |
+| `metadata` | — | ✓ | Counts + hash only — the untrusted-tier ceiling |
+| `redacted` (default) | ✓, through the secret matcher (`analyzers.redact.redact_secrets`), capped | ✓ | Safe default |
+| `full` | ✓, verbatim, capped only | ✓ | Local debugging |
+
+Resolution (`resolve_content_capture(configured, trust_tier)`):
+`MERGECRAFT_TRACING_CONTENT` env → the YAML `tracing.content` field → the
+default `redacted`. An unrecognised value at any step falls through to the
+next, ending at the default — fail safe, never `full`. Bodies are
+byte-capped at the shared `TRACE_ATTRS_JSON_MAX_BYTES` budget and flagged
+`.truncated`; `.chars` / `.bytes` / `.sha256` always describe the
+**original** payload (D8), so the hash detects prompt drift between two
+runs even when neither shipped a body.
+
+**D7 — the untrusted cap cannot be configured away.** At any trust tier
+other than `trusted`, a body-emitting level is lowered to `metadata`
+**after** precedence resolution: `content: full` in YAML and
+`MERGECRAFT_TRACING_CONTENT=full` both yield `metadata` on a fork-PR-shaped
+run. The cap only ever lowers a level — `off` stays `off`, and nothing is
+ever raised. Shipping a fork PR's prompt bodies to a remote sink is
+exactly the exfiltration path trust tiers exist to close.
 
 ## Span tree (W4 — Batch B)
 
@@ -479,6 +511,50 @@ without the caller having to know about mergeCraft's tracer. The
 `agents/_stream_consumer.py::consume_stream` wraps the handler call so
 any nested OTel operation inside an agent's per-event handler inherits
 the run's trace.
+
+## Three identifiers: review.id, trace_id, review.correlation_key (OB1)
+
+One logical review fans out into several processes: the orchestrating run
+plus one spawned agent CLI per subagent. Three identifiers — not two —
+describe that shape (D2):
+
+| Identifier | Scope | Source |
+| --- | --- | --- |
+| `review.id` | **One logical review**, across every process and agent run | `tracing/review_context.py::resolve_review_id()` — `MERGECRAFT_REVIEW_ID` inherited verbatim, else a fresh `uuid4` per review |
+| `trace_id` | **One agent run** (one process) | `tracing/tracer.py::resolve_trace_id()` — see *One trace per run (T3)* above |
+| `review.correlation_key` | **Every attempt at one commit** — deliberately collides | `correlation_key_for()` — deterministic `sha256(repo\|pr\|head_sha)` (D3) |
+
+The shape to remember: **one review with three agent runs has one
+`review.id` and three `trace_id` values.** One `review.id` filter returns
+the entire review — every agent, every tool call, the verdict — across
+every process. `review.correlation_key` answers the orthogonal query:
+"every attempt at this commit", because two reviews of one commit are two
+reviews (distinct `review.id`s) but share the key (D3). A local patch
+review has no repo/pr/head context, so its key is empty and the attribute
+is omitted rather than emitted as a misleading constant.
+
+### How the identity travels
+
+- **Within a process:** both entry points — the CLI
+  (`offline_review.py::run_offline_diff_review`) and the Action
+  (`main.py::main`) — bind a frozen `ReviewContext` via
+  `bind_review_context(...)`. `Span.close()` reads the bound context at
+  **close time** (D4), so a context bound after the tracer was built still
+  reaches spans that are already open. Merge precedence: tracer baseline →
+  review context → lazy `attrs_source` → explicit `set_attribute`.
+- **Across the process boundary (O2):** `agents/shared.py::spawn_agent_cli`
+  — the single choke point for all five drivers — exports
+  `MERGECRAFT_REVIEW_ID` + `MERGECRAFT_REVIEW_CORRELATION_KEY` into the
+  child env via `setdefault`, after the privilege-drop env patch. A
+  driver-pinned value wins; a fail-closed `setpriv` error still surfaces
+  first. The child's `resolve_review_id()` then inherits the parent's
+  review verbatim.
+- **Baseline attrs (O3):** `baseline_run_attrs()` stamps every span with
+  `mergecraft.version`, `mergecraft.run_id`, `mergecraft.trust_tier`, and
+  the VCS/CI fields (`vcs.repository.name`, `vcs.change.id`,
+  `vcs.revision`, `ci.workflow_run_id`, `ci.job_id`) so a span can say
+  which build and which change produced it. The `Tracer` carries them in a
+  `baseline_attrs` field with `repr=False` (D5).
 
 ## What's next
 

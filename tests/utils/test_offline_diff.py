@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from mergecraft.utils.offline_diff import detect_default_base, materialize_diff
+from mergecraft.utils.offline_diff import detect_default_base, git_unstaged_diff, materialize_diff
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -50,3 +50,10 @@ def test_materialize_on_feature_branch(git_repo: Path) -> None:
     text = result.path.read_text(encoding="utf-8")
     assert "three" in text or "+three" in text
     assert result.base_ref == "main"
+
+
+def test_unstaged_diff_skips_binary_untracked_files(git_repo: Path) -> None:
+    """Binary untracked files must not crash unstaged diff materialization."""
+    (git_repo / "binary.bin").write_bytes(b"\x00\x01\x02")
+    text = git_unstaged_diff(cwd=git_repo)
+    assert "binary.bin" not in text

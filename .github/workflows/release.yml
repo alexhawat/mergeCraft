@@ -53,11 +53,44 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # EV3 eval regression gate — structural replay of the eval bank compared
+  # against the committed baseline with the declared tolerance band
+  # (mergecraft.evals.gate.DEFAULT_GATE_TOLERANCE). Blocking: a metric that
+  # regresses beyond the band fails the release before publish.
+  eval-gate:
+    name: Eval regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: Replay eval bank (candidate)
+        run: |
+          set -euo pipefail
+          uv run mergecraft eval replay-bank \
+            --results-dir "$RUNNER_TEMP/eval-gate" \
+            --json > "$RUNNER_TEMP/candidate.json"
+      - name: Release regression gate
+        run: |
+          set -euo pipefail
+          uv run mergecraft eval gate \
+            --baseline evals/results/latest.json \
+            --candidate "$RUNNER_TEMP/candidate.json" \
+            --tolerance 0.02
+        # NOTE: the committed baseline is currently perfect
+        # (unsafe_approval_rate 0.0 / clean_block_rate 0.0 over ~46 cases), so
+        # a single case flipping can exceed the 0.02 band. When the eval bank
+        # changes, regenerate the baseline from the same commit
+        # (`mergecraft eval replay-bank` → `evals/results/latest.json`) so the
+        # gate measures drift, not corpus edits.
+
   # W8.2 publish gate — read-only reminder that CI/CD signs digests before
   # `craft publish` (PyPI + GHCR SHA→version retag via .craft.yml).
   publish:
     name: Publish gate
-    needs: prepare
+    needs: [prepare, eval-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
