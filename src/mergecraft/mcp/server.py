@@ -314,7 +314,7 @@ def _register_mcp_route(
     """Mount one JSON-RPC MCP endpoint with a fixed tool surface."""
     by_name = {t.name: t for t in tools}
 
-    async def handle_rpc(body: dict[str, Any]) -> dict[str, Any]:
+    async def handle_rpc(body: dict[str, Any], *, agent_id: str | None = None) -> dict[str, Any]:
         req_id = body.get("id")
         method = body.get("method")
         params = body.get("params") or {}
@@ -372,6 +372,12 @@ def _register_mcp_route(
                 "gen_ai.tool.name": name,
                 "gen_ai.tool.call.id": _span_tool_call_id(),
             }
+            # D10 (OB4) — per-agent attribution from the MCP side: the
+            # dispatch-issued identity arrives as a request header (the
+            # harness subprocess is uninstrumentable), so every tool.call
+            # span carries the calling agent's id.
+            if agent_id:
+                call_attrs["mergecraft.agent.id"] = agent_id
             with tracer.start_span("tool.call", attrs_source=lambda: dict(call_attrs)) as _span:
                 enrich_tool_request(_span, arguments=arguments)
                 try:
@@ -425,6 +431,9 @@ def _register_mcp_route(
                 status_code=400,
             )
         items = body if isinstance(body, list) else [body]
+        # D10 (OB4) — the dispatch-issued agent id, forwarded by the agent
+        # CLI's MCP client config as a header on every call.
+        calling_agent_id = request.headers.get("x-mergecraft-agent-id") or None
         # A JSON-RPC message with no `id` is a notification. The streamable-HTTP
         # spec requires 202 with an empty body for a notification-only POST;
         # answering one with a response object (`"id": null`) makes a strict
@@ -433,8 +442,10 @@ def _register_mcp_route(
         if all(_is_notification(item) for item in items):
             return Response(status_code=202)
         if isinstance(body, list):
-            return JSONResponse([await handle_rpc(item) for item in items])
-        return JSONResponse(await handle_rpc(body))
+            return JSONResponse(
+                [await handle_rpc(item, agent_id=calling_agent_id) for item in items]
+            )
+        return JSONResponse(await handle_rpc(body, agent_id=calling_agent_id))
 
     app.add_api_route(
         path,

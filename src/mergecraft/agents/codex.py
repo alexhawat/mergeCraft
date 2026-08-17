@@ -417,6 +417,12 @@ def _append_custom_provider_lines(lines: list[str]) -> None:
 
 
 def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
+    # D10 (OB4) — the dispatch-issued agent id reaches the codex subprocess
+    # via the ``MERGECRAFT_AGENT_ID`` env handoff (spawn_agent_cli). A TOML
+    # ``http_headers`` key for codex MCP servers is not part of the config
+    # surface this driver has verified, so no header is written here — an
+    # unverified config key could fail codex's parse and break the review;
+    # per-agent attribution for codex rides the env contract instead.
     lines.extend(
         [
             "",

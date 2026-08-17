@@ -109,6 +109,13 @@ def write_mcp_config(
         "httpUrl": ctx.mcp_server_url,
         "trust": True,
     }
+    # D10 (OB4) — forward the dispatch-issued agent id as a header on every
+    # MCP call so the server can attribute this agent's tool.call spans.
+    from mergecraft.tracing.signals import current_agent_id
+
+    agent_id = current_agent_id()
+    if agent_id:
+        server_config["headers"] = {"X-MergeCraft-Agent-Id": agent_id}
     excluded_tools = [str(name) for name in ctx.subagent_denied_tools]
     if excluded_tools:
         server_config["excludeTools"] = excluded_tools

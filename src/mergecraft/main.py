@@ -1113,7 +1113,21 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 attempt_agent_id,
                 attempt_model or "(auto)",
             )
-        return await attempt_agent.run(attempt_ctx)
+        # O8/D10 (OB4) — issue the per-agent identity at dispatch: the span
+        # carries it and ``spawn_agent_cli`` exports it as
+        # ``MERGECRAFT_AGENT_ID`` so the MCP server can attribute this
+        # agent's tool calls.
+        from mergecraft.tracing import get_tracer_from_settings
+        from mergecraft.tracing.signals import agent_run_span
+
+        with agent_run_span(
+            get_tracer_from_settings(settings),
+            agent_id=str(attempt_agent_id),
+            role="reviewer",
+            lens=str(tool_state.selected_mode or "") or None,
+            executed_model=attempt_model,
+        ):
+            return await attempt_agent.run(attempt_ctx)
 
     # Named ``_execute_agent`` deliberately — same name as the top-level
     # phase function that calls this one, shadowed locally. A pre-G4 test
@@ -1131,7 +1145,17 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 tool_state=tool_state,
             )
             return winning_slug, chain_result
-        return selected_slug, await agent.run(run_ctx)
+        from mergecraft.tracing import get_tracer_from_settings
+        from mergecraft.tracing.signals import agent_run_span
+
+        with agent_run_span(
+            get_tracer_from_settings(settings),
+            agent_id=str(agent.name),
+            role="reviewer",
+            lens=str(tool_state.selected_mode or "") or None,
+            executed_model=ctx.resolved_model,
+        ):
+            return selected_slug, await agent.run(run_ctx)
 
     agent_task = asyncio.create_task(_execute_agent())
 
@@ -1314,6 +1338,31 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         verdict_prediction=verdict_prediction,
         actual_outcome=str(outcome) if verdict_prediction is not None else None,
     )
+
+    # O9 (OB4) — the verdict span at the publish convergence point. Emitted
+    # only when the agent actually submitted a terminal verdict: a run that
+    # never submitted has no verdict, and the missing span is the signal
+    # (the same diagnostic philosophy as the phase spans). The disagreement
+    # flag is derived by the emitter, never supplied here.
+    submission = tool_state.terminal_submission
+    if submission is not None:
+        try:
+            from mergecraft.tracing import get_tracer_from_settings
+            from mergecraft.tracing.signals import emit_verdict
+
+            fallback_reason = (result.metadata or {}).get("fallback_reason")
+            published_count = len(submission.findings)
+            emit_verdict(
+                get_tracer_from_settings(settings),
+                agent_verdict=submission.verdict,
+                structural_verdict="pass" if outcome is RunOutcome.passed else "fail",
+                published_count=published_count,
+                # Withdrawn ≈ proposed by the agent but not published.
+                withdrawn_count=max(len(tool_state.agent_findings) - published_count, 0),
+                fallback_reason=str(fallback_reason) if fallback_reason else None,
+            )
+        except Exception as exc:
+            logger.debug("verdict span emission skipped: {}", exc)
 
     if outcome is not RunOutcome.passed:
         return MainResult(

@@ -755,7 +755,18 @@ async def _run_agent_review(
 
         logger.info("» offline diff-review via agent={}", agent.name)
         await agent.install()
-        result = await agent.run(run_ctx)
+        # O8/D10 (OB4) — issue the per-agent identity at dispatch, exactly as
+        # the Action path does in main.py, so the CLI and Action traces agree.
+        from mergecraft.tracing import get_tracer_from_settings
+        from mergecraft.tracing.signals import agent_run_span
+
+        with agent_run_span(
+            get_tracer_from_settings(settings),
+            agent_id=str(agent.name),
+            role="reviewer",
+            executed_model=resolved_model,
+        ):
+            result = await agent.run(run_ctx)
         try:
             record_agent_usage(budget_tracker, result.usage)
         except BudgetExhausted as exc:

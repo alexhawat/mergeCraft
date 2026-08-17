@@ -85,14 +85,22 @@ def _strip_provider_prefix(specifier: str) -> str:
 
 
 def write_mcp_config(ctx: AgentRunContext) -> str:
+    from mergecraft.tracing.signals import current_agent_id
+
     config_dir = Path(ctx.tmpdir) / ".claude"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "mcp.json"
+    server_entry: dict[str, Any] = {"type": "http", "url": ctx.mcp_server_url}
+    # D10 (OB4) — forward the dispatch-issued agent id as a header on every
+    # MCP call so the server can attribute this agent's tool.call spans.
+    agent_id = current_agent_id()
+    if agent_id:
+        server_entry["headers"] = {"X-MergeCraft-Agent-Id": agent_id}
     config_path.write_text(
         json.dumps(
             {
                 "mcpServers": {
-                    MERGECRAFT_MCP_NAME: {"type": "http", "url": ctx.mcp_server_url},
+                    MERGECRAFT_MCP_NAME: server_entry,
                 }
             }
         ),

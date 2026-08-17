@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
@@ -83,7 +84,14 @@ def span_attrs_for_verdict_diagnostic(
 
 
 def stamp_review_phase_on_active_span(phase: ReviewPhase) -> None:
-    """Stamp ``review.phase`` on the active span when one is open (D10)."""
+    """Stamp ``review.phase`` on the active span when one is open (D10).
+
+    OB4 / O9 — the same transition seam also emits a ``mergecraft.phase``
+    point span via the active span's tracer, so the trace shows the
+    lifecycle as it advances and a run that dies early visibly stops before
+    the terminal phases. Best-effort: a span-emission failure must never
+    break the transition itself (convention 3).
+    """
     from mergecraft.tracing import Span
     from mergecraft.tracing.tracer import _ACTIVE_SPAN
 
@@ -91,6 +99,12 @@ def stamp_review_phase_on_active_span(phase: ReviewPhase) -> None:
     if isinstance(active, Span):
         active.set_attribute("review.phase", phase.value)
         active.set_attribute("mergecraft.review.phase", phase.value)
+        try:
+            from mergecraft.tracing.signals import emit_phase
+
+            emit_phase(active.tracer, phase=phase)
+        except Exception:
+            logger.debug("phase span emission skipped for {}", phase.value)
 
 
 def _current_review_phase(tool_state: Any) -> ReviewPhase:

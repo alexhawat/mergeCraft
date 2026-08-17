@@ -45,8 +45,13 @@ def spawn_agent_cli(
     single choke point shared by all five drivers, and the injection is
     deliberately last so a fail-closed setpriv error can never be masked by
     a review-env failure.
+
+    D10 (OB4) — the dispatch-issued agent identity (``MERGECRAFT_AGENT_ID``,
+    from the bound ``agent_run_span``) rides the same setdefault handoff so
+    the harness subprocess's MCP calls can be attributed to their agent.
     """
     from mergecraft.tracing.review_context import review_env_for_subprocess
+    from mergecraft.tracing.signals import AGENT_ID_ENV_VAR, current_agent_id
     from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
 
     wrapped_cmd = wrap_agent_command(cmd)
@@ -54,6 +59,9 @@ def spawn_agent_cli(
     try:
         for key, value in review_env_for_subprocess().items():
             resolved_env.setdefault(key, value)
+        agent_id = current_agent_id()
+        if agent_id:
+            resolved_env.setdefault(AGENT_ID_ENV_VAR, agent_id)
     except Exception as exc:
         # Tracing must never fail a review (convention 3) — a review-env
         # failure degrades to an uncorrelated child, never a failed spawn.

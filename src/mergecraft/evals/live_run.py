@@ -209,6 +209,30 @@ def run_live_detection(
         findings = load_reported_findings({"findings": raw_rows})
 
         report = score_findings(issues, findings, slack=slack, closed_world=case.closed_world)
+        # D12 (OB4) — eval scores are spans AND files: the span inherits the
+        # active review.id via the OB1 close-time merge, making the
+        # eval↔trace join free. Best-effort; scoring never depends on it.
+        try:
+            from mergecraft.tracing import current_tracer, get_tracer_from_settings
+            from mergecraft.tracing.signals import emit_eval_score
+
+            tracer = current_tracer()
+            if tracer is None:
+                from mergecraft.config import load_repo_settings
+
+                tracer = get_tracer_from_settings(load_repo_settings(load_learnings_files=False))
+            metrics: dict[str, Any] = {
+                "recall": report.recall,
+                "corpus_confirmed_precision": report.corpus_confirmed_precision,
+                "f1": report.f1,
+            }
+            if case.closed_world:
+                metrics["strict_precision"] = report.strict_precision
+            if report.blocker_precision is not None:
+                metrics["blocker_precision"] = report.blocker_precision
+            emit_eval_score(tracer, case_id=case.case_id, metrics=metrics)
+        except Exception as exc:
+            logger.debug("eval score span skipped for {}: {}", case.case_id, exc)
         reports.append(report)
         case_results.append(
             DetectionCaseResult(
