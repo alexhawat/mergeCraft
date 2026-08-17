@@ -253,3 +253,40 @@ Target API (CC1.2):
 Removed impl-pending xfail markers from CC1 test modules. Suite is 16 real passes.
 Adjusted regression/output tests to use taxonomy-valid finding fixtures and exit-code
 expectations for non-blocking findings (`10`).
+
+## CC2 — operability (PR CC2)
+
+Wave plan: `.ignorelocal/02-cli-sources-trust-wave-plan.md` (PR CC2)
+Authoring wave: **CC2.1**. Implementation: **CC2.2**.
+
+Target API (CC2.2):
+
+- ``mergecraft doctor`` on `src/mergecraft/cli/doctor_cmd.py`
+- ``config show|explain|set|validate`` + generalized precedence on
+  `src/mergecraft/cli/config_precedence.py` (``config tracing`` unchanged)
+- ``mergecraft plan`` on `src/mergecraft/cli/plan_cmd.py`
+- ``build_run_manifest`` / ``resolve_local_telemetry_defaults`` on
+  `src/mergecraft/evidence/run_manifest.py`
+
+## Contract matrix (CC2)
+
+| # | Contract | Layer | Primary test |
+|---|----------|-------|--------------|
+| CC2.1a | doctor probe rows | integration | `test_reports_git_provider_analyzer_auth_config_rows` |
+| CC2.1b | doctor hard failure exit | integration | `test_exits_nonzero_on_a_hard_failure` |
+| CC2.1c | doctor never leaks secrets | integration | `test_never_prints_a_credential_value` |
+| CC2.1d | config show value + source | integration | `test_config_show_reports_resolved_values_with_source` |
+| CC2.1e | config explain winning layer | integration | `test_config_explain_names_the_winning_layer` |
+| CC2.1f | config validate forbid unknown | integration | `test_config_validate_rejects_an_unknown_key` |
+| CC2.1g | validate before agent | integration | `test_config_validate_runs_before_expensive_execution` |
+| CC2.1h | plan lists chain/toolset/analyzers | integration | `test_plan_lists_model_chain_toolset_and_analyzers` |
+| CC2.1i | plan no provider calls | integration | `test_plan_makes_no_provider_call` |
+| CC2.1j | manifest hashes | unit | `test_manifest_carries_model_cli_and_prompt_hashes` |
+| CC2.1k | D11 local telemetry default | unit | `test_local_run_defaults_to_no_remote_telemetry` |
+
+## Acceptance (CC2.1)
+
+- 11 tests collected across `tests/cli/test_doctor.py`,
+  `tests/cli/test_config_surface.py`, `tests/cli/test_plan.py`,
+  `tests/cli/test_run_manifest.py`
+- 0 pass; 11 RED via `xfail(strict=False)` — pending CC2.2
