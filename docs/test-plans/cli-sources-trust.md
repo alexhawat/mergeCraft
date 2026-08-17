@@ -207,3 +207,43 @@ Fixture: `tests/security/fixtures/hostile-repo/` (built by
 
 - 8 tests collected in `tests/security/test_hostile_corpus.py`
 - All green once TS1–TS4 hardening is present and the fixture is built
+
+## CC1 — machine contract (PR CC1)
+
+Wave plan: `.ignorelocal/02-cli-sources-trust-wave-plan.md` (PR CC1)
+Authoring wave: **CC1.1**. Implementation: **CC1.2**.
+
+Target API (CC1.2):
+
+- ``RUN_OUTCOME_EXIT_CODE`` / ``exit_code_for_outcome`` on `src/mergecraft/run_outcome.py`
+- ``--format text|json|jsonl|sarif`` and ``--agent`` on `src/mergecraft/cli/diff_review_cmd.py`
+- ``AGENT_PROTOCOL_VERSION`` + event helpers on `src/mergecraft/cli/agent_protocol.py`
+- Agent findings in `src/mergecraft/analyzers/sarif.py`
+
+## Contract matrix (CC1)
+
+| # | Contract | Layer | Primary test |
+|---|----------|-------|--------------|
+| CC1.1a | clean pass → exit 0 | integration | `test_clean_review_exits_zero` |
+| CC1.1b | findings exit distinct | integration | `test_findings_exit_code_distinct_from_clean` |
+| CC1.1c | blocked exit distinct | integration | `test_blocked_exit_code_distinct_from_findings` |
+| CC1.1d | inconclusive exit | integration | `test_inconclusive_exit_code_distinct` |
+| CC1.1e | configuration_error exit | integration | `test_config_error_exit_code` |
+| CC1.1f | infra_error exit | integration | `test_infra_error_exit_code` |
+| CC1.1g | timed_out exit | integration | `test_timeout_exit_code` |
+| CC1.1h | total outcome mapping | unit | `test_every_run_outcome_has_exactly_one_exit_code` |
+| CC1.1i | text default format | integration | `test_text_format_default` |
+| CC1.1j | ``--json`` schema pin | regression | `test_json_format_matches_existing_findings_schema` |
+| CC1.1k | SARIF agent findings | integration | `test_sarif_includes_agent_findings` |
+| CC1.1l | jsonl one object per line | integration | `test_jsonl_is_one_object_per_line` |
+| CC1.1m | protocol_version on events | integration | `test_events_carry_protocol_version` |
+| CC1.1n | event sequence | integration | `test_event_sequence_is_run_started_then_phases_then_verdict_then_finished` |
+| CC1.1o | findings before verdict | integration | `test_findings_stream_before_the_verdict` |
+| CC1.1p | line-by-line parse | integration | `test_protocol_is_parseable_line_by_line_while_streaming` |
+
+## Acceptance (CC1.1)
+
+- 16 tests collected across `tests/cli/test_exit_codes.py`,
+  `tests/cli/test_output_formats.py`, `tests/cli/test_agent_protocol.py`
+- 2 pass (regression pins: ``--json`` schema)
+- 14 RED via `xfail(strict=False)` — pending CC1.2
