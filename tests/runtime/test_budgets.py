@@ -84,3 +84,31 @@ def test_record_agent_usage_charges_token_and_cost_budgets() -> None:
             AgentUsage(agent="test", input_tokens=2, output_tokens=0, cost_usd=0.0),
         )
     assert exc_info.value.kind == "token"
+
+
+def test_tracker_records_last_exhausted_for_orchestrator_drain() -> None:
+    """``BudgetTracker`` records the ``BudgetExhausted`` it raises.
+
+    mergeCraft review (PR #242, finding ``aeb5d964c1d35e5a41784ded``) found
+    the MCP ``tools/call`` handler only surfaces tool-call budget exhaustion
+    as a JSON-RPC error — the orchestrator's ``_finalize`` only reads
+    ``RunContext.budget_exhaustion``, populated from token/cost usage via
+    ``record_agent_usage``. A run that exhausts its tool-call budget can
+    therefore submit a terminal verdict and be approved.
+
+    The fix records the exception on the tracker itself (``last_exhausted``),
+    so a downstream orchestrator that drains the tracker at finalize time —
+    regardless of which call site tripped the budget — sees the exhaustion
+    and applies ``budget_exhaustion_outcome`` (D12).
+    """
+    tracker = BudgetTracker(_tight_bounds())
+    tracker.record_tool_call()
+    tracker.record_tool_call()
+    assert tracker.last_exhausted is None
+    with pytest.raises(BudgetExhausted):
+        tracker.record_tool_call()
+    assert isinstance(tracker.last_exhausted, BudgetExhausted)
+    assert tracker.last_exhausted.kind == "tool_call"
+    # Draining the tracker surfaces the same outcome mapping the orchestrator
+    # would apply (D12 — inconclusive never a partial approval).
+    assert budget_exhaustion_outcome(tracker.last_exhausted) is RunOutcome.inconclusive

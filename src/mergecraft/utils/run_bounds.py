@@ -82,12 +82,21 @@ class BudgetExhausted(RuntimeError):
 
 @dataclass(slots=True)
 class BudgetTracker:
-    """Mutable per-run budget consumption against resolved :class:`RunBounds`."""
+    """Mutable per-run budget consumption against resolved :class:`RunBounds`.
+
+    ``last_exhausted`` is set to the ``BudgetExhausted`` raised on the most
+    recent overrun (whether tripped from agent-usage accounting via
+    ``record_agent_usage`` or from the MCP ``tools/call`` handler via
+    ``record_tool_call``). ``mergecraft.main._finalize`` drains this so D12
+    holds uniformly regardless of which call site tripped the budget — see
+    PR #242 review finding ``aeb5d964c1d35e5a41784ded``.
+    """
 
     bounds: RunBounds
     tokens_used: int = 0
     cost_used: float = 0.0
     tool_calls: int = 0
+    last_exhausted: BudgetExhausted | None = None
 
     def record_tokens(self, count: int) -> None:
         if count <= 0:
@@ -95,7 +104,7 @@ class BudgetTracker:
         self.tokens_used += count
         if self.tokens_used > self.bounds.token_budget:
             msg = f"token budget exhausted ({self.tokens_used} > {self.bounds.token_budget})"
-            raise BudgetExhausted("token", msg)
+            self._raise(BudgetExhausted("token", msg))
 
     def record_cost(self, amount: float) -> None:
         if amount <= 0:
@@ -105,13 +114,23 @@ class BudgetTracker:
             msg = (
                 f"cost budget exhausted ({self.cost_used:.4f} > {self.bounds.cost_budget_usd:.4f})"
             )
-            raise BudgetExhausted("cost", msg)
+            self._raise(BudgetExhausted("cost", msg))
 
     def record_tool_call(self) -> None:
         self.tool_calls += 1
         if self.tool_calls > self.bounds.tool_call_budget:
             msg = f"tool-call budget exhausted ({self.tool_calls} > {self.bounds.tool_call_budget})"
-            raise BudgetExhausted("tool_call", msg)
+            self._raise(BudgetExhausted("tool_call", msg))
+
+    def _raise(self, exc: BudgetExhausted) -> None:
+        """Stash the exhaustion on the tracker, then raise.
+
+        Catching the exception at a higher level (e.g. the MCP JSON-RPC
+        handler) is allowed — the orchestrator's ``_finalize`` still reads
+        ``last_exhausted`` and applies ``budget_exhaustion_outcome`` (D12).
+        """
+        self.last_exhausted = exc
+        raise exc
 
 
 def record_agent_usage(tracker: BudgetTracker | None, usage: AgentUsage | None) -> None:

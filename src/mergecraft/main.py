@@ -1306,6 +1306,20 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
 
         outcome = budget_exhaustion_outcome(ctx.budget_exhaustion)
         failure_reason = str(ctx.budget_exhaustion)
+    elif (
+        ctx.budget_tracker is not None
+        and getattr(ctx.budget_tracker, "last_exhausted", None) is not None
+    ):
+        # D12 / PR #242 finding ``aeb5d964c1d35e5a41784ded`` — tool-call
+        # budget exhaustion surfaces only from the MCP ``tools/call`` handler
+        # (which catches ``BudgetExhausted`` to return a JSON-RPC error). The
+        # tracker itself records the exception, so the orchestrator still
+        # tags the run ``inconclusive`` at finalize time rather than
+        # approving on a partial signal.
+        from mergecraft.utils.run_bounds import budget_exhaustion_outcome
+
+        outcome = budget_exhaustion_outcome(ctx.budget_tracker.last_exhausted)
+        failure_reason = str(ctx.budget_tracker.last_exhausted)
     else:
         outcome, failure_reason = _classify_outcome(
             result=result,
