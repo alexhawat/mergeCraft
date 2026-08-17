@@ -18,9 +18,11 @@ called with the pre-OB3 signature, the helpers must keep emitting exactly the
 attrs they always did (subset assertion — OB3.2 ADDS keys, it never renames or
 revalues the existing ones).
 
-The ``_tool_attrs`` module exists, so imports are top-level; the new keywords
-do not, so the three addition tests fail RED (``TypeError``) under non-strict
-``xfail`` (``green after OB3.2``) until OB3.2 lands.
+The ``_tool_attrs`` module exists, so imports are top-level; at RED-suite time
+the new keywords did not, so the three addition tests failed RED
+(``TypeError``) under non-strict ``xfail`` (``green after OB3.2``). The
+post-OB3.2 reconciliation removed the markers (commit ``d4c1c54`` made them
+XPASS), so all four tests are now clean real passes.
 """
 
 from __future__ import annotations
@@ -42,7 +44,6 @@ def recording_sink() -> Any:
     return {"sink": sink, "tracer": tracer}
 
 
-@pytest.mark.xfail(reason="green after OB3.2: call_id correlation on both sides", strict=False)
 def test_tool_call_id_correlates_request_and_response(recording_sink: Any) -> None:
     """``gen_ai.tool.call.id`` is emitted by BOTH helpers, joining request to response."""
     tracer = recording_sink["tracer"]
@@ -60,7 +61,6 @@ def test_tool_call_id_correlates_request_and_response(recording_sink: Any) -> No
         )
 
 
-@pytest.mark.xfail(reason="green after OB3.2: tool.call duration attr", strict=False)
 def test_tool_call_records_duration(recording_sink: Any) -> None:
     """The close side records how long the tool call took."""
     tracer = recording_sink["tracer"]
@@ -72,7 +72,6 @@ def test_tool_call_records_duration(recording_sink: Any) -> None:
     assert sink.events[0].attrs["tool.duration_ms"] == 87
 
 
-@pytest.mark.xfail(reason="green after OB3.2: MCP-vs-native distinction", strict=False)
 def test_mcp_vs_native_tool_is_distinguished(recording_sink: Any) -> None:
     """A trace can tell an MCP-server tool call from a harness-native one."""
     tracer = recording_sink["tracer"]

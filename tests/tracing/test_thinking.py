@@ -21,23 +21,25 @@ Harness coverage is genuinely partial (plan §OB3.1 note): only harnesses that
 expose reasoning (the OpenCode HTTP path / the stream consumer) can populate
 this — these tests pin the pure builder, not harness wiring (OB3.2 File 2).
 
-The ``genai`` import is lazy (shared fixture in ``tests/tracing/conftest.py``)
-so collection stays clean; all four tests carry non-strict ``xfail`` markers
-(``green after OB3.2``) and are expected RED until OB3.2 lands.
+The ``genai`` import is lazy (shared fixture in ``tests/tracing/conftest.py``),
+which kept collection clean at RED-suite time; all four tests carried
+non-strict ``xfail`` markers (``green after OB3.2``) until the post-OB3.2
+reconciliation removed them (commit ``d4c1c54`` made them XPASS), so all four
+are now clean real passes.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING, Any
 
 from mergecraft.tracing.content import ContentCapture, resolve_content_capture
+
+if TYPE_CHECKING:
+    from _pytest.monkeypatch import MonkeyPatch
 
 _THINKING = "mergecraft.thinking"
 
 
-@pytest.mark.xfail(reason="green after OB3.2: thinking_attrs (D9)", strict=False)
 def test_reasoning_text_captured_under_policy(genai_module: Any) -> None:
     """D9 — reasoning text ships under the SAME content policy as prompts.
 
@@ -57,7 +59,6 @@ def test_reasoning_text_captured_under_policy(genai_module: Any) -> None:
     assert attrs[f"{_THINKING}.chars"] == len(text)
 
 
-@pytest.mark.xfail(reason="green after OB3.2: reasoning token count", strict=False)
 def test_reasoning_tokens_recorded(genai_module: Any) -> None:
     """The provider's reasoning-token count lands beside the body metadata."""
     genai = genai_module
@@ -69,7 +70,6 @@ def test_reasoning_tokens_recorded(genai_module: Any) -> None:
     assert attrs["mergecraft.usage.reasoning_tokens"] == 512
 
 
-@pytest.mark.xfail(reason="green after OB3.2: provider-redacted flag", strict=False)
 def test_provider_redacted_thinking_is_distinguishable_from_empty(genai_module: Any) -> None:
     """A provider-redacted thinking block must not read as 'no reasoning happened'."""
     genai = genai_module
@@ -84,10 +84,7 @@ def test_provider_redacted_thinking_is_distinguishable_from_empty(genai_module: 
     assert redacted.get(_THINKING) in (None, ""), "provider-redacted thinking has no body to ship"
 
 
-@pytest.mark.xfail(reason="green after OB3.2: D9 gate inheritance", strict=False)
-def test_reasoning_never_bypasses_the_gate(
-    monkeypatch: pytest.MonkeyPatch, genai_module: Any
-) -> None:
+def test_reasoning_never_bypasses_the_gate(monkeypatch: MonkeyPatch, genai_module: Any) -> None:
     """D9 — no configuration lets reasoning text past a gate prompts cannot pass.
 
     Drives the full OB2 resolution path: an untrusted run with ``full``

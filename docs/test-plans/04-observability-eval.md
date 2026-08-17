@@ -5,9 +5,9 @@ Worktree: session worktree on branch `alexhawat-observability-eval-waves` (based
 
 This doc is appended to per sub-wave. So far: **PR OB1 (sub-wave OB1.1,
 reconciled post-OB1.2)**, **PR OB2 (sub-wave OB2.1, reconciled post-OB2.2)**
-and **PR OB3 (sub-wave OB3.1)**, **PR EV1 (sub-wave EV1.1)**. The OB4 /
-EV2–EV3 sections will be appended by their own `test-creator` sub-waves as
-those PRs start.
+and **PR OB3 (sub-wave OB3.1)**, **PR EV1 (sub-wave EV1.1, reconciled
+post-EV1.2)**. The OB4 / EV2–EV3 sections will be appended by their own
+`test-creator` sub-waves as those PRs start.
 
 ## PR OB1 — review-wide correlation on every span (test plan OB1.1)
 
@@ -194,8 +194,17 @@ Final gate, with blocking `security-review`).
 ## PR OB3 — model parameters, LLM input/output and reasoning capture (test plan OB3.1)
 
 Authoring wave: **OB3.1** (tests-first, RED). Implementation: **OB3.2**.
-xfail-reconciliation: **post-OB3.2** (orchestrator re-dispatches test-creator to
-remove the satisfied markers).
+xfail-reconciliation: **post-OB3.2** — complete (2026-08-17): OB3.2 (`d4c1c54`)
+made the 15 RED tests XPASS; the non-strict `green after OB3.2` markers were
+removed and the suite is 16/16 clean real passes, 0 xfail/xpass.
+
+**Post-OB3.2 test amendment (escalation receiver):** `test_request_params_reach_the_span`'s
+fixture model id was changed from `anthropic/claude-opus-4.8` to `claude-opus-test` —
+the sink path routes string attrs through the pre-existing entropy redactor
+(`redact_secrets`, ≥20 chars at entropy ≥ 4.0), which rewrote the realistic slug
+to `[REDACTED].8`. Rationale (orchestrator ruling): the redaction layer is a
+security boundary and is NOT changing; the test bends, keeping the builder-level
+assertions in the sibling tests as-is.
 
 Locked decisions covered: **D9** (reasoning inherits the prompt/content gate —
 never a looser one), **D11** (record BOTH requested and executed model; a
@@ -212,16 +221,16 @@ model payloads only on the OpenCode HTTP path and in
 shared `_tool_attrs.py` helpers; no test asserts per-harness payload coverage
 (OB3.2 File 2 wiring), so nothing implies uniform coverage.
 
-### xfail schedule
+### xfail schedule (historical)
 
-15 of 16 tests carry `@pytest.mark.xfail(reason="green after OB3.2: …",
-strict=False)` — `strict=False` is explicit because the repo pins
+15 of 16 tests carried `@pytest.mark.xfail(reason="green after OB3.2: …",
+strict=False)` — `strict=False` was explicit because the repo pins
 `xfail_strict = true`. `tests/tracing/test_tool_detail.py::test_existing_tool_attrs_unchanged`
-is the regression pin (subset assertion on the pre-OB3 `_tool_attrs` surface)
-and passes today. The `mergecraft.tracing.genai` import is lazy (shared
-fixture in `tests/tracing/conftest.py`) so collection stays clean. After OB3.2
-lands, the markers are removed in reconciliation so the suite ends with 16
-clean real passes.
+was never xfailed (regression pin on the pre-OB3 `_tool_attrs` surface). The
+`mergecraft.tracing.genai` import was lazy (shared fixture in
+`tests/tracing/conftest.py`) so collection stayed clean. OB3.2 (`d4c1c54`)
+turned the 15 into XPASS; the markers were removed in the post-OB3.2
+reconciliation, so the suite ends with 16 clean real passes.
 
 ### Attribute-name contract pinned by these tests (convention 6)
 
@@ -282,26 +291,31 @@ clean real passes.
 
 ### Acceptance (plan §OB3.1)
 
-16 collected; **1 passes** (`test_existing_tool_attrs_unchanged`); **15 RED**
-(non-strict xfail — failures at runtime, zero collection errors). `make lint` +
+At RED-suite time (OB3.1): 16 collected; **1 passes** (`test_existing_tool_attrs_unchanged`);
+**15 RED** (non-strict xfail — failures at runtime, zero collection errors).
+Post-OB3.2 reconciliation: **16 passed, 0 xfail/xpass**. `make lint` +
 `make typecheck` clean. Live gates: none in OB3.1 — `skipped: no live gate`
 (the reasoning-model Logfire proof is the OB3 Final gate).
 
 ## PR EV1 — repair the corpus run path and publish reproducible numbers (test plan EV1.1)
 
 Authoring wave: **EV1.1** (tests-first, RED). Implementation: **EV1.2**.
+xfail-reconciliation: **post-EV1.2** — complete (2026-08-17): EV1.2 (`b1b5452`)
+made all 6 RED tests XPASS; the non-strict `green after EV1.2` markers were
+removed and the suite is 6/6 clean real passes, 0 xfail/xpass.
 Closes **#219** (raw-findings run dir splits on slashes in model slugs),
 **#220** (live corpus review runs in an empty scratch cwd and loses repo
 context), **#140** (publish reproducible benchmark numbers with full version
 pins). Finding covered: **O10**.
 
-### xfail schedule
+### xfail schedule (historical)
 
-All 6 contract tests carry `@pytest.mark.xfail(reason="green after EV1.2: …",
-strict=False)` — `strict=False` is explicit because the repo pins
-`xfail_strict = true`. Post-EV1.2 the orchestrator re-dispatches test-creator
-to remove the satisfied markers. Each test fails for exactly one intended
-reason today (verified with `--runxfail`):
+All 6 contract tests carried `@pytest.mark.xfail(reason="green after EV1.2: …",
+strict=False)` — `strict=False` was explicit because the repo pins
+`xfail_strict = true`. EV1.2 (`b1b5452`) turned all 6 into XPASS; the markers
+were removed in the post-EV1.2 reconciliation, so the suite ends with 6 clean
+real passes. At RED time each test failed for exactly one intended reason
+(verified with `--runxfail`):
 
 - `test_run_dir.py` — assertion failures: the run dir is nested
   (`raw-findings/openrouter-openrouter/openai/gpt-5-…`) instead of one flat
@@ -348,10 +362,11 @@ reviewer the operator's real checkout.
 | `BenchmarkResultSet.reproducibility_digest` (new) | Non-empty content hash over the result set excluding volatile wall-clock fields (`pins.recorded_at`); equal for two replays at one commit + corpus |
 | `VersionPins.mergecraft_version` (new) | The installed mergeCraft distribution version (`mergecraft.__version__`), alongside the existing commit pin |
 
-### Acceptance (plan §EV1.1)
+### Acceptance (plan §EV1.1, post-reconciliation)
 
-6 collected; **0 pass**; **6 RED** (non-strict xfail — failures at runtime,
-zero collection errors). `make lint` + `make typecheck` clean. Live gates:
-none in EV1.1 — all six tests are keyless (stub `review_fn` / stubbed
-`run_offline_diff_review` boundary), so `skipped: no live gate` applies
-cleanly; the live-provider proof is the EV1 Final gate.
+6 collected; **6 passed**; 0 xfail/xpass (RED acceptance at authoring time was
+6 collected / 0 pass / 6 RED — met at `1c0881c`). `make lint` +
+`make typecheck` clean. Live gates: none in EV1.1 — all six tests are keyless
+(stub `review_fn` / stubbed `run_offline_diff_review` boundary), so
+`skipped: no live gate` applies cleanly; the live-provider proof is the EV1
+Final gate.

@@ -17,16 +17,16 @@ message payloads only on the OpenCode HTTP path and in
 the pure builders only; which harnesses can populate them is OB3.2 File 2 and
 is intentionally not asserted here.
 
-The ``genai`` import is lazy (shared fixture in ``tests/tracing/conftest.py``)
-so collection stays clean; all four tests carry non-strict ``xfail`` markers
-(``green after OB3.2``) and are expected RED until OB3.2 lands.
+The ``genai`` import is lazy (shared fixture in ``tests/tracing/conftest.py``),
+which kept collection clean at RED-suite time; all four tests carried
+non-strict ``xfail`` markers (``green after OB3.2``) until the post-OB3.2
+reconciliation removed them (commit ``d4c1c54`` made them XPASS), so all four
+are now clean real passes.
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-import pytest
 
 from mergecraft.tracing.content import ContentCapture
 
@@ -34,7 +34,6 @@ _INPUT = "gen_ai.input.messages"
 _OUTPUT = "gen_ai.output.messages"
 
 
-@pytest.mark.xfail(reason="green after OB3.2: input_messages_attrs", strict=False)
 def test_input_messages_captured_under_policy(genai_module: Any) -> None:
     """O5 — input messages ship under the content policy, bodies through the secret matcher."""
     genai = genai_module
@@ -57,7 +56,6 @@ def test_input_messages_captured_under_policy(genai_module: Any) -> None:
     assert attrs[f"{_INPUT}.bytes"] > 0
 
 
-@pytest.mark.xfail(reason="green after OB3.2: output_messages_attrs", strict=False)
 def test_output_messages_captured_under_policy(genai_module: Any) -> None:
     """O5 — output (completion) messages ship under the content policy too."""
     genai = genai_module
@@ -73,7 +71,6 @@ def test_output_messages_captured_under_policy(genai_module: Any) -> None:
     assert attrs[f"{_OUTPUT}.chars"] > 0
 
 
-@pytest.mark.xfail(reason="green after OB3.2: message count attr", strict=False)
 def test_message_count_recorded(genai_module: Any) -> None:
     """The message count rides alongside the body/hash on both directions."""
     genai = genai_module
@@ -90,7 +87,6 @@ def test_message_count_recorded(genai_module: Any) -> None:
     assert outbound[f"{_OUTPUT}.count"] == 1
 
 
-@pytest.mark.xfail(reason="green after OB3.2: policy-gated message bodies", strict=False)
 def test_bodies_absent_at_metadata_level(genai_module: Any) -> None:
     """At ``metadata`` the bodies stay home — counts, sizes and the D8 hash remain."""
     genai = genai_module
