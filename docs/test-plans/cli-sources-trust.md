@@ -54,4 +54,10 @@ existing ``derive_trust_tier`` behaviour.
 
 - 10 tests collected
 - 1 passes (`test_github_action_path_tier_unchanged`)
-- 9 RED (`xfail(strict=False)`)
+- 9 RED (`xfail(strict=False)`) — **cleared post-TS1.2 (2026-08-17)**
+
+## TS1.2 xfail reconciliation (2026-08-17)
+
+Removed `_TS1_2_XFAIL` from all nine impl-pending tests in
+`tests/security/test_source_trust.py`. Suite is 10 real passes (0 xfail).
+Updated D3 override test to capture loguru warnings via sink (not stdlib caplog).
