@@ -104,8 +104,9 @@ Post-OB1.2 reconciliation: **15 passed, 0 xfail/xpass**. `make lint` +
 ## PR OB2 — content-capture policy for model payloads (test plan OB2.1)
 
 Authoring wave: **OB2.1** (tests-first, RED). Implementation: **OB2.2**.
-xfail-reconciliation: **post-OB2.2** (orchestrator re-dispatches test-creator to
-remove the satisfied markers).
+xfail-reconciliation: **post-OB2.2** — complete (2026-08-17): OB2.2 (`178f97c`)
+made all 13 RED tests XPASS; the non-strict `green after OB2.2` markers were
+removed and the suite is 13/13 clean real passes, 0 xfail/xpass.
 
 Locked decisions covered: **D6** (four capture levels — `off` / `metadata` /
 `redacted` / `full` — default `redacted`), **D7** (an untrusted trust tier is
@@ -115,14 +116,14 @@ level above `off`). Also pins: bodies capped with a `.truncated` marker,
 original size reported before truncation, invalid level falls back to the
 default (fail safe, never open to `full`).
 
-### xfail schedule
+### xfail schedule (historical)
 
-All 13 tests in `tests/tracing/test_content_policy.py` carry
+All 13 tests in `tests/tracing/test_content_policy.py` carried
 `@pytest.mark.xfail(reason="green after OB2.2: …", strict=False)` —
-`strict=False` is explicit because the repo pins `xfail_strict = true`. The
-`mergecraft.tracing.content` import is lazy (fixture) so collection stays clean.
-After OB2.2 lands, the markers are removed in reconciliation so the suite ends
-with 13 clean real passes.
+`strict=False` was explicit because the repo pins `xfail_strict = true`. The
+`mergecraft.tracing.content` import was lazy (fixture) so collection stayed
+clean. OB2.2 (`178f97c`) turned all 13 into XPASS; the markers were removed in
+the post-OB2.2 reconciliation, so the suite ends with 13 clean real passes.
 
 ### Env-var contract pinned by these tests (not fixed in prose by the plan)
 
@@ -183,7 +184,8 @@ All tests live in `tests/tracing/test_content_policy.py`.
 
 ### Acceptance (plan §OB2.1)
 
-13 collected; **0 pass**; **13 RED** (non-strict xfail — failures at runtime,
-zero collection errors). `make lint` + `make typecheck` clean. Live gates:
+At RED-suite time (OB2.1): 13 collected; **0 pass**; **13 RED** (non-strict xfail —
+failures at runtime, zero collection errors). Post-OB2.2 reconciliation:
+**13 passed, 0 xfail/xpass**. `make lint` + `make typecheck` clean. Live gates:
 none in OB2.1 — `skipped: no live gate` (the fork-PR runtime proof is the OB2
 Final gate, with blocking `security-review`).

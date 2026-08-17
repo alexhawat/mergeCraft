@@ -27,12 +27,14 @@ following the existing ``MERGECRAFT_TRACING*`` family in
 ``mergecraft/cli/tracing_precedence.py``; env beats YAML config (normal
 precedence) but never beats the D7 untrusted cap.
 
-The ``content`` module import is lazy (fixture below) so the suite collects
-with zero collection errors. All 13 tests carry non-strict ``xfail`` markers
-(``green after OB2.2`` — the repo pins ``xfail_strict = true``, so
-``strict=False`` is explicit) and are expected RED until OB2.2 lands.
+The ``content`` module import is lazy (fixture below), which kept collection
+clean at RED-suite time. All 13 tests carried non-strict ``xfail`` markers
+(``green after OB2.2``) while OB2.2 was unimplemented; the markers were removed
+in the post-OB2.2 reconciliation (commit ``178f97c`` made all 13 XPASS), so
+every test here is now a clean real pass.
 
-Acceptance (plan §OB2.1): 13 collected; 0 pass; 13 RED (xfail).
+Acceptance (plan §OB2.1, post-reconciliation): 13 collected; 13 passed;
+0 xfail/xpass.
 """
 
 from __future__ import annotations
@@ -69,7 +71,6 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-@pytest.mark.xfail(reason="green after OB2.2: ContentCapture off level", strict=False)
 def test_off_emits_nothing(content_module: Any) -> None:
     """``off`` emits neither body nor metadata — not even the hash."""
     content = content_module
@@ -82,7 +83,6 @@ def test_off_emits_nothing(content_module: Any) -> None:
     assert result == {}
 
 
-@pytest.mark.xfail(reason="green after OB2.2: ContentCapture metadata level", strict=False)
 def test_metadata_emits_counts_and_hash_only(content_module: Any) -> None:
     """``metadata`` emits counts + hash but never the body (D6/D8)."""
     content = content_module
@@ -98,7 +98,6 @@ def test_metadata_emits_counts_and_hash_only(content_module: Any) -> None:
     assert result[f"{_PREFIX}.sha256"] == _sha256(payload)
 
 
-@pytest.mark.xfail(reason="green after OB2.2: redacted level via redact_secrets", strict=False)
 def test_redacted_emits_body_through_the_secret_matcher(content_module: Any) -> None:
     """``redacted`` ships the body through ``analyzers.redact.redact_secrets``.
 
@@ -119,7 +118,6 @@ def test_redacted_emits_body_through_the_secret_matcher(content_module: Any) -> 
     assert result[f"{_PREFIX}.sha256"] == _sha256(payload)
 
 
-@pytest.mark.xfail(reason="green after OB2.2: full level caps only", strict=False)
 def test_full_emits_body_capped_only(content_module: Any) -> None:
     """``full`` ships the body verbatim (capped only) — the secret matcher is NOT applied."""
     content = content_module
@@ -132,7 +130,6 @@ def test_full_emits_body_capped_only(content_module: Any) -> None:
     assert result[f"{_PREFIX}.sha256"] == _sha256(payload)
 
 
-@pytest.mark.xfail(reason="green after OB2.2: D6 default redacted", strict=False)
 def test_default_is_redacted(monkeypatch: MonkeyPatch, content_module: Any) -> None:
     """D6 — no configured level (and no env override) resolves to ``redacted``."""
     from mergecraft.config.settings import TracingSettings
@@ -144,7 +141,6 @@ def test_default_is_redacted(monkeypatch: MonkeyPatch, content_module: Any) -> N
     assert TracingSettings().content == "redacted"
 
 
-@pytest.mark.xfail(reason="green after OB2.2: D7 untrusted cap", strict=False)
 def test_untrusted_tier_is_capped_at_metadata(
     monkeypatch: MonkeyPatch, content_module: Any
 ) -> None:
@@ -161,7 +157,6 @@ def test_untrusted_tier_is_capped_at_metadata(
     )
 
 
-@pytest.mark.xfail(reason="green after OB2.2: D7 cap vs YAML config", strict=False)
 def test_untrusted_cap_cannot_be_overridden_by_config(
     monkeypatch: MonkeyPatch, content_module: Any
 ) -> None:
@@ -179,7 +174,6 @@ def test_untrusted_cap_cannot_be_overridden_by_config(
     )
 
 
-@pytest.mark.xfail(reason="green after OB2.2: D7 cap vs env override", strict=False)
 def test_untrusted_cap_cannot_be_overridden_by_env(
     monkeypatch: MonkeyPatch, content_module: Any
 ) -> None:
@@ -191,7 +185,6 @@ def test_untrusted_cap_cannot_be_overridden_by_env(
     assert content.resolve_content_capture("off", "untrusted") == content.ContentCapture.METADATA
 
 
-@pytest.mark.xfail(reason="green after OB2.2: env > config precedence", strict=False)
 def test_env_beats_config_at_trusted_tier(monkeypatch: MonkeyPatch, content_module: Any) -> None:
     """Normal precedence still applies at a trusted tier: env wins over YAML config."""
     content = content_module
@@ -204,7 +197,6 @@ def test_env_beats_config_at_trusted_tier(monkeypatch: MonkeyPatch, content_modu
     assert resolve("metadata", "trusted") == content.ContentCapture.FULL
 
 
-@pytest.mark.xfail(reason="green after OB2.2: D8 hash above off", strict=False)
 def test_hash_is_emitted_at_every_level_above_off(content_module: Any) -> None:
     """D8 — ``.sha256`` (of the original payload) is present at metadata/redacted/full."""
     content = content_module
@@ -227,7 +219,6 @@ def test_hash_is_emitted_at_every_level_above_off(content_module: Any) -> None:
     ), "off emits nothing, hash included"
 
 
-@pytest.mark.xfail(reason="green after OB2.2: body capping + truncated marker", strict=False)
 def test_body_is_capped_and_marked_truncated(content_module: Any) -> None:
     """Bodies are capped at ``max_bytes`` and flagged ``.truncated``.
 
@@ -251,7 +242,6 @@ def test_body_is_capped_and_marked_truncated(content_module: Any) -> None:
     assert len(defaulted[_PREFIX].encode()) <= TRACE_ATTRS_JSON_MAX_BYTES
 
 
-@pytest.mark.xfail(reason="green after OB2.2: original sizes reported", strict=False)
 def test_original_size_is_reported_before_truncation(content_module: Any) -> None:
     """``.chars`` / ``.bytes`` / ``.sha256`` describe the ORIGINAL payload, not the cap."""
     content = content_module
@@ -267,7 +257,6 @@ def test_original_size_is_reported_before_truncation(content_module: Any) -> Non
     assert len(result[_PREFIX]) < 1024
 
 
-@pytest.mark.xfail(reason="green after OB2.2: invalid level fails safe", strict=False)
 def test_invalid_level_falls_back_to_default_not_full(
     monkeypatch: MonkeyPatch, content_module: Any
 ) -> None:
