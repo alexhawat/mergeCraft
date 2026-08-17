@@ -181,3 +181,29 @@ Target API (TS4.2):
 
 Removed impl-pending xfail markers from `tests/cli/test_source_resolver.py`.
 Suite is 14 real passes.
+
+## TS5 — adversarial hostile-repo corpus (PR TS5)
+
+Wave plan: `.ignorelocal/02-cli-sources-trust-wave-plan.md` (PR TS5)
+Authoring wave: **TS5.1**. Fixture construction: **TS5.2**.
+
+Fixture: `tests/security/fixtures/hostile-repo/` (built by
+`tests/security/fixtures/build_hostile_repo.sh`, auto-built in tests when missing).
+
+## Contract matrix (TS5)
+
+| # | Attack / decision | Layer | Primary test |
+|---|-------------------|-------|--------------|
+| TS5.1a | TS2 setupScript RCE | integration | `test_hostile_setup_script_does_not_execute` |
+| TS5.1b | TS2 staticChecks command | unit | `test_hostile_static_check_command_does_not_execute` |
+| TS5.1c | TS3/D7 symlink escape | unit | `test_symlink_to_home_is_not_read` |
+| TS5.1d | D8 README injection fenced | integration | `test_prompt_injection_in_readme_is_fenced_not_obeyed` |
+| TS5.1e | D8 commit message fenced | unit | `test_prompt_injection_in_commit_message_is_fenced` |
+| TS5.1f | TS3/D6 size ceiling | unit | `test_oversized_file_hits_the_ceiling` |
+| TS5.1g | TS1/D3 trust escalation | unit | `test_repo_cannot_declare_itself_trusted` |
+| TS5.1h | D4 usable third-party review | integration | `test_review_still_produces_a_usable_verdict_on_the_hostile_repo` |
+
+## Acceptance (TS5.1)
+
+- 8 tests collected in `tests/security/test_hostile_corpus.py`
+- All green once TS1–TS4 hardening is present and the fixture is built
