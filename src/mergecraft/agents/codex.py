@@ -37,6 +37,13 @@ from mergecraft.tracing._tool_attrs import (
     enrich_tool_request,
     enrich_tool_response,
 )
+from mergecraft.tracing.genai import (
+    ModelParams,
+    output_messages_attrs,
+    request_attrs,
+    resolve_capture_policy,
+    thinking_attrs,
+)
 from mergecraft.tracing.redaction import redact_tool_payload
 from mergecraft.tracing.tracer import (
     ProviderLLMPair,
@@ -52,11 +59,17 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+    from mergecraft.tracing.content import ContentCapture
     from mergecraft.tracing.tracer import Tracer
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 CODEX_REVIEW_PERMISSION_PROFILE = "mergecraft-review"
+# O4 — the reasoning effort written into ``config.toml`` is the one request
+# parameter the codex harness exposes to mergeCraft; the constant keeps the
+# TOML value and the span attribute (``mergecraft.reasoning_effort``) from
+# drifting apart.
+_CODEX_MODEL_REASONING_EFFORT = "high"
 
 # Codex CLI's Linux platform sandbox is bubblewrap + Landlock. Inside a
 # container that is *already* namespaced — such as a Docker container action —
@@ -476,7 +489,7 @@ def write_mcp_config(
     lines = [
         f"approval_policy = {_toml_string('never' if os.environ.get('CI') == 'true' else 'on-request')}",
         f"experimental_instructions_file = {_toml_string(str(instructions_path))}",
-        f"model_reasoning_effort = {_toml_string('high')}",
+        f"model_reasoning_effort = {_toml_string(_CODEX_MODEL_REASONING_EFFORT)}",
     ]
     # W3 / #71 — Codex passthrough for OpenAI-compatible providers. No-op
     # when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set, so the
@@ -688,9 +701,16 @@ def _run_codex_streaming(
     except Exception as exc:
         logger.debug("codex stream tracer resolution failed: {}", exc)
 
+    # OB3 — resolve the content-capture policy only when a tracer is live;
+    # the trust tier is ``derive_trust_tier()``'s output carried on the tool
+    # state, never an env fallback (D7 — the cap must not be env-defeatable).
+    capture_policy = (
+        resolve_capture_policy(ctx.tool_state.trust_tier) if tracer is not None else None
+    )
     handler, close_all_open_spans = _codex_stream_event_handler(
         tracer=tracer,
         model_id=model or "default",
+        capture_policy=capture_policy,
     )
 
     try:
@@ -758,10 +778,22 @@ def _run_codex_streaming(
     return AgentResult(success=True, output=output or None, usage=usage)
 
 
+def _sole_open_llm_span(open_pairs: dict[str, ProviderLLMPair | None]) -> Any:
+    """Return the llm span of the single open provider pair, else ``None``.
+
+    Codex's ``message.completed`` / reasoning ``item.completed`` events do
+    not carry the thread id, so payload attrs can only be stamped when
+    exactly one pair is open (the typical shape — one thread per run).
+    """
+    live = [pair.llm for pair in open_pairs.values() if pair is not None]
+    return live[0] if len(live) == 1 else None
+
+
 def _codex_stream_event_handler(
     *,
     tracer: Tracer | None,
     model_id: str,
+    capture_policy: ContentCapture | None = None,
 ) -> tuple[
     Callable[[StreamSpanAccumulator, dict[str, Any]], None],
     Callable[[], None],
@@ -776,11 +808,20 @@ def _codex_stream_event_handler(
         the tool call's name + input on the open span.
       - ``item.completed`` with ``item.type == "tool_result"``: close
         the matching ``tool.call`` span.
+      - ``item.completed`` with ``item.type == "reasoning"``: capture the
+        reasoning text on the open ``llm.call`` span (O6/D9, OB3) — gated
+        by ``capture_policy``; reasoning inherits the prompt gate.
       - ``message.completed``: surface the assistant text as the
-        run's final output.
+        run's final output; with ``capture_policy`` set, also capture the
+        output messages on the open ``llm.call`` span (O5, OB3).
       - ``turn.completed``: replace the accumulator's usage with the
         authoritative final usage and close the thread's ``llm.call``
         span.
+
+    ``capture_policy=None`` (the default) keeps the pre-OB3 attribute
+    surface byte-identical: no payload attrs are stamped. The driver
+    resolves it via ``resolve_capture_policy(ctx.tool_state.trust_tier)``
+    — the ``derive_trust_tier()`` output, never an env fallback (D7).
     """
     # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt, not two
     # independent dicts keyed by the same id. Opening the provider span and
@@ -847,6 +888,14 @@ def _codex_stream_event_handler(
                     pair.llm.set_attribute("gen_ai.operation.name", "chat")
                     pair.llm.set_attribute("gen_ai.request.model", model_id)
                     pair.llm.set_attribute("gen_ai.response.model", model_id)
+                    # O4 (OB3) — the one request knob codex exposes: the
+                    # reasoning effort mergeCraft itself wrote into
+                    # ``config.toml``. No stable OTel name → mergecraft.*.
+                    for attr_key, attr_value in request_attrs(
+                        model=None,
+                        params=ModelParams(reasoning_effort=_CODEX_MODEL_REASONING_EFFORT),
+                    ).items():
+                        pair.llm.set_attribute(attr_key, attr_value)
                 open_pairs[thread_id] = pair
                 open_pair_bookkeeping[thread_id] = {"tokens_in": 0, "tokens_out": 0}
             return
@@ -923,6 +972,18 @@ def _codex_stream_event_handler(
                 # above (codex shape). The tool_result just records the
                 # output content; nothing to close here.
                 return
+            if item_type == "reasoning":
+                # O6 / D9 (OB3) — codex surfaces reasoning as items; the
+                # text goes through the same content gate as prompts.
+                if capture_policy is not None:
+                    reasoning_text = item.get("text")
+                    llm_span = _sole_open_llm_span(open_pairs)
+                    if llm_span is not None and isinstance(reasoning_text, str):
+                        for attr_key, attr_value in thinking_attrs(
+                            reasoning_text, policy=capture_policy
+                        ).items():
+                            llm_span.set_attribute(attr_key, attr_value)
+                return
             return
 
         if event_type == "message.completed":
@@ -930,6 +991,16 @@ def _codex_stream_event_handler(
             content = message.get("content") if isinstance(message, dict) else None
             if isinstance(content, str) and content:
                 accumulator.set_output(content)
+                # O5 (OB3) — the assistant text is the completion payload;
+                # capture it on the open llm span under the content policy.
+                if capture_policy is not None:
+                    llm_span = _sole_open_llm_span(open_pairs)
+                    if llm_span is not None:
+                        for attr_key, attr_value in output_messages_attrs(
+                            [{"role": "assistant", "content": content}],
+                            policy=capture_policy,
+                        ).items():
+                            llm_span.set_attribute(attr_key, attr_value)
             return
 
         if event_type == "turn.completed":
@@ -939,6 +1010,17 @@ def _codex_stream_event_handler(
             cost = event.get("total_cost_usd")
             if isinstance(cost, (int, float)) and usage is not None:
                 accumulator.cost_usd = float(cost)
+            # O6 (OB3) — the Responses-API usage shape carries the reasoning
+            # token count under output_tokens_details; surface it beside the
+            # body metadata. A count is usage metadata, not a body, so it is
+            # not gated by the content policy (same as gen_ai.usage.*).
+            reasoning_tokens: int | None = None
+            if isinstance(usage, dict):
+                details = usage.get("output_tokens_details")
+                if isinstance(details, dict) and isinstance(
+                    details.get("reasoning_tokens"), (int, float)
+                ):
+                    reasoning_tokens = int(details["reasoning_tokens"])
             # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt owns the
             # close discipline (inner llm span first, outer provider span
             # second). Stamp the cost + usage attrs on the inner llm span
@@ -955,6 +1037,10 @@ def _codex_stream_event_handler(
                     pair.llm.set_attribute(
                         "gen_ai.usage.output_tokens", bookkeeping.get("tokens_out", 0)
                     )
+                    if reasoning_tokens is not None:
+                        pair.llm.set_attribute(
+                            "mergecraft.usage.reasoning_tokens", reasoning_tokens
+                        )
             for key in list(open_pairs.keys()):
                 _close_provider_llm_pair(open_pairs.pop(key))
             open_pair_bookkeeping.clear()

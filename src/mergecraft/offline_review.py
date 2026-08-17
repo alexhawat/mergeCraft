@@ -443,8 +443,12 @@ def _offline_review_context() -> ReviewContext:
 
     A local patch review has no repo/pr/head identity, so the correlation
     key stays empty (D3 — no misleading constant) and the review id resolves
-    from ``MERGECRAFT_REVIEW_ID`` (inherited) or a fresh uuid4.
+    from ``MERGECRAFT_REVIEW_ID`` (inherited) or a fresh uuid4. The trust
+    tier is ``derive_trust_tier(offline=True)`` — an explicit derivation for
+    the operator's own tree, never an env fallback (the OB2 security gate:
+    env-controlled tiers would silently neutralize the D7 content cap).
     """
+    from mergecraft.analyzers.trust import derive_trust_tier
     from mergecraft.tracing.review_context import ReviewContext, resolve_review_id
 
     return ReviewContext(
@@ -452,7 +456,7 @@ def _offline_review_context() -> ReviewContext:
         source="cli",
         mode="review",
         trigger="cli",
-        trust_tier=os.environ.get("MERGECRAFT_TRUST_TIER") or "trusted",
+        trust_tier=derive_trust_tier(offline=True),
     )
 
 
@@ -644,6 +648,9 @@ async def _run_agent_review(
         # the prompt forbids them.
         github = GitHubClient(token="")
         tool_state = init_tool_state(owner="local", name=cwd.name, dir=str(cwd))
+        # Carry the review's resolved trust tier so drivers resolving the OB2
+        # content policy via ``ctx.tool_state.trust_tier`` get the honest
+        # derived tier (the OB2 security gate) rather than an env fallback.
         tool_state.trust_tier = trust_tier
         # Point the shared evidence seam at the patch this run reviewed, so the
         # offline packet classifies blast radius from the same diff the agent
