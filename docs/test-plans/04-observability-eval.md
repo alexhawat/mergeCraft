@@ -7,8 +7,8 @@ This doc is appended to per sub-wave. So far: **PR OB1 (sub-wave OB1.1,
 reconciled post-OB1.2)**, **PR OB2 (sub-wave OB2.1, reconciled post-OB2.2)**
 **PR OB3 (sub-wave OB3.1, reconciled post-OB3.2, one amended test)**,
 **PR EV1 (sub-wave EV1.1, reconciled post-EV1.2)**, **PR EV2 (sub-wave
-EV2.1, reconciled post-EV2.2)** and **PR OB4 (sub-wave OB4.1)**. The EV3 section will be appended by
-its own `test-creator` sub-wave when that PR starts.
+EV2.1, reconciled post-EV2.2)**, **PR OB4 (sub-wave OB4.1)** and **PR EV3
+(sub-wave EV3.1)**. All seven PRs now have their test-plan sections.
 
 ## PR OB1 — review-wide correlation on every span (test plan OB1.1)
 
@@ -537,4 +537,79 @@ collection stays clean.
 
 8 collected; **8 passed**; 0 xfail/xpass (RED acceptance at authoring time was
 8 collected / 0 pass / 8 RED — met at `cf3f866`). `make lint` +
+`make typecheck` clean. Live gates: none — `skipped: no live gate`.
+
+## PR EV3 — adversarial corpus and release regression gate (test plan EV3.1)
+
+Authoring wave: **EV3.1** (tests-first, RED). Implementation: **EV3.2**.
+The injection-fence unit mechanics shipped in W4 (`mergecraft.utils.fence`);
+EV3 pins the **corpus-level proof** (one hostile case per attack vector, run
+through the fence path every suite run) and the **release regression gate**
+with a declared tolerance band. All nine tests are structural and keyless —
+they assert fencing/classification/comparison mechanics, never a live model's
+judgement — so `skipped: no live gate` applies to the whole sub-wave.
+
+### xfail schedule
+
+All 9 contract tests carry `@pytest.mark.xfail(reason="green after EV3.2: …",
+strict=False)` — `strict=False` is explicit because the repo pins
+`xfail_strict = true`. Post-EV3.2 the orchestrator re-dispatches test-creator
+to remove the satisfied markers. Every test fails at RED time with
+`ModuleNotFoundError` on the two new modules (`mergecraft.evals.adversarial`,
+`mergecraft.evals.gate`) via lazy in-test imports — collection stays clean,
+and each corpus test asserts its attack vector is **present** (an empty
+corpus is a failure, never a vacuous pass).
+
+### Pinned definitions (not fixed in prose by the plan)
+
+| Contract | Pinned definition |
+| --- | --- |
+| Adversarial corpus location | `evals/cases/adversarial/`, one JSON case per hostile shape (bank `list_cases` reads only top-level `*.md`, so the subdirectory cannot leak into structural replay) |
+| Attack-vector vocabulary | `pr_body`, `review_comment`, `commit_message`, `poisoned_context`, `misleading_tests`, `generated_code` |
+| Fence check | `check_fence(case)` runs the case through the real W4 fence mechanics; `fenced` = wrapped in the nonce-bound untrusted block, `forged_delimiters_neutralized` = payload cannot terminate its own fence early, `legit_content_preserved` = the case's `legit_marker` survives, `handled_as` ∈ `{"reviewed", "classified"}` |
+| Decision-bearing corpus cases | `poisoned_context` and `misleading_tests` cases record `expected_decision == "block"` |
+| Gate direction | `decision_replay_pass_rate` drop regresses; `unsafe_approval_rate` / `clean_block_rate` rise regresses |
+| `DEFAULT_GATE_TOLERANCE` | Expected `0.02` — wider than one-case noise, far narrower than a material regression; tests pin only `0 < band < 0.20` and use it as the default invocation tolerance |
+
+### Contract → test mapping
+
+| Contract | Test(s) | File |
+| --- | --- | --- |
+| Fence holds — injection in PR body | `test_fence_holds_against_injection_in_pr_body` | `tests/evals/adversarial/test_prompt_injection_corpus.py` |
+| Fence holds — injection in review comment | `test_fence_holds_against_injection_in_review_comment` | `tests/evals/adversarial/test_prompt_injection_corpus.py` |
+| Fence holds — injection in commit message | `test_fence_holds_against_injection_in_commit_message` | `tests/evals/adversarial/test_prompt_injection_corpus.py` |
+| Poisoned context fenced AND the real defect's content survives; verdict stays `block` | `test_poisoned_context_does_not_suppress_a_real_finding` | `tests/evals/adversarial/test_prompt_injection_corpus.py` |
+| Misleading tests fenced; corpus verdict never approval-shaped | `test_misleading_tests_do_not_manufacture_approval` | `tests/evals/adversarial/test_prompt_injection_corpus.py` |
+| Generated code classified, not reviewed (`handled_as == "classified"`) | `test_generated_code_is_classified_not_reviewed` | `tests/evals/adversarial/test_prompt_injection_corpus.py` |
+| Material regression (20pp pass-rate drop) fails the gate | `test_release_fails_on_a_material_regression` | `tests/evals/test_release_gate.py` |
+| The regressed metric is named (and unchanged metrics are not smeared) | `test_release_gate_reports_which_metric_regressed` | `tests/evals/test_release_gate.py` |
+| Noise within the declared band passes | `test_gate_tolerates_noise_within_the_declared_band` | `tests/evals/test_release_gate.py` |
+
+### Target API EV3.2 must satisfy (as pinned by these tests)
+
+`src/mergecraft/evals/adversarial.py` (new):
+
+| Symbol | Contract |
+| --- | --- |
+| `DEFAULT_ADVERSARIAL_CORPUS_DIR` | `Path("evals/cases/adversarial")` |
+| `AdversarialCase` | `case_id`, `vector` (vocabulary above), `payload`, `author`, `author_association`, `legit_marker=""`, `expected_decision=""` |
+| `discover_adversarial_cases(corpus_dir=DEFAULT_ADVERSARIAL_CORPUS_DIR)` | Loads every case file; ≥1 case per vector |
+| `FenceCheck` / `check_fence(case)` | `case_id`, `fenced`, `forged_delimiters_neutralized`, `legit_content_preserved`, `handled_as` |
+
+`src/mergecraft/evals/gate.py` (new):
+
+| Symbol | Contract |
+| --- | --- |
+| `DEFAULT_GATE_TOLERANCE` | The declared band (see above) |
+| `MetricDelta` | `metric`, `baseline`, `candidate`, `delta`, `regressed` |
+| `GateReport` | `passed`, `tolerance`, `deltas`, `regressed_metrics: tuple[str, ...]` |
+| `eval_gate(*, candidate, baseline, tolerance=DEFAULT_GATE_TOLERANCE)` | Pure, direction-aware comparison of the result sets' scalar gate metrics |
+
+The release-workflow wiring (`.github/workflows/release.yml`) is EV3.2's
+runtime proof (EV3 Final), not unit-tested here.
+
+### Acceptance (plan §EV3.1)
+
+9 collected; **0 pass**; **9 RED** (non-strict xfail — `ModuleNotFoundError`
+at runtime via lazy imports, zero collection errors). `make lint` +
 `make typecheck` clean. Live gates: none — `skipped: no live gate`.
