@@ -16,9 +16,11 @@ Convention 5 (``test_span_cap_not_approached_by_a_normal_review``): a normal
 review's signal spans are O(dozens) — three orders of magnitude under
 ``MAX_SPANS_PER_RUN`` (10 000). New span kinds must not change that.
 
-The ``signals`` import is lazy (shared fixture in ``tests/tracing/conftest.py``)
-so collection stays clean; all three tests carry non-strict ``xfail`` markers
-(``green after OB4.2``) and are expected RED until OB4.2 lands.
+The ``signals`` import is lazy (shared fixture in ``tests/tracing/conftest.py``),
+which kept collection clean at RED-suite time; all three tests carried
+non-strict ``xfail`` markers (``green after OB4.2``) until the post-OB4.2
+reconciliation removed them (commit ``a3e9302`` made them XPASS), so all three
+are now clean real passes.
 """
 
 from __future__ import annotations
@@ -46,7 +48,6 @@ def tracer_and_sink() -> dict[str, Any]:
     return {"sink": sink, "tracer": tracer}
 
 
-@pytest.mark.xfail(reason="green after OB4.2: emit_eval_score", strict=False)
 def test_eval_score_emits_each_metric_as_an_attribute(
     tracer_and_sink: dict[str, Any], signals_module: Any
 ) -> None:
@@ -73,7 +74,6 @@ def test_eval_score_emits_each_metric_as_an_attribute(
     assert event.attrs["mergecraft.eval.duplicate_rate"] == 0.0, "a zero metric is real data"
 
 
-@pytest.mark.xfail(reason="green after OB4.2: eval span inherits review.id (D12)", strict=False)
 def test_eval_span_inherits_the_review_id(
     tracer_and_sink: dict[str, Any],
     signals_module: Any,
@@ -95,7 +95,6 @@ def test_eval_span_inherits_the_review_id(
     assert event.attrs["review.correlation_key"], "the correlation key rides along too"
 
 
-@pytest.mark.xfail(reason="green after OB4.2: signal span budget", strict=False)
 def test_span_cap_not_approached_by_a_normal_review(
     tracer_and_sink: dict[str, Any], signals_module: Any
 ) -> None:

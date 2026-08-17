@@ -375,8 +375,9 @@ Final gate.
 ## PR OB4 — phase, agent, finding, verdict and eval spans (test plan OB4.1)
 
 Authoring wave: **OB4.1** (tests-first, RED). Implementation: **OB4.2**.
-xfail-reconciliation: **post-OB4.2** (orchestrator re-dispatches test-creator to
-remove the satisfied markers).
+xfail-reconciliation: **post-OB4.2** — complete (2026-08-17): OB4.2 (`a3e9302`)
+made all 14 RED tests XPASS; the non-strict `green after OB4.2` markers were
+removed and the suite is 14/14 clean real passes, 0 xfail/xpass.
 
 Locked decisions covered: **D10** (per-agent attribution from the MCP side —
 identity issued at dispatch, exported across the `spawn_agent_cli` boundary as
@@ -388,14 +389,14 @@ spans). Conventions pinned: 3 (all emitters total and non-throwing — NullTrace
 no-op), 4 (finding bodies route through OB2's `capture_text`), 5 (span cap not
 approached by a normal review).
 
-### xfail schedule
+### xfail schedule (historical)
 
-All 14 tests carry `@pytest.mark.xfail(reason="green after OB4.2: …",
-strict=False)` — `strict=False` is explicit because the repo pins
-`xfail_strict = true`. The `mergecraft.tracing.signals` import is lazy (shared
-fixture in `tests/tracing/conftest.py`) so collection stays clean. After OB4.2
-lands, the markers are removed in reconciliation so the suite ends with 14
-clean real passes.
+All 14 tests carried `@pytest.mark.xfail(reason="green after OB4.2: …",
+strict=False)` — `strict=False` was explicit because the repo pins
+`xfail_strict = true`. The `mergecraft.tracing.signals` import was lazy (shared
+fixture in `tests/tracing/conftest.py`) so collection stayed clean. OB4.2
+(`a3e9302`) turned all 14 into XPASS; the markers were removed in the
+post-OB4.2 reconciliation, so the suite ends with 14 clean real passes.
 
 ### Env-var contract pinned by these tests (not fixed in prose by the plan)
 
@@ -457,8 +458,9 @@ open-decorate-close discipline:
 
 ### Acceptance (plan §OB4.1)
 
-14 collected; **0 pass**; **14 RED** (non-strict xfail — failures at runtime,
-zero collection errors). `make lint` + `make typecheck` clean. Live gates:
+At RED-suite time (OB4.1): 14 collected; **0 pass**; **14 RED** (non-strict xfail —
+failures at runtime, zero collection errors). Post-OB4.2 reconciliation:
+**14 passed, 0 xfail/xpass**. `make lint` + `make typecheck` clean. Live gates:
 none in OB4.1 — `skipped: no live gate` (the runtime proof is the OB4 Final
 gate).
 

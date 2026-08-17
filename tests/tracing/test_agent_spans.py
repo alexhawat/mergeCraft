@@ -21,9 +21,11 @@ child env, same setdefault discipline as OB1's review env), NOT anything inside
 the harness subprocess, which mergeCraft cannot instrument (plan: Out of
 scope).
 
-The ``signals`` import is lazy (shared fixture in ``tests/tracing/conftest.py``)
-so collection stays clean; all four tests carry non-strict ``xfail`` markers
-(``green after OB4.2``) and are expected RED until OB4.2 lands.
+The ``signals`` import is lazy (shared fixture in ``tests/tracing/conftest.py``),
+which kept collection clean at RED-suite time; all four tests carried
+non-strict ``xfail`` markers (``green after OB4.2``) until the post-OB4.2
+reconciliation removed them (commit ``a3e9302`` made them XPASS), so all four
+are now clean real passes.
 """
 
 from __future__ import annotations
@@ -71,7 +73,6 @@ def captured_popen(monkeypatch: MonkeyPatch) -> list[dict[str, Any]]:
     return calls
 
 
-@pytest.mark.xfail(reason="green after OB4.2: agent_run_span identity attrs", strict=False)
 def test_agent_run_span_carries_identity(
     tracer_and_sink: dict[str, Any], signals_module: Any
 ) -> None:
@@ -102,7 +103,6 @@ def test_agent_run_span_carries_identity(
     assert event.attrs["mergecraft.agent.toolset"] == ["read_file", "run_analyzers"]
 
 
-@pytest.mark.xfail(reason="green after OB4.2: agent identity context", strict=False)
 def test_tool_calls_chain_under_their_agent(
     tracer_and_sink: dict[str, Any], signals_module: Any
 ) -> None:
@@ -127,7 +127,6 @@ def test_tool_calls_chain_under_their_agent(
     assert by_kind["mergecraft.agent.run"].attrs["mergecraft.agent.id"] == "reviewer-1"
 
 
-@pytest.mark.xfail(reason="green after OB4.2: agent_run_span", strict=False)
 def test_two_agents_are_distinguishable_in_one_trace(
     tracer_and_sink: dict[str, Any], signals_module: Any
 ) -> None:
@@ -149,7 +148,6 @@ def test_two_agents_are_distinguishable_in_one_trace(
     assert first.attrs["mergecraft.agent.role"] != second.attrs["mergecraft.agent.role"]
 
 
-@pytest.mark.xfail(reason="green after OB4.2: agent id env export at spawn", strict=False)
 def test_attribution_survives_the_subprocess_boundary(
     captured_popen: list[dict[str, Any]],
     tracer_and_sink: dict[str, Any],

@@ -14,12 +14,14 @@ declare a second one.
 value: a run that dies before SUBMIT leaves a trace whose phase list visibly
 stops — the fail-closed case is diagnosable at a glance.
 
-The ``signals`` import is lazy (shared fixture in ``tests/tracing/conftest.py``)
-so collection stays clean; both tests carry non-strict ``xfail`` markers
-(``green after OB4.2``) and are expected RED until OB4.2 lands.
+The ``signals`` import is lazy (shared fixture in ``tests/tracing/conftest.py``),
+which kept collection clean at RED-suite time; both tests carried non-strict
+``xfail`` markers (``green after OB4.2``) until the post-OB4.2 reconciliation
+removed them (commit ``a3e9302`` made them XPASS), so both are now clean real
+passes.
 
-Acceptance (plan §OB4.1, shared with the sibling modules): 14 collected;
-0 pass; 14 RED (xfail).
+Acceptance (plan §OB4.1, post-reconciliation): 14 collected; 14 passed;
+0 xfail/xpass.
 """
 
 from __future__ import annotations
@@ -46,7 +48,6 @@ def tracer_and_sink() -> dict[str, Any]:
     return {"sink": sink, "tracer": tracer}
 
 
-@pytest.mark.xfail(reason="green after OB4.2: emit_phase", strict=False)
 def test_each_review_phase_emits_a_span(
     tracer_and_sink: dict[str, Any], signals_module: Any
 ) -> None:
@@ -69,7 +70,6 @@ def test_each_review_phase_emits_a_span(
     signals.emit_phase(NullTracer(), phase=ReviewPhase.INIT)
 
 
-@pytest.mark.xfail(reason="green after OB4.2: emit_phase", strict=False)
 def test_a_run_that_never_submits_shows_the_missing_phase(
     tracer_and_sink: dict[str, Any], signals_module: Any
 ) -> None:

@@ -21,9 +21,11 @@ span carries:
   ``mergecraft.verdict.fallback_reason`` (omitted when no fallback occurred —
   absent, never null).
 
-The ``signals`` import is lazy (shared fixture in ``tests/tracing/conftest.py``)
-so collection stays clean; all three tests carry non-strict ``xfail`` markers
-(``green after OB4.2``) and are expected RED until OB4.2 lands.
+The ``signals`` import is lazy (shared fixture in ``tests/tracing/conftest.py``),
+which kept collection clean at RED-suite time; all three tests carried
+non-strict ``xfail`` markers (``green after OB4.2``) until the post-OB4.2
+reconciliation removed them (commit ``a3e9302`` made them XPASS), so all three
+are now clean real passes.
 """
 
 from __future__ import annotations
@@ -48,7 +50,6 @@ def tracer_and_sink() -> dict[str, Any]:
     return {"sink": sink, "tracer": tracer}
 
 
-@pytest.mark.xfail(reason="green after OB4.2: emit_verdict", strict=False)
 def test_carries_agent_and_structural_verdict(
     tracer_and_sink: dict[str, Any], signals_module: Any
 ) -> None:
@@ -71,7 +72,6 @@ def test_carries_agent_and_structural_verdict(
     assert event.attrs["mergecraft.verdict.structural"] == "pass"
 
 
-@pytest.mark.xfail(reason="green after OB4.2: derived disagreement flag", strict=False)
 def test_disagreement_flag_is_derived(tracer_and_sink: dict[str, Any], signals_module: Any) -> None:
     """The disagreement flag is computed by the emitter from the two verdicts.
 
@@ -92,7 +92,6 @@ def test_disagreement_flag_is_derived(tracer_and_sink: dict[str, Any], signals_m
     assert flags == [True, True, False, False]
 
 
-@pytest.mark.xfail(reason="green after OB4.2: verdict counts + fallback reason", strict=False)
 def test_counts_and_fallback_reason_recorded(
     tracer_and_sink: dict[str, Any], signals_module: Any
 ) -> None:
