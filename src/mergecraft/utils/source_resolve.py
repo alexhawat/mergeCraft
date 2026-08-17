@@ -1,4 +1,4 @@
-"""Bounded, credential-safe acquisition of third-party review sources (TS3)."""
+"""Bounded, credential-safe acquisition and resolution of review sources (TS3/TS4)."""
 
 from __future__ import annotations
 
@@ -6,14 +6,16 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
 from mergecraft.utils.git_setup import git_env_for_token, scrub_clone_credentials
+from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff
 from mergecraft.utils.workspace import register_workspace_root
 
 if TYPE_CHECKING:
@@ -27,6 +29,8 @@ DEFAULT_MAX_FILES = 50_000
 DEFAULT_DEPTH = 1
 
 _LOCAL_BARE_RE = re.compile(r"\.git$")
+_OWNER_REPO_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
+_COMMIT_RANGE_RE = re.compile(r"^[\w./^~@{}_-]+\.\.[\w./^~@{}_-]+$")
 
 
 class SourceResolveError(ValueError):
@@ -291,19 +295,259 @@ def cli_analyzer_sandbox_applies(*, trust_tier: TrustTier | str, repo_root: Path
     return True
 
 
+@dataclass(frozen=True, slots=True)
+class AuthResolution:
+    """Resolved GitHub credential for clone acquisition (D10)."""
+
+    token: str | None
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class SourceResolverSpec:
+    """CLI flags that describe which tree and diff to review (TS4)."""
+
+    repo: str | None = None
+    head: str | None = None
+    base: str | None = None
+    staged: bool = False
+    unstaged: bool = False
+    commit_range: str | None = None
+    token: str | None = None
+    cwd: Path = field(default_factory=Path.cwd)
+    invocation_root: Path = field(default_factory=Path.cwd)
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedWorkspace:
+    """A review workspace after source resolution."""
+
+    cwd: Path
+    git_common_dir: Path | None
+    cloned: bool
+    temp_dir: Path | None = None
+
+
+def resolve_auth_token(*, explicit: str | None = None) -> AuthResolution:
+    """Resolve GitHub auth with D10 precedence."""
+    if explicit:
+        return AuthResolution(token=explicit, source="--token")
+    for env_var in ("GH_TOKEN", "GITHUB_TOKEN"):
+        value = os.environ.get(env_var)
+        if value:
+            return AuthResolution(token=value, source=env_var)
+    result = subprocess.run(
+        ["gh", "auth", "token"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        token = result.stdout.strip()
+        if token:
+            return AuthResolution(token=token, source="gh auth token")
+    return AuthResolution(token=None, source="anonymous")
+
+
+def parse_commit_range(range_str: str) -> tuple[str, str]:
+    """Validate and split a ``left..right`` commit range."""
+    cleaned = range_str.strip()
+    if not _COMMIT_RANGE_RE.match(cleaned):
+        msg = f"malformed commit range: {range_str!r}"
+        raise ValueError(msg)
+    if any(char in cleaned for char in (";", "|", "&", "$", "`")):
+        msg = f"malformed commit range: {range_str!r}"
+        raise ValueError(msg)
+    left, right = cleaned.split("..", 1)
+    return left, right
+
+
+def resolve_git_common_dir(cwd: Path) -> Path | None:
+    """Return the resolved git common directory for linked worktrees (D9)."""
+    git_entry = cwd / ".git"
+    if not git_entry.exists():
+        return None
+    try:
+        output = _run_git(["rev-parse", "--git-common-dir"], cwd=str(cwd.resolve()))
+    except RuntimeError:
+        return None
+    common = (cwd / output.strip()).resolve()
+    return common if common.is_dir() else None
+
+
+def _normalize_remote_repo(repo: str) -> str:
+    candidate = repo.strip()
+    if _OWNER_REPO_RE.match(candidate):
+        owner, name = candidate.split("/", 1)
+        return f"https://github.com/{owner}/{name}.git"
+    if candidate.startswith("file://"):
+        parsed = urlparse(candidate)
+        return str(Path(unquote(parsed.path)).resolve())
+    if candidate.startswith(("https://", "http://")):
+        return candidate
+    path = Path(candidate)
+    if path.exists():
+        return str(path.resolve())
+    msg = f"unrecognized repository source: {repo!r}"
+    raise SourceResolveError(msg)
+
+
+def _is_remote_source(repo: str) -> bool:
+    candidate = repo.strip()
+    if candidate.startswith("file://"):
+        return True
+    if _OWNER_REPO_RE.match(candidate):
+        return True
+    if candidate.startswith(("https://", "http://")):
+        return True
+    parsed = urlparse(candidate)
+    return bool(parsed.scheme)
+
+
+def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
+    """Resolve ``--repo`` / ``--cwd`` into a review workspace."""
+    if spec.repo is None:
+        cwd = spec.cwd.resolve()
+        return ResolvedWorkspace(
+            cwd=cwd,
+            git_common_dir=resolve_git_common_dir(cwd),
+            cloned=False,
+        )
+
+    repo = spec.repo.strip()
+    if _is_remote_source(repo):
+        auth = resolve_auth_token(explicit=spec.token)
+        url = _normalize_remote_repo(repo)
+        ref = spec.head or "main"
+        temp_dir = Path(tempfile.mkdtemp(prefix="mergecraft-source-"))
+        acquired = acquire(
+            ReviewSource(url=url, ref=ref, token=auth.token),
+            dest=temp_dir,
+        )
+        if spec.base and spec.base != ref:
+            redirect_args = _redirect_hardening_args()
+            _run_git(
+                [
+                    *redirect_args,
+                    "fetch",
+                    "--depth",
+                    str(DEFAULT_DEPTH),
+                    "--no-tags",
+                    "origin",
+                    f"{spec.base}:refs/remotes/origin/{spec.base}",
+                ],
+                cwd=str(acquired.path),
+                env=_credential_env(auth.token),
+            )
+        return ResolvedWorkspace(
+            cwd=acquired.path,
+            git_common_dir=resolve_git_common_dir(acquired.path),
+            cloned=True,
+            temp_dir=temp_dir,
+        )
+
+    local = Path(repo).expanduser().resolve()
+    if not local.exists():
+        msg = f"repository path does not exist: {local}"
+        raise SourceResolveError(msg)
+    if spec.head:
+        _run_git(["checkout", spec.head], cwd=str(local))
+    return ResolvedWorkspace(
+        cwd=local,
+        git_common_dir=resolve_git_common_dir(local),
+        cloned=False,
+    )
+
+
+def materialize_resolved_diff(
+    workspace: ResolvedWorkspace,
+    *,
+    spec: SourceResolverSpec,
+    out_dir: Path,
+    diff_file: Path | None = None,
+) -> DiffMaterialization:
+    """Materialize a diff for a resolved workspace (TS4)."""
+    from mergecraft.utils.offline_diff import (
+        git_range_diff,
+        git_ref_diff,
+        git_staged_diff,
+        git_unstaged_diff,
+    )
+
+    if diff_file is not None:
+        return materialize_diff(
+            cwd=workspace.cwd,
+            out_dir=out_dir,
+            diff_file=diff_file,
+            git_dir=workspace.git_common_dir,
+        )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "review.diff"
+    base_ref: str | None = None
+
+    if spec.staged:
+        text = git_staged_diff(cwd=workspace.cwd)
+        base_ref = None
+    elif spec.unstaged:
+        text = git_unstaged_diff(cwd=workspace.cwd)
+        base_ref = None
+    elif spec.commit_range:
+        parse_commit_range(spec.commit_range)
+        text = git_range_diff(cwd=workspace.cwd, range_spec=spec.commit_range)
+        base_ref = spec.commit_range
+    elif spec.head or spec.base:
+        base_ref = spec.base or "main"
+        head = "HEAD" if workspace.cloned and spec.head else (spec.head or "HEAD")
+        text = git_ref_diff(
+            cwd=workspace.cwd,
+            base=base_ref,
+            head=head,
+            git_dir=workspace.git_common_dir,
+        )
+    else:
+        return materialize_diff(
+            cwd=workspace.cwd,
+            out_dir=out_dir,
+            base=spec.base,
+            git_dir=workspace.git_common_dir,
+        )
+
+    if text and not text.endswith("\n"):
+        text = f"{text}\n"
+    path.write_text(text, encoding="utf-8")
+    line_count = 0 if not text.strip() else text.count("\n")
+    empty = not text.strip()
+    logger.info(
+        "» offline diff ready ({} lines{}) → {}",
+        line_count,
+        f", base={base_ref}" if base_ref else "",
+        path,
+    )
+    return DiffMaterialization(path=path, base_ref=base_ref, line_count=line_count, empty=empty)
+
+
 __all__ = [
     "DEFAULT_DEPTH",
     "DEFAULT_MAX_BYTES",
     "DEFAULT_MAX_FILES",
     "AcquiredSource",
+    "AuthResolution",
     "CloneAuthError",
     "CloneLimitError",
     "CloneUrlError",
+    "ResolvedWorkspace",
     "ReviewSource",
     "SourceResolveError",
+    "SourceResolverSpec",
     "acquire",
     "cli_analyzer_sandbox_applies",
     "confine_path",
     "filter_confined_paths",
+    "materialize_resolved_diff",
+    "parse_commit_range",
+    "resolve_auth_token",
+    "resolve_git_common_dir",
+    "resolve_workspace",
     "validate_clone_url",
 ]

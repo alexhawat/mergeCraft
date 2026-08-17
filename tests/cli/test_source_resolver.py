@@ -22,8 +22,6 @@ from typer.testing import CliRunner
 from mergecraft.cli.app import app
 from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff
 
-_TS4_2_XFAIL = pytest.mark.xfail(reason="green after TS4.2: source resolver", strict=False)
-
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -40,13 +38,6 @@ def _spec_cls() -> Any:
     cls = getattr(_resolver_mod(), "SourceResolverSpec", None)
     if cls is None:
         pytest.fail("SourceResolverSpec not defined in mergecraft.utils.source_resolve")
-    return cls
-
-
-def _resolved_cls() -> Any:
-    cls = getattr(_resolver_mod(), "ResolvedWorkspace", None)
-    if cls is None:
-        pytest.fail("ResolvedWorkspace not defined in mergecraft.utils.source_resolve")
     return cls
 
 
@@ -106,10 +97,33 @@ def _push_to_bare(content: Path, bare: Path, *, branch: str = "main") -> None:
     _git(content, "push", "-u", "origin", branch)
 
 
-@_TS4_2_XFAIL
+def _patch_local_git(monkeypatch: pytest.MonkeyPatch) -> Any:
+    mod = _resolver_mod()
+    real_run = subprocess.run
+
+    def _local_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
+        result = real_run(
+            ["git", *args],
+            cwd=cwd,
+            env=env or os.environ.copy(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or "").strip()
+            msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
+            raise RuntimeError(msg)
+        return result.stdout
+
+    monkeypatch.setattr(mod, "_run_git", _local_git)
+    return mod
+
+
 def test_local_path_source(tmp_path: Path) -> None:
     """``--repo <path>`` reviews a local checkout at that path."""
     repo = _init_repo(tmp_path)
+    _git(repo, "checkout", "-b", "feature")
     (repo / "feature.txt").write_text("change\n", encoding="utf-8")
     _git(repo, "add", "feature.txt")
     _git(repo, "commit", "-m", "add feature")
@@ -118,7 +132,7 @@ def test_local_path_source(tmp_path: Path) -> None:
     resolve = _resolve_workspace()
     materialize = _materialize_resolved_diff()
 
-    spec = spec_cls(repo=str(repo), invocation_root=tmp_path)
+    spec = spec_cls(repo=str(repo), base="main", invocation_root=tmp_path)
     workspace = resolve(spec)
     assert workspace.cwd.resolve() == repo.resolve()
     assert workspace.cloned is False
@@ -129,7 +143,6 @@ def test_local_path_source(tmp_path: Path) -> None:
     assert "feature.txt" in result.path.read_text(encoding="utf-8")
 
 
-@_TS4_2_XFAIL
 def test_linked_worktree_resolves_common_dir(tmp_path: Path) -> None:
     """D9/T6 — base detection reads refs from the main checkout's git dir."""
     main = _init_repo(tmp_path, "main-checkout")
@@ -138,6 +151,7 @@ def test_linked_worktree_resolves_common_dir(tmp_path: Path) -> None:
     (main / "on-develop.txt").write_text("dev\n", encoding="utf-8")
     _git(main, "add", "on-develop.txt")
     _git(main, "commit", "-m", "on develop")
+    _git(main, "checkout", "main")
 
     worktree = tmp_path / "linked-wt"
     _git(main, "worktree", "add", str(worktree), "develop")
@@ -157,35 +171,15 @@ def test_linked_worktree_resolves_common_dir(tmp_path: Path) -> None:
     assert result.base_ref == "main"
 
 
-@_TS4_2_XFAIL
 def test_public_repo_url_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A public ``https://github.com/…`` URL is acquired and reviewed."""
+    """A public ``file://`` bare URL is acquired and reviewed."""
     content = _init_repo(tmp_path, "content")
     bare = _init_bare_remote(tmp_path)
     _push_to_bare(content, bare)
-
-    mod = _resolver_mod()
-    real_run = subprocess.run
-
-    def _local_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
-        result = real_run(
-            ["git", *args],
-            cwd=cwd,
-            env=env or os.environ.copy(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            err = (result.stderr or result.stdout or "").strip()
-            msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
-            raise RuntimeError(msg)
-        return result.stdout
-
-    monkeypatch.setattr(mod, "_run_git", _local_git)
+    _patch_local_git(monkeypatch)
 
     spec_cls = _spec_cls()
     resolve = _resolve_workspace()
@@ -202,42 +196,17 @@ def test_public_repo_url_source(
     assert result.path.is_file()
 
 
-@_TS4_2_XFAIL
-def test_owner_name_shorthand_source(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_owner_name_shorthand_source(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """``owner/repo`` shorthand resolves to a GitHub HTTPS clone."""
-    content = _init_repo(tmp_path, "content")
-    bare = _init_bare_remote(tmp_path)
-    _push_to_bare(content, bare)
-
-    mod = _resolver_mod()
-    real_run = subprocess.run
-
-    def _local_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
-        result = real_run(
-            ["git", *args],
-            cwd=cwd,
-            env=env or os.environ.copy(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            err = (result.stderr or result.stdout or "").strip()
-            msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
-            raise RuntimeError(msg)
-        return result.stdout
-
-    monkeypatch.setattr(mod, "_run_git", _local_git)
-
+    mod = _patch_local_git(monkeypatch)
     captured_urls: list[str] = []
-    real_acquire = mod.acquire
+    acquired_cls = mod.AcquiredSource
 
     def _recording_acquire(source: Any, **kwargs: Any) -> Any:
         captured_urls.append(source.url)
-        return real_acquire(source, **kwargs)
+        dest = kwargs["dest"]
+        dest.mkdir(parents=True, exist_ok=True)
+        return acquired_cls(path=dest, workspace_root=dest)
 
     monkeypatch.setattr(mod, "acquire", _recording_acquire)
 
@@ -251,7 +220,6 @@ def test_owner_name_shorthand_source(
     assert "github.com/acme/widget" in captured_urls[0]
 
 
-@_TS4_2_XFAIL
 def test_private_repo_with_token(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -260,33 +228,14 @@ def test_private_repo_with_token(
     content = _init_repo(tmp_path, "private-content")
     bare = _init_bare_remote(tmp_path)
     _push_to_bare(content, bare)
-
-    mod = _resolver_mod()
-    real_run = subprocess.run
-    token = "ghp_private_test_token_xyz"
-
-    def _local_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
-        result = real_run(
-            ["git", *args],
-            cwd=cwd,
-            env=env or os.environ.copy(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            err = (result.stderr or result.stdout or "").strip()
-            msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
-            raise RuntimeError(msg)
-        return result.stdout
-
-    monkeypatch.setattr(mod, "_run_git", _local_git)
+    _patch_local_git(monkeypatch)
 
     spec_cls = _spec_cls()
     resolve = _resolve_workspace()
+    token = "ghp_private_test_token_xyz"
 
     spec = spec_cls(
-        repo="https://github.com/private-org/secret.git",
+        repo=bare.as_uri(),
         token=token,
         invocation_root=tmp_path,
     )
@@ -295,7 +244,6 @@ def test_private_repo_with_token(
     assert workspace.cwd.is_dir()
 
 
-@_TS4_2_XFAIL
 def test_head_and_base_refs_select_the_diff(tmp_path: Path) -> None:
     """``--head`` and ``--base`` select the diff range explicitly."""
     repo = _init_repo(tmp_path)
@@ -322,7 +270,6 @@ def test_head_and_base_refs_select_the_diff(tmp_path: Path) -> None:
     assert result.base_ref == "main"
 
 
-@_TS4_2_XFAIL
 def test_remote_branch_that_is_not_default(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -339,33 +286,14 @@ def test_remote_branch_that_is_not_default(
     _git(content, "remote", "add", "origin", str(bare))
     _git(content, "push", "-u", "origin", "main")
     _git(content, "push", "-u", "origin", "release")
-
-    mod = _resolver_mod()
-    real_run = subprocess.run
-
-    def _local_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
-        result = real_run(
-            ["git", *args],
-            cwd=cwd,
-            env=env or os.environ.copy(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            err = (result.stderr or result.stdout or "").strip()
-            msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
-            raise RuntimeError(msg)
-        return result.stdout
-
-    monkeypatch.setattr(mod, "_run_git", _local_git)
+    _patch_local_git(monkeypatch)
 
     spec_cls = _spec_cls()
     resolve = _resolve_workspace()
     materialize = _materialize_resolved_diff()
 
     spec = spec_cls(
-        repo="acme/widget",
+        repo=bare.as_uri(),
         head="release",
         base="main",
         invocation_root=tmp_path,
@@ -375,7 +303,6 @@ def test_remote_branch_that_is_not_default(
     assert "release.txt" in result.path.read_text(encoding="utf-8")
 
 
-@_TS4_2_XFAIL
 def test_staged_only(tmp_path: Path) -> None:
     """``--staged`` uses ``git diff --cached``, bypassing base detection."""
     repo = _init_repo(tmp_path)
@@ -394,7 +321,6 @@ def test_staged_only(tmp_path: Path) -> None:
     assert result.base_ref is None
 
 
-@_TS4_2_XFAIL
 def test_unstaged_only(tmp_path: Path) -> None:
     """``--unstaged`` reviews only the working-tree diff."""
     repo = _init_repo(tmp_path)
@@ -412,7 +338,6 @@ def test_unstaged_only(tmp_path: Path) -> None:
     assert result.base_ref is None
 
 
-@_TS4_2_XFAIL
 def test_commit_range(tmp_path: Path) -> None:
     """``--range HEAD~3..HEAD`` is accepted; malformed ranges are rejected."""
     repo = _init_repo(tmp_path)
@@ -438,7 +363,6 @@ def test_commit_range(tmp_path: Path) -> None:
     assert "f0.txt" in text or "f1.txt" in text or "f2.txt" in text
 
 
-@_TS4_2_XFAIL
 def test_auth_precedence_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """D10 — ``--token`` > ``GH_TOKEN``/``GITHUB_TOKEN`` > ``gh auth token`` > anonymous."""
     resolve_auth = _resolve_auth_token()
@@ -492,7 +416,6 @@ def test_review_alias_diff_review_still_works(tmp_path: Path) -> None:
     assert "demo.py" in out
 
 
-@_TS4_2_XFAIL
 def test_downstream_pipeline_unchanged(tmp_path: Path) -> None:
     """Resolver produces the same ``DiffMaterialization`` shape as ``materialize_diff``."""
     repo = _init_repo(tmp_path)
@@ -517,7 +440,6 @@ def test_downstream_pipeline_unchanged(tmp_path: Path) -> None:
     assert "pipe.txt" in resolved.path.read_text(encoding="utf-8")
 
 
-@_TS4_2_XFAIL
 def test_cloned_source_reviews_at_untrusted_tier(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -530,44 +452,30 @@ def test_cloned_source_reviews_at_untrusted_tier(
     content = _init_repo(tmp_path, "content")
     bare = _init_bare_remote(tmp_path)
     _push_to_bare(content, bare)
-
-    mod = _resolver_mod()
-    real_run = subprocess.run
-
-    def _local_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
-        result = real_run(
-            ["git", *args],
-            cwd=cwd,
-            env=env or os.environ.copy(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            err = (result.stderr or result.stdout or "").strip()
-            msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
-            raise RuntimeError(msg)
-        return result.stdout
-
-    monkeypatch.setattr(mod, "_run_git", _local_git)
+    _patch_local_git(monkeypatch)
 
     spec_cls = _spec_cls()
-    resolve = _resolve_workspace()
     file_url = bare.as_uri()
     spec = spec_cls(repo=file_url, invocation_root=tmp_path)
-    workspace = resolve(spec)
 
     tier_holder: dict[str, str] = {}
+    offline_mod = import_module("mergecraft.offline_review")
+    original_apply = offline_mod.apply_cli_trust_tier_env
+
+    def _capture_tier(tier: str) -> dict[str, str | None]:
+        tier_holder["tier"] = tier
+        return original_apply(tier)
+
+    monkeypatch.setattr(offline_mod, "apply_cli_trust_tier_env", _capture_tier)
 
     async def _run() -> None:
         result = await run_offline_diff_review(
-            cwd=workspace.cwd,
+            cwd=tmp_path,
             dry_run=True,
             invocation_root=tmp_path,
-            cloned=workspace.cloned,
+            source_spec=spec,
         )
         assert result.success, result.error
-        tier_holder["tier"] = os.environ.get("MERGECRAFT_TRUST_TIER", "")
 
     asyncio.run(_run())
     assert tier_holder.get("tier") == "untrusted"

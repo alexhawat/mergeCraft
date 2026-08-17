@@ -13,6 +13,7 @@ from rich.console import Console
 from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.offline_review import run_offline_diff_review
 from mergecraft.utils.log import configure_logging
+from mergecraft.utils.source_resolve import SourceResolverSpec
 
 console = Console()
 
@@ -28,6 +29,40 @@ def run(
         "--base",
         "-b",
         help="Git base ref for merge-base diff (default: upstream or origin/main|master).",
+    ),
+    repo: str | None = typer.Option(
+        None,
+        "--repo",
+        help=(
+            "Review source: local path, https://github.com/owner/repo URL, or owner/repo shorthand."
+        ),
+    ),
+    head: str | None = typer.Option(
+        None,
+        "--head",
+        help="Head ref to review (default: current HEAD or clone ref).",
+    ),
+    staged: bool = typer.Option(
+        False,
+        "--staged",
+        help="Review only staged changes (`git diff --cached`).",
+    ),
+    unstaged: bool = typer.Option(
+        False,
+        "--unstaged",
+        help="Review only unstaged working-tree changes.",
+    ),
+    commit_range: str | None = typer.Option(
+        None,
+        "--range",
+        help="Explicit commit range (e.g. HEAD~3..HEAD).",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help=(
+            "GitHub token for private clone (wins over GH_TOKEN/GITHUB_TOKEN and `gh auth token`)."
+        ),
     ),
     diff: Path | None = typer.Option(
         None,
@@ -134,8 +169,19 @@ def run(
     configure_logging()
     invocation_root = Path.cwd().resolve()
     root = cwd.resolve()
-    if diff is None and not (root / ".git").exists():
-        _bail(f"not a git repository: {root} (or pass --diff PATH)")
+    source_spec = SourceResolverSpec(
+        repo=repo,
+        head=head,
+        base=base,
+        staged=staged,
+        unstaged=unstaged,
+        commit_range=commit_range,
+        token=token,
+        cwd=root,
+        invocation_root=invocation_root,
+    )
+    if diff is None and repo is None and not (root / ".git").exists():
+        _bail(f"not a git repository: {root} (or pass --diff PATH or --repo)")
 
     try:
         trust_override = parse_cli_trust_override(trust)
@@ -174,6 +220,7 @@ def run(
             tracing_cli=tracing_cli,
             invocation_root=invocation_root,
             trust_override=trust_override,
+            source_spec=source_spec,
         )
     )
 

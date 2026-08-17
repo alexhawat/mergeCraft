@@ -40,8 +40,14 @@ from mergecraft.utils.agent_resolve import resolve_model, resolve_runtime_agent
 from mergecraft.utils.fence import Fence, render_untrusted
 from mergecraft.utils.github import GitHubClient
 from mergecraft.utils.instructions import resolve_instructions
-from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff, summarize_diff
+from mergecraft.utils.offline_diff import DiffMaterialization, summarize_diff
 from mergecraft.utils.skills import install_bundled_skills
+from mergecraft.utils.source_resolve import (
+    SourceResolverSpec,
+    filter_confined_paths,
+    materialize_resolved_diff,
+    resolve_workspace,
+)
 
 
 @dataclass(slots=True)
@@ -106,6 +112,29 @@ def build_offline_review_prompt(
         f"## Diff summary\n\n{summary}\n"
         f"{extra_block}"
     )
+
+
+def _filter_diff_to_paths(diff_text: str, kept_paths: list[str]) -> str:
+    """Keep only diff hunks for paths in ``kept_paths`` (D7 containment)."""
+    if not kept_paths:
+        return ""
+    keep = set(kept_paths)
+    blocks: list[str] = []
+    current: list[str] = []
+    current_path: str | None = None
+    for line in diff_text.splitlines(keepends=True):
+        if line.startswith("diff --git "):
+            if current and current_path in keep:
+                blocks.append("".join(current))
+            parts = line.split()
+            current_path = parts[3].removeprefix("b/") if len(parts) >= 4 else None
+            current = [line]
+            continue
+        if current:
+            current.append(line)
+    if current and current_path in keep:
+        blocks.append("".join(current))
+    return "".join(blocks)
 
 
 def _render_offline_extra_block(extra: str) -> str:
@@ -307,9 +336,17 @@ async def run_offline_diff_review(
     invocation_root: Path | None = None,
     trust_override: CliTrustOverride | None = None,
     cloned: bool = False,
+    source_spec: SourceResolverSpec | None = None,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
-    cwd = cwd.resolve()
+    spec = source_spec or SourceResolverSpec(cwd=cwd, invocation_root=invocation_root or cwd)
+    try:
+        workspace = resolve_workspace(spec)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return OfflineReviewResult(success=False, error=str(exc))
+
+    cwd = workspace.cwd
+    cloned = workspace.cloned or cloned
     if not (cwd / ".git").exists() and diff_file is None:
         return OfflineReviewResult(
             success=False,
@@ -332,8 +369,30 @@ async def run_offline_diff_review(
 
     out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
     try:
-        materialization = materialize_diff(cwd=cwd, out_dir=out_dir, base=base, diff_file=diff_file)
-    except (OSError, RuntimeError) as exc:
+        materialization = materialize_resolved_diff(
+            workspace,
+            spec=spec,
+            out_dir=out_dir,
+            diff_file=diff_file,
+        )
+        if trust_tier == "untrusted":
+            diff_text = materialization.path.read_text(encoding="utf-8")
+            paths = [
+                line.split()[3].removeprefix("b/")
+                for line in diff_text.splitlines()
+                if line.startswith("diff --git ") and len(line.split()) >= 4
+            ]
+            kept = filter_confined_paths(cwd, paths)
+            if kept != paths:
+                filtered = _filter_diff_to_paths(diff_text, kept)
+                materialization.path.write_text(filtered, encoding="utf-8")
+                materialization = DiffMaterialization(
+                    path=materialization.path,
+                    base_ref=materialization.base_ref,
+                    line_count=0 if not filtered.strip() else filtered.count("\n"),
+                    empty=not filtered.strip(),
+                )
+    except (OSError, RuntimeError, ValueError) as exc:
         return OfflineReviewResult(success=False, error=str(exc))
 
     try:

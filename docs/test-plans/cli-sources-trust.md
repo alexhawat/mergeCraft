@@ -175,4 +175,9 @@ Target API (TS4.2):
 
 - 14 tests collected
 - 1 passes (`test_review_alias_diff_review_still_works`)
-- 13 RED via `xfail(strict=False)`
+- 13 RED via `xfail(strict=False)` — **cleared post-TS4.2 (2026-08-17)**
+
+## TS4.2 xfail reconciliation (2026-08-17)
+
+Removed impl-pending xfail markers from `tests/cli/test_source_resolver.py`.
+Suite is 14 real passes.
