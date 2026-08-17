@@ -25,7 +25,12 @@ from mergecraft.analyzers.trust import (
     derive_source_trust_tier,
 )
 from mergecraft.config import load_repo_settings
-from mergecraft.config.settings import CliTrustOverride, RepoInfo
+from mergecraft.config.settings import (
+    CliTrustOverride,
+    RepoInfo,
+    apply_trust_tier_to_repo_settings,
+    build_executable_config_skip_reason,
+)
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
@@ -417,6 +422,18 @@ async def _run_agent_review(
         # read — exactly as the Action path does via ``checkout_pr``.
         primary_repo_state(tool_state).diff_path = str(materialization.path)
         settings = load_repo_settings(root=cwd, load_learnings_files=False)
+        settings, drops = apply_trust_tier_to_repo_settings(
+            settings,
+            trust_tier,
+            source_label="CLI offline review",
+        )
+        setup_script_skip_reason = ""
+        if drops:
+            for reason in drops.values():
+                logger.warning("» {}", reason)
+            setup_script_skip_reason = build_executable_config_skip_reason(drops)
+            if setup_script_skip_reason:
+                tool_state.setup_script_skip_reason = setup_script_skip_reason
         resolved_model = resolve_model(slug=model)
         agent = resolve_runtime_agent(model=resolved_model, settings=settings)
         modes = compute_modes(agent.name, signed_commits=False)
@@ -484,6 +501,7 @@ async def _run_agent_review(
             modes=modes,
             agent_id=agent.name,
             output_schema=output_schema,
+            setup_script_skip_reason=setup_script_skip_reason,
         )
         run_ctx = AgentRunContext(
             payload=payload,

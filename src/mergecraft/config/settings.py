@@ -24,6 +24,19 @@ from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 AccountPlan = Literal["none", "payg"]
 HeadingDepth = Literal[1, 2, 3, 4, 5, 6]
 CliTrustOverride = Literal["trusted", "untrusted"]
+TrustTier = Literal["trusted", "untrusted"]
+
+# TS2 / D4 — executable repo-declared keys that may run only on trusted tier.
+TIER_GATED_EXECUTABLE_FIELDS: frozenset[str] = frozenset(
+    {"setup_script", "prepush_script", "stop_script"}
+)
+
+
+def _tier_gated_field(*, default: Any = None, alias: str | None = None, **kwargs: Any) -> Any:
+    extra = dict(kwargs.pop("json_schema_extra", {}) or {})
+    extra["tier_gated"] = True
+    return Field(default=default, alias=alias, json_schema_extra=extra, **kwargs)
+
 
 # D4 / D8 / W6.2 — security/runtime and optional-feature models both use
 # ``extra="forbid"``. The optional-feature one-release warning shim has ended
@@ -91,7 +104,7 @@ class StaticCheckDefinition(_OptionalFeatureModel):
     """
 
     name: str
-    command: str
+    command: str = Field(json_schema_extra={"tier_gated": True})
     suffixes: list[str] = Field(default_factory=list)
 
 
@@ -353,9 +366,9 @@ class RepoSettings(BaseModel):
     # Default ``True`` preserves today's fallback behaviour.
     allow_fallback: bool = Field(default=True, alias="allowFallback")
     modes: list[ModeDefinition] = Field(default_factory=list)
-    setup_script: str | None = Field(default=None, alias="setupScript")
-    prepush_script: str | None = Field(default=None, alias="prepushScript")
-    stop_script: str | None = Field(default=None, alias="stopScript")
+    setup_script: str | None = _tier_gated_field(default=None, alias="setupScript")
+    prepush_script: str | None = _tier_gated_field(default=None, alias="prepushScript")
+    stop_script: str | None = _tier_gated_field(default=None, alias="stopScript")
     # S1 / D10 — ``setup_failure_policy`` decides what a trusted-tier
     # ``setup_script`` failure means. Closed vocabulary
     # (``inconclusive`` | ``fail`` | ``warn``); default ``inconclusive``
@@ -429,6 +442,57 @@ class RepoSettings(BaseModel):
         if isinstance(value, str):
             return value.lower()
         return value
+
+
+def _executable_drop_reason(field: str, source_label: str) -> str:
+    if field == "setup_script":
+        return f"skipped setup_script on untrusted tier ({source_label})"
+    return f"dropped {field} on untrusted tier ({source_label})"
+
+
+def build_executable_config_skip_reason(drops: dict[str, str]) -> str:
+    """Combine per-key drop reasons for prompt threading (TS2 / F3 shape)."""
+    if not drops:
+        return ""
+    if "setup_script" in drops:
+        return drops["setup_script"]
+    return "; ".join(sorted(drops.values()))
+
+
+def apply_trust_tier_to_repo_settings(
+    settings: RepoSettings,
+    tier: TrustTier | str,
+    *,
+    source_label: str,
+) -> tuple[RepoSettings, dict[str, str]]:
+    """Drop tier-gated executable config when the review source is untrusted (D4)."""
+    if tier == "trusted":
+        return settings, {}
+
+    drops: dict[str, str] = {}
+    updates: dict[str, Any] = {}
+
+    for field_name in TIER_GATED_EXECUTABLE_FIELDS:
+        value = getattr(settings, field_name)
+        if value is not None:
+            drops[field_name] = _executable_drop_reason(field_name, source_label)
+            updates[field_name] = None
+
+    if settings.static_checks:
+        stripped_checks: list[StaticCheckDefinition] = []
+        for check in settings.static_checks:
+            if check.command:
+                key = f"static_checks.{check.name}.command"
+                drops[key] = _executable_drop_reason(key, source_label)
+                stripped_checks.append(check.model_copy(update={"command": ""}))
+            else:
+                stripped_checks.append(check)
+        updates["static_checks"] = stripped_checks
+
+    if not updates:
+        return settings, drops
+
+    return settings.model_copy(update=updates), drops
 
 
 class RepoInfo(BaseModel):

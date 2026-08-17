@@ -510,6 +510,27 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     ctx.trust_tier = trust_tier
     ctx.tool_state.trust_tier = trust_tier
 
+    assert ctx.settings is not None
+    from mergecraft.config.settings import (
+        apply_trust_tier_to_repo_settings,
+        build_executable_config_skip_reason,
+    )
+
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "unknown")
+    settings, drops = apply_trust_tier_to_repo_settings(
+        ctx.settings,
+        trust_tier,
+        source_label=f"{event_name} event",
+    )
+    ctx.settings = settings
+    if drops:
+        for reason in drops.values():
+            logger.warning("» {}", reason)
+        skip_reason = build_executable_config_skip_reason(drops)
+        if skip_reason:
+            ctx.setup_script_skip_reason = skip_reason
+            ctx.tool_state.setup_script_skip_reason = skip_reason
+
     token_ref = await resolve_tokens(
         push=ctx.payload.get("push") or "restricted", xrepo=ctx.payload.get("xrepo")
     )
@@ -825,7 +846,8 @@ async def _run_setup_script_phase(ctx: RunContext) -> None:
             logger.warning("» {}", setup_script_skip_reason)
     setup_elapsed_s = time.monotonic() - setup_started_at
     ctx.setup_hook_failure = setup_hook_failure
-    ctx.setup_script_skip_reason = setup_script_skip_reason
+    if setup_script_skip_reason:
+        ctx.setup_script_skip_reason = setup_script_skip_reason
     ctx.setup_elapsed_s = setup_elapsed_s
 
 
