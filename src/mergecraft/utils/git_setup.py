@@ -181,6 +181,48 @@ def _git_get(repo_dir: str, key: str) -> str:
         return ""
 
 
+def git_env_for_token(token: str) -> dict[str, str]:
+    """Build git subprocess env with header-based auth — never URL-embedded (D5)."""
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    if token:
+        env["GIT_CONFIG_COUNT"] = "1"
+        env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
+        env["GIT_CONFIG_VALUE_0"] = f"Authorization: Bearer {token}"
+    return env
+
+
+def scrub_clone_credentials(repo_dir: Path | str) -> None:
+    """Remove credential material from a clone's local git config after fetch (D5)."""
+    import re
+
+    root = Path(repo_dir)
+    for key in (
+        "http.extraHeader",
+        "credential.helper",
+        "credential.username",
+        "credential.useHttpPath",
+    ):
+        subprocess.run(
+            ["git", "config", "--local", "--unset-all", key],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    config_path = root / ".git" / "config"
+    if not config_path.is_file():
+        return
+    text = config_path.read_text(encoding="utf-8")
+    scrubbed = re.sub(
+        r"(?im)^\s*extraHeader\s*=.*authorization:.*$",
+        "",
+        text,
+    )
+    if scrubbed != text:
+        config_path.write_text(scrubbed, encoding="utf-8")
+
+
 def write_askpass_script(tmpdir: str, token: str) -> str:
     """Write a GIT_ASKPASS helper returning ``x-access-token`` + the token.
 
@@ -350,7 +392,9 @@ __all__ = [
     "MERGECRAFT_BOT_NAME",
     "cleanup_temp_directory",
     "create_temp_directory",
+    "git_env_for_token",
     "register_created_path",
+    "scrub_clone_credentials",
     "setup_git",
     "wipe_runner_leak_surface",
     "write_askpass_script",

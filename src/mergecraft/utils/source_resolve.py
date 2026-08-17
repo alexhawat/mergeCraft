@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from mergecraft.mcp.git import _git_env
+from mergecraft.utils.git_setup import git_env_for_token, scrub_clone_credentials
 from mergecraft.utils.workspace import register_workspace_root
 
 if TYPE_CHECKING:
@@ -120,9 +120,7 @@ def _run_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) ->
 
 def _credential_env(token: str | None) -> dict[str, str]:
     """Build git environment with header-based auth — never URL-embedded (D5)."""
-    env = _git_env(token or "")
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    return env
+    return git_env_for_token(token or "")
 
 
 def _redirect_hardening_args() -> list[str]:
@@ -130,31 +128,7 @@ def _redirect_hardening_args() -> list[str]:
 
 
 def _scrub_clone_credentials(repo_dir: Path) -> None:
-    """Remove any credential material from the local git config after fetch (D5)."""
-    for key in (
-        "http.extraHeader",
-        "credential.helper",
-        "credential.username",
-        "credential.useHttpPath",
-    ):
-        subprocess.run(
-            ["git", "config", "--local", "--unset-all", key],
-            cwd=repo_dir,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    config_path = repo_dir / ".git" / "config"
-    if not config_path.is_file():
-        return
-    text = config_path.read_text(encoding="utf-8")
-    scrubbed = re.sub(
-        r"(?im)^\s*extraHeader\s*=.*authorization:.*$",
-        "",
-        text,
-    )
-    if scrubbed != text:
-        config_path.write_text(scrubbed, encoding="utf-8")
+    scrub_clone_credentials(repo_dir)
 
 
 def _tree_stats(root: Path) -> tuple[int, int]:

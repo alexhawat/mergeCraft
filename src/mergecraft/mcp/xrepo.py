@@ -12,7 +12,7 @@ from loguru import logger
 from mergecraft.mcp.git import _git_env, _run_git
 from mergecraft.mcp.shared import EMPTY_SCHEMA, ToolClass, execute, tool
 from mergecraft.mcp.tool_state import RepoAccess, ensure_repo_state, repo_key
-from mergecraft.utils.source_resolve import _scrub_clone_credentials
+from mergecraft.utils.git_setup import scrub_clone_credentials
 from mergecraft.utils.workspace import register_workspace_root
 
 if TYPE_CHECKING:
@@ -139,7 +139,7 @@ def checkout_repo_tool(ctx: ToolContext):
                 ["checkout", "-B", default_branch, "FETCH_HEAD"],
                 cwd=str(dir_path),
             )
-            _scrub_clone_credentials(dir_path)
+            scrub_clone_credentials(dir_path)
             state.push_url = url
             logger.info(
                 "checked out secondary repo {}/{} ({}) → {}",
@@ -155,7 +155,7 @@ def checkout_repo_tool(ctx: ToolContext):
             }
         except Exception:
             if dir_path.exists():
-                _scrub_clone_credentials(dir_path)
+                scrub_clone_credentials(dir_path)
             ctx.tool_state.repos.pop(repo_key(owner, repo), None)
             shutil.rmtree(dir_path, ignore_errors=True)
             raise
