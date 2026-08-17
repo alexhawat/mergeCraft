@@ -7,8 +7,10 @@ This doc is appended to per sub-wave. So far: **PR OB1 (sub-wave OB1.1,
 reconciled post-OB1.2)**, **PR OB2 (sub-wave OB2.1, reconciled post-OB2.2)**
 **PR OB3 (sub-wave OB3.1, reconciled post-OB3.2, one amended test)**,
 **PR EV1 (sub-wave EV1.1, reconciled post-EV1.2)**, **PR EV2 (sub-wave
-EV2.1, reconciled post-EV2.2)**, **PR OB4 (sub-wave OB4.1)** and **PR EV3
-(sub-wave EV3.1)**. All seven PRs now have their test-plan sections.
+EV2.1, reconciled post-EV2.2)**, **PR OB4 (sub-wave OB4.1, reconciled
+post-OB4.2)** and **PR EV3 (sub-wave EV3.1, reconciled post-EV3.2)**. All
+seven PRs now have their test-plan sections, and the plan's suite is fully
+reconciled — OB1–OB4 and EV1–EV3 all green, zero xfail/xpass left behind.
 
 ## PR OB1 — review-wide correlation on every span (test plan OB1.1)
 
@@ -544,6 +546,10 @@ collection stays clean.
 ## PR EV3 — adversarial corpus and release regression gate (test plan EV3.1)
 
 Authoring wave: **EV3.1** (tests-first, RED). Implementation: **EV3.2**.
+xfail-reconciliation: **post-EV3.2** — complete (2026-08-17): EV3.2 (`0aff25c`)
+made all 9 RED tests XPASS; the non-strict `green after EV3.2` markers were
+removed and the suite is 9/9 clean real passes (188 passed, 1 pre-existing
+W9-spun-out xfail, 0 xpass across `tests/evals`), 0 xfail/xpass.
 The injection-fence unit mechanics shipped in W4 (`mergecraft.utils.fence`);
 EV3 pins the **corpus-level proof** (one hostile case per attack vector, run
 through the fence path every suite run) and the **release regression gate**
@@ -551,12 +557,13 @@ with a declared tolerance band. All nine tests are structural and keyless —
 they assert fencing/classification/comparison mechanics, never a live model's
 judgement — so `skipped: no live gate` applies to the whole sub-wave.
 
-### xfail schedule
+### xfail schedule (historical)
 
-All 9 contract tests carry `@pytest.mark.xfail(reason="green after EV3.2: …",
+All 9 contract tests carried `@pytest.mark.xfail(reason="green after EV3.2: …",
 strict=False)` — `strict=False` is explicit because the repo pins
-`xfail_strict = true`. Post-EV3.2 the orchestrator re-dispatches test-creator
-to remove the satisfied markers. Every test fails at RED time with
+`xfail_strict = true`. EV3.2 (`0aff25c`) turned all 9 into XPASS; the markers
+were removed in the post-EV3.2 reconciliation, so the suite ends with 9 clean
+real passes. Every test failed at RED time with
 `ModuleNotFoundError` on the two new modules (`mergecraft.evals.adversarial`,
 `mergecraft.evals.gate`) via lazy in-test imports — collection stays clean,
 and each corpus test asserts its attack vector is **present** (an empty

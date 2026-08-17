@@ -1,6 +1,7 @@
 """EV3 — the release regression gate: material regression blocks, noise passes.
 
-RED suite for PR EV3 (sub-wave EV3.1; implementation EV3.2). Wave plan:
+Authored RED for PR EV3 (sub-wave EV3.1; implementation EV3.2 landed in
+``0aff25c``; xfail markers reconciled post-EV3.2). Wave plan:
 ``.ignorelocal/waves/04-observability-eval-wave-plan.md``; test-plan doc:
 ``docs/test-plans/04-observability-eval.md``.
 
@@ -38,16 +39,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from mergecraft.evals.benchmark import BenchmarkResultSet, run_structural_replay
 from mergecraft.evals.store import Case, add_case
 from mergecraft.utils.learnings import LearningProvenance
-
-_XFAIL_EV3_2 = pytest.mark.xfail(
-    reason="green after EV3.2: mergecraft.evals.gate eval_gate + GateReport + tolerance band",
-    strict=False,
-)
 
 _WHEN = datetime(2026, 8, 17, 12, 0, 0, tzinfo=UTC)
 
@@ -107,7 +101,6 @@ def _result_set(
 # ── the gate ──
 
 
-@_XFAIL_EV3_2
 def test_release_fails_on_a_material_regression(tmp_path: Path) -> None:
     """A 20-point pass-rate drop is material by any reasonable band — the
     gate fails, and the declared band is pinned smaller than that."""
@@ -122,7 +115,6 @@ def test_release_fails_on_a_material_regression(tmp_path: Path) -> None:
     assert 0 < DEFAULT_GATE_TOLERANCE < 0.20
 
 
-@_XFAIL_EV3_2
 def test_release_gate_reports_which_metric_regressed(tmp_path: Path) -> None:
     """Only ``unsafe_approval_rate`` moved — the report names exactly that
     metric as regressed (direction-aware: a *rise* in an error rate is the
@@ -139,7 +131,6 @@ def test_release_gate_reports_which_metric_regressed(tmp_path: Path) -> None:
     assert "decision_replay_pass_rate" not in report.regressed_metrics
 
 
-@_XFAIL_EV3_2
 def test_gate_tolerates_noise_within_the_declared_band(tmp_path: Path) -> None:
     """One-point wobble on both gated rates, inside the declared default
     band: the gate passes and names no regressed metric — a gate that alarms

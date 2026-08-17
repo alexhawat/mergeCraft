@@ -1,6 +1,7 @@
 """EV3 — the adversarial prompt-injection corpus: the fence holds on every case.
 
-RED suite for PR EV3 (sub-wave EV3.1; implementation EV3.2). Wave plan:
+Authored RED for PR EV3 (sub-wave EV3.1; implementation EV3.2 landed in
+``0aff25c``; xfail markers reconciled post-EV3.2). Wave plan:
 ``.ignorelocal/waves/04-observability-eval-wave-plan.md``; test-plan doc:
 ``docs/test-plans/04-observability-eval.md``.
 
@@ -44,15 +45,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
     from mergecraft.evals.adversarial import AdversarialCase
-
-_XFAIL_EV3_2 = pytest.mark.xfail(
-    reason="green after EV3.2: adversarial corpus + mergecraft.evals.adversarial fence harness",
-    strict=False,
-)
 
 
 def _cases_for(vector: str) -> list[AdversarialCase]:
@@ -72,7 +66,6 @@ def _cases_for(vector: str) -> list[AdversarialCase]:
 # ── injection vectors: the fence holds ──
 
 
-@_XFAIL_EV3_2
 def test_fence_holds_against_injection_in_pr_body() -> None:
     from mergecraft.evals.adversarial import check_fence
 
@@ -84,7 +77,6 @@ def test_fence_holds_against_injection_in_pr_body() -> None:
         )
 
 
-@_XFAIL_EV3_2
 def test_fence_holds_against_injection_in_review_comment() -> None:
     from mergecraft.evals.adversarial import check_fence
 
@@ -96,7 +88,6 @@ def test_fence_holds_against_injection_in_review_comment() -> None:
         )
 
 
-@_XFAIL_EV3_2
 def test_fence_holds_against_injection_in_commit_message() -> None:
     from mergecraft.evals.adversarial import check_fence
 
@@ -111,7 +102,6 @@ def test_fence_holds_against_injection_in_commit_message() -> None:
 # ── the fence must not help the attack ──
 
 
-@_XFAIL_EV3_2
 def test_poisoned_context_does_not_suppress_a_real_finding() -> None:
     """A poisoned context block is fenced, and the case's real seeded defect
     (``legit_marker``) survives fencing intact — the poison must not push the
@@ -128,7 +118,6 @@ def test_poisoned_context_does_not_suppress_a_real_finding() -> None:
         assert case.expected_decision == "block"
 
 
-@_XFAIL_EV3_2
 def test_misleading_tests_do_not_manufacture_approval() -> None:
     """Tests that merely *claim* coverage (misleading names/comments) are
     untrusted content like any other: fenced, and the corpus-recorded verdict
@@ -143,7 +132,6 @@ def test_misleading_tests_do_not_manufacture_approval() -> None:
         )
 
 
-@_XFAIL_EV3_2
 def test_generated_code_is_classified_not_reviewed() -> None:
     """Generated code is *classified*, not reviewed as human-authored — the
     harness reports ``handled_as == "classified"`` for the generated-code
