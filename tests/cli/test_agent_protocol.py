@@ -22,7 +22,6 @@ from mergecraft.run_outcome import RunOutcome
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-_CC1_2_XFAIL = pytest.mark.xfail(reason="green after CC1.2: agent JSONL protocol", strict=False)
 
 _SAMPLE_PATCH = (
     "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
@@ -99,7 +98,6 @@ def _parse_agent_lines(stdout: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in lines]
 
 
-@_CC1_2_XFAIL
 def test_events_carry_protocol_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every emitted event carries an explicit ``protocol_version``."""
     _install_agent_review(monkeypatch)
@@ -111,7 +109,6 @@ def test_events_carry_protocol_version(tmp_path: Path, monkeypatch: pytest.Monke
         assert event.get("protocol_version") == version
 
 
-@_CC1_2_XFAIL
 def test_event_sequence_is_run_started_then_phases_then_verdict_then_finished(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -129,7 +126,6 @@ def test_event_sequence_is_run_started_then_phases_then_verdict_then_finished(
     assert all(idx < verdict_index for idx in phase_indices)
 
 
-@_CC1_2_XFAIL
 def test_findings_stream_before_the_verdict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -144,7 +140,6 @@ def test_findings_stream_before_the_verdict(
     assert all(idx < verdict_index for idx in finding_indices)
 
 
-@_CC1_2_XFAIL
 def test_protocol_is_parseable_line_by_line_while_streaming(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

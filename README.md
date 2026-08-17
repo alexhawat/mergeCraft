@@ -198,7 +198,13 @@ mergecraft review --repo https://github.com/o/r --token "$GH_TOKEN"  # private r
 mergecraft review --staged                               # staged changes only
 mergecraft review --diff changes.patch --dry-run         # inspect the prompt, no LLM call
 mergecraft review --json findings.json                 # machine-readable Finding[] for scoring
+mergecraft review --format sarif --output report.sarif.json
+mergecraft review --format jsonl --output stream.jsonl
+mergecraft review --agent                              # JSONL agent protocol on stdout
 ```
+
+Process exit codes: `0` clean pass; `10` non-blocking findings; `11` blocking severities;
+`20` inconclusive; `30` configuration error; `40` infra error; `50` timed out.
 
 `diff-review` is a hidden alias of `review` (Harbor and existing scripts keep working).
 

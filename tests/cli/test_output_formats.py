@@ -10,7 +10,7 @@ import json
 import re
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: TC002 — MonkeyPatch annotations on test functions
 from tests.analyzers.support import import_module as import_analyzer_module
 from typer.testing import CliRunner
 
@@ -21,7 +21,6 @@ from mergecraft.offline_review import OfflineReviewResult
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-_CC1_2_XFAIL = pytest.mark.xfail(reason="green after CC1.2: output format flags", strict=False)
 
 _SAMPLE_PATCH = (
     "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
@@ -38,7 +37,7 @@ def _agent_finding_dict() -> dict[str, object]:
         tool="mergecraft-agent",
         rule_id="AGENT-1",
         category="Security & Privacy",
-        severity="Major",
+        severity="Minor",
         confidence="likely",
         message="agent finding",
         path="demo.py",
@@ -116,14 +115,13 @@ def test_json_format_matches_existing_findings_schema(
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     combined = _plain(result.stdout + result.stderr)
-    assert result.exit_code == 0, combined
+    assert result.exit_code == 10, combined
     assert json_out.is_file(), combined
     payload = json.loads(json_out.read_text(encoding="utf-8"))
     assert isinstance(payload.get("findings"), list)
     assert payload["findings"][0]["rule_id"] == finding["rule_id"]
 
 
-@_CC1_2_XFAIL
 def test_sarif_includes_agent_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``--format sarif`` exports agent findings, not only analyzer findings."""
     finding = _agent_finding_dict()
@@ -135,7 +133,7 @@ def test_sarif_includes_agent_findings(tmp_path: Path, monkeypatch: pytest.Monke
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     combined = _plain(result.stdout + result.stderr)
-    assert result.exit_code == 0, combined
+    assert result.exit_code == 10, combined
     assert sarif_out.is_file(), combined
     document = json.loads(sarif_out.read_text(encoding="utf-8"))
     validate_sarif_document(document)
@@ -143,7 +141,6 @@ def test_sarif_includes_agent_findings(tmp_path: Path, monkeypatch: pytest.Monke
     assert any(row.get("ruleId") == finding["rule_id"] for row in results)
 
 
-@_CC1_2_XFAIL
 def test_jsonl_is_one_object_per_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``--format jsonl`` writes one JSON object per line."""
     _install_fake_review(monkeypatch, findings=[_agent_finding_dict()])
@@ -154,7 +151,7 @@ def test_jsonl_is_one_object_per_line(tmp_path: Path, monkeypatch: pytest.Monkey
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     combined = _plain(result.stdout + result.stderr)
-    assert result.exit_code == 0, combined
+    assert result.exit_code == 10, combined
     assert jsonl_out.is_file(), combined
     lines = [line for line in jsonl_out.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert lines

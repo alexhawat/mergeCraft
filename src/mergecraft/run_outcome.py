@@ -11,12 +11,22 @@ this module ships the outcome -> check-conclusion half
 next to its only writer, ``cli/gha_cmd.py`` (W5.3), keyed by
 :func:`error_code_for_outcome`. See ``docs/REVIEW-DOCTRINE.md`` ("Run
 outcome taxonomy") for the operator-facing walkthrough of both halves.
+
+CC1 adds a sibling outcome -> process exit-code table for the CLI machine
+contract (:data:`RUN_OUTCOME_EXIT_CODE`, :func:`exit_code_for_outcome`).
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
+
+from mergecraft.agents.gates import BLOCKING_SEVERITIES
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from mergecraft.analyzers.finding import Finding
 
 
 class RunOutcome(StrEnum):
@@ -53,6 +63,20 @@ RUN_OUTCOME_CONCLUSION: Final[dict[RunOutcome, CompletionConclusion]] = {
     RunOutcome.inconclusive: "neutral",
 }
 
+# CC1 — CLI process exit codes (one distinct code per ``RunOutcome`` value).
+# ``RunOutcome.failed`` with blocking severities uses :data:`CLI_BLOCKED_EXIT_CODE`
+# via :func:`exit_code_for_outcome` / :func:`cli_exit_code_for_review`.
+RUN_OUTCOME_EXIT_CODE: Final[dict[RunOutcome, int]] = {
+    RunOutcome.passed: 0,
+    RunOutcome.failed: 10,
+    RunOutcome.inconclusive: 20,
+    RunOutcome.configuration_error: 30,
+    RunOutcome.infra_error: 40,
+    RunOutcome.timed_out: 50,
+}
+
+CLI_BLOCKED_EXIT_CODE: Final[int] = 11
+
 
 def run_succeeded_for_outcome(outcome: RunOutcome) -> bool:
     """Only ``passed`` counts as a succeeded run for the approval gate (D3).
@@ -77,10 +101,38 @@ def error_code_for_outcome(outcome: RunOutcome) -> str:
     return f"mergecraft.{outcome.value}"
 
 
+def exit_code_for_outcome(outcome: RunOutcome, *, blocked: bool = False) -> int:
+    """Map a ``RunOutcome`` to a distinct CLI process exit code (CC1).
+
+    ``RunOutcome.failed`` with blocking severities uses :data:`CLI_BLOCKED_EXIT_CODE`
+    so merge gates can distinguish blockers from non-blocking findings.
+    """
+    if outcome is RunOutcome.failed and blocked:
+        return CLI_BLOCKED_EXIT_CODE
+    return RUN_OUTCOME_EXIT_CODE[outcome]
+
+
+def cli_exit_code_for_review(
+    outcome: RunOutcome,
+    findings: Sequence[Finding] | None = None,
+) -> int:
+    """Resolve the CLI exit code for a completed offline review (CC1)."""
+    rows = list(findings or [])
+    if rows and any(row.severity in BLOCKING_SEVERITIES for row in rows):
+        return exit_code_for_outcome(RunOutcome.failed, blocked=True)
+    if rows and outcome is RunOutcome.passed:
+        return exit_code_for_outcome(RunOutcome.failed, blocked=False)
+    return exit_code_for_outcome(outcome)
+
+
 __all__ = [
+    "CLI_BLOCKED_EXIT_CODE",
     "RUN_OUTCOME_CONCLUSION",
+    "RUN_OUTCOME_EXIT_CODE",
     "CompletionConclusion",
     "RunOutcome",
+    "cli_exit_code_for_review",
     "error_code_for_outcome",
+    "exit_code_for_outcome",
     "run_succeeded_for_outcome",
 ]

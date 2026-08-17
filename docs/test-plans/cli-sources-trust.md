@@ -246,4 +246,10 @@ Target API (CC1.2):
 - 16 tests collected across `tests/cli/test_exit_codes.py`,
   `tests/cli/test_output_formats.py`, `tests/cli/test_agent_protocol.py`
 - 2 pass (regression pins: ``--json`` schema)
-- 14 RED via `xfail(strict=False)` — pending CC1.2
+- 14 RED via `xfail(strict=False)` — **cleared post-CC1.2 (2026-08-17)**
+
+## CC1.2 xfail reconciliation (2026-08-17)
+
+Removed impl-pending xfail markers from CC1 test modules. Suite is 16 real passes.
+Adjusted regression/output tests to use taxonomy-valid finding fixtures and exit-code
+expectations for non-blocking findings (`10`).

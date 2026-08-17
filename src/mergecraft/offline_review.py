@@ -36,6 +36,7 @@ from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
+from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.agent_resolve import resolve_model, resolve_runtime_agent
 from mergecraft.utils.fence import Fence, render_untrusted
 from mergecraft.utils.github import GitHubClient
@@ -61,6 +62,47 @@ class OfflineReviewResult:
     # On-disk path of the run's merge evidence packet (#47 / #96), or None
     # when no packet was produced (dry run, empty diff, emission failure).
     evidence_packet_path: str | None = None
+    outcome: RunOutcome | None = None
+
+
+def _offline_failure(
+    *,
+    error: str,
+    outcome: RunOutcome,
+    diff_path: str | None = None,
+    evidence_packet_path: str | None = None,
+    output: str | None = None,
+    structured_output: str | None = None,
+) -> OfflineReviewResult:
+    return OfflineReviewResult(
+        success=False,
+        error=error,
+        output=output,
+        structured_output=structured_output,
+        diff_path=diff_path,
+        evidence_packet_path=evidence_packet_path,
+        outcome=outcome,
+    )
+
+
+def _offline_error_outcome(exc: BaseException) -> RunOutcome:
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return RunOutcome.timed_out
+    if isinstance(exc, ValueError):
+        return RunOutcome.configuration_error
+    return RunOutcome.infra_error
+
+
+def parse_offline_review_findings(result: OfflineReviewResult) -> list[Finding]:
+    """Parse validated findings from an offline review's structured output."""
+    if not result.structured_output:
+        return []
+    try:
+        return [
+            Finding.model_validate(row) for row in parse_findings_payload(result.structured_output)
+        ]
+    except ValueError:
+        return []
 
 
 def build_offline_review_prompt(
@@ -166,9 +208,9 @@ def _finalize_structured_findings(
 
     structured_raw = result.structured_output
     if not structured_raw:
-        return OfflineReviewResult(
-            success=False,
+        return _offline_failure(
             error=STRUCTURED_OUTPUT_REQUIRED_MSG,
+            outcome=RunOutcome.configuration_error,
             diff_path=result.diff_path,
             evidence_packet_path=result.evidence_packet_path,
         )
@@ -176,9 +218,9 @@ def _finalize_structured_findings(
     try:
         findings = parse_findings_payload(structured_raw)
     except ValueError as exc:
-        return OfflineReviewResult(
-            success=False,
+        return _offline_failure(
             error=str(exc),
+            outcome=RunOutcome.configuration_error,
             diff_path=result.diff_path,
             evidence_packet_path=result.evidence_packet_path,
         )
@@ -186,9 +228,9 @@ def _finalize_structured_findings(
     try:
         write_findings_json(json_path, findings)
     except OSError as exc:
-        return OfflineReviewResult(
-            success=False,
+        return _offline_failure(
             error=f"failed to write findings JSON: {exc}",
+            outcome=RunOutcome.configuration_error,
             diff_path=result.diff_path,
             evidence_packet_path=result.evidence_packet_path,
         )
@@ -343,14 +385,14 @@ async def run_offline_diff_review(
     try:
         workspace = resolve_workspace(spec)
     except (OSError, RuntimeError, ValueError) as exc:
-        return OfflineReviewResult(success=False, error=str(exc))
+        return _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc))
 
     cwd = workspace.cwd
     cloned = workspace.cloned or cloned
     if not (cwd / ".git").exists() and diff_file is None:
-        return OfflineReviewResult(
-            success=False,
+        return _offline_failure(
             error=f"not a git repository: {cwd} (pass --diff for a standalone patch file)",
+            outcome=RunOutcome.configuration_error,
         )
 
     # Forward the ``diff-review`` tracing flags as ``MERGECRAFT_*`` env
@@ -393,7 +435,7 @@ async def run_offline_diff_review(
                     empty=not filtered.strip(),
                 )
     except (OSError, RuntimeError, ValueError) as exc:
-        return OfflineReviewResult(success=False, error=str(exc))
+        return _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc))
 
     try:
         if materialization.empty:
@@ -401,15 +443,16 @@ async def run_offline_diff_review(
                 try:
                     write_findings_json(json_path, [])
                 except OSError as exc:
-                    return OfflineReviewResult(
-                        success=False,
+                    return _offline_failure(
                         error=f"failed to write findings JSON: {exc}",
+                        outcome=RunOutcome.configuration_error,
                     )
             return OfflineReviewResult(
                 success=True,
                 output="no changes to review (empty diff).",
                 diff_path=str(materialization.path),
                 empty_diff=True,
+                outcome=RunOutcome.passed,
             )
 
         output_schema = findings_output_schema() if json_path is not None else None
@@ -426,6 +469,7 @@ async def run_offline_diff_review(
                 output=prompt,
                 diff_path=str(materialization.path),
                 empty_diff=False,
+                outcome=RunOutcome.passed,
             )
 
         result = await _run_agent_review(
@@ -595,6 +639,7 @@ async def _run_agent_review(
                 error=result.error or "agent failed",
                 diff_path=str(materialization.path),
                 evidence_packet_path=packet_path,
+                outcome=RunOutcome.failed,
             )
         return OfflineReviewResult(
             success=True,
@@ -602,12 +647,13 @@ async def _run_agent_review(
             structured_output=structured_output,
             diff_path=str(materialization.path),
             evidence_packet_path=packet_path,
+            outcome=RunOutcome.passed,
         )
     except Exception as exc:
         logger.exception("offline diff-review failed")
-        return OfflineReviewResult(
-            success=False,
+        return _offline_failure(
             error=str(exc),
+            outcome=_offline_error_outcome(exc),
             diff_path=str(materialization.path),
         )
     finally:

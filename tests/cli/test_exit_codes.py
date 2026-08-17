@@ -23,10 +23,6 @@ from mergecraft.run_outcome import RunOutcome
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-_CC1_2_XFAIL = pytest.mark.xfail(
-    reason="green after CC1.2: machine contract exit codes", strict=False
-)
-
 _SAMPLE_PATCH = (
     "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
 )
@@ -81,7 +77,7 @@ def _blocker_finding_dict() -> dict[str, object]:
         rule_id="SEC-001",
         category="Security & Privacy",
         severity="Critical",
-        confidence="confirmed",
+        confidence="certain",
         message="hard blocker",
         path="demo.py",
         start_line=1,
@@ -129,7 +125,6 @@ def _invoke_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     )
 
 
-@_CC1_2_XFAIL
 def test_clean_review_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A clean review (``passed``, no findings) exits 0."""
     _patch_offline_review(monkeypatch, outcome=RunOutcome.passed, findings=[])
@@ -137,7 +132,6 @@ def test_clean_review_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert result.exit_code == 0, _plain(result.stdout + result.stderr)
 
 
-@_CC1_2_XFAIL
 def test_findings_exit_code_distinct_from_clean(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -153,7 +147,6 @@ def test_findings_exit_code_distinct_from_clean(
     assert result.exit_code == _exit_code_for_outcome()(RunOutcome.failed)
 
 
-@_CC1_2_XFAIL
 def test_blocked_exit_code_distinct_from_findings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -172,7 +165,6 @@ def test_blocked_exit_code_distinct_from_findings(
     assert result.exit_code == blocked, _plain(result.stdout + result.stderr)
 
 
-@_CC1_2_XFAIL
 def test_inconclusive_exit_code_distinct(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``RunOutcome.inconclusive`` maps to a distinct exit code."""
     _patch_offline_review(
@@ -187,7 +179,6 @@ def test_inconclusive_exit_code_distinct(tmp_path: Path, monkeypatch: pytest.Mon
     assert result.exit_code == code, _plain(result.stdout + result.stderr)
 
 
-@_CC1_2_XFAIL
 def test_config_error_exit_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``RunOutcome.configuration_error`` maps to a distinct exit code."""
     _patch_offline_review(
@@ -200,7 +191,6 @@ def test_config_error_exit_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert result.exit_code == _exit_code_for_outcome()(RunOutcome.configuration_error)
 
 
-@_CC1_2_XFAIL
 def test_infra_error_exit_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``RunOutcome.infra_error`` maps to a distinct exit code."""
     _patch_offline_review(
@@ -213,7 +203,6 @@ def test_infra_error_exit_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert result.exit_code == _exit_code_for_outcome()(RunOutcome.infra_error)
 
 
-@_CC1_2_XFAIL
 def test_timeout_exit_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``RunOutcome.timed_out`` maps to a distinct exit code."""
     _patch_offline_review(
@@ -226,7 +215,6 @@ def test_timeout_exit_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert result.exit_code == _exit_code_for_outcome()(RunOutcome.timed_out)
 
 
-@_CC1_2_XFAIL
 def test_every_run_outcome_has_exactly_one_exit_code() -> None:
     """Total mapping pin — each ``RunOutcome`` has one distinct exit code."""
     table = _run_outcome_exit_table()
