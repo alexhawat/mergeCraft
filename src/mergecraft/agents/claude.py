@@ -48,14 +48,14 @@ from mergecraft.tracing.tracer import (
     _close_provider_llm_pair,
     _open_provider_llm_pair,
 )
-from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.types import MERGECRAFT_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.privilege import prepare_workspace_for_agent, wrap_agent_command
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from mergecraft.tracing.tracer import Tracer
 
@@ -96,29 +96,49 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     return str(config_path)
 
 
-def build_agents_json() -> str:
+def build_agents_json(
+    *,
+    verifier_denied_tools: Sequence[str] = (),
+    subagent_denied_tools: Sequence[str] = (),
+    agents_json: str | None = None,
+) -> str:
+    """Return Claude ``--agents`` JSON for reviewer and verifier subagents.
+
+    When ``agents_json`` is supplied (registry render from AP2), return it
+    verbatim for backward-compatible call sites.
+    """
+    if agents_json is not None:
+        return agents_json
+    verifier: dict[str, Any] = {
+        "description": (
+            "Read-only verification subagent for Critical/Major analyzer, CI and "
+            "agent-authored findings. Confirms, downgrades, or drops before "
+            f"publication against rubric v{VERIFIER_RUBRIC_VERSION}."
+        ),
+        "prompt": VERIFIER_SYSTEM_PROMPT,
+        # Pinned in agents/verifier.py so the judge model recorded with a
+        # verdict and the judge model actually dispatched cannot diverge
+        # (#45). Sonnet is deliberately a different tier from the
+        # orchestrator that wrote the finding.
+        "model": pinned_judge_model("claude") or "claude-sonnet-5",
+    }
+    denied = [format_mcp_tool_ref("claude", name) for name in verifier_denied_tools]
+    if denied:
+        verifier["disallowedTools"] = denied
+    reviewer: dict[str, Any] = {
+        "description": (
+            "Read-only review subagent for lens-based code review. "
+            "Reads only — no writes, no state-changing shell or MCP calls."
+        ),
+        "prompt": REVIEWER_SYSTEM_PROMPT,
+        "model": "claude-sonnet-5",
+    }
+    reviewer_denied = [format_mcp_tool_ref("claude", name) for name in subagent_denied_tools]
+    if reviewer_denied:
+        reviewer["disallowedTools"] = reviewer_denied
     agents = {
-        REVIEWER_AGENT_NAME: {
-            "description": (
-                "Read-only review subagent for lens-based code review. "
-                "Reads only — no writes, no state-changing shell or MCP calls."
-            ),
-            "prompt": REVIEWER_SYSTEM_PROMPT,
-            "model": "claude-sonnet-5",
-        },
-        VERIFIER_AGENT_NAME: {
-            "description": (
-                "Read-only verification subagent for Critical/Major analyzer, CI and "
-                "agent-authored findings. Confirms, downgrades, or drops before "
-                f"publication against rubric v{VERIFIER_RUBRIC_VERSION}."
-            ),
-            "prompt": VERIFIER_SYSTEM_PROMPT,
-            # Pinned in agents/verifier.py so the judge model recorded with a
-            # verdict and the judge model actually dispatched cannot diverge
-            # (#45). Sonnet is deliberately a different tier from the
-            # orchestrator that wrote the finding.
-            "model": pinned_judge_model("claude") or "claude-sonnet-5",
-        },
+        REVIEWER_AGENT_NAME: reviewer,
+        VERIFIER_AGENT_NAME: verifier,
     }
     return json.dumps(agents)
 
@@ -618,9 +638,17 @@ def _run_claude_once(
     mcp_config: str,
     continue_session: bool = False,
 ) -> AgentResult:
+    from mergecraft.agents.harness_render import render_for_run
+
+    harness_render = render_for_run(ctx, "claude")
     model = None
     if ctx.resolved_model:
         model = _strip_provider_prefix(ctx.resolved_model)
+    agents_payload = (
+        harness_render.payload
+        if isinstance(harness_render.payload, str)
+        else json.dumps(harness_render.payload)
+    )
     cmd = [
         cli,
         "--print",
@@ -631,7 +659,11 @@ def _run_claude_once(
         "--disallowedTools",
         CLAUDE_DISALLOWED_TOOLS,
         "--agents",
-        build_agents_json(),
+        build_agents_json(
+            verifier_denied_tools=ctx.verifier_denied_tools,
+            subagent_denied_tools=ctx.subagent_denied_tools,
+            agents_json=agents_payload,
+        ),
         "--effort",
         "high",
     ]

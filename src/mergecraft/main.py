@@ -15,6 +15,7 @@ from mergecraft.action.inputs import apply_setup_overrides, apply_tracing_overri
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import Agent, AgentResult, AgentRunContext
+from mergecraft.agents.verifier import verifier_denied_tool_names
 from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_secrets
 from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
 from mergecraft.analyzers.trust import (
@@ -23,12 +24,17 @@ from mergecraft.analyzers.trust import (
     resolve_analyzers_mode,
 )
 from mergecraft.evidence.run_packet import emit_run_packet
-from mergecraft.main_outcome import _classify_outcome, _publish_span_attrs
+from mergecraft.main_outcome import (
+    _classify_outcome,
+    _publish_span_attrs,
+    _verdict_protocol_publish,
+)
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import ProgressComment, ToolState, init_tool_state
 from mergecraft.modes import _custom_modes, compute_modes
+from mergecraft.prep.types import is_prep_install_failure
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
 from mergecraft.utils.agent_resolve import (
@@ -159,6 +165,7 @@ class RunContext:
     mcp_url: str = ""
     stop_mcp: Callable[[], None] | None = None
     subagent_denied: list[str] = field(default_factory=list)
+    verifier_denied: list[str] = field(default_factory=list)
     instructions: Any = None
     run_ctx: AgentRunContext | None = None
 
@@ -303,6 +310,8 @@ async def _publish(
     outcome: RunOutcome,
     failure_reason: str | None,
     attrs_source: Callable[[], dict[str, Any]],
+    verdict_prediction: Any | None = None,
+    actual_outcome: str | None = None,
 ) -> str | None:
     """Tracer span + status check + evidence packet — the run's publish block.
 
@@ -335,7 +344,11 @@ async def _publish(
         # final state. A blocked or failed run is exactly when the
         # evidence matters most, so this runs on both branches below.
         written = await asyncio.to_thread(
-            emit_run_packet, tool_context, run_succeeded=outcome is RunOutcome.passed
+            emit_run_packet,
+            tool_context,
+            run_succeeded=outcome is RunOutcome.passed,
+            verdict_prediction=verdict_prediction,
+            actual_outcome=actual_outcome,
         )
         return str(written) if written else None
 
@@ -369,7 +382,7 @@ async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
         return None
     reasons: list[str] = []
     for result in state.results or []:
-        if not result.dependencies_installed and result.issues:
+        if is_prep_install_failure(result):
             reasons.extend(str(item) for item in result.issues)
     if reasons:
         return "; ".join(reasons)
@@ -595,7 +608,7 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
         )
         resolved_model = resolve_model(slug=only_slug, respect_env_override=False)
         selected_slug = only_slug
-    agent = resolve_runtime_agent(model=resolved_model)
+    agent = resolve_runtime_agent(model=resolved_model, settings=settings)
     agent_id = agent.name
     ctx.agent = agent
     ctx.agent_id = agent_id
@@ -847,6 +860,8 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
 
     subagent_denied = subagent_denied_tool_names(tool_context, ctx.output_schema)
     ctx.subagent_denied = subagent_denied
+    verifier_denied = verifier_denied_tool_names(tool_context, ctx.output_schema)
+    ctx.verifier_denied = verifier_denied
 
     try:
         learnings_path = await seed_learnings_file(tmpdir=tmpdir, current=settings.learnings)
@@ -909,6 +924,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         mcp_server_url=mcp_url,
         tmpdir=tmpdir,
         subagent_denied_tools=subagent_denied,
+        verifier_denied_tools=verifier_denied,
         instructions=instructions,
         tool_state=tool_state,
         api_token=run_context.api_token,
@@ -1005,7 +1021,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
 
     async def _run_agent_once(slug: str) -> AgentResult:
         attempt_model = resolve_model(slug=slug, respect_env_override=False)
-        attempt_agent = resolve_runtime_agent(model=attempt_model)
+        attempt_agent = resolve_runtime_agent(model=attempt_model, settings=settings)
         attempt_agent_id = attempt_agent.name
 
         if attempt_agent_id == agent_id:
@@ -1034,11 +1050,16 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 replace(tool_context, agent_id=attempt_agent_id),
                 output_schema,
             )
+            attempt_verifier_denied = verifier_denied_tool_names(
+                replace(tool_context, agent_id=attempt_agent_id),
+                output_schema,
+            )
             attempt_ctx = replace(
                 run_ctx,
                 resolved_model=attempt_model,
                 instructions=attempt_instructions,
                 subagent_denied_tools=attempt_denied,
+                verifier_denied_tools=attempt_verifier_denied,
             )
             tool_context.agent_id = attempt_agent_id
             tool_context.modes = attempt_modes
@@ -1064,6 +1085,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 run_once=_run_agent_once,
                 head=model_head,
                 pin=model_pin,
+                tool_state=tool_state,
             )
             return winning_slug, chain_result
         return selected_slug, await agent.run(run_ctx)
@@ -1215,6 +1237,18 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         setup_reason=setup_reason,
         setup_policy=settings.setup_failure_policy,
         prep_reason=prep_reason,
+        mode=tool_state.selected_mode,
+        verdict_protocol=settings.gates.terminal_verdict,
+        final_summary_written=tool_state.final_summary_written,
+    )
+    diagnostic_attrs, verdict_prediction = _verdict_protocol_publish(
+        result=result,
+        mode=tool_state.selected_mode,
+        setup_reason=setup_reason,
+        setup_policy=settings.setup_failure_policy,
+        prep_reason=prep_reason,
+        final_summary_written=tool_state.final_summary_written,
+        terminal_verdict=settings.gates.terminal_verdict,
     )
 
     selected_mode_obj = next(
@@ -1225,7 +1259,9 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         ctx,
         outcome=outcome,
         failure_reason=failure_reason,
-        attrs_source=lambda: _publish_span_attrs(outcome, selected_mode_obj),
+        attrs_source=lambda: _publish_span_attrs(outcome, selected_mode_obj) | diagnostic_attrs,
+        verdict_prediction=verdict_prediction,
+        actual_outcome=str(outcome) if verdict_prediction is not None else None,
     )
 
     if outcome is not RunOutcome.passed:

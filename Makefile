@@ -16,6 +16,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	examples example-workflows-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
+	bench-detect \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check
 
@@ -72,6 +73,9 @@ pyright: ## Supplemental Pyright pass
 
 catalog-check: ## Manifest fixture/doc/severity gate (C5/C6)
 	$(UV) run python -m mergecraft.analyzers.catalog_docs
+
+agents-check: ## Agent registry model/prompt/tool validation gate (AP1)
+	$(UV) run python -m mergecraft.agents.catalog_docs
 
 PYTEST_SPLIT := $(if $(MERGECRAFT_TEST_SPLITS),--splits $(MERGECRAFT_TEST_SPLITS) --group $(MERGECRAFT_TEST_GROUP) --splitting-algorithm least_duration,)
 
@@ -140,11 +144,11 @@ reference-docs: ## Regenerate the README action + CLI reference tables
 reference-docs-check: ## Fail when README reference tables drift from action.yml / the CLI
 	$(UV) run python scripts/gen_reference_docs.py --check
 
-ci-static: lockcheck lint typecheck pyright catalog-check build example-workflows-check reference-docs-check ## Static/build tier
+ci-static: lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check reference-docs-check ## Static/build tier
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check build example-workflows-check reference-docs-check security coverage-gate
+CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check reference-docs-check security coverage-gate
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)
@@ -177,6 +181,9 @@ eval-gate: ## Check eval-bank integrity (structural; see 'mergecraft eval gate -
 
 eval-replay: ## Replay eval bank; write versioned result set (operator-triggered; needs live keys for F1)
 	$(UV) run mergecraft eval replay-bank
+
+bench-detect: ## Join structural replay + live finding-location detection (#140, B3; needs live keys)
+	$(UV) run mergecraft eval bench
 
 docker-build: ## Build action Docker image
 	docker build -t mergeCraft:local -f Dockerfile .

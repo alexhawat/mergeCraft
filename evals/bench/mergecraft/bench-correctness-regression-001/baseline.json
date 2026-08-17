@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-correctness-regression-001-001",
+      "path": "src/mergecraft/utils/env_probe.py",
+      "start_line": 12,
+      "end_line": 12,
+      "title": "get_region reintroduces the None-deref the #118 comment says was already fixed",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

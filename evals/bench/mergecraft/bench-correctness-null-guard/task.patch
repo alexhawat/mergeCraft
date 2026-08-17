@@ -1,0 +1,13 @@
+diff --git a/src/mergecraft/config/loader.py b/src/mergecraft/config/loader.py
+--- a/src/mergecraft/config/loader.py
++++ b/src/mergecraft/config/loader.py
+@@ -44,7 +44,6 @@
+ def enabled_analyzer_names(settings: Settings) -> list[str]:
+     """Return analyzer names explicitly enabled in config."""
+     names = []
+-    if settings.analyzers is not None:
+-        for name in settings.analyzers.enabled:
+-            names.append(name)
++    for name in settings.analyzers.enabled:
++        names.append(name)
+     return names

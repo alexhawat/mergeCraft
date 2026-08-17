@@ -151,6 +151,7 @@ class GatesSettings(BaseModel):
 
     gate_action: GateMode = "shadow"
     thermostat: GateMode = "shadow"
+    terminal_verdict: GateMode = "enforce"
     override: dict[str, str] = Field(default_factory=dict)
 
 
@@ -158,6 +159,46 @@ class AnalyzerPatternSettings(_OptionalFeatureModel):
     """Pattern backend selection for analyzer detection."""
 
     backend: str | None = None
+
+
+DispatchMode = Literal["single", "ensemble", "shadow"]
+RiskBand = Literal["low", "medium", "high"]
+
+
+class LensTriggerOverride(BaseModel):
+    """Declarative routing triggers for a registry lens entry (AP4)."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    categories: list[str] = Field(default_factory=list)
+    min_risk_band: RiskBand | None = Field(default=None, alias="minRiskBand")
+
+
+OrchestratorKind = Literal["llm", "deterministic", "hybrid"]
+
+
+class AgentBindingOverride(BaseModel):
+    """Partial override for one agent entry under ``agents:`` in config (AP1)."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    role: str | None = None
+    lens: str | None = None
+    model: str | None = None
+    model_chain: list[str] | None = Field(default=None, alias="modelChain")
+    prompt_id: str | None = Field(default=None, alias="promptId")
+    prompt_version: str | None = Field(default=None, alias="promptVersion")
+    budget: int | None = None
+    timeout_s: int | None = Field(default=None, alias="timeoutS")
+    dispatch: DispatchMode | None = None
+    triggers: LensTriggerOverride | None = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _normalize_role(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.lower()
+        return value
 
 
 class AnalyzersSettings(BaseModel):
@@ -294,6 +335,9 @@ class RepoSettings(BaseModel):
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
+    # HA3 / D11 — explicit harness selection. When unset, ``utils/agent_resolve``
+    # infers the runtime from the model slug (today's behaviour).
+    harness: Literal["opencode", "codex", "claude", "gemini", "cursor"] | None = None
     model: str | None = None
     models: list[str] | None = None
     model_fallbacks: dict[str, list[str]] | None = Field(default=None, alias="modelFallbacks")
@@ -339,6 +383,16 @@ class RepoSettings(BaseModel):
     # no declaration, no substitution, no extra API call.
     ci_evidence: CiEvidenceSettings = Field(default_factory=CiEvidenceSettings, alias="ciEvidence")
     analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
+    agents: dict[str, AgentBindingOverride] = Field(default_factory=dict)
+    # AP6 / D10 — orchestrator kind. Default ``llm`` preserves today's prompt-driven
+    # orchestrator; ``deterministic`` walks a declarative pipeline file; ``hybrid``
+    # is the AP7 decision-node seam (declared here for forward compatibility).
+    orchestrator: OrchestratorKind = "llm"
+    # AP6 / D9 — operator-authored pipeline used when the repo pipeline is untrusted
+    # or absent. Path relative to repo root or absolute.
+    operator_pipeline: str | None = Field(default=None, alias="operatorPipeline")
+    # AP6 — optional repo-local pipeline file path (default ``.mergecraft/pipeline.yaml``).
+    pipeline: str | None = None
     learnings: str | None = None
     learnings_headings: list[LearningsHeading] = Field(
         default_factory=list, alias="learningsHeadings"

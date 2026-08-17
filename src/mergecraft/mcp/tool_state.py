@@ -86,6 +86,23 @@ class ProgressComment:
 
 
 @dataclass(slots=True)
+class TerminalSubmission:
+    """Recorded terminal review verdict for a run (VP1).
+
+    Findings are ``AgentFinding`` instances at runtime; typed as ``Any`` here
+    to keep this module free of the verifier import cycle.
+    """
+
+    id: str
+    verdict: Literal["approve", "request_changes"]
+    summary: str
+    findings: list[Any]
+    payload_hash: str
+    submitted_at: str
+    attempt_id: int
+
+
+@dataclass(slots=True)
 class ReviewRecord:
     id: int
     node_id: str
@@ -192,6 +209,13 @@ class ToolState:
     # live path always sets this.
     modes: list[Mode] = field(default_factory=list)
     review: ReviewRecord | None = None
+    # D10 / VP4 — closed ``ReviewPhase`` vocabulary; advanced by checkout and
+    # verdict tools (``mcp/verdict.py``).
+    review_phase: str = "INIT"
+    # Stashed ``create_pull_request_review`` params for ``publish_pull_request_review``.
+    pending_review_publication: dict[str, Any] | None = None
+    terminal_submission: TerminalSubmission | None = None
+    terminal_submission_conflict: bool = False
     approval: ApprovalRecord | None = None
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None
@@ -257,6 +281,7 @@ class ToolState:
     # the live path so the packet can prove which model actually ran).
     requested_model: str | None = None
     fallback_index: int = 0
+    attempt_id: int = 0
     fallback_occurred: bool = False
     unselected_proxy_default: bool | None = None
     model_clamped: dict[str, str] | None = None
@@ -266,6 +291,11 @@ class ToolState:
     agent_diagnostic: Any = None
     browser_daemon: Any = None
     analyzer_run: AnalyzerRunState | None = None
+    # Session-scoped verifier confirms. ``run_analyzers`` replaces
+    # ``analyzer_run`` wholesale, so confirmations must not live only there.
+    verified_ids: set[str] = field(default_factory=set)
+    confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
+    agent_findings: list[dict[str, Any]] = field(default_factory=list)
     # Evidence normalised from the consumer's finished CI (#36). ``None`` until
     # a CI source is actually read, so a run that consulted no CI records
     # nothing rather than an empty section.
@@ -274,6 +304,10 @@ class ToolState:
     # verification tools (D14): an LLM judge may not evaluate a finding before
     # the deterministic checks it is meant to supplement have had their turn.
     static_checks_ran: bool = False
+    # Last ``run_static_checks`` report — ``{name, status}`` rows, replaced (not
+    # appended) on each call. Read by ``validation_state_from_tool_context`` so
+    # ``approve`` is rejected when a required gate recorded ``status: failed``.
+    static_checks: list[dict[str, Any]] = field(default_factory=list)
 
 
 def repo_key(owner: str, name: str) -> str:

@@ -23,7 +23,6 @@ from mergecraft.agents.openai_compatible_gateways import (
     resolve_gateway_endpoints,
 )
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
-from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
     AgentResult,
     AgentRunContext,
@@ -32,7 +31,6 @@ from mergecraft.agents.shared import (
     log_token_table,
     spawn_agent_cli,
 )
-from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
@@ -59,6 +57,11 @@ class ProviderTimeoutError(RuntimeError):
     instead of letting a raw ``httpx.ReadTimeout`` traceback abort the whole
     review.
     """
+
+
+def _api_key_from_env(api_key_env: str) -> str:
+    """Read a provider API key from the environment at emit time (HA1 / D16)."""
+    return os.environ.get(api_key_env, "").strip()
 
 
 def build_custom_provider(model: str | None) -> dict[str, object] | None:
@@ -105,7 +108,7 @@ def build_custom_provider(model: str | None) -> dict[str, object] | None:
                     "name": record.provider_id,
                     "options": {
                         "baseURL": record.base_url,
-                        "apiKey": record.api_key,
+                        "apiKey": _api_key_from_env(record.api_key_env),
                     },
                     "models": models,
                 }
@@ -150,7 +153,11 @@ def _custom_provider_ids(model: str | None) -> list[str]:
 
 
 def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
+    from mergecraft.agents.harness_render import render_for_run
+
     fs_perm = build_opencode_native_fs_permission()
+    render_result = render_for_run(ctx, "opencode")
+    agent_block = render_result.payload["agent"] if isinstance(render_result.payload, dict) else {}
     config: dict[str, object] = {
         "permission": {
             "bash": "deny",
@@ -167,20 +174,7 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
                 "timeout": 300_000,
             }
         },
-        "agent": {
-            REVIEWER_AGENT_NAME: {
-                "description": ("Read-only review subagent for lens-based code review."),
-                "prompt": REVIEWER_SYSTEM_PROMPT,
-                "mode": "subagent",
-            },
-            VERIFIER_AGENT_NAME: {
-                "description": (
-                    "Read-only verification subagent for Critical/Major analyzer findings."
-                ),
-                "prompt": VERIFIER_SYSTEM_PROMPT,
-                "mode": "subagent",
-            },
-        },
+        "agent": agent_block,
     }
     if model:
         config["model"] = model

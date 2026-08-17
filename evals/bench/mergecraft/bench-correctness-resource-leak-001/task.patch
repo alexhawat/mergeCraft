@@ -1,0 +1,11 @@
+diff --git a/src/mergecraft/utils/tempfiles.py b/src/mergecraft/utils/tempfiles.py
+--- a/src/mergecraft/utils/tempfiles.py
++++ b/src/mergecraft/utils/tempfiles.py
+@@ -14,5 +14,5 @@
+
+
+ def read_scratch(path: Path) -> str:
+-    with path.open("r", encoding="utf-8") as handle:
+-        return handle.read()
++    handle = path.open("r", encoding="utf-8")
++    return handle.read()

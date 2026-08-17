@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -40,6 +41,23 @@ class ModelFallbackPolicyError(RuntimeError):
     Message always names configuration/fallback so operators and RED tests can
     match the policy without inspecting the exception type alone.
     """
+
+
+class FallbackReason(StrEnum):
+    """Why a model-chain entry was skipped (HA2 / D13).
+
+    Distinct from verdict content — a valid ``request_changes`` is a usable
+    result and never appears here. Stamped on the **winner** as the reason the
+    previous attempt was skipped (last skip wins when multiple advances).
+    """
+
+    provider_error = "provider_error"
+    timeout = "timeout"
+    crash = "crash"
+    no_terminal_verdict = "no_terminal_verdict"
+    malformed_submission = "malformed_submission"
+    semantic_rejection = "semantic_rejection"
+    stale_attempt = "stale_attempt"
 
 
 def _has_env(name: str) -> bool:
@@ -185,6 +203,38 @@ def effective_model_slugs(settings: RepoSettings) -> list[str]:
         return base
     rest = [slug for slug in base if slug != env_model]
     return [env_model, *rest]
+
+
+def resolve_effective_model_slug(settings: RepoSettings) -> str | None:
+    """Return the model slug that would actually run right now, or ``None``.
+
+    The shared "what would win" resolution — originally ``mergecraft
+    models show``'s private ``_winning_slug`` helper, promoted here so
+    other CLI commands (e.g. ``mergecraft eval bench``) can resolve
+    ``.mergecraft/config.yaml`` the same way rather than only checking
+    ``MERGECRAFT_MODEL`` (``resolve_model(slug=None)`` alone never reads
+    config — it only checks an explicit slug and the env override;
+    mergeCraft self-review, PR #216, caught `mergecraft eval bench`
+    advertising config-only resolution while never actually consulting it).
+
+    Precedence: ``MERGECRAFT_MODEL`` env override, else the first
+    configured slug with detected credentials, else the first configured
+    slug regardless, else ``settings.model`` resolved through the alias
+    catalog.
+    """
+    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
+    if env_model:
+        return env_model
+
+    configured = _configured_model_slugs(settings)
+    for slug in configured:
+        if has_credentials_for_slug(slug):
+            return slug
+
+    if configured:
+        return configured[0]
+
+    return resolve_model(slug=settings.model)
 
 
 def _alias_for_slug(slug: str) -> ModelAlias | None:
@@ -353,12 +403,65 @@ def _is_retryable_failure(result: AgentResult) -> bool:
     return retryable is True
 
 
+def _retryable_failure_reason(result: AgentResult) -> FallbackReason:
+    error = (result.error or "").lower()
+    metadata = result.metadata or {}
+    if "timeout" in error or metadata.get("timeout") is True:
+        return FallbackReason.timeout
+    if "crash" in error or metadata.get("crash") is True:
+        return FallbackReason.crash
+    return FallbackReason.provider_error
+
+
+def _classify_skip_reason(result: AgentResult, chain_index: int) -> FallbackReason | None:
+    """Return why ``result`` cannot be the chain winner, or ``None`` when usable."""
+    diagnostics = result.diagnostics or {}
+    attempt_id = diagnostics.get("attempt_id")
+    if attempt_id is not None and attempt_id != chain_index:
+        return FallbackReason.stale_attempt
+
+    if result.success and result.terminal_submission_received:
+        return None
+
+    if not result.success:
+        return _retryable_failure_reason(result)
+
+    if diagnostics.get("malformed_submission"):
+        return FallbackReason.malformed_submission
+    return FallbackReason.no_terminal_verdict
+
+
+def _is_incomplete_review_success(
+    result: AgentResult,
+    tool_state: ToolState | None,
+) -> bool:
+    """True when a successful provider result is not a usable review winner.
+
+    Scripted chain tests that omit ``tool_state`` keep success=True winner
+    semantics. The live orchestrator always passes ``tool_state``.
+    """
+    if tool_state is None or not result.success or result.terminal_submission_received:
+        return False
+    from mergecraft.main_outcome import _is_incremental_review, _is_review_mode
+
+    mode = tool_state.selected_mode
+    if mode is not None and not _is_review_mode(mode):
+        return False
+    if _is_incremental_review(mode) and tool_state.final_summary_written:
+        return False
+    submission = tool_state.terminal_submission
+    if submission is not None and not tool_state.terminal_submission_conflict:
+        return bool((result.diagnostics or {}).get("rejection_reason"))
+    return True
+
+
 def _attach_model_evidence(
     result: AgentResult,
     *,
     requested_model: str,
     executed_model: str,
     fallback_index: int,
+    fallback_reason: FallbackReason | None = None,
 ) -> AgentResult:
     """Stamp requested/executed/fallback fields onto ``result.metadata`` (W10.2/W10.3).
 
@@ -375,8 +478,26 @@ def _attach_model_evidence(
             "fallback_occurred": fallback_index > 0,
         }
     )
+    if fallback_reason is not None:
+        meta["fallback_reason"] = fallback_reason
     result.metadata = meta
     return result
+
+
+def stamp_attempt_id(
+    tool_state: ToolState,
+    *,
+    attempt_id: int,
+    fallback_index: int,
+) -> None:
+    """Stamp the active model-chain attempt on ``tool_state`` (V7 / VP3).
+
+    Called when a model-chain attempt starts so ``submit_review_verdict`` can
+    copy the same id onto ``TerminalSubmission`` instead of inferring one at
+    submit time.
+    """
+    tool_state.attempt_id = attempt_id
+    tool_state.fallback_index = fallback_index
 
 
 def promote_model_evidence(
@@ -407,6 +528,15 @@ def promote_model_evidence(
         )
 
 
+def _prepare_chain_attempt(tool_state: ToolState | None, fallback_index: int) -> None:
+    """Stamp the active chain index and drop any prior attempt's terminal submit."""
+    if tool_state is None:
+        return
+    stamp_attempt_id(tool_state, attempt_id=fallback_index, fallback_index=fallback_index)
+    tool_state.terminal_submission = None
+    tool_state.terminal_submission_conflict = False
+
+
 async def run_with_model_chain(
     *,
     settings: RepoSettings,
@@ -415,6 +545,7 @@ async def run_with_model_chain(
     correlation: dict[str, Any] | None = None,
     head: str | None = None,
     pin: bool = False,
+    tool_state: ToolState | None = None,
 ) -> tuple[str, AgentResult]:
     """Walk the model chain, advancing on retryable failures.
 
@@ -444,6 +575,10 @@ async def run_with_model_chain(
         pin (bool, optional): #37 / W4 — collapse to ``[head]`` (or the first
             configured entry) and skip the fallback tail. The escape hatch for
             operators who explicitly want "use exactly this model".
+        tool_state (ToolState | None, optional): Shared MCP state for this run.
+            When supplied, ``fallback_index`` is updated *before* ``run_once``
+            and any terminal submission from a prior chain entry is cleared so
+            a fallback cannot inherit or conflict-reject the failed attempt.
 
     Returns:
         tuple[str, AgentResult]: The winning slug and its agent result.
@@ -477,6 +612,7 @@ async def run_with_model_chain(
 
         chain_index = 0
         attempts = 0
+        last_skip_reason: FallbackReason | None = None
 
         root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
 
@@ -485,21 +621,25 @@ async def run_with_model_chain(
         while attempts < max_attempts:
             slug = chain[chain_index]
             attempts += 1
+            _prepare_chain_attempt(tool_state, chain_index)
             logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
 
+            resolved_harness = resolve_harness(settings, slug)
             attempt_attrs = {
                 "model.id": slug,
                 "model.provider": _agent_provider_for_slug(slug),
-                "model.mode": _agent_mode_for_slug(slug),
+                "model.mode": resolved_harness,
                 "model.fallback_index": chain_index,
                 "model.attempt_number": attempts,
                 "agent.provider": _agent_provider_for_slug(slug),
-                "agent.mode": _agent_mode_for_slug(slug),
+                "agent.mode": resolved_harness,
+                "harness": resolved_harness,
+                "agent.harness": resolved_harness,
                 # OTel GenAI semantic-convention names so Logfire's native
                 # GenAI dashboard populates. ``gen_ai.system`` is the provider
                 # slug (anthropic/openai/google/opencode/...).
                 "gen_ai.system": _agent_provider_for_slug(slug),
-                "gen_ai.agent.name": _agent_mode_for_slug(slug),
+                "gen_ai.agent.name": resolved_harness,
                 "gen_ai.request.model": slug,
                 "agent.cli_argv": cli_argv,
             }
@@ -536,11 +676,26 @@ async def run_with_model_chain(
                 ) as _call_span:
                     pass
 
-                if result.success:
+                skip_reason = _classify_skip_reason(result, chain_index)
+                # Live path: IncrementalReview ``report_progress`` and
+                # non-review modes are complete even without a terminal
+                # submit. Scripted tests omit ``tool_state`` and keep D13
+                # (success without a verdict still advances).
+                if (
+                    skip_reason == FallbackReason.no_terminal_verdict
+                    and tool_state is not None
+                    and not _is_incomplete_review_success(result, tool_state)
+                ):
+                    skip_reason = None
+                elif skip_reason == FallbackReason.no_terminal_verdict and (
+                    result.diagnostics or {}
+                ).get("rejection_reason"):
+                    skip_reason = FallbackReason.semantic_rejection
+                if skip_reason is None:
                     attempt_span.set_status("ok")
                     terminal_status = "ok"
                     logger.info("» model chain succeeded slug={}", slug)
-                elif not _is_retryable_failure(result):
+                elif not result.success and not _is_retryable_failure(result):
                     attempt_span.set_status("error", result.error or "unknown error")
                     terminal_status = "error"
                     logger.warning(
@@ -554,29 +709,41 @@ async def run_with_model_chain(
                         msg = (
                             "configuration error: allow_fallback is false — refusing "
                             f"model fallback from unavailable primary {slug!r}: "
-                            f"{result.error or 'unknown error'}"
+                            f"{result.error or 'incomplete review result'}"
                         )
                         raise ModelFallbackPolicyError(msg)
+                    last_skip_reason = skip_reason
                     nxt = chain[chain_index + 1]
-                    attempt_span.set_status("retryable", result.error or "unknown error")
-                    # W10.3 — structured, operator-visible warning (must name
-                    # "fallback"; also stamped onto result.metadata below).
+                    attempt_span.set_status(
+                        "retryable",
+                        result.error or skip_reason.value,
+                    )
+                    terminal_status = "retryable"
                     logger.warning(
-                        "model fallback occurred: requested={} failed ({}); "
+                        "model fallback occurred: requested={} skipped ({}) — "
                         "advancing to executed={} (fallback_index={})",
                         requested_model or slug,
-                        result.error or "unknown error",
+                        skip_reason.value,
                         nxt,
                         chain_index + 1,
                     )
-                else:
+                elif not result.success and _is_retryable_failure(result):
                     attempt_span.set_status("retryable", result.error or "unknown error")
+                    terminal_status = "retryable"
                     logger.warning(
                         "» model chain slug={} failed (retryable): {} — retrying ({}/{})",
                         slug,
                         result.error or "unknown error",
                         attempts,
                         max_attempts,
+                    )
+                else:
+                    attempt_span.set_status("error", skip_reason.value)
+                    terminal_status = "error"
+                    logger.warning(
+                        "» model chain slug={} unusable at chain tail: {}",
+                        slug,
+                        skip_reason.value,
                     )
 
             # The ``agent.attempt`` span has now closed and emitted. Emit
@@ -594,6 +761,7 @@ async def run_with_model_chain(
                         parent_span_id=root_parent_id,
                         slug=follow_on_slug,
                         fallback_index=chain_index,
+                        settings=settings,
                     )
                 # Propagate the terminal status to the root span so the
                 # trace tree's top-level ``mergecraft.run`` span reflects
@@ -609,6 +777,7 @@ async def run_with_model_chain(
                     requested_model=requested_model or slug,
                     executed_model=slug,
                     fallback_index=winner_index,
+                    fallback_reason=last_skip_reason,
                 )
                 if terminal_status == "ok":
                     _root.set_status("ok")
@@ -644,6 +813,66 @@ def _agent_mode_for_slug(slug: str) -> str:
     if provider == "cursor":
         return "cursor"
     return "opencode"
+
+
+_NATIVE_HARNESS_PROVIDERS: dict[str, frozenset[str]] = {
+    "codex": frozenset({"openai"}),
+    "claude": frozenset({"anthropic"}),
+    "gemini": frozenset({"google"}),
+    "cursor": frozenset({"cursor"}),
+}
+
+# OpenCode is the generic multi-provider harness: gateway presets, custom
+# slugs, and explicit overrides (openai / anthropic under ``harness: opencode``).
+_OPENCODE_NATIVE_PROVIDERS = frozenset({"nous", "tokenhub", "minimax", "openai", "anthropic"})
+_KNOWN_CATALOG_PROVIDERS = frozenset(
+    {
+        "anthropic",
+        "openai",
+        "google",
+        "cursor",
+        "bedrock",
+        "vertex",
+        "nous",
+        "tokenhub",
+        "minimax",
+    }
+)
+
+
+def _harness_supports_provider(harness: str, provider: str) -> bool:
+    """Return whether ``harness`` may run models from ``provider``."""
+    if harness == "opencode":
+        if provider in _OPENCODE_NATIVE_PROVIDERS:
+            return True
+        # Custom / unknown catalog prefixes route through OpenCode today.
+        return provider not in _KNOWN_CATALOG_PROVIDERS
+    native = _NATIVE_HARNESS_PROVIDERS.get(harness)
+    return native is not None and provider in native
+
+
+def resolve_harness(settings: RepoSettings, slug: str) -> str:
+    """Resolve the agent harness for ``slug`` under ``settings`` (HA3 / D11).
+
+    When ``settings.harness`` is unset, delegates to today's
+    :func:`_agent_mode_for_slug` inference. When set, validates the
+    (harness, provider, model) triple and returns the explicit value.
+    Unsupported combinations raise :class:`ModelFallbackPolicyError` so
+    ``main._classify_error_outcome`` maps them to ``configuration_error``.
+    """
+    if settings.harness is None:
+        return _agent_mode_for_slug(slug)
+
+    harness = settings.harness
+    provider = _agent_provider_for_slug(slug)
+    if _harness_supports_provider(harness, provider):
+        return harness
+
+    msg = (
+        f"configuration error: harness {harness!r} is incompatible with "
+        f"model {slug!r} (provider {provider!r})"
+    )
+    raise ModelFallbackPolicyError(msg)
 
 
 def _cost_attrs_from_usage(usage: Any) -> dict[str, Any]:
@@ -717,12 +946,26 @@ def _snapshot_attrs(
     return _snap
 
 
+def _attempt_harness_label(settings: RepoSettings | None, slug: str) -> str:
+    """Harness name stamped on an attempt span, including synthetic follow-ons.
+
+    Visited attempts validate via :func:`resolve_harness`. Not-visited
+    follow-ons must not re-validate (an unused tail slug can be an
+    unsupported combo) but still stamp the operator's explicit ``harness:``
+    so the trace does not mix override labels with inferred ones.
+    """
+    if settings is not None and settings.harness is not None:
+        return settings.harness
+    return _agent_mode_for_slug(slug)
+
+
 def _emit_advanced_attempt(
     tracer: Any,
     *,
     parent_span_id: str | None,
     slug: str,
     fallback_index: int,
+    settings: RepoSettings | None = None,
 ) -> None:
     """Emit a synthetic ``agent.attempt`` span for a chain entry the runtime loop skipped past.
 
@@ -733,15 +976,18 @@ def _emit_advanced_attempt(
     ``"not_visited"`` so consumers can distinguish it from a real
     ``"skipped"`` (no credentials/binary) entry.
     """
+    harness = _attempt_harness_label(settings, slug)
     attrs = {
         "model.id": slug,
         "model.provider": _agent_provider_for_slug(slug),
-        "model.mode": _agent_mode_for_slug(slug),
+        "model.mode": harness,
         "model.fallback_index": fallback_index,
         "agent.provider": _agent_provider_for_slug(slug),
-        "agent.mode": _agent_mode_for_slug(slug),
+        "agent.mode": harness,
+        "harness": harness,
+        "agent.harness": harness,
         "gen_ai.system": _agent_provider_for_slug(slug),
-        "gen_ai.agent.name": _agent_mode_for_slug(slug),
+        "gen_ai.agent.name": harness,
         "gen_ai.request.model": slug,
         "agent.cli_argv": _redacted_cli_argv(),
     }
@@ -844,8 +1090,19 @@ def resolve_model(*, slug: str | None = None, respect_env_override: bool = True)
     return None
 
 
-def resolve_runtime_agent(*, model: str | None = None) -> Agent:
-    """Pick claude vs opencode based on model + available credentials."""
+def resolve_runtime_agent(
+    *,
+    model: str | None = None,
+    settings: RepoSettings | None = None,
+) -> Agent:
+    """Pick the runtime agent from model, credentials, and optional ``harness:``.
+
+    ``MERGECRAFT_AGENT`` still wins when set. When ``settings.harness`` is
+    set, the explicit harness is validated against the model (D11) and
+    returned — so ``harness: opencode`` with an OpenAI slug runs OpenCode
+    instead of Codex. When unset, today's provider/credential inference
+    applies, including fail-loud for missing native-harness credentials.
+    """
     env_agent = os.environ.get("MERGECRAFT_AGENT", "").strip()
     if env_agent:
         if env_agent in agents:
@@ -853,6 +1110,10 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
         logger.warning(
             '» unknown MERGECRAFT_AGENT="{}" — falling through to auto-select', env_agent
         )
+
+    if settings is not None and settings.harness is not None:
+        harness = resolve_harness(settings, model) if model else settings.harness
+        return resolve_agent(harness)
 
     if model and _has_bedrock_auth() and os.environ.get(BEDROCK_MODEL_ID_ENV, "").strip() == model:
         return agents["claude"] if is_bedrock_anthropic_id(model) else agents["opencode"]
@@ -923,6 +1184,7 @@ def resolve_runtime_agent(*, model: str | None = None) -> Agent:
 
 
 __all__ = [
+    "FallbackReason",
     "ModelFallbackPolicyError",
     "effective_model_chain",
     "effective_model_slugs",
@@ -930,8 +1192,11 @@ __all__ = [
     "is_runnable_model_slug",
     "pick_runnable_slug_from_chain",
     "promote_model_evidence",
+    "resolve_effective_model_slug",
+    "resolve_harness",
     "resolve_model",
     "resolve_runtime_agent",
     "run_with_model_chain",
     "select_runnable_model_slug",
+    "stamp_attempt_id",
 ]

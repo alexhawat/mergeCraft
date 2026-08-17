@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -51,6 +51,7 @@ def get_commit_info_tool(ctx: ToolContext):
 
     return tool(
         name="get_commit_info",
+        tool_class=ToolClass.REPOSITORY_READ,
         description=(
             "Retrieve commit metadata and diff via GitHub API. Returns diffFile "
             "pointing to formatted diff."

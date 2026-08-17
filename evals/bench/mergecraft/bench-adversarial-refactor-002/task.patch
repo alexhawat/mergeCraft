@@ -1,0 +1,16 @@
+diff --git a/src/mergecraft/analyzers/label.py b/src/mergecraft/analyzers/label.py
+--- a/src/mergecraft/analyzers/label.py
++++ b/src/mergecraft/analyzers/label.py
+@@ -3,7 +3,11 @@
+ from __future__ import annotations
+
+
++def _short(text: str) -> str:
++    return text[:1].upper()
++
++
+ def finding_label(severity: str, category: str) -> str:
+-    sev = severity[:1].upper()
++    sev = _short(severity)
+     cat = category.split(" ")[0].upper()
+     return f"[{sev}/{cat}]"

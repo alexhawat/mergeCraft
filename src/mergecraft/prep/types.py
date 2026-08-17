@@ -27,7 +27,21 @@ class PrepResult:
     dependencies_installed: bool
     package_manager: str | None = None
     config_file: str | None = None
+    skipped: bool = False
     issues: list[str] = field(default_factory=list)
+
+
+def is_prep_install_failure(result: PrepResult) -> bool:
+    """True when a language prep step attempted an install and failed.
+
+    A policy skip (``shell: disabled`` / ``ignore_scripts``) is not an
+    install failure. W6.1 fail-closed must not map that skip to
+    ``RunOutcome.inconclusive`` — otherwise a completed review of a Python
+    repo never posts ``mergecraft-approval``.
+    """
+    if result.skipped or result.dependencies_installed:
+        return False
+    return bool(result.issues)
 
 
 class PrepDefinition(Protocol):
@@ -45,4 +59,5 @@ __all__ = [
     "PrepOptions",
     "PrepResult",
     "PythonPackageManager",
+    "is_prep_install_failure",
 ]

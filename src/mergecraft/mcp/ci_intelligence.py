@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -34,6 +34,7 @@ def analyze_ci_failures_tool(ctx: ToolContext):
 
     return tool(
         name="analyze_ci_failures",
+        tool_class=ToolClass.ANALYSIS,
         timeout_ms=600_000,
         description=(
             "Fetch failing CI workflow logs for a check suite, cluster root causes, classify "

@@ -1,0 +1,12 @@
+diff --git a/src/mergecraft/utils/quota.py b/src/mergecraft/utils/quota.py
+--- a/src/mergecraft/utils/quota.py
++++ b/src/mergecraft/utils/quota.py
+@@ -5,7 +5,7 @@
+
+ def is_over_budget(used: int, limit: int) -> bool:
+     """Return True when usage has reached or exceeded the limit."""
+-    return used >= limit
++    return used > limit
+
+
+ def remaining(used: int, limit: int) -> int:

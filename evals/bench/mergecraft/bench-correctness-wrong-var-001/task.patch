@@ -1,0 +1,9 @@
+diff --git a/src/mergecraft/evals/aggregate.py b/src/mergecraft/evals/aggregate.py
+--- a/src/mergecraft/evals/aggregate.py
++++ b/src/mergecraft/evals/aggregate.py
+@@ -7,4 +7,4 @@
+     """Return mean recall across ``count`` cases."""
+     if count == 0:
+         return 0.0
+-    return total_recall / count
++    return total_precision / count

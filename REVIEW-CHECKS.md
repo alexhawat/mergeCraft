@@ -70,6 +70,42 @@ to `decide_approval(packet, …)`, the explicit `Decision` row on the
 packet wins over every other signal — including the recorded
 `self_assessment`.
 
+## Terminal verdict vs structural verdict (VP2)
+
+A review run is not complete until the agent records a **terminal
+submission** through `submit_review_verdict`. Provider success, review
+prose, and `create_pull_request_review` publication are separate acts:
+
+- **Agent verdict** — the model's `approve` / `request_changes` choice,
+  summary, and structured findings submitted through the typed MCP tool.
+  This is the only signal that answers "did a review happen on this
+  attempt?"
+- **Structural verdict** — what `decide_approval` computes from typed
+  findings, `run_succeeded`, and trust tier. Narrative output and
+  `ApprovalRecord.would_approve` are advisory only and never override a
+  confirmed blocker.
+
+**Schema vs semantic validation.** The tool rejects unknown fields and
+invalid verdict enums at parse time. After schema validation,
+`validate_submission` applies semantic rules server-side: `request_changes`
+with zero findings, `approve` over a verifier-confirmed Critical/Major
+blocker, and `approve` while a required deterministic gate failed are all
+rejected with a typed `rejection_reason`. A rejected submission does not
+set `terminal_submission_received` — the attempt is fallback-eligible and
+maps to `RunOutcome.inconclusive`, same as no submission at all.
+
+**Why prose is not authoritative.** Text such as "LGTM" in `result.output`
+has never been an input to `decide_approval` and cannot approve a pull
+request. A run whose provider returned successfully but never called
+`submit_review_verdict` now reports `inconclusive` (`neutral` check
+conclusion) instead of `passed`.
+
+**Fallback interaction.** Semantic fallback advances when
+`terminal_submission_received` is false — whether because no submission
+was recorded or because the validator rejected one. A valid
+`request_changes` verdict with confirmed findings is a usable result and
+does not trigger fallback.
+
 ## 1. Code correctness and risk
 
 The reviewer reads the whole diff itself, then picks the **lenses** the PR actually warrants and investigates each as a falsifiable question — optionally dispatching a `mergecraft-reviewer` subagent per lens so they run in parallel. Nothing here is a fixed pass; a docs-only diff gets none of it.

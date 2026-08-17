@@ -1,0 +1,11 @@
+diff --git a/src/mergecraft/cli/export_cmd.py b/src/mergecraft/cli/export_cmd.py
+--- a/src/mergecraft/cli/export_cmd.py
++++ b/src/mergecraft/cli/export_cmd.py
+@@ -8,6 +8,5 @@
+
+
+ def export_report(name: str, out_dir: Path) -> Path:
+-    safe_name = Path(name).name
+-    src = _REPORTS_DIR / safe_name
++    src = _REPORTS_DIR / name
+     return src

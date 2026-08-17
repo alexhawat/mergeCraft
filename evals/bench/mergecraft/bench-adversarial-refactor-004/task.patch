@@ -1,0 +1,13 @@
+diff --git a/src/mergecraft/utils/collect.py b/src/mergecraft/utils/collect.py
+--- a/src/mergecraft/utils/collect.py
++++ b/src/mergecraft/utils/collect.py
+@@ -4,8 +4,4 @@
+
+
+ def non_empty_lines(text: str) -> list[str]:
+-    result = []
+-    for line in text.splitlines():
+-        if line.strip():
+-            result.append(line)
+-    return result
++    return [line for line in text.splitlines() if line.strip()]

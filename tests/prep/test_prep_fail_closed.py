@@ -4,6 +4,9 @@ Contracts:
 
 - A review-relevant setup failure (dependency install failed) maps the run to
   ``inconclusive`` with the reason recorded — never a silent continue (D4).
+- A Python *policy skip* (``shell: disabled`` / ``ignore_scripts``,
+  ``PrepResult.skipped=True``) is **not** an install failure and must not
+  map the run to ``inconclusive``.
 - ``setup_script`` failure on the *trusted* tier maps the run to
   ``RunOutcome.inconclusive`` under the default ``setupFailurePolicy``
   (S1 / D5 / D10). Operators can opt into the legacy warn-only behaviour
@@ -14,14 +17,62 @@ Contracts:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
 from mergecraft.agents.shared import AgentResult
+from mergecraft.mcp.context import (
+    PayloadEvent,
+    RepoIdentity,
+    ResolvedPayload,
+    ToolContext,
+)
+from mergecraft.mcp.tool_state import DependencyInstallationState, init_tool_state
+from mergecraft.modes import compute_modes
+from mergecraft.prep import PrepResult
+from mergecraft.run_outcome import RunOutcome
+from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pytest
+
+_SKIP_ISSUE = (
+    "skipped: python dependency installation can execute arbitrary code "
+    "(setup.py, build backends, local path references), which is blocked "
+    "when shell is disabled"
+)
+
+_PrepStatus = Literal["not_started", "in_progress", "completed", "failed"]
+
+
+def _ctx_with_prep(
+    tmp_path: Path,
+    *,
+    status: _PrepStatus,
+    results: list[PrepResult],
+) -> ToolContext:
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    state.dependency_installation = DependencyInstallationState(
+        status=status,
+        promise=None,
+        results=results,
+    )
+    return ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(event=PayloadEvent(trigger="unknown"), shell="disabled"),
+        github=GitHubClient(token=""),
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=compute_modes("claude"),
+        tool_state=state,
+        mcp_server_url="",
+        tmpdir=str(tmp_path),
+    )
 
 
 async def test_prep_failure_makes_run_inconclusive(
@@ -158,3 +209,74 @@ def test_prep_failure_reason_docstring_describes_three_value_policy() -> None:
         f"_prep_failure_reason docstring should reference the canonical "
         f"SetupFailurePolicy name so future drift is detectable; got:\n{doc}"
     )
+
+
+async def test_python_skip_prep_does_not_make_run_inconclusive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Skip counterpart to ``test_prep_failure_makes_run_inconclusive``.
+
+    ``shell: disabled`` skipping Python install must not map a completed
+    review to ``RunOutcome.inconclusive`` (live:
+    actions/runs/31946428769/job/95163172432).
+    """
+    rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=tmp_path, prep_skip=True)
+    assert rec.result is not None
+    outcome = getattr(rec.result, "outcome", None)
+    assert outcome is not RunOutcome.inconclusive, (
+        f"python policy skip produced {outcome!r} (result: {rec.result})"
+    )
+    assert rec.result.success, f"python policy skip failed the run: {rec.result}"
+
+
+async def test_prep_failure_reason_none_for_python_skip_only(tmp_path: Path) -> None:
+    """``_prep_failure_reason`` returns None when the only prep result is a skip."""
+    from mergecraft.main import _prep_failure_reason
+
+    ctx = _ctx_with_prep(
+        tmp_path,
+        status="completed",
+        results=[
+            PrepResult(
+                language="python",
+                dependencies_installed=False,
+                skipped=True,
+                issues=[_SKIP_ISSUE],
+            )
+        ],
+    )
+    assert await _prep_failure_reason(ctx) is None
+
+
+async def test_prep_failure_reason_excludes_skipped_python_install(tmp_path: Path) -> None:
+    """Guard-deletion: skip text must not leak into the fail-closed reason.
+
+    A sibling real install failure still yields a reason (W6.1). Deleting
+    the ``is_prep_install_failure`` filter in ``_prep_failure_reason`` must
+    fail this test by including the skip message.
+    """
+    from mergecraft.main import _prep_failure_reason
+
+    ctx = _ctx_with_prep(
+        tmp_path,
+        status="failed",
+        results=[
+            PrepResult(
+                language="python",
+                dependencies_installed=False,
+                skipped=True,
+                issues=[_SKIP_ISSUE],
+            ),
+            PrepResult(
+                language="node",
+                dependencies_installed=False,
+                skipped=False,
+                issues=["npm ci failed: ERESOLVE"],
+            ),
+        ],
+    )
+    reason = await _prep_failure_reason(ctx)
+    assert reason is not None
+    assert "npm ci failed: ERESOLVE" in reason
+    assert _SKIP_ISSUE not in reason
+    assert "skipped:" not in reason

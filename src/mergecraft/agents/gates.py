@@ -14,12 +14,17 @@ from mergecraft.evidence.gate_policy import GateActionPolicy as GateActionPolicy
 from mergecraft.evidence.packet import Decision as PacketDecision
 from mergecraft.evidence.packet import MergeEvidencePacket
 from mergecraft.mcp.server import build_orchestrator_tools
+from mergecraft.mcp.shared import (
+    REVIEWER_ALLOWED_TOOL_CLASSES,
+    JsonSchema,
+    ToolClass,
+    admits_readonly_role,
+)
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.mcp.context import ToolContext
-    from mergecraft.mcp.shared import JsonSchema
     from mergecraft.utils.status_checks import Conclusion
 
 # OpenCode Wildcard dialect write denies for the entire .git tree
@@ -52,19 +57,48 @@ GIT_NATIVE_READ_DENY_CLAUDE: list[str] = [f"{tool}(.git/config)" for tool in CLA
 # one source of truth.
 BLOCKING_SEVERITIES: Final[frozenset[str]] = frozenset({"Critical", "Major"})
 
+# Terminal-protocol tools are orchestrator-only even when ``mutates=False``.
+TERMINAL_PROTOCOL_DENIED_TOOL_NAMES: Final[frozenset[str]] = frozenset({"submit_review_verdict"})
+
+
+def _denied_tool_names_for_allowed_classes(
+    ctx: ToolContext,
+    allowed: frozenset[ToolClass],
+    *,
+    role: str,
+    output_schema: JsonSchema | None = None,
+) -> list[str]:
+    registered = build_orchestrator_tools(ctx, output_schema)
+    names = [spec.name for spec in registered if not admits_readonly_role(spec, allowed)]
+    if not names:
+        msg = (
+            f"{role} deny list derived empty — no MCP tool is outside the role's "
+            "allowed read-only surface. refusing to start with the gate effectively disabled."
+        )
+        raise RuntimeError(msg)
+    return names
+
 
 def subagent_denied_tool_names(
     ctx: ToolContext,
     output_schema: JsonSchema | None = None,
 ) -> list[str]:
-    """Canonical bare names of every state-mutating MCP tool for this run."""
-    names = [t.name for t in build_orchestrator_tools(ctx, output_schema) if t.mutates]
-    if not names:
-        msg = (
-            "subagent deny list derived empty — no MCP tool is marked mutates=True. "
-            "refusing to start with the subagent gate effectively disabled."
-        )
-        raise RuntimeError(msg)
+    """Canonical bare names denied to reviewer-like subagents.
+
+    Derivation is the complement of ``admits_readonly_role`` (class filter
+    intersected with ``mutates``). ``TERMINAL_PROTOCOL_DENIED_TOOL_NAMES`` is
+    unioned so a ``mutates=False`` terminal tool cannot drop off the deny list
+    if it is misclassified.
+    """
+    names = _denied_tool_names_for_allowed_classes(
+        ctx,
+        REVIEWER_ALLOWED_TOOL_CLASSES,
+        role="subagent",
+        output_schema=output_schema,
+    )
+    for terminal_name in TERMINAL_PROTOCOL_DENIED_TOOL_NAMES:
+        if terminal_name not in names:
+            names.append(terminal_name)
     return names
 
 
@@ -88,6 +122,16 @@ def build_opencode_native_fs_permission() -> dict[str, object]:
 def _has_blocker(findings: list[Finding]) -> bool:
     """True iff any finding carries a severity the gate treats as blocking."""
     return any(f.severity in BLOCKING_SEVERITIES for f in findings)
+
+
+def has_failed_required_static_check(static_checks: list[dict[str, str]]) -> bool:
+    """True when any ``run_static_checks`` row reports ``status: failed``.
+
+    The terminal-verdict validator consults this for ``approve`` submissions.
+    Only ``failed`` is a negative gate signal — ``unavailable`` and friends are
+    honest skips, not blockers.
+    """
+    return any(row.get("status") == "failed" for row in static_checks)
 
 
 @overload
@@ -487,6 +531,7 @@ __all__ = [
     "decide_action",
     "decide_approval",
     "decision_summary_lines",
+    "has_failed_required_static_check",
     "log_decision",
     "select_rule_id",
     "subagent_denied_tool_names",

@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-crossfile-api-signature-001",
+      "path": "src/mergecraft/action/runner.py",
+      "start_line": 210,
+      "end_line": 215,
+      "title": "dispatch_review's call site not updated after run_review gained a required trust_tier argument",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

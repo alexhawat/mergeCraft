@@ -11,7 +11,7 @@ from urllib.parse import urljoin
 import httpx
 from loguru import logger
 
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -83,6 +83,7 @@ def upload_file_tool(ctx: ToolContext):
 
     return tool(
         name="upload_file",
+        tool_class=ToolClass.GITHUB_MUTATION,
         mutates=True,
         description=(
             "Upload a file to get a permanent public URL. Max 10MB. "

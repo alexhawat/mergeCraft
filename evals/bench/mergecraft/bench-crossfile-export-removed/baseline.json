@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-crossfile-export-removed-001",
+      "path": "src/mergecraft/cli/main.py",
+      "start_line": 8,
+      "end_line": 8,
+      "title": "main.py still imports legacy_review_command after it was deleted from review_cmd.py",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

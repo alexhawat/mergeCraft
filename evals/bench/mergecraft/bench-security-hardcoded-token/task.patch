@@ -1,0 +1,10 @@
+diff --git a/scripts/debug_client.py b/scripts/debug_client.py
+--- a/scripts/debug_client.py
++++ b/scripts/debug_client.py
+@@ -9,5 +9,5 @@
+
+ def make_client() -> httpx.Client:
+     base_url = "https://api.example.com"
+-    headers = {"Authorization": f"Bearer {os.environ['MERGECRAFT_DEBUG_TOKEN']}"}
++    headers = {"Authorization": "Bearer sk-live-51H8x9K2example0000000000"}
+     return httpx.Client(base_url=base_url, headers=headers)

@@ -62,6 +62,8 @@ Inspired by [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 | 💻 **Offline mode** | `mergecraft diff-review` reviews local diffs or patch files, no PR required — `--json` for benchmarks |
 | 🧪 **Eval infrastructure** | Evidence packets, eval bank replay, and gate-and-bench scoring built in — benchmark numbers unpublished; run `make eval-replay` locally (see [evals/README.md](evals/README.md)) |
 
+**Terminal verdict (default: enforce).** `gates.terminal_verdict` defaults to `enforce`: a run without a validated `submit_review_verdict` submission reports `inconclusive`. Set `gates.terminal_verdict: shadow` in `.mergecraft/config.yaml` to log diagnostics only. `create_pull_request_review` records through the same validator as `submit_review_verdict` and cannot approve without a validated terminal submission.
+
 ## 🗂️ Repository layout
 
 One row per root-level directory, for anyone who has just cloned:
@@ -402,6 +404,7 @@ described below); the *effective* runtime default when left unset is
 |--------|-------------|
 | `evidence_packet` | JSON body of this run's Merge Evidence Packet (#47) — the versioned, structured record of the findings, deterministic checks, blast-radius lane, self-assessment, and decision behind the review. Emitted via `$GITHUB_OUTPUT` as multiline JSON (not a filesystem path). Empty when the run had no pull request to attest to. To upload as an artifact, write the output to a file in a later step. Schema: `docs/evidence-packet.md`. |
 | `result` | Set when the prompt requests it; required when output_schema is provided. |
+| `verdict_diagnostic` | Closed VerdictDiagnostic code from the terminal-verdict policy path for this run. Empty when the run did not evaluate terminal protocol policy. |
 <!-- END:action-outputs -->
 
 #### Worked example — Nous-hosted DeepSeek V4 Flash
@@ -457,6 +460,24 @@ The `env_key` field references the **env-var name**, not the resolved
 key value — convention 7. The harness reads the env var at exec time.
 
 #### Which harness handles which
+
+**Harness vs provider vs model.** OpenCode is the generic multi-provider
+harness (OpenAI-compatible gateways, Nous, TokenHub, custom providers).
+Codex is the OpenAI-native harness. **Nous** is a *provider* (inference
+gateway); **DeepSeek** is a *model family* under that provider — not a
+harness name. Set `harness:` in `.mergecraft/config.yaml` to pick the
+runtime independently of `model:`; when unset, mergeCraft infers the
+harness from the model slug (see matrix below).
+
+| Model slug (unset `harness`) | Inferred harness | Explicit override exercised by tests |
+|------------------------------|------------------|--------------------------------------|
+| `nous/deepseek-v4-flash` | `opencode` | — |
+| `nous/deepseek/deepseek-v4-flash` | `opencode` | — |
+| `openai/gpt-5.3-codex` | `codex` | `harness: opencode` → `opencode` |
+| `anthropic/claude-sonnet` | `claude` | `harness: opencode` → `opencode` |
+| `google/gemini-3.1-pro-preview` | `gemini` | — |
+| `cursor/cloud-agent` | `cursor` | — |
+| `nous/deepseek/deepseek-v4-flash` + `harness: claude` | — | **configuration error** (names both halves) |
 
 | Harness | Format written | Where it lives |
 |---------|----------------|----------------|
@@ -545,6 +566,9 @@ of them for its full flag set):
 <!-- BEGIN:cli-commands -->
 | Command | Description |
 |---------|-------------|
+| `mergecraft agents list` | List agent bindings with model chain, prompt id, and tool count. |
+| `mergecraft agents set <role>` | Write a single agent binding override into `.mergecraft/config.yaml`. |
+| `mergecraft agents show <role>` | Show resolved prompt text and MCP tool names for one role. |
 | `mergecraft analyzers detect` | Show analyzers that would run for changed paths in this repo. |
 | `mergecraft analyzers docs` | Regenerate `docs/ANALYZERS.md` from manifests. |
 | `mergecraft analyzers explain <analyzer-id>` | Print manifest fields and notes for one analyzer. |
@@ -563,6 +587,7 @@ of them for its full flag set):
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
 | `mergecraft diff-review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft eval add` | Add a case to the bank. |
+| `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval gate` | Check the eval bank's integrity — the CI-safe half of the eval loop. |
 | `mergecraft eval list` | List cases in the bank. |
 | `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44, W12.1). |
@@ -576,9 +601,15 @@ of them for its full flag set):
 | `mergecraft learnings active` | List only the active (promoted) learning entries. |
 | `mergecraft learnings influence` | List active + staging learning entries with their provenance. |
 | `mergecraft learnings staging` | List only the staging (quarantined) learning entries. |
+| `mergecraft lens list` | List bundled lens ids and display titles. |
+| `mergecraft lens show <lens-id>` | Show rubric, triggers, evidence, and tool classes for one lens. |
+| `mergecraft lens test <lens-id>` | Preview one lens dispatch (rubric + routing context) for a diff fixture. |
 | `mergecraft models list` | List curated model slugs and whether credentials are detected locally. |
 | `mergecraft models set <slugs>` | Write an ordered `models:` list to `.mergecraft/config.yaml`. |
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |
+| `mergecraft pipeline explain` | Print pipeline step ids and predicate vocabulary. |
+| `mergecraft pipeline lint` | Validate the pipeline file and registry agent references. |
+| `mergecraft pipeline show --diff DIFF` | Preview which pipeline steps would run or skip for a diff. |
 | `mergecraft traces show <run-id>` | Read back the local JSONL traces for the given run id (re-redacts on render). |
 | `mergecraft tracing logfire disable` | Disable Logfire tracing by removing the token + project locally and on GitHub. |
 | `mergecraft tracing logfire enable` | Enable Logfire tracing by writing the token + project locally and on GitHub. |

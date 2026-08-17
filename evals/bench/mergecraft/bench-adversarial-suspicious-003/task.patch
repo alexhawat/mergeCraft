@@ -1,0 +1,17 @@
+diff --git a/src/mergecraft/review_taxonomy_labels.py b/src/mergecraft/review_taxonomy_labels.py
+--- a/src/mergecraft/review_taxonomy_labels.py
++++ b/src/mergecraft/review_taxonomy_labels.py
+@@ -5,4 +5,13 @@
+ SEVERITY_EMOJI: dict[str, str] = {
+     "Critical": "🔴",
+     "Major": "🟠",
++    "Minor": "🟡",
++    "Trivial": "⚪",
+ }
++
++SEVERITY_ORDER: dict[str, int] = {
++    "Critical": 0,
++    "Major": 1,
++    "Minor": 2,
++    "Trivial": 3,
++}

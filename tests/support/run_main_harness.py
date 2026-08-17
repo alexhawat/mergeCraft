@@ -181,6 +181,7 @@ async def run_main_for_test(
     agent: FakeAgent | None = None,
     agents_by_slug: dict[str, FakeAgent] | None = None,
     prep_failure: str | None = None,
+    prep_skip: bool = False,
     setup_script_rc: int = 0,
     setup_script_stdout: bytes = b"",
     setup_script_stderr: bytes = b"",
@@ -194,7 +195,9 @@ async def run_main_for_test(
     Parameters select the scenario; every collaborator records into the
     returned :class:`MainRunRecord`. ``prep_failure`` (a reason string) makes
     the dependency-installation state land in ``failed`` before the agent runs,
-    emulating a broken prep phase. ``cleanup_tmpdir=False`` leaves the run's
+    emulating a broken prep phase. ``prep_skip=True`` injects a Python policy
+    skip (``skipped=True``, ``status="completed"``) — ``shell: disabled`` must
+    not map that skip to ``RunOutcome.inconclusive``. ``cleanup_tmpdir=False`` leaves the run's
     temp dir alone so cleanup-contract tests can observe what ``main()`` did.
     """
     repo_root = tmp_path / "workspace"
@@ -310,7 +313,7 @@ async def run_main_for_test(
     agent_map: dict[str, FakeAgent] = dict(agents_by_slug or {})
     default_agent = agent if agent is not None else FakeAgent()
 
-    def _fake_resolve_runtime_agent(model: str | None = None) -> FakeAgent:
+    def _fake_resolve_runtime_agent(model: str | None = None, **_kwargs: object) -> FakeAgent:
         if model is not None and model in agent_map:
             return agent_map[model]
         return default_agent
@@ -348,6 +351,26 @@ async def run_main_for_test(
                         language="python",
                         dependencies_installed=False,
                         issues=[prep_failure],
+                    )
+                ],
+            )
+        elif prep_skip:
+            # Mirrors ``start_installation``'s done-callback after a Python
+            # ``ignore_scripts`` skip: issues may describe the skip, but
+            # ``skipped=True`` keeps status ``completed`` (not ``failed``).
+            tool_context.tool_state.dependency_installation = DependencyInstallationState(
+                status="completed",
+                promise=None,
+                results=[
+                    PrepResult(
+                        language="python",
+                        dependencies_installed=False,
+                        skipped=True,
+                        issues=[
+                            "skipped: python dependency installation can execute arbitrary code "
+                            "(setup.py, build backends, local path references), which is blocked "
+                            "when shell is disabled"
+                        ],
                     )
                 ],
             )

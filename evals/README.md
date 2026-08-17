@@ -89,10 +89,52 @@ Each result set records:
 - `corpus_commit` (git SHA of the case files)
 - structural decision-replay pass rate across the bank
 
-Finding-location **precision / recall / F1** and false-positives-per-run are
-written only when a live run completes across ≥2 configured providers. With
-missing API keys the harness records `skipped: no live credential` and omits
-those metrics — do not fabricate a table in the README.
+Finding-location **precision / recall / F1** and false-positives-per-run come
+from a live run. With missing API keys the harness records `skipped: no live
+credential` and omits those metrics — do not fabricate a table in the README.
+
+`mergecraft eval bench` runs **one** provider/model per invocation — its
+`detection` section is that single provider's result, not the full
+comparison. **Publishing requires ≥2 configured providers** (D12: reported
+per provider, never averaged) — run `eval bench` once per provider (each
+call gets its own timestamped result set and raw-findings directory, so
+nothing overwrites an earlier run's evidence) and combine the separate files
+at publication time (B7). A single-provider result set committed along the
+way is an honest partial artifact, not a claim that D12 is satisfied.
+
+### Two corpora, two questions (D7)
+
+`evals/cases/` (the bank above) and `evals/bench/mergecraft/` (below) answer
+different questions and are never conflated:
+
+| | `evals/cases/` (bank) | `evals/bench/mergecraft/` (detection corpus) |
+|---|---|---|
+| Question | *Did the gate make the right decision?* | *Did the review find the right lines?* |
+| Ground truth | `recorded_findings` + `expected_decision`, no patch | a patch + `baseline.json` (`{"closed_world": bool, "issues": [...]}`) |
+| Cost | free, keyless — `replay_case()` recomputes the verdict | needs a live provider — runs `diff-review` for real |
+| Consumer | `mergecraft eval replay-bank`, the `gate_matrix` fields | `mergecraft eval bench`, the `detection` section |
+
+A bank case cannot answer a detection question (no patch to review) and a
+detection case cannot answer a gate question (no `expected_decision`) — see
+`docs/dev/test-plans/eval-benchmark-b3-live.md` for why `discover_detection_cases`
+silently ignores anything shaped like the other corpus rather than erroring.
+
+### Live detection join (B3, #140)
+
+```bash
+make bench-detect
+# or: mergecraft eval bench --model anthropic/claude-sonnet --json
+```
+
+Joins the keyless structural replay above with a live run against
+`evals/bench/mergecraft/`: each case's patch is reviewed via `diff-review`,
+scored against its `baseline.json` with `score_findings()`, and folded into
+the `detection` section of the published result set (`evals/live_run.py`).
+The structural section always populates; `detection` is `None` with a typed
+`skipped_reason` — `"no live credential"` or `"no patch-bearing cases"` — when
+it cannot run, never a fabricated zero. B4 seeded the detection corpus (43
+patch-bearing cases); as of this writing no live provider credentials are
+configured in CI, so every `bench-detect` run there reports the former.
 
 ### Seeded corpus (human-labelled, W9.0)
 
@@ -105,6 +147,13 @@ those metrics — do not fabricate a table in the README.
 
 Ground truth is the human-labelled corpus above. LLM-as-judge scoring is a
 separate measured component when live runs are enabled.
+
+Every case added by B4 (the `evals/bench/mergecraft/` detection-corpus patches
+and their `evals/cases/bench-*` bank entries) is agent-seeded/synthetic rather
+than human-mined — every such row carries `provenance: agent-seeded` — and is
+distinct from both the human-labelled table above and the human-provenance
+tripll ReviewBench corpus described earlier in this document; caveat it
+separately when publishing (B7).
 
 Provider set defaults to **Claude + OpenAI**; estimate ~10–30 tokens per case for
 a minimal live probe. Full diff-review runs are operator-triggered, not PR CI.

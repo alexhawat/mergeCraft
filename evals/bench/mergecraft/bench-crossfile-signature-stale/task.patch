@@ -1,0 +1,19 @@
+diff --git a/src/mergecraft/analyzers/adapters/registry.py b/src/mergecraft/analyzers/adapters/registry.py
+--- a/src/mergecraft/analyzers/adapters/registry.py
++++ b/src/mergecraft/analyzers/adapters/registry.py
+@@ -7,5 +7,5 @@
+ _REGISTRY: dict[str, Callable[[], object]] = {}
+
+
+-def register_adapter(name: str, factory: Callable[[], object]) -> None:
++def register_adapter(name: str, factory: Callable[[], object], *, trust_tier: str) -> None:
+     _REGISTRY[name] = factory
+diff --git a/src/mergecraft/analyzers/pipeline.py b/src/mergecraft/analyzers/pipeline.py
+--- a/src/mergecraft/analyzers/pipeline.py
++++ b/src/mergecraft/analyzers/pipeline.py
+@@ -9,4 +9,5 @@
+
+
+ def wire_default_adapters() -> None:
++    logger.debug("wiring default analyzer adapters")
+     register_adapter("ruff", make_ruff_adapter)

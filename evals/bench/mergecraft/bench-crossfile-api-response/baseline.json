@@ -1,0 +1,15 @@
+{
+  "closed_world": false,
+  "issues": [
+    {
+      "id": "bench-crossfile-api-response-001",
+      "path": "src/mergecraft/cli/pipeline_cmd.py",
+      "start_line": 12,
+      "end_line": 12,
+      "title": "print_findings still iterates run_pipeline's result as a list after it changed to a dict envelope",
+      "severity": "Critical",
+      "category": "Functional Correctness",
+      "provenance": "agent-seeded"
+    }
+  ]
+}

@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added agent registry binding model, prompt, toolset and budget per role with `mergecraft agents list|show|set` and `make agents-check`
+- Added registry-driven harness render for Claude, OpenCode, Codex, Gemini, and Cursor with per-agent models and declared Codex degradation in run metadata
+- Added typed specialist handoff, model-diversity policy for verification, and ensemble or shadow dispatch modes on agent bindings
+- Added change classifier and risk-based lens routing with recorded per-lens reasons in Review mode
+- Promoted 20 themed review lenses from Review prose into registry entries with `mergecraft lens list|show|test`
+- Added pluggable orchestrator with declarative pipeline file, trust gate for untrusted sources, and `mergecraft pipeline lint|show|explain`
+- Added declared decision nodes for hybrid orchestration — typed triviality, lens selection, and finding disposition seams with pipeline-owned control flow
+
+### Fixed
+
+- Two ensemble models that both report no findings no longer escalate to a judge (#238)
+- Reviews of Python repositories with `shell: disabled` no longer fail closed after a completed review just because dependency installation was skipped as a security policy
+- Fixed: model-chain fallback now advances when the provider succeeds without a terminal verdict; a valid `request_changes` is a usable result and does not trigger fallback
+- Fixed: explicit `harness:` now selects the runtime agent, not only span labels
+- Fixed: a previously recorded `approve` is re-validated before GitHub publish, so a later confirmed blocker cannot ship an `APPROVE` review
+- Fixed: body-only `create_pull_request_review` with `approved: false` no longer posts a GitHub `APPROVE`
+- Fixed: `create_pull_request_review` now requires established review scope in Review modes, matching `submit_review_verdict`
+
+### Changed
+
+- Changed: `gates.terminal_verdict` now defaults to `enforce`; missing terminal verdict reports `inconclusive`. Operators can still set `shadow`
+- Changed: `create_pull_request_review` now records through the same validator as `submit_review_verdict`; GitHub posting is an internal publisher, not an agent tool
+
+### Added
+
+- Added: optional `harness` setting (`opencode` / `codex` / `claude` / `gemini` / `cursor`) to select the agent runtime independently of provider/model. Existing configs with the key unset keep today's inference
+- Added: terminal-verdict protocol shadow mode (`gates.terminal_verdict`, default `shadow`) with a closed `VerdictDiagnostic` vocabulary; enforce still applies the fail-closed missing-verdict branch
+- Added: server-side semantic validation of the terminal verdict — `request_changes` with no findings, `approve` over a verifier-confirmed blocker, and `approve` with a failing required deterministic check are all rejected and fail closed
+- Added: `submit_review_verdict` — a typed MCP operation that records a review's terminal verdict
+  (`approve` / `request_changes`), summary and structured findings. Unknown fields and invalid
+  verdict values are rejected; an identical re-submission is idempotent, a conflicting one is an
+  error. Not yet enforced — the run outcome is unchanged in this release
 - `mergecraft tracing logfire wire-workflow` / `unwire-workflow` — surgical
   YAML mutation of `.github/workflows/*.yml` to wire (or strip) the four
   Logfire keys (`tracing: "true"`, `tracing-to: logfire`,
@@ -29,8 +61,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (PR G2): the README table documented 9 of 24 real `action.yml` inputs and
   neither declared output anywhere
 
+### Security
+
+- Reviewer and verifier now hold distinct, class-derived MCP toolsets; the live
+  MCP server exposes those surfaces at `/mcp/reviewer` and `/mcp/verifier`,
+  mutating tools stay off both except `checkout_pr` on the reviewer, and
+  finding-verdict persistence stays orchestrator-only
+
 ### Fixed
 
+- Fixed: terminal-verdict shadow mode now records a predicted outcome beside the legacy result on the live finalize path
+- Fixed: a body-only COMMENT is no longer recorded as `request_changes`, and body-only `request_changes` is rejected unless it has real findings
+- Fixed: publication must match the recorded terminal verdict and is re-validated before sending `APPROVE`
+- Fixed: IncrementalReview `report_progress` no longer advances the model chain
+- Fixed: Review completion via `create_pull_request_review` now records a terminal verdict, and IncrementalReview may complete via `report_progress` without mapping to `inconclusive`
+- Fixed: verifier confirms persist outside replaceable analyzer run state, including agent-authored findings
+- Fixed: a verifier `confirm` now persists the finding fingerprint so `approve` over a confirmed blocker is rejected on the live tool path, not only in unit tests that seed `verified_ids`
+- Fixed: a stored `approve` is re-validated at finalize against current evidence, so a later failed required gate or verifier confirm cannot leave the run `passed`
+- Fixed: a provider success without a usable terminal verdict now advances the model chain when fallback is allowed, instead of accepting the first process-successful result
+- Fixed: a later `run_static_checks` call that matches no gates no longer wipes a prior failed row, so `approve` still fails closed
+- Fixed: `approve` is now rejected on the live path when `run_static_checks` recorded a failed required gate; previously the validator only saw those rows in unit tests
+- Fixed: a review run that completes without submitting a terminal verdict now reports `inconclusive` (a `neutral` check conclusion) instead of `passed`. Previously a provider that returned successfully without reviewing anything produced a successful run. Prose such as "LGTM" has never been able to approve and still cannot
+- `submit_review_verdict` now rejects non-list `findings` and severities outside
+  the review taxonomy, hashes the validated payload so omitting `findings` matches
+  `findings: []`, keeps a conflict flag sticky for the attempt, and scopes the
+  recorded submit to the active model-chain attempt so a fallback cannot inherit
+  or conflict-reject the failed attempt's verdict
 - `README.md`'s CLI table documented `mergecraft traces <run-id>`, but the real
   registered command is `mergecraft traces show <run-id>` — the stale
   invocation is now generated from the live CLI app instead of hand-maintained
@@ -108,6 +164,7 @@ Full pre-release development history: see
 
 ### Changed
 
+- Typed `ProviderConfig` for OpenAI-compatible gateways (capabilities declarative; API keys stay in env vars). No wire-format change to generated `opencode.json`
 - **BREAKING** — `with: model:` is now the head of the effective model
   chain rather than a replacement for it; set `model_pin: enabled` (or
   `modelPin: true`) to restore the old single-model behavior

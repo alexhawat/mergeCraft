@@ -58,10 +58,19 @@ from mergecraft.mcp.review_comments import (
     resolve_review_thread_tool,
 )
 from mergecraft.mcp.select_mode import select_mode_tool
-from mergecraft.mcp.shared import JsonSchema, ToolResult, ToolSpec
+from mergecraft.mcp.shared import (
+    REVIEWER_ALLOWED_TOOL_CLASSES,
+    VERIFIER_ALLOWED_TOOL_CLASSES,
+    JsonSchema,
+    ToolClass,
+    ToolResult,
+    ToolSpec,
+    admits_readonly_role,
+)
 from mergecraft.mcp.shell import kill_background_tool, shell_tool
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.upload import upload_file_tool
+from mergecraft.mcp.verdict import submit_review_verdict_tool
 from mergecraft.mcp.verification import (
     record_finding_verdict_tool,
     verify_agent_findings_tool,
@@ -85,6 +94,8 @@ MCP_PORT_START = 3764
 MCP_PORT_ATTEMPTS = 100
 MCP_HOST = "127.0.0.1"
 MCP_ENDPOINT = "/mcp"
+MCP_REVIEWER_ENDPOINT = "/mcp/reviewer"
+MCP_VERIFIER_ENDPOINT = "/mcp/verifier"
 
 
 def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None) -> list[ToolSpec]:
@@ -136,6 +147,39 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
     return tools
 
 
+def _filter_tools_by_class(
+    tools: list[ToolSpec],
+    allowed: frozenset[ToolClass],
+) -> list[ToolSpec]:
+    filtered = [spec for spec in tools if admits_readonly_role(spec, allowed)]
+    if not filtered:
+        msg = "class filter yielded an empty toolset"
+        raise RuntimeError(msg)
+    return filtered
+
+
+def build_reviewer_tools(
+    ctx: ToolContext,
+    output_schema: JsonSchema | None = None,
+) -> list[ToolSpec]:
+    """Read-only reviewer surface — class-filtered, distinct from verifier (H4)."""
+    return _filter_tools_by_class(
+        build_orchestrator_tools(ctx, output_schema),
+        REVIEWER_ALLOWED_TOOL_CLASSES,
+    )
+
+
+def build_verifier_tools(
+    ctx: ToolContext,
+    output_schema: JsonSchema | None = None,
+) -> list[ToolSpec]:
+    """Read-only verifier surface — class-filtered, distinct from reviewer (H4)."""
+    return _filter_tools_by_class(
+        build_orchestrator_tools(ctx, output_schema),
+        VERIFIER_ALLOWED_TOOL_CLASSES,
+    )
+
+
 def build_orchestrator_tools(
     ctx: ToolContext, output_schema: JsonSchema | None = None
 ) -> list[ToolSpec]:
@@ -143,6 +187,7 @@ def build_orchestrator_tools(
         *build_common_tools(ctx, output_schema),
         report_progress_tool(ctx),
         select_mode_tool(ctx),
+        submit_review_verdict_tool(ctx),
         push_branch_tool(ctx),
         push_tags_tool(ctx),
         delete_branch_tool(ctx),
@@ -253,20 +298,14 @@ def _record_trajectory(
         logger.debug("trajectory: failed to record {} — {}", name, exc)
 
 
-def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> FastAPI:
-    """Build the MCP app.
-
-    ``ctx`` is optional so a test can stand the app up with bare tool specs;
-    when it is supplied — which is what ``start_mcp_http_server`` does on every
-    real run — each ``tools/call`` is appended to the run's trajectory record.
-    """
-    tool_ctx = ctx
+def _register_mcp_route(
+    app: FastAPI,
+    path: str,
+    tools: list[ToolSpec],
+    tool_ctx: ToolContext | None,
+) -> None:
+    """Mount one JSON-RPC MCP endpoint with a fixed tool surface."""
     by_name = {t.name: t for t in tools}
-    app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.1.0")
-
-    @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
 
     async def handle_rpc(body: dict[str, Any]) -> dict[str, Any]:
         req_id = body.get("id")
@@ -347,7 +386,6 @@ def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> Fas
             "error": {"code": -32601, "message": f"Method not found: {method}"},
         }
 
-    @app.api_route(MCP_ENDPOINT, methods=["GET", "POST", "DELETE"])
     async def mcp_endpoint(request: Request) -> Response:
         if request.method == "GET":
             # Streamable HTTP / SSE clients may probe with GET — reply with tool list.
@@ -381,6 +419,39 @@ def create_mcp_app(tools: list[ToolSpec], ctx: ToolContext | None = None) -> Fas
             return JSONResponse([await handle_rpc(item) for item in items])
         return JSONResponse(await handle_rpc(body))
 
+    app.add_api_route(
+        path,
+        mcp_endpoint,
+        methods=["GET", "POST", "DELETE"],
+        name=f"mcp_{path.strip('/').replace('/', '_')}",
+    )
+
+
+def create_mcp_app(
+    tools: list[ToolSpec],
+    ctx: ToolContext | None = None,
+    *,
+    role_tools: dict[str, list[ToolSpec]] | None = None,
+) -> FastAPI:
+    """Build the MCP app.
+
+    ``ctx`` is optional so a test can stand the app up with bare tool specs;
+    when it is supplied — which is what ``start_mcp_http_server`` does on every
+    real run — each ``tools/call`` is appended to the run's trajectory record.
+
+    ``role_tools`` mounts extra class-filtered surfaces at ``{MCP_ENDPOINT}/{role}``
+    (the reviewer lives at ``MCP_REVIEWER_ENDPOINT``, the verifier at
+    ``MCP_VERIFIER_ENDPOINT``). The primary endpoint stays the orchestrator set.
+    """
+    app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.1.0")
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    _register_mcp_route(app, MCP_ENDPOINT, tools, ctx)
+    for role, role_tool_list in (role_tools or {}).items():
+        _register_mcp_route(app, f"{MCP_ENDPOINT}/{role}", role_tool_list, ctx)
     return app
 
 
@@ -404,8 +475,14 @@ def start_mcp_http_server(
     Returns ``(url, stop)`` where ``stop`` is an idempotent disposer.
     """
     tools = build_orchestrator_tools(ctx, output_schema)
+    reviewer_tools = build_reviewer_tools(ctx, output_schema)
+    verifier_tools = build_verifier_tools(ctx, output_schema)
+    app = create_mcp_app(
+        tools,
+        ctx,
+        role_tools={"reviewer": reviewer_tools, "verifier": verifier_tools},
+    )
     port = _select_port()
-    app = create_mcp_app(tools)
     config = uvicorn.Config(
         app,
         host=MCP_HOST,

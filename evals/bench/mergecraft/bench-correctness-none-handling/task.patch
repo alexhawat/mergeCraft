@@ -1,0 +1,10 @@
+diff --git a/src/mergecraft/config/threshold.py b/src/mergecraft/config/threshold.py
+--- a/src/mergecraft/config/threshold.py
++++ b/src/mergecraft/config/threshold.py
+@@ -7,5 +7,5 @@
+
+ def resolve_min_severity(config: dict[str, Any]) -> str:
+     """Return the configured minimum severity, defaulting to Minor."""
+-    gate = config.get("gate") or {}
++    gate = config.get("gate")
+     return gate.get("min_severity", "Minor")

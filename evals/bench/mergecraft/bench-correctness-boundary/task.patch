@@ -1,0 +1,10 @@
+diff --git a/src/mergecraft/utils/pagination.py b/src/mergecraft/utils/pagination.py
+--- a/src/mergecraft/utils/pagination.py
++++ b/src/mergecraft/utils/pagination.py
+@@ -6,5 +6,5 @@
+ def page_slice(items: list[str], page: int, page_size: int) -> list[str]:
+     """Return the 0-indexed ``page``'s slice of ``items``."""
+     start = page * page_size
+-    end = start + page_size
++    end = start + page_size + 1
+     return items[start:end]

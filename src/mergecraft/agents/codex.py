@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -75,6 +76,20 @@ USER_NAMESPACE_FAILURES: tuple[str, ...] = (
 # ephemeral, isolated container; the nested sandbox is redundant".
 CODEX_SANDBOX_ENV = "MERGECRAFT_CODEX_SANDBOX"
 CODEX_SANDBOX_UNSANDBOXED = "danger-full-access"
+
+
+@dataclass(frozen=True, slots=True)
+class CodexSubagentDegradation:
+    """Declared limitation for Codex subagent dispatch (D15)."""
+
+    kind: str
+    toolset_parity: bool
+
+
+CODEX_SUBAGENT_DEGRADATION = CodexSubagentDegradation(
+    kind="prose-only",
+    toolset_parity=False,
+)
 
 # Mirrors mergecraft.utils.git_setup — Codex refuses PATH aliases under these.
 _FORBIDDEN_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/usr/tmp")
@@ -238,7 +253,9 @@ def _codex_mcp_tool_preamble() -> str:
     )
 
 
-def _build_subagent_instructions() -> str:
+def _build_subagent_instructions(subagent_block: str | None = None) -> str:
+    if subagent_block is not None:
+        return subagent_block
     return "\n\n".join(
         [
             "Registered read-only subagents (spawn via Codex subagent tooling when needed):",
@@ -437,7 +454,11 @@ def _append_read_only_mcp_network_lines(lines: list[str]) -> None:
     )
 
 
-def write_mcp_config(ctx: AgentRunContext) -> str:
+def write_mcp_config(
+    ctx: AgentRunContext,
+    *,
+    subagent_block: str | None = None,
+) -> str:
     """Write Codex ``config.toml`` under ``$CODEX_HOME`` and return its path."""
     codex_home = _codex_home(ctx)
     codex_home.mkdir(parents=True, exist_ok=True)
@@ -446,7 +467,7 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
         instructions_parts.append(_codex_mcp_tool_preamble())
     if ctx.instructions.system:
         instructions_parts.append(ctx.instructions.system)
-    instructions_parts.append(_build_subagent_instructions())
+    instructions_parts.append(_build_subagent_instructions(subagent_block))
     instructions_path = codex_home / "mergecraft-instructions.md"
     instructions_path.write_text("\n\n".join(instructions_parts), encoding="utf-8")
 
@@ -955,12 +976,16 @@ def _codex_stream_event_handler(
 
 
 async def _run(ctx: AgentRunContext) -> AgentResult:
+    from mergecraft.agents.harness_render import merge_manifest_metadata, render_for_run
+
     try:
         cli = await _install(None)
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
-    mcp_config = write_mcp_config(ctx)
+    render_result = render_for_run(ctx, "codex")
+    subagent_block = render_result.payload if isinstance(render_result.payload, str) else None
+    mcp_config = write_mcp_config(ctx, subagent_block=subagent_block)
     # Blocking Popen/wait/stream consume runs in a worker thread so
     # ``asyncio.wait_for`` in ``main`` can preempt the coroutine (W9.2).
     initial = await asyncio.to_thread(
@@ -982,7 +1007,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         )
 
     result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
-    return await finalize_agent_result(ctx, result)
+    finalized = await finalize_agent_result(ctx, result)
+    return merge_manifest_metadata(finalized, render_result)
 
 
 codex = agent(name="codex", install=_install, run=_run, build_env=_build_env)

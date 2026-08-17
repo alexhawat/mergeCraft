@@ -160,6 +160,43 @@ def test_otlp_sink_maps_attrs_to_genai_conventions(trace_event_data: dict[str, A
     assert span_attrs["gen_ai.usage.output_tokens"] == 48
 
 
+def test_otlp_sink_json_encodes_dict_and_list_attrs(trace_event_data: dict[str, Any]) -> None:
+    """A dict/list-of-dict attr value is JSON-encoded before it reaches the OTel span.
+
+    ``tool.arguments`` / ``tool.output`` (``_tool_attrs.py``) carry raw dict
+    payloads through ``TraceEvent.attrs`` — JSON-compatible, but not one of
+    the types the real OTel SDK accepts for span attributes (``bool`` /
+    ``str`` / ``bytes`` / ``int`` / ``float`` or a homogeneous sequence of
+    those). Passing a dict straight through used to make the SDK log
+    "Invalid type dict for attribute" and silently drop the attribute.
+    ``OTLPSink.write`` must coerce it via ``_otel_safe_attr_value`` first. A
+    scalar-only list (``tool.input_keys``) is left untouched since OTel
+    already accepts it.
+    """
+    from mergecraft.tracing import OTLPSink, TraceEvent
+
+    trace_event_data["attrs"] = {
+        "tool.arguments": {"path": "src/foo.py", "content": "x = 1"},
+        "tool.output": [{"kind": "text", "text": "ok"}],
+        "tool.input_keys": ["content", "path"],
+    }
+    sink = OTLPSink(endpoint="http://127.0.0.1:1/canary-no-network", provider=object())
+    fake_tracer = _FakeOtelTracer()
+    sink._tracer = fake_tracer
+
+    sink.write(TraceEvent.model_validate(trace_event_data))
+
+    span_attrs = fake_tracer.calls[0]["attributes"]
+    assert isinstance(span_attrs["tool.arguments"], str)
+    assert json.loads(span_attrs["tool.arguments"]) == {
+        "path": "src/foo.py",
+        "content": "x = 1",
+    }
+    assert isinstance(span_attrs["tool.output"], str)
+    assert json.loads(span_attrs["tool.output"]) == [{"kind": "text", "text": "ok"}]
+    assert span_attrs["tool.input_keys"] == ["content", "path"]
+
+
 def test_sink_write_failure_never_propagates(trace_event_data: dict[str, Any]) -> None:
     """A raising inner sink is swallowed by ``RedactingSink`` and logged at ``warning``.
 
@@ -223,6 +260,7 @@ __all__ = [
     "test_attrs_over_cap_are_truncated_not_dropped",
     "test_jsonl_sink_redacts_on_write_and_on_read",
     "test_jsonl_sink_round_trips_every_field",
+    "test_otlp_sink_json_encodes_dict_and_list_attrs",
     "test_otlp_sink_maps_attrs_to_genai_conventions",
     "test_sink_write_failure_never_propagates",
 ]

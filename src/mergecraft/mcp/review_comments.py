@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.findings.threads import fetch_review_threads as _fetch_review_threads
-from mergecraft.mcp.shared import execute, tool
+from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -53,6 +53,7 @@ def get_review_comments_tool(ctx: ToolContext):
 
     return tool(
         name="get_review_comments",
+        tool_class=ToolClass.REVIEW_READ,
         description=(
             "List review threads (inline comments) for a pull request, including "
             "thread IDs for resolve_review_thread."
@@ -94,6 +95,7 @@ def list_pull_request_reviews_tool(ctx: ToolContext):
 
     return tool(
         name="list_pull_request_reviews",
+        tool_class=ToolClass.REVIEW_READ,
         description="List submitted reviews for a pull request.",
         input_schema={
             "type": "object",
@@ -118,6 +120,7 @@ def resolve_review_thread_tool(ctx: ToolContext):
 
     return tool(
         name="resolve_review_thread",
+        tool_class=ToolClass.REVIEW_WRITE,
         mutates=True,
         description="Resolve a pull request review thread by GraphQL thread ID.",
         input_schema={

@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from enum import StrEnum
+from typing import Any, Final, Literal
 
 from loguru import logger
 
@@ -13,6 +14,51 @@ JsonSchema = dict[str, Any]
 # Tool bodies vary across modules; wrap loosely then normalize in ``execute``.
 ToolBody = Callable[..., Awaitable[Any]]
 ToolHandler = Callable[[Mapping[str, Any]], Awaitable[Any]]
+
+
+class ToolClass(StrEnum):
+    """D14 — ten closed values; role toolsets derive from class filters."""
+
+    SCOPE = "scope"
+    REPOSITORY_READ = "repository-read"
+    ANALYSIS = "analysis"
+    VERIFICATION = "verification"
+    REVIEW_READ = "review-read"
+    REVIEW_WRITE = "review-write"
+    GITHUB_MUTATION = "github-mutation"
+    REPOSITORY_MUTATION = "repository-mutation"
+    SHELL = "shell"
+    TERMINAL_PROTOCOL = "terminal-protocol"
+
+
+REVIEWER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
+    {
+        ToolClass.SCOPE,
+        ToolClass.REPOSITORY_READ,
+        ToolClass.ANALYSIS,
+        ToolClass.REVIEW_READ,
+    }
+)
+VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
+    {
+        ToolClass.REPOSITORY_READ,
+        ToolClass.ANALYSIS,
+        ToolClass.VERIFICATION,
+    }
+)
+# ``checkout_pr`` is SCOPE + mutates=True but must stay on the reviewer surface
+# (HA4.2 / D14). Every other mutating tool is orchestrator-only even when its
+# class is otherwise allowed on a read-only role.
+READONLY_MUTATING_ALLOWLIST: Final[frozenset[str]] = frozenset({"checkout_pr"})
+
+
+def repository_mutation_class_for_push(
+    push: Literal["disabled", "restricted", "enabled"],
+) -> ToolClass:
+    """Classify push/commit tools: ``repository-mutation`` only when push is enabled."""
+    if push == "enabled":
+        return ToolClass.REPOSITORY_MUTATION
+    return ToolClass.GITHUB_MUTATION
 
 
 @dataclass(slots=True)
@@ -25,14 +71,16 @@ class ToolResult:
 class ToolSpec:
     """A mergeCraft MCP tool definition.
 
-    ``mutates`` marks a named state-changing tool that must be reserved for the
-    orchestrator and denied to subagents.
+    ``mutates`` marks a named state-changing tool. Read-only role filters
+    intersect class membership with this flag: mutating tools stay off
+    reviewer/verifier unless the name is in ``READONLY_MUTATING_ALLOWLIST``.
     """
 
     name: str
     description: str
     input_schema: JsonSchema
     execute: ToolHandler
+    tool_class: ToolClass
     mutates: bool = False
     annotations: dict[str, Any] = field(default_factory=dict)
     timeout_ms: int | None = None
@@ -48,12 +96,25 @@ class ToolSpec:
         return entry
 
 
+def admits_readonly_role(spec: ToolSpec, allowed: frozenset[ToolClass]) -> bool:
+    """True when ``spec`` may appear on a class-filtered read-only surface.
+
+    Class membership is necessary but not sufficient: ``mutates=True`` tools
+    stay off reviewer/verifier unless they are on
+    ``READONLY_MUTATING_ALLOWLIST`` (today: ``checkout_pr``, HA4.2 / D14).
+    """
+    if spec.tool_class not in allowed:
+        return False
+    return not spec.mutates or spec.name in READONLY_MUTATING_ALLOWLIST
+
+
 def tool(
     *,
     name: str,
     description: str,
     input_schema: JsonSchema,
     execute: ToolHandler,
+    tool_class: ToolClass,
     mutates: bool = False,
     annotations: dict[str, Any] | None = None,
     timeout_ms: int | None = None,
@@ -63,6 +124,7 @@ def tool(
         description=description,
         input_schema=input_schema,
         execute=execute,
+        tool_class=tool_class,
         mutates=mutates,
         annotations=annotations or {},
         timeout_ms=timeout_ms,

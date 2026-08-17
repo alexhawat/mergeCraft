@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.mcp.shared import EMPTY_SCHEMA, execute, tool
+from mergecraft.mcp.shared import EMPTY_SCHEMA, ToolClass, execute, tool
 from mergecraft.mcp.tool_state import DependencyInstallationState
-from mergecraft.prep import PrepOptions, PrepResult, run_prep_phase
+from mergecraft.prep import PrepOptions, PrepResult, is_prep_install_failure, run_prep_phase
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -30,6 +30,9 @@ def _format_prep_results(results: list[PrepResult]) -> str:
             lines.append(
                 f"{lang} dependencies installed successfully via {result.package_manager}."
             )
+        elif result.skipped:
+            reason = result.issues[0] if result.issues else "skipped by policy"
+            lines.append(f"{lang} dependency installation skipped: {reason}")
         else:
             err = "\n".join(result.issues) if result.issues else "unknown error"
             lines.append(f"{lang} dependency installation failed.\n\nError:\n{err}")
@@ -57,7 +60,7 @@ def start_installation(ctx: ToolContext) -> None:
             # ``status="failed"`` to ``RunOutcome.inconclusive`` (not silent
             # continue). The MCP tools still return the formatted summary so
             # the agent can see the reason.
-            has_failure = any((not r.dependencies_installed and r.issues) for r in results)
+            has_failure = any(is_prep_install_failure(r) for r in results)
             state.status = "failed" if has_failure else "completed"
             state.results = results
         except Exception:
@@ -94,6 +97,7 @@ def start_dependency_installation_tool(ctx: ToolContext):
 
     return tool(
         name="start_dependency_installation",
+        tool_class=ToolClass.ANALYSIS,
         mutates=True,
         description=(
             "Start installing project dependencies in the background. Non-blocking and idempotent."
@@ -124,6 +128,7 @@ def await_dependency_installation_tool(ctx: ToolContext):
 
     return tool(
         name="await_dependency_installation",
+        tool_class=ToolClass.ANALYSIS,
         description=(
             "Wait for dependency installation to complete and get the results. "
             "Auto-starts if not yet started."

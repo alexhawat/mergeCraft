@@ -1,0 +1,18 @@
+diff --git a/src/mergecraft/config/settings.py b/src/mergecraft/config/settings.py
+--- a/src/mergecraft/config/settings.py
++++ b/src/mergecraft/config/settings.py
+@@ -6,4 +6,4 @@
+
+
+ class GateConfig(BaseModel):
+-    severity_threshold: str = "Major"
++    min_severity: str = "Major"
+diff --git a/src/mergecraft/agents/gate_config_reader.py b/src/mergecraft/agents/gate_config_reader.py
+--- a/src/mergecraft/agents/gate_config_reader.py
++++ b/src/mergecraft/agents/gate_config_reader.py
+@@ -8,4 +8,5 @@
+
+
+ def blocking_threshold(config: GateConfig) -> str:
++    logger.debug("resolving blocking threshold")
+     return config.severity_threshold

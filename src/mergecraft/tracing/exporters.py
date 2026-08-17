@@ -422,6 +422,28 @@ def json_dumps(obj: Any) -> bytes:
     return _json.dumps(obj, default=str).encode("utf-8")
 
 
+def _otel_safe_attr_value(value: Any) -> Any:
+    """Coerce ``value`` into a type the real OTel SDK accepts for span attributes.
+
+    OTel restricts attribute values to ``bool`` / ``str`` / ``bytes`` / ``int`` /
+    ``float`` or a homogeneous sequence of those. ``TraceEvent.attrs`` is only
+    JSON-compatible, not OTel-safe — structured values like ``tool.arguments``
+    / ``tool.output`` (dicts, or lists containing them) reach here as-is and
+    the SDK rejects them outright, dropping the attribute with an "Invalid
+    type" warning instead of raising. JSON-encode anything outside the
+    accepted set so the value still reaches the exported span.
+    """
+    if isinstance(value, bool | str | bytes | int | float):
+        return value
+    if isinstance(value, list | tuple) and all(
+        isinstance(item, bool | str | bytes | int | float) for item in value
+    ):
+        return list(value)
+    import json as _json
+
+    return _json.dumps(value, default=str)
+
+
 class OTLPSink:
     """One sink class serving both ``logfire`` and ``otel`` (D5).
 
@@ -533,10 +555,16 @@ class OTLPSink:
             }
             # Forward mergeCraft attrs (gen_ai.*, model.*, …) so OTLP export
             # reaches real collectors — the in-memory recording processor is
-            # not a substitute for this boundary (#143 / W7).
+            # not a substitute for this boundary (#143 / W7). Coerced through
+            # ``_otel_safe_attr_value`` first: ``TraceEvent.attrs`` is
+            # JSON-compatible and carries structured values (``tool.arguments``,
+            # ``tool.output``, …) that the real OTel SDK rejects outright —
+            # bool/str/bytes/int/float or a homogeneous sequence of those is
+            # the full accepted type set; anything else silently drops with an
+            # "Invalid type" warning instead of raising.
             for key, value in (event.attrs or {}).items():
                 if key not in attrs:
-                    attrs[key] = value
+                    attrs[key] = _otel_safe_attr_value(value)
             # If attrs is the truncation marker, forward the marker as an
             # attribute so consumers see it (D8).
             if event.attrs.get("truncated") is True:
