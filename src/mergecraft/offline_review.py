@@ -587,7 +587,7 @@ async def _run_offline_diff_review(
                 output="no changes to review (empty diff).",
                 diff_path=str(materialization.path),
                 empty_diff=True,
-                outcome=RunOutcome.passed,
+                outcome=outcome_with_scope_reduction(RunOutcome.passed, scope_reduction),
                 scope_reduction=scope_reduction,
             )
 
