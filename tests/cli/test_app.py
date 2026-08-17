@@ -16,7 +16,8 @@ def test_cli_help() -> None:
     assert "init" in result.stdout
     assert "auth" in result.stdout
     assert "watch" in result.stdout
-    assert "diff-review" in result.stdout
+    assert "review" in result.stdout
+    assert "diff-review" not in result.stdout
     assert "gha" in result.stdout
 
 
