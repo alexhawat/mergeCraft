@@ -3,9 +3,10 @@
 Wave plan: `.ignorelocal/waves/04-observability-eval-wave-plan.md`
 Worktree: session worktree on branch `alexhawat-observability-eval-waves` (based on `pre-0.0.1`).
 
-This doc is appended to per sub-wave. So far: **PR OB1 (sub-wave OB1.1)**. The
-OB2–OB4 / EV1–EV3 sections will be appended by their own `test-creator`
-sub-waves as those PRs start.
+This doc is appended to per sub-wave. So far: **PR OB1 (sub-wave OB1.1,
+reconciled post-OB1.2)** and **PR OB2 (sub-wave OB2.1)**. The OB3–OB4 /
+EV1–EV3 sections will be appended by their own `test-creator` sub-waves as
+those PRs start.
 
 ## PR OB1 — review-wide correlation on every span (test plan OB1.1)
 
@@ -99,3 +100,90 @@ At RED-suite time (OB1.1): 15 collected; **1 passes** (`test_tracer_repr_is_unch
 **14 RED** (non-strict xfail — failures at runtime, zero collection errors).
 Post-OB1.2 reconciliation: **15 passed, 0 xfail/xpass**. `make lint` +
 `make typecheck` clean. Live gates: none in OB1.1 — `skipped: no live gate`.
+
+## PR OB2 — content-capture policy for model payloads (test plan OB2.1)
+
+Authoring wave: **OB2.1** (tests-first, RED). Implementation: **OB2.2**.
+xfail-reconciliation: **post-OB2.2** (orchestrator re-dispatches test-creator to
+remove the satisfied markers).
+
+Locked decisions covered: **D6** (four capture levels — `off` / `metadata` /
+`redacted` / `full` — default `redacted`), **D7** (an untrusted trust tier is
+capped at `metadata` and this cannot be configured away — not by YAML config,
+not by env var; the security assertion), **D8** (content hash emitted at every
+level above `off`). Also pins: bodies capped with a `.truncated` marker,
+original size reported before truncation, invalid level falls back to the
+default (fail safe, never open to `full`).
+
+### xfail schedule
+
+All 13 tests in `tests/tracing/test_content_policy.py` carry
+`@pytest.mark.xfail(reason="green after OB2.2: …", strict=False)` —
+`strict=False` is explicit because the repo pins `xfail_strict = true`. The
+`mergecraft.tracing.content` import is lazy (fixture) so collection stays clean.
+After OB2.2 lands, the markers are removed in reconciliation so the suite ends
+with 13 clean real passes.
+
+### Env-var contract pinned by these tests (not fixed in prose by the plan)
+
+| Env var | Meaning |
+| --- | --- |
+| `MERGECRAFT_TRACING_CONTENT` | Capture-level override; beats YAML `tracing.content` (normal precedence) but never beats the D7 untrusted cap. Follows the existing `MERGECRAFT_TRACING*` family in `src/mergecraft/cli/tracing_precedence.py`. |
+
+### Span-attribute contract pinned by these tests
+
+`capture_text(payload, prefix, policy, max_bytes)` emits, for the given
+`prefix` (e.g. `gen_ai.input`):
+
+| Attribute | Levels | Content |
+| --- | --- | --- |
+| `<prefix>` | `redacted`, `full` | Body — through `analyzers.redact.redact_secrets` at `redacted`, verbatim at `full`; capped at `max_bytes` (default `cap.TRACE_ATTRS_JSON_MAX_BYTES`). |
+| `<prefix>.chars` | above `off` | Original payload length in chars (before truncation). |
+| `<prefix>.bytes` | above `off` | Original payload length in bytes (before truncation). |
+| `<prefix>.sha256` | above `off` (D8) | sha256 hexdigest of the **original** payload — identical across levels so it detects drift even between two runs that shipped no body. |
+| `<prefix>.truncated` | body levels | `True` when the emitted body was cut by `max_bytes`. |
+
+### Contract → test mapping
+
+All tests live in `tests/tracing/test_content_policy.py`.
+
+| Contract | Test(s) |
+| --- | --- |
+| D6 — `off` emits nothing (no body, no metadata, no hash) | `test_off_emits_nothing` |
+| D6/D8 — `metadata` emits counts + hash only, never the body | `test_metadata_emits_counts_and_hash_only` |
+| D6 — `redacted` body is exactly `redact_secrets(payload)` (no second redactor) | `test_redacted_emits_body_through_the_secret_matcher` |
+| D6 — `full` body verbatim, capped only (secret matcher not applied) | `test_full_emits_body_capped_only` |
+| D6 — default is `redacted` (resolver `None` + `TracingSettings.content` default) | `test_default_is_redacted` |
+| D7 — untrusted tier capped at `metadata`; cap never raises `off` | `test_untrusted_tier_is_capped_at_metadata` |
+| D7 — `content: full` in YAML still yields `metadata` untrusted | `test_untrusted_cap_cannot_be_overridden_by_config` |
+| D7 — `MERGECRAFT_TRACING_CONTENT=full` still yields `metadata` untrusted | `test_untrusted_cap_cannot_be_overridden_by_env` |
+| Precedence — env beats config at a trusted tier | `test_env_beats_config_at_trusted_tier` |
+| D8 — hash at every level above `off` (of the original payload) | `test_hash_is_emitted_at_every_level_above_off` |
+| Capping — body cut at `max_bytes`, `.truncated` marker; default cap is `TRACE_ATTRS_JSON_MAX_BYTES` | `test_body_is_capped_and_marked_truncated` |
+| Capping — `.chars` / `.bytes` / `.sha256` describe the original payload | `test_original_size_is_reported_before_truncation` |
+| Fail safe — invalid level (config or env) falls back to `redacted`, never `full` | `test_invalid_level_falls_back_to_default_not_full` |
+
+### Target API OB2.2 must satisfy (as pinned by these tests)
+
+`src/mergecraft/tracing/content.py` (new):
+
+| Symbol | Contract |
+| --- | --- |
+| `ContentCapture` | StrEnum: `off` / `metadata` / `redacted` / `full` |
+| `ContentCapture.emits_body` | `True` at `redacted` + `full` only |
+| `ContentCapture.emits_metadata` | `True` at `metadata` + `redacted` + `full` only |
+| `resolve_content_capture(configured, trust_tier)` | Precedence: `MERGECRAFT_TRACING_CONTENT` env → `configured` → `redacted` default; invalid values fall back to `redacted` (never `full`); `untrusted` tier caps the result at `metadata` (cap never raises `off`) |
+| `capture_text(payload, prefix, policy, max_bytes=TRACE_ATTRS_JSON_MAX_BYTES)` | Emits the attribute table above; `{}` at `off`; reuses `analyzers.redact.redact_secrets` — no second redaction or capping mechanism |
+
+`src/mergecraft/config/settings.py`:
+
+| Symbol | Contract |
+| --- | --- |
+| `TracingSettings.content` | New field, default `"redacted"`; accepted by the (extra-forbidding) YAML model |
+
+### Acceptance (plan §OB2.1)
+
+13 collected; **0 pass**; **13 RED** (non-strict xfail — failures at runtime,
+zero collection errors). `make lint` + `make typecheck` clean. Live gates:
+none in OB2.1 — `skipped: no live gate` (the fork-PR runtime proof is the OB2
+Final gate, with blocking `security-review`).
