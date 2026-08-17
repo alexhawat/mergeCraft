@@ -137,3 +137,42 @@ Target API (TS3.2):
 
 Removed impl-pending xfail markers from `tests/security/test_clone_hardening.py`.
 Suite is 13 real passes.
+
+## TS4 — source resolver (PR TS4)
+
+Wave plan: `.ignorelocal/02-cli-sources-trust-wave-plan.md` (PR TS4)
+Authoring wave: **TS4.1**. Implementation: **TS4.2**.
+
+Target API (TS4.2):
+
+- ``SourceResolverSpec``, ``ResolvedWorkspace``, ``resolve_workspace``,
+  ``materialize_resolved_diff``, ``resolve_auth_token``, ``parse_commit_range`` on
+  `src/mergecraft/utils/source_resolve.py`
+- Generalized ``detect_default_base`` / ``git_merge_base_diff`` on
+  `src/mergecraft/utils/offline_diff.py`
+- ``review`` verb + hidden ``diff-review`` alias on `src/mergecraft/cli/`
+
+## Contract matrix (TS4)
+
+| # | Decision / convention | Layer | Primary test |
+|---|----------------------|-------|--------------|
+| TS4.1a | local path ``--repo`` | integration | `test_local_path_source` |
+| TS4.1b | D9 worktree common dir | integration | `test_linked_worktree_resolves_common_dir` |
+| TS4.1c | public repo URL | integration | `test_public_repo_url_source` |
+| TS4.1d | owner/name shorthand | integration | `test_owner_name_shorthand_source` |
+| TS4.1e | private repo + token | integration | `test_private_repo_with_token` |
+| TS4.1f | ``--head`` / ``--base`` | integration | `test_head_and_base_refs_select_the_diff` |
+| TS4.1g | non-default branch | integration | `test_remote_branch_that_is_not_default` |
+| TS4.1h | ``--staged`` | integration | `test_staged_only` |
+| TS4.1i | ``--unstaged`` | integration | `test_unstaged_only` |
+| TS4.1j | ``--range`` | unit | `test_commit_range` |
+| TS4.1k | D10 auth precedence | unit | `test_auth_precedence_order` |
+| TS4.1l | D8 Harbor pin | regression | `test_review_alias_diff_review_still_works` |
+| TS4.1m | DiffMaterialization unchanged | integration | `test_downstream_pipeline_unchanged` |
+| TS4.1n | TS1 cloned tier | integration | `test_cloned_source_reviews_at_untrusted_tier` |
+
+## Acceptance (TS4.1)
+
+- 14 tests collected
+- 1 passes (`test_review_alias_diff_review_still_works`)
+- 13 RED via `xfail(strict=False)`
