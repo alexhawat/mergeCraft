@@ -341,6 +341,27 @@ class TracingSettings(BaseModel):
         raise ValueError(msg)
 
 
+class RunBoundsSettings(BaseModel):
+    """Per-run budget and degradation ceilings (CC3 / N-05, R-08)."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    token_budget: int = Field(default=2_000_000, alias="tokenBudget", gt=0)
+    cost_budget_usd: float = Field(default=50.0, alias="costBudgetUsd", gt=0)
+    tool_call_budget: int = Field(default=500, alias="toolCallBudget", gt=0)
+    max_diff_lines: int = Field(default=50_000, alias="maxDiffLines", gt=0)
+    context_retrieval_timeout_s: int = Field(
+        default=30,
+        alias="contextRetrievalTimeoutS",
+        gt=0,
+    )
+    cache_max_bytes: int = Field(
+        default=512 * 1024 * 1024,
+        alias="cacheMaxBytes",
+        gt=0,
+    )
+
+
 class RepoSettings(BaseModel):
     """Per-repo runtime settings — local equivalent of upstream ``RepoSettings``.
 
@@ -435,6 +456,7 @@ class RepoSettings(BaseModel):
         default_factory=list, alias="xrepoLearningsHeadings"
     )
     tracing: TracingSettings = Field(default_factory=TracingSettings)
+    run_bounds: RunBoundsSettings = Field(default_factory=RunBoundsSettings, alias="runBounds")
 
     @field_validator("push", "shell", mode="before")
     @classmethod

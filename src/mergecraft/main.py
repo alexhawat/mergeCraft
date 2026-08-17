@@ -168,6 +168,8 @@ class RunContext:
     verifier_denied: list[str] = field(default_factory=list)
     instructions: Any = None
     run_ctx: AgentRunContext | None = None
+    run_bounds: Any = None
+    budget_tracker: Any = None
 
 
 def _first_runnable_in_chain(chain: list[str]) -> str:
@@ -404,6 +406,10 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     ctx.run_context = run_context
     settings = apply_tracing_overrides(run_context.repo_settings)
     ctx.settings = settings
+    from mergecraft.utils.run_bounds import BudgetTracker, resolve_run_bounds
+
+    ctx.run_bounds = resolve_run_bounds(settings=settings)
+    ctx.budget_tracker = BudgetTracker(ctx.run_bounds)
 
     github_event = read_github_event()
     ctx.github_event = github_event

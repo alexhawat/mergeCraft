@@ -25,13 +25,19 @@ def _run_git(
     args: list[str],
     *,
     cwd: Path,
+    timeout_s: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    if timeout_s is None:
+        from mergecraft.utils.run_bounds import timeout_for_external_operation
+
+        timeout_s = timeout_for_external_operation("git_diff")
     return subprocess.run(
         ["git", *args],
         cwd=cwd,
         check=False,
         capture_output=True,
         text=True,
+        timeout=timeout_s,
     )
 
 

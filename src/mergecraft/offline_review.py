@@ -42,6 +42,14 @@ from mergecraft.utils.fence import Fence, render_untrusted
 from mergecraft.utils.github import GitHubClient
 from mergecraft.utils.instructions import resolve_instructions
 from mergecraft.utils.offline_diff import DiffMaterialization, summarize_diff
+from mergecraft.utils.run_bounds import (
+    BudgetExhausted,
+    ScopeReduction,
+    apply_diff_line_budget,
+    budget_exhaustion_outcome,
+    outcome_with_scope_reduction,
+    resolve_run_bounds,
+)
 from mergecraft.utils.skills import install_bundled_skills
 from mergecraft.utils.source_resolve import (
     SourceResolverSpec,
@@ -63,6 +71,7 @@ class OfflineReviewResult:
     # when no packet was produced (dry run, empty diff, emission failure).
     evidence_packet_path: str | None = None
     outcome: RunOutcome | None = None
+    scope_reduction: object | None = None
 
 
 def _offline_failure(
@@ -427,6 +436,9 @@ async def run_offline_diff_review(
         cloned=cloned,
     )
     trust_env_previous = apply_cli_trust_tier_env(trust_tier)
+    settings = load_repo_settings(root=cwd, load_learnings_files=False)
+    run_bounds = resolve_run_bounds(settings=settings)
+    scope_reduction: ScopeReduction | None = None
 
     out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
     try:
@@ -453,6 +465,24 @@ async def run_offline_diff_review(
                     line_count=0 if not filtered.strip() else filtered.count("\n"),
                     empty=not filtered.strip(),
                 )
+        diff_text = materialization.path.read_text(encoding="utf-8")
+        reduced_text, scope_reduction = apply_diff_line_budget(
+            diff_text,
+            max_lines=run_bounds.max_diff_lines,
+        )
+        if scope_reduction is not None:
+            materialization.path.write_text(reduced_text, encoding="utf-8")
+            materialization = DiffMaterialization(
+                path=materialization.path,
+                base_ref=materialization.base_ref,
+                line_count=scope_reduction.kept_lines,
+                empty=not reduced_text.strip(),
+            )
+    except BudgetExhausted as exc:
+        return _offline_failure(
+            error=str(exc),
+            outcome=budget_exhaustion_outcome(exc),
+        )
     except (OSError, RuntimeError, ValueError) as exc:
         return _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc))
 
@@ -472,6 +502,7 @@ async def run_offline_diff_review(
                 diff_path=str(materialization.path),
                 empty_diff=True,
                 outcome=RunOutcome.passed,
+                scope_reduction=scope_reduction,
             )
 
         output_schema = findings_output_schema() if json_path is not None else None
@@ -488,7 +519,8 @@ async def run_offline_diff_review(
                 output=prompt,
                 diff_path=str(materialization.path),
                 empty_diff=False,
-                outcome=RunOutcome.passed,
+                outcome=outcome_with_scope_reduction(RunOutcome.passed, scope_reduction),
+                scope_reduction=scope_reduction,
             )
 
         result = await _run_agent_review(
@@ -500,11 +532,23 @@ async def run_offline_diff_review(
             output_schema=output_schema,
             evidence_packet_path=evidence_packet_path,
             trust_tier=trust_tier,
+            run_bounds=run_bounds,
         )
         if json_path is None:
+            if result.outcome is not None:
+                result.outcome = outcome_with_scope_reduction(result.outcome, scope_reduction)
+            elif result.success:
+                result.outcome = outcome_with_scope_reduction(RunOutcome.passed, scope_reduction)
+            result.scope_reduction = scope_reduction
             return result
 
-        return _finalize_structured_findings(result, json_path)
+        finalized = _finalize_structured_findings(result, json_path)
+        if finalized.outcome is not None:
+            finalized.outcome = outcome_with_scope_reduction(finalized.outcome, scope_reduction)
+        elif finalized.success:
+            finalized.outcome = outcome_with_scope_reduction(RunOutcome.passed, scope_reduction)
+        finalized.scope_reduction = scope_reduction
+        return finalized
     finally:
         # Restore the operator's ``.env`` tracing vars so the ``diff-review``
         # overrides never leak into the caller's environment.
@@ -535,6 +579,7 @@ async def _run_agent_review(
     output_schema: dict[str, Any] | None = None,
     evidence_packet_path: Path | None = None,
     trust_tier: str = "trusted",
+    run_bounds: object | None = None,
 ) -> OfflineReviewResult:
     stop_mcp = None
     github: GitHubClient | None = None

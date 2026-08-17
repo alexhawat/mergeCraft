@@ -329,4 +329,8 @@ Target API (CC3.2):
 - 10 tests collected across `tests/runtime/test_budgets.py`,
   `tests/runtime/test_timeouts.py`, `tests/runtime/test_large_inputs.py`,
   `tests/runtime/test_cache.py`
-- 0 pass; 10 RED via `xfail(strict=False)` — pending CC3.2
+- 0 pass; 10 RED via `xfail(strict=False)` — **cleared post-CC3.2 (2026-08-17)**
+
+## CC3.2 xfail reconciliation (2026-08-17)
+
+Removed impl-pending xfail markers from CC3 runtime test modules. Suite is 10 real passes.
