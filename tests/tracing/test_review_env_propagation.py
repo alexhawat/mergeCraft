@@ -18,9 +18,10 @@ mirroring the established pattern in
 ``tests/agents/test_privilege_drop_home_wiring.py``.
 
 The ``review_context`` import is lazy (shared fixtures in
-``tests/tracing/conftest.py``) so collection stays clean; all four tests carry
-non-strict ``xfail`` markers (``green after OB1.2``) and are expected RED until
-the implementation lands.
+``tests/tracing/conftest.py``), which kept collection clean at RED-suite time.
+All four tests carried non-strict ``xfail`` markers (``green after OB1.2``);
+the markers were removed in the post-OB1.2 reconciliation (commit ``3891020``
+made them XPASS), so all four are now clean real passes.
 """
 
 from __future__ import annotations
@@ -60,7 +61,6 @@ def captured_popen(monkeypatch: MonkeyPatch) -> dict[str, Any]:
     return captured
 
 
-@pytest.mark.xfail(reason="green after OB1.2: spawn_agent_cli exports the review env", strict=False)
 def test_spawn_agent_cli_exports_review_env(
     captured_popen: dict[str, Any],
     monkeypatch: MonkeyPatch,
@@ -84,7 +84,6 @@ def test_spawn_agent_cli_exports_review_env(
     assert "MERGECRAFT_REVIEW_ID" not in caller_env, "the caller's env dict must not be mutated"
 
 
-@pytest.mark.xfail(reason="green after OB1.2: resolve_review_id() env inheritance", strict=False)
 def test_child_process_reuses_the_inherited_review_id(
     monkeypatch: MonkeyPatch,
     review_context_module: Any,
@@ -108,10 +107,6 @@ def test_child_process_reuses_the_inherited_review_id(
     assert first != second, "uuid4 fallback mints one review id per resolution, not a constant"
 
 
-@pytest.mark.xfail(
-    reason="green after OB1.2: review env injection ordered after agent_subprocess_env",
-    strict=False,
-)
 def test_privilege_error_still_surfaces_first(
     monkeypatch: MonkeyPatch,
     review_context_module: Any,
@@ -137,7 +132,6 @@ def test_privilege_error_still_surfaces_first(
         spawn_agent_cli(["codex", "exec"], env={"PATH": "/usr/bin"})
 
 
-@pytest.mark.xfail(reason="green after OB1.2: review env injection uses setdefault", strict=False)
 def test_explicit_caller_value_wins(
     captured_popen: dict[str, Any],
     review_context_module: Any,

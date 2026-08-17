@@ -10,8 +10,9 @@ sub-waves as those PRs start.
 ## PR OB1 — review-wide correlation on every span (test plan OB1.1)
 
 Authoring wave: **OB1.1** (tests-first, RED). Implementation: **OB1.2**.
-xfail-reconciliation: **post-OB1.2** (orchestrator re-dispatches test-creator to
-remove the satisfied markers).
+xfail-reconciliation: **post-OB1.2** — complete (2026-08-17): OB1.2 (`3891020`)
+made all 14 RED tests XPASS; the non-strict `green after OB1.2` markers were
+removed and the suite is 15/15 clean real passes, 0 xfail/xpass.
 
 Locked decisions covered: **D2** (three identifiers), **D3** (review_id not
 derived from head SHA; `correlation_key` deliberately collides across attempts),
@@ -21,13 +22,13 @@ baseline → review context → lazy `attrs_source` → explicit `set_attribute`
 (no review-wide identity), **O2** (identity must cross the subprocess boundary),
 **O3** (spans self-describing: version + VCS/CI fields).
 
-### xfail schedule
+### xfail schedule (historical)
 
-All 14 contract tests carry `@pytest.mark.xfail(reason="green after OB1.2: …",
-strict=False)` — `strict=False` is explicit because the repo pins
-`xfail_strict = true`. The D5 repr pin is not xfailed (passes today, must keep
-passing). After OB1.2 lands, the markers are removed in reconciliation so the
-suite ends with 15 clean real passes.
+All 14 contract tests carried `@pytest.mark.xfail(reason="green after OB1.2: …",
+strict=False)` — `strict=False` was explicit because the repo pins
+`xfail_strict = true`. The D5 repr pin was never xfailed. OB1.2 (`3891020`)
+turned all 14 into XPASS; the markers were removed in the post-OB1.2
+reconciliation, so the suite ends with 15 clean real passes.
 
 ### Env-var contract pinned by these tests (not fixed in prose by the plan)
 
@@ -94,6 +95,7 @@ the child **after** `agent_subprocess_env`, via `setdefault` (O2).
 
 ### Acceptance (plan §OB1.1)
 
-15 collected; **1 passes** (`test_tracer_repr_is_unchanged`); **14 RED**
-(non-strict xfail — failures at runtime, zero collection errors). `make lint` +
+At RED-suite time (OB1.1): 15 collected; **1 passes** (`test_tracer_repr_is_unchanged`);
+**14 RED** (non-strict xfail — failures at runtime, zero collection errors).
+Post-OB1.2 reconciliation: **15 passed, 0 xfail/xpass**. `make lint` +
 `make typecheck` clean. Live gates: none in OB1.1 — `skipped: no live gate`.

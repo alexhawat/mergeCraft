@@ -15,15 +15,14 @@ Pins the OB1 contracts against the OB1.2 target API, which does not exist yet:
   (tracer baseline → review context → lazy ``attrs_source`` → explicit
   ``set_attribute``).
 
-All imports of the not-yet-existing module are lazy (inside fixtures/tests) so
-the suite collects with zero collection errors. The nine contract tests carry
-non-strict ``xfail`` markers (``green after OB1.2`` — the repo pins
-``xfail_strict = true``, so ``strict=False`` is explicit) and are expected RED
-until OB1.2 lands; ``test_tracer_repr_is_unchanged`` is the D5 regression pin
-and passes today.
+All imports of the once-new module are lazy (inside fixtures/tests), which kept
+collection clean at RED-suite time. The nine contract tests carried non-strict
+``xfail`` markers (``green after OB1.2``) while OB1.2 was unimplemented; the
+markers were removed in the post-OB1.2 reconciliation (commit ``3891020`` made
+all 14 XPASS), so every test here is now a clean real pass.
 
-Acceptance (plan §OB1.1, shared with the sibling modules): 15 collected;
-1 passes (the repr pin); 14 RED (xfail).
+Acceptance (plan §OB1.1, post-reconciliation): 15 collected; 15 passed;
+0 xfail/xpass.
 """
 
 from __future__ import annotations
@@ -54,7 +53,6 @@ def tracer_and_sink() -> dict[str, Any]:
     return {"sink": sink, "tracer": tracer}
 
 
-@pytest.mark.xfail(reason="green after OB1.2: review context merge in Span.close()", strict=False)
 def test_review_id_lands_on_every_span(
     tracer_and_sink: dict[str, Any],
     review_context_module: Any,
@@ -90,7 +88,6 @@ def test_review_id_lands_on_every_span(
         )
 
 
-@pytest.mark.xfail(reason="green after OB1.2: review context merge in Span.close()", strict=False)
 def test_review_id_is_stable_within_a_review(
     review_context_module: Any,
     review_context_factory: Callable[..., Any],
@@ -116,7 +113,6 @@ def test_review_id_is_stable_within_a_review(
         assert event.attrs["review.id"] == "review-ob1-stable"
 
 
-@pytest.mark.xfail(reason="green after OB1.2: review context merge in Span.close()", strict=False)
 def test_trace_id_is_per_run_not_per_review(
     monkeypatch: MonkeyPatch,
     review_context_module: Any,
@@ -149,7 +145,6 @@ def test_trace_id_is_per_run_not_per_review(
     assert all(trace_ids), "no run may fall back to an empty trace_id"
 
 
-@pytest.mark.xfail(reason="green after OB1.2: correlation_key_for()", strict=False)
 def test_correlation_key_is_deterministic(review_context_module: Any) -> None:
     """D3 — same repo/pr/head_sha always yields sha256(repo|pr|head_sha)."""
     rc = review_context_module
@@ -163,9 +158,6 @@ def test_correlation_key_is_deterministic(review_context_module: Any) -> None:
     assert second == expected
 
 
-@pytest.mark.xfail(
-    reason="green after OB1.2: correlation_key_for() + resolve_review_id()", strict=False
-)
 def test_correlation_key_differs_from_review_id_across_attempts(
     monkeypatch: MonkeyPatch,
     review_context_module: Any,
@@ -189,7 +181,6 @@ def test_correlation_key_differs_from_review_id_across_attempts(
     )
 
 
-@pytest.mark.xfail(reason="green after OB1.2: attrs() drops empty values", strict=False)
 def test_correlation_key_is_empty_without_repo_context(
     tracer_and_sink: dict[str, Any],
     review_context_module: Any,
@@ -221,9 +212,6 @@ def test_correlation_key_is_empty_without_repo_context(
     assert "review.correlation_key" not in event_attrs
 
 
-@pytest.mark.xfail(
-    reason="green after OB1.2: close-time merge reads the live context", strict=False
-)
 def test_context_bound_after_tracer_creation_still_reaches_spans(
     tracer_and_sink: dict[str, Any],
     review_context_module: Any,
@@ -246,7 +234,6 @@ def test_context_bound_after_tracer_creation_still_reaches_spans(
     assert sink.events[0].attrs["review.id"] == "review-ob1-late-bind"
 
 
-@pytest.mark.xfail(reason="green after OB1.2: D4 precedence chain in Span.close()", strict=False)
 def test_precedence_explicit_attr_beats_review_context(
     tracer_and_sink: dict[str, Any],
     review_context_module: Any,
@@ -266,9 +253,6 @@ def test_precedence_explicit_attr_beats_review_context(
     assert sink.events[0].attrs["review.id"] == "review-explicit"
 
 
-@pytest.mark.xfail(
-    reason="green after OB1.2: baseline_run_attrs() + Tracer.baseline_attrs", strict=False
-)
 def test_baseline_attrs_carry_version_and_vcs_fields(monkeypatch: MonkeyPatch) -> None:
     """O3 — baseline attrs make a span self-describing: build version + VCS/CI fields."""
     monkeypatch.setenv("GITHUB_REPOSITORY", "octo/mergecraft")

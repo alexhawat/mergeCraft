@@ -20,8 +20,9 @@ either entry point's tracer) is covered by the sibling module; the full
 runtime proof across the harness subprocess is the OB1 Final evidence gate.
 
 The test is one function (plan §OB1.1 names exactly one) covering both entry
-points; it carries a non-strict ``xfail`` (``green after OB1.2``) and is
-expected RED until the binding lands in both modules.
+points; it carried a non-strict ``xfail`` (``green after OB1.2``) until the
+post-OB1.2 reconciliation removed the marker (commit ``3891020`` made it
+XPASS), so it is now a clean real pass.
 """
 
 from __future__ import annotations
@@ -29,8 +30,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 from typing import Final
-
-import pytest
 
 _SRC_DIR: Final[Path] = Path(__file__).resolve().parents[2] / "src" / "mergecraft"
 _ENTRY_MODULES: Final[tuple[str, ...]] = ("offline_review.py", "main.py")
@@ -50,7 +49,6 @@ def _module_calls_bind_review_context(path: Path) -> bool:
     return False
 
 
-@pytest.mark.xfail(reason="green after OB1.2: entry-point review-context binding", strict=False)
 def test_both_entry_points_emit_review_id_and_baseline() -> None:
     """Both run entry points bind a ``ReviewContext`` so their spans emit ``review.id``.
 
