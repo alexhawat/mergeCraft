@@ -102,8 +102,12 @@ def _run_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) ->
         if (
             "Authentication failed" in err
             or "could not read Username" in err
+            or "could not read from remote repository" in err
+            or "Repository not found" in err
+            or "not found" in err.lower()
             or "401" in err
             or "403" in err
+            or "404" in err
         ):
             raise CloneAuthError(
                 "authentication required for private repository — pass --token, "
@@ -156,16 +160,16 @@ def _scrub_clone_credentials(repo_dir: Path) -> None:
 def _tree_stats(root: Path) -> tuple[int, int]:
     total_bytes = 0
     file_count = 0
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.is_symlink():
-            continue
-        file_count += 1
-        try:
-            total_bytes += path.stat().st_size
-        except OSError:
-            continue
+    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+        for name in filenames:
+            path = Path(dirpath) / name
+            if path.is_symlink():
+                continue
+            file_count += 1
+            try:
+                total_bytes += path.stat().st_size
+            except OSError:
+                continue
     return total_bytes, file_count
 
 
@@ -225,14 +229,19 @@ def acquire(
         ]
         _run_git(fetch_args, cwd=str(dest), env=env)
         _run_git(["checkout", "-B", source.ref, "FETCH_HEAD"], cwd=str(dest))
-    except RuntimeError as exc:
+    except (RuntimeError, CloneAuthError) as exc:
         shutil.rmtree(dest, ignore_errors=True)
         err = str(exc)
         if source.token is None and (
-            "Authentication failed" in err
+            isinstance(exc, CloneAuthError)
+            or "Authentication failed" in err
             or "could not read Username" in err
+            or "could not read from remote repository" in err
+            or "Repository not found" in err
+            or "not found" in err.lower()
             or "401" in err
             or "403" in err
+            or "404" in err
         ):
             raise CloneAuthError(
                 "authentication required for private repository — pass --token, "
@@ -243,7 +252,11 @@ def acquire(
         if dest.exists():
             _scrub_clone_credentials(dest)
 
-    _enforce_limits(dest, max_bytes=max_bytes, max_files=max_files)
+    try:
+        _enforce_limits(dest, max_bytes=max_bytes, max_files=max_files)
+    except CloneLimitError:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
     workspace_root = dest.resolve()
     register_workspace_root(str(workspace_root))
     logger.info("acquired review source at {} (ref={})", workspace_root, source.ref)

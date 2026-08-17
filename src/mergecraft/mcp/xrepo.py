@@ -154,6 +154,8 @@ def checkout_repo_tool(ctx: ToolContext):
                 "defaultBranch": default_branch,
             }
         except Exception:
+            if dir_path.exists():
+                _scrub_clone_credentials(dir_path)
             ctx.tool_state.repos.pop(repo_key(owner, repo), None)
             shutil.rmtree(dir_path, ignore_errors=True)
             raise
