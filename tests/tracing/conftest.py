@@ -84,3 +84,15 @@ def review_context_factory(review_context_module: Any) -> Callable[..., Any]:
         return review_context_module.ReviewContext(**fields)
 
     return _make
+
+
+@pytest.fixture
+def genai_module() -> Any:
+    """Lazily import the OB3.2 GenAI builders module (``tracing/genai.py``).
+
+    The module does not exist until the OB3.2 implementation wave lands it.
+    Importing inside the fixture (rather than at module top level) keeps test
+    collection clean — zero collection errors — while every dependent test
+    still fails RED at runtime under its non-strict ``xfail`` marker.
+    """
+    return importlib.import_module("mergecraft.tracing.genai")

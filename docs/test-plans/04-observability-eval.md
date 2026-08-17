@@ -4,9 +4,9 @@ Wave plan: `.ignorelocal/waves/04-observability-eval-wave-plan.md`
 Worktree: session worktree on branch `alexhawat-observability-eval-waves` (based on `pre-0.0.1`).
 
 This doc is appended to per sub-wave. So far: **PR OB1 (sub-wave OB1.1,
-reconciled post-OB1.2)** and **PR OB2 (sub-wave OB2.1)**. The OB3–OB4 /
-EV1–EV3 sections will be appended by their own `test-creator` sub-waves as
-those PRs start.
+reconciled post-OB1.2)**, **PR OB2 (sub-wave OB2.1, reconciled post-OB2.2)**
+and **PR OB3 (sub-wave OB3.1)**. The OB4 / EV1–EV3 sections will be appended
+by their own `test-creator` sub-waves as those PRs start.
 
 ## PR OB1 — review-wide correlation on every span (test plan OB1.1)
 
@@ -189,3 +189,99 @@ failures at runtime, zero collection errors). Post-OB2.2 reconciliation:
 **13 passed, 0 xfail/xpass**. `make lint` + `make typecheck` clean. Live gates:
 none in OB2.1 — `skipped: no live gate` (the fork-PR runtime proof is the OB2
 Final gate, with blocking `security-review`).
+
+## PR OB3 — model parameters, LLM input/output and reasoning capture (test plan OB3.1)
+
+Authoring wave: **OB3.1** (tests-first, RED). Implementation: **OB3.2**.
+xfail-reconciliation: **post-OB3.2** (orchestrator re-dispatches test-creator to
+remove the satisfied markers).
+
+Locked decisions covered: **D9** (reasoning inherits the prompt/content gate —
+never a looser one), **D11** (record BOTH requested and executed model; a
+fallback is visible as the mismatch). Findings covered: **O4** (no request
+parameters), **O5** (no prompt/completion bodies), **O6** (no reasoning
+capture). Global convention 6 (OTel GenAI names; mergeCraft-specific additions
+under `mergecraft.*`) and convention 4 (all bodies route through OB2's
+`capture_text` — no second policy mechanism) are pinned throughout.
+
+**Harness coverage is genuinely partial** (plan §OB3.1 note): mergeCraft sees
+model payloads only on the OpenCode HTTP path and in
+`src/mergecraft/agents/_stream_consumer.py` — never for the CLI harnesses. All
+15 contract tests pin the **pure builders** in `tracing/genai.py` and the
+shared `_tool_attrs.py` helpers; no test asserts per-harness payload coverage
+(OB3.2 File 2 wiring), so nothing implies uniform coverage.
+
+### xfail schedule
+
+15 of 16 tests carry `@pytest.mark.xfail(reason="green after OB3.2: …",
+strict=False)` — `strict=False` is explicit because the repo pins
+`xfail_strict = true`. `tests/tracing/test_tool_detail.py::test_existing_tool_attrs_unchanged`
+is the regression pin (subset assertion on the pre-OB3 `_tool_attrs` surface)
+and passes today. The `mergecraft.tracing.genai` import is lazy (shared
+fixture in `tests/tracing/conftest.py`) so collection stays clean. After OB3.2
+lands, the markers are removed in reconciliation so the suite ends with 16
+clean real passes.
+
+### Attribute-name contract pinned by these tests (convention 6)
+
+| Attribute | Source |
+| --- | --- |
+| `gen_ai.request.model` / `gen_ai.response.model` | `request_attrs` / `response_attrs` (D11 — both, always) |
+| `gen_ai.request.{temperature,top_p,top_k,max_tokens,stop_sequences,seed}` | `request_attrs` from `ModelParams`; unset knobs omitted, never zeroed |
+| `mergecraft.reasoning_effort` / `mergecraft.thinking_budget` | `request_attrs` — no stable OTel name exists, so these live under `mergecraft.*` |
+| `gen_ai.input.messages` / `gen_ai.output.messages` (+ `.chars` / `.bytes` / `.sha256` / `.truncated`) | `input_messages_attrs` / `output_messages_attrs` via `capture_text` |
+| `gen_ai.input.messages.count` / `gen_ai.output.messages.count` | message count beside the body/hash |
+| `mergecraft.thinking` (+ `.chars` / `.bytes` / `.sha256` / `.truncated`) | `thinking_attrs` via `capture_text` (D9 — same gate as prompts) |
+| `mergecraft.thinking.provider_redacted` | `thinking_attrs(provider_redacted=True)` — distinguishes provider-redacted from empty |
+| `mergecraft.usage.reasoning_tokens` | `thinking_attrs(reasoning_tokens=…)` — no stable OTel name |
+| `gen_ai.tool.call.id` | new `call_id` kwarg on both `enrich_tool_request` and `enrich_tool_response` |
+| `tool.duration_ms` | new `duration_ms` kwarg on `enrich_tool_response` |
+| `tool.origin` (`"mcp"` / `"native"`) | new `tool_origin` kwarg on `enrich_tool_request` |
+
+### Contract → test mapping
+
+| Contract | Test | File |
+| --- | --- | --- |
+| O4 — every set knob reaches the span under its OTel GenAI name | `test_request_params_reach_the_span` | `tests/tracing/test_model_params.py` |
+| O4 — unset knob omitted, not zeroed | `test_unset_knob_is_omitted_not_zeroed` | `tests/tracing/test_model_params.py` |
+| D11 — executed model recorded beside requested | `test_response_model_recorded_beside_request_model` | `tests/tracing/test_model_params.py` |
+| D11 — fallback visible as request/response mismatch | `test_fallback_is_visible_as_a_model_mismatch` | `tests/tracing/test_model_params.py` |
+| O5 — input messages under policy, bodies through the matcher | `test_input_messages_captured_under_policy` | `tests/tracing/test_llm_payloads.py` |
+| O5 — output messages under policy | `test_output_messages_captured_under_policy` | `tests/tracing/test_llm_payloads.py` |
+| O5 — message count beside body/hash, both directions | `test_message_count_recorded` | `tests/tracing/test_llm_payloads.py` |
+| O5 + D6 — bodies absent at `metadata`; hash/counts remain | `test_bodies_absent_at_metadata_level` | `tests/tracing/test_llm_payloads.py` |
+| O6/D9 — reasoning text under the SAME policy as prompts | `test_reasoning_text_captured_under_policy` | `tests/tracing/test_thinking.py` |
+| O6 — reasoning token count recorded | `test_reasoning_tokens_recorded` | `tests/tracing/test_thinking.py` |
+| O6 — provider-redacted ≠ empty | `test_provider_redacted_thinking_is_distinguishable_from_empty` | `tests/tracing/test_thinking.py` |
+| D9 — no configuration lets reasoning past the gate (untrusted + `full` → no body) | `test_reasoning_never_bypasses_the_gate` | `tests/tracing/test_thinking.py` |
+| Tool detail — `gen_ai.tool.call.id` on both sides | `test_tool_call_id_correlates_request_and_response` | `tests/tracing/test_tool_detail.py` |
+| Tool detail — duration recorded | `test_tool_call_records_duration` | `tests/tracing/test_tool_detail.py` |
+| Tool detail — MCP vs native distinguished | `test_mcp_vs_native_tool_is_distinguished` | `tests/tracing/test_tool_detail.py` |
+| Tool detail — existing attrs unchanged (**green pin**) | `test_existing_tool_attrs_unchanged` | `tests/tracing/test_tool_detail.py` |
+
+### Target API OB3.2 must satisfy (as pinned by these tests)
+
+`src/mergecraft/tracing/genai.py` (new):
+
+| Symbol | Contract |
+| --- | --- |
+| `ModelParams` | Value type: `temperature`, `top_p`, `top_k`, `max_tokens`, `stop`, `seed`, `reasoning_effort`, `thinking_budget` — all optional, default unset |
+| `request_attrs(model=, params=)` | `gen_ai.request.model` + set knobs only, under the names in the table above |
+| `response_attrs(model=)` | `gen_ai.response.model` |
+| `usage_attrs` | Token usage attrs (existing `gen_ai.usage.*` names) |
+| `input_messages_attrs(messages, policy=)` / `output_messages_attrs(messages, policy=)` | Serialized bodies via `capture_text` at the `gen_ai.{input,output}.messages` prefix + `.count` |
+| `thinking_attrs(text, policy=, reasoning_tokens=None, provider_redacted=False)` | Reasoning via `capture_text` at the `mergecraft.thinking` prefix + the two `mergecraft.*` extras above |
+
+`src/mergecraft/tracing/_tool_attrs.py`:
+
+| Symbol | Contract |
+| --- | --- |
+| `enrich_tool_request(span, *, arguments, call_id=None, tool_origin=None)` | New optional kwargs → `gen_ai.tool.call.id` / `tool.origin`; existing attrs unchanged |
+| `enrich_tool_response(span, *, output, error=None, call_id=None, duration_ms=None)` | New optional kwargs → `gen_ai.tool.call.id` / `tool.duration_ms`; existing attrs unchanged |
+
+### Acceptance (plan §OB3.1)
+
+16 collected; **1 passes** (`test_existing_tool_attrs_unchanged`); **15 RED**
+(non-strict xfail — failures at runtime, zero collection errors). `make lint` +
+`make typecheck` clean. Live gates: none in OB3.1 — `skipped: no live gate`
+(the reasoning-model Logfire proof is the OB3 Final gate).
