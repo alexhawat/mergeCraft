@@ -65,6 +65,7 @@ from mergecraft.utils.source_resolve import (
 
 if TYPE_CHECKING:
     from mergecraft.tracing.review_context import ReviewContext
+    from mergecraft.utils.source_resolve import ResolvedWorkspace
 
 
 @dataclass(slots=True)
@@ -424,7 +425,12 @@ async def run_offline_diff_review(
 
     from mergecraft.tracing.review_context import bind_review_context
 
-    with bind_review_context(_offline_review_context()):
+    review_root = (invocation_root or cwd).resolve()
+    with bind_review_context(
+        _offline_review_context(
+            cwd=cwd, review_root=review_root, trust_override=trust_override, cloned=cloned
+        )
+    ):
         return await _run_offline_diff_review(
             cwd=cwd,
             base=base,
@@ -435,20 +441,31 @@ async def run_offline_diff_review(
             json_path=json_path,
             evidence_packet_path=evidence_packet_path,
             tracing_cli=tracing_cli,
+            workspace=workspace,
+            spec=spec,
+            review_root=review_root,
+            trust_override=trust_override,
+            cloned=cloned,
         )
 
 
-def _offline_review_context() -> ReviewContext:
+def _offline_review_context(
+    *,
+    cwd: Path,
+    review_root: Path,
+    trust_override: CliTrustOverride | None = None,
+    cloned: bool = False,
+) -> ReviewContext:
     """Build the run's ``ReviewContext`` for a local diff review (OB1/O1).
 
     A local patch review has no repo/pr/head identity, so the correlation
     key stays empty (D3 — no misleading constant) and the review id resolves
     from ``MERGECRAFT_REVIEW_ID`` (inherited) or a fresh uuid4. The trust
-    tier is ``derive_trust_tier(offline=True)`` — an explicit derivation for
-    the operator's own tree, never an env fallback (the OB2 security gate:
-    env-controlled tiers would silently neutralize the D7 content cap).
+    tier comes from ``resolve_offline_review_trust_tier`` — an explicit
+    derivation from source provenance, never an env fallback (the OB2
+    security gate: env-controlled tiers would silently neutralize the D7
+    content cap).
     """
-    from mergecraft.analyzers.trust import derive_trust_tier
     from mergecraft.tracing.review_context import ReviewContext, resolve_review_id
 
     return ReviewContext(
@@ -456,7 +473,12 @@ def _offline_review_context() -> ReviewContext:
         source="cli",
         mode="review",
         trigger="cli",
-        trust_tier=derive_trust_tier(offline=True),
+        trust_tier=resolve_offline_review_trust_tier(
+            cwd=cwd,
+            invocation_root=review_root,
+            trust_override=trust_override,
+            cloned=cloned,
+        ),
     )
 
 
@@ -471,6 +493,11 @@ async def _run_offline_diff_review(
     json_path: Path | None = None,
     evidence_packet_path: Path | None = None,
     tracing_cli: list[str] | None = None,
+    workspace: ResolvedWorkspace,
+    spec: SourceResolverSpec,
+    review_root: Path,
+    trust_override: CliTrustOverride | None = None,
+    cloned: bool = False,
 ) -> OfflineReviewResult:
     """Body of :func:`run_offline_diff_review`, run under the bound review context."""
     cwd = cwd.resolve()
@@ -488,7 +515,6 @@ async def _run_offline_diff_review(
 
     telemetry_env_previous = apply_local_telemetry_defaults(private_repo=True, cwd=cwd)
     tracing_env_previous = _apply_tracing_cli_overrides(tracing_cli)
-    review_root = (invocation_root or cwd).resolve()
     trust_tier = resolve_offline_review_trust_tier(
         cwd=cwd,
         invocation_root=review_root,
