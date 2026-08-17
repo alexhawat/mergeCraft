@@ -9,6 +9,7 @@ from pathlib import Path
 from loguru import logger
 
 _DEFAULT_BASES = ("main", "master", "develop", "trunk")
+_MAX_UNTRACKED_FILE_BYTES = 256 * 1024
 
 
 @dataclass(slots=True)
@@ -167,17 +168,22 @@ def git_unstaged_diff(*, cwd: Path) -> str:
             if not path.is_file():
                 continue
             try:
-                contents = path.read_text(encoding="utf-8")
+                raw = path.read_bytes()
             except OSError:
                 continue
+            if len(raw) > _MAX_UNTRACKED_FILE_BYTES:
+                logger.info("skipped oversized untracked file in unstaged diff: {}", rel)
+                continue
+            if b"\0" in raw:
+                logger.info("skipped binary untracked file in unstaged diff: {}", rel)
+                continue
+            contents = raw.decode("utf-8", errors="replace")
             text += (
                 f"diff --git a/{rel} b/{rel}\nnew file mode 100644\n--- /dev/null\n+++ b/{rel}\n"
             )
             for line in contents.splitlines():
                 text += f"+{line}\n"
             if contents and not contents.endswith("\n"):
-                pass
-            elif not contents:
                 text += "\n"
     return text
 

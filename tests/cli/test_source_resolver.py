@@ -345,6 +345,40 @@ def test_remote_branch_that_is_not_default(
     assert "release.txt" in result.path.read_text(encoding="utf-8")
 
 
+def test_remote_head_without_base_fetches_default_branch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``--head`` on a remote clone without ``--base`` still resolves against main."""
+    content = _init_repo(tmp_path, "content")
+    _git(content, "checkout", "-b", "feature")
+    (content / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _git(content, "add", "feature.txt")
+    _git(content, "commit", "-m", "feature branch")
+    _git(content, "checkout", "main")
+
+    bare = _init_bare_remote(tmp_path)
+    _git(content, "remote", "add", "origin", str(bare))
+    _git(content, "push", "-u", "origin", "main")
+    _git(content, "push", "-u", "origin", "feature")
+    _patch_local_git(monkeypatch)
+
+    spec_cls = _spec_cls()
+    resolve = _resolve_workspace()
+    materialize = _materialize_resolved_diff()
+
+    spec = spec_cls(
+        repo=bare.as_uri(),
+        head="feature",
+        invocation_root=tmp_path,
+    )
+    workspace = resolve(spec)
+    result = materialize(workspace, spec=spec, out_dir=tmp_path / "head-only-out")
+    text = result.path.read_text(encoding="utf-8")
+    assert "feature.txt" in text
+    assert result.base_ref in {"main", "origin/main"}
+
+
 def test_staged_only(tmp_path: Path) -> None:
     """``--staged`` uses ``git diff --cached``, bypassing base detection."""
     repo = _init_repo(tmp_path)

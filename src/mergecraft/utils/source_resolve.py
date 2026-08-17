@@ -280,19 +280,8 @@ def filter_confined_paths(workspace_root: Path, paths: list[str]) -> list[str]:
 
 def cli_analyzer_sandbox_applies(*, trust_tier: TrustTier | str, repo_root: Path) -> bool:
     """Return whether the offline CLI path applies analyzer sandbox policy."""
-    from mergecraft.analyzers.manifest import load_manifest_file
-    from mergecraft.analyzers.sandbox import plan_sandbox
-
-    if trust_tier != "untrusted":
-        return False
-    manifest = load_manifest_file(Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml"))
-    plan_sandbox(
-        manifest=manifest,
-        tier="untrusted",
-        repo_root=repo_root,
-        scratch_dir=repo_root / ".mergecraft-scratch",
-    )
-    return True
+    del repo_root  # trust tier alone drives sandbox policy on the CLI path
+    return trust_tier == "untrusted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,6 +319,8 @@ class ResolvedWorkspace:
 
 def resolve_auth_token(*, explicit: str | None = None) -> AuthResolution:
     """Resolve GitHub auth with D10 precedence."""
+    from mergecraft.utils.run_bounds import timeout_for_external_operation
+
     if explicit:
         return AuthResolution(token=explicit, source="--token")
     for env_var in ("GH_TOKEN", "GITHUB_TOKEN"):
@@ -341,6 +332,7 @@ def resolve_auth_token(*, explicit: str | None = None) -> AuthResolution:
         capture_output=True,
         text=True,
         check=False,
+        timeout=timeout_for_external_operation("http_request"),
     )
     if result.returncode == 0:
         token = result.stdout.strip()
@@ -404,6 +396,30 @@ def _is_remote_source(repo: str) -> bool:
     return bool(parsed.scheme)
 
 
+def _fetch_remote_ref(
+    *,
+    ref: str,
+    cwd: Path,
+    env: dict[str, str],
+    depth: int = DEFAULT_DEPTH,
+) -> None:
+    """Fetch a single remote ref into ``refs/remotes/origin/<ref>``."""
+    redirect_args = _redirect_hardening_args()
+    _run_git(
+        [
+            *redirect_args,
+            "fetch",
+            "--depth",
+            str(depth),
+            "--no-tags",
+            "origin",
+            f"{ref}:refs/remotes/origin/{ref}",
+        ],
+        cwd=str(cwd),
+        env=env,
+    )
+
+
 def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
     """Resolve ``--repo`` / ``--cwd`` into a review workspace."""
     if spec.repo is None:
@@ -424,21 +440,18 @@ def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
             ReviewSource(url=url, ref=ref, token=auth.token),
             dest=temp_dir,
         )
+        auth_env = _credential_env(auth.token)
         if spec.base and spec.base != ref:
-            redirect_args = _redirect_hardening_args()
-            _run_git(
-                [
-                    *redirect_args,
-                    "fetch",
-                    "--depth",
-                    str(DEFAULT_DEPTH),
-                    "--no-tags",
-                    "origin",
-                    f"{spec.base}:refs/remotes/origin/{spec.base}",
-                ],
-                cwd=str(acquired.path),
-                env=_credential_env(auth.token),
-            )
+            _fetch_remote_ref(ref=spec.base, cwd=acquired.path, env=auth_env)
+        elif spec.head and spec.base is None and ref not in {"main", "master"}:
+            for candidate in ("main", "master"):
+                if candidate == ref:
+                    continue
+                try:
+                    _fetch_remote_ref(ref=candidate, cwd=acquired.path, env=auth_env)
+                    break
+                except RuntimeError:
+                    continue
         return ResolvedWorkspace(
             cwd=acquired.path,
             git_common_dir=resolve_git_common_dir(acquired.path),
@@ -495,7 +508,14 @@ def materialize_resolved_diff(
         text = git_range_diff(cwd=workspace.cwd, range_spec=spec.commit_range)
         base_ref = spec.commit_range
     elif spec.head or spec.base:
-        base_ref = spec.base or "main"
+        if spec.base:
+            base_ref = spec.base
+        elif workspace.cloned:
+            from mergecraft.utils.offline_diff import detect_default_base
+
+            base_ref = detect_default_base(workspace.cwd, git_dir=workspace.git_common_dir)
+        else:
+            base_ref = "main"
         head = "HEAD" if workspace.cloned and spec.head else (spec.head or "HEAD")
         text = git_ref_diff(
             cwd=workspace.cwd,

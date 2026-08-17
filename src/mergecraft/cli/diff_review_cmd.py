@@ -28,12 +28,14 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
 console = Console()
+error_console = Console(stderr=True)
 
 OutputFormat = Literal["text", "json", "jsonl", "sarif"]
 
 
-def _exit_with_message(msg: str, exit_code: int) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
+def _exit_with_message(msg: str, exit_code: int, *, agent_mode: bool = False) -> NoReturn:
+    target = error_console if agent_mode else console
+    target.print(f"[red]{msg}[/red]")
     raise typer.Exit(exit_code)
 
 
@@ -325,7 +327,7 @@ def run(
             console.print(result.output)
         if agent_mode:
             _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
-        _exit_with_message(result.error or "diff-review failed", exit_code)
+        _exit_with_message(result.error or "diff-review failed", exit_code, agent_mode=agent_mode)
 
     if agent_mode:
         _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)

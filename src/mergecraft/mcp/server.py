@@ -84,7 +84,6 @@ from mergecraft.tracing._tool_attrs import (
 from mergecraft.tracing.tracer import get_tracer_from_settings
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.process_group import kill_process_groups
-from mergecraft.utils.run_bounds import BudgetExhausted
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -354,6 +353,8 @@ def _register_mcp_route(
                     "error": {"code": -32601, "message": f"Unknown tool: {name}"},
                 }
             try:
+                from mergecraft.utils.run_bounds import BudgetExhausted
+
                 _charge_tool_call_budget(tool_ctx)
             except BudgetExhausted as exc:
                 return {

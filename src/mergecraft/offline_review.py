@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,7 +100,7 @@ def _offline_failure(
 
 
 def _offline_error_outcome(exc: BaseException) -> RunOutcome:
-    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError, subprocess.TimeoutExpired)):
         return RunOutcome.timed_out
     if isinstance(exc, ValueError):
         return RunOutcome.configuration_error
@@ -406,7 +407,7 @@ async def run_offline_diff_review(
     spec = source_spec or SourceResolverSpec(cwd=cwd, invocation_root=invocation_root or cwd)
     try:
         workspace = resolve_workspace(spec)
-    except (OSError, RuntimeError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
         return _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc))
 
     cwd = workspace.cwd
@@ -487,7 +488,7 @@ async def run_offline_diff_review(
             error=str(exc),
             outcome=budget_exhaustion_outcome(exc),
         )
-    except (OSError, RuntimeError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
         return _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc))
 
     try:

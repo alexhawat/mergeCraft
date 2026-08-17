@@ -170,6 +170,7 @@ class RunContext:
     run_ctx: AgentRunContext | None = None
     run_bounds: Any = None
     budget_tracker: Any = None
+    budget_exhaustion: Any = None
 
 
 def _first_runnable_in_chain(chain: list[str]) -> str:
@@ -1005,9 +1006,12 @@ def _promote_and_finalize_agent_result(
 
     if result.usage:
         tool_state.usage_entries.append(result.usage)
-        from mergecraft.utils.run_bounds import record_agent_usage
+        from mergecraft.utils.run_bounds import BudgetExhausted, record_agent_usage
 
-        record_agent_usage(ctx.budget_tracker, result.usage)
+        try:
+            record_agent_usage(ctx.budget_tracker, result.usage)
+        except BudgetExhausted as exc:
+            ctx.budget_exhaustion = exc
 
     if output_schema and not tool_state.output:
         msg = (
@@ -1264,15 +1268,23 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
     # ``setup_failure_policy`` to the resolution.
     prep_reason = await _prep_failure_reason(tool_context)
     setup_reason = tool_state.setup_hook_failure or ""
-    outcome, failure_reason = _classify_outcome(
-        result=result,
-        setup_reason=setup_reason,
-        setup_policy=settings.setup_failure_policy,
-        prep_reason=prep_reason,
-        mode=tool_state.selected_mode,
-        verdict_protocol=settings.gates.terminal_verdict,
-        final_summary_written=tool_state.final_summary_written,
-    )
+    outcome: RunOutcome
+    failure_reason: str | None
+    if ctx.budget_exhaustion is not None:
+        from mergecraft.utils.run_bounds import budget_exhaustion_outcome
+
+        outcome = budget_exhaustion_outcome(ctx.budget_exhaustion)
+        failure_reason = str(ctx.budget_exhaustion)
+    else:
+        outcome, failure_reason = _classify_outcome(
+            result=result,
+            setup_reason=setup_reason,
+            setup_policy=settings.setup_failure_policy,
+            prep_reason=prep_reason,
+            mode=tool_state.selected_mode,
+            verdict_protocol=settings.gates.terminal_verdict,
+            final_summary_written=tool_state.final_summary_written,
+        )
     diagnostic_attrs, verdict_prediction = _verdict_protocol_publish(
         result=result,
         mode=tool_state.selected_mode,

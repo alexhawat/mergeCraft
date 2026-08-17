@@ -154,3 +154,32 @@ def test_protocol_is_parseable_line_by_line_while_streaming(
     assert parsed
     assert parsed[0]["event"] == "run_started"
     assert parsed[-1]["event"] == "run_finished"
+
+
+def test_agent_failure_routes_error_to_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--agent`` keeps stdout JSONL-only on failure; human errors go to stderr."""
+
+    async def fake_run_offline_diff_review(**kwargs: object) -> OfflineReviewResult:
+        materialization_path = kwargs.get("diff_file")
+        diff_path = str(materialization_path) if materialization_path else None
+        return OfflineReviewResult(
+            success=False,
+            error="review failed",
+            diff_path=diff_path,
+            outcome=RunOutcome.failed,
+        )
+
+    monkeypatch.setattr(
+        "mergecraft.cli.diff_review_cmd.run_offline_diff_review",
+        fake_run_offline_diff_review,
+    )
+    result = _invoke_agent(tmp_path)
+    assert result.exit_code != 0
+    assert result.stdout.strip()
+    for line in result.stdout.splitlines():
+        if line.strip():
+            json.loads(line)
+    assert "review failed" in _plain(result.stderr)
+    assert "review failed" not in _plain(result.stdout)
