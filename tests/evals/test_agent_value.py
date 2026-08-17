@@ -21,18 +21,16 @@ happens here):
 
 Both symbols are imported lazily inside the tests (ImportError at RED time;
 collection stays clean). Keyless and pure: ``skipped: no live gate``.
+
+Reconciled post-EV2.2 (2026-08-17): EV2.2 (commit ``3d64488``) made all tests
+in this file XPASS; the non-strict ``green after EV2.2`` xfail markers were
+removed, so every test here is now a clean real pass.
+
 """
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.evals.scoring import BaselineIssue, ReportedFinding
-
-_XFAIL_EV2_2 = pytest.mark.xfail(
-    reason="green after EV2.2: LensValue + unique_accepted_findings_per_lens",
-    strict=False,
-)
 
 
 def _issue(identifier: str, *, start: int) -> BaselineIssue:
@@ -48,7 +46,6 @@ def _issues() -> list[BaselineIssue]:
     return [_issue("iss-a", start=10), _issue("iss-b", start=110), _issue("iss-c", start=210)]
 
 
-@_XFAIL_EV2_2
 def test_unique_accepted_findings_per_lens() -> None:
     """security locates A+B, correctness locates A, style locates C:
     security's unique value is exactly B; correctness adds nothing unique."""
@@ -71,7 +68,6 @@ def test_unique_accepted_findings_per_lens() -> None:
     assert values["style"].unique_accepted == 1
 
 
-@_XFAIL_EV2_2
 def test_a_lens_that_finds_nothing_unique_is_visible() -> None:
     """A lens with zero unique accepted findings still appears in the report —
     a lens that earns nothing must be *visible as a zero*, never silently

@@ -7,7 +7,7 @@ This doc is appended to per sub-wave. So far: **PR OB1 (sub-wave OB1.1,
 reconciled post-OB1.2)**, **PR OB2 (sub-wave OB2.1, reconciled post-OB2.2)**
 **PR OB3 (sub-wave OB3.1, reconciled post-OB3.2, one amended test)**,
 **PR EV1 (sub-wave EV1.1, reconciled post-EV1.2)**, **PR EV2 (sub-wave
-EV2.1)** and **PR OB4 (sub-wave OB4.1)**. The EV3 section will be appended by
+EV2.1, reconciled post-EV2.2)** and **PR OB4 (sub-wave OB4.1)**. The EV3 section will be appended by
 its own `test-creator` sub-wave when that PR starts.
 
 ## PR OB1 — review-wide correlation on every span (test plan OB1.1)
@@ -465,19 +465,23 @@ gate).
 ## PR EV2 — blocker precision, duplicate rate, per-lens and judge value (test plan EV2.1)
 
 Authoring wave: **EV2.1** (tests-first, RED). Implementation: **EV2.2**.
+xfail-reconciliation: **post-EV2.2** — complete (2026-08-17): EV2.2
+(`3d64488`) made all 8 RED tests XPASS; the non-strict `green after EV2.2`
+markers were removed and the suite is 8/8 clean real passes, 0 xfail/xpass.
 All eight contracts pin the *scoring* side (global convention 7 — production
 emits normalized fields/attribution, `evals/` scores); per-lens and judge
 value consume typed attribution inputs, not OB4 spans. Every test is keyless
 and pure (`score_findings` / typed models only), so `skipped: no live gate`
 applies to the whole file set.
 
-### xfail schedule
+### xfail schedule (historical)
 
-All 8 contract tests carry `@pytest.mark.xfail(reason="green after EV2.2: …",
-strict=False)` — `strict=False` is explicit because the repo pins
-`xfail_strict = true`. Post-EV2.2 the orchestrator re-dispatches test-creator
-to remove the satisfied markers. Each test fails for exactly one intended
-reason today (verified with `--runxfail`): `AttributeError` on
+All 8 contract tests carried `@pytest.mark.xfail(reason="green after EV2.2: …",
+strict=False)` — `strict=False` was explicit because the repo pins
+`xfail_strict = true`. EV2.2 (`3d64488`) turned all 8 into XPASS; the markers
+were removed in the post-EV2.2 reconciliation, so the suite ends with 8 clean
+real passes. At RED time each test failed for exactly one intended reason
+(verified with `--runxfail`): `AttributeError` on
 `ScoreReport.blocker_precision` / `ScoreReport.duplicate_finding_indexes`
 (existing models, new attributes), `ImportError` on the new symbols
 (`unique_accepted_findings_per_lens`, `judge_value`, `summarize_latencies`,
@@ -529,8 +533,8 @@ collection stays clean.
 | `LatencySummary` / `summarize_latencies(durations_ms)` | `p50_ms` / `p95_ms`, linear-interpolation percentile method |
 | `rollup_by_orchestrator_kind(rows_by_kind)` | `dict[str, CorpusClassRollup]` with the pinned status mapping |
 
-### Acceptance (plan §EV2.1)
+### Acceptance (plan §EV2.1, post-reconciliation)
 
-8 collected; **0 pass**; **8 RED** (non-strict xfail — failures at runtime,
-zero collection errors). `make lint` + `make typecheck` clean. Live gates:
-none — `skipped: no live gate`.
+8 collected; **8 passed**; 0 xfail/xpass (RED acceptance at authoring time was
+8 collected / 0 pass / 8 RED — met at `cf3f866`). `make lint` +
+`make typecheck` clean. Live gates: none — `skipped: no live gate`.

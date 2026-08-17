@@ -20,6 +20,11 @@ duplicate ledger:
 
 Pinned as attribute access on the existing ``ScoreReport`` — AttributeError at
 RED time, collection stays clean. Keyless and pure: ``skipped: no live gate``.
+
+Reconciled post-EV2.2 (2026-08-17): EV2.2 (commit ``3d64488``) made all tests
+in this file XPASS; the non-strict ``green after EV2.2`` xfail markers were
+removed, so every test here is now a clean real pass.
+
 """
 
 from __future__ import annotations
@@ -28,13 +33,7 @@ import pytest
 
 from mergecraft.evals.scoring import ReportedFinding, score_findings
 
-_XFAIL_EV2_2 = pytest.mark.xfail(
-    reason="green after EV2.2: ScoreReport.duplicate_finding_indexes + duplicate_rate",
-    strict=False,
-)
 
-
-@_XFAIL_EV2_2
 def test_semantic_duplicates_are_counted() -> None:
     """Two differently-worded findings at the same location are semantic
     duplicates; the paraphrase is counted, the canonical first occurrence is

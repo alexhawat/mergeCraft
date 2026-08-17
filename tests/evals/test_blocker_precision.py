@@ -22,6 +22,11 @@ Pinned as attribute access on the existing ``ScoreReport`` — AttributeError at
 RED time, collection stays clean, and EV2.2 chooses the storage (field or
 derived property). Keyless and pure: ``score_findings`` needs no provider, so
 ``skipped: no live gate``.
+
+Reconciled post-EV2.2 (2026-08-17): EV2.2 (commit ``3d64488``) made all tests
+in this file XPASS; the non-strict ``green after EV2.2`` xfail markers were
+removed, so every test here is now a clean real pass.
+
 """
 
 from __future__ import annotations
@@ -32,11 +37,6 @@ from mergecraft.evals.scoring import (
     BaselineIssue,
     ReportedFinding,
     score_findings,
-)
-
-_XFAIL_EV2_2 = pytest.mark.xfail(
-    reason="green after EV2.2: ScoreReport.blocker_precision (blocker band scored separately)",
-    strict=False,
 )
 
 
@@ -53,7 +53,6 @@ def _finding(*, start: int, severity: str, path: str = "src/app.py") -> Reported
 # ── blocker precision is its own number ──
 
 
-@_XFAIL_EV2_2
 def test_scored_separately_from_overall_precision() -> None:
     """One blocker found + two unmatched non-blocker findings: overall
     corpus-confirmed precision is 1/3, blocker precision is a perfect 1.0 —
@@ -75,7 +74,6 @@ def test_scored_separately_from_overall_precision() -> None:
     assert report.blocker_precision != report.corpus_confirmed_precision
 
 
-@_XFAIL_EV2_2
 def test_blocker_precision_regression_is_detectable() -> None:
     """Two runs with *identical* overall precision but the blocker band
     regressed: run B matched the minor issue and leaked an unmatched blocker

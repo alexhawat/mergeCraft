@@ -17,6 +17,11 @@ pre-judge and post-judge scorings of the same run:
 
 Both symbols are imported lazily inside the test (ImportError at RED time;
 collection stays clean). Keyless and pure: ``skipped: no live gate``.
+
+Reconciled post-EV2.2 (2026-08-17): EV2.2 (commit ``3d64488``) made all tests
+in this file XPASS; the non-strict ``green after EV2.2`` xfail markers were
+removed, so every test here is now a clean real pass.
+
 """
 
 from __future__ import annotations
@@ -29,11 +34,6 @@ from mergecraft.evals.scoring import (
     score_findings,
 )
 
-_XFAIL_EV2_2 = pytest.mark.xfail(
-    reason="green after EV2.2: JudgeValue + judge_value(before, after)",
-    strict=False,
-)
-
 
 def _issue(identifier: str, *, start: int) -> BaselineIssue:
     return BaselineIssue(id=identifier, path="src/app.py", start_line=start, end_line=start + 1)
@@ -43,7 +43,6 @@ def _finding(*, start: int, path: str = "src/app.py") -> ReportedFinding:
     return ReportedFinding(path=path, start_line=start, end_line=start + 1)
 
 
-@_XFAIL_EV2_2
 def test_noise_removed_and_recall_lost_are_both_reported() -> None:
     """The judge filters two real false positives *and* one true finding:
     strict precision improves (2/4 -> 1/1) while recall drops — both halves of

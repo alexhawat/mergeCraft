@@ -21,22 +21,20 @@ on this branch provides; scoring folds it here):
 
 The symbol is imported lazily inside the test (ImportError at RED time;
 collection stays clean). Keyless and pure: ``skipped: no live gate``.
+
+Reconciled post-EV2.2 (2026-08-17): EV2.2 (commit ``3d64488``) made all tests
+in this file XPASS; the non-strict ``green after EV2.2`` xfail markers were
+removed, so every test here is now a clean real pass.
+
 """
 
 from __future__ import annotations
-
-import pytest
 
 from mergecraft.evals.benchmark import CaseReplayRow
 from mergecraft.evals.store import (
     CASE_STATUS_BLOCKED,
     CASE_STATUS_PASSED,
     CASE_STATUS_REGRESSION,
-)
-
-_XFAIL_EV2_2 = pytest.mark.xfail(
-    reason="green after EV2.2: rollup_by_orchestrator_kind scores hybrid vs llm (W-23)",
-    strict=False,
 )
 
 
@@ -51,7 +49,6 @@ def _row(case_id: str, status: str) -> CaseReplayRow:
     )
 
 
-@_XFAIL_EV2_2
 def test_orchestrator_kind_is_a_scored_dimension() -> None:
     """The same replay rows rolled up per orchestrator kind: hybrid and llm
     each get their own total/correct/incorrect/inconclusive counts, so the
