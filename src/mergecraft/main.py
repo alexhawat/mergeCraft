@@ -703,6 +703,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         agent_id=ctx.agent_id,
         repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
         payload=ctx_payload,
+        scm=ctx.scm,
         github=github_client_from_scm(ctx.scm),
         github_installation_token=token_ref.mcp_token,
         git_token=token_ref.git_token,

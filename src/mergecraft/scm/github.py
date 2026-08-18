@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mergecraft.scm.protocol import ScmCapability, ScmProvider
-from mergecraft.utils.github import (
-    GitHubClient,
-    resolve_run_context_data,
-)
-
-if TYPE_CHECKING:
-    from mergecraft.config.settings import RepoSettings, RunContextData
+from mergecraft.utils.github import GitHubClient
 
 
 class GitHubScmAdapter:
@@ -314,37 +308,3 @@ def github_client_from_scm(scm: ScmProvider) -> GitHubClient | None:
 def create_github_scm(token: str, *, client: GitHubClient | None = None) -> GitHubScmAdapter:
     """Build a GitHub adapter from a token or an existing client."""
     return GitHubScmAdapter(client or GitHubClient(token))
-
-
-async def resolve_run_context_for_scm(
-    adapter: GitHubScmAdapter,
-    *,
-    settings: RepoSettings | None = None,
-    settings_path: str | None = None,
-    repository: str | None = None,
-) -> RunContextData:
-    """Resolve run context using the GitHub adapter's underlying client."""
-    return await resolve_run_context_data(
-        adapter.client,
-        settings=settings,
-        settings_path=settings_path,
-        repository=repository,
-    )
-
-
-async def resolve_run_context_from_token(
-    token: str,
-    *,
-    settings: RepoSettings | None = None,
-    settings_path: str | None = None,
-    repository: str | None = None,
-) -> tuple[GitHubScmAdapter, RunContextData]:
-    """Convenience helper for ``main.py`` without leaking client types."""
-    adapter = create_github_scm(token)
-    run_context = await resolve_run_context_for_scm(
-        adapter,
-        settings=settings,
-        settings_path=settings_path,
-        repository=repository,
-    )
-    return adapter, run_context

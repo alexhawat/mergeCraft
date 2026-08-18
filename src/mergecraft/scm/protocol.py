@@ -374,13 +374,6 @@ class RecordingScmProvider:
         return await self.create_review(owner, repo, pull_number, **fields)
 
 
-def _unsupported(name: str) -> Any:
-    async def _raise(*_args: Any, **_kwargs: Any) -> Any:
-        raise NotImplementedError(name)
-
-    return _raise
-
-
 @dataclass
 class InMemoryScmProvider:
     """Deterministic provider for checkout semantics tests."""

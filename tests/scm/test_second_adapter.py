@@ -31,6 +31,7 @@ async def test_unsupported_capability_is_declared_not_faked() -> None:
     from mergecraft.scm.protocol import ScmCapability
 
     adapter = GitLabScmAdapter(token="test-token", base_url="https://gitlab.example/api/v4")
+    assert adapter.capabilities == frozenset()
     assert ScmCapability.GRAPHQL not in adapter.capabilities
 
     with pytest.raises(UnsupportedScmCapability) as exc_info:
@@ -39,3 +40,47 @@ async def test_unsupported_capability_is_declared_not_faked() -> None:
     message = str(exc_info.value).lower()
     assert "graphql" in message or "unsupported" in message
     assert "capabilit" in message
+
+
+@pytest.mark.asyncio
+async def test_create_review_raises_unsupported_not_fabricated_success() -> None:
+    """Review publication must not receive hollow dicts missing GitHub-shaped ``id``."""
+    require_scm()
+    from mergecraft.scm.errors import UnsupportedScmCapability
+    from mergecraft.scm.gitlab import GitLabScmAdapter
+
+    adapter = GitLabScmAdapter(token="test-token", base_url="https://gitlab.example/api/v4")
+
+    with pytest.raises(UnsupportedScmCapability) as exc_info:
+        await adapter.create_review("acme", "demo", 7, event="COMMENT", body="nope")
+
+    assert "create_review" in str(exc_info.value).lower()
+
+
+def test_tool_context_preserves_explicit_scm_instance(tmp_path: object) -> None:
+    """Non-GitHub ``scm`` must not be replaced by an empty GitHub fallback client."""
+    require_scm()
+    from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
+    from mergecraft.mcp.tool_state import init_tool_state
+    from mergecraft.modes import compute_modes
+    from mergecraft.scm.github import GitHubScmAdapter
+    from mergecraft.scm.gitlab import GitLabScmAdapter
+
+    adapter = GitLabScmAdapter(token="test-token", base_url="https://gitlab.example/api/v4")
+    path = str(tmp_path)
+    ctx = ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(
+            event=PayloadEvent(trigger="pull_request", issue_number=7, is_pr=True),
+            shell="restricted",
+        ),
+        scm=adapter,
+        modes=compute_modes("claude"),
+        tool_state=init_tool_state(owner="acme", name="demo", dir=path),
+        mcp_server_url="",
+        tmpdir=path,
+    )
+
+    assert ctx.scm is adapter
+    assert not isinstance(ctx.scm, GitHubScmAdapter)
