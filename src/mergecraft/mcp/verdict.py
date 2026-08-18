@@ -29,6 +29,9 @@ from mergecraft.review_taxonomy import FINDING_SEVERITIES
 from mergecraft.tracing.redaction import redact_attrs
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
+
+if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
 _ALLOWED_VERDICTS = frozenset({"approve", "request_changes"})
@@ -233,12 +236,10 @@ def _finding_fingerprint(item: Any) -> str:
     return str(getattr(item, "fingerprint", "") or "")
 
 
-def _coerce_confirmed_finding(item: Any) -> Any | None:
-    from mergecraft.analyzers.finding import Finding, FindingValidationError
+def _coerce_confirmed_finding(item: Any) -> Finding | None:
+    from mergecraft.analyzers.finding import Finding, FindingValidationError, make_finding
 
     if isinstance(item, Finding):
-        return item
-    if hasattr(item, "severity") and not isinstance(item, dict):
         return item
     if isinstance(item, dict):
         try:
@@ -247,11 +248,28 @@ def _coerce_confirmed_finding(item: Any) -> Any | None:
             severity = item.get("severity")
             if not severity:
                 return None
-            from types import SimpleNamespace
+            from typing import cast
 
-            return SimpleNamespace(
-                fingerprint=str(item.get("fingerprint") or ""),
+            from mergecraft.analyzers.finding import IntroducedByPr
+
+            introduced_raw = str(item.get("introduced_by_pr") or "unknown")
+            introduced = cast(
+                "IntroducedByPr",
+                introduced_raw if introduced_raw in {"true", "false", "unknown"} else "unknown",
+            )
+            return make_finding(
+                tool=str(item.get("tool") or "agent"),
+                rule_id=str(item.get("rule_id") or "agent:confirmed"),
+                category=str(item.get("category") or "Functional Correctness"),
                 severity=str(severity),
+                confidence=str(item.get("confidence") or "likely"),
+                message=str(item.get("message") or item.get("body") or ""),
+                path=str(item.get("path") or ""),
+                start_line=int(item.get("start_line") or item.get("line") or 1),
+                end_line=int(item.get("end_line") or item.get("line") or 1),
+                source="agent",
+                fingerprint=str(item.get("fingerprint") or "") or None,
+                introduced_by_pr=introduced,
             )
     return None
 
@@ -377,19 +395,14 @@ def validate_submission(submission: dict[str, Any], *, state: Any) -> Submission
 
     if verdict == "approve":
         from mergecraft.agents.gates import BLOCKING_SEVERITIES, has_failed_required_static_check
+        from mergecraft.analyzers.finding import Finding
         from mergecraft.findings.causality import apply_causality_policy
 
         for finding in _confirmed_findings_from_state(state):
-            coerced = _coerce_confirmed_finding(finding)
-            if coerced is None:
+            if not isinstance(finding, Finding):
                 continue
-            if hasattr(coerced, "introduced_by_pr"):
-                coerced = apply_causality_policy(coerced)
-            if isinstance(coerced, dict):
-                severity = coerced.get("severity")
-            else:
-                severity = getattr(coerced, "severity", None)
-            if severity in BLOCKING_SEVERITIES:
+            adjusted = apply_causality_policy(finding)
+            if adjusted.severity in BLOCKING_SEVERITIES:
                 return SubmissionValidation(
                     accepted=False,
                     rejection_reason=REJECTION_APPROVE_CONFIRMED_BLOCKER,

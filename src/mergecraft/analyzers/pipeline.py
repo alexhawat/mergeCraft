@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.analyzers.baseline_suppression import (
-    collect_base_analyzer_findings,
     log_suppression_audit,
     should_run_baseline_suppression,
     suppress_baseline_findings,
@@ -17,12 +16,15 @@ from mergecraft.analyzers.budget import default_inline_budget, place_findings
 from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.lockfile import lock_digest
+from mergecraft.analyzers.precision import apply_analyzer_precision
 from mergecraft.analyzers.registry import detect_enabled
 from mergecraft.analyzers.review_gate import filter_for_review
 from mergecraft.analyzers.scope import (
+    DiffScope,
     annotate_introduced_by_pr,
     base_comparison_available,
     introduced_by_base_diff,
+    parse_diff_scope,
     scope_findings,
     suppress_withdrawn_findings,
 )
@@ -35,7 +37,6 @@ from mergecraft.analyzers.trust import (
     resolve_selection_tier,
 )
 from mergecraft.config import load_repo_settings
-from mergecraft.findings.dedup import dedupe_findings
 from mergecraft.mcp.review import format_analyzer_inline_body
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow
 
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from mergecraft.analyzers.manifest import AnalyzerManifest
     from mergecraft.config.settings import AnalyzersSettings
 
 TrustTier = Literal["trusted", "untrusted"]
@@ -103,6 +105,62 @@ def _build_pre_merge_summary(
         parts.append(f"{len(skipped)} skipped ({reasons})")
     parts.append(f"lock {lockfile_digest_value}")
     return "; ".join(parts)
+
+
+def _apply_baseline_suppression(
+    scoped: list[Finding],
+    *,
+    repo_root: Path,
+    manifests: list[AnalyzerManifest],
+    changed_files: list[str],
+    diff_text: str,
+    base_comparison: str,
+    tier: TrustTier,
+    base_ref: str | None,
+    offline: bool,
+    allow_repo_binaries: bool,
+    diff_scope: DiffScope | None = None,
+) -> list[Finding]:
+    """Run base-vs-head suppression when configured; fail closed on collection errors."""
+    if not should_run_baseline_suppression(
+        diff_text=diff_text,
+        base_comparison=base_comparison,
+    ):
+        return scoped
+
+    from mergecraft.analyzers.baseline_suppression import collect_base_analyzer_findings
+
+    collection = collect_base_analyzer_findings(
+        repo_root=repo_root,
+        manifests=manifests,
+        changed_files=changed_files,
+        head_findings=scoped,
+        tier=tier,
+        base_ref=base_ref,
+        offline=offline,
+        allow_repo_binaries=allow_repo_binaries,
+    )
+    if not collection.collected:
+        logger.info(
+            "baseline suppression: base collection failed — leaving introduced_by_pr unknown"
+        )
+        return scoped
+
+    scoped = introduced_by_base_diff(scoped, collection.findings)
+    suppression = suppress_baseline_findings(
+        head_findings=scoped,
+        base_findings=collection.findings,
+        diff_text=diff_text,
+        base_comparison=base_comparison,
+        scope=diff_scope,
+    )
+    log_suppression_audit(suppression.audit_trail)
+    logger.info(
+        "baseline suppression: reported={} suppressed={}",
+        len(suppression.reported),
+        len(suppression.suppressed),
+    )
+    return suppression.reported
 
 
 def run_analyzer_pipeline(
@@ -271,7 +329,9 @@ def run_analyzer_pipeline(
                 )
 
         learnings_text = _load_learnings(repo_root)
+        diff_scope: DiffScope | None = None
         if diff_text.strip():
+            diff_scope = parse_diff_scope(diff_text)
             scoped = scope_findings(
                 raw_findings,
                 diff_text=diff_text,
@@ -286,36 +346,21 @@ def run_analyzer_pipeline(
             offline=offline,
         )
         scoped = annotate_introduced_by_pr(scoped, base_run_performed=base_run)
-        if should_run_baseline_suppression(
+        scoped = _apply_baseline_suppression(
+            scoped,
+            repo_root=repo_root,
+            manifests=manifests,
+            changed_files=changed_files,
             diff_text=diff_text,
             base_comparison=settings.base_comparison,
-        ):
-            base_findings = collect_base_analyzer_findings(
-                repo_root=repo_root,
-                manifests=manifests,
-                changed_files=changed_files,
-                head_findings=scoped,
-                tier=tier,
-                base_ref=base_ref,
-                offline=offline,
-                allow_repo_binaries=repo_binaries_allowed,
-            )
-            scoped = introduced_by_base_diff(scoped, base_findings)
-            suppression = suppress_baseline_findings(
-                head_findings=scoped,
-                base_findings=base_findings,
-                diff_text=diff_text,
-                base_comparison=settings.base_comparison,
-            )
-            scoped = suppression.reported
-            log_suppression_audit(suppression.audit_trail)
-            logger.info(
-                "baseline suppression: reported={} suppressed={}",
-                len(suppression.reported),
-                len(suppression.suppressed),
-            )
+            tier=tier,
+            base_ref=base_ref,
+            offline=offline,
+            allow_repo_binaries=repo_binaries_allowed,
+            diff_scope=diff_scope,
+        )
 
-        clustered = dedupe_findings(cluster_findings(scoped))
+        clustered = apply_analyzer_precision(cluster_findings(scoped))
         budget = (
             inline_budget
             if inline_budget is not None

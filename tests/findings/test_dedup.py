@@ -12,7 +12,7 @@ from tests.findings.support import make_finding
 
 def test_two_lenses_reporting_one_defect_produce_one_finding() -> None:
     """Two review lenses flag the same defect once each — publish one finding."""
-    from mergecraft.findings.dedup import dedupe_findings
+    from mergecraft.analyzers.dedup import dedupe_findings
 
     findings = [
         make_finding(
@@ -42,7 +42,7 @@ def test_two_lenses_reporting_one_defect_produce_one_finding() -> None:
 
 def test_same_defect_different_wording_is_deduped() -> None:
     """Paraphrases of one defect at the same place collapse to a single finding."""
-    from mergecraft.findings.dedup import dedupe_findings
+    from mergecraft.analyzers.dedup import dedupe_findings
 
     findings = [
         make_finding(
@@ -66,7 +66,7 @@ def test_same_defect_different_wording_is_deduped() -> None:
 
 def test_distinct_defects_on_one_line_are_not_merged() -> None:
     """Different categories on the same line stay separate — the false-merge guard."""
-    from mergecraft.findings.dedup import dedupe_findings
+    from mergecraft.analyzers.dedup import dedupe_findings
 
     findings = [
         make_finding(
@@ -94,7 +94,7 @@ def test_distinct_defects_on_one_line_are_not_merged() -> None:
 
 def test_same_category_distinct_defects_on_one_line_are_not_merged() -> None:
     """Same category on one line with different defects stay separate."""
-    from mergecraft.findings.dedup import dedupe_findings
+    from mergecraft.analyzers.dedup import dedupe_findings
 
     findings = [
         make_finding(

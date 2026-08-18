@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mergecraft.analyzers.manifest_names import CONFIG_MANIFEST_NAMES, LOCKFILE_NAMES
 from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING, finding_fingerprint
 
 if TYPE_CHECKING:
@@ -16,34 +17,6 @@ _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(.+?) b/(.+?)$")
 _NEW_FILE_RE = re.compile(r"^new file mode ")
 _DEV_NULL_RE = re.compile(r"^--- /dev/null")
-
-# Scope exceptions (W5.2) — explicit paths, not heuristics.
-_LOCKFILE_NAMES: frozenset[str] = frozenset(
-    {
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "yarn.lock",
-        "poetry.lock",
-        "Pipfile.lock",
-        "uv.lock",
-        "Cargo.lock",
-        "go.sum",
-        "composer.lock",
-        "Gemfile.lock",
-    }
-)
-_DEPENDENCY_MANIFEST_NAMES: frozenset[str] = frozenset(
-    {
-        "requirements.txt",
-        "requirements-dev.txt",
-        "pyproject.toml",
-        "package.json",
-        "go.mod",
-        "Cargo.toml",
-        "Gemfile",
-        "composer.json",
-    }
-)
 _MIGRATION_PREFIXES: tuple[str, ...] = (
     "db/migrations/",
     "migrations/",
@@ -150,9 +123,9 @@ def _record_exception_paths(
     name = Path(path).name
     if is_new_file:
         changed_dependency_manifests.add(path)
-    if name in _LOCKFILE_NAMES:
+    if name in LOCKFILE_NAMES:
         changed_lockfiles.add(path)
-    if name in _DEPENDENCY_MANIFEST_NAMES:
+    if name in CONFIG_MANIFEST_NAMES:
         changed_dependency_manifests.add(path)
     if path.startswith((".github/workflows/", ".github/actions/")):
         changed_workflows.add(path)
@@ -194,10 +167,11 @@ def apply_scope_exceptions(
     *,
     diff_text: str,
     repo_root: Path | None = None,
+    scope: DiffScope | None = None,
 ) -> list[Finding]:
     """Keep findings on changed hunks or on explicit PR-scope exception paths."""
     _ = repo_root
-    scope = parse_diff_scope(diff_text)
+    scope = scope if scope is not None else parse_diff_scope(diff_text)
     kept: list[Finding] = []
     for finding in findings:
         on_hunk = _line_intersects_hunks(finding.path, finding.start_line, finding.end_line, scope)
@@ -287,7 +261,7 @@ def withdrawn_fingerprints(learnings_text: str) -> frozenset[str]:
     return frozenset(fingerprints)
 
 
-def _changed_paths_from_scope(scope: DiffScope) -> list[str]:
+def changed_paths_from_scope(scope: DiffScope) -> list[str]:
     paths = set(scope.hunk_ranges.keys())
     paths.update(scope.added_files)
     paths.update(scope.changed_lockfiles)
@@ -301,12 +275,13 @@ def filter_generated_scope(
     findings: list[Finding],
     *,
     diff_text: str,
+    scope: DiffScope | None = None,
 ) -> list[Finding]:
     """Drop generated/minified/vendored paths policy excludes (D4)."""
     from mergecraft.classify.generated_files import ChangeSet, review_includes_path
 
-    scope = parse_diff_scope(diff_text)
-    change: ChangeSet = {"changed_paths": _changed_paths_from_scope(scope)}
+    scope = scope if scope is not None else parse_diff_scope(diff_text)
+    change: ChangeSet = {"changed_paths": changed_paths_from_scope(scope)}
     kept: list[Finding] = []
     for finding in findings:
         if review_includes_path(finding.path, change=change):
@@ -322,8 +297,14 @@ def scope_findings(
     learnings_text: str = "",
 ) -> list[Finding]:
     """Apply diff scoping, exceptions, generated policy, and withdrawn suppression."""
-    scoped = apply_scope_exceptions(findings, diff_text=diff_text, repo_root=repo_root)
-    scoped = filter_generated_scope(scoped, diff_text=diff_text)
+    scope = parse_diff_scope(diff_text)
+    scoped = apply_scope_exceptions(
+        findings,
+        diff_text=diff_text,
+        repo_root=repo_root,
+        scope=scope,
+    )
+    scoped = filter_generated_scope(scoped, diff_text=diff_text, scope=scope)
     return suppress_withdrawn_findings(scoped, learnings_text)
 
 
@@ -332,6 +313,7 @@ __all__ = [
     "annotate_introduced_by_pr",
     "apply_scope_exceptions",
     "base_comparison_available",
+    "changed_paths_from_scope",
     "filter_generated_scope",
     "filter_to_diff",
     "introduced_by_base_diff",

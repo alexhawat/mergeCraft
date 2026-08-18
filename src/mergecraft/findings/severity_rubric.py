@@ -14,6 +14,21 @@ _RubricRule = dict[str, Any]
 
 SEVERITY_RUBRIC: Final[tuple[_RubricRule, ...]] = (
     {
+        "id": "security-signal",
+        "categories": ("Security & Privacy",),
+        "patterns": (
+            r"secret",
+            r"token",
+            r"credential",
+            r"password",
+            r"injection",
+            r"\bauth\b",
+            r"\bsql\b",
+            r"xss",
+        ),
+        "max_severity": "Critical",
+    },
+    {
         "id": "maint-style-nit",
         "categories": ("Maintainability & Code Quality",),
         "patterns": (
@@ -22,6 +37,8 @@ SEVERITY_RUBRIC: Final[tuple[_RubricRule, ...]] = (
             r"typo",
             r"spelling",
             r"prefer .* over",
+            r"style",
+            r"naming",
         ),
         "max_severity": "Minor",
     },
@@ -71,8 +88,20 @@ def apply_severity_rubric(
     return finding.model_copy(update={"severity": severity})
 
 
+def infer_category_from_message(body: str) -> str:
+    """Infer a taxonomy category from message text using rubric patterns."""
+    for rule, patterns in _COMPILED:
+        categories = rule.get("categories")
+        if not categories:
+            continue
+        if any(pattern.search(body) for pattern in patterns):
+            return str(categories[0])
+    return "Functional Correctness"
+
+
 __all__ = [
     "SEVERITY_RUBRIC",
     "SEVERITY_RUBRIC_VERSION",
     "apply_severity_rubric",
+    "infer_category_from_message",
 ]

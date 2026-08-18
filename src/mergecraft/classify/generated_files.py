@@ -5,19 +5,10 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TypedDict
 
+from mergecraft.analyzers.manifest_names import CONFIG_MANIFEST_NAMES
 from mergecraft.analyzers.paths import normalize_repo_path
 
-_GENERATOR_CONFIG_NAMES = frozenset(
-    {
-        "pyproject.toml",
-        "package.json",
-        "Cargo.toml",
-        "go.mod",
-        "Makefile",
-        "buf.gen.yaml",
-        "openapi-generator.yaml",
-    }
-)
+_GENERATOR_CONFIG_NAMES = CONFIG_MANIFEST_NAMES
 
 
 class FileKind(StrEnum):

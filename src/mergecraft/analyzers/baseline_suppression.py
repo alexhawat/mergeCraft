@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Literal
 from loguru import logger
 
 from mergecraft.analyzers.paths import normalize_repo_path
-from mergecraft.analyzers.scope import _changed_paths_from_scope, parse_diff_scope
+from mergecraft.analyzers.scope import DiffScope, changed_paths_from_scope, parse_diff_scope
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -40,9 +40,17 @@ class SuppressionResult:
     audit_trail: list[SuppressionAuditEntry] = field(default_factory=list)
 
 
-def _touched_paths(diff_text: str) -> set[str]:
-    scope = parse_diff_scope(diff_text)
-    return {normalize_repo_path(path) for path in _changed_paths_from_scope(scope)}
+@dataclass(frozen=True, slots=True)
+class BaseCollectionResult:
+    """Outcome of running analyzers at the base ref."""
+
+    findings: list[Finding]
+    collected: bool
+
+
+def _touched_paths(diff_text: str, *, scope: DiffScope | None = None) -> set[str]:
+    parsed = scope if scope is not None else parse_diff_scope(diff_text)
+    return {normalize_repo_path(path) for path in changed_paths_from_scope(parsed)}
 
 
 def _changed_line_count(diff_text: str) -> int:
@@ -103,7 +111,7 @@ def collect_base_analyzer_findings(
     base_ref: str | None = None,
     offline: bool = False,
     allow_repo_binaries: bool = True,
-) -> list[Finding]:
+) -> BaseCollectionResult:
     """Run the same enabled analyzers at ``base_ref`` and return their findings."""
     from mergecraft.analyzers.adapters import run_adapter
     from mergecraft.analyzers.contracts import resolve_analyzer_base_ref
@@ -116,7 +124,7 @@ def collect_base_analyzer_findings(
     )
     if not resolved:
         logger.info("baseline suppression: base ref unavailable — skipping base collection")
-        return []
+        return BaseCollectionResult(findings=[], collected=False)
 
     scan_files = list(
         dict.fromkeys(
@@ -125,7 +133,7 @@ def collect_base_analyzer_findings(
     )
     worktree = _checkout_base_worktree(repo_root, resolved)
     if worktree is None:
-        return []
+        return BaseCollectionResult(findings=[], collected=False)
 
     base_findings: list[Finding] = []
     try:
@@ -144,7 +152,7 @@ def collect_base_analyzer_findings(
             base_findings.extend(result.findings)
     finally:
         _remove_base_worktree(repo_root, worktree)
-    return base_findings
+    return BaseCollectionResult(findings=base_findings, collected=True)
 
 
 def log_suppression_audit(audit_trail: list[SuppressionAuditEntry]) -> None:
@@ -164,6 +172,7 @@ def suppress_baseline_findings(
     base_findings: list[Finding],
     diff_text: str,
     base_comparison: str,
+    scope: DiffScope | None = None,
 ) -> SuppressionResult:
     """Suppress analyzer hits that already existed on base (D3)."""
     if base_comparison != "full":
@@ -179,7 +188,7 @@ def suppress_baseline_findings(
             ],
         )
 
-    touched = _touched_paths(diff_text)
+    touched = _touched_paths(diff_text, scope=scope)
     base_by_fingerprint = {finding.fingerprint: finding for finding in base_findings}
     base_identities = {_baseline_identity(finding) for finding in base_findings}
 
@@ -216,6 +225,7 @@ def suppress_baseline_findings(
 
 
 __all__ = [
+    "BaseCollectionResult",
     "SuppressionAuditEntry",
     "SuppressionResult",
     "collect_base_analyzer_findings",

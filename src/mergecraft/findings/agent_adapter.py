@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.finding import make_finding
@@ -12,51 +11,16 @@ from mergecraft.findings.causality import (
     causality_text,
 )
 from mergecraft.findings.precision_pipeline import apply_precision_pipeline
+from mergecraft.findings.severity_rubric import infer_category_from_message
 
 if TYPE_CHECKING:
     from mergecraft.agents.verifier import AgentFinding
     from mergecraft.analyzers.finding import Finding
 
-_MAINTENANCE_HINTS = frozenset(
-    {
-        "f-string",
-        "formatting",
-        "typo",
-        "spelling",
-        "comment",
-        "docstring",
-        "readme",
-        "style",
-        "naming",
-    }
-)
-_SECURITY_HINTS = frozenset(
-    {
-        "secret",
-        "token",
-        "credential",
-        "password",
-        "injection",
-        "auth",
-        "sql",
-        "xss",
-    }
-)
-
-
-def _contains_category_hint(text: str, hint: str) -> bool:
-    """Return whether ``hint`` appears as its own token, not a substring."""
-    pattern = rf"(?<![a-z0-9]){re.escape(hint.casefold())}(?![a-z0-9])"
-    return re.search(pattern, text.casefold()) is not None
-
 
 def infer_agent_finding_category(body: str) -> str:
     """Infer a taxonomy category for rubric normalization."""
-    if any(_contains_category_hint(body, hint) for hint in _SECURITY_HINTS):
-        return "Security & Privacy"
-    if any(_contains_category_hint(body, hint) for hint in _MAINTENANCE_HINTS):
-        return "Maintainability & Code Quality"
-    return "Functional Correctness"
+    return infer_category_from_message(body)
 
 
 def coerce_agent_finding(item: Any) -> AgentFinding:

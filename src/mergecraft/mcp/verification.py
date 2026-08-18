@@ -32,8 +32,7 @@ from mergecraft.findings.agent_adapter import (
     finding_for_publication_validation,
     normalize_agent_findings_via_pipeline,
 )
-from mergecraft.findings.causality import CausalityValidationError
-from mergecraft.findings.precision_pipeline import apply_precision_pipeline
+from mergecraft.findings.causality import CausalityValidationError, validate_blocking_finding
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
 from mergecraft.utils.learnings import learnings_file_path
@@ -66,7 +65,7 @@ def _validate_publication_finding(
         severity=severity,
     )
     try:
-        apply_precision_pipeline([finding], dedupe=False, enforce_causality=True)
+        validate_blocking_finding(finding)
     except CausalityValidationError as exc:
         raise ValueError(str(exc)) from exc
 
