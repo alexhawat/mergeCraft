@@ -22,7 +22,8 @@ def test_one_additional_provider_satisfies_the_protocol() -> None:
     assert report.complete is True, f"adapter missing protocol operations: {report.missing}"
 
 
-def test_unsupported_capability_is_declared_not_faked() -> None:
+@pytest.mark.asyncio
+async def test_unsupported_capability_is_declared_not_faked() -> None:
     """Providers declare unsupported capabilities instead of emulating GitHub."""
     require_scm()
     from mergecraft.scm.errors import UnsupportedScmCapability
@@ -33,7 +34,7 @@ def test_unsupported_capability_is_declared_not_faked() -> None:
     assert ScmCapability.GRAPHQL not in adapter.capabilities
 
     with pytest.raises(UnsupportedScmCapability) as exc_info:
-        adapter.graphql("query { viewer { username } }")
+        await adapter.graphql("query { viewer { username } }")
 
     message = str(exc_info.value).lower()
     assert "graphql" in message or "unsupported" in message

@@ -12,6 +12,7 @@ from loguru import logger
 
 from mergecraft.ci.log_excerpt import analyze_log
 from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation
+from mergecraft.scm.github import github_client_from_scm
 
 if TYPE_CHECKING:
     from mergecraft.ci.types import ProviderContext, RawFailure
@@ -39,7 +40,7 @@ class GitHubActionsProvider:
         truncation_cap: int = DEFAULT_TRUNCATION_CAP,
     ) -> dict[str, Any]:
         """Download failed workflow logs for a check suite (legacy MCP contract)."""
-        payload = await ctx.github.get(
+        payload = await ctx.scm.get(
             f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs",
             params={"check_suite_id": check_suite_id, "per_page": 100},
         )
@@ -63,7 +64,10 @@ class GitHubActionsProvider:
         for run in selected:
             run_id = run["id"]
             try:
-                response = await ctx.github._client.get(
+                github = github_client_from_scm(ctx.scm)
+                if github is None:
+                    raise RuntimeError("log download requires a GitHub SCM adapter")
+                response = await github._client.get(
                     f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{run_id}/logs",
                     headers={"Accept": "application/vnd.github+json"},
                     follow_redirects=True,

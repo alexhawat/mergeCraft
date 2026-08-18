@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -55,13 +56,21 @@ _GITHUB_MCP_READ_TOOLS: frozenset[str] = frozenset(
         "get_pull_request",
         "get_issue",
         "get_issue_comments",
-        "get_issue_events",
         "get_commit_info",
         "list_pull_request_reviews",
-        "get_review_comments",
         "list_check_runs",
         "get_check_suite",
+    }
+)
+
+# MCP tools whose production implementations use generic REST/GraphQL ops rather
+# than a namesake protocol method — mapped in tests/scm/test_protocol.py.
+_GITHUB_MCP_GENERIC_TOOLS: frozenset[str] = frozenset(
+    {
+        "get_issue_events",
         "get_check_suite_logs",
+        "get_review_comments",
+        "checkout_pr",
     }
 )
 
@@ -80,7 +89,6 @@ _GITHUB_MCP_WRITE_TOOLS: frozenset[str] = frozenset(
         "add_labels",
         "remove_labels",
         "resolve_review_thread",
-        "checkout_pr",
     }
 )
 
@@ -240,22 +248,13 @@ class ScmProvider(Protocol):
     async def get_issue_comments(
         self, owner: str, repo: str, issue_number: int, **kwargs: Any
     ) -> list[dict[str, Any]]: ...
-    async def get_issue_events(
-        self, owner: str, repo: str, issue_number: int, **kwargs: Any
-    ) -> list[dict[str, Any]]: ...
     async def get_commit_info(self, owner: str, repo: str, sha: str) -> dict[str, Any]: ...
     async def list_pull_request_reviews(
-        self, owner: str, repo: str, pull_number: int, **kwargs: Any
-    ) -> list[dict[str, Any]]: ...
-    async def get_review_comments(
         self, owner: str, repo: str, pull_number: int, **kwargs: Any
     ) -> list[dict[str, Any]]: ...
     async def list_check_runs(
         self, owner: str, repo: str, ref: str, **kwargs: Any
     ) -> dict[str, Any]: ...
-    async def get_check_suite_logs(
-        self, owner: str, repo: str, check_suite_id: int, **kwargs: Any
-    ) -> str: ...
 
     async def edit_issue_comment(
         self, owner: str, repo: str, comment_id: int, body: str
@@ -283,17 +282,6 @@ class ScmProvider(Protocol):
     async def resolve_review_thread(
         self, owner: str, repo: str, thread_id: str
     ) -> dict[str, Any]: ...
-    async def checkout_pr(
-        self,
-        owner: str,
-        repo: str,
-        pull_number: int,
-        *,
-        cwd: str,
-        temp_dir: str,
-        git_token: str = "",
-        last_reviewed_sha: str | None = None,
-    ) -> dict[str, Any]: ...
 
 
 def protocol_operation_names() -> frozenset[str]:
@@ -309,6 +297,21 @@ def protocol_supports_github_operations() -> bool:
     )
 
 
+def mcp_generic_tool_names() -> frozenset[str]:
+    """MCP tools satisfied via generic REST/GraphQL ops, not namesake protocol methods."""
+    return _GITHUB_MCP_GENERIC_TOOLS
+
+
+def _async_protocol_operations() -> frozenset[str]:
+    """Operation names declared ``async def`` on ``ScmProvider``."""
+    async_ops: set[str] = set()
+    for name in protocol_operation_names():
+        member = getattr(ScmProvider, name, None)
+        if member is not None and inspect.iscoroutinefunction(member):
+            async_ops.add(name)
+    return frozenset(async_ops)
+
+
 @dataclass(slots=True)
 class ProviderValidationReport:
     complete: bool
@@ -318,10 +321,17 @@ class ProviderValidationReport:
 def validate_provider(provider: object) -> ProviderValidationReport:
     """Check that ``provider`` implements every declared protocol operation."""
     missing: list[str] = []
+    async_ops = _async_protocol_operations()
     for name in sorted(protocol_operation_names()):
         member = getattr(provider, name, None)
         if member is None or not callable(member):
             missing.append(name)
+            continue
+        is_async = inspect.iscoroutinefunction(member)
+        if name in async_ops and not is_async:
+            missing.append(f"{name} (expected async)")
+        elif name not in async_ops and is_async:
+            missing.append(f"{name} (expected sync)")
     return ProviderValidationReport(complete=not missing, missing=tuple(missing))
 
 

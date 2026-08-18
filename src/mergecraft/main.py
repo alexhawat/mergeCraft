@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import importlib
 import os
-import sys
 import time
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -66,6 +64,7 @@ from mergecraft.utils.git_setup import (
     setup_git,
     wipe_runner_leak_surface,
 )
+from mergecraft.utils.github import GitHubClient, resolve_run_context_data
 from mergecraft.utils.instructions import resolve_instructions
 from mergecraft.utils.learnings import (
     persist_learnings,
@@ -98,32 +97,6 @@ from mergecraft.utils.workspace import (
     ensure_github_workspace_registered,
     resolve_allowed_working_directory,
 )
-
-_GH_UTIL = importlib.import_module("mergecraft.utils.github")
-_CLIENT_CLS_NAME = "GitHub" + "Client"
-_RESOLVE_RUN_CTX_NAME = "resolve_run_context_data"
-
-
-def _github_client_factory(token: str, **kwargs: Any) -> Any:
-    """Build a GitHub REST client, honouring test harness patches on ``main``."""
-    client_cls = getattr(
-        sys.modules[__name__], _CLIENT_CLS_NAME, getattr(_GH_UTIL, _CLIENT_CLS_NAME)
-    )
-    return client_cls(token, **kwargs)
-
-
-async def _resolve_run_context(client: Any) -> RunContextData:
-    """Resolve run context, honouring test harness patches on ``main``."""
-    resolver = getattr(
-        sys.modules[__name__],
-        _RESOLVE_RUN_CTX_NAME,
-        getattr(_GH_UTIL, _RESOLVE_RUN_CTX_NAME),
-    )
-    return cast("RunContextData", await resolver(client))
-
-
-setattr(sys.modules[__name__], _RESOLVE_RUN_CTX_NAME, getattr(_GH_UTIL, _RESOLVE_RUN_CTX_NAME))
-setattr(sys.modules[__name__], _CLIENT_CLS_NAME, getattr(_GH_UTIL, _CLIENT_CLS_NAME))
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -441,8 +414,9 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     resolved_prompt = resolve_prompt_input()
     ctx.resolved_prompt = resolved_prompt
     ctx.job_token = get_job_token()
-    ctx.scm = create_github_scm(ctx.job_token, client=_github_client_factory(ctx.job_token))
-    run_context = await _resolve_run_context(github_client_from_scm(ctx.scm))
+    github_client = GitHubClient(ctx.job_token)
+    ctx.scm = create_github_scm(ctx.job_token, client=github_client)
+    run_context = await resolve_run_context_data(github_client)
     ctx.run_context = run_context
     settings = apply_tracing_overrides(run_context.repo_settings)
     ctx.settings = settings
@@ -583,9 +557,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     ctx.token_ref = token_ref
     # Prefer MCP token for API calls
     await ctx.scm.aclose()
-    ctx.scm = create_github_scm(
-        token_ref.mcp_token, client=_github_client_factory(token_ref.mcp_token)
-    )
+    ctx.scm = create_github_scm(token_ref.mcp_token, client=GitHubClient(token_ref.mcp_token))
 
     return ctx
 

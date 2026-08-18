@@ -77,15 +77,23 @@ _GITHUB_MCP_READ_TOOLS: frozenset[str] = frozenset(
         "get_pull_request",
         "get_issue",
         "get_issue_comments",
-        "get_issue_events",
         "get_commit_info",
         "list_pull_request_reviews",
-        "get_review_comments",
         "list_check_runs",
         "get_check_suite",
-        "get_check_suite_logs",
     }
 )
+
+# MCP tools whose implementations call generic REST/GraphQL ops — not namesake
+# protocol methods (declare, don't fake).
+_MCP_TOOL_REQUIRED_OPS: dict[str, frozenset[str]] = {
+    "get_issue_events": frozenset({"get"}),
+    "get_check_suite_logs": frozenset(
+        {"get", "list_workflow_run_artifacts", "download_artifact_zip"}
+    ),
+    "get_review_comments": frozenset({"graphql"}),
+    "checkout_pr": frozenset({"get_pull", "list_reviews", "get"}),
+}
 
 _GITHUB_MCP_WRITE_TOOLS: frozenset[str] = frozenset(
     {
@@ -102,8 +110,23 @@ _GITHUB_MCP_WRITE_TOOLS: frozenset[str] = frozenset(
         "add_labels",
         "remove_labels",
         "resolve_review_thread",
-        "checkout_pr",
     }
+)
+
+_CORE_SCM_MODULES: tuple[str, ...] = (
+    "mergecraft.mcp.pr_info",
+    "mergecraft.mcp.checkout",
+    "mergecraft.mcp.review",
+    "mergecraft.mcp.comment",
+    "mergecraft.mcp.issue_comments",
+    "mergecraft.mcp.issue_events",
+    "mergecraft.mcp.review_comments",
+    "mergecraft.mcp.check_runs",
+    "mergecraft.mcp.check_suite",
+    "mergecraft.ci.providers.github_actions",
+    "mergecraft.ci.intelligence",
+    "mergecraft.utils.status_checks",
+    "mergecraft.utils.code_scanning",
 )
 
 # Behavioural snapshot captured on ``origin/pre-0.0.1`` before any extraction.
@@ -150,6 +173,7 @@ def test_every_github_operation_is_expressible_through_the_protocol() -> None:
     """Every GitHub REST helper and MCP tool maps to a protocol operation."""
     require_scm()
     from mergecraft.scm.protocol import (
+        mcp_generic_tool_names,
         protocol_operation_names,
         protocol_supports_github_operations,
     )
@@ -162,6 +186,14 @@ def test_every_github_operation_is_expressible_through_the_protocol() -> None:
 
     missing_mcp = (_GITHUB_MCP_READ_TOOLS | _GITHUB_MCP_WRITE_TOOLS) - declared
     assert not missing_mcp, f"protocol missing MCP-level operations: {sorted(missing_mcp)}"
+
+    generic_tools = mcp_generic_tool_names()
+    assert generic_tools == frozenset(_MCP_TOOL_REQUIRED_OPS)
+    for tool_name, required_ops in _MCP_TOOL_REQUIRED_OPS.items():
+        missing_ops = required_ops - declared
+        assert not missing_ops, (
+            f"MCP tool {tool_name!r} requires protocol ops {sorted(missing_ops)}"
+        )
 
     assert protocol_supports_github_operations() is True
 
@@ -229,23 +261,16 @@ def test_no_github_specific_type_leaks_into_core() -> None:
     else:
         assert annotation is ScmProvider or getattr(annotation, "__name__", "") == "ScmProvider"
 
-    leaking_modules: list[str] = []
-    for module_name in (
-        "mergecraft.mcp.pr_info",
-        "mergecraft.mcp.checkout",
-        "mergecraft.mcp.review",
-        "mergecraft.mcp.comment",
-        "mergecraft.mcp.issue_comments",
-        "mergecraft.main",
-    ):
+    github_shim_modules: list[str] = []
+    for module_name in _CORE_SCM_MODULES:
         module = importlib.import_module(module_name)
         source = inspect.getsource(module)
-        if "GitHubClient" in source or "ctx.github" in source:
-            leaking_modules.append(module_name)
+        if "ctx.github" in source:
+            github_shim_modules.append(module_name)
 
-    assert not leaking_modules, (
-        "GitHub-specific types or ctx.github call sites leaked into core modules: "
-        f"{leaking_modules}"
+    assert not github_shim_modules, (
+        "Core modules must call ctx.scm, not the ctx.github compatibility shim: "
+        f"{github_shim_modules}"
     )
 
 

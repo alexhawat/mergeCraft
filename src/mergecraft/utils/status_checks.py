@@ -90,7 +90,7 @@ async def _create_check_run(
         body["details_url"] = (
             f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{ctx.run_id}"
         )
-    await ctx.github.post(f"/repos/{ctx.repo.owner}/{ctx.repo.name}/check-runs", json=body)
+    await ctx.scm.post(f"/repos/{ctx.repo.owner}/{ctx.repo.name}/check-runs", json=body)
     logger.info(
         "» posted {} check ({}) on {}",
         name,
@@ -130,7 +130,7 @@ async def report_status_checks(
         return
 
     try:
-        pr = await ctx.github.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
+        pr = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
         head_sha = str(pr.get("head", {}).get("sha") or "")
         if not head_sha:
             return

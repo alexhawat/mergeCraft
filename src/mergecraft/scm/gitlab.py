@@ -32,7 +32,7 @@ class GitLabScmAdapter:
     async def aclose(self) -> None:
         return None
 
-    def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         _ = (query, variables)
         raise UnsupportedScmCapability("graphql", provider="GitLabScmAdapter")
 
@@ -262,12 +262,6 @@ class GitLabScmAdapter:
     ) -> list[dict[str, Any]]:
         return await self.list_issue_comments(owner, repo, issue_number, **kwargs)
 
-    async def get_issue_events(
-        self, owner: str, repo: str, issue_number: int, **kwargs: Any
-    ) -> list[dict[str, Any]]:
-        _ = (owner, repo, issue_number, kwargs)
-        return []
-
     async def get_commit_info(self, owner: str, repo: str, sha: str) -> dict[str, Any]:
         return await self.get_commit(owner, repo, sha)
 
@@ -276,22 +270,10 @@ class GitLabScmAdapter:
     ) -> list[dict[str, Any]]:
         return await self.list_reviews(owner, repo, pull_number, **kwargs)
 
-    async def get_review_comments(
-        self, owner: str, repo: str, pull_number: int, **kwargs: Any
-    ) -> list[dict[str, Any]]:
-        _ = (owner, repo, pull_number, kwargs)
-        return []
-
     async def list_check_runs(
         self, owner: str, repo: str, ref: str, **kwargs: Any
     ) -> dict[str, Any]:
         return await self.list_check_suites_for_ref(owner, repo, ref, **kwargs)
-
-    async def get_check_suite_logs(
-        self, owner: str, repo: str, check_suite_id: int, **_kwargs: Any
-    ) -> str:
-        suite = await self.get_check_suite(owner, repo, check_suite_id)
-        return str(suite.get("id") or "")
 
     async def edit_issue_comment(
         self, owner: str, repo: str, comment_id: int, body: str
@@ -335,17 +317,3 @@ class GitLabScmAdapter:
     async def resolve_review_thread(self, owner: str, repo: str, thread_id: str) -> dict[str, Any]:
         _ = (owner, repo)
         return {"threadId": thread_id, "isResolved": True}
-
-    async def checkout_pr(
-        self,
-        owner: str,
-        repo: str,
-        pull_number: int,
-        *,
-        cwd: str,
-        temp_dir: str,
-        git_token: str = "",
-        last_reviewed_sha: str | None = None,
-    ) -> dict[str, Any]:
-        _ = (owner, repo, pull_number, cwd, temp_dir, git_token, last_reviewed_sha)
-        raise UnsupportedScmCapability("checkout_pr", provider="GitLabScmAdapter")

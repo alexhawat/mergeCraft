@@ -234,17 +234,6 @@ class GitHubScmAdapter:
     ) -> list[dict[str, Any]]:
         return await self.list_issue_comments(owner, repo, issue_number, **kwargs)
 
-    async def get_issue_events(
-        self, owner: str, repo: str, issue_number: int, **kwargs: Any
-    ) -> list[dict[str, Any]]:
-        payload = await self.get(
-            f"/repos/{owner}/{repo}/issues/{issue_number}/events",
-            headers={"Accept": "application/vnd.github+json"},
-            params={"per_page": 100},
-            **kwargs,
-        )
-        return payload if isinstance(payload, list) else []
-
     async def get_commit_info(self, owner: str, repo: str, sha: str) -> dict[str, Any]:
         return await self.get_commit(owner, repo, sha)
 
@@ -253,26 +242,10 @@ class GitHubScmAdapter:
     ) -> list[dict[str, Any]]:
         return await self.list_reviews(owner, repo, pull_number, **kwargs)
 
-    async def get_review_comments(
-        self, owner: str, repo: str, pull_number: int, **kwargs: Any
-    ) -> list[dict[str, Any]]:
-        payload = await self.get(
-            f"/repos/{owner}/{repo}/pulls/{pull_number}/comments",
-            params={"per_page": 100},
-            **kwargs,
-        )
-        return payload if isinstance(payload, list) else []
-
     async def list_check_runs(
         self, owner: str, repo: str, ref: str, **kwargs: Any
     ) -> dict[str, Any]:
         return await self.list_check_suites_for_ref(owner, repo, ref, **kwargs)
-
-    async def get_check_suite_logs(
-        self, owner: str, repo: str, check_suite_id: int, **_kwargs: Any
-    ) -> str:
-        suite = await self.get_check_suite(owner, repo, check_suite_id)
-        return str(suite.get("head_sha") or "")
 
     async def edit_issue_comment(
         self, owner: str, repo: str, comment_id: int, body: str
@@ -329,21 +302,6 @@ mutation($threadId: ID!) {
         data = await self.graphql(query, {"threadId": thread_id})
         thread = (data.get("resolveReviewThread") or {}).get("thread") or {}
         return {"isResolved": bool(thread.get("isResolved"))}
-
-    async def checkout_pr(
-        self,
-        owner: str,
-        repo: str,
-        pull_number: int,
-        *,
-        cwd: str,
-        temp_dir: str,
-        git_token: str = "",
-        last_reviewed_sha: str | None = None,
-    ) -> dict[str, Any]:
-        _ = (owner, repo, cwd, temp_dir, git_token, last_reviewed_sha, pull_number)
-        msg = "checkout_pr executes through mcp/checkout.py in production runs"
-        raise NotImplementedError(msg)
 
 
 def github_client_from_scm(scm: ScmProvider) -> GitHubClient | None:
