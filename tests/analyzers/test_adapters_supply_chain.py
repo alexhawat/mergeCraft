@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -30,6 +32,28 @@ def _run(tool_id: str, repo_root: Path, changed_files: list[str], *, tier: str =
     )
 
 
+def _run_expecting_cve(
+    tool_id: str, repo_root: Path, changed_files: list[str], *, tier: str = "trusted"
+) -> Any:
+    """Run a supply-chain adapter that must report the planted CVE.
+
+    Trivy fetches its vulnerability DB over the network; a slow download can
+    yield valid JSON with zero findings before the DB is ready (see
+    ``supply_chain._run_trivy_and_parse``). Retry only in this fixture test —
+    production scans must not treat every empty result as transient.
+    """
+    supply_chain = import_module("mergecraft.analyzers.supply_chain")
+    result = _run(tool_id, repo_root, changed_files, tier=tier)
+    if tool_id != "trivy" or result.skipped or result.findings:
+        return result
+    for _ in range(1, supply_chain._TRIVY_MAX_ATTEMPTS):
+        time.sleep(supply_chain._TRIVY_RETRY_DELAY_S)
+        result = _run(tool_id, repo_root, changed_files, tier=tier)
+        if result.skipped or result.findings:
+            return result
+    return result
+
+
 @pytest.mark.parametrize("tool_id", ["osv-scanner", "trivy"])
 def test_newly_introduced_cve_reported_with_fix_and_transitive_status(
     tool_id: str, adapter_fixture_repo: Path
@@ -37,7 +61,7 @@ def test_newly_introduced_cve_reported_with_fix_and_transitive_status(
     if tool_id not in _catalog_ids():
         pytest.fail(f"{tool_id} manifest missing from catalog")
 
-    result = _run(
+    result = _run_expecting_cve(
         tool_id,
         adapter_fixture_repo,
         ["requirements.txt"],
