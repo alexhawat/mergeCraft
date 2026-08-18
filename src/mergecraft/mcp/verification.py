@@ -265,6 +265,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
         normalized_findings = normalize_agent_findings_via_pipeline(
             findings,
             rule_id="agent:draft",
+            dedupe=True,
         )
         stored: dict[str, dict[str, Any]] = {}
         for item in ctx.tool_state.agent_findings:

@@ -472,6 +472,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
         normalized_findings = normalize_agent_findings_via_pipeline(
             list(validated.findings),
             rule_id="agent:terminal",
+            dedupe=True,
         )
         submission_dict = {
             "verdict": validated.verdict,

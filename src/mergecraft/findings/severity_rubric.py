@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Final
 
+from mergecraft.review_policy.security_tokens import SECURITY_MESSAGE_PATTERNS
+
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
@@ -21,16 +23,7 @@ SEVERITY_RUBRIC: Final[tuple[_RubricRule, ...]] = (
     {
         "id": "security-signal",
         "categories": ("Security & Privacy",),
-        "patterns": (
-            r"secret",
-            r"token",
-            r"credential",
-            r"password",
-            r"injection",
-            r"\bauth\b",
-            r"\bsql\b",
-            r"xss",
-        ),
+        "patterns": SECURITY_MESSAGE_PATTERNS,
     },
     {
         "id": "maint-style-nit",

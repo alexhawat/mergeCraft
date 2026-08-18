@@ -232,6 +232,7 @@ def test_base_collection_fault_isolation_continues_on_adapter_error(
 
     assert calls == ["ruff", "mypy"]
     assert result.collected is True
+    assert result.succeeded_manifest_ids == frozenset({"mypy"})
     assert result.findings == [base_hit]
 
 
@@ -275,6 +276,54 @@ def test_apply_baseline_suppression_skips_diff_when_all_adapters_skipped(
         base_ref=None,
         offline=False,
         allow_repo_binaries=True,
+    )
+
+    assert result == [head]
+    assert head.introduced_by_pr == "unknown"
+
+
+def test_partial_base_coverage_does_not_mark_introduced_by_pr(
+    monkeypatch,
+) -> None:
+    """Partial base runs must not falsely mark findings via incomplete base diff."""
+    from mergecraft.analyzers import baseline_suppression, pipeline
+
+    head, base = _head_and_base_hit(
+        path="src/fixture_app/handler.py",
+        line=12,
+        message="Unused import os",
+    )
+
+    monkeypatch.setattr(
+        baseline_suppression,
+        "collect_base_analyzer_findings",
+        lambda **_kwargs: baseline_suppression.BaseCollectionResult(
+            findings=[base],
+            collected=True,
+            succeeded_manifest_ids=frozenset({"mypy"}),
+        ),
+    )
+
+    large_diff = "\n".join(
+        [
+            "diff --git a/src/a.py b/src/a.py",
+            "@@ -1,20 +1,20 @@",
+            *(f"+line {index}" for index in range(20)),
+        ]
+    )
+
+    result = pipeline._apply_baseline_suppression(
+        [head],
+        repo_root=Path("/tmp/unused"),
+        manifests=[],
+        changed_files=["src/a.py"],
+        diff_text=large_diff,
+        base_comparison="full",
+        tier="trusted",
+        base_ref=None,
+        offline=False,
+        allow_repo_binaries=True,
+        head_succeeded_manifest_ids=frozenset({"ruff", "mypy"}),
     )
 
     assert result == [head]

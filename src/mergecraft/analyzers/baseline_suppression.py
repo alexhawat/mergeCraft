@@ -46,6 +46,7 @@ class BaseCollectionResult:
 
     findings: list[Finding]
     collected: bool
+    succeeded_manifest_ids: frozenset[str] = frozenset()
 
 
 def _touched_paths(diff_text: str, *, scope: DiffScope | None = None) -> set[str]:
@@ -136,7 +137,7 @@ def collect_base_analyzer_findings(
         return BaseCollectionResult(findings=[], collected=False)
 
     base_findings: list[Finding] = []
-    any_succeeded = False
+    succeeded: set[str] = set()
     try:
         for manifest in manifests:
             try:
@@ -158,11 +159,16 @@ def collect_base_analyzer_findings(
                 continue
             if result.skipped:
                 continue
-            any_succeeded = True
+            succeeded.add(manifest.id)
             base_findings.extend(result.findings)
     finally:
         _remove_base_worktree(repo_root, worktree)
-    return BaseCollectionResult(findings=base_findings, collected=any_succeeded)
+    succeeded_ids = frozenset(succeeded)
+    return BaseCollectionResult(
+        findings=base_findings,
+        collected=bool(succeeded_ids),
+        succeeded_manifest_ids=succeeded_ids,
+    )
 
 
 def log_suppression_audit(audit_trail: list[SuppressionAuditEntry]) -> None:
@@ -186,17 +192,7 @@ def suppress_baseline_findings(
 ) -> SuppressionResult:
     """Suppress analyzer hits that already existed on base (D3)."""
     if base_comparison != "full":
-        return SuppressionResult(
-            reported=list(head_findings),
-            audit_trail=[
-                SuppressionAuditEntry(
-                    fingerprint=finding.fingerprint,
-                    decision="reported",
-                    reason="baseline suppression disabled",
-                )
-                for finding in head_findings
-            ],
-        )
+        return SuppressionResult(reported=list(head_findings))
 
     touched = _touched_paths(diff_text, scope=scope)
     base_by_fingerprint = {finding.fingerprint: finding for finding in base_findings}

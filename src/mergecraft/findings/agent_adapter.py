@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from mergecraft.analyzers.dedup import dedupe_findings
 from mergecraft.analyzers.finding import make_finding
 from mergecraft.findings.causality import (
     CAUSALITY_EVIDENCE_PREFIX,
@@ -55,6 +56,36 @@ def agent_finding_to_finding(
     )
 
 
+def _finding_to_agent_draft(
+    finding: Finding,
+    *,
+    source: AgentFinding | None = None,
+) -> AgentFinding:
+    """Map a normalized ``Finding`` back to the agent wire shape."""
+    from mergecraft.agents.verifier import AgentFinding
+
+    if source is not None:
+        return source.model_copy(update={"severity": finding.severity})
+
+    return AgentFinding(
+        path=finding.path,
+        body=finding.message,
+        severity=finding.severity,
+        line=finding.start_line,
+        fingerprint=finding.fingerprint,
+    )
+
+
+def _apply_row_level_precision(
+    drafts: list[AgentFinding],
+    *,
+    rule_id: str,
+) -> list[Finding]:
+    """Run rubric and causality per row without changing list cardinality."""
+    converted = [agent_finding_to_finding(draft, rule_id=rule_id) for draft in drafts]
+    return apply_precision_pipeline(converted, dedupe=False)
+
+
 def normalize_agent_findings_via_pipeline(
     findings: list[Any],
     *,
@@ -66,23 +97,31 @@ def normalize_agent_findings_via_pipeline(
 
     if not findings:
         return []
-    refined = apply_precision_pipeline(
-        [
-            agent_finding_to_finding(coerce_agent_finding(item), rule_id=rule_id)
-            for item in findings
-        ],
-        dedupe=dedupe,
-    )
+
+    drafts = [coerce_agent_finding(item) for item in findings]
+    refined = _apply_row_level_precision(drafts, rule_id=rule_id)
+
+    if dedupe:
+        deduped = dedupe_findings(refined)
+        surviving = {id(finding) for finding in deduped}
+        normalized: list[Any] = []
+        for draft, finding in zip(drafts, refined, strict=True):
+            if id(finding) not in surviving:
+                continue
+            normalized.append(_finding_to_agent_draft(finding, source=draft))
+            surviving.remove(id(finding))
+        return normalized
+
     normalized: list[Any] = []
-    for draft, finding in zip(findings, refined, strict=True):
-        if isinstance(draft, AgentFinding):
+    for draft, finding, original in zip(drafts, refined, findings, strict=True):
+        if isinstance(original, AgentFinding):
             normalized.append(draft.model_copy(update={"severity": finding.severity}))
-        elif isinstance(draft, dict):
-            row = dict(draft)
+        elif isinstance(original, dict):
+            row = dict(original)
             row["severity"] = finding.severity
             normalized.append(row)
         else:
-            normalized.append(draft)
+            normalized.append(original)
     return normalized
 
 

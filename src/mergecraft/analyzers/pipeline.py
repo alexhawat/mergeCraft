@@ -120,6 +120,7 @@ def _apply_baseline_suppression(
     offline: bool,
     allow_repo_binaries: bool,
     diff_scope: DiffScope | None = None,
+    head_succeeded_manifest_ids: frozenset[str] | None = None,
 ) -> list[Finding]:
     """Run base-vs-head suppression when configured; fail closed on collection errors."""
     if not should_run_baseline_suppression(
@@ -140,9 +141,17 @@ def _apply_baseline_suppression(
         offline=offline,
         allow_repo_binaries=allow_repo_binaries,
     )
-    if not collection.collected:
+    expected = (
+        head_succeeded_manifest_ids
+        if head_succeeded_manifest_ids is not None
+        else collection.succeeded_manifest_ids
+    )
+    if not collection.collected or collection.succeeded_manifest_ids != expected:
         logger.info(
-            "baseline suppression: base collection failed — leaving introduced_by_pr unknown"
+            "baseline suppression: base collection incomplete "
+            "(head={} base={}) — leaving introduced_by_pr unknown",
+            sorted(expected),
+            sorted(collection.succeeded_manifest_ids),
         )
         return scoped
 
@@ -237,6 +246,7 @@ def run_analyzer_pipeline(
     ) as parent_span:
         rows: list[AnalyzerStatusRow] = []
         raw_findings: list[Finding] = []
+        head_succeeded_manifest_ids: set[str] = set()
 
         from mergecraft.analyzers.adapters import run_adapter
 
@@ -314,6 +324,7 @@ def run_analyzer_pipeline(
 
                 findings_count = len(result.findings)
                 status = "failed" if result.findings else "passed"
+                head_succeeded_manifest_ids.add(manifest.id)
                 rows.append(
                     AnalyzerStatusRow(
                         id=manifest.id,
@@ -359,6 +370,7 @@ def run_analyzer_pipeline(
             offline=offline,
             allow_repo_binaries=repo_binaries_allowed,
             diff_scope=diff_scope,
+            head_succeeded_manifest_ids=frozenset(head_succeeded_manifest_ids),
         )
 
         clustered = apply_analyzer_precision(cluster_findings(scoped))

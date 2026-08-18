@@ -11,16 +11,12 @@ from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 from mergecraft.review_policy.paths import normalize_repo_path
+from mergecraft.review_policy.security_tokens import DOMAIN_HINT_GROUPS
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
 _TOKEN_RE = re.compile(r"[a-z0-9]{3,}", re.IGNORECASE)
-_DOMAIN_HINTS: tuple[frozenset[str], ...] = (
-    frozenset({"sql", "query", "injection", "unsanitized", "binding"}),
-    frozenset({"timeout", "retry", "loop"}),
-    frozenset({"secret", "token", "credential", "password"}),
-)
 _STOPWORDS = frozenset(
     {
         "all",
@@ -141,7 +137,7 @@ def _domain_overlap(left: str, right: str) -> tuple[int, bool]:
     right_tokens = _message_tokens(right)
     best_shared = 0
     best_each_side_two = False
-    for group in _DOMAIN_HINTS:
+    for group in DOMAIN_HINT_GROUPS:
         left_domain = left_tokens & group
         right_domain = right_tokens & group
         if not left_domain or not right_domain:
