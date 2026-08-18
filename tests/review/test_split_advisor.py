@@ -9,8 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 
 def _independent_groups() -> list[dict[str, Any]]:
     return [
@@ -33,7 +31,6 @@ def _recommend_split(groups: list[dict[str, Any]], **kwargs: Any) -> Any:
     return recommend_pr_split(groups, **kwargs)
 
 
-@pytest.mark.xfail(reason="green after DG2.2", strict=False)
 def test_unrelated_groups_produce_a_split_recommendation() -> None:
     """Independent clusters yield a concrete split recommendation."""
     advice = _recommend_split(_independent_groups())
@@ -46,7 +43,6 @@ def test_unrelated_groups_produce_a_split_recommendation() -> None:
     assert advice.summary.strip()
 
 
-@pytest.mark.xfail(reason="green after DG2.2", strict=False)
 def test_split_advice_is_advisory_only(tmp_path: Path) -> None:
     """Split advice is text-only — convention 3 forbids repo writes."""
     target = tmp_path / "would-be-split-plan.md"

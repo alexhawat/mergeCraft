@@ -52,7 +52,6 @@ class _FakeGitHub:
         }
 
 
-@pytest.mark.xfail(reason="green after DG2.2", strict=False)
 def test_disputed_state_is_recorded() -> None:
     """A challenged finding records ``disputed`` with a reason (G7)."""
     from mergecraft.findings.lifecycle import dispute_finding, lifecycle_state
@@ -67,7 +66,6 @@ def test_disputed_state_is_recorded() -> None:
     assert lifecycle_state(record) == "disputed"
 
 
-@pytest.mark.xfail(reason="green after DG2.2", strict=False)
 def test_waived_state_carries_reason_and_expiry() -> None:
     """Waivers carry an explicit reason and expiry — not a silent suppression."""
     from mergecraft.findings.lifecycle import waive_finding
@@ -128,7 +126,6 @@ async def test_resolved_by_change_still_works() -> None:
     assert carryover_findings(normalized) == []
 
 
-@pytest.mark.xfail(reason="green after DG2.2", strict=False)
 def test_stale_finding_is_distinguishable_from_resolved() -> None:
     """Stale anchors are not conflated with findings resolved by the change."""
     from mergecraft.findings.lifecycle import lifecycle_state_from_thread

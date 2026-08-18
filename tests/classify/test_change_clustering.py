@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 
 def _change(*paths: str, **signals: object) -> dict[str, object]:
     return {"changed_paths": list(paths), "diff_stats": signals}
@@ -22,7 +20,6 @@ def _cluster_change(change: dict[str, object], **kwargs: Any) -> Any:
     return cluster_changes(change, **kwargs)
 
 
-@pytest.mark.xfail(reason="green after DG2.2", strict=False)
 def test_files_cluster_by_dependency_and_intent() -> None:
     """Related files cluster together; unrelated paths land in separate groups."""
     change = _change(
@@ -50,7 +47,6 @@ def test_files_cluster_by_dependency_and_intent() -> None:
     assert cluster_for["docs/guide.md"] != cluster_for["src/billing/invoice.py"]
 
 
-@pytest.mark.xfail(reason="green after DG2.2", strict=False)
 def test_independent_groups_are_identified() -> None:
     """Wholly unrelated change groups are surfaced for the split advisor."""
     change = _change(

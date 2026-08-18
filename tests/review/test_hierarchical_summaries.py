@@ -7,8 +7,6 @@ high-risk regions; reduced scope is always reported (file 2 D12).
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.utils.run_bounds import ScopeReduction
 
 
@@ -33,7 +31,6 @@ def _build_hierarchical_context(*args: object, **kwargs: object) -> object:
     return build_hierarchical_context(*args, **kwargs)
 
 
-@pytest.mark.xfail(reason="green after DG2.2", strict=False)
 def test_large_diff_reduces_to_map_then_summaries_then_hunks() -> None:
     """A large diff becomes a map, cluster summaries, and selected raw hunks."""
     diff_text = _synthetic_diff(files=40, lines_per_file=200)
@@ -51,7 +48,6 @@ def test_large_diff_reduces_to_map_then_summaries_then_hunks() -> None:
     assert result.token_estimate <= 8_000
 
 
-@pytest.mark.xfail(reason="green after DG2.2", strict=False)
 def test_high_risk_regions_keep_raw_tokens() -> None:
     """High-risk paths keep verbatim diff tokens even under a tight budget."""
     diff_text = _synthetic_diff(files=30, lines_per_file=150)
@@ -69,7 +65,6 @@ def test_high_risk_regions_keep_raw_tokens() -> None:
     assert any(hunk.raw for hunk in result.hunks if hunk.path == risk_path)
 
 
-@pytest.mark.xfail(reason="green after DG2.2", strict=False)
 def test_reduced_scope_is_reported() -> None:
     """Scope reduction is explicit — large-PR summarization never truncates silently."""
     diff_text = _synthetic_diff(files=60, lines_per_file=500)
