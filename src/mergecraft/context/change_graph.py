@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 — used at runtime for repo traversal
+from typing import TYPE_CHECKING
 
 from mergecraft.context.call_graph import CallGraph, build_call_graph
+from mergecraft.context.repo_paths import iter_repo_files
+
+if TYPE_CHECKING:
+    from mergecraft.utils.run_bounds import RunBounds
 
 _CONTRACT_SUFFIXES = frozenset({".yaml", ".yml", ".json", ".proto"})
 _TEST_DIR_NAMES = frozenset({"tests", "test"})
+_FROM_IMPORT = re.compile(r"from\s+{module}\s+import\s+.*\b{symbol}\b")
+_IMPORT_MODULE = re.compile(r"\bimport\s+{module}\b")
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,21 +43,26 @@ def resolve_change_graph(
     repo_root: Path,
     tree_sha: str,
     changed: list[ChangedSymbol],
+    run_bounds: RunBounds | None = None,
 ) -> ChangeGraphResult:
     """Resolve dependents, tests, and contracts affected by ``changed`` symbols."""
     graph = build_call_graph(repo_root=repo_root, tree_sha=tree_sha)
+    deadline = _context_deadline(run_bounds)
     dependents: set[str] = set()
     tests: set[str] = set()
     contracts: set[str] = set()
 
     for symbol in changed:
+        if _timed_out(deadline):
+            break
         qualified = _qualify_symbol(symbol)
         dependents.update(_dependents_for(graph, qualified, symbol.name))
-        tests.update(_covering_tests(repo_root, symbol))
+        tests.update(_covering_tests(repo_root, symbol, deadline=deadline))
         contracts.update(
             _affected_contracts(
                 repo_root,
                 symbol_names={symbol.name, *_symbol_tail(qualified), *dependents},
+                deadline=deadline,
             )
         )
 
@@ -58,6 +71,16 @@ def resolve_change_graph(
         tests=tuple(sorted(tests)),
         contracts=tuple(sorted(contracts)),
     )
+
+
+def _context_deadline(run_bounds: RunBounds | None) -> float | None:
+    if run_bounds is None:
+        return None
+    return time.monotonic() + run_bounds.context_retrieval_timeout_s
+
+
+def _timed_out(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() > deadline
 
 
 def _qualify_symbol(symbol: ChangedSymbol) -> str:
@@ -87,48 +110,56 @@ def _dependents_for(graph: CallGraph, qualified: str, bare_name: str) -> set[str
     return found
 
 
-def _covering_tests(repo_root: Path, symbol: ChangedSymbol) -> set[str]:
+def _covering_tests(
+    repo_root: Path,
+    symbol: ChangedSymbol,
+    *,
+    deadline: float | None,
+) -> set[str]:
     tests: set[str] = set()
     module = _module_name(symbol.path)
-    needles = (
-        f"from {module} import {symbol.name}",
-        f"import {module}",
-        symbol.name,
+    from_import = _FROM_IMPORT.pattern.format(
+        module=re.escape(module),
+        symbol=re.escape(symbol.name),
     )
-    for rel_path in _iter_test_files(repo_root):
+    import_module = _IMPORT_MODULE.pattern.format(module=re.escape(module))
+    for rel_path in _iter_test_files(repo_root, deadline=deadline):
         source = (repo_root / rel_path).read_text(encoding="utf-8")
-        if any(needle in source for needle in needles):
+        if re.search(from_import, source) or re.search(import_module, source):
             tests.add(rel_path)
     return tests
 
 
-def _iter_test_files(repo_root: Path) -> list[str]:
+def _iter_test_files(repo_root: Path, *, deadline: float | None) -> list[str]:
     paths: list[str] = []
-    for path in sorted(repo_root.rglob("test*.py")):
-        if not path.is_file():
-            continue
+
+    def _is_test_file(path: Path) -> bool:
+        if not path.name.startswith("test") or path.suffix != ".py":
+            return False
         rel = path.relative_to(repo_root).as_posix()
-        if rel.startswith(".git/"):
-            continue
-        parts = rel.split("/")
-        if any(part in _TEST_DIR_NAMES for part in parts):
-            paths.append(rel)
+        return any(part in _TEST_DIR_NAMES for part in rel.split("/"))
+
+    for rel in iter_repo_files(repo_root, predicate=_is_test_file, deadline=deadline):
+        paths.append(rel)
     return paths
 
 
-def _affected_contracts(repo_root: Path, *, symbol_names: set[str]) -> set[str]:
+def _affected_contracts(
+    repo_root: Path,
+    *,
+    symbol_names: set[str],
+    deadline: float | None,
+) -> set[str]:
     contracts: set[str] = set()
-    for path in sorted(repo_root.rglob("*")):
-        if not path.is_file():
-            continue
+
+    def _is_contract(path: Path) -> bool:
         rel = path.relative_to(repo_root).as_posix()
-        if rel.startswith(".git/"):
-            continue
-        if path.suffix.casefold() not in _CONTRACT_SUFFIXES and "contracts" not in rel:
-            continue
         if path.suffix.casefold() not in _CONTRACT_SUFFIXES:
-            continue
-        source = path.read_text(encoding="utf-8")
+            return False
+        return "contracts" in rel or path.suffix.casefold() in _CONTRACT_SUFFIXES
+
+    for rel in iter_repo_files(repo_root, predicate=_is_contract, deadline=deadline):
+        source = (repo_root / rel).read_text(encoding="utf-8")
         if any(re.search(rf"\b{re.escape(name)}\b", source) for name in symbol_names if name):
             contracts.add(rel)
     return contracts

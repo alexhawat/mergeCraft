@@ -8,6 +8,7 @@ from pathlib import Path  # noqa: TC003 — used at runtime for repo traversal
 from typing import TYPE_CHECKING
 
 from mergecraft.context.provenance import ContextItem
+from mergecraft.utils.run_bounds import BudgetExhausted
 
 if TYPE_CHECKING:
     from mergecraft.utils.run_bounds import BudgetTracker
@@ -55,22 +56,26 @@ def expand_with_budget(
 
     for chunk in chunks:
         cost = _estimate_tokens(chunk)
-        if total_tokens + cost > token_budget:
+        remaining = _remaining_token_budget(
+            token_budget=token_budget,
+            total_tokens=total_tokens,
+            budget_tracker=budget_tracker,
+        )
+        if cost > remaining:
             truncated = True
-            remaining = max(0, token_budget - total_tokens)
             if remaining > 0:
                 clipped = chunk[: remaining * 4]
                 item = _context_item(path=path, text=clipped, reason="dynamic_expansion")
                 items.append(item)
                 total_tokens += item.token_cost
-                if budget_tracker is not None:
-                    budget_tracker.record_tokens(item.token_cost)
+                _record_tokens_without_raise(budget_tracker, item.token_cost)
             break
         item = _context_item(path=path, text=chunk, reason="dynamic_expansion")
         items.append(item)
         total_tokens += item.token_cost
-        if budget_tracker is not None:
-            budget_tracker.record_tokens(item.token_cost)
+        if not _record_tokens_without_raise(budget_tracker, item.token_cost):
+            truncated = True
+            break
 
     return ExpansionResult(
         items=tuple(items),
@@ -92,6 +97,35 @@ def _context_item(*, path: str, text: str, reason: str) -> ContextItem:
 
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
+
+
+def _remaining_token_budget(
+    *,
+    token_budget: int,
+    total_tokens: int,
+    budget_tracker: BudgetTracker | None,
+) -> int:
+    remaining = token_budget - total_tokens
+    if budget_tracker is None:
+        return remaining
+    tracker_remaining = budget_tracker.bounds.token_budget - budget_tracker.tokens_used
+    return min(remaining, tracker_remaining)
+
+
+def _record_tokens_without_raise(
+    budget_tracker: BudgetTracker | None,
+    count: int,
+) -> bool:
+    """Record token usage without raising when a shared tracker is exhausted."""
+    if budget_tracker is None or count <= 0:
+        return True
+    if budget_tracker.tokens_used + count > budget_tracker.bounds.token_budget:
+        return False
+    try:
+        budget_tracker.record_tokens(count)
+    except BudgetExhausted:
+        return False
+    return True
 
 
 def _extract_scope(path: Path, *, symbol: str) -> str:

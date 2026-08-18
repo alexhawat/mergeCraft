@@ -10,6 +10,8 @@ from rich.table import Table
 
 from mergecraft.context.change_graph import ChangedSymbol, resolve_change_graph
 from mergecraft.context.provenance import ContextItem, inspect_context
+from mergecraft.context.repo_paths import git_blob_sha, git_show_text
+from mergecraft.context.symbol_index import index_symbols
 
 app = typer.Typer(
     name="context",
@@ -34,6 +36,30 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def _symbol_kind(
+    *,
+    repo_root: Path,
+    tree_sha: str,
+    path: str,
+    symbol_name: str,
+) -> str:
+    lookup_name = symbol_name.split(".")[-1]
+    source = git_show_text(repo_root, tree_sha, path)
+    if source is None:
+        return "symbol"
+    blob_sha = git_blob_sha(repo_root, tree_sha, path)
+    indexed = index_symbols(
+        repo_root=repo_root,
+        rel_path=path,
+        blob_sha=blob_sha,
+        source=source,
+    )
+    for symbol in indexed.symbols:
+        if symbol.name == lookup_name:
+            return symbol.kind
+    return "symbol"
+
+
 @app.command("inspect")
 def inspect_cmd(
     repo_root: Path = typer.Option(..., "--repo-root", help="Repository root to inspect."),
@@ -44,10 +70,16 @@ def inspect_cmd(
 ) -> None:
     """Report sources, scope, provenance citations, and token totals."""
     path, symbol_name = _parse_scope(scope)
+    symbol_kind = _symbol_kind(
+        repo_root=repo_root,
+        tree_sha=tree_sha,
+        path=path,
+        symbol_name=symbol_name,
+    )
     change = resolve_change_graph(
         repo_root=repo_root,
         tree_sha=tree_sha,
-        changed=[ChangedSymbol(path=path, name=symbol_name, kind="function")],
+        changed=[ChangedSymbol(path=path, name=symbol_name, kind=symbol_kind)],
     )
 
     items: list[ContextItem] = [

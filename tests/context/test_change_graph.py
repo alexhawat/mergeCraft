@@ -73,3 +73,24 @@ def test_changed_symbol_resolves_to_affected_contracts(tmp_path: Path) -> None:
     result = _changed_process_symbol(change_graph_mod, repo_root, tree_sha)
 
     assert "contracts/openapi.yaml" in result.contracts
+
+
+def test_covering_tests_require_import_aware_match(tmp_path: Path) -> None:
+    """Covering-test detection ignores bare symbol-name substring matches."""
+    repo_root = tmp_path / "repo"
+    write_change_graph_fixture_repo(repo_root)
+    (repo_root / "tests" / "test_noise.py").write_text(
+        "def test_mentions_process_in_docstring_only() -> None:\n"
+        '    """process is mentioned here but not imported."""\n'
+        "    assert True\n",
+        encoding="utf-8",
+    )
+    git_init_repo(repo_root)
+    git_commit_all(repo_root)
+
+    change_graph_mod = import_context_module("change_graph")
+    tree_sha = git_tree_sha(repo_root)
+    result = _changed_process_symbol(change_graph_mod, repo_root, tree_sha)
+
+    assert "tests/test_service.py" in result.tests
+    assert "tests/test_noise.py" not in result.tests

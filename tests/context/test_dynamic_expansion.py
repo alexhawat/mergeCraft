@@ -70,3 +70,27 @@ def test_expansion_respects_the_token_budget(tmp_path: Path) -> None:
     assert result.truncated is True
     assert result.token_cost <= tracker.bounds.token_budget
     assert tracker.tokens_used <= tracker.bounds.token_budget
+    assert tracker.last_exhausted is None
+
+
+def test_expansion_truncates_without_raising_budget_exhausted(tmp_path: Path) -> None:
+    """Shared budget trackers are not exhausted by dynamic expansion clipping."""
+    repo_root = tmp_path / "repo"
+    write_dynamic_expansion_fixture_repo(repo_root)
+    git_init_repo(repo_root)
+    git_commit_all(repo_root)
+
+    expansion_mod = import_context_module("dynamic_expansion")
+    tracker = BudgetTracker(_tight_bounds())
+    tracker.tokens_used = tracker.bounds.token_budget - 1
+
+    result = expansion_mod.expand_with_budget(
+        repo_root=repo_root,
+        path="src/demo/widget.py",
+        symbol="Widget",
+        token_budget=tracker.bounds.token_budget,
+        budget_tracker=tracker,
+    )
+
+    assert result.truncated is True
+    assert tracker.last_exhausted is None
