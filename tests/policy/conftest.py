@@ -9,8 +9,6 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-_DG5_2_XFAIL = pytest.mark.xfail(reason="green after DG5.2", strict=False)
-
 VALID_RULE_YAML = """
 id: no-hardcoded-secrets
 owner: platform-security
@@ -112,12 +110,6 @@ rules:
     scope:
       path: "docs/**"
 """
-
-
-@pytest.fixture
-def dg5_xfail() -> pytest.MarkDecorator:
-    """Non-strict xfail marker for contracts satisfied in DG5.2."""
-    return _DG5_2_XFAIL
 
 
 @pytest.fixture
