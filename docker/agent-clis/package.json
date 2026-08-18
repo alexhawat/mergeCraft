@@ -6,6 +6,6 @@
     "@anthropic-ai/claude-code": "2.1.227",
     "@openai/codex": "0.147.0",
     "@google/gemini-cli": "0.54.4",
-    "opencode-ai": "1.18.16"
+    "opencode-ai": "1.18.18"
   }
 }
