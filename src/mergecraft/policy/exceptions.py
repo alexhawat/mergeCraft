@@ -49,7 +49,7 @@ def parse_exception(text: str) -> PolicyException:
     try:
         return PolicyException.model_validate(loaded)
     except ValidationError as exc:
-        _raise_config_error(exc)
+        _raise_config_error(exc, document_kind="policy exception")
 
 
 def parse_exceptions_document(text: str) -> list[PolicyException]:
@@ -75,7 +75,7 @@ def parse_exceptions_document(text: str) -> list[PolicyException]:
             try:
                 parsed.append(PolicyException.model_validate(item))
             except ValidationError as exc:
-                _raise_config_error(exc)
+                _raise_config_error(exc, document_kind="policy exception")
         return parsed
     return [parse_exception(text)]
 

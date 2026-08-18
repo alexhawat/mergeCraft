@@ -18,21 +18,33 @@ def _route_finding_challenge(*args: object, **kwargs: object) -> object:
     return route_finding_challenge(*args, **kwargs)
 
 
-_SLASH_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("/mergecraft review", "Review"),
-    ("/mergecraft ask", "Ask"),
-    ("/mergecraft explain", "Explain"),
-    ("/mergecraft verify", "Verify"),
-    ("/mergecraft describe", "Describe"),
-)
-
-
-def test_slash_commands_route_to_the_right_mode() -> None:
-    """``/mergecraft …`` comments map deterministically onto built-in modes."""
+def test_review_slash_command_routes_to_review_mode() -> None:
+    """``/mergecraft review`` maps onto the built-in Review mode."""
     settings = default_settings()
     permissions = {"shell": "restricted", "push": "disabled"}
 
-    for body, expected_mode in _SLASH_COMMANDS:
+    result = _route_comment(
+        body="/mergecraft review",
+        author_association="MEMBER",
+        allowlist=(),
+        repo_settings=settings,
+        payload_permissions=permissions,
+    )
+    assert result.refused is False
+    assert result.mode == "Review"
+
+
+def test_staged_slash_commands_refuse_until_modes_exist() -> None:
+    """Ask/explain/verify/describe refuse routing until those modes are built-in."""
+    settings = default_settings()
+    permissions = {"shell": "restricted", "push": "disabled"}
+
+    for body in (
+        "/mergecraft ask",
+        "/mergecraft explain",
+        "/mergecraft verify",
+        "/mergecraft describe",
+    ):
         result = _route_comment(
             body=body,
             author_association="MEMBER",
@@ -40,15 +52,16 @@ def test_slash_commands_route_to_the_right_mode() -> None:
             repo_settings=settings,
             payload_permissions=permissions,
         )
-        assert result.refused is False
-        assert result.mode == expected_mode
+        assert result.refused is True
+        assert result.reason == "mode_not_implemented"
+        assert result.mode is None
 
 
 def test_commenter_permissions_gate_the_capability() -> None:
     """Untrusted commenters cannot invoke slash commands even with a valid body."""
     settings = default_settings()
     permissions = {"shell": "restricted", "push": "disabled"}
-    body = "/mergecraft describe"
+    body = "/mergecraft review"
 
     for association in sorted(TRUSTED_AUTHOR_ASSOCIATIONS):
         trusted = _route_comment(

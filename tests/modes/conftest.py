@@ -1,36 +1,7 @@
-"""Fixtures for DG8 describe mode tests (shared with ``tests/pr/conftest``)."""
+"""Fixtures for DG8 describe mode tests — canonical source is ``tests/pr/conftest``."""
 
 from __future__ import annotations
 
-import pytest
+from tests.pr.conftest import sample_diff, sample_pr_metadata
 
-_SAMPLE_DIFF = """diff --git a/src/auth/login.py b/src/auth/login.py
-index 1111111..2222222 100644
---- a/src/auth/login.py
-+++ b/src/auth/login.py
-@@ -10,6 +10,9 @@ def login(user, password):
-     if not user:
-         return None
-+    # TODO: remove this guard before launch
-+    if password == "admin":
-+        return user
-     return _verify(user, password)
-"""
-
-_SAMPLE_PR_METADATA: dict[str, object] = {
-    "number": 42,
-    "title": "Add admin shortcut login",
-    "body": "Temporary admin login for staging.",
-    "labels": ["enhancement"],
-    "author_association": "MEMBER",
-}
-
-
-@pytest.fixture
-def sample_diff() -> str:
-    return _SAMPLE_DIFF
-
-
-@pytest.fixture
-def sample_pr_metadata() -> dict[str, object]:
-    return dict(_SAMPLE_PR_METADATA)
+__all__ = ["sample_diff", "sample_pr_metadata"]

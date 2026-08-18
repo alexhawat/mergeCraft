@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 from mergecraft.agents.gates import BLOCKING_SEVERITIES
 from mergecraft.analyzers.finding import Finding, make_finding
+from mergecraft.policy.schema import EnforcementModeLiteral
 
-EnforcementMode = Literal["advisory", "warning", "required", "blocking"]
+EnforcementMode = EnforcementModeLiteral
 
 
 @dataclass(frozen=True, slots=True)

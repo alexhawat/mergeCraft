@@ -21,12 +21,10 @@ _CHALLENGE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Built-in modes today (see mergecraft.modes) — only these may be routed.
+_ROUTABLE_COMMANDS: frozenset[str] = frozenset({"review"})
 _MODE_BY_COMMAND: dict[str, str] = {
     "review": "Review",
-    "ask": "Ask",
-    "explain": "Explain",
-    "verify": "Verify",
-    "describe": "Describe",
 }
 
 _PERMISSION_RANK: dict[str, int] = {
@@ -137,6 +135,13 @@ def route_comment(
         )
 
     command = match.group(1).lower()
+    if command not in _ROUTABLE_COMMANDS:
+        return CommentRouteResult(
+            refused=True,
+            reason="mode_not_implemented",
+            effective_permissions=effective,
+        )
+
     mode = _MODE_BY_COMMAND[command]
     return CommentRouteResult(refused=False, mode=mode, effective_permissions=effective)
 
