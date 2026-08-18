@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import httpx
 import pytest
 
 from mergecraft.agents.shared import AgentResult
 from mergecraft.config.settings import RepoSettings
-from mergecraft.utils.agent_resolve import run_with_model_chain
+from mergecraft.utils.agent_resolve import _is_retryable_failure, run_with_model_chain
 
 
 @pytest.mark.asyncio
@@ -74,17 +73,9 @@ async def test_auth_failure_is_not_retried_as_transient(monkeypatch: pytest.Monk
     assert result.success is False
 
 
-def test_invalid_model_output_is_not_treated_as_transport_failure(provider_harness) -> None:
-    provider_harness.reload([])
-    response = httpx.post(
-        provider_harness.base_url + "/chat/completions",
-        headers={"Authorization": "Bearer sk-mergecraft-test"},
-        json={"model": "default/dummy", "messages": []},
-        timeout=5.0,
-    )
-    assert response.status_code == 400
+def test_parse_failure_is_not_retryable() -> None:
     result = AgentResult(success=False, error="parse failure")
-    assert result.metadata.get("retryable") is not True
+    assert _is_retryable_failure(result) is False
 
 
 def test_opencode_http_timeout_is_not_marked_retryable() -> None:

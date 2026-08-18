@@ -15,5 +15,5 @@ def test_consume_stream_replays_ordered_lines() -> None:
         ]
     )
     acc = StreamSpanAccumulator(agent_name="test")
-    consume_stream(raw_stream=lines, accumulator=acc, handler=lambda _event: None)
-    assert len(lines) == 2
+    consume_stream(raw_stream=lines, accumulator=acc, handler=lambda _acc, _event: None)
+    assert acc.parsed_event_count == 2

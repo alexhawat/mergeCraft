@@ -12,6 +12,7 @@ from tests.support.provider_harness.pytest_plugin import load_harness_fixtures
 from tests.support.provider_harness.schema import load_fixture_file
 
 _FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_health_and_readiness_report_server_state(provider_harness) -> None:
@@ -60,7 +61,7 @@ def test_dummy_api_key_is_accepted_only_by_test_server(provider_harness) -> None
         timeout=5.0,
     )
     assert response.status_code == 401
-    assert "sk-mergecraft-test" not in Path("src/mergecraft/agents/opencode.py").read_text(
+    assert "sk-mergecraft-test" not in (_REPO_ROOT / "src/mergecraft/agents/opencode.py").read_text(
         encoding="utf-8"
     )
 
