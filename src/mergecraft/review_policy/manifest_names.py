@@ -1,4 +1,4 @@
-"""Canonical lockfile and config manifest names for scope and generated policy."""
+"""Canonical lockfile and manifest names for scope and generated policy."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ LOCKFILE_NAMES: frozenset[str] = frozenset(
     }
 )
 
-CONFIG_MANIFEST_NAMES: frozenset[str] = frozenset(
+DEPENDENCY_MANIFEST_NAMES: frozenset[str] = frozenset(
     {
         "requirements.txt",
         "requirements-dev.txt",
@@ -27,10 +27,19 @@ CONFIG_MANIFEST_NAMES: frozenset[str] = frozenset(
         "Cargo.toml",
         "Gemfile",
         "composer.json",
+    }
+)
+
+GENERATOR_CONFIG_NAMES: frozenset[str] = frozenset(
+    {
         "Makefile",
         "buf.gen.yaml",
         "openapi-generator.yaml",
     }
 )
 
-__all__ = ["CONFIG_MANIFEST_NAMES", "LOCKFILE_NAMES"]
+__all__ = [
+    "DEPENDENCY_MANIFEST_NAMES",
+    "GENERATOR_CONFIG_NAMES",
+    "LOCKFILE_NAMES",
+]

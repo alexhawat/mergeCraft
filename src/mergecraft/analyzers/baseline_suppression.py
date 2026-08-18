@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
-from mergecraft.analyzers.paths import normalize_repo_path
 from mergecraft.analyzers.scope import DiffScope, changed_paths_from_scope, parse_diff_scope
+from mergecraft.review_policy.paths import normalize_repo_path
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -136,23 +136,33 @@ def collect_base_analyzer_findings(
         return BaseCollectionResult(findings=[], collected=False)
 
     base_findings: list[Finding] = []
+    any_succeeded = False
     try:
         for manifest in manifests:
-            result = run_adapter(
-                tool_id=manifest.id,
-                repo_root=worktree,
-                changed_files=scan_files,
-                tier=tier,
-                base_ref=resolved,
-                offline=offline,
-                allow_repo_binaries=allow_repo_binaries,
-            )
+            try:
+                result = run_adapter(
+                    tool_id=manifest.id,
+                    repo_root=worktree,
+                    changed_files=scan_files,
+                    tier=tier,
+                    base_ref=resolved,
+                    offline=offline,
+                    allow_repo_binaries=allow_repo_binaries,
+                )
+            except (KeyError, OSError, ValueError) as exc:
+                logger.info(
+                    "baseline suppression: analyzer {} unavailable at base: {}",
+                    manifest.id,
+                    exc,
+                )
+                continue
             if result.skipped:
                 continue
+            any_succeeded = True
             base_findings.extend(result.findings)
     finally:
         _remove_base_worktree(repo_root, worktree)
-    return BaseCollectionResult(findings=base_findings, collected=True)
+    return BaseCollectionResult(findings=base_findings, collected=any_succeeded)
 
 
 def log_suppression_audit(audit_trail: list[SuppressionAuditEntry]) -> None:

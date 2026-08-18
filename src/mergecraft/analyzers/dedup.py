@@ -10,7 +10,7 @@ import re
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
-from mergecraft.analyzers.paths import normalize_repo_path
+from mergecraft.review_policy.paths import normalize_repo_path
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding

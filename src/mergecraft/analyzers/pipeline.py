@@ -337,6 +337,7 @@ def run_analyzer_pipeline(
                 diff_text=diff_text,
                 repo_root=repo_root,
                 learnings_text=learnings_text,
+                scope=diff_scope,
             )
         else:
             scoped = suppress_withdrawn_findings(raw_findings, learnings_text)

@@ -4,17 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mergecraft.review_policy.paths import normalize_repo_path
+
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-def normalize_repo_path(path: str) -> str:
-    """Strip leading ``./`` and diff ``a/`` / ``b/`` prefixes from a repo path."""
-    text = path.strip().replace("\\", "/")
-    for prefix in ("./", "a/", "b/"):
-        if text.startswith(prefix):
-            text = text[len(prefix) :]
-    return text
 
 
 def safe_repo_relative_path(repo_root: Path, rel: str) -> Path | None:

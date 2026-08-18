@@ -1,4 +1,9 @@
-"""Code-defined severity rubric applied at the judge seam (DG1, G2)."""
+"""Code-defined severity rubric applied at the judge seam (DG1, G2).
+
+Rules may include ``max_severity`` to cap inflated model severity (maint/style/docs).
+Rules with ``categories`` only — e.g. ``security-signal`` — participate in
+``infer_category_from_message`` but do not alter severity.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +31,6 @@ SEVERITY_RUBRIC: Final[tuple[_RubricRule, ...]] = (
             r"\bsql\b",
             r"xss",
         ),
-        "max_severity": "Critical",
     },
     {
         "id": "maint-style-nit",
@@ -82,7 +86,9 @@ def apply_severity_rubric(
         if categories and finding.category not in categories:
             continue
         if any(pattern.search(message) for pattern in patterns):
-            severity = _cap_severity(severity, str(rule["max_severity"]))
+            max_severity = rule.get("max_severity")
+            if max_severity is not None:
+                severity = _cap_severity(severity, str(max_severity))
     if severity == finding.severity:
         return finding
     return finding.model_copy(update={"severity": severity})

@@ -30,8 +30,6 @@ from mergecraft.tracing.redaction import redact_attrs
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
-
-if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
 _ALLOWED_VERDICTS = frozenset({"approve", "request_changes"})

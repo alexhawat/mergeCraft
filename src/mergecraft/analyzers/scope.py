@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mergecraft.analyzers.manifest_names import CONFIG_MANIFEST_NAMES, LOCKFILE_NAMES
+from mergecraft.review_policy.manifest_names import DEPENDENCY_MANIFEST_NAMES, LOCKFILE_NAMES
 from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING, finding_fingerprint
 
 if TYPE_CHECKING:
@@ -125,7 +125,7 @@ def _record_exception_paths(
         changed_dependency_manifests.add(path)
     if name in LOCKFILE_NAMES:
         changed_lockfiles.add(path)
-    if name in CONFIG_MANIFEST_NAMES:
+    if name in DEPENDENCY_MANIFEST_NAMES:
         changed_dependency_manifests.add(path)
     if path.startswith((".github/workflows/", ".github/actions/")):
         changed_workflows.add(path)
@@ -295,16 +295,17 @@ def scope_findings(
     diff_text: str,
     repo_root: Path | None = None,
     learnings_text: str = "",
+    scope: DiffScope | None = None,
 ) -> list[Finding]:
     """Apply diff scoping, exceptions, generated policy, and withdrawn suppression."""
-    scope = parse_diff_scope(diff_text)
+    parsed = scope if scope is not None else parse_diff_scope(diff_text)
     scoped = apply_scope_exceptions(
         findings,
         diff_text=diff_text,
         repo_root=repo_root,
-        scope=scope,
+        scope=parsed,
     )
-    scoped = filter_generated_scope(scoped, diff_text=diff_text, scope=scope)
+    scoped = filter_generated_scope(scoped, diff_text=diff_text, scope=parsed)
     return suppress_withdrawn_findings(scoped, learnings_text)
 
 

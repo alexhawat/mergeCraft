@@ -5,10 +5,8 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TypedDict
 
-from mergecraft.analyzers.manifest_names import CONFIG_MANIFEST_NAMES
-from mergecraft.analyzers.paths import normalize_repo_path
-
-_GENERATOR_CONFIG_NAMES = CONFIG_MANIFEST_NAMES
+from mergecraft.review_policy.manifest_names import GENERATOR_CONFIG_NAMES
+from mergecraft.review_policy.paths import normalize_repo_path
 
 
 class FileKind(StrEnum):
@@ -51,7 +49,7 @@ def review_includes_path(path: str, *, change: ChangeSet) -> bool:
     normalized_path = normalize_repo_path(path)
     if kind == FileKind.GENERATED:
         generator_changed = any(
-            item.rsplit("/", 1)[-1] in _GENERATOR_CONFIG_NAMES for item in changed
+            item.rsplit("/", 1)[-1] in GENERATOR_CONFIG_NAMES for item in changed
         )
         return generator_changed or normalized_path in changed
     return normalized_path in changed

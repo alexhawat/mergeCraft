@@ -18,11 +18,6 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
 
-def infer_agent_finding_category(body: str) -> str:
-    """Infer a taxonomy category for rubric normalization."""
-    return infer_category_from_message(body)
-
-
 def coerce_agent_finding(item: Any) -> AgentFinding:
     """Parse an ``AgentFinding`` or wire dict into the typed draft shape."""
     from mergecraft.agents.verifier import AgentFinding
@@ -48,7 +43,7 @@ def agent_finding_to_finding(
     return make_finding(
         tool="agent",
         rule_id=rule_id,
-        category=infer_agent_finding_category(finding.body),
+        category=infer_category_from_message(finding.body),
         severity=finding.severity,
         confidence="likely",
         message=finding.body,
@@ -133,6 +128,5 @@ __all__ = [
     "agent_finding_to_finding",
     "coerce_agent_finding",
     "finding_for_publication_validation",
-    "infer_agent_finding_category",
     "normalize_agent_findings_via_pipeline",
 ]

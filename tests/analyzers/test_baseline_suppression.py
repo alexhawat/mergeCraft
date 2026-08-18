@@ -7,6 +7,7 @@ Implementation: **DG1.2** — wired through ``analyzers/config.py::baseCompariso
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from tests.analyzers.support import import_module
 from tests.findings.support import make_finding
@@ -134,10 +135,110 @@ def test_base_collection_failure_is_distinct_from_clean_zero_hits() -> None:
     assert clean.collected is True
 
 
-def test_apply_baseline_suppression_skips_diff_when_collection_fails(
+def test_base_collection_all_skipped_is_not_collected(monkeypatch, tmp_path: Path) -> None:
+    """When every base adapter skips, collection must fail closed (collected=False)."""
+    from mergecraft.analyzers import adapters, baseline_suppression, contracts
+
+    worktree = tmp_path / "base-worktree"
+    worktree.mkdir()
+
+    monkeypatch.setattr(
+        contracts,
+        "resolve_analyzer_base_ref",
+        lambda *_args, **_kwargs: "base-sha",
+    )
+    monkeypatch.setattr(
+        baseline_suppression,
+        "_checkout_base_worktree",
+        lambda *_args, **_kwargs: worktree,
+    )
+    monkeypatch.setattr(
+        baseline_suppression, "_remove_base_worktree", lambda *_args, **_kwargs: None
+    )
+
+    manifests = [SimpleNamespace(id="ruff"), SimpleNamespace(id="mypy")]
+
+    def _all_skipped(**_kwargs: object) -> adapters.AdapterRunResult:
+        return adapters.AdapterRunResult(findings=[], skipped=True, skip_reason="unavailable")
+
+    monkeypatch.setattr(adapters, "run_adapter", _all_skipped)
+
+    result = baseline_suppression.collect_base_analyzer_findings(
+        repo_root=tmp_path,
+        manifests=manifests,
+        changed_files=["src/a.py"],
+        head_findings=[],
+        tier="trusted",
+    )
+
+    assert result.findings == []
+    assert result.collected is False
+
+
+def test_base_collection_fault_isolation_continues_on_adapter_error(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """One failing base adapter must not abort collection for the rest."""
+    from mergecraft.analyzers import adapters, baseline_suppression, contracts
+
+    worktree = tmp_path / "base-worktree"
+    worktree.mkdir()
+
+    monkeypatch.setattr(
+        contracts,
+        "resolve_analyzer_base_ref",
+        lambda *_args, **_kwargs: "base-sha",
+    )
+    monkeypatch.setattr(
+        baseline_suppression,
+        "_checkout_base_worktree",
+        lambda *_args, **_kwargs: worktree,
+    )
+    monkeypatch.setattr(
+        baseline_suppression, "_remove_base_worktree", lambda *_args, **_kwargs: None
+    )
+
+    manifests = [SimpleNamespace(id="ruff"), SimpleNamespace(id="mypy")]
+
+    base_hit = make_finding(
+        tool="mypy",
+        rule_id="error",
+        category="Functional Correctness",
+        severity="Major",
+        message="Type error",
+        path="src/a.py",
+        start_line=1,
+        end_line=1,
+        source="analyzer",
+    )
+    calls: list[str] = []
+
+    def _run_adapter(*, tool_id: str, **_kwargs: object) -> adapters.AdapterRunResult:
+        calls.append(tool_id)
+        if tool_id == "ruff":
+            raise OSError("ruff binary missing")
+        return adapters.AdapterRunResult(findings=[base_hit], skipped=False)
+
+    monkeypatch.setattr(adapters, "run_adapter", _run_adapter)
+
+    result = baseline_suppression.collect_base_analyzer_findings(
+        repo_root=tmp_path,
+        manifests=manifests,
+        changed_files=["src/a.py"],
+        head_findings=[],
+        tier="trusted",
+    )
+
+    assert calls == ["ruff", "mypy"]
+    assert result.collected is True
+    assert result.findings == [base_hit]
+
+
+def test_apply_baseline_suppression_skips_diff_when_all_adapters_skipped(
     monkeypatch,
 ) -> None:
-    """Failed base collection must not mark findings pre-existing via empty base diff."""
+    """All-skipped base collection must not mark findings pre-existing via empty base diff."""
     from mergecraft.analyzers import baseline_suppression, pipeline
 
     head, _base = _head_and_base_hit(
