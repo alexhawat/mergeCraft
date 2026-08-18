@@ -1,0 +1,15 @@
+{
+  "name": "blocking-correctness",
+  "match": {
+    "provider": "default",
+    "model": "dummy",
+    "mode": "review",
+    "streaming": false
+  },
+  "response": {
+    "body": {
+      "id": "blocking",
+      "choices": [{"message": {"role": "assistant", "content": "Critical issue."}}]
+    }
+  }
+}

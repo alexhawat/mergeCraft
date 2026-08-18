@@ -1,0 +1,7 @@
+{
+  "name": "missing-terminal",
+  "match": {"provider": "default", "model": "dummy", "streaming": false},
+  "response": {
+    "blocks": [{"kind": "text", "text": "Review done but no verdict tool."}]
+  }
+}

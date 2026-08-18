@@ -1,0 +1,27 @@
+{
+  "name": "valid-request-changes",
+  "match": {"provider": "default", "model": "dummy", "streaming": false},
+  "response": {
+    "blocks": [
+      {
+        "kind": "tool_call",
+        "tool_name": "submit_review_verdict",
+        "tool_call_id": "call-verdict-1",
+        "arguments": {
+          "verdict": "request_changes",
+          "summary": "Blocking issue",
+          "findings": [
+            {
+              "severity": "Critical",
+              "category": "correctness",
+              "title": "Bug",
+              "description": "Fails tests",
+              "location": "src/foo.py:1"
+            }
+          ]
+        }
+      },
+      {"kind": "text", "text": "ignored trailing narrative"}
+    ]
+  }
+}
