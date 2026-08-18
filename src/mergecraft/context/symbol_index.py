@@ -48,6 +48,7 @@ def index_symbols(
     rel_path: str,
     blob_sha: str,
     cache: _CacheProto | None = None,
+    source: str | None = None,
 ) -> SymbolIndexResult:
     """Index symbols for ``rel_path`` at ``blob_sha``."""
     if cache is not None:
@@ -55,8 +56,8 @@ def index_symbols(
         if cached is not None:
             return cast("SymbolIndexResult", cached)
 
-    path = repo_root / rel_path
-    source = path.read_text(encoding="utf-8")
+    if source is None:
+        source = (repo_root / rel_path).read_text(encoding="utf-8")
     suffix = Path(rel_path).suffix.casefold()
     if suffix in _TREE_SITTER_SUFFIXES:
         result = _index_with_tree_sitter(source)
