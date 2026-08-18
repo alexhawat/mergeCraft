@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -12,6 +11,7 @@ from typing import TYPE_CHECKING, Literal
 from loguru import logger
 
 from mergecraft.analyzers.paths import normalize_repo_path
+from mergecraft.analyzers.scope import _changed_paths_from_scope, parse_diff_scope
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
 TrustTier = Literal["trusted", "untrusted"]
 
-_DIFF_FILE_RE = re.compile(r"^diff --git a/(.+?) b/(.+?)$", re.MULTILINE)
 _MIN_CHANGED_LINES_FOR_BASELINE = 12
 
 
@@ -41,12 +40,9 @@ class SuppressionResult:
     audit_trail: list[SuppressionAuditEntry] = field(default_factory=list)
 
 
-def _changed_paths(diff_text: str) -> set[str]:
-    paths: set[str] = set()
-    for match in _DIFF_FILE_RE.finditer(diff_text):
-        paths.add(normalize_repo_path(match.group(1)))
-        paths.add(normalize_repo_path(match.group(2)))
-    return paths
+def _touched_paths(diff_text: str) -> set[str]:
+    scope = parse_diff_scope(diff_text)
+    return {normalize_repo_path(path) for path in _changed_paths_from_scope(scope)}
 
 
 def _changed_line_count(diff_text: str) -> int:
@@ -183,7 +179,7 @@ def suppress_baseline_findings(
             ],
         )
 
-    touched = _changed_paths(diff_text)
+    touched = _touched_paths(diff_text)
     base_by_fingerprint = {finding.fingerprint: finding for finding in base_findings}
     base_identities = {_baseline_identity(finding) for finding in base_findings}
 
