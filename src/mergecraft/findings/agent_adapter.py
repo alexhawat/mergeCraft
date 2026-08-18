@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from mergecraft.analyzers.finding import make_finding
 from mergecraft.findings.causality import (
@@ -15,6 +15,8 @@ from mergecraft.findings.precision_pipeline import apply_precision_pipeline
 from mergecraft.findings.severity_rubric import infer_category_from_message
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from mergecraft.agents.verifier import AgentFinding
     from mergecraft.analyzers.finding import Finding
 
@@ -80,10 +82,27 @@ def _apply_row_level_precision(
     drafts: list[AgentFinding],
     *,
     rule_id: str,
-) -> list[Finding]:
-    """Run rubric and causality per row without changing list cardinality."""
+    repo_root: Path | None = None,
+    trust_tier: Literal["trusted", "untrusted"] = "trusted",
+) -> list[tuple[AgentFinding, Finding]]:
+    """Run rubric, causality, and optional memory; return aligned draft pairs."""
     converted = [agent_finding_to_finding(draft, rule_id=rule_id) for draft in drafts]
-    return apply_precision_pipeline(converted, dedupe=False)
+    refined = apply_precision_pipeline(
+        converted,
+        dedupe=False,
+        repo_root=repo_root,
+        trust_tier=trust_tier,
+    )
+    draft_by_fingerprint = {
+        finding.fingerprint: draft for draft, finding in zip(drafts, converted, strict=True)
+    }
+    pairs: list[tuple[AgentFinding, Finding]] = []
+    for finding in refined:
+        draft = draft_by_fingerprint.get(finding.fingerprint)
+        if draft is None:
+            continue
+        pairs.append((draft, finding))
+    return pairs
 
 
 def normalize_agent_findings_via_pipeline(
@@ -91,6 +110,8 @@ def normalize_agent_findings_via_pipeline(
     *,
     rule_id: str,
     dedupe: bool = False,
+    repo_root: Path | None = None,
+    trust_tier: Literal["trusted", "untrusted"] = "trusted",
 ) -> list[Any]:
     """Run the DG1 precision pipeline and map severities back onto agent rows."""
     from mergecraft.agents.verifier import AgentFinding
@@ -99,17 +120,28 @@ def normalize_agent_findings_via_pipeline(
         return []
 
     drafts = [coerce_agent_finding(item) for item in findings]
-    refined = _apply_row_level_precision(drafts, rule_id=rule_id)
+    pairs = _apply_row_level_precision(
+        drafts,
+        rule_id=rule_id,
+        repo_root=repo_root,
+        trust_tier=trust_tier,
+    )
 
     if dedupe:
+        refined = [finding for _, finding in pairs]
         dedupe_result = dedupe_findings_with_indices(refined)
         return [
-            _finding_to_agent_draft(refined[index], source=drafts[index])
+            _finding_to_agent_draft(refined[index], source=pairs[index][0])
             for index in dedupe_result.kept_indices
         ]
 
+    original_by_fingerprint = {
+        agent_finding_to_finding(draft, rule_id=rule_id).fingerprint: original
+        for draft, original in zip(drafts, findings, strict=True)
+    }
     normalized: list[Any] = []
-    for draft, finding, original in zip(drafts, refined, findings, strict=True):
+    for draft, finding in pairs:
+        original = original_by_fingerprint[finding.fingerprint]
         if isinstance(original, AgentFinding):
             normalized.append(draft.model_copy(update={"severity": finding.severity}))
         elif isinstance(original, dict):

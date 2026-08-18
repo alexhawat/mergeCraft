@@ -631,8 +631,27 @@ Trust the tools — do not repeatedly verify after successful operations. Except
             raw = ""
         if raw:
             from mergecraft.utils.learnings import list_active_entries as _list_active
+            from mergecraft.utils.learnings import load_weighted_active_memories
 
             active_entries = _list_active(raw)
+            weighted_texts = {
+                text
+                for text, weight in load_weighted_active_memories(learnings_text=raw)
+                if weight > 0.0
+            }
+            if active_entries:
+                filtered_entries: list[dict[str, Any]] = []
+                for entry in active_entries:
+                    body_lines: list[str] = []
+                    for line in str(entry.get("body") or "").splitlines():
+                        bullet = line.strip().lstrip("-* ").strip()
+                        if bullet and bullet not in weighted_texts:
+                            continue
+                        body_lines.append(line)
+                    new_body = "\n".join(body_lines).strip()
+                    if new_body:
+                        filtered_entries.append({**entry, "body": new_body})
+                active_entries = filtered_entries
     learnings_section = build_learnings_section(
         file_path=learnings_file_path,
         headings=headings,

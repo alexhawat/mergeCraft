@@ -264,10 +264,17 @@ def verify_agent_findings_tool(ctx: ToolContext):
             )
             for row in (params.get("findings") or [])
         ]
+        trust = (
+            ctx.tool_state.trust_tier
+            if ctx.tool_state.trust_tier in {"trusted", "untrusted"}
+            else "trusted"
+        )
         normalized_findings = normalize_agent_findings_via_pipeline(
             findings,
             rule_id="agent:draft",
             dedupe=True,
+            repo_root=repo_root,
+            trust_tier=trust,  # type: ignore[arg-type]
         )
         stored: dict[str, dict[str, Any]] = {}
         for item in ctx.tool_state.agent_findings:

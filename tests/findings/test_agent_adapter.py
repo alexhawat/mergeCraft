@@ -58,3 +58,53 @@ def test_normalize_agent_findings_dedupes_at_publication_seam() -> None:
     assert len(normalized) == 1
     assert normalized[0].path == "src/a.py"
     assert normalized[0].line == 10
+
+
+def test_normalize_agent_findings_memory_suppression_aligns_drafts(tmp_path) -> None:
+    """Memory suppression must not remap deduped rows to pre-suppression drafts."""
+    from mergecraft.findings.agent_adapter import normalize_agent_findings_via_pipeline
+    from mergecraft.utils.memory import FeedbackOutcome, record_finding_feedback
+    from tests.memory.support import feedback_store_path, make_finding
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    dismissed = make_finding(
+        message="Stale warning",
+        path="src/app.py",
+        start_line=1,
+        end_line=1,
+    )
+    record_finding_feedback(
+        store_path=feedback_store_path(repo),
+        fingerprint=dismissed.fingerprint,
+        outcome=FeedbackOutcome.DISMISSED,
+        reason="Already fixed upstream",
+        pr_number=7,
+    )
+
+    findings = [
+        AgentFinding(
+            path="src/app.py",
+            body="Stale warning",
+            severity="Major",
+            line=1,
+            fingerprint=dismissed.fingerprint,
+        ),
+        AgentFinding(
+            path="src/app.py",
+            body="Real regression in retry loop",
+            severity="Major",
+            line=10,
+        ),
+    ]
+
+    normalized = normalize_agent_findings_via_pipeline(
+        findings,
+        rule_id="agent:terminal",
+        dedupe=True,
+        repo_root=repo,
+    )
+
+    assert len(normalized) == 1
+    assert normalized[0].body == "Real regression in retry loop"
+    assert normalized[0].line == 10

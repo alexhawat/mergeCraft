@@ -14,6 +14,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -469,10 +470,18 @@ def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
         validated = SubmitReviewVerdictParams.model_validate(params)
+        repo_root = Path(primary_repo_state(ctx.tool_state).dir)
+        trust = (
+            ctx.tool_state.trust_tier
+            if ctx.tool_state.trust_tier in {"trusted", "untrusted"}
+            else "trusted"
+        )
         normalized_findings = normalize_agent_findings_via_pipeline(
             list(validated.findings),
             rule_id="agent:terminal",
             dedupe=True,
+            repo_root=repo_root,
+            trust_tier=trust,  # type: ignore[arg-type]
         )
         submission_dict = {
             "verdict": validated.verdict,
