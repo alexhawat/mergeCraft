@@ -9,7 +9,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
@@ -119,7 +119,7 @@ async def _resolve_run_context(client: Any) -> RunContextData:
         _RESOLVE_RUN_CTX_NAME,
         getattr(_GH_UTIL, _RESOLVE_RUN_CTX_NAME),
     )
-    return await resolver(client)
+    return cast("RunContextData", await resolver(client))
 
 
 setattr(sys.modules[__name__], _RESOLVE_RUN_CTX_NAME, getattr(_GH_UTIL, _RESOLVE_RUN_CTX_NAME))
