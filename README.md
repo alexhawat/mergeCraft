@@ -631,6 +631,11 @@ of them for its full flag set):
 | `mergecraft lens test <lens-id>` | Preview one lens dispatch (rubric + routing context) for a diff fixture. |
 | `mergecraft mcp list` | Print the resolved MCP tool names for a role. |
 | `mergecraft mcp serve` | Start the MCP HTTP server for a resolved workspace and role. |
+| `mergecraft memory export --output OUTPUT` | Export repo memory to a JSON bundle. |
+| `mergecraft memory forget` | Remove one active memory entry. |
+| `mergecraft memory import <bundle-path>` | Import a memory export bundle into a repository. |
+| `mergecraft memory list` | List active memory entries for a repository. |
+| `mergecraft memory show` | Show one memory entry by id. |
 | `mergecraft models list` | List curated model slugs and whether credentials are detected locally. |
 | `mergecraft models set <slugs>` | Write an ordered `models:` list to `.mergecraft/config.yaml`. |
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |

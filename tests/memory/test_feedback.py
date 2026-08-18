@@ -8,12 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.memory.support import feedback_store_path, sample_fingerprint
 
 
-@pytest.mark.xfail(reason="green after DG7.2: finding feedback capture", strict=False)
 def test_accepted_dismissed_disputed_are_recorded_with_reason(tmp_path: Path) -> None:
     """G14: developer feedback records outcome and reason, not withdrawal alone."""
     from mergecraft.utils.memory import FeedbackOutcome, record_finding_feedback
@@ -62,7 +59,6 @@ def test_accepted_dismissed_disputed_are_recorded_with_reason(tmp_path: Path) ->
     assert by_outcome[FeedbackOutcome.DISPUTED].reason == disputed.reason
 
 
-@pytest.mark.xfail(reason="green after DG7.2: feedback keyed by fingerprint", strict=False)
 def test_feedback_is_keyed_by_fingerprint(tmp_path: Path) -> None:
     """Feedback lookups and updates are keyed by finding fingerprint."""
     from mergecraft.utils.memory import (

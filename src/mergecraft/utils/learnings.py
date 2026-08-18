@@ -31,6 +31,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import ToolState
 
@@ -729,6 +730,86 @@ async def persist_xrepo_learnings(ctx: ToolContext) -> None:
         logger.warning("xrepo learnings persist failed: {}", exc)
 
 
+# ── DG7 — memory wiring for review runs ────────────────────────────────────
+
+
+def repo_memory_paths(repo_root: Path) -> tuple[Path, Path]:
+    """Return ``(feedback.json, memory.json)`` paths under ``repo_root/.mergecraft``."""
+    base = repo_root / ".mergecraft"
+    from mergecraft.utils.memory import FEEDBACK_FILE_NAME, MEMORY_FILE_NAME
+
+    return base / FEEDBACK_FILE_NAME, base / MEMORY_FILE_NAME
+
+
+def apply_repo_memory_to_findings(
+    findings: list[Finding],
+    *,
+    repo_root: Path,
+) -> list[Finding]:
+    """Apply dismissed feedback and negative-memory rules before publication."""
+    from mergecraft.utils.memory import (
+        FeedbackOutcome,
+        NegativeMemoryStore,
+        apply_negative_memory,
+        load_feedback_store,
+    )
+
+    if not findings:
+        return []
+    feedback_path, memory_path = repo_memory_paths(repo_root)
+    feedback = load_feedback_store(feedback_path)
+    surviving: list[Finding] = []
+    for finding in findings:
+        record = feedback.entries.get(finding.fingerprint)
+        if record is not None and record.outcome == FeedbackOutcome.DISMISSED:
+            continue
+        surviving.append(finding)
+    if not memory_path.is_file():
+        return surviving
+    store = NegativeMemoryStore(path=memory_path)
+    result = apply_negative_memory(findings=surviving, store=store, repo_root=repo_root)
+    return result.reported
+
+
+def load_weighted_active_memories(
+    repo_root: Path,
+    *,
+    now: datetime | None = None,
+) -> list[tuple[str, float]]:
+    """Return active learnings bullets with recency weights for prompt injection."""
+    from mergecraft.utils.memory import MemoryEntry, apply_recency_weighting, memory_entry_id
+
+    learn_path = repo_root / ".mergecraft" / "learnings.md"
+    if not learn_path.is_file():
+        return []
+    text = learn_path.read_text(encoding="utf-8")
+    ts = now or datetime.now(UTC)
+    entries: list[MemoryEntry] = []
+    for item in list_active_entries(text):
+        body = str(item.get("body") or "").strip()
+        if not body:
+            continue
+        for line in body.splitlines():
+            bullet = line.strip().lstrip("-* ").strip()
+            if not bullet:
+                continue
+            prov = item.get("provenance")
+            recorded = prov.timestamp if isinstance(prov, LearningProvenance) else ts
+            entries.append(
+                MemoryEntry(
+                    id=memory_entry_id(bullet),
+                    text=bullet,
+                    recorded_at=recorded,
+                    ttl_days=365,
+                )
+            )
+    return [
+        (entry.text, weight)
+        for entry, weight in apply_recency_weighting(entries, now=ts)
+        if weight > 0.0
+    ]
+
+
 __all__ = [
     "ACTIVE_SECTION_HEADING",
     "LEARNINGS_FILE_NAME",
@@ -737,6 +818,7 @@ __all__ = [
     "TRUSTED_AUTHOR_ASSOCIATIONS",
     "XREPO_LEARNINGS_FILE_NAME",
     "LearningProvenance",
+    "apply_repo_memory_to_findings",
     "build_learnings_review_delta",
     "build_provenance_record",
     "ensure_learnings_review_delta",
@@ -744,12 +826,14 @@ __all__ = [
     "learnings_file_path",
     "list_active_entries",
     "list_staging_entries",
+    "load_weighted_active_memories",
     "merge_learnings_delta_into_review_body",
     "parse_provenance_comment",
     "persist_is_ephemeral",
     "persist_learnings",
     "persist_xrepo_learnings",
     "read_learnings_file",
+    "repo_memory_paths",
     "route_learnings_for_persist",
     "seed_learnings_file",
     "seed_xrepo_learnings_file",

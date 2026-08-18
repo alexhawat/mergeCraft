@@ -26,6 +26,7 @@ from mergecraft.cli import (
     learnings_cmd,
     lens_cmd,
     mcp_cmd,
+    memory_cmd,
     models_cmd,
     pipeline_cmd,
     plan_cmd,
@@ -60,6 +61,7 @@ app.command("review")(diff_review_cmd.run)
 app.command("diff-review", hidden=True)(diff_review_cmd.run)
 app.add_typer(gha_cmd.app, name="gha")
 app.add_typer(learnings_cmd.app, name="learnings")
+app.add_typer(memory_cmd.app, name="memory")
 app.add_typer(findings_cmd.app, name="findings")
 app.add_typer(eval_cmd.app, name="eval")
 # W8.4 — ``mergecraft config tracing`` + ``mergecraft traces <run-id>``.

@@ -8,12 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.memory.support import make_finding, memory_store_path
 
 
-@pytest.mark.xfail(reason="green after DG7.2: negative memory rules", strict=False)
 def test_do_not_flag_x_when_y_is_stored(tmp_path: Path) -> None:
     """Store ``do not flag X when Y`` and suppress matching findings."""
     from mergecraft.utils.memory import NegativeMemoryStore, apply_negative_memory
@@ -52,7 +49,6 @@ def test_do_not_flag_x_when_y_is_stored(tmp_path: Path) -> None:
     assert result.suppression_reasons[suppressed_finding.fingerprint]
 
 
-@pytest.mark.xfail(reason="green after DG7.2: negative memory audit trail", strict=False)
 def test_negative_memory_is_bounded_and_auditable(tmp_path: Path) -> None:
     """Negative memory is capped and every suppression carries an audit record (convention 7)."""
     from mergecraft.utils.memory import NegativeMemoryStore, apply_negative_memory
@@ -65,7 +61,7 @@ def test_negative_memory_is_bounded_and_auditable(tmp_path: Path) -> None:
     for idx in range(max_entries + 2):
         store.add_rule(
             pattern=f"pattern-{idx}",
-            when=f"condition-{idx}",
+            when="path ends with app.py",
             reason=f"audit reason {idx}",
         )
 
@@ -85,7 +81,6 @@ def test_negative_memory_is_bounded_and_auditable(tmp_path: Path) -> None:
         assert result.suppression_reasons[finding.fingerprint] in {entry.reason for entry in audit}
 
 
-@pytest.mark.xfail(reason="green after DG7.2: over-suppression detection", strict=False)
 def test_over_suppression_is_detectable(tmp_path: Path) -> None:
     """A reviewer taught into silence must be visible in an over-suppression report."""
     from mergecraft.utils.memory import NegativeMemoryStore, detect_over_suppression

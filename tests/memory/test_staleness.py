@@ -8,12 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.memory.support import days_ago, memory_store_path, utc_now
 
 
-@pytest.mark.xfail(reason="green after DG7.2: TTL and recency weighting", strict=False)
 def test_ttl_and_recency_weighting_apply(tmp_path: Path) -> None:
     """Expired memories drop out; recent memories weigh higher than stale ones."""
     from mergecraft.utils.memory import MemoryEntry, apply_recency_weighting
@@ -53,7 +50,6 @@ def test_ttl_and_recency_weighting_apply(tmp_path: Path) -> None:
     assert weights["recent-heavy"] > weights["fresh"]
 
 
-@pytest.mark.xfail(reason="green after DG7.2: contradicting memory detection", strict=False)
 def test_contradicting_memories_are_flagged(tmp_path: Path) -> None:
     """Conflicting memories are surfaced instead of silently merged."""
     from mergecraft.utils.memory import MemoryEntry, detect_contradicting_memories
