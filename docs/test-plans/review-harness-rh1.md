@@ -22,25 +22,23 @@ Target API (RH1.2):
 
 ## xfail schedule
 
-All RH1.2 markers use `strict=False` (`pyproject.toml` may set `xfail_strict =
-true`; an early-passing xfail becomes XPASS, not a silent pass). **Cleared after
-RH1.2** — twelve contract tests become real passes; three regression pins were
-never marked.
+RH1.2 shipped on branch `wave/review-harness` — all twelve contract tests pass
+without xfail markers. The three regression pins below were never marked.
 
-| Wave | Test | Marker reason | Status |
-|------|------|---------------|--------|
-| **RH1.2** | `test_fixture_requires_provider_and_model` | `green after RH1.2` | pending |
-| **RH1.2** | `test_fixture_requires_request_match_fields` | same | pending |
-| **RH1.2** | `test_fixture_accepts_json_response_and_metadata` | same | pending |
-| **RH1.2** | `test_fixture_accepts_ordered_response_blocks` | same | pending |
-| **RH1.2** | `test_malformed_fixture_is_rejected_with_path` | same | pending |
-| **RH1.2** | `test_matching_uses_provider_model_and_mode` | same | pending |
-| **RH1.2** | `test_streaming_flag_participates_in_matching` | same | pending |
-| **RH1.2** | `test_body_field_matchers_are_explicit` | same | pending |
-| **RH1.2** | `test_no_fixture_match_is_an_error_in_strict_mode` | same | pending |
-| **RH1.2** | `test_multiple_matches_are_an_error` | same | pending |
-| **RH1.2** | `test_unexpected_fixture_reuse_is_an_error` | same | pending |
-| **RH1.2** | `test_mismatch_includes_redacted_request_and_candidate_reasons` | same | pending |
+| Wave | Test | Status |
+|------|------|--------|
+| **RH1.2** | `test_fixture_requires_provider_and_model` | **passing** |
+| **RH1.2** | `test_fixture_requires_request_match_fields` | **passing** |
+| **RH1.2** | `test_fixture_accepts_json_response_and_metadata` | **passing** |
+| **RH1.2** | `test_fixture_accepts_ordered_response_blocks` | **passing** |
+| **RH1.2** | `test_malformed_fixture_is_rejected_with_path` | **passing** |
+| **RH1.2** | `test_matching_uses_provider_model_and_mode` | **passing** |
+| **RH1.2** | `test_streaming_flag_participates_in_matching` | **passing** |
+| **RH1.2** | `test_body_field_matchers_are_explicit` | **passing** |
+| **RH1.2** | `test_no_fixture_match_is_an_error_in_strict_mode` | **passing** |
+| **RH1.2** | `test_multiple_matches_are_an_error` | **passing** |
+| **RH1.2** | `test_unexpected_fixture_reuse_is_an_error` | **passing** |
+| **RH1.2** | `test_mismatch_includes_redacted_request_and_candidate_reasons` | **passing** |
 
 Regression pins (no xfail — must pass @ RH1.1):
 
@@ -69,12 +67,14 @@ Regression pins (no xfail — must pass @ RH1.1):
 | RH1.1m | D14 — redaction pin | pin | `redact_secrets` contract | `test_diagnostics_do_not_include_provider_keys_or_github_tokens` |
 | RH1.1n | D2 — production fence | pin | no prod import of harness | `test_src_mergecraft_does_not_import_provider_harness` |
 
-## RED acceptance (RH1.1)
+## RED acceptance (RH1.1 → RH1.2)
 
-- `uv run pytest --collect-only -q tests/harness/` → **15** collected, zero collection errors.
-- File run: **3 pass** (lenient pin, redaction pin, import fence) + **12 xfail** (schema,
-  matcher, diagnostics). Do not edit `tests/support/provider_harness/` or `src/` to green
-  the suite in RH1.1.
+RH1.2 is complete on `wave/review-harness`:
+
+- `uv run pytest -q tests/harness/` → **15** collected, all passing (12 contract +
+  3 regression pins).
+- Implementation lives under `tests/support/provider_harness/` with zero `src/`
+  edits (**D2**).
 
 ## Files
 

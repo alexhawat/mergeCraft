@@ -77,6 +77,8 @@ def test_empty_stream_profile_completes_without_content(provider_harness) -> Non
         timeout=5.0,
     )
     assert response.status_code == 200
+    assert '"content"' not in response.text
+    assert "[DONE]" in response.text
 
 
 def test_http_401_profile_is_not_transient(provider_harness) -> None:
