@@ -13,12 +13,16 @@ _MIN_CHAT_BODY = {
 }
 
 
-def _fixture(name: str, *, model: str = "dummy") -> object:
+def _fixture(
+    name: str, *, model: str = "dummy", body_fields: dict[str, object] | None = None
+) -> object:
     from tests.support.provider_harness.schema import FixtureSpec, MatchSpec, ResponseSpec
 
     return FixtureSpec(
         name=name,
-        match=MatchSpec(provider="default", model=model, mode="review"),
+        match=MatchSpec(
+            provider="default", model=model, mode="review", body_fields=body_fields or {}
+        ),
         response=ResponseSpec(body=_MIN_CHAT_BODY),
     )
 
@@ -33,9 +37,13 @@ def test_mismatch_includes_redacted_request_and_candidate_reasons() -> None:
             "model": "dummy",
             "messages": [{"role": "user", "content": "review"}],
             "Authorization": f"Bearer {api_key}",
+            "api_key": api_key,
         },
     )
-    fixtures = [_fixture("candidate-a", model="other-a"), _fixture("candidate-b", model="other-b")]
+    fixtures = [
+        _fixture("candidate-a", model="other-a", body_fields={"api_key": "expected-a"}),
+        _fixture("candidate-b", model="other-b", body_fields={"api_key": "expected-b"}),
+    ]
 
     try:
         match_fixture(req, fixtures, strict=True)
@@ -85,7 +93,7 @@ def test_diagnostics_never_dump_unbounded_payloads() -> None:
     err = NoFixtureMatch(
         request=snapshot(body={"blob": huge}),
         fixtures=[],
-        candidate_reasons={"x": "y"},
+        candidate_reasons={"x": f"body_fields['blob']: expected 'y', got {huge!r}"},
     )
     text = format_mismatch(err)
     assert len(text) < 5000

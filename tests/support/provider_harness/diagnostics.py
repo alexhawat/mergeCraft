@@ -27,6 +27,13 @@ def _redact_body(body: object) -> str:
     return redacted
 
 
+def _redact_reason(reason: str) -> str:
+    redacted = redact_secrets(reason)
+    if len(redacted) > _BODY_CAP:
+        return redacted[: _BODY_CAP - 3] + "..."
+    return redacted
+
+
 def format_mismatch(
     error: Exception,
     *,
@@ -45,7 +52,7 @@ def format_mismatch(
             "candidates:",
         ]
         for name, reason in error.candidate_reasons.items():
-            lines.append(f"  - {name}: {reason}")
+            lines.append(f"  - {name}: {_redact_reason(reason)}")
     elif isinstance(error, AmbiguousFixtureMatch):
         names = ", ".join(m.name for m in error.matches)
         lines = [f"fixture mismatch: ambiguous match among {names}"]
