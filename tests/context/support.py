@@ -64,6 +64,74 @@ def git_blob_sha(root: Path, rel_path: str, ref: str = "HEAD") -> str:
     return git_run("rev-parse", f"{ref}:{rel_path}", cwd=root)
 
 
+def write_call_graph_fixture_repo(root: Path) -> None:
+    """Lay down imports, references, and call edges for call-graph tests."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "src" / "demo").mkdir(parents=True)
+    (root / "src" / "demo" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "src" / "demo" / "lib.py").write_text(
+        "def helper() -> str:\n    return 'ok'\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "demo" / "consumer.py").write_text(
+        "from demo.lib import helper\n\ndef caller() -> str:\n    return helper()\n",
+        encoding="utf-8",
+    )
+
+
+def write_change_graph_fixture_repo(root: Path) -> None:
+    """Lay down dependents, covering tests, and contracts for change-graph tests."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "src" / "demo").mkdir(parents=True)
+    (root / "src" / "demo" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "src" / "demo" / "service.py").write_text(
+        "def process() -> dict[str, str]:\n    return {'status': 'ok'}\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "demo" / "api.py").write_text(
+        "from demo.service import process\n\n"
+        "def handle_request() -> dict[str, str]:\n    return process()\n",
+        encoding="utf-8",
+    )
+    (root / "tests").mkdir(parents=True)
+    (root / "tests" / "test_service.py").write_text(
+        "from demo.service import process\n\n"
+        "def test_process_returns_ok() -> None:\n"
+        "    assert process()['status'] == 'ok'\n",
+        encoding="utf-8",
+    )
+    (root / "contracts").mkdir(parents=True)
+    (root / "contracts" / "openapi.yaml").write_text(
+        "openapi: '3.0.0'\n"
+        "info:\n"
+        "  title: Demo API\n"
+        "  version: '1.0.0'\n"
+        "paths:\n"
+        "  /process:\n"
+        "    get:\n"
+        "      operationId: handle_request\n"
+        "      responses:\n"
+        "        '200':\n"
+        "          description: ok\n",
+        encoding="utf-8",
+    )
+
+
+def write_dynamic_expansion_fixture_repo(root: Path) -> None:
+    """Lay down nested scopes for on-demand expansion tests."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "src" / "demo").mkdir(parents=True)
+    (root / "src" / "demo" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "src" / "demo" / "widget.py").write_text(
+        "class Widget:\n"
+        "    def render(self) -> str:\n"
+        "        return self._body()\n\n"
+        "    def _body(self) -> str:\n"
+        "        return 'x' * 200\n",
+        encoding="utf-8",
+    )
+
+
 def write_context_fixture_repo(root: Path) -> None:
     """Lay down a miniature repo for map + symbol indexing tests."""
     root.mkdir(parents=True, exist_ok=True)
