@@ -125,6 +125,25 @@ def cluster_changes(
                     intent=dominant_intent,
                 )
             )
+        elif len(component) == 1:
+            path = component[0]
+            path_intent = intent_map.get(path, "unclassified")
+            other_intents = {
+                intent_map.get(other_path, "unclassified")
+                for other_path in paths
+                if other_path != path
+            }
+            if path_intent not in other_intents:
+                independent_groups.append(
+                    ChangeCluster(
+                        id=_cluster_id(
+                            None if path_intent == "unclassified" else path_intent,
+                            component,
+                        ),
+                        paths=sorted(component),
+                        intent=None if path_intent == "unclassified" else path_intent,
+                    )
+                )
 
     return ClusterResult(clusters=clusters, independent_groups=independent_groups)
 

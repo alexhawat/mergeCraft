@@ -73,3 +73,39 @@ def test_independent_groups_are_identified() -> None:
     group_paths = [frozenset(group.paths) for group in result.independent_groups]
     assert frozenset({"frontend/app.tsx", "frontend/router.tsx"}) in group_paths
     assert frozenset({"infra/terraform/main.tf", "infra/terraform/variables.tf"}) in group_paths
+
+
+def test_singleton_with_distinct_intent_surfaces_for_split() -> None:
+    """A lone file whose intent differs from a cluster enables split advice."""
+    change = _change(
+        "src/api/handlers.py",
+        "src/api/routes.py",
+        "docs/guide.md",
+        files_changed=3,
+    )
+    dependency_edges = [
+        ("src/api/routes.py", "src/api/handlers.py"),
+    ]
+    intents = {
+        "src/api/handlers.py": "api-refactor",
+        "src/api/routes.py": "api-refactor",
+        "docs/guide.md": "docs-only",
+    }
+
+    result = _cluster_change(change, dependency_edges=dependency_edges, intents=intents)
+
+    assert len(result.independent_groups) >= 2
+    group_paths = [frozenset(group.paths) for group in result.independent_groups]
+    assert frozenset({"src/api/handlers.py", "src/api/routes.py"}) in group_paths
+    assert frozenset({"docs/guide.md"}) in group_paths
+
+    from mergecraft.review.split_advisor import recommend_pr_split
+
+    advice = recommend_pr_split(
+        [
+            {"id": group.id, "paths": group.paths, "intent": group.intent}
+            for group in result.independent_groups
+        ]
+    )
+    assert advice.recommend_split is True
+    assert len(advice.suggested_prs) >= 2

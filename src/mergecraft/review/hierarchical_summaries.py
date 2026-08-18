@@ -131,19 +131,6 @@ def build_hierarchical_context(
             omitted_paths.remove(path)
 
     total_lines = sum(_line_count(block) for _, block in blocks)
-    kept_lines = sum(_line_count(hunk.raw) for hunk in hunks)
-    scope_reduction: ScopeReduction | None = None
-    if omitted_paths:
-        reason = (
-            f"token budget reduced scope ({token_budget} tokens); "
-            f"{len(omitted_paths)} file(s) summarized only"
-        )
-        scope_reduction = ScopeReduction(
-            original_lines=total_lines,
-            kept_lines=kept_lines,
-            omitted_paths=sorted(omitted_paths),
-            reason=reason,
-        )
 
     rendered_parts = [
         *(f"{entry.path} ({entry.lines_changed} lines)" for entry in map_entries),
@@ -155,7 +142,7 @@ def build_hierarchical_context(
     if token_estimate > token_budget and hunks:
         while hunks and token_estimate > token_budget:
             dropped = hunks.pop()
-            if dropped.path not in risk and dropped.path not in omitted_paths:
+            if dropped.path not in omitted_paths:
                 omitted_paths.append(dropped.path)
             rendered_parts = [
                 *(f"{entry.path} ({entry.lines_changed} lines)" for entry in map_entries),
@@ -163,16 +150,19 @@ def build_hierarchical_context(
                 *(hunk.raw for hunk in hunks),
             ]
             token_estimate = sum(_estimate_tokens(part) for part in rendered_parts)
-        if omitted_paths and scope_reduction is None:
-            scope_reduction = ScopeReduction(
-                original_lines=total_lines,
-                kept_lines=sum(_line_count(hunk.raw) for hunk in hunks),
-                omitted_paths=sorted(set(omitted_paths)),
-                reason=(
-                    f"token budget reduced scope ({token_budget} tokens); "
-                    f"{len(omitted_paths)} file(s) summarized only"
-                ),
-            )
+
+    scope_reduction: ScopeReduction | None = None
+    if omitted_paths:
+        unique_omitted = sorted(set(omitted_paths))
+        scope_reduction = ScopeReduction(
+            original_lines=total_lines,
+            kept_lines=sum(_line_count(hunk.raw) for hunk in hunks),
+            omitted_paths=unique_omitted,
+            reason=(
+                f"token budget reduced scope ({token_budget} tokens); "
+                f"{len(unique_omitted)} file(s) summarized only"
+            ),
+        )
 
     return HierarchicalContext(
         map=map_entries,
