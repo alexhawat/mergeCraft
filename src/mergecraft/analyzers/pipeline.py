@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
+from mergecraft.analyzers.baseline_suppression import should_run_baseline_suppression
 from mergecraft.analyzers.budget import default_inline_budget, place_findings
 from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding
@@ -28,6 +29,7 @@ from mergecraft.analyzers.trust import (
     resolve_selection_tier,
 )
 from mergecraft.config import load_repo_settings
+from mergecraft.findings.dedup import dedupe_findings
 from mergecraft.mcp.review import format_analyzer_inline_body
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow
 
@@ -278,8 +280,20 @@ def run_analyzer_pipeline(
             offline=offline,
         )
         scoped = annotate_introduced_by_pr(scoped, base_run_performed=base_run)
+        if should_run_baseline_suppression(
+            diff_text=diff_text,
+            base_comparison=settings.base_comparison,
+        ):
+            logger.debug(
+                "baseline suppression enabled for diff with {} changed lines",
+                sum(
+                    1
+                    for line in diff_text.splitlines()
+                    if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+                ),
+            )
 
-        clustered = cluster_findings(scoped)
+        clustered = dedupe_findings(cluster_findings(scoped))
         budget = (
             inline_budget
             if inline_budget is not None

@@ -240,7 +240,26 @@ def verify_agent_findings_tool(ctx: ToolContext):
             if isinstance(fingerprint, str) and fingerprint:
                 stored[fingerprint] = item
         for finding in findings:
+            from mergecraft.analyzers.finding import make_finding
+            from mergecraft.findings.severity_rubric import apply_severity_rubric
+
+            normalized = apply_severity_rubric(
+                make_finding(
+                    tool="agent",
+                    rule_id="agent:draft",
+                    category="Functional Correctness",
+                    severity=finding.severity,
+                    confidence="likely",
+                    message=finding.body,
+                    path=finding.path,
+                    start_line=int(finding.line or 1),
+                    end_line=int(finding.line or 1),
+                    source="agent",
+                ),
+                model_assigned_severity=finding.severity,
+            )
             row = finding.model_dump(mode="json")
+            row["severity"] = normalized.severity
             row["fingerprint"] = finding.identity()
             stored[str(row["fingerprint"])] = row
         ctx.tool_state.agent_findings = list(stored.values())

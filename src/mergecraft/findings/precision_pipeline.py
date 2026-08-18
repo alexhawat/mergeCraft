@@ -1,0 +1,26 @@
+"""DG1 precision pipeline — compose dedup, rubric, and causality."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from mergecraft.findings.causality import apply_causality_policy
+from mergecraft.findings.dedup import dedupe_findings
+from mergecraft.findings.severity_rubric import apply_severity_rubric
+
+if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
+
+
+def apply_precision_pipeline(findings: list[Finding]) -> list[Finding]:
+    """Run DG1 precision transforms before publication or scoring."""
+    refined = dedupe_findings(findings)
+    adjusted: list[Finding] = []
+    for finding in refined:
+        finding = apply_severity_rubric(finding)
+        finding = apply_causality_policy(finding)
+        adjusted.append(finding)
+    return adjusted
+
+
+__all__ = ["apply_precision_pipeline"]
