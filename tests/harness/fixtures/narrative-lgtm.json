@@ -1,7 +1,16 @@
 {
   "name": "narrative-lgtm",
-  "match": {"provider": "default", "model": "dummy", "streaming": false},
+  "match": {
+    "provider": "default",
+    "model": "dummy",
+    "streaming": false
+  },
   "response": {
-    "blocks": [{"kind": "text", "text": "LGTM ship it"}]
+    "blocks": [
+      {
+        "kind": "text",
+        "text": "LGTM ship it"
+      }
+    ]
   }
 }

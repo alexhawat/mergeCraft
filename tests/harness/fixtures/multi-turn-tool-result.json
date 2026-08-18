@@ -10,7 +10,14 @@
   "response": {
     "body": {
       "id": "turn-1",
-      "choices": [{"message": {"role": "assistant", "content": "second turn"}}]
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "second turn"
+          }
+        }
+      ]
     }
   }
 }

@@ -1,0 +1,70 @@
+"""Redacted mismatch diagnostics for provider-harness."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING
+
+from mergecraft.analyzers.redact import redact_secrets
+from tests.support.provider_harness.matcher import (
+    AmbiguousFixtureMatch,
+    FixtureReuseError,
+    NoFixtureMatch,
+)
+
+if TYPE_CHECKING:
+    from tests.support.provider_harness.metrics import HarnessMetrics
+
+_BODY_CAP = 2048
+
+
+def _redact_body(body: object) -> str:
+    if body is None:
+        return ""
+    try:
+        raw = json.dumps(body, sort_keys=True, default=str)
+    except TypeError, ValueError:
+        raw = repr(body)
+    redacted = redact_secrets(raw)
+    if len(redacted) > _BODY_CAP:
+        return redacted[: _BODY_CAP - 3] + "..."
+    return redacted
+
+
+def format_mismatch(
+    error: Exception,
+    *,
+    metrics: HarnessMetrics | None = None,
+    latency_ms: float | None = None,
+) -> str:
+    if isinstance(error, NoFixtureMatch):
+        req = error.request
+        lines = [
+            "fixture mismatch: no match",
+            f"provider: {req.get('provider', '?')}",
+            f"model: {req.get('model', '?')}",
+            f"mode: {req.get('mode', '?')}",
+            f"turn_index: {req.get('turn_index', 0)}",
+            f"request body (redacted): {_redact_body(req.get('body'))}",
+            "candidates:",
+        ]
+        for name, reason in error.candidate_reasons.items():
+            lines.append(f"  - {name}: {reason}")
+    elif isinstance(error, AmbiguousFixtureMatch):
+        names = ", ".join(m.name for m in error.matches)
+        lines = [f"fixture mismatch: ambiguous match among {names}"]
+    elif isinstance(error, FixtureReuseError):
+        fix = error.fixture
+        lines = [
+            f"fixture mismatch: reuse limit for {fix.name!r} "
+            f"(max_uses={fix.max_uses}, use_count={fix.use_count})"
+        ]
+    else:
+        return redact_secrets(str(error))
+
+    if metrics is not None:
+        snap = metrics.snapshot()
+        lines.append(f"fixture_usage: {snap.get('fixture_usage', {})}")
+    if latency_ms is not None:
+        lines.append(f"latency_ms: {latency_ms:.2f}")
+    return "\n".join(lines)

@@ -1,6 +1,10 @@
 {
   "name": "valid-request-changes",
-  "match": {"provider": "default", "model": "dummy", "streaming": false},
+  "match": {
+    "provider": "default",
+    "model": "dummy",
+    "streaming": false
+  },
   "response": {
     "blocks": [
       {
@@ -12,16 +16,17 @@
           "summary": "Blocking issue",
           "findings": [
             {
-              "severity": "Critical",
-              "category": "correctness",
-              "title": "Bug",
-              "description": "Fails tests",
-              "location": "src/foo.py:1"
+              "path": "src/foo.py",
+              "body": "Critical correctness issue",
+              "severity": "Critical"
             }
           ]
         }
       },
-      {"kind": "text", "text": "ignored trailing narrative"}
+      {
+        "kind": "text",
+        "text": "ignored trailing narrative"
+      }
     ]
   }
 }

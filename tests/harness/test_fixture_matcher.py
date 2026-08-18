@@ -42,7 +42,6 @@ def _fixture(
     )
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_matching_uses_provider_model_and_mode() -> None:
     from tests.support.provider_harness.matcher import NoFixtureMatch, match_fixture
 
@@ -58,7 +57,6 @@ def test_matching_uses_provider_model_and_mode() -> None:
         match_fixture(snapshot(model="unknown"), fixtures, strict=True)
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_streaming_flag_participates_in_matching() -> None:
     from tests.support.provider_harness.matcher import match_fixture
 
@@ -74,7 +72,6 @@ def test_streaming_flag_participates_in_matching() -> None:
     assert matched_stream.name == "stream"
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_body_field_matchers_are_explicit() -> None:
     from tests.support.provider_harness.matcher import NoFixtureMatch, match_fixture
 
@@ -96,7 +93,6 @@ def test_body_field_matchers_are_explicit() -> None:
         match_fixture(snapshot(body={"temperature": 0.5}), fixtures, strict=True)
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_no_fixture_match_is_an_error_in_strict_mode() -> None:
     from tests.support.provider_harness.matcher import NoFixtureMatch, match_fixture
 
@@ -106,7 +102,6 @@ def test_no_fixture_match_is_an_error_in_strict_mode() -> None:
         match_fixture(snapshot(model="dummy"), fixtures, strict=True)
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_multiple_matches_are_an_error() -> None:
     from tests.support.provider_harness.matcher import AmbiguousFixtureMatch, match_fixture
 
@@ -119,7 +114,6 @@ def test_multiple_matches_are_an_error() -> None:
         match_fixture(snapshot(), fixtures, strict=True)
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_unexpected_fixture_reuse_is_an_error() -> None:
     from tests.support.provider_harness.matcher import FixtureReuseError, match_fixture
 

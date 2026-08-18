@@ -23,7 +23,6 @@ def _fixture(name: str, *, model: str = "dummy") -> object:
     )
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_mismatch_includes_redacted_request_and_candidate_reasons() -> None:
     from tests.support.provider_harness.diagnostics import format_mismatch
     from tests.support.provider_harness.matcher import NoFixtureMatch, match_fixture
@@ -61,3 +60,32 @@ def test_diagnostics_do_not_include_provider_keys_or_github_tokens() -> None:
     assert "sk-abc12345ghi" not in redacted
     assert "ghp_" + "x" * 36 not in redacted
     assert "[REDACTED]" in redacted
+
+
+def test_failure_diagnostic_contains_fixture_usage_and_latency() -> None:
+    from tests.support.provider_harness.diagnostics import format_mismatch
+    from tests.support.provider_harness.matcher import NoFixtureMatch
+    from tests.support.provider_harness.metrics import HarnessMetrics
+
+    metrics = HarnessMetrics()
+    metrics.fixture_usage["candidate"] = 2
+    err = NoFixtureMatch(
+        request=snapshot(), fixtures=[], candidate_reasons={"candidate": "model mismatch"}
+    )
+    text = format_mismatch(err, metrics=metrics, latency_ms=12.5)
+    assert "fixture_usage" in text
+    assert "latency_ms" in text
+
+
+def test_diagnostics_never_dump_unbounded_payloads() -> None:
+    from tests.support.provider_harness.diagnostics import format_mismatch
+    from tests.support.provider_harness.matcher import NoFixtureMatch
+
+    huge = "x" * 5000
+    err = NoFixtureMatch(
+        request=snapshot(body={"blob": huge}),
+        fixtures=[],
+        candidate_reasons={"x": "y"},
+    )
+    text = format_mismatch(err)
+    assert len(text) < 5000

@@ -26,6 +26,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 
 - `src/mergecraft/` — package (src layout)
 - `tests/` — mirrors package areas
+- `tests/harness/` — deterministic provider-harness RED/GREEN suites (no live API keys on `make test`)
 - `Makefile` — single command surface (sevn-style)
 - Docker Action via root `Dockerfile` + `action.yml`
 

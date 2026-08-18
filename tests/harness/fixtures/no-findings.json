@@ -3,13 +3,19 @@
   "match": {
     "provider": "default",
     "model": "dummy",
-    "mode": "review",
     "streaming": false
   },
   "response": {
     "body": {
       "id": "no-findings",
-      "choices": [{"message": {"role": "assistant", "content": "No findings."}}]
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "No findings."
+          }
+        }
+      ]
     }
   }
 }

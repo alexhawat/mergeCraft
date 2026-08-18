@@ -13,7 +13,6 @@ _MIN_CHAT_BODY = {
 }
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_fixture_requires_provider_and_model() -> None:
     from pydantic import ValidationError
 
@@ -34,7 +33,6 @@ def test_fixture_requires_provider_and_model() -> None:
         )
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_fixture_requires_request_match_fields() -> None:
     from pydantic import ValidationError
 
@@ -47,7 +45,6 @@ def test_fixture_requires_request_match_fields() -> None:
         MatchSpec(provider="")  # type: ignore[call-arg]
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_fixture_accepts_json_response_and_metadata() -> None:
     from tests.support.provider_harness.schema import FixtureSpec, MatchSpec, ResponseSpec
 
@@ -72,7 +69,6 @@ def test_fixture_accepts_json_response_and_metadata() -> None:
     }
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_fixture_accepts_ordered_response_blocks() -> None:
     from tests.support.provider_harness.schema import (
         FixtureSpec,
@@ -102,7 +98,6 @@ def test_fixture_accepts_ordered_response_blocks() -> None:
     assert fixture.response.blocks[1].tool_name == "submit_review_verdict"
 
 
-@pytest.mark.xfail(reason="green after RH1.2", strict=False)
 def test_malformed_fixture_is_rejected_with_path(tmp_path: Path) -> None:
     from tests.support.provider_harness.schema import MalformedFixtureError, load_fixture_file
 
