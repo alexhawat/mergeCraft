@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`docs/dev/provider-harness.md`); opt-in sanitized capture under
   `.ignorelocal/provider-harness/records/`.
 - Repository context engine indexes repo maps, per-file symbol indexes (tree-sitter with generic fallback), provenance citations, and trust-gated instruction/skill discovery under `mergecraft.context`
+- Call graph, change graph (changed symbol → dependents → tests → contracts), budget-aware dynamic expansion, targeted git blame, and `mergecraft context inspect` for provenance-backed context retrieval
 - Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews
 - Large-PR review engine (DG2): cluster changed paths by dependency and intent, build hierarchical diff context (map → summaries → raw hunks) with token-budget scope reduction that reserves verbatim hunks for high-risk regions, record disputed/waived/stale finding lifecycle states, and emit advisory-only PR split recommendations from independent change groups
 - Finding precision pipeline (DG1): deduplicate agent/analyzer findings before publication, apply a code-defined severity rubric at the verifier seam, require structured causality on blocking findings, suppress pre-existing analyzer hits via baseline comparison, and classify generated/minified/vendored paths for review policy

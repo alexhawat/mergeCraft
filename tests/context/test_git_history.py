@@ -8,12 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.context.support import git_commit_all, git_init_repo, import_context_module
 
 
-@pytest.mark.xfail(reason="green after DG4.2: targeted blame provenance", strict=False)
 def test_targeted_blame_is_retrieved_with_provenance(tmp_path: Path) -> None:
     """Targeted blame returns line attribution with reproducible provenance."""
     repo_root = tmp_path / "repo"

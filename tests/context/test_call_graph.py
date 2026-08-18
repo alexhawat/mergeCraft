@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.context.support import (
     git_commit_all,
     git_init_repo,
@@ -19,7 +17,6 @@ from tests.context.support import (
 )
 
 
-@pytest.mark.xfail(reason="green after DG4.2: call graph indexing", strict=False)
 def test_imports_references_and_callers_are_indexed(tmp_path: Path) -> None:
     """The call graph indexes import edges, symbol references, and caller relationships."""
     repo_root = tmp_path / "repo"

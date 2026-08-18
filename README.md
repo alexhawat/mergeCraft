@@ -608,6 +608,7 @@ of them for its full flag set):
 | `mergecraft config show <key>` | Show a resolved config value and the precedence layer that supplied it. |
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
 | `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
+| `mergecraft context inspect` | Report sources, scope, provenance citations, and token totals. |
 | `mergecraft diff-review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |

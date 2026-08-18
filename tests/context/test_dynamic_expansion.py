@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from mergecraft.utils.run_bounds import BudgetTracker, RunBounds
 from tests.context.support import (
     git_commit_all,
@@ -31,7 +29,6 @@ def _tight_bounds() -> RunBounds:
     )
 
 
-@pytest.mark.xfail(reason="green after DG4.2: dynamic enclosing scope", strict=False)
 def test_enclosing_scope_is_retrieved_on_demand(tmp_path: Path) -> None:
     """Dynamic expansion retrieves the enclosing scope for a symbol on demand."""
     repo_root = tmp_path / "repo"
@@ -53,7 +50,6 @@ def test_enclosing_scope_is_retrieved_on_demand(tmp_path: Path) -> None:
     assert all(item.reason == "dynamic_expansion" for item in result.items)
 
 
-@pytest.mark.xfail(reason="green after DG4.2: expansion token budget", strict=False)
 def test_expansion_respects_the_token_budget(tmp_path: Path) -> None:
     """Dynamic expansion stops before exceeding the per-run token budget (CC3)."""
     repo_root = tmp_path / "repo"

@@ -9,7 +9,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
 from tests.context.support import (
     git_commit_all,
     git_init_repo,
@@ -28,7 +27,6 @@ def _plain(text: str) -> str:
     return _ANSI.sub("", text)
 
 
-@pytest.mark.xfail(reason="green after DG4.2: context inspect CLI", strict=False)
 def test_reports_sources_scope_provenance_and_tokens(tmp_path: Path) -> None:
     """``context inspect`` reports sources, scope, provenance citations, and token totals."""
     repo_root = tmp_path / "repo"

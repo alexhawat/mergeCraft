@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.context.support import (
     git_commit_all,
     git_init_repo,
@@ -34,7 +32,6 @@ def _changed_process_symbol(change_graph_mod: object, repo_root: Path, tree_sha:
     )
 
 
-@pytest.mark.xfail(reason="green after DG4.2: change graph dependents", strict=False)
 def test_changed_symbol_resolves_to_dependents(tmp_path: Path) -> None:
     """A changed symbol resolves to symbols that depend on it."""
     repo_root = tmp_path / "repo"
@@ -50,7 +47,6 @@ def test_changed_symbol_resolves_to_dependents(tmp_path: Path) -> None:
     assert "demo.api.handle_request" in dependents or "handle_request" in dependents
 
 
-@pytest.mark.xfail(reason="green after DG4.2: change graph tests", strict=False)
 def test_changed_symbol_resolves_to_covering_tests(tmp_path: Path) -> None:
     """A changed symbol resolves to test files that cover it."""
     repo_root = tmp_path / "repo"
@@ -65,7 +61,6 @@ def test_changed_symbol_resolves_to_covering_tests(tmp_path: Path) -> None:
     assert "tests/test_service.py" in result.tests
 
 
-@pytest.mark.xfail(reason="green after DG4.2: change graph contracts", strict=False)
 def test_changed_symbol_resolves_to_affected_contracts(tmp_path: Path) -> None:
     """A changed symbol resolves to API contracts that reference it."""
     repo_root = tmp_path / "repo"
