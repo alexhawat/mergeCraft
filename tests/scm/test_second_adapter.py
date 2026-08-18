@@ -1,17 +1,15 @@
 """DG9.1 RED suite — second SCM adapter contract (D10 demand-gated).
 
 Wave plan: ``.ignorelocal/waves/05-review-depth-governance-wave-plan.md`` (DG9.1 RED,
-DG9.2 impl). Both tests are ``@pytest.mark.xfail(strict=False)`` until a non-GitHub
-adapter lands beside ``GitHubScmAdapter``.
+DG9.2 impl).
 """
 
 from __future__ import annotations
 
 import pytest
-from tests.scm.conftest import _DG9_2_XFAIL, require_scm
+from tests.scm.conftest import require_scm
 
 
-@_DG9_2_XFAIL
 def test_one_additional_provider_satisfies_the_protocol() -> None:
     """At least one non-GitHub adapter fully implements ``ScmProvider``."""
     require_scm()
@@ -24,7 +22,6 @@ def test_one_additional_provider_satisfies_the_protocol() -> None:
     assert report.complete is True, f"adapter missing protocol operations: {report.missing}"
 
 
-@_DG9_2_XFAIL
 def test_unsupported_capability_is_declared_not_faked() -> None:
     """Providers declare unsupported capabilities instead of emulating GitHub."""
     require_scm()

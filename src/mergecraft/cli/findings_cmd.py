@@ -29,6 +29,7 @@ from mergecraft.findings.sweep import (
     plan_carryover,
 )
 from mergecraft.findings.threads import fetch_review_threads
+from mergecraft.scm.github import GitHubScmAdapter
 from mergecraft.utils.github import GitHubClient, parse_repo_context
 from mergecraft.utils.token import get_job_token
 
@@ -113,7 +114,7 @@ def export(
         client = _client()
         try:
             page = await fetch_review_threads(
-                client, owner, name, pr, include_resolved=include_resolved
+                GitHubScmAdapter(client), owner, name, pr, include_resolved=include_resolved
             )
             if page.truncated:
                 console.print(

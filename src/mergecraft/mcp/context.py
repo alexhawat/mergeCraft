@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.modes import Mode
     from mergecraft.review_checks import StaticCheckConfig
+    from mergecraft.scm.protocol import ScmProvider
     from mergecraft.types import AgentId, XrepoConfig
     from mergecraft.utils.github import GitHubClient
     from mergecraft.utils.run_bounds import BudgetTracker
@@ -53,12 +54,12 @@ class ResolvedPayload:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, init=False)
 class ToolContext:
     agent_id: AgentId
     repo: RepoIdentity
     payload: ResolvedPayload
-    github: GitHubClient
+    scm: ScmProvider
     github_installation_token: str
     git_token: str
     api_token: str
@@ -75,34 +76,124 @@ class ToolContext:
     signed_commits: bool = False
     mode_instructions: dict[str, str] = field(default_factory=dict)
     static_checks: list[StaticCheckConfig] = field(default_factory=list)
-    # Whether `run_static_checks` is offered at all. Gates run repo-declared
-    # commands, so on a pull request they are commands the PR author controls —
-    # that is exactly what `shell: disabled` exists to forbid. Offline reviews
-    # gate this on trust tier (D7) like the MCP serve path.
     static_checks_enabled: bool = False
-    # #36 / D10 — repo-declared mapping from a mergeCraft gate name to the CI
-    # check-run name that proves it, and the workflow artifacts whose SARIF may
-    # be ingested. Both empty by default: with no declaration mergeCraft never
-    # reads the consumer's CI and never substitutes a gate outcome.
     ci_gate_checks: dict[str, str] = field(default_factory=dict)
     ci_sarif_artifacts: list[str] = field(default_factory=list)
     analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto"
     trust_tier: Literal["trusted", "untrusted"] = "trusted"
     analyzers_settings_enabled: bool = True
-    # #39 / D13 — whether this run may upload analyzer findings to GitHub code
-    # scanning. Default False: with it unset nothing is built, nothing is
-    # posted, and the run makes no extra API call. Resolved once in `main.py`
-    # from the `sarif_upload` action input and `analyzers.sarifUpload`.
     sarif_upload_enabled: bool = False
     run_id: int | None = None
     job_id: str | None = None
     oss: bool = False
     plan: AccountPlan = "unknown"
     resolved_model: str | None = None
-    # W12.4 — opt-in. When True, `create_pull_request_review` logs a
-    # `logger.info` suggestion to add the run to the eval bank when the
-    # run produced no positive findings, the trust tier is `trusted`,
-    # and the trigger is a re-review (not a fresh PR). Default False
-    # (no suggestion). mergeCraft never auto-adds (#44).
     suggest_eval_add: bool = False
     budget_tracker: BudgetTracker | None = None
+
+    def __init__(
+        self,
+        *,
+        agent_id: AgentId,
+        repo: RepoIdentity,
+        payload: ResolvedPayload,
+        github: GitHubClient | None = None,
+        scm: ScmProvider | None = None,
+        github_installation_token: str = "",
+        git_token: str = "",
+        api_token: str = "",
+        modes: list[Mode] | None = None,
+        tool_state: ToolState | None = None,
+        mcp_server_url: str = "",
+        tmpdir: str = "",
+        refresh_git_token: Callable[[str], Awaitable[str]] | None = None,
+        read_token: str | None = None,
+        xrepo: XrepoConfig | None = None,
+        prepush_script: str | None = None,
+        pr_approve_enabled: bool = False,
+        auto_merge_enabled: bool = False,
+        signed_commits: bool = False,
+        mode_instructions: dict[str, str] | None = None,
+        static_checks: list[StaticCheckConfig] | None = None,
+        static_checks_enabled: bool = False,
+        ci_gate_checks: dict[str, str] | None = None,
+        ci_sarif_artifacts: list[str] | None = None,
+        analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto",
+        trust_tier: Literal["trusted", "untrusted"] = "trusted",
+        analyzers_settings_enabled: bool = True,
+        sarif_upload_enabled: bool = False,
+        run_id: int | None = None,
+        job_id: str | None = None,
+        oss: bool = False,
+        plan: AccountPlan = "unknown",
+        resolved_model: str | None = None,
+        suggest_eval_add: bool = False,
+        budget_tracker: BudgetTracker | None = None,
+    ) -> None:
+        from mergecraft.scm.github import GitHubScmAdapter
+        from mergecraft.utils.github import GitHubClient
+
+        if scm is not None:
+            resolved_scm = scm
+        elif github is not None:
+            resolved_scm = GitHubScmAdapter(github)
+        else:
+            resolved_scm = GitHubScmAdapter(GitHubClient(token=""))
+
+        self.agent_id = agent_id
+        self.repo = repo
+        self.payload = payload
+        self.scm = resolved_scm
+        self.github_installation_token = github_installation_token
+        self.git_token = git_token
+        self.api_token = api_token
+        self.modes = list(modes or [])
+        if tool_state is None:
+            msg = "tool_state is required"
+            raise ValueError(msg)
+        self.tool_state = tool_state
+        self.mcp_server_url = mcp_server_url
+        self.tmpdir = tmpdir
+        self.refresh_git_token = refresh_git_token
+        self.read_token = read_token
+        self.xrepo = xrepo
+        self.prepush_script = prepush_script
+        self.pr_approve_enabled = pr_approve_enabled
+        self.auto_merge_enabled = auto_merge_enabled
+        self.signed_commits = signed_commits
+        self.mode_instructions = dict(mode_instructions or {})
+        self.static_checks = list(static_checks or [])
+        self.static_checks_enabled = static_checks_enabled
+        self.ci_gate_checks = dict(ci_gate_checks or {})
+        self.ci_sarif_artifacts = list(ci_sarif_artifacts or [])
+        self.analyzers_mode = analyzers_mode
+        self.trust_tier = trust_tier
+        self.analyzers_settings_enabled = analyzers_settings_enabled
+        self.sarif_upload_enabled = sarif_upload_enabled
+        self.run_id = run_id
+        self.job_id = job_id
+        self.oss = oss
+        self.plan = plan
+        self.resolved_model = resolved_model
+        self.suggest_eval_add = suggest_eval_add
+        self.budget_tracker = budget_tracker
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "github":
+            from mergecraft.scm.github import GitHubScmAdapter
+
+            scm = object.__getattribute__(self, "scm")
+            if isinstance(scm, GitHubScmAdapter):
+                return scm.client
+            msg = "ToolContext.scm is not a GitHub adapter"
+            raise AttributeError(msg)
+        msg = f"{type(self).__name__!s} has no attribute {name!r}"
+        raise AttributeError(msg)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "github":
+            from mergecraft.scm.github import GitHubScmAdapter
+
+            object.__setattr__(self, "scm", GitHubScmAdapter(value))
+            return
+        object.__setattr__(self, name, value)

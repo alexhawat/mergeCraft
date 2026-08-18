@@ -22,7 +22,6 @@ from typing import Any
 
 import pytest
 from tests.scm.conftest import (
-    _DG9_2_XFAIL,
     RecordingGitHubClient,
     github_snapshot_transport,
     require_scm,
@@ -147,7 +146,6 @@ _SNAPSHOT_TOOL_OUTPUTS: dict[str, dict[str, Any]] = {
 }
 
 
-@_DG9_2_XFAIL
 def test_every_github_operation_is_expressible_through_the_protocol() -> None:
     """Every GitHub REST helper and MCP tool maps to a protocol operation."""
     require_scm()
@@ -213,7 +211,6 @@ async def test_github_adapter_behaviour_is_unchanged(tmp_path: Path) -> None:
     )
 
 
-@_DG9_2_XFAIL
 def test_no_github_specific_type_leaks_into_core() -> None:
     """Core runtime surfaces depend on ``ScmProvider``, not ``GitHubClient``."""
     require_scm()
@@ -252,15 +249,13 @@ def test_no_github_specific_type_leaks_into_core() -> None:
     )
 
 
-@_DG9_2_XFAIL
 @pytest.mark.asyncio
 async def test_review_publication_goes_through_the_protocol(tmp_path: Path) -> None:
     """Validated terminal submissions publish via the SCM provider, not ctx.github."""
     require_scm()
-    from mergecraft.scm.protocol import RecordingScmProvider, resolve_scm_provider
-
     from mergecraft.mcp.review import publish_pull_request_review
     from mergecraft.mcp.tool_state import TerminalSubmission, primary_repo_state
+    from mergecraft.scm.protocol import RecordingScmProvider, resolve_scm_provider
 
     recording = RecordingScmProvider()
     ctx = tool_ctx(tmp_path)
@@ -286,7 +281,6 @@ async def test_review_publication_goes_through_the_protocol(tmp_path: Path) -> N
     assert resolve_scm_provider(ctx) is recording
 
 
-@_DG9_2_XFAIL
 def test_checkout_and_diff_semantics_are_preserved() -> None:
     """Checkout + incremental diff semantics survive the protocol extraction."""
     require_scm()

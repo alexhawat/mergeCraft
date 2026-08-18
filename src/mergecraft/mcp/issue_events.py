@@ -17,7 +17,7 @@ def get_issue_events_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         issue_number = int(params["issue_number"])
         primary_repo_state(ctx.tool_state).issue_number = issue_number
-        raw = await ctx.github.get(
+        raw = await ctx.scm.get(
             f"/repos/{ctx.repo.owner}/{ctx.repo.name}/issues/{issue_number}/timeline",
             headers={"Accept": "application/vnd.github+json"},
             params={"per_page": 100},

@@ -15,7 +15,7 @@ def get_issue_comments_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         issue_number = int(params["issue_number"])
         primary_repo_state(ctx.tool_state).issue_number = issue_number
-        comments = await ctx.github.list_issue_comments(
+        comments = await ctx.scm.list_issue_comments(
             ctx.repo.owner,
             ctx.repo.name,
             issue_number,

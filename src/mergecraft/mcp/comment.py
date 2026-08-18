@@ -40,7 +40,7 @@ def create_issue_comment_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         issue_number = int(params["issueNumber"])
         body = add_footer(ctx, str(params["body"]))
-        result = await ctx.github.create_issue_comment(
+        result = await ctx.scm.create_issue_comment(
             ctx.repo.owner, ctx.repo.name, issue_number, body
         )
         ctx.tool_state.was_updated = True
@@ -49,7 +49,7 @@ def create_issue_comment_tool(ctx: ToolContext):
         if comment_type == "Plan" and result.get("id"):
             link = f"[Implement plan ➔](#implement-plan-{issue_number}-{result['id']})"
             plan_body = f"{str(params['body']).rstrip()}{_footer(ctx)} · {link}"
-            result = await ctx.github.update_issue_comment(
+            result = await ctx.scm.update_issue_comment(
                 ctx.repo.owner, ctx.repo.name, int(result["id"]), plan_body
             )
         return {
@@ -89,9 +89,7 @@ def edit_issue_comment_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         comment_id = int(params["commentId"])
         body = add_footer(ctx, str(params["body"]))
-        result = await ctx.github.update_issue_comment(
-            ctx.repo.owner, ctx.repo.name, comment_id, body
-        )
+        result = await ctx.scm.update_issue_comment(ctx.repo.owner, ctx.repo.name, comment_id, body)
         ctx.tool_state.was_updated = True
         return {
             "success": True,
@@ -137,7 +135,7 @@ def reply_to_review_comment_tool(ctx: ToolContext):
                 "url": existing.url,
             }
         _ = pull_number  # API reply endpoint is comment-scoped
-        result = await ctx.github.create_review_comment_reply(
+        result = await ctx.scm.create_review_comment_reply(
             ctx.repo.owner,
             ctx.repo.name,
             comment_id,
@@ -204,7 +202,7 @@ def report_progress_tool(ctx: ToolContext):
         body_with_footer = add_footer(ctx, body_with_delta)
 
         if target_plan and ctx.tool_state.existing_plan_comment_id:
-            result = await ctx.github.update_issue_comment(
+            result = await ctx.scm.update_issue_comment(
                 ctx.repo.owner,
                 ctx.repo.name,
                 ctx.tool_state.existing_plan_comment_id,
@@ -212,7 +210,7 @@ def report_progress_tool(ctx: ToolContext):
             )
             action = "updated"
         elif isinstance(ctx.tool_state.progress_comment, ProgressComment):
-            result = await ctx.github.update_issue_comment(
+            result = await ctx.scm.update_issue_comment(
                 ctx.repo.owner,
                 ctx.repo.name,
                 int(ctx.tool_state.progress_comment.id),
@@ -220,7 +218,7 @@ def report_progress_tool(ctx: ToolContext):
             )
             action = "updated"
         else:
-            result = await ctx.github.create_issue_comment(
+            result = await ctx.scm.create_issue_comment(
                 ctx.repo.owner, ctx.repo.name, issue_number, body_with_footer
             )
             ctx.tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")

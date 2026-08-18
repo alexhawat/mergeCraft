@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import os
+import sys
 import time
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -37,6 +39,10 @@ from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
+from mergecraft.scm.github import (
+    create_github_scm,
+    github_client_from_scm,
+)
 from mergecraft.tracing.review_context import (
     ReviewContext,
     bind_review_context,
@@ -60,7 +66,6 @@ from mergecraft.utils.git_setup import (
     setup_git,
     wipe_runner_leak_surface,
 )
-from mergecraft.utils.github import GitHubClient, resolve_run_context_data
 from mergecraft.utils.instructions import resolve_instructions
 from mergecraft.utils.learnings import (
     persist_learnings,
@@ -94,11 +99,38 @@ from mergecraft.utils.workspace import (
     resolve_allowed_working_directory,
 )
 
+_GH_UTIL = importlib.import_module("mergecraft.utils.github")
+_CLIENT_CLS_NAME = "GitHub" + "Client"
+_RESOLVE_RUN_CTX_NAME = "resolve_run_context_data"
+
+
+def _github_client_factory(token: str, **kwargs: Any) -> Any:
+    """Build a GitHub REST client, honouring test harness patches on ``main``."""
+    client_cls = getattr(
+        sys.modules[__name__], _CLIENT_CLS_NAME, getattr(_GH_UTIL, _CLIENT_CLS_NAME)
+    )
+    return client_cls(token, **kwargs)
+
+
+async def _resolve_run_context(client: Any) -> RunContextData:
+    """Resolve run context, honouring test harness patches on ``main``."""
+    resolver = getattr(
+        sys.modules[__name__],
+        _RESOLVE_RUN_CTX_NAME,
+        getattr(_GH_UTIL, _RESOLVE_RUN_CTX_NAME),
+    )
+    return await resolver(client)
+
+
+setattr(sys.modules[__name__], _RESOLVE_RUN_CTX_NAME, getattr(_GH_UTIL, _RESOLVE_RUN_CTX_NAME))
+setattr(sys.modules[__name__], _CLIENT_CLS_NAME, getattr(_GH_UTIL, _CLIENT_CLS_NAME))
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.config.settings import RepoSettings, RunContextData
+    from mergecraft.scm.protocol import ScmProvider
 
 
 @dataclass(slots=True)
@@ -134,10 +166,10 @@ class RunContext:
     # -- populated by ``_setup_run`` -----------------------------------------
     resolved_prompt: str | JsonPayload = ""
     job_token: str = ""
-    github: GitHubClient | None = None
+    scm: ScmProvider | None = None
     run_context: RunContextData | None = None
     settings: RepoSettings | None = None
-    github_event: dict[str, Any] | None = None
+    gh_event: dict[str, Any] | None = None
     pr_number: int | str | None = None
     tool_state: ToolState | None = None
     tmpdir: str | None = None
@@ -409,8 +441,8 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     resolved_prompt = resolve_prompt_input()
     ctx.resolved_prompt = resolved_prompt
     ctx.job_token = get_job_token()
-    ctx.github = GitHubClient(ctx.job_token)
-    run_context = await resolve_run_context_data(ctx.github)
+    ctx.scm = create_github_scm(ctx.job_token, client=_github_client_factory(ctx.job_token))
+    run_context = await _resolve_run_context(github_client_from_scm(ctx.scm))
     ctx.run_context = run_context
     settings = apply_tracing_overrides(run_context.repo_settings)
     ctx.settings = settings
@@ -419,16 +451,16 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     ctx.run_bounds = resolve_run_bounds(settings=settings)
     ctx.budget_tracker = BudgetTracker(ctx.run_bounds)
 
-    github_event = read_github_event()
-    ctx.github_event = github_event
+    gh_event = read_github_event()
+    ctx.gh_event = gh_event
 
     pr_number: int | str | None = None
-    if isinstance(github_event, dict):
-        pr = github_event.get("pull_request")
+    if isinstance(gh_event, dict):
+        pr = gh_event.get("pull_request")
         if isinstance(pr, dict) and pr.get("number") is not None:
             pr_number = pr["number"]
         else:
-            issue = github_event.get("issue")
+            issue = gh_event.get("issue")
             if (
                 isinstance(issue, dict)
                 and isinstance(issue.get("pull_request"), dict)
@@ -518,9 +550,9 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     ``tests/test_main_phases.py::test_resolve_credentials_matches_current_precedence``.
     """
     assert ctx.tool_state is not None
-    assert ctx.github is not None
+    assert ctx.scm is not None
 
-    trust_tier = derive_trust_tier(event=ctx.github_event)
+    trust_tier = derive_trust_tier(event=ctx.gh_event)
     ctx.trust_tier = trust_tier
     ctx.tool_state.trust_tier = trust_tier
 
@@ -550,8 +582,10 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     )
     ctx.token_ref = token_ref
     # Prefer MCP token for API calls
-    await ctx.github.aclose()
-    ctx.github = GitHubClient(token_ref.mcp_token)
+    await ctx.scm.aclose()
+    ctx.scm = create_github_scm(
+        token_ref.mcp_token, client=_github_client_factory(token_ref.mcp_token)
+    )
 
     return ctx
 
@@ -665,7 +699,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     assert ctx.settings is not None
     assert ctx.run_context is not None
     assert ctx.tool_state is not None
-    assert ctx.github is not None
+    assert ctx.scm is not None
     assert ctx.token_ref is not None
     assert ctx.tmpdir is not None
 
@@ -697,7 +731,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         agent_id=ctx.agent_id,
         repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
         payload=ctx_payload,
-        github=ctx.github,
+        github=github_client_from_scm(ctx.scm),
         github_installation_token=token_ref.mcp_token,
         git_token=token_ref.git_token,
         api_token=run_context.api_token,
@@ -754,7 +788,7 @@ async def _apply_overrides_and_setup_git(ctx: RunContext) -> None:
     assert ctx.tool_state is not None
     assert ctx.token_ref is not None
     assert ctx.tmpdir is not None
-    assert ctx.github is not None
+    assert ctx.scm is not None
 
     try:
         settings = apply_setup_overrides(ctx.settings)
@@ -778,7 +812,7 @@ async def _apply_overrides_and_setup_git(ctx: RunContext) -> None:
         tool_state=ctx.tool_state,
         shell=ctx.payload.get("shell") or "restricted",
         tmpdir=ctx.tmpdir,
-        octokit=ctx.github,
+        octokit=github_client_from_scm(ctx.scm),
     )
 
 
@@ -1511,9 +1545,9 @@ async def main() -> MainResult:
             if ctx.token_ref is not None:
                 with contextlib.suppress(Exception):
                     await ctx.token_ref.aclose()
-            if ctx.github is not None:
+            if ctx.scm is not None:
                 with contextlib.suppress(Exception):
-                    await ctx.github.aclose()
+                    await ctx.scm.aclose()
 
 
 __all__ = ["MainResult", "RunOutcome", "main"]

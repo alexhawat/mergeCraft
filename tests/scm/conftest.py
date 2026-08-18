@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-import pytest
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -25,20 +24,10 @@ except ImportError:
     _SCM_AVAILABLE = False
     _scm_protocol_mod = None  # type: ignore[assignment]
 
-_DG9_2_XFAIL = pytest.mark.xfail(
-    reason="green after DG9.2: ScmProvider protocol extraction",
-    strict=False,
-)
-
 
 def require_scm() -> None:
     """Hard gate for impl-pending tests — missing module is an assertion failure."""
     assert _SCM_AVAILABLE, "mergecraft.scm not implemented yet (DG9.2)"
-
-
-@pytest.fixture
-def scm_xfail_marker() -> pytest.MarkDecorator:
-    return _DG9_2_XFAIL
 
 
 class RecordingGitHubClient(GitHubClient):
