@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added: a test-only provider-harness fixture schema and strict matcher
+  (`tests/support/provider_harness`) so deterministic review tests can name
+  the exact provider interaction they expect. Not used in production.
+- Added: provider-harness recording workflow and operator docs
+  (`docs/dev/provider-harness.md`); opt-in sanitized capture under
+  `.ignorelocal/provider-harness/records/`.
 - Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews
 - `mergecraft mcp serve` and `mergecraft mcp list` expose the reviewer's MCP tool surface to external clients without widening trust tier or tool-class policy (D13)
 - Named review profiles (`--profile fast|deep|security`) bundle model chain, analyzer focus, and run budgets; explicit CLI flags still win

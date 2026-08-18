@@ -1,0 +1,21 @@
+{
+  "name": "schema-smoke",
+  "match": {
+    "provider": "default",
+    "model": "dummy",
+    "streaming": false
+  },
+  "response": {
+    "body": {
+      "id": "stub",
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "{}"
+          }
+        }
+      ]
+    }
+  }
+}
