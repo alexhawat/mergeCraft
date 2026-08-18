@@ -256,7 +256,10 @@ class ProviderHarnessServer:
                 write_record(request=snapshot, fixture=fixture)
 
                 if streaming or (profile and profile.disconnect_after_chunk is not None):
-                    chunks = _sse_chunks(fixture)
+                    if profile is not None and profile.body == "":
+                        chunks = ["data: [DONE]\n\n"]
+                    else:
+                        chunks = _sse_chunks(fixture)
                     disconnect_at = profile.disconnect_after_chunk if profile else None
                     body_out = b""
                     for index, chunk in enumerate(chunks):
@@ -265,6 +268,8 @@ class ProviderHarnessServer:
                             break
                         body_out += chunk.encode("utf-8")
                     headers = {"Content-Type": "text/event-stream", **fixture.response.headers}
+                    if profile is not None:
+                        headers = {**headers, **profile.headers}
                     server_ref.metrics.record_match(
                         fixture.name,
                         latency_ms=(time.perf_counter() - started) * 1000,
