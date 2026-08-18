@@ -1,0 +1,130 @@
+"""DG1 baseline suppression — base-vs-head analyzer diffing (G4, D3).
+
+Wave plan: ``.ignorelocal/waves/05-review-depth-governance-wave-plan.md`` (PR DG1).
+Implementation: **DG1.2** — wired through ``analyzers/config.py::baseComparison``.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from tests.analyzers.support import FIXTURE_REPO, import_module
+from tests.findings.support import make_finding
+
+
+def _head_and_base_hit(*, path: str, line: int, message: str) -> tuple[object, object]:
+    finding_mod = import_module("mergecraft.analyzers.finding")
+    shared = {
+        "tool": "ruff",
+        "rule_id": "F401",
+        "category": "Maintainability & Code Quality",
+        "severity": "Minor",
+        "confidence": "certain",
+        "message": message,
+        "path": path,
+        "start_line": line,
+        "end_line": line,
+        "source": "analyzer",
+    }
+    head = finding_mod.make_finding(**shared, introduced_by_pr="unknown")
+    base = finding_mod.make_finding(**shared, introduced_by_pr="false")
+    return head, base
+
+
+@pytest.mark.xfail(reason="green after DG1.2", strict=False)
+def test_preexisting_analyzer_hit_is_suppressed() -> None:
+    """A hit present on base and head on an untouched line is suppressed (D3)."""
+    from mergecraft.analyzers.baseline_suppression import suppress_baseline_findings
+
+    head, base = _head_and_base_hit(
+        path="src/fixture_app/handler.py",
+        line=12,
+        message="Unused import os",
+    )
+    diff_text = "diff --git a/README.md b/README.md\n"
+
+    result = suppress_baseline_findings(
+        head_findings=[head],
+        base_findings=[base],
+        diff_text=diff_text,
+        repo_root=FIXTURE_REPO,
+        base_comparison="full",
+    )
+
+    assert result.suppressed == [head]
+    assert result.reported == []
+
+
+@pytest.mark.xfail(reason="green after DG1.2", strict=False)
+def test_new_hit_on_an_untouched_file_is_still_reported() -> None:
+    """The diff can expose a defect on a file it never touched — still report it."""
+    from mergecraft.analyzers.baseline_suppression import suppress_baseline_findings
+
+    novel = make_finding(
+        tool="ruff",
+        rule_id="E722",
+        category="Maintainability & Code Quality",
+        severity="Major",
+        message="Bare except on helper",
+        path="src/fixture_app/eval_sink.py",
+        start_line=5,
+        end_line=5,
+        source="analyzer",
+        introduced_by_pr="true",
+    )
+    diff_text = "diff --git a/README.md b/README.md\n"
+
+    result = suppress_baseline_findings(
+        head_findings=[novel],
+        base_findings=[],
+        diff_text=diff_text,
+        repo_root=FIXTURE_REPO,
+        base_comparison="full",
+    )
+
+    assert novel in result.reported
+    assert result.suppressed == []
+
+
+@pytest.mark.xfail(reason="green after DG1.2", strict=False)
+def test_suppression_is_skipped_when_it_cannot_pay_for_itself() -> None:
+    """Tiny diffs skip the expensive base run — default ``baseComparison`` is ``diff``."""
+    from mergecraft.analyzers.baseline_suppression import should_run_baseline_suppression
+
+    tiny_diff = "diff --git a/src/a.py b/src/a.py\n@@ -1 +1 @@\n-old\n+new\n"
+    settings_mod = import_module("mergecraft.config.settings")
+    settings = settings_mod.AnalyzersSettings()
+
+    assert settings.base_comparison == "diff"
+    assert (
+        should_run_baseline_suppression(
+            diff_text=tiny_diff, base_comparison=settings.base_comparison
+        )
+        is False
+    )
+
+
+@pytest.mark.xfail(reason="green after DG1.2", strict=False)
+def test_suppression_decision_is_auditable() -> None:
+    """Every suppression carries an audit trail (convention 7)."""
+    from mergecraft.analyzers.baseline_suppression import suppress_baseline_findings
+
+    head, base = _head_and_base_hit(
+        path="src/fixture_app/handler.py",
+        line=12,
+        message="Unused import os",
+    )
+
+    result = suppress_baseline_findings(
+        head_findings=[head],
+        base_findings=[base],
+        diff_text="diff --git a/README.md b/README.md\n",
+        repo_root=FIXTURE_REPO,
+        base_comparison="full",
+    )
+
+    assert result.audit_trail
+    entry = result.audit_trail[0]
+    assert entry.fingerprint == head.fingerprint
+    assert entry.decision == "suppressed"
+    assert entry.reason
