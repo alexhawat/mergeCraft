@@ -41,8 +41,8 @@ def test_mismatch_includes_redacted_request_and_candidate_reasons() -> None:
         },
     )
     fixtures = [
-        _fixture("candidate-a", model="other-a", body_fields={"api_key": "expected-a"}),
-        _fixture("candidate-b", model="other-b", body_fields={"api_key": "expected-b"}),
+        _fixture("candidate-a", body_fields={"api_key": "expected-a"}),
+        _fixture("candidate-b", body_fields={"api_key": "expected-b"}),
     ]
 
     try:
@@ -54,6 +54,7 @@ def test_mismatch_includes_redacted_request_and_candidate_reasons() -> None:
 
     assert "candidate-a" in diagnostic
     assert "candidate-b" in diagnostic
+    assert "body_fields" in diagnostic
     assert api_key not in diagnostic
     assert "[REDACTED]" in diagnostic or "<redacted>" in diagnostic
     assert "provider" in diagnostic.lower() or "default" in diagnostic
