@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Linked-repo reads are grant-gated (D9): a run can only load repos declared in its authorized set; linked-repo and ticket text render through the W4 fence as untrusted data
 - Discovered repo instruction and skill files (`CLAUDE.md`, `AGENTS.md`, `SKILL.md`, `.cursor/rules/*.md`) from an untrusted review source render through the W4 fence as evidence and never enter the instruction bundle
 - CLI offline reviews now derive a trust tier from review-source provenance; cloned or out-of-root paths review at untrusted tier unless the operator passes an explicit `--trust` override
 - Executable repo config (`setupScript`, `prepushScript`, `stopScript`, `staticChecks[].command`) from an untrusted review source is ignored; declarative config still applies
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added: provider-harness recording workflow and operator docs
   (`docs/dev/provider-harness.md`); opt-in sanitized capture under
   `.ignorelocal/provider-harness/records/`.
+- Cross-repository intelligence indexes linked repos at pinned commits, contract surfaces (OpenAPI, GraphQL, protobuf, exports), cross-repo blast radius, reproducible citations, and ticket acceptance-criteria mapping under `mergecraft.xrepo` and `mergecraft.requirements`
 - Repository context engine indexes repo maps, per-file symbol indexes (tree-sitter with generic fallback), provenance citations, and trust-gated instruction/skill discovery under `mergecraft.context`
 - Call graph, change graph (changed symbol → dependents → tests → contracts), budget-aware dynamic expansion, targeted git blame, and `mergecraft context inspect` for provenance-backed context retrieval
 - Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews

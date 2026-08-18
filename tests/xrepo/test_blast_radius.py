@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from tests.xrepo.support import (
     import_xrepo_module,
     write_contract_fixture_repo,
@@ -17,7 +16,6 @@ from tests.xrepo.support import (
 )
 
 
-@pytest.mark.xfail(reason="green after DG6.2: cross-repo blast radius", strict=False)
 def test_changed_contract_resolves_to_dependent_repos(tmp_path: Path) -> None:
     """A changed contract in one linked repo resolves to dependent repos."""
     contracts_root = tmp_path / "api-contracts"

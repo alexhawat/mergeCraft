@@ -9,7 +9,6 @@ and must pass before DG6.2 lands.
 
 from __future__ import annotations
 
-import pytest
 from tests.security.hostile_corpus import assert_fenced
 from tests.xrepo.support import import_requirements_module
 
@@ -27,7 +26,6 @@ _TICKET_BODY = (
 )
 
 
-@pytest.mark.xfail(reason="green after DG6.2: acceptance-criteria extraction", strict=False)
 def test_acceptance_criteria_are_extracted_as_atomic_items() -> None:
     """Acceptance criteria in ticket text are extracted as atomic checklist items."""
     criteria_mod = import_requirements_module("criteria")
@@ -39,7 +37,6 @@ def test_acceptance_criteria_are_extracted_as_atomic_items() -> None:
     assert len(criteria) == 2
 
 
-@pytest.mark.xfail(reason="green after DG6.2: criterion evidence mapping", strict=False)
 def test_each_criterion_maps_to_code_tests_or_evidence() -> None:
     """Each extracted criterion maps to code, tests, or explicit missing evidence."""
     criteria_mod = import_requirements_module("criteria")
@@ -56,7 +53,6 @@ def test_each_criterion_maps_to_code_tests_or_evidence() -> None:
     assert all(mapping.criterion.text for mapping in mappings)
 
 
-@pytest.mark.xfail(reason="green after DG6.2: unimplemented criterion reporting", strict=False)
 def test_unimplemented_criterion_is_reported() -> None:
     """A criterion with no supporting code or tests is reported as unimplemented."""
     criteria_mod = import_requirements_module("criteria")
@@ -73,7 +69,6 @@ def test_unimplemented_criterion_is_reported() -> None:
     assert any("reset email" in item.text.lower() for item in unimplemented)
 
 
-@pytest.mark.xfail(reason="green after DG6.2: scope creep detection", strict=False)
 def test_scope_creep_is_detected() -> None:
     """Scope creep is detected when the change map exceeds stated ticket intent."""
     criteria_mod = import_requirements_module("criteria")

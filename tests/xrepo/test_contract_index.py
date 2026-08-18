@@ -8,11 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from tests.xrepo.support import import_xrepo_module, write_contract_fixture_repo
 
 
-@pytest.mark.xfail(reason="green after DG6.2: contract surface indexing", strict=False)
 def test_openapi_graphql_protobuf_and_exports_are_indexed(tmp_path: Path) -> None:
     """Contract indexing surfaces OpenAPI, GraphQL, protobuf, and export symbols."""
     repo_root = tmp_path / "contracts"
