@@ -15,6 +15,7 @@ from tests.xrepo.support import (
     write_linked_repos_manifest,
 )
 
+from mergecraft.utils.bounded_text import resolve_path_under_root
 from mergecraft.utils.fence import SAFETY_NOTE
 
 _LINKED_CONTENT_MARKER = "LINKED_REPO_README_CONTENT"
@@ -39,6 +40,58 @@ def test_manifest_declares_repos_at_pinned_commits(tmp_path: Path) -> None:
     pinned = {(entry.owner, entry.name): entry.commit for entry in manifest.repos}
     assert pinned[("acme", "api-contracts")] == "abc111" * 5
     assert pinned[("acme", "web-client")] == "def222" * 5
+
+
+def test_manifest_rejects_unpinned_commit_refs(tmp_path: Path) -> None:
+    """Convention 4 — manifest commits must be pinned SHAs, not branch names."""
+    repo_root = tmp_path / "primary"
+    repo_root.mkdir()
+    manifest_path = write_linked_repos_manifest(
+        repo_root,
+        repos=[{"owner": "acme", "name": "api-contracts", "commit": "main"}],
+    )
+
+    linked_mod = import_xrepo_module("linked_repos")
+    with pytest.raises(ValueError, match="pinned git object id"):
+        linked_mod.parse_manifest(manifest_path)
+
+
+def test_resolve_path_under_root_rejects_escape(tmp_path: Path) -> None:
+    """Linked-repo reads reject paths that escape the checkout root."""
+    checkout = tmp_path / "linked"
+    checkout.mkdir()
+    (checkout / "README.md").write_text("safe\n", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match="escapes checkout root"):
+        resolve_path_under_root(checkout, "../../secret")
+
+
+def test_authorized_linked_repo_content_is_read_from_checkout(tmp_path: Path) -> None:
+    """D9 — granted reads return content from the linked repo checkout root."""
+    repo_root = tmp_path / "primary"
+    repo_root.mkdir()
+    linked_root = tmp_path / "api-contracts"
+    linked_root.mkdir()
+    marker = "AUTHORIZED_LINKED_README"
+    (linked_root / "README.md").write_text(f"# API\n\n{marker}\n", encoding="utf-8")
+    commit = "abc111" * 5
+    manifest_path = write_linked_repos_manifest(
+        repo_root,
+        repos=[{"owner": "acme", "name": "api-contracts", "commit": commit}],
+    )
+
+    linked_mod = import_xrepo_module("linked_repos")
+    manifest = linked_mod.parse_manifest(manifest_path)
+    grant = linked_mod.RunGrant(authorized_repos=frozenset({"api-contracts"}))
+
+    content = linked_mod.load_linked_repo_content(
+        manifest=manifest,
+        repo="api-contracts",
+        grant=grant,
+        repo_roots={"api-contracts": linked_root},
+    )
+
+    assert marker in content
 
 
 def test_unauthorized_repo_is_not_retrievable(tmp_path: Path) -> None:

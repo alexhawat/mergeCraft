@@ -135,16 +135,15 @@ def detect_scope_creep(
     creep: list[str] = []
     for path in change_map.changed_paths:
         path_tokens = _tokens(path.replace("/", " "))
-        if not path_tokens & intent_tokens:
-            # Paths whose directory names are unrelated to intent are out of scope
-            if any(part in path for part in ("billing", "admin", "payment", "infra")):
-                creep.append(path)
-            elif path.startswith("src/") and not any(
-                _keyword_overlap(stated_intent, sym) for sym in change_map.touched_symbols
-            ):
-                dir_name = path.split("/")[1] if "/" in path else path
-                if dir_name not in {"auth"} and dir_name not in intent_tokens:
-                    creep.append(path)
+        if path_tokens & intent_tokens:
+            continue
+        path_evidence = any(
+            _keyword_overlap(stated_intent, sym)
+            and (_keyword_overlap(path, sym) or _tokens(sym) & path_tokens)
+            for sym in change_map.touched_symbols
+        )
+        if not path_evidence:
+            creep.append(path)
     return creep
 
 

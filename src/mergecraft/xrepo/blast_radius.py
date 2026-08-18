@@ -6,6 +6,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 — used at runtime for consumer traversal
 
+from mergecraft.utils.bounded_text import (
+    MAX_CONSUMER_HAYSTACK_BYTES,
+    iter_indexable_files,
+    read_bounded_text,
+)
 from mergecraft.xrepo.linked_repos import (
     LinkedReposManifest,  # noqa: TC001 — runtime manifest access
 )
@@ -57,15 +62,16 @@ def _consumer_refs_contract(
 ) -> str | None:
     """Return a human reason when the consumer references the contract."""
     haystack_parts: list[str] = []
-    for path in consumer_root.rglob("*"):
-        if not path.is_file() or path.is_symlink():
+    total_bytes = 0
+    for path in iter_indexable_files(consumer_root):
+        text = read_bounded_text(path)
+        if text is None:
             continue
-        if path.stat().st_size > 256_000:
-            continue
-        try:
-            haystack_parts.append(path.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
-            continue
+        encoded = text.encode("utf-8", errors="replace")
+        if total_bytes + len(encoded) > MAX_CONSUMER_HAYSTACK_BYTES:
+            break
+        haystack_parts.append(text)
+        total_bytes += len(encoded)
     haystack = "\n".join(haystack_parts).lower()
     repo_tail = contract_repo.rsplit("/", 1)[-1].lower()
     if contract_commit.lower() not in haystack and repo_tail not in haystack:

@@ -21,7 +21,14 @@ class Citation:
     end_line: int
 
 
-_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+PINNED_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def validate_pinned_sha(sha: str) -> None:
+    """Validate that ``sha`` is a pinned git object id (not a branch name)."""
+    if not PINNED_SHA_RE.fullmatch(sha.lower()):
+        msg = f"commit must be a pinned git object id; got {sha!r}"
+        raise ValueError(msg)
 
 
 def validate_citation(citation: Citation) -> None:
@@ -29,9 +36,10 @@ def validate_citation(citation: Citation) -> None:
     if not citation.repo.strip():
         msg = "citation.repo is required"
         raise CitationError(msg)
-    if not _SHA_RE.fullmatch(citation.sha.lower()):
-        msg = f"citation.sha must be a git object id; got {citation.sha!r}"
-        raise CitationError(msg)
+    try:
+        validate_pinned_sha(citation.sha)
+    except ValueError as exc:
+        raise CitationError(str(exc)) from exc
     if not citation.path.strip():
         msg = "citation.path is required"
         raise CitationError(msg)
@@ -52,4 +60,11 @@ def format_citation(citation: Citation) -> str:
     )
 
 
-__all__ = ["Citation", "CitationError", "format_citation", "validate_citation"]
+__all__ = [
+    "PINNED_SHA_RE",
+    "Citation",
+    "CitationError",
+    "format_citation",
+    "validate_citation",
+    "validate_pinned_sha",
+]

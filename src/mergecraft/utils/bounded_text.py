@@ -6,6 +6,7 @@ from collections.abc import Iterator  # noqa: TC003 — used in iter_indexable_f
 from pathlib import Path  # noqa: TC003 — used at runtime for path containment
 
 MAX_INDEX_TEXT_BYTES = 256_000
+MAX_CONSUMER_HAYSTACK_BYTES = 2_048_000
 
 
 def read_bounded_text(path: Path, *, max_bytes: int = MAX_INDEX_TEXT_BYTES) -> str | None:
@@ -51,6 +52,7 @@ def iter_indexable_files(root: Path) -> Iterator[Path]:
 
 
 __all__ = [
+    "MAX_CONSUMER_HAYSTACK_BYTES",
     "MAX_INDEX_TEXT_BYTES",
     "iter_indexable_files",
     "read_bounded_text",

@@ -9,6 +9,7 @@ import yaml
 
 from mergecraft.utils.bounded_text import read_bounded_text, resolve_path_under_root
 from mergecraft.utils.fence import Fence, render_untrusted
+from mergecraft.xrepo.citations import validate_pinned_sha
 
 
 class LinkedRepoAccessError(PermissionError):
@@ -77,6 +78,7 @@ def parse_manifest(path: Path) -> LinkedReposManifest:
         if not owner or not name or not commit:
             msg = f"linked-repo entry requires owner, name, and commit: {item!r}"
             raise ValueError(msg)
+        validate_pinned_sha(commit)
         entries.append(LinkedRepoEntry(owner=owner, name=name, commit=commit))
     return LinkedReposManifest(repos=tuple(entries))
 
