@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from mergecraft.analyzers.finding import make_finding
 from mergecraft.findings.causality import (
@@ -83,10 +83,16 @@ def _apply_row_level_precision(
     *,
     rule_id: str,
     repo_root: Path | None = None,
+    trust_tier: Literal["trusted", "untrusted"] = "trusted",
 ) -> list[Finding]:
     """Run rubric and causality per row without changing list cardinality."""
     converted = [agent_finding_to_finding(draft, rule_id=rule_id) for draft in drafts]
-    return apply_precision_pipeline(converted, dedupe=False, repo_root=repo_root)
+    return apply_precision_pipeline(
+        converted,
+        dedupe=False,
+        repo_root=repo_root,
+        trust_tier=trust_tier,
+    )
 
 
 def normalize_agent_findings_via_pipeline(
@@ -95,6 +101,7 @@ def normalize_agent_findings_via_pipeline(
     rule_id: str,
     dedupe: bool = False,
     repo_root: Path | None = None,
+    trust_tier: Literal["trusted", "untrusted"] = "trusted",
 ) -> list[Any]:
     """Run the DG1 precision pipeline and map severities back onto agent rows."""
     from mergecraft.agents.verifier import AgentFinding
@@ -103,7 +110,12 @@ def normalize_agent_findings_via_pipeline(
         return []
 
     drafts = [coerce_agent_finding(item) for item in findings]
-    refined = _apply_row_level_precision(drafts, rule_id=rule_id, repo_root=repo_root)
+    refined = _apply_row_level_precision(
+        drafts,
+        rule_id=rule_id,
+        repo_root=repo_root,
+        trust_tier=trust_tier,
+    )
 
     if dedupe:
         dedupe_result = dedupe_findings_with_indices(refined)

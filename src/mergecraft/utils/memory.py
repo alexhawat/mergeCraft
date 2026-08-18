@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 MEMORY_FILE_NAME = "memory.json"
 FEEDBACK_FILE_NAME = "feedback.json"
 DEFAULT_MAX_NEGATIVE_RULES = 64
+DEFAULT_ACTIVE_MEMORY_TTL_DAYS = 365
 
 
 class FeedbackOutcome(StrEnum):
@@ -588,34 +589,7 @@ def export_memory_bundle(*, repo: Path) -> dict[str, Any]:
     }
 
 
-def import_memory_bundle(*, repo: Path, bundle: dict[str, Any]) -> None:
-    """Import a memory export bundle into ``repo``."""
-    learnings_path = repo / ".mergecraft" / "learnings.md"
-    learnings_path.parent.mkdir(parents=True, exist_ok=True)
-    if learnings_path.is_file():
-        text = learnings_path.read_text(encoding="utf-8")
-    else:
-        text = "# Learnings\n\n## Active\n\n## Staging\n\n"
-    from mergecraft.utils.learnings import ACTIVE_SECTION_HEADING, split_learnings_by_section
-
-    prefix, active_body, staging_body = split_learnings_by_section(text)
-    existing = {entry["id"] for entry in parse_memory_entries_from_learnings(text)}
-    new_lines = [active_body.rstrip()] if active_body.strip() else []
-    for entry in bundle.get("entries", []):
-        if not isinstance(entry, dict):
-            continue
-        entry_id = str(entry.get("id", ""))
-        bullet = str(entry.get("text", "")).strip()
-        if not bullet or entry_id in existing:
-            continue
-        new_lines.append(f"- {bullet}")
-        existing.add(entry_id)
-    active_block = "\n".join(line for line in new_lines if line).strip()
-    seed = prefix.rstrip() or "# Learnings"
-    learnings_path.write_text(
-        f"{seed}\n\n## {ACTIVE_SECTION_HEADING}\n\n{active_block}\n\n## Staging\n\n{staging_body.strip()}\n",
-        encoding="utf-8",
-    )
+def _import_bundle_sidecars(*, repo: Path, bundle: dict[str, Any]) -> None:
     feedback_path = repo / ".mergecraft" / FEEDBACK_FILE_NAME
     store = load_feedback_store(feedback_path)
     for item in bundle.get("feedback", []):
@@ -637,6 +611,52 @@ def import_memory_bundle(*, repo: Path, bundle: dict[str, Any]) -> None:
     if isinstance(negative_raw, dict):
         memory_path = repo / ".mergecraft" / MEMORY_FILE_NAME
         _write_json(memory_path, negative_raw)
+
+
+def _collect_new_import_bullets(
+    text: str,
+    bundle: dict[str, Any],
+) -> list[str]:
+    existing = {entry["id"] for entry in parse_memory_entries_from_learnings(text)}
+    new_bullets: list[str] = []
+    for entry in bundle.get("entries", []):
+        if not isinstance(entry, dict):
+            continue
+        entry_id = str(entry.get("id", ""))
+        bullet = str(entry.get("text", "")).strip()
+        if not bullet or entry_id in existing:
+            continue
+        new_bullets.append(f"- {bullet}")
+        existing.add(entry_id)
+    return new_bullets
+
+
+def import_memory_bundle(*, repo: Path, bundle: dict[str, Any]) -> None:
+    """Import a memory export bundle into ``repo``."""
+    learnings_path = repo / ".mergecraft" / "learnings.md"
+    learnings_path.parent.mkdir(parents=True, exist_ok=True)
+    if learnings_path.is_file():
+        text = learnings_path.read_text(encoding="utf-8")
+    else:
+        text = "# Learnings\n\n## Active\n\n## Staging\n\n"
+    new_bullets = _collect_new_import_bullets(text, bundle)
+    if not _has_sectioned_learnings_layout(text):
+        lines = text.rstrip().splitlines()
+        lines.extend(new_bullets)
+        learnings_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    else:
+        from mergecraft.utils.learnings import ACTIVE_SECTION_HEADING, split_learnings_by_section
+
+        prefix, active_body, staging_body = split_learnings_by_section(text)
+        new_lines = [active_body.rstrip()] if active_body.strip() else []
+        new_lines.extend(new_bullets)
+        active_block = "\n".join(line for line in new_lines if line).strip()
+        seed = prefix.rstrip() or "# Learnings"
+        learnings_path.write_text(
+            f"{seed}\n\n## {ACTIVE_SECTION_HEADING}\n\n{active_block}\n\n## Staging\n\n{staging_body.strip()}\n",
+            encoding="utf-8",
+        )
+    _import_bundle_sidecars(repo=repo, bundle=bundle)
 
 
 __all__ = [

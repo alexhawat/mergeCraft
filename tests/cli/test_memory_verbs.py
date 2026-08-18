@@ -105,6 +105,43 @@ def test_proposed_memory_requires_activation() -> None:
     assert proposed not in staging_part
 
 
+def test_import_preserves_legacy_flat_learnings_bullet(tmp_path: Path) -> None:
+    """Importing into legacy flat learnings keeps pre-existing bullets."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    learnings = repo / ".mergecraft" / "learnings.md"
+    learnings.parent.mkdir(parents=True, exist_ok=True)
+    learnings.write_text(
+        "# Learnings\n\n- keep timeouts on retry loops\n",
+        encoding="utf-8",
+    )
+
+    export_path = tmp_path / "memory-export.json"
+    export_repo = tmp_path / "export-source"
+    export_repo.mkdir()
+    (export_repo / ".mergecraft").mkdir(parents=True)
+    (export_repo / ".mergecraft" / "learnings.md").write_text(
+        "# Learnings\n\n## Active\n\n- imported memory bullet\n",
+        encoding="utf-8",
+    )
+    export_result = runner.invoke(
+        app,
+        ["memory", "export", "--repo", str(export_repo), "--output", str(export_path)],
+    )
+    assert export_result.exit_code == 0, export_result.stdout
+
+    import_result = runner.invoke(
+        app,
+        ["memory", "import", str(export_path), "--repo", str(repo)],
+    )
+    assert import_result.exit_code == 0, import_result.stdout
+
+    remaining_text = learnings.read_text(encoding="utf-8")
+    assert "keep timeouts on retry loops" in remaining_text
+    assert "imported memory bullet" in remaining_text
+    assert "## Active" not in remaining_text
+
+
 def test_forget_removes_legacy_flat_learnings_bullet(tmp_path: Path) -> None:
     """Legacy learnings without section headings lose the targeted bullet."""
     repo = tmp_path / "repo"

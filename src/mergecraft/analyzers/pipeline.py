@@ -356,7 +356,7 @@ def run_analyzer_pipeline(
 
         from mergecraft.utils.learnings import apply_repo_memory_to_findings
 
-        scoped = apply_repo_memory_to_findings(scoped, repo_root=repo_root)
+        scoped = apply_repo_memory_to_findings(scoped, repo_root=repo_root, trust_tier=tier)
 
         base_run = base_comparison_available(
             base_comparison=settings.base_comparison,

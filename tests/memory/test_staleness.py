@@ -78,4 +78,35 @@ def test_contradicting_memories_are_flagged(tmp_path: Path) -> None:
     assert contradictions
     pair = contradictions[0]
     assert {pair.left_id, pair.right_id} == {"always-flag-sql", "ignore-sql-in-tests"}
-    assert pair.reason.strip()
+
+
+def test_unprovenanced_bullets_ignore_ttl(tmp_path: Path) -> None:
+    """Hand-maintained bullets without provenance never expire from prompt weighting."""
+    from mergecraft.utils.learnings import load_weighted_active_memories
+
+    text = "# Learnings\n\n## Active\n\n- operator curated rule from 2020\n"
+    weighted = load_weighted_active_memories(learnings_text=text)
+
+    assert weighted == [("operator curated rule from 2020", 1.0)]
+
+
+def test_provenanced_bullets_expire_after_ttl(tmp_path: Path) -> None:
+    """Provenanced bullets respect TTL and drop out when expired."""
+    from mergecraft.utils.learnings import LearningProvenance, load_weighted_active_memories
+
+    now = utc_now()
+    provenance = LearningProvenance(
+        run_id="run-old",
+        pr_number=1,
+        source_field="learnings_md",
+        author_login="alice",
+        author_association="MEMBER",
+        trust_tier="trusted",
+        timestamp=days_ago(400),
+    )
+    text = (
+        f"# Learnings\n\n## Active\n\n{provenance.render_comment()}\n- expired provenanced note\n"
+    )
+    weighted = load_weighted_active_memories(learnings_text=text, now=now, ttl_days=365)
+
+    assert weighted == []

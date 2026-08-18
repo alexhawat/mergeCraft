@@ -634,9 +634,10 @@ Trust the tools — do not repeatedly verify after successful operations. Except
             from mergecraft.utils.learnings import load_weighted_active_memories
 
             active_entries = _list_active(raw)
-            repo_root = _Path(learnings_file_path).parent.parent
             weighted_texts = {
-                text for text, weight in load_weighted_active_memories(repo_root) if weight > 0.0
+                text
+                for text, weight in load_weighted_active_memories(learnings_text=raw)
+                if weight > 0.0
             }
             if weighted_texts:
                 filtered_entries: list[dict[str, Any]] = []
