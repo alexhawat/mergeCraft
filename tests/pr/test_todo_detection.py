@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 
 def _scan_todo_additions(diff: str) -> list[object]:
     from mergecraft.pr.todo_detection import scan_todo_additions
@@ -11,7 +9,6 @@ def _scan_todo_additions(diff: str) -> list[object]:
     return scan_todo_additions(diff)
 
 
-@pytest.mark.xfail(reason="green after DG8.2: risky TODO detection", strict=False)
 def test_risky_todo_additions_are_flagged(sample_diff: str) -> None:
     """New TODO/FIXME/HACK lines introduced by the diff are surfaced with path + line."""
     findings = _scan_todo_additions(sample_diff)

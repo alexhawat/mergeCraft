@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.config.settings import default_settings
 from mergecraft.utils.payload import TRUSTED_AUTHOR_ASSOCIATIONS
 
@@ -29,7 +27,6 @@ _SLASH_COMMANDS: tuple[tuple[str, str], ...] = (
 )
 
 
-@pytest.mark.xfail(reason="green after DG8.2: slash-command routing", strict=False)
 def test_slash_commands_route_to_the_right_mode() -> None:
     """``/mergecraft …`` comments map deterministically onto built-in modes."""
     settings = default_settings()
@@ -47,7 +44,6 @@ def test_slash_commands_route_to_the_right_mode() -> None:
         assert result.mode == expected_mode
 
 
-@pytest.mark.xfail(reason="green after DG8.2: commenter permission gate", strict=False)
 def test_commenter_permissions_gate_the_capability() -> None:
     """Untrusted commenters cannot invoke slash commands even with a valid body."""
     settings = default_settings()
@@ -75,7 +71,6 @@ def test_commenter_permissions_gate_the_capability() -> None:
     assert untrusted.reason
 
 
-@pytest.mark.xfail(reason="green after DG8.2: chat cannot widen permissions", strict=False)
 def test_chat_cannot_widen_push_or_shell_permission() -> None:
     """Comment invocation must not escalate push/shell beyond the workflow payload."""
     result = _route_comment(
@@ -94,7 +89,6 @@ def test_chat_cannot_widen_push_or_shell_permission() -> None:
     assert effective["push"] == "disabled"
 
 
-@pytest.mark.xfail(reason="green after DG8.2: finding challenge → verifier", strict=False)
 def test_finding_challenge_routes_to_the_verifier() -> None:
     """A finding challenge comment routes to the verifier agent, not a mutating mode."""
     result = _route_finding_challenge(

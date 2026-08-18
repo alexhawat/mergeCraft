@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 
 def _classify_effort_band(*args: object, **kwargs: object) -> object:
     from mergecraft.pr.effort_band import classify_effort_band
@@ -17,7 +15,6 @@ _EFFORT_BANDS = frozenset({"xs", "s", "m", "l", "xl"})
 _MINUTE_PATTERN = re.compile(r"\b\d+\s*(?:min(?:ute)?s?|hrs?|hours?)\b", re.IGNORECASE)
 
 
-@pytest.mark.xfail(reason="green after DG8.2: effort band classifier", strict=False)
 def test_emits_a_band_not_a_fake_minute_estimate(
     sample_diff: str,
     sample_pr_metadata: dict[str, object],

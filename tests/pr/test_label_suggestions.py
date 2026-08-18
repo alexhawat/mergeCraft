@@ -38,7 +38,6 @@ def _suggest_labels(*args: object, **kwargs: object) -> object:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after DG8.2: advisory label suggestions", strict=False)
 async def test_labels_are_suggested_not_applied(
     sample_diff: str,
     sample_pr_metadata: dict[str, object],

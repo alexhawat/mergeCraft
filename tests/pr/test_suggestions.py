@@ -10,8 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
@@ -22,7 +20,6 @@ def _generate_pr_suggestions(*args: object, **kwargs: object) -> object:
     return generate_pr_suggestions(*args, **kwargs)
 
 
-@pytest.mark.xfail(reason="green after DG8.2: text-only PR suggestions (D11)", strict=False)
 def test_changelog_docs_and_test_suggestions_are_text_only(
     sample_diff: str,
     sample_pr_metadata: dict[str, object],
@@ -43,9 +40,6 @@ def test_changelog_docs_and_test_suggestions_are_text_only(
     assert getattr(result, "written_paths", ()) == ()
 
 
-@pytest.mark.xfail(
-    reason="green after DG8.2: test suggestions never touch disk (D11)", strict=False
-)
 def test_test_suggestions_are_not_written_to_disk(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

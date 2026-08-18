@@ -9,8 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
@@ -21,7 +19,6 @@ def _build_describe_output(*args: object, **kwargs: object) -> object:
     return build_describe_output(*args, **kwargs)
 
 
-@pytest.mark.xfail(reason="green after DG8.2: standalone describe output", strict=False)
 def test_emits_title_body_walkthrough_risk_and_test_summary(
     sample_diff: str,
     sample_pr_metadata: dict[str, object],
@@ -37,7 +34,6 @@ def test_emits_title_body_walkthrough_risk_and_test_summary(
     assert result.body != result.walkthrough
 
 
-@pytest.mark.xfail(reason="green after DG8.2: describe is output-only (convention 3)", strict=False)
 def test_describe_never_writes_to_the_repo(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
