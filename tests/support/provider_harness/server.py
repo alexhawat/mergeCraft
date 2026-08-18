@@ -243,6 +243,8 @@ class ProviderHarnessServer:
                         self._send_bytes(profile.status_code, profile.raw_body, profile.headers)
                         return
                     if profile.status_code >= 400:
+                        if profile.status_code == 429 or profile.status_code >= 500:
+                            server_ref.metrics.record_retry()
                         server_ref.metrics.record_match(
                             fixture.name,
                             latency_ms=(time.perf_counter() - started) * 1000,

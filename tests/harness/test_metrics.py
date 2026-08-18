@@ -6,6 +6,16 @@ import httpx
 
 from tests.support.provider_harness import DUMMY_API_KEY
 from tests.support.provider_harness.pytest_plugin import load_harness_fixtures
+from tests.support.provider_harness.schema import FixtureSpec, MatchSpec, ResponseSpec
+
+
+def _profile_fixture(profile: str) -> FixtureSpec:
+    return FixtureSpec(
+        name=f"profile-{profile}",
+        match=MatchSpec(provider="default", model="dummy"),
+        response=ResponseSpec(body={"id": "stub", "choices": []}),
+        profile=profile,
+    )
 
 
 def test_metrics_count_matches_mismatches_statuses_and_retries(provider_harness) -> None:
@@ -26,6 +36,16 @@ def test_metrics_count_matches_mismatches_statuses_and_retries(provider_harness)
     assert snap["matches"] >= 1
     assert snap["mismatches"] >= 1
 
+    provider_harness.reload([_profile_fixture("http_429")])
+    httpx.post(
+        provider_harness.base_url + "/chat/completions",
+        headers={"Authorization": f"Bearer {DUMMY_API_KEY}"},
+        json={"model": "default/dummy", "messages": []},
+        timeout=5.0,
+    )
+    snap = provider_harness.metrics.snapshot()
+    assert snap["retries"] >= 1
+
 
 def test_metrics_are_bounded_and_reset_per_server(provider_harness) -> None:
     provider_harness.reload(load_harness_fixtures("no-findings"))
@@ -37,4 +57,4 @@ def test_metrics_are_bounded_and_reset_per_server(provider_harness) -> None:
     )
     provider_harness.reload(load_harness_fixtures("no-findings"))
     snap = provider_harness.metrics.snapshot()
-    assert snap["request_count"] >= 0
+    assert snap["request_count"] == 0
