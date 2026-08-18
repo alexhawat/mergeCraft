@@ -1,4 +1,7 @@
-"""Standalone describe output — text-only PR summary (DG8, convention 3)."""
+"""Standalone describe output — text-only PR summary (DG8, convention 3).
+
+Library surface only — not wired into ``select_mode`` / dispatch yet (DG7/DG8 pairing).
+"""
 
 from __future__ import annotations
 

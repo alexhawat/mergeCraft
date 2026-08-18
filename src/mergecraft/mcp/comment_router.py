@@ -1,4 +1,11 @@
-"""Slash-command comment router with permission gating (DG8)."""
+"""Slash-command comment router with permission gating (DG8).
+
+Library surface only — not wired into the review ``select_mode`` / dispatch path
+yet.  DG8.2 extracts routing logic for unit tests; DG7/DG8 follow-on work connects
+``route_comment`` and ``route_finding_challenge`` to Action comment handlers.
+Only ``/mergecraft review`` resolves to a built-in mode today; ask/explain/verify/describe
+refuse with ``mode_not_implemented`` until those modes exist.
+"""
 
 from __future__ import annotations
 

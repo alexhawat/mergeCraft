@@ -61,6 +61,20 @@ Locked decisions: **convention 3** (review-only — no writes to the reviewed tr
 | `route_comment(body, author_association, allowlist, repo_settings, payload_permissions)` | Maps `/mergecraft review|ask|explain|verify|describe` → modes; refuses untrusted authors; `effective_permissions` cannot widen payload |
 | `route_finding_challenge(...)` | Routes fingerprint challenges to verifier (`target="verifier"`), not mutating modes |
 
+## Staging contract (DG8.2 vs dispatch wiring)
+
+DG8.2 delivers **library extraction only** — pure functions under `src/mergecraft/pr/*` and
+`src/mergecraft/mcp/comment_router.py` with unit-test coverage. They are **not** imported by
+the Action dispatch path (`mergecraft.main`, `select_mode`, comment-trigger handlers) in this PR.
+
+Follow-on work (DG7/DG8 pairing in the wave plan) wires:
+
+- `route_comment` / `route_finding_challenge` → comment-trigger dispatch and `select_mode`
+- `build_describe_output`, `generate_pr_suggestions`, etc. → their respective slash-command modes
+
+Until that wiring lands, only `/mergecraft review` maps to a built-in mode; ask/explain/verify/describe
+correctly refuse with `mode_not_implemented`. Tests assert this staged status — no fake dispatch hooks.
+
 ## Contract → coverage matrix
 
 | # | Test | Layer | Contract |

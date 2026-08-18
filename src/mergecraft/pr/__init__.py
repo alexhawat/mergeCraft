@@ -1,4 +1,9 @@
-"""PR utilities — describe, suggestions, TODO scan, effort band, labels (DG8)."""
+"""PR utilities — describe, suggestions, TODO scan, effort band, labels (DG8).
+
+Library surfaces extracted in DG8.2 for unit testing.  Wiring into the review
+dispatch path (``select_mode``, MCP tools, Action comment handlers) is a DG7/DG8
+follow-on — callers must not assume live integration from this package alone.
+"""
 
 from __future__ import annotations
 

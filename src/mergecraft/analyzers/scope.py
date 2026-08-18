@@ -11,6 +11,8 @@ from mergecraft.review_policy.manifest_names import DEPENDENCY_MANIFEST_NAMES, L
 from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING, finding_fingerprint
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from mergecraft.analyzers.finding import Finding
 
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
@@ -109,6 +111,33 @@ def parse_diff_scope(diff_text: str) -> DiffScope:
         changed_migrations=frozenset(changed_migrations),
         changed_dependency_manifests=frozenset(changed_dependency_manifests),
     )
+
+
+def iter_added_diff_lines(diff_text: str) -> Iterator[tuple[str, int, str]]:
+    """Yield ``(path, new-file line number, added line content)`` from a unified diff."""
+    current_path: str | None = None
+    new_line = 0
+
+    for raw_line in diff_text.splitlines():
+        file_match = _DIFF_FILE_RE.match(raw_line)
+        if file_match:
+            current_path = file_match.group(2)
+            continue
+
+        if current_path is None:
+            continue
+
+        hunk_match = _HUNK_RE.match(raw_line)
+        if hunk_match:
+            new_line = int(hunk_match.group(1))
+            continue
+
+        prefix = raw_line[:1]
+        if prefix == "+":
+            yield current_path, new_line, raw_line[1:]
+            new_line += 1
+        elif prefix == " ":
+            new_line += 1
 
 
 def _record_exception_paths(
@@ -320,6 +349,7 @@ __all__ = [
     "filter_generated_scope",
     "filter_to_diff",
     "introduced_by_base_diff",
+    "iter_added_diff_lines",
     "parse_diff_scope",
     "scope_findings",
     "suppress_withdrawn_findings",

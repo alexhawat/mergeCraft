@@ -115,3 +115,33 @@ def test_finding_challenge_routes_to_the_verifier() -> None:
     assert result.target == "verifier"
     assert result.fingerprint == "abc123"
     assert result.mode != "Build"
+
+
+def test_comment_router_is_a_staged_library_surface() -> None:
+    """DG8.2 library extraction — routing is not wired to Action dispatch yet."""
+    import ast
+    import inspect
+
+    import mergecraft.main as main_mod
+    import mergecraft.mcp.comment_router as router
+
+    doc = router.__doc__ or ""
+    assert "library surface" in doc.lower()
+    assert "select_mode" in doc or "dispatch" in doc
+
+    main_source = inspect.getsource(main_mod)
+    assert "comment_router" not in main_source
+
+    tree = ast.parse(main_source)
+    imported_modules: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_modules.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.append(node.module)
+
+    assert "mergecraft.mcp.comment_router" not in imported_modules
+    assert not any(
+        module == "mergecraft.pr" or module.startswith("mergecraft.pr.")
+        for module in imported_modules
+    )

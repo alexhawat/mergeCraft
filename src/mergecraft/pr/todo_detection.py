@@ -1,4 +1,8 @@
-"""Deterministic TODO/FIXME/HACK scan on diff additions (DG8)."""
+"""Deterministic TODO/FIXME/HACK scan on diff additions (DG8).
+
+Library surface only — not wired into the review dispatch path yet.  DG7/DG8
+follow-on work connects ``scan_todo_additions`` to comment handlers and modes.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-_DIFF_FILE_RE = re.compile(r"^diff --git a/(.+?) b/(.+?)$")
+from mergecraft.analyzers.scope import iter_added_diff_lines
+
 _TODO_RE = re.compile(r"\b(TODO|FIXME|HACK)\b", re.IGNORECASE)
 _HIGH_RISK_PATH_PARTS = ("auth", "security", "payment", "billing", "migration")
 
@@ -38,39 +42,16 @@ def _risk_level_for(path: str, text: str) -> RiskLevel:
 def scan_todo_additions(diff: str) -> list[TodoFinding]:
     """Return added lines containing TODO, FIXME, or HACK markers."""
     findings: list[TodoFinding] = []
-    current_path: str | None = None
-    new_line = 0
-
-    for raw_line in diff.splitlines():
-        file_match = _DIFF_FILE_RE.match(raw_line)
-        if file_match:
-            current_path = file_match.group(2)
-            continue
-
-        if current_path is None:
-            continue
-
-        hunk_match = _HUNK_RE.match(raw_line)
-        if hunk_match:
-            new_line = int(hunk_match.group(1))
-            continue
-
-        prefix = raw_line[:1]
-        if prefix == "+":
-            content = raw_line[1:]
-            if _TODO_RE.search(content):
-                findings.append(
-                    TodoFinding(
-                        path=current_path,
-                        line=new_line,
-                        text=content.strip(),
-                        risk_level=_risk_level_for(current_path, content),
-                    )
+    for path, line, content in iter_added_diff_lines(diff):
+        if _TODO_RE.search(content):
+            findings.append(
+                TodoFinding(
+                    path=path,
+                    line=line,
+                    text=content.strip(),
+                    risk_level=_risk_level_for(path, content),
                 )
-            new_line += 1
-        elif prefix == " ":
-            new_line += 1
-
+            )
     return findings
 
 

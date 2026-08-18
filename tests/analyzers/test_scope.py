@@ -131,3 +131,22 @@ diff --git a/src/generated/schema.py b/src/generated/schema.py
 """
     kept = scope.filter_generated_scope([finding], diff_text=diff)
     assert len(kept) == 1
+
+
+def test_iter_added_diff_lines_yields_path_line_and_content() -> None:
+    scope = import_module("mergecraft.analyzers.scope")
+    diff = """diff --git a/README.md b/README.md
+@@ -1,3 +1,4 @@
+ # Title
++added line
+ unchanged
+diff --git a/src/app.py b/src/app.py
+@@ -10,1 +10,2 @@
+ def run():
++    return 1
+"""
+    added = list(scope.iter_added_diff_lines(diff))
+    assert added == [
+        ("README.md", 2, "added line"),
+        ("src/app.py", 11, "    return 1"),
+    ]
