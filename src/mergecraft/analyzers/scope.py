@@ -211,10 +211,12 @@ def introduced_by_base_diff(
     base_findings: list[Finding],
 ) -> list[Finding]:
     """Mark findings present on head but absent on base as PR-introduced."""
-    base_fps = {finding.fingerprint for finding in base_findings}
+    from mergecraft.analyzers.baseline_suppression import _baseline_identity
+
+    base_identities = {_baseline_identity(finding) for finding in base_findings}
     result: list[Finding] = []
     for finding in head_findings:
-        is_new = finding.fingerprint not in base_fps
+        is_new = _baseline_identity(finding) not in base_identities
         result.append(
             finding.model_copy(update={"introduced_by_pr": "true" if is_new else "false"})
         )
@@ -277,14 +279,14 @@ def filter_generated_scope(
     diff_text: str,
     scope: DiffScope | None = None,
 ) -> list[Finding]:
-    """Drop generated/minified/vendored paths policy excludes (D4)."""
-    from mergecraft.classify.generated_files import ChangeSet, review_includes_path
+    """Drop generated/minified/vendored findings policy excludes (D4)."""
+    from mergecraft.classify.generated_files import ChangeSet, finding_survives_generated_policy
 
     scope = scope if scope is not None else parse_diff_scope(diff_text)
     change: ChangeSet = {"changed_paths": changed_paths_from_scope(scope)}
     kept: list[Finding] = []
     for finding in findings:
-        if review_includes_path(finding.path, change=change):
+        if finding_survives_generated_policy(finding.path, change=change):
             kept.append(finding)
     return kept
 

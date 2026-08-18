@@ -56,8 +56,9 @@ def _validate_publication_finding(
 ) -> None:
     """Require structured causality before a blocking finding is confirmed (D2)."""
     row = _finding_row_for_fingerprint(ctx, fingerprint)
-    if row is None and severity is None:
-        return
+    if row is None:
+        msg = f"finding fingerprint {fingerprint!r} not found for blocking publication validation"
+        raise ValueError(msg)
     finding = finding_for_publication_validation(
         row,
         fingerprint=fingerprint,
@@ -110,7 +111,8 @@ def _persist_confirmed_fingerprint(
     row = _finding_row_for_fingerprint(ctx, fingerprint)
     if row is None:
         if not severity:
-            return
+            msg = f"finding fingerprint {fingerprint!r} not found for confirm persistence"
+            raise ValueError(msg)
         row = {"fingerprint": fingerprint, "severity": severity}
     else:
         row.setdefault("fingerprint", fingerprint)

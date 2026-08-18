@@ -206,9 +206,21 @@ async def test_a_dropped_finding_stays_refuted_on_the_next_run(tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_confirm_verdict_publishes_and_writes_nothing(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    body = "this token is logged in plaintext"
+    fingerprint = finding_fingerprint(path="src/app.py", body=body)
+    ctx.tool_state.agent_findings = [
+        {
+            "path": "src/app.py",
+            "line": 12,
+            "severity": "Critical",
+            "body": body,
+            "fingerprint": fingerprint,
+        }
+    ]
     payload = await _verdict(
-        _ctx(tmp_path),
-        fingerprint="a" * 24,
+        ctx,
+        fingerprint=fingerprint,
         verdict="confirm",
         reason="Reproduced by reading the caller.",
     )
@@ -218,11 +230,36 @@ async def test_confirm_verdict_publishes_and_writes_nothing(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_confirm_verdict_fails_when_fingerprint_is_unknown(tmp_path: Path) -> None:
+    result = await record_finding_verdict_tool(_ctx(tmp_path)).execute(
+        {
+            "fingerprint": "e" * 24,
+            "verdict": "confirm",
+            "reason": "Reproduced by reading the caller.",
+        }
+    )
+    assert result.is_error is True
+    assert "not found for blocking publication validation" in result.content[0]["text"]
+
+
+@pytest.mark.asyncio
 async def test_verdict_records_judge_model_provider_and_rubric_version(tmp_path: Path) -> None:
     """#45's first acceptance criterion, at the seam that produces verdicts."""
+    ctx = _ctx(tmp_path)
+    body = "this token is logged in plaintext"
+    fingerprint = finding_fingerprint(path="src/app.py", body=body)
+    ctx.tool_state.agent_findings = [
+        {
+            "path": "src/app.py",
+            "line": 12,
+            "severity": "Critical",
+            "body": body,
+            "fingerprint": fingerprint,
+        }
+    ]
     payload = await _verdict(
-        _ctx(tmp_path),
-        fingerprint="b" * 24,
+        ctx,
+        fingerprint=fingerprint,
         verdict="confirm",
         reason="Confirmed.",
     )
