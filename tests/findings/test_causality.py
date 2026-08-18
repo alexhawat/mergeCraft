@@ -13,7 +13,6 @@ from mergecraft.agents.gates import BLOCKING_SEVERITIES
 from tests.findings.support import make_finding
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_blocking_finding_requires_a_causality_field() -> None:
     """Blocking findings without causality fail validation (D2)."""
     from mergecraft.findings.causality import CausalityValidationError, validate_blocking_finding
@@ -30,7 +29,6 @@ def test_blocking_finding_requires_a_causality_field() -> None:
         validate_blocking_finding(finding)
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_finding_not_introduced_by_the_diff_is_downgraded() -> None:
     """Pre-existing defects are downgraded — they must not block merge."""
     from mergecraft.findings.causality import apply_causality_policy

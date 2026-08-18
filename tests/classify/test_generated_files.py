@@ -7,10 +7,7 @@ inclusion.
 
 from __future__ import annotations
 
-import pytest
 
-
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_generated_minified_vendored_are_classified() -> None:
     """Generated, minified, and vendored paths are labelled explicitly (D4)."""
     from mergecraft.classify.generated_files import FileKind, classify_path
@@ -22,7 +19,6 @@ def test_generated_minified_vendored_are_classified() -> None:
     assert classify_path("src/mergecraft/app.py") == FileKind.SOURCE
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_generator_config_change_is_still_reviewed() -> None:
     """When generator config changes, generated output stays in review scope."""
     from mergecraft.classify.generated_files import review_includes_path

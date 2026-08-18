@@ -6,8 +6,6 @@ Implementation: **DG1.2** — wired through ``analyzers/config.py::baseCompariso
 
 from __future__ import annotations
 
-import pytest
-
 from tests.analyzers.support import FIXTURE_REPO, import_module
 from tests.findings.support import make_finding
 
@@ -31,7 +29,6 @@ def _head_and_base_hit(*, path: str, line: int, message: str) -> tuple[object, o
     return head, base
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_preexisting_analyzer_hit_is_suppressed() -> None:
     """A hit present on base and head on an untouched line is suppressed (D3)."""
     from mergecraft.analyzers.baseline_suppression import suppress_baseline_findings
@@ -55,7 +52,6 @@ def test_preexisting_analyzer_hit_is_suppressed() -> None:
     assert result.reported == []
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_new_hit_on_an_untouched_file_is_still_reported() -> None:
     """The diff can expose a defect on a file it never touched — still report it."""
     from mergecraft.analyzers.baseline_suppression import suppress_baseline_findings
@@ -86,7 +82,6 @@ def test_new_hit_on_an_untouched_file_is_still_reported() -> None:
     assert result.suppressed == []
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_suppression_is_skipped_when_it_cannot_pay_for_itself() -> None:
     """Tiny diffs skip the expensive base run — default ``baseComparison`` is ``diff``."""
     from mergecraft.analyzers.baseline_suppression import should_run_baseline_suppression
@@ -104,7 +99,6 @@ def test_suppression_is_skipped_when_it_cannot_pay_for_itself() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_suppression_decision_is_auditable() -> None:
     """Every suppression carries an audit trail (convention 7)."""
     from mergecraft.analyzers.baseline_suppression import suppress_baseline_findings

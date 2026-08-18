@@ -8,6 +8,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def normalize_repo_path(path: str) -> str:
+    """Strip leading ``./`` and diff ``a/`` / ``b/`` prefixes from a repo path."""
+    text = path.strip().replace("\\", "/")
+    for prefix in ("./", "a/", "b/"):
+        if text.startswith(prefix):
+            text = text[len(prefix) :]
+    return text
+
+
 def safe_repo_relative_path(repo_root: Path, rel: str) -> Path | None:
     """Return a resolved path under ``repo_root``, or None when ``rel`` escapes."""
     root = repo_root.resolve()
@@ -20,4 +29,4 @@ def safe_repo_relative_path(repo_root: Path, rel: str) -> Path | None:
     return None
 
 
-__all__ = ["safe_repo_relative_path"]
+__all__ = ["normalize_repo_path", "safe_repo_relative_path"]

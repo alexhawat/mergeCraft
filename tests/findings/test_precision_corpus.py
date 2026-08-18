@@ -15,7 +15,6 @@ _PRE_DG1_RECALL = 1.0
 _PRE_DG1_PRECISION = 0.64
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_precision_improves_without_recall_loss() -> None:
     """Precision rises on the bench corpus; recall must not fall — the gate test."""
     from mergecraft.findings.precision_corpus import (

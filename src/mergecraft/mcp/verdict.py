@@ -223,6 +223,53 @@ class SubmissionValidation:
     rejection_reason: str | None
 
 
+def _agent_finding_to_finding(item: Any) -> Any:
+    from mergecraft.agents.verifier import AgentFinding
+    from mergecraft.analyzers.finding import make_finding
+
+    if isinstance(item, AgentFinding):
+        draft = item
+    elif isinstance(item, dict):
+        draft = AgentFinding.model_validate(item)
+    else:
+        msg = "each finding must be an object"
+        raise ValueError(msg)
+    return make_finding(
+        tool="agent",
+        rule_id="agent:terminal",
+        category="Functional Correctness",
+        severity=draft.severity,
+        confidence="likely",
+        message=draft.body,
+        path=draft.path,
+        start_line=int(draft.line or 1),
+        end_line=int(draft.line or 1),
+        source="agent",
+    )
+
+
+def _apply_terminal_precision(findings: list[Any]) -> list[Any]:
+    """Normalize terminal findings through the DG1 precision pipeline."""
+    from mergecraft.agents.verifier import AgentFinding
+    from mergecraft.findings.precision_pipeline import apply_precision_pipeline
+
+    if not findings:
+        return []
+    as_findings = [_agent_finding_to_finding(item) for item in findings]
+    refined = apply_precision_pipeline(as_findings, dedupe=False)
+    normalized: list[Any] = []
+    for draft, finding in zip(findings, refined, strict=True):
+        if isinstance(draft, AgentFinding):
+            normalized.append(draft.model_copy(update={"severity": finding.severity}))
+        elif isinstance(draft, dict):
+            row = dict(draft)
+            row["severity"] = finding.severity
+            normalized.append(row)
+        else:
+            normalized.append(draft)
+    return normalized
+
+
 def _finding_fingerprint(item: Any) -> str:
     if isinstance(item, dict):
         return str(item.get("fingerprint") or "")
@@ -373,9 +420,15 @@ def validate_submission(submission: dict[str, Any], *, state: Any) -> Submission
 
     if verdict == "approve":
         from mergecraft.agents.gates import BLOCKING_SEVERITIES, has_failed_required_static_check
+        from mergecraft.findings.causality import apply_causality_policy
 
         for finding in _confirmed_findings_from_state(state):
-            severity = finding.severity if hasattr(finding, "severity") else finding.get("severity")
+            coerced = _coerce_confirmed_finding(finding)
+            if coerced is None:
+                continue
+            if hasattr(coerced, "introduced_by_pr"):
+                coerced = apply_causality_policy(coerced)
+            severity = coerced.severity if hasattr(coerced, "severity") else coerced.get("severity")
             if severity in BLOCKING_SEVERITIES:
                 return SubmissionValidation(
                     accepted=False,
@@ -453,17 +506,21 @@ def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
         validated = SubmitReviewVerdictParams.model_validate(params)
+        normalized_findings = _apply_terminal_precision(list(validated.findings))
         submission_dict = {
             "verdict": validated.verdict,
             "summary": validated.summary,
-            "findings": [item.model_dump() for item in validated.findings],
+            "findings": [
+                item.model_dump() if hasattr(item, "model_dump") else item
+                for item in normalized_findings
+            ],
         }
         existing = ctx.tool_state.terminal_submission
         existing_id = existing.id if existing is not None else None
         recorded = record_validated_terminal_submission(
             ctx,
             submission_dict,
-            findings=list(validated.findings),
+            findings=normalized_findings,
         )
         ctx.tool_state.review_phase = ReviewPhase.SUBMIT.value
         stamp_review_phase_on_active_span(ReviewPhase.SUBMIT)

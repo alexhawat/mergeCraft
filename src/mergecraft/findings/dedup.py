@@ -10,6 +10,8 @@ import re
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
+from mergecraft.analyzers.paths import normalize_repo_path
+
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
@@ -19,14 +21,7 @@ _DOMAIN_HINTS: tuple[tuple[str, ...], ...] = (
     ("timeout", "retry", "loop"),
     ("secret", "token", "credential", "password"),
 )
-
-
-def _normalize_path(path: str) -> str:
-    text = path.strip().replace("\\", "/")
-    for prefix in ("./", "a/", "b/"):
-        if text.startswith(prefix):
-            text = text[len(prefix) :]
-    return text
+_MIN_SHARED_TOKENS = 3
 
 
 def _message_tokens(message: str) -> set[str]:
@@ -41,7 +36,7 @@ def _messages_semantically_similar(first: str, second: str) -> bool:
     if SequenceMatcher(None, left, right).ratio() >= 0.4:
         return True
     shared = _message_tokens(left) & _message_tokens(right)
-    if len(shared) >= 2:
+    if len(shared) >= _MIN_SHARED_TOKENS:
         return True
     for group in _DOMAIN_HINTS:
         if (
@@ -56,7 +51,7 @@ def _messages_semantically_similar(first: str, second: str) -> bool:
 
 def _location_key(finding: Finding) -> tuple[str, int, int, str]:
     return (
-        _normalize_path(finding.path),
+        normalize_repo_path(finding.path),
         finding.start_line,
         finding.end_line,
         finding.category,

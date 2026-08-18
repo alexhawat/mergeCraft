@@ -287,6 +287,33 @@ def withdrawn_fingerprints(learnings_text: str) -> frozenset[str]:
     return frozenset(fingerprints)
 
 
+def _changed_paths_from_scope(scope: DiffScope) -> list[str]:
+    paths = set(scope.hunk_ranges.keys())
+    paths.update(scope.added_files)
+    paths.update(scope.changed_lockfiles)
+    paths.update(scope.changed_workflows)
+    paths.update(scope.changed_migrations)
+    paths.update(scope.changed_dependency_manifests)
+    return sorted(paths)
+
+
+def filter_generated_scope(
+    findings: list[Finding],
+    *,
+    diff_text: str,
+) -> list[Finding]:
+    """Drop generated/minified/vendored paths policy excludes (D4)."""
+    from mergecraft.classify.generated_files import ChangeSet, review_includes_path
+
+    scope = parse_diff_scope(diff_text)
+    change: ChangeSet = {"changed_paths": _changed_paths_from_scope(scope)}
+    kept: list[Finding] = []
+    for finding in findings:
+        if review_includes_path(finding.path, change=change):
+            kept.append(finding)
+    return kept
+
+
 def scope_findings(
     findings: list[Finding],
     *,
@@ -294,8 +321,9 @@ def scope_findings(
     repo_root: Path | None = None,
     learnings_text: str = "",
 ) -> list[Finding]:
-    """Apply diff scoping, exceptions, and withdrawn suppression."""
+    """Apply diff scoping, exceptions, generated policy, and withdrawn suppression."""
     scoped = apply_scope_exceptions(findings, diff_text=diff_text, repo_root=repo_root)
+    scoped = filter_generated_scope(scoped, diff_text=diff_text)
     return suppress_withdrawn_findings(scoped, learnings_text)
 
 
@@ -304,6 +332,7 @@ __all__ = [
     "annotate_introduced_by_pr",
     "apply_scope_exceptions",
     "base_comparison_available",
+    "filter_generated_scope",
     "filter_to_diff",
     "introduced_by_base_diff",
     "parse_diff_scope",

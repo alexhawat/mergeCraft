@@ -5,8 +5,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Final
 
-from mergecraft.agents.gates import BLOCKING_SEVERITIES
-
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
@@ -70,10 +68,7 @@ def apply_severity_rubric(
             severity = _cap_severity(severity, str(rule["max_severity"]))
     if severity == finding.severity:
         return finding
-    updated = finding.model_copy(update={"severity": severity})
-    if updated.severity in BLOCKING_SEVERITIES:
-        return updated
-    return updated
+    return finding.model_copy(update={"severity": severity})
 
 
 __all__ = [

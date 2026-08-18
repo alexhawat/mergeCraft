@@ -7,12 +7,9 @@ semantic body comparison, before the judge.
 
 from __future__ import annotations
 
-import pytest
-
 from tests.findings.support import make_finding
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_two_lenses_reporting_one_defect_produce_one_finding() -> None:
     """Two review lenses flag the same defect once each — publish one finding."""
     from mergecraft.findings.dedup import dedupe_findings
@@ -43,7 +40,6 @@ def test_two_lenses_reporting_one_defect_produce_one_finding() -> None:
     assert len(deduped) == 1
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_same_defect_different_wording_is_deduped() -> None:
     """Paraphrases of one defect at the same place collapse to a single finding."""
     from mergecraft.findings.dedup import dedupe_findings
@@ -68,7 +64,6 @@ def test_same_defect_different_wording_is_deduped() -> None:
     assert len(deduped) == 1
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_distinct_defects_on_one_line_are_not_merged() -> None:
     """Different categories on the same line stay separate — the false-merge guard."""
     from mergecraft.findings.dedup import dedupe_findings

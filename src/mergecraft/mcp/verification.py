@@ -27,11 +27,14 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.analyzers.finding import make_finding
+from mergecraft.config import load_repo_settings
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
 from mergecraft.utils.learnings import learnings_file_path
 
 if TYPE_CHECKING:
+    from mergecraft.agents.verifier import AgentFinding
     from mergecraft.mcp.context import ToolContext
 
 _NOT_READY_REASON = (
@@ -39,6 +42,73 @@ _NOT_READY_REASON = (
     "run_analyzers (and run_static_checks when available) first so mechanically "
     "checkable facts are settled before any judge sees the finding (D14, #45)."
 )
+
+_MAINTENANCE_HINTS = frozenset(
+    {
+        "f-string",
+        "formatting",
+        "typo",
+        "spelling",
+        "comment",
+        "docstring",
+        "readme",
+        "style",
+        "naming",
+    }
+)
+_SECURITY_HINTS = frozenset(
+    {
+        "secret",
+        "token",
+        "credential",
+        "password",
+        "injection",
+        "auth",
+        "sql",
+        "xss",
+    }
+)
+
+
+def _agent_finding_category(body: str) -> str:
+    """Infer a taxonomy category for rubric normalization."""
+    text = body.casefold()
+    if any(hint in text for hint in _SECURITY_HINTS):
+        return "Security & Privacy"
+    if any(hint in text for hint in _MAINTENANCE_HINTS):
+        return "Maintainability & Code Quality"
+    return "Functional Correctness"
+
+
+def _agent_finding_as_finding(finding: AgentFinding) -> Any:
+    return make_finding(
+        tool="agent",
+        rule_id="agent:draft",
+        category=_agent_finding_category(finding.body),
+        severity=finding.severity,
+        confidence="likely",
+        message=finding.body,
+        path=finding.path,
+        start_line=int(finding.line or 1),
+        end_line=int(finding.line or 1),
+        source="agent",
+    )
+
+
+def _normalized_agent_findings(findings: list[AgentFinding]) -> list[AgentFinding]:
+    """Run the DG1 precision pipeline and map severities back onto agent rows."""
+    from mergecraft.findings.precision_pipeline import apply_precision_pipeline
+
+    if not findings:
+        return []
+    refined = apply_precision_pipeline(
+        [_agent_finding_as_finding(item) for item in findings], dedupe=False
+    )
+    normalized: list[AgentFinding] = []
+    for draft, finding in zip(findings, refined, strict=True):
+        row = draft.model_copy(update={"severity": finding.severity})
+        normalized.append(row)
+    return normalized
 
 
 def _deterministic_checks_ran(ctx: ToolContext) -> list[str]:
@@ -214,7 +284,6 @@ def verify_agent_findings_tool(ctx: ToolContext):
             AgentFinding,
             plan_agent_verifications,
         )
-        from mergecraft.config import load_repo_settings
 
         completed = _deterministic_checks_ran(ctx)
         if not completed:
@@ -234,32 +303,14 @@ def verify_agent_findings_tool(ctx: ToolContext):
             )
             for row in (params.get("findings") or [])
         ]
+        normalized_findings = _normalized_agent_findings(findings)
         stored: dict[str, dict[str, Any]] = {}
         for item in ctx.tool_state.agent_findings:
             fingerprint = item.get("fingerprint") if isinstance(item, dict) else None
             if isinstance(fingerprint, str) and fingerprint:
                 stored[fingerprint] = item
-        for finding in findings:
-            from mergecraft.analyzers.finding import make_finding
-            from mergecraft.findings.severity_rubric import apply_severity_rubric
-
-            normalized = apply_severity_rubric(
-                make_finding(
-                    tool="agent",
-                    rule_id="agent:draft",
-                    category="Functional Correctness",
-                    severity=finding.severity,
-                    confidence="likely",
-                    message=finding.body,
-                    path=finding.path,
-                    start_line=int(finding.line or 1),
-                    end_line=int(finding.line or 1),
-                    source="agent",
-                ),
-                model_assigned_severity=finding.severity,
-            )
+        for finding in normalized_findings:
             row = finding.model_dump(mode="json")
-            row["severity"] = normalized.severity
             row["fingerprint"] = finding.identity()
             stored[str(row["fingerprint"])] = row
         ctx.tool_state.agent_findings = list(stored.values())
@@ -267,7 +318,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
             ctx, [AgentFindingLike(**row) for row in stored.values()], stage="proposed"
         )
         plan = plan_agent_verifications(
-            findings,
+            normalized_findings,
             budget=settings.inline_budget,
             learnings_text=_learnings_text(ctx),
             repo_root=repo_root,
@@ -348,6 +399,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
 
 def record_finding_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
+        from mergecraft.agents.gates import BLOCKING_SEVERITIES
         from mergecraft.agents.verifier import JudgeVerdict, judge_pin, record_verifier_verdict
 
         completed = _deterministic_checks_ran(ctx)
@@ -390,8 +442,6 @@ def record_finding_verdict_tool(ctx: ToolContext):
         if outcome.verdict == "confirm" and outcome.publishable:
             _persist_confirmed_fingerprint(ctx, outcome.fingerprint)
         elif outcome.verdict == "downgrade" and outcome.publishable:
-            from mergecraft.agents.gates import BLOCKING_SEVERITIES
-
             new_severity = verdict.new_severity
             if new_severity in BLOCKING_SEVERITIES:
                 _persist_confirmed_fingerprint(

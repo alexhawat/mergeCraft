@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
-from mergecraft.analyzers.baseline_suppression import should_run_baseline_suppression
+from mergecraft.analyzers.baseline_suppression import (
+    collect_base_analyzer_findings,
+    log_suppression_audit,
+    should_run_baseline_suppression,
+    suppress_baseline_findings,
+)
 from mergecraft.analyzers.budget import default_inline_budget, place_findings
 from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding
@@ -17,6 +22,7 @@ from mergecraft.analyzers.review_gate import filter_for_review
 from mergecraft.analyzers.scope import (
     annotate_introduced_by_pr,
     base_comparison_available,
+    introduced_by_base_diff,
     scope_findings,
     suppress_withdrawn_findings,
 )
@@ -284,13 +290,30 @@ def run_analyzer_pipeline(
             diff_text=diff_text,
             base_comparison=settings.base_comparison,
         ):
-            logger.debug(
-                "baseline suppression enabled for diff with {} changed lines",
-                sum(
-                    1
-                    for line in diff_text.splitlines()
-                    if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
-                ),
+            base_findings = collect_base_analyzer_findings(
+                repo_root=repo_root,
+                manifests=manifests,
+                changed_files=changed_files,
+                head_findings=scoped,
+                tier=tier,
+                base_ref=base_ref,
+                offline=offline,
+                allow_repo_binaries=repo_binaries_allowed,
+            )
+            scoped = introduced_by_base_diff(scoped, base_findings)
+            suppression = suppress_baseline_findings(
+                head_findings=scoped,
+                base_findings=base_findings,
+                diff_text=diff_text,
+                repo_root=repo_root,
+                base_comparison=settings.base_comparison,
+            )
+            scoped = suppression.reported
+            log_suppression_audit(suppression.audit_trail)
+            logger.info(
+                "baseline suppression: reported={} suppressed={}",
+                len(suppression.reported),
+                len(suppression.suppressed),
             )
 
         clustered = dedupe_findings(cluster_findings(scoped))

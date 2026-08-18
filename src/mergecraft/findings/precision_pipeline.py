@@ -12,9 +12,13 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
 
-def apply_precision_pipeline(findings: list[Finding]) -> list[Finding]:
+def apply_precision_pipeline(
+    findings: list[Finding],
+    *,
+    dedupe: bool = True,
+) -> list[Finding]:
     """Run DG1 precision transforms before publication or scoring."""
-    refined = dedupe_findings(findings)
+    refined = dedupe_findings(findings) if dedupe else list(findings)
     adjusted: list[Finding] = []
     for finding in refined:
         finding = apply_severity_rubric(finding)

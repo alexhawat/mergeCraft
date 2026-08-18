@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mergecraft.agents.gates import BLOCKING_SEVERITIES
-
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
@@ -17,6 +15,8 @@ class CausalityValidationError(ValueError):
 
 
 def _is_blocking(finding: Finding) -> bool:
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES
+
     return finding.severity in BLOCKING_SEVERITIES
 
 

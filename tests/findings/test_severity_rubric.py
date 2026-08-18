@@ -7,8 +7,6 @@ Implementation: **DG1.2** — rubric applied at the ``JudgeVerdict`` seam in
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.agents.gates import BLOCKING_SEVERITIES
 from tests.findings.support import make_finding
 
@@ -18,7 +16,6 @@ def test_blocking_severities_unchanged() -> None:
     assert frozenset({"Critical", "Major"}) == BLOCKING_SEVERITIES
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_rubric_normalizes_model_assigned_severity() -> None:
     """Inflated model severity is normalized by the code-defined rubric."""
     from mergecraft.findings.severity_rubric import apply_severity_rubric
@@ -38,7 +35,6 @@ def test_rubric_normalizes_model_assigned_severity() -> None:
     assert normalized.severity in {"Minor", "Trivial"}
 
 
-@pytest.mark.xfail(reason="green after DG1.2", strict=False)
 def test_rubric_is_code_defined_not_model_defined() -> None:
     """The rubric is a code artifact — not delegated to the reviewing model."""
     from mergecraft.findings import severity_rubric
