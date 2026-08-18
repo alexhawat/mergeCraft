@@ -7,6 +7,7 @@ at the same location. Distinct categories on one line stay separate.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
@@ -107,6 +108,14 @@ _GENERIC_TOKENS = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class DedupeResult:
+    """Findings after dedupe plus indices into the input list."""
+
+    findings: list[Finding]
+    kept_indices: list[int]
+
+
 def _message_tokens(message: str) -> set[str]:
     return {match.group(0).casefold() for match in _TOKEN_RE.finditer(message)}
 
@@ -189,30 +198,39 @@ def _location_key(finding: Finding) -> tuple[str, int, int, str]:
     )
 
 
-def dedupe_findings(findings: list[Finding]) -> list[Finding]:
-    """Return findings with duplicate defects collapsed to one row each."""
+def dedupe_findings_with_indices(findings: list[Finding]) -> DedupeResult:
+    """Return deduped findings and the input indices that survived."""
     if not findings:
-        return []
+        return DedupeResult(findings=[], kept_indices=[])
 
-    buckets: dict[tuple[str, int, int, str], list[Finding]] = {}
-    for finding in findings:
-        buckets.setdefault(_location_key(finding), []).append(finding)
+    indexed: list[tuple[int, Finding]] = list(enumerate(findings))
+    buckets: dict[tuple[str, int, int, str], list[tuple[int, Finding]]] = {}
+    for index, finding in indexed:
+        buckets.setdefault(_location_key(finding), []).append((index, finding))
 
     deduped: list[Finding] = []
+    kept_indices: list[int] = []
     for bucket in buckets.values():
-        clusters: list[list[Finding]] = []
-        for finding in bucket:
+        clusters: list[list[tuple[int, Finding]]] = []
+        for index, finding in bucket:
             placed = False
             for cluster in clusters:
-                if _messages_semantically_similar(cluster[0].message, finding.message):
-                    cluster.append(finding)
+                if _messages_semantically_similar(cluster[0][1].message, finding.message):
+                    cluster.append((index, finding))
                     placed = True
                     break
             if not placed:
-                clusters.append([finding])
+                clusters.append([(index, finding)])
         for cluster in clusters:
-            deduped.append(cluster[0])
-    return deduped
+            survivor_index, survivor = cluster[0]
+            deduped.append(survivor)
+            kept_indices.append(survivor_index)
+    return DedupeResult(findings=deduped, kept_indices=kept_indices)
 
 
-__all__ = ["dedupe_findings"]
+def dedupe_findings(findings: list[Finding]) -> list[Finding]:
+    """Return findings with duplicate defects collapsed to one row each."""
+    return dedupe_findings_with_indices(findings).findings
+
+
+__all__ = ["DedupeResult", "dedupe_findings", "dedupe_findings_with_indices"]

@@ -276,6 +276,7 @@ def test_apply_baseline_suppression_skips_diff_when_all_adapters_skipped(
         base_ref=None,
         offline=False,
         allow_repo_binaries=True,
+        base_run_performed=False,
     )
 
     assert result == [head]
@@ -323,6 +324,7 @@ def test_partial_base_coverage_does_not_mark_introduced_by_pr(
         base_ref=None,
         offline=False,
         allow_repo_binaries=True,
+        base_run_performed=False,
         head_succeeded_manifest_ids=frozenset({"ruff", "mypy"}),
     )
 

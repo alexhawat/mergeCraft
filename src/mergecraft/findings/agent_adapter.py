@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.analyzers.dedup import dedupe_findings
 from mergecraft.analyzers.finding import make_finding
 from mergecraft.findings.causality import (
     CAUSALITY_EVIDENCE_PREFIX,
     CausalityValidationError,
     causality_text,
 )
+from mergecraft.findings.dedup import dedupe_findings_with_indices
 from mergecraft.findings.precision_pipeline import apply_precision_pipeline
 from mergecraft.findings.severity_rubric import infer_category_from_message
 
@@ -102,15 +102,11 @@ def normalize_agent_findings_via_pipeline(
     refined = _apply_row_level_precision(drafts, rule_id=rule_id)
 
     if dedupe:
-        deduped = dedupe_findings(refined)
-        surviving = {id(finding) for finding in deduped}
-        normalized: list[Any] = []
-        for draft, finding in zip(drafts, refined, strict=True):
-            if id(finding) not in surviving:
-                continue
-            normalized.append(_finding_to_agent_draft(finding, source=draft))
-            surviving.remove(id(finding))
-        return normalized
+        dedupe_result = dedupe_findings_with_indices(refined)
+        return [
+            _finding_to_agent_draft(refined[index], source=drafts[index])
+            for index in dedupe_result.kept_indices
+        ]
 
     normalized: list[Any] = []
     for draft, finding, original in zip(drafts, refined, findings, strict=True):

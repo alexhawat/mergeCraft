@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mergecraft.analyzers.dedup import dedupe_findings
 from mergecraft.findings.causality import apply_causality_policy
+from mergecraft.findings.dedup import dedupe_findings
 from mergecraft.findings.severity_rubric import apply_severity_rubric
 
 if TYPE_CHECKING:

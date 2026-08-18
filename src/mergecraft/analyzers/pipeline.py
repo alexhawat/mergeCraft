@@ -16,7 +16,6 @@ from mergecraft.analyzers.budget import default_inline_budget, place_findings
 from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.lockfile import lock_digest
-from mergecraft.analyzers.precision import apply_analyzer_precision
 from mergecraft.analyzers.registry import detect_enabled
 from mergecraft.analyzers.review_gate import filter_for_review
 from mergecraft.analyzers.scope import (
@@ -37,6 +36,7 @@ from mergecraft.analyzers.trust import (
     resolve_selection_tier,
 )
 from mergecraft.config import load_repo_settings
+from mergecraft.findings.dedup import dedupe_findings
 from mergecraft.mcp.review import format_analyzer_inline_body
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow
 
@@ -119,15 +119,16 @@ def _apply_baseline_suppression(
     base_ref: str | None,
     offline: bool,
     allow_repo_binaries: bool,
+    base_run_performed: bool,
     diff_scope: DiffScope | None = None,
     head_succeeded_manifest_ids: frozenset[str] | None = None,
 ) -> list[Finding]:
-    """Run base-vs-head suppression when configured; fail closed on collection errors."""
+    """Annotate ``introduced_by_pr`` and run base-vs-head suppression when eligible."""
     if not should_run_baseline_suppression(
         diff_text=diff_text,
         base_comparison=base_comparison,
     ):
-        return scoped
+        return annotate_introduced_by_pr(scoped, base_run_performed=base_run_performed)
 
     from mergecraft.analyzers.baseline_suppression import collect_base_analyzer_findings
 
@@ -153,7 +154,7 @@ def _apply_baseline_suppression(
             sorted(expected),
             sorted(collection.succeeded_manifest_ids),
         )
-        return scoped
+        return annotate_introduced_by_pr(scoped, base_run_performed=base_run_performed)
 
     scoped = introduced_by_base_diff(scoped, collection.findings)
     suppression = suppress_baseline_findings(
@@ -357,7 +358,6 @@ def run_analyzer_pipeline(
             base_comparison=settings.base_comparison,
             offline=offline,
         )
-        scoped = annotate_introduced_by_pr(scoped, base_run_performed=base_run)
         scoped = _apply_baseline_suppression(
             scoped,
             repo_root=repo_root,
@@ -369,11 +369,13 @@ def run_analyzer_pipeline(
             base_ref=base_ref,
             offline=offline,
             allow_repo_binaries=repo_binaries_allowed,
+            base_run_performed=base_run,
             diff_scope=diff_scope,
             head_succeeded_manifest_ids=frozenset(head_succeeded_manifest_ids),
         )
 
-        clustered = apply_analyzer_precision(cluster_findings(scoped))
+        # Analyzer path: dedupe only — rubric/causality stay on agent findings.
+        clustered = dedupe_findings(cluster_findings(scoped))
         budget = (
             inline_budget
             if inline_budget is not None
