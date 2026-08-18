@@ -305,7 +305,6 @@ def run_analyzer_pipeline(
                 head_findings=scoped,
                 base_findings=base_findings,
                 diff_text=diff_text,
-                repo_root=repo_root,
                 base_comparison=settings.base_comparison,
             )
             scoped = suppression.reported

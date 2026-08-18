@@ -19,6 +19,10 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from mergecraft.findings.agent_adapter import (
+    coerce_agent_finding,
+    normalize_agent_findings_via_pipeline,
+)
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import TerminalSubmission, primary_repo_state
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
@@ -223,32 +227,6 @@ class SubmissionValidation:
     rejection_reason: str | None
 
 
-def _apply_terminal_precision(findings: list[Any]) -> list[Any]:
-    """Normalize terminal findings through the DG1 precision pipeline."""
-    from mergecraft.agents.verifier import AgentFinding
-    from mergecraft.findings.agent_adapter import agent_finding_to_finding, coerce_agent_finding
-    from mergecraft.findings.precision_pipeline import apply_precision_pipeline
-
-    if not findings:
-        return []
-    as_findings = [
-        agent_finding_to_finding(coerce_agent_finding(item), rule_id="agent:terminal")
-        for item in findings
-    ]
-    refined = apply_precision_pipeline(as_findings, dedupe=False)
-    normalized: list[Any] = []
-    for draft, finding in zip(findings, refined, strict=True):
-        if isinstance(draft, AgentFinding):
-            normalized.append(draft.model_copy(update={"severity": finding.severity}))
-        elif isinstance(draft, dict):
-            row = dict(draft)
-            row["severity"] = finding.severity
-            normalized.append(row)
-        else:
-            normalized.append(draft)
-    return normalized
-
-
 def _finding_fingerprint(item: Any) -> str:
     if isinstance(item, dict):
         return str(item.get("fingerprint") or "")
@@ -435,20 +413,12 @@ class SubmitReviewVerdictParams(BaseModel):
     @field_validator("findings", mode="before")
     @classmethod
     def _coerce_findings(cls, value: object) -> list[Any]:
-        from mergecraft.agents.verifier import AgentFinding
-
         if not isinstance(value, list):
             msg = "findings must be a list"
             raise ValueError(msg)
         coerced: list[Any] = []
         for item in value:
-            if isinstance(item, AgentFinding):
-                finding = item
-            elif isinstance(item, dict):
-                finding = AgentFinding.model_validate(item)
-            else:
-                msg = "each finding must be an object"
-                raise ValueError(msg)
+            finding = coerce_agent_finding(item)
             if finding.severity not in FINDING_SEVERITIES:
                 msg = f"severity must be one of {FINDING_SEVERITIES!r}, got {finding.severity!r}"
                 raise ValueError(msg)
@@ -488,7 +458,10 @@ def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
         validated = SubmitReviewVerdictParams.model_validate(params)
-        normalized_findings = _apply_terminal_precision(list(validated.findings))
+        normalized_findings = normalize_agent_findings_via_pipeline(
+            list(validated.findings),
+            rule_id="agent:terminal",
+        )
         submission_dict = {
             "verdict": validated.verdict,
             "summary": validated.summary,

@@ -6,7 +6,7 @@ Implementation: **DG1.2** — wired through ``analyzers/config.py::baseCompariso
 
 from __future__ import annotations
 
-from tests.analyzers.support import FIXTURE_REPO, import_module
+from tests.analyzers.support import import_module
 from tests.findings.support import make_finding
 
 
@@ -44,7 +44,6 @@ def test_preexisting_analyzer_hit_is_suppressed() -> None:
         head_findings=[head],
         base_findings=[base],
         diff_text=diff_text,
-        repo_root=FIXTURE_REPO,
         base_comparison="full",
     )
 
@@ -74,7 +73,6 @@ def test_new_hit_on_an_untouched_file_is_still_reported() -> None:
         head_findings=[novel],
         base_findings=[],
         diff_text=diff_text,
-        repo_root=FIXTURE_REPO,
         base_comparison="full",
     )
 
@@ -113,7 +111,6 @@ def test_suppression_decision_is_auditable() -> None:
         head_findings=[head],
         base_findings=[base],
         diff_text="diff --git a/README.md b/README.md\n",
-        repo_root=FIXTURE_REPO,
         base_comparison="full",
     )
 

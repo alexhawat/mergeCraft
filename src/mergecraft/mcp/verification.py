@@ -28,7 +28,10 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.config import load_repo_settings
-from mergecraft.findings.agent_adapter import agent_finding_to_finding, coerce_agent_finding
+from mergecraft.findings.agent_adapter import (
+    finding_for_publication_validation,
+    normalize_agent_findings_via_pipeline,
+)
 from mergecraft.findings.causality import CausalityValidationError
 from mergecraft.findings.precision_pipeline import apply_precision_pipeline
 from mergecraft.mcp.shared import ToolClass, execute, tool
@@ -36,7 +39,6 @@ from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
 from mergecraft.utils.learnings import learnings_file_path
 
 if TYPE_CHECKING:
-    from mergecraft.agents.verifier import AgentFinding
     from mergecraft.mcp.context import ToolContext
 
 _NOT_READY_REASON = (
@@ -44,60 +46,6 @@ _NOT_READY_REASON = (
     "run_analyzers (and run_static_checks when available) first so mechanically "
     "checkable facts are settled before any judge sees the finding (D14, #45)."
 )
-
-
-def _normalized_agent_findings(findings: list[AgentFinding]) -> list[AgentFinding]:
-    """Run the DG1 precision pipeline and map severities back onto agent rows."""
-    if not findings:
-        return []
-    refined = apply_precision_pipeline(
-        [agent_finding_to_finding(item, rule_id="agent:draft") for item in findings],
-        dedupe=False,
-    )
-    normalized: list[AgentFinding] = []
-    for draft, finding in zip(findings, refined, strict=True):
-        row = draft.model_copy(update={"severity": finding.severity})
-        normalized.append(row)
-    return normalized
-
-
-def _finding_for_publication_validation(
-    row: dict[str, Any] | None,
-    *,
-    fingerprint: str,
-    causality: str,
-    severity: str | None = None,
-) -> Any:
-    """Build a ``Finding`` for D2 validation from agent or analyzer rows."""
-    from mergecraft.agents.verifier import AgentFinding
-    from mergecraft.analyzers.finding import Finding
-    from mergecraft.findings.causality import CAUSALITY_EVIDENCE_PREFIX, causality_text
-
-    if row is not None and "message" in row:
-        finding = Finding.model_validate(row)
-        if causality_text(finding) is None and causality.strip():
-            evidence = list(finding.evidence)
-            evidence.append(f"{CAUSALITY_EVIDENCE_PREFIX} {causality.strip()}")
-            finding = finding.model_copy(update={"evidence": evidence})
-        if severity:
-            finding = finding.model_copy(update={"severity": severity})
-        return finding
-
-    if row is not None:
-        draft = coerce_agent_finding(row)
-    else:
-        if not severity:
-            msg = "blocking finding requires a causality field explaining why this PR caused it"
-            raise CausalityValidationError(msg)
-        draft = AgentFinding(
-            path="",
-            body="",
-            severity=severity,
-            fingerprint=fingerprint,
-        )
-    if severity:
-        draft = draft.model_copy(update={"severity": severity})
-    return agent_finding_to_finding(draft, rule_id="agent:confirmed", causality=causality)
 
 
 def _validate_publication_finding(
@@ -111,7 +59,7 @@ def _validate_publication_finding(
     row = _finding_row_for_fingerprint(ctx, fingerprint)
     if row is None and severity is None:
         return
-    finding = _finding_for_publication_validation(
+    finding = finding_for_publication_validation(
         row,
         fingerprint=fingerprint,
         causality=causality,
@@ -315,7 +263,10 @@ def verify_agent_findings_tool(ctx: ToolContext):
             )
             for row in (params.get("findings") or [])
         ]
-        normalized_findings = _normalized_agent_findings(findings)
+        normalized_findings = normalize_agent_findings_via_pipeline(
+            findings,
+            rule_id="agent:draft",
+        )
         stored: dict[str, dict[str, Any]] = {}
         for item in ctx.tool_state.agent_findings:
             fingerprint = item.get("fingerprint") if isinstance(item, dict) else None

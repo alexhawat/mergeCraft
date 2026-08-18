@@ -167,11 +167,9 @@ def suppress_baseline_findings(
     head_findings: list[Finding],
     base_findings: list[Finding],
     diff_text: str,
-    repo_root: Path,
     base_comparison: str,
 ) -> SuppressionResult:
     """Suppress analyzer hits that already existed on base (D3)."""
-    del repo_root  # reserved for future path-aware checks
     if base_comparison != "full":
         return SuppressionResult(
             reported=list(head_findings),
