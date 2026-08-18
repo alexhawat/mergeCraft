@@ -9,7 +9,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from mergecraft.pr.describe import _changed_paths
+from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
 
 
 class GitHubLabelsClient(Protocol):
@@ -59,7 +59,7 @@ async def suggest_labels(
     _ = owner
     _ = repo
 
-    paths = _changed_paths(diff)
+    paths = changed_paths_from_scope(parse_diff_scope(diff))
     existing = _existing_labels(pr_metadata)
     suggested: list[str] = []
 

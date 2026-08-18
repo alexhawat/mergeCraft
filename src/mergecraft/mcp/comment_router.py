@@ -161,7 +161,11 @@ def route_finding_challenge(
     fingerprint: str | None = None,
     author_login: str | None = None,
 ) -> FindingChallengeRouteResult:
-    """Route ``/mergecraft challenge fp:…`` comments to the verifier agent."""
+    """Route ``/mergecraft challenge fp:…`` comments to the verifier agent.
+
+    When the comment body contains ``fp:…``, that fingerprint takes precedence
+    over the explicit ``fingerprint`` parameter — the body reflects user intent.
+    """
     if not _author_allowed(
         association=author_association,
         allowlist=allowlist,
@@ -174,7 +178,7 @@ def route_finding_challenge(
 
     match = _CHALLENGE_RE.match(body.strip())
     parsed_fingerprint = match.group(1) if match else None
-    resolved_fingerprint = fingerprint or parsed_fingerprint
+    resolved_fingerprint = parsed_fingerprint or fingerprint
     if not resolved_fingerprint:
         return FindingChallengeRouteResult(refused=True, reason="missing_fingerprint")
 

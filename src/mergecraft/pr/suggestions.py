@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mergecraft.pr.describe import _changed_paths
+from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
 
 SuggestionKind = Literal["changelog", "docs", "tests"]
 
@@ -46,7 +46,7 @@ def generate_pr_suggestions(
     _ = repo_root  # convention 3 — suggestions are prose, never written to disk
 
     title = _metadata_str(pr_metadata, "title", "this change")
-    paths = _changed_paths(diff)
+    paths = changed_paths_from_scope(parse_diff_scope(diff))
     primary = paths[0] if paths else "the touched modules"
 
     changelog = ""

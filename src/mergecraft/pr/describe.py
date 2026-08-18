@@ -5,7 +5,6 @@ Library surface only — not wired into ``select_mode`` / dispatch yet (DG7/DG8 
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
@@ -13,10 +12,8 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     from pathlib import Path
 
-from mergecraft.analyzers.scope import parse_diff_scope
+from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
 from mergecraft.modes._pr_summary_format import PR_SUMMARY_FORMAT
-
-_DIFF_FILE_RE = re.compile(r"^diff --git a/(.+?) b/(.+?)$", re.MULTILINE)
 
 
 class DescribeOutput(BaseModel):
@@ -29,13 +26,6 @@ class DescribeOutput(BaseModel):
     walkthrough: str
     risk_summary: str
     test_summary: str
-
-
-def _changed_paths(diff: str) -> list[str]:
-    seen: dict[str, None] = {}
-    for match in _DIFF_FILE_RE.finditer(diff):
-        seen.setdefault(match.group(2), None)
-    return list(seen)
 
 
 def _metadata_str(pr_metadata: dict[str, object], key: str, default: str = "") -> str:
@@ -62,8 +52,8 @@ def build_describe_output(
     pr_number = pr_metadata.get("number")
     number_text = f"#{pr_number}" if isinstance(pr_number, int) else "this PR"
 
-    paths = _changed_paths(diff)
     scope = parse_diff_scope(diff)
+    paths = changed_paths_from_scope(scope)
     file_count = len(paths) or len(scope.hunk_ranges)
 
     body = (

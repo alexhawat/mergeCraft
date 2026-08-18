@@ -117,6 +117,60 @@ def test_finding_challenge_routes_to_the_verifier() -> None:
     assert result.mode != "Build"
 
 
+def test_finding_challenge_refuses_untrusted_authors() -> None:
+    """Untrusted commenters cannot invoke finding-challenge routing."""
+    result = _route_finding_challenge(
+        body="/mergecraft challenge fp:abc123 — false positive",
+        author_association="NONE",
+        allowlist=(),
+    )
+
+    assert result.refused is True
+    assert result.reason == "association=NONE"
+    assert result.target is None
+    assert result.fingerprint is None
+
+
+def test_finding_challenge_refuses_when_fingerprint_missing() -> None:
+    """Challenge comments without a fingerprint are refused."""
+    result = _route_finding_challenge(
+        body="/mergecraft challenge — no fingerprint here",
+        author_association="MEMBER",
+        allowlist=(),
+    )
+
+    assert result.refused is True
+    assert result.reason == "missing_fingerprint"
+    assert result.target is None
+    assert result.fingerprint is None
+
+
+def test_finding_challenge_extracts_fingerprint_from_body_only() -> None:
+    """Body-parsed fingerprint suffices when no explicit param is passed."""
+    result = _route_finding_challenge(
+        body="/mergecraft challenge fp:frombody — disputed finding",
+        author_association="MEMBER",
+        allowlist=(),
+    )
+
+    assert result.refused is False
+    assert result.target == "verifier"
+    assert result.fingerprint == "frombody"
+
+
+def test_finding_challenge_prefers_body_fingerprint_over_explicit_param() -> None:
+    """Body ``fp:…`` wins over an explicit ``fingerprint`` argument."""
+    result = _route_finding_challenge(
+        body="/mergecraft challenge fp:frombody — disputed finding",
+        author_association="MEMBER",
+        allowlist=(),
+        fingerprint="explicit",
+    )
+
+    assert result.refused is False
+    assert result.fingerprint == "frombody"
+
+
 def test_comment_router_is_a_staged_library_surface() -> None:
     """DG8.2 library extraction — routing is not wired to Action dispatch yet."""
     import ast

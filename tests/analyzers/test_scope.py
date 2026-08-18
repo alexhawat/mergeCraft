@@ -136,11 +136,17 @@ diff --git a/src/generated/schema.py b/src/generated/schema.py
 def test_iter_added_diff_lines_yields_path_line_and_content() -> None:
     scope = import_module("mergecraft.analyzers.scope")
     diff = """diff --git a/README.md b/README.md
+index 1111111..2222222 100644
+--- a/README.md
++++ b/README.md
 @@ -1,3 +1,4 @@
  # Title
 +added line
  unchanged
 diff --git a/src/app.py b/src/app.py
+index 3333333..4444444 100644
+--- a/src/app.py
++++ b/src/app.py
 @@ -10,1 +10,2 @@
  def run():
 +    return 1

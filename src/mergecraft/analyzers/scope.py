@@ -132,6 +132,9 @@ def iter_added_diff_lines(diff_text: str) -> Iterator[tuple[str, int, str]]:
             new_line = int(hunk_match.group(1))
             continue
 
+        if raw_line.startswith(("--- ", "+++ ")):
+            continue
+
         prefix = raw_line[:1]
         if prefix == "+":
             yield current_path, new_line, raw_line[1:]
