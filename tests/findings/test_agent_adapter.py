@@ -19,6 +19,15 @@ def test_category_hints_match_whole_tokens_not_substrings() -> None:
     assert infer_category_from_message("SQL injection via unsanitized input") == (
         "Security & Privacy"
     )
+    assert infer_category_from_message("Rename secretariat office contact field") == (
+        "Functional Correctness"
+    )
+    assert infer_category_from_message("Increment token_count before rate limit") == (
+        "Functional Correctness"
+    )
+    assert infer_category_from_message("Token bucket refill rate is too high") == (
+        "Security & Privacy"
+    )
 
 
 def test_normalize_agent_findings_dedupes_at_publication_seam() -> None:

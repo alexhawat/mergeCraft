@@ -11,14 +11,14 @@ DOMAIN_HINT_GROUPS: Final[tuple[frozenset[str], ...]] = (
 )
 
 SECURITY_MESSAGE_PATTERNS: Final[tuple[str, ...]] = (
-    r"secret",
-    r"token",
-    r"credential",
-    r"password",
-    r"injection",
+    r"\bsecret\b",
+    r"\btoken\b",
+    r"\bcredential\b",
+    r"\bpassword\b",
+    r"\binjection\b",
     r"\bauth\b",
     r"\bsql\b",
-    r"xss",
+    r"\bxss\b",
 )
 
 __all__ = ["DOMAIN_HINT_GROUPS", "SECURITY_MESSAGE_PATTERNS"]
