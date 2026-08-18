@@ -4,20 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tests.support.provider_harness.schema import register_profiles
-
-PROFILE_NAMES = frozenset(
-    {
-        "http_429",
-        "http_500",
-        "http_401",
-        "timeout",
-        "malformed_json",
-        "empty_stream",
-        "disconnect_after_chunk",
-    }
-)
-register_profiles(PROFILE_NAMES)
+from tests.support.provider_harness.schema import ProfileName
 
 
 @dataclass(frozen=True)
@@ -30,7 +17,7 @@ class ProfileOutcome:
     disconnect_after_chunk: int | None = None
 
 
-def apply_profile(name: str | None) -> ProfileOutcome | None:
+def apply_profile(name: ProfileName | None) -> ProfileOutcome | None:
     if name is None:
         return None
     if name == "http_429":

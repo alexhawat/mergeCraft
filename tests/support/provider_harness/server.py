@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from mergecraft.analyzers.redact import redact_secrets
 from tests.support.provider_harness import DUMMY_API_KEY
 from tests.support.provider_harness.diagnostics import format_mismatch
 from tests.support.provider_harness.matcher import (
@@ -24,6 +23,7 @@ from tests.support.provider_harness.matcher import (
 from tests.support.provider_harness.metrics import HarnessMetrics
 from tests.support.provider_harness.profiles import apply_profile
 from tests.support.provider_harness.recorder import write_record
+from tests.support.provider_harness.redaction import sanitize_json_text
 from tests.support.provider_harness.schema import FixtureSpec, load_fixture_file
 
 _HISTORY_CAP = 32
@@ -93,6 +93,7 @@ class ProviderHarnessServer:
         self._thread: threading.Thread | None = None
         self._host = "127.0.0.1"
         self._port = 0
+        self._usage_counts: dict[str, int] = {}
         self.metrics = HarnessMetrics()
 
     @property
@@ -116,8 +117,7 @@ class ProviderHarnessServer:
         with self._lock:
             if fixtures is not None:
                 self._fixtures = list(fixtures)
-            for fix in self._fixtures:
-                fix.use_count = 0
+            self._usage_counts.clear()
             self.metrics.reset()
 
     def url_for(self, path: str) -> str:
@@ -155,7 +155,7 @@ class ProviderHarnessServer:
                 return self.headers.get("Authorization", "") == f"Bearer {DUMMY_API_KEY}"
 
             def _record(self, body_bytes: bytes) -> None:
-                redacted = redact_secrets(body_bytes.decode("utf-8", errors="replace"))
+                redacted = sanitize_json_text(body_bytes.decode("utf-8", errors="replace"))
                 entry = RedactedRequest(
                     method=self.command,
                     path=urlparse(self.path).path,
@@ -212,7 +212,12 @@ class ProviderHarnessServer:
                 snapshot = server_ref._snapshot_from_body(body)
                 streaming = bool(body.get("stream", False))
                 try:
-                    fixture = match_fixture(snapshot, server_ref._fixtures, strict=True)
+                    fixture = match_fixture(
+                        snapshot,
+                        server_ref._fixtures,
+                        strict=True,
+                        usage_counts=server_ref._usage_counts,
+                    )
                 except (NoFixtureMatch, AmbiguousFixtureMatch, FixtureReuseError) as exc:
                     latency_ms = (time.perf_counter() - started) * 1000
                     server_ref.metrics.record_mismatch(latency_ms=latency_ms, status_code=400)

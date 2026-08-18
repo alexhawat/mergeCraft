@@ -119,12 +119,13 @@ def test_unexpected_fixture_reuse_is_an_error() -> None:
 
     fixtures = [_fixture(name="single-use", max_uses=1)]
     req = snapshot()
+    usage: dict[str, int] = {}
 
-    first = match_fixture(req, fixtures, strict=True)
+    first = match_fixture(req, fixtures, strict=True, usage_counts=usage)
     assert first.name == "single-use"
 
     with pytest.raises(FixtureReuseError):
-        match_fixture(req, fixtures, strict=True)
+        match_fixture(req, fixtures, strict=True, usage_counts=usage)
 
 
 def test_lenient_mode_is_not_the_ci_default() -> None:

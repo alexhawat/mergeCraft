@@ -47,7 +47,7 @@ def test_mismatch_includes_redacted_request_and_candidate_reasons() -> None:
     assert "candidate-a" in diagnostic
     assert "candidate-b" in diagnostic
     assert api_key not in diagnostic
-    assert "[REDACTED]" in diagnostic
+    assert "[REDACTED]" in diagnostic or "<redacted>" in diagnostic
     assert "provider" in diagnostic.lower() or "default" in diagnostic
     assert "model" in diagnostic.lower() or "dummy" in diagnostic
 

@@ -8,7 +8,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-_KNOWN_PROFILES: frozenset[str] = frozenset()
+ProfileName = Literal[
+    "http_429",
+    "http_500",
+    "http_401",
+    "timeout",
+    "malformed_json",
+    "empty_stream",
+    "disconnect_after_chunk",
+]
 
 
 class MalformedFixtureError(ValueError):
@@ -67,20 +75,7 @@ class FixtureSpec(BaseModel):
     match: MatchSpec
     response: ResponseSpec
     max_uses: int = 1
-    profile: str | None = None
-    use_count: int = Field(default=0, exclude=True)
-
-    @model_validator(mode="after")
-    def _validate_profile(self) -> FixtureSpec:
-        if self.profile is not None and self.profile not in _KNOWN_PROFILES:
-            msg = f"unknown profile {self.profile!r}"
-            raise ValueError(msg)
-        return self
-
-
-def register_profiles(names: frozenset[str]) -> None:
-    global _KNOWN_PROFILES
-    _KNOWN_PROFILES = names
+    profile: ProfileName | None = None
 
 
 def load_fixture_file(path: Path) -> FixtureSpec:

@@ -30,8 +30,9 @@ class AmbiguousFixtureMatch(Exception):
 
 
 class FixtureReuseError(Exception):
-    def __init__(self, *, fixture: FixtureSpec) -> None:
+    def __init__(self, *, fixture: FixtureSpec, used_count: int) -> None:
         self.fixture = fixture
+        self.used_count = used_count
         super().__init__(f"fixture {fixture.name!r} exceeded max_uses={fixture.max_uses}")
 
 
@@ -91,17 +92,20 @@ def match_fixture(
     fixtures: list[FixtureSpec],
     *,
     strict: bool = True,
+    usage_counts: dict[str, int] | None = None,
 ) -> FixtureSpec:
     effective_strict = strict and not _env_lenient()
 
+    counts = usage_counts if usage_counts is not None else {}
     candidate_reasons: dict[str, str] = {}
     matches: list[FixtureSpec] = []
     for fixture in fixtures:
         reason = _match_spec(request, fixture.match)
+        used = counts.get(fixture.name, 0)
         if reason is None:
-            if fixture.use_count >= fixture.max_uses:
+            if used >= fixture.max_uses:
                 if effective_strict:
-                    raise FixtureReuseError(fixture=fixture)
+                    raise FixtureReuseError(fixture=fixture, used_count=used)
                 candidate_reasons[fixture.name] = "max_uses exceeded"
                 continue
             matches.append(fixture)
@@ -119,5 +123,5 @@ def match_fixture(
     if len(matches) > 1:
         matches = [matches[0]]
     chosen = matches[0]
-    chosen.use_count += 1
+    counts[chosen.name] = counts.get(chosen.name, 0) + 1
     return chosen

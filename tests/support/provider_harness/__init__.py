@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tests.support.provider_harness.profiles  # noqa: F401 — register profile names
 from tests.support.provider_harness.diagnostics import format_mismatch
 from tests.support.provider_harness.matcher import (
     AmbiguousFixtureMatch,
