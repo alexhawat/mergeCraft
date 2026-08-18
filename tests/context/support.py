@@ -37,6 +37,15 @@ def git_commit_all(root: Path, message: str = "init") -> str:
         "user.email=test@example.com",
         "-c",
         "user.name=Test User",
+        "add",
+        "-A",
+        cwd=root,
+    )
+    git_run(
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test User",
         "commit",
         "-m",
         message,
@@ -57,6 +66,7 @@ def git_blob_sha(root: Path, rel_path: str, ref: str = "HEAD") -> str:
 
 def write_context_fixture_repo(root: Path) -> None:
     """Lay down a miniature repo for map + symbol indexing tests."""
+    root.mkdir(parents=True, exist_ok=True)
     (root / "pyproject.toml").write_text(
         '[project]\nname = "demo"\nversion = "0.1.0"\n\n[project.scripts]\n'
         'demo-cli = "myservice.cli:main"\n',

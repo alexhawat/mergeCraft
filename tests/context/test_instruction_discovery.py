@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from mergecraft.utils.fence import SAFETY_NOTE
 from tests.context.support import (
     REPO_INSTRUCTIONS_HEADER,
@@ -70,7 +68,6 @@ def _render_prompt(
     )
 
 
-@pytest.mark.xfail(reason="green after DG3.2: trusted instruction discovery", strict=False)
 def test_trusted_repo_instructions_are_loaded(tmp_path: Path) -> None:
     """G9 — trusted-tier discovered instruction files enter the repo instruction bundle."""
     repo_root = tmp_path / "repo"
@@ -85,7 +82,6 @@ def test_trusted_repo_instructions_are_loaded(tmp_path: Path) -> None:
     assert SAFETY_NOTE not in repo_instructions
 
 
-@pytest.mark.xfail(reason="green after DG3.2: untrusted instructions fenced as data", strict=False)
 def test_untrusted_repo_instructions_are_fenced_as_data(tmp_path: Path) -> None:
     """D5 — untrusted-tier discovered instruction files render through the W4 fence."""
     repo_root = tmp_path / "repo"
@@ -102,10 +98,6 @@ def test_untrusted_repo_instructions_are_fenced_as_data(tmp_path: Path) -> None:
     assert "field=repo_instruction" in joined or "field=repo_claude_md" in joined
 
 
-@pytest.mark.xfail(
-    reason="green after DG3.2: untrusted instructions excluded from instruction bundle",
-    strict=False,
-)
 def test_untrusted_instructions_never_enter_the_instruction_bundle(tmp_path: Path) -> None:
     """D5 security — hostile repo instructions must not appear in the rendered instruction bundle."""
     repo_root = tmp_path / "repo"
@@ -127,7 +119,6 @@ def test_untrusted_instructions_never_enter_the_instruction_bundle(tmp_path: Pat
     assert any(_UNTRUSTED_MARKER in block for block in fenced_blocks(prompt))
 
 
-@pytest.mark.xfail(reason="green after DG3.2: repo skills follow trust gate", strict=False)
 def test_repo_skills_follow_the_same_gate(tmp_path: Path) -> None:
     """G10/D5 — repo SKILL.md files follow the same trusted/untrusted gate as instructions."""
     repo_root = tmp_path / "repo"
@@ -150,10 +141,6 @@ def test_repo_skills_follow_the_same_gate(tmp_path: Path) -> None:
     assert any(_SKILL_MARKER in block for block in fenced_blocks(untrusted_prompt))
 
 
-@pytest.mark.xfail(
-    reason="green after DG3.2: discovered instruction injection neutralized",
-    strict=False,
-)
 def test_injection_inside_a_discovered_instruction_file_is_not_obeyed(tmp_path: Path) -> None:
     """Injection prose inside a discovered instruction file stays fenced data, not instructions."""
     repo_root = tmp_path / "repo"

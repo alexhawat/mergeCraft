@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.context.support import (
     RecordingCache,
     git_blob_sha,
@@ -29,7 +27,6 @@ def _init_git_repo(root: Path, rel_path: str, content: str) -> tuple[Path, str, 
     return path, rel_path, blob_sha
 
 
-@pytest.mark.xfail(reason="green after DG3.2: tree-sitter symbol index", strict=False)
 def test_indexes_symbols_for_a_supported_language(tmp_path: Path) -> None:
     """Python symbols are indexed via the supported-language backend."""
     repo_root = tmp_path / "repo"
@@ -53,9 +50,6 @@ def test_indexes_symbols_for_a_supported_language(tmp_path: Path) -> None:
     assert "build_widget" in symbol_names
 
 
-@pytest.mark.xfail(
-    reason="green after DG3.2: generic fallback for unsupported languages", strict=False
-)
 def test_unsupported_language_degrades_to_the_generic_fallback(tmp_path: Path) -> None:
     """D6 — an unsupported language never fails indexing; it uses the generic backend."""
     repo_root = tmp_path / "repo"
@@ -76,7 +70,6 @@ def test_unsupported_language_degrades_to_the_generic_fallback(tmp_path: Path) -
     assert any(symbol.name == "legacy_entry" for symbol in result.symbols)
 
 
-@pytest.mark.xfail(reason="green after DG3.2: reduced fidelity metadata", strict=False)
 def test_reduced_fidelity_is_recorded(tmp_path: Path) -> None:
     """D6 — generic fallback records reduced indexing fidelity on the result."""
     repo_root = tmp_path / "repo"
@@ -98,7 +91,6 @@ def test_reduced_fidelity_is_recorded(tmp_path: Path) -> None:
     assert result.fidelity_note
 
 
-@pytest.mark.xfail(reason="green after DG3.2: symbol index cache keyed by blob sha", strict=False)
 def test_index_is_cached_by_blob_sha(tmp_path: Path) -> None:
     """Convention 6 — the symbol index cache key is the git blob object SHA."""
     repo_root = tmp_path / "repo"

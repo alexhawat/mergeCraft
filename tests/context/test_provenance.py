@@ -6,12 +6,9 @@ Implementation: **DG3.2** — ``mergecraft.context.provenance``.
 
 from __future__ import annotations
 
-import pytest
-
 from tests.context.support import import_context_module
 
 
-@pytest.mark.xfail(reason="green after DG3.2: context item provenance fields", strict=False)
 def test_every_context_item_records_repo_sha_path_and_reason() -> None:
     """Convention 4 — every retrieved context item carries repo, SHA, path, and reason."""
     provenance_mod = import_context_module("provenance")
@@ -33,7 +30,6 @@ def test_every_context_item_records_repo_sha_path_and_reason() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after DG3.2: context inspect token accounting", strict=False)
 def test_context_inspect_reports_token_cost_per_item() -> None:
     """Context inspect reports per-item token cost for budget visibility."""
     provenance_mod = import_context_module("provenance")

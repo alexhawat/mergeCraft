@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.context.support import (
     RecordingCache,
     git_commit_all,
@@ -20,7 +18,6 @@ from tests.context.support import (
 )
 
 
-@pytest.mark.xfail(reason="green after DG3.2: repo map builder", strict=False)
 def test_indexes_packages_services_entrypoints_and_build_config(tmp_path: Path) -> None:
     """The repo map surfaces packages, services, entrypoints, and build config."""
     repo_root = tmp_path / "repo"
@@ -44,7 +41,6 @@ def test_indexes_packages_services_entrypoints_and_build_config(tmp_path: Path) 
     assert "Makefile" in build_config_paths
 
 
-@pytest.mark.xfail(reason="green after DG3.2: repo map cache keyed by tree sha", strict=False)
 def test_map_is_cached_by_tree_sha(tmp_path: Path) -> None:
     """Convention 6 — the repo map cache key is the git tree object SHA."""
     repo_root = tmp_path / "repo"
