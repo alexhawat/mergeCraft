@@ -30,6 +30,8 @@ dependencies = [
     "markdownify==1.2.2",
     "pyjwt[crypto]>=2.13.0",
     "aiofiles==25.1.0",
+    "tree-sitter==0.26.0",
+    "tree-sitter-python==0.25.0",
 ]
 
 [project.scripts]
