@@ -6,12 +6,9 @@ Implementation: **DG5.2** — advisory/warning/required/blocking enforcement.
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.agents.gates import BLOCKING_SEVERITIES, decide_approval
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_advisory_warning_required_blocking_modes() -> None:
     """Four enforcement modes produce distinct gate-facing outcomes."""
     from mergecraft.policy.enforcement import EnforcementMode, evaluate_enforcement
@@ -27,6 +24,9 @@ def test_advisory_warning_required_blocking_modes() -> None:
     assert warning.contributes_blocker is False
     assert required.contributes_blocker is False
     assert blocking.contributes_blocker is True
+    assert advisory.finding is not None
+    assert warning.finding is not None
+    assert required.finding is not None
     assert blocking.finding is not None
     assert blocking.finding.severity in BLOCKING_SEVERITIES
 
@@ -35,7 +35,23 @@ def test_advisory_warning_required_blocking_modes() -> None:
     assert blocking.mode in modes
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
+def test_non_blocking_modes_preserve_declared_severity() -> None:
+    """Advisory violations keep the rule severity instead of coercing to Major."""
+    from mergecraft.policy.enforcement import evaluate_enforcement
+
+    violation = {
+        "rule_id": "style-nit",
+        "path": "src/app.py",
+        "message": "policy violation",
+        "severity": "Minor",
+    }
+    result = evaluate_enforcement(mode="advisory", violation=violation)
+
+    assert result.finding is not None
+    assert result.finding.severity == "Minor"
+    assert result.contributes_blocker is False
+
+
 def test_blocking_rule_contributes_a_blocking_finding_not_a_second_gate() -> None:
     """Blocking policy violations feed ``decide_approval`` — no parallel approval path."""
     from mergecraft.policy.enforcement import evaluate_enforcement

@@ -644,6 +644,9 @@ of them for its full flag set):
 | `mergecraft pipeline lint` | Validate the pipeline file and registry agent references. |
 | `mergecraft pipeline show --diff DIFF` | Preview which pipeline steps would run or skip for a diff. |
 | `mergecraft plan` | Preview model chain, toolset, analyzers, and token estimate without provider calls. |
+| `mergecraft policy explain --path PATH` | List effective rules for a path and name each rule's source layer. |
+| `mergecraft policy lint` | Validate policy rule YAML under `.mergecraft/policy/`. |
+| `mergecraft policy test --fixtures FIXTURES` | Run should-trigger and should-not policy fixtures. |
 | `mergecraft review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft traces show <run-id>` | Read back the local JSONL traces for the given run id (re-redacts on render). |
 | `mergecraft tracing logfire disable` | Disable Logfire tracing by removing the token + project locally and on GitHub. |

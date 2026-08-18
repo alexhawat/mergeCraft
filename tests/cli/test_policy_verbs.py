@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.policy.conftest import MALFORMED_RULE_YAML, POLICY_LINT_FIXTURES
 from typer.testing import CliRunner
 
@@ -31,7 +30,6 @@ def _write_policy_tree(tmp_path: Path, rules_yaml: str) -> None:
     (policy_dir / "rules.yaml").write_text(rules_yaml, encoding="utf-8")
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_policy_lint_rejects_a_malformed_rule(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -49,7 +47,6 @@ def test_policy_lint_rejects_a_malformed_rule(
     assert "id" in output or "owner" in output or "severity" in output or "config" in output
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_policy_test_runs_should_trigger_and_should_not_fixtures(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -63,7 +60,7 @@ def test_policy_test_runs_should_trigger_and_should_not_fixtures(
         encoding="utf-8",
     )
     (fixtures / "should-not.yaml").write_text(
-        "path: docs/readme.md\nviolation: none\n",
+        "path: README.md\nviolation: none\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -80,7 +77,6 @@ def test_policy_test_runs_should_trigger_and_should_not_fixtures(
     assert "pass" in output or "trigger" in output
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_policy_explain_names_the_source_of_each_effective_rule(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -107,3 +103,30 @@ def test_policy_explain_names_the_source_of_each_effective_rule(
     output = result.stdout.lower()
     assert "should-trigger" in output
     assert "source" in output or "layer" in output or "org" in output or "repo" in output
+
+
+def test_policy_lint_validates_exceptions_yaml(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``policy lint`` validates ``exceptions.yaml`` when present."""
+    _write_policy_tree(tmp_path, POLICY_LINT_FIXTURES)
+    policy_dir = tmp_path / ".mergecraft" / "policy"
+    (policy_dir / "exceptions.yaml").write_text(
+        """exceptions:
+  - id: temp-waiver
+    rule_id: no-hardcoded-secrets
+    reason: emergency hotfix with tracked follow-up
+    approver: security-lead
+    scope:
+      path: "src/legacy/**"
+    expires_at: "2099-12-31T23:59:59Z"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["policy", "lint"])
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "exception" in result.stdout.lower()

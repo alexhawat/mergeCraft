@@ -11,7 +11,6 @@ import pytest
 from tests.policy.conftest import MALFORMED_RULE_YAML, UNKNOWN_KEY_RULE_YAML, VALID_RULE_YAML
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_rule_requires_id_owner_version_rationale_severity() -> None:
     """Every rule carries id, owner, version, rationale, and severity."""
     from mergecraft.policy.schema import PolicyConfigError, parse_rule
@@ -28,10 +27,25 @@ def test_rule_requires_id_owner_version_rationale_severity() -> None:
         parse_rule(MALFORMED_RULE_YAML)
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_unknown_key_is_a_config_error() -> None:
     """Unknown keys in a rule document fail closed as a config error."""
     from mergecraft.policy.schema import PolicyConfigError, parse_rule
 
     with pytest.raises(PolicyConfigError, match=r"unknown|unexpected|extra"):
         parse_rule(UNKNOWN_KEY_RULE_YAML)
+
+
+def test_invalid_severity_is_a_config_error() -> None:
+    """Severity typos fail closed at lint time against ``FINDING_SEVERITIES``."""
+    from mergecraft.policy.schema import PolicyConfigError, parse_rule
+
+    invalid = """
+id: bad-severity
+owner: platform
+version: 1
+rationale: Typos must not pass lint.
+severity: Catastrophic
+enforcement: advisory
+"""
+    with pytest.raises(PolicyConfigError, match=r"severity|Catastrophic"):
+        parse_rule(invalid)

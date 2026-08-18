@@ -6,12 +6,9 @@ Implementation: **DG5.2** — org/repo/branch/path/language scope resolution.
 
 from __future__ import annotations
 
-import pytest
-
 from tests.policy.conftest import ORG_RULE_YAML, PATH_RULE_YAML, REPO_RULE_YAML
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_org_repo_branch_path_language_scopes_resolve_deterministically() -> None:
     """The same scope inputs always yield the same effective rule ordering."""
     from mergecraft.policy.schema import parse_rule
@@ -37,7 +34,6 @@ def test_org_repo_branch_path_language_scopes_resolve_deterministically() -> Non
     assert {rule.id for rule in first} >= {"org-baseline", "repo-override", "path-specific"}
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_inheritance_org_then_repo_then_path() -> None:
     """Org baseline applies first; repo and path layers override in order."""
     from mergecraft.policy.schema import parse_rule
@@ -62,3 +58,50 @@ def test_inheritance_org_then_repo_then_path() -> None:
     assert layers.index("org") < layers.index("repo") < layers.index("path")
     path_rule = next(entry for entry in effective if entry.rule.id == "path-specific")
     assert path_rule.rule.enforcement == "blocking"
+
+
+def test_deeper_scope_overrides_same_id_at_shallower_layer() -> None:
+    """Path-scoped rules supersede org/repo rules that share the same id."""
+    from mergecraft.policy.schema import parse_rule
+    from mergecraft.policy.scoping import ScopeContext, resolve_effective_rules
+
+    org_rule = parse_rule(
+        """
+id: shared-rule
+owner: org-platform
+version: 1
+rationale: Org default.
+severity: Minor
+enforcement: advisory
+scope:
+  org: acme-corp
+"""
+    )
+    path_rule = parse_rule(
+        """
+id: shared-rule
+owner: team-alpha
+version: 2
+rationale: Path override.
+severity: Critical
+enforcement: blocking
+scope:
+  org: acme-corp
+  repo: payments-api
+  path: "src/handlers/**"
+"""
+    )
+    context = ScopeContext(
+        org="acme-corp",
+        repo="payments-api",
+        branch="main",
+        path="src/handlers/pay.py",
+        language="python",
+    )
+
+    effective = resolve_effective_rules([org_rule, path_rule], context=context)
+
+    assert len(effective) == 1
+    assert effective[0].rule.id == "shared-rule"
+    assert effective[0].source_layer == "path"
+    assert effective[0].rule.enforcement == "blocking"

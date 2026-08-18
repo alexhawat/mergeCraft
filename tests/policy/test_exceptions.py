@@ -13,7 +13,6 @@ import pytest
 from tests.policy.conftest import ACTIVE_EXCEPTION_YAML, EXPIRED_EXCEPTION_YAML
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_exception_requires_reason_approver_scope_and_expiry() -> None:
     """Waivers must carry reason, approver, scope, and an expiry timestamp."""
     from mergecraft.policy.exceptions import PolicyConfigError, parse_exception
@@ -33,7 +32,6 @@ rule_id: no-hardcoded-secrets
         parse_exception(incomplete)
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_expired_exception_stops_applying() -> None:
     """An expired waiver no longer suppresses its scoped rule."""
     from mergecraft.policy.exceptions import exception_applies, parse_exception

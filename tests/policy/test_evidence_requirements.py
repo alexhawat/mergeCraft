@@ -6,12 +6,9 @@ Implementation: **DG5.2** — required evidence with fail-closed evaluation.
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.run_outcome import RunOutcome
 
 
-@pytest.mark.xfail(reason="green after DG5.2", strict=False)
 def test_missing_required_evidence_yields_inconclusive() -> None:
     """A rule whose required evidence is unavailable never silently passes."""
     from mergecraft.policy.evidence import evaluate_rule_evidence
