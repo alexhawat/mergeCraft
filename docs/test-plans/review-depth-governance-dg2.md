@@ -95,5 +95,5 @@ collection stays clean before implementation lands.
 
 ## Status
 
-DG2.1 RED suite authored 2026-08-18. Awaiting DG2.2 implementation and xfail
-reconciliation.
+DG2.1 RED suite committed 2026-08-18 @ `015d9d9` — 11 collected, 1 pass, 10 xfail.
+Awaiting DG2.2 implementation and xfail reconciliation.
