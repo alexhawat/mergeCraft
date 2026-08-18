@@ -223,39 +223,18 @@ class SubmissionValidation:
     rejection_reason: str | None
 
 
-def _agent_finding_to_finding(item: Any) -> Any:
-    from mergecraft.agents.verifier import AgentFinding
-    from mergecraft.analyzers.finding import make_finding
-
-    if isinstance(item, AgentFinding):
-        draft = item
-    elif isinstance(item, dict):
-        draft = AgentFinding.model_validate(item)
-    else:
-        msg = "each finding must be an object"
-        raise ValueError(msg)
-    return make_finding(
-        tool="agent",
-        rule_id="agent:terminal",
-        category="Functional Correctness",
-        severity=draft.severity,
-        confidence="likely",
-        message=draft.body,
-        path=draft.path,
-        start_line=int(draft.line or 1),
-        end_line=int(draft.line or 1),
-        source="agent",
-    )
-
-
 def _apply_terminal_precision(findings: list[Any]) -> list[Any]:
     """Normalize terminal findings through the DG1 precision pipeline."""
     from mergecraft.agents.verifier import AgentFinding
+    from mergecraft.findings.agent_adapter import agent_finding_to_finding, coerce_agent_finding
     from mergecraft.findings.precision_pipeline import apply_precision_pipeline
 
     if not findings:
         return []
-    as_findings = [_agent_finding_to_finding(item) for item in findings]
+    as_findings = [
+        agent_finding_to_finding(coerce_agent_finding(item), rule_id="agent:terminal")
+        for item in findings
+    ]
     refined = apply_precision_pipeline(as_findings, dedupe=False)
     normalized: list[Any] = []
     for draft, finding in zip(findings, refined, strict=True):
@@ -428,7 +407,10 @@ def validate_submission(submission: dict[str, Any], *, state: Any) -> Submission
                 continue
             if hasattr(coerced, "introduced_by_pr"):
                 coerced = apply_causality_policy(coerced)
-            severity = coerced.severity if hasattr(coerced, "severity") else coerced.get("severity")
+            if isinstance(coerced, dict):
+                severity = coerced.get("severity")
+            else:
+                severity = getattr(coerced, "severity", None)
             if severity in BLOCKING_SEVERITIES:
                 return SubmissionValidation(
                     accepted=False,

@@ -16,13 +16,18 @@ def apply_precision_pipeline(
     findings: list[Finding],
     *,
     dedupe: bool = True,
+    enforce_causality: bool = False,
 ) -> list[Finding]:
     """Run DG1 precision transforms before publication or scoring."""
+    from mergecraft.findings.causality import validate_blocking_finding
+
     refined = dedupe_findings(findings) if dedupe else list(findings)
     adjusted: list[Finding] = []
     for finding in refined:
         finding = apply_severity_rubric(finding)
         finding = apply_causality_policy(finding)
+        if enforce_causality:
+            validate_blocking_finding(finding)
         adjusted.append(finding)
     return adjusted
 
