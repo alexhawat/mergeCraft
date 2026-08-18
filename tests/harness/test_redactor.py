@@ -22,10 +22,11 @@ def test_redacts_github_tokens_and_secret_like_values() -> None:
 
 
 def test_redacts_sensitive_request_fields_before_fixture_write() -> None:
-    source = inspect.getsource(recorder_module._sanitize)
-    assert "redact_secrets" in source or "redact_attrs" in inspect.getsource(
-        recorder_module.write_record
-    )
+    from tests.support.provider_harness import redaction as redaction_module
+
+    source = inspect.getsource(redaction_module.sanitize_value)
+    assert "redact_secrets" in source
+    assert "redact_attrs" in source
 
 
 def test_recording_requires_explicit_local_opt_in(monkeypatch) -> None:
