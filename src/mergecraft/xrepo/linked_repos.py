@@ -7,6 +7,7 @@ from pathlib import Path  # noqa: TC003 — used at runtime for manifest I/O
 
 import yaml
 
+from mergecraft.utils.bounded_text import read_bounded_text, resolve_path_under_root
 from mergecraft.utils.fence import Fence, render_untrusted
 
 
@@ -108,11 +109,15 @@ def load_linked_repo_content(
     if root is None:
         msg = f"no checkout root for linked repo {repo!r}"
         raise FileNotFoundError(msg)
-    target = root / relative_path
+    target = resolve_path_under_root(root, relative_path)
     if not target.is_file():
         msg = f"linked repo content not found: {target}"
         raise FileNotFoundError(msg)
-    return target.read_text(encoding="utf-8")
+    content = read_bounded_text(target)
+    if content is None:
+        msg = f"linked repo content unreadable: {target}"
+        raise FileNotFoundError(msg)
+    return content
 
 
 def render_linked_repo_context(
@@ -124,11 +129,12 @@ def render_linked_repo_context(
 ) -> str:
     """Render linked-repo content through the W4 fence as untrusted data."""
     fence = Fence()
+    cited = f"### `{repo}` @ {commit}\n\n{content.strip()}"
     return render_untrusted(
-        content,
+        cited,
         author=author,
         tier="untrusted",
-        label="linked_repo_content",
+        label=f"linked_repo_content:{repo}@{commit}",
         nonce=fence.nonce,
     )
 

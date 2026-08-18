@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
+from mergecraft.utils.bounded_text import read_bounded_text
+
 Backend = Literal["tree_sitter", "generic"]
 Fidelity = Literal["full", "reduced"]
 
@@ -57,7 +59,17 @@ def index_symbols(
             return cast("SymbolIndexResult", cached)
 
     if source is None:
-        source = (repo_root / rel_path).read_text(encoding="utf-8")
+        source = read_bounded_text(repo_root / rel_path)
+        if source is None:
+            result = SymbolIndexResult(
+                symbols=(),
+                backend="generic",
+                fidelity="reduced",
+                fidelity_note="source file unreadable, symlink, or exceeds size bound",
+            )
+            if cache is not None:
+                cache.set(blob_sha, result)
+            return result
     suffix = Path(rel_path).suffix.casefold()
     if suffix in _TREE_SITTER_SUFFIXES:
         result = _index_with_tree_sitter(source)

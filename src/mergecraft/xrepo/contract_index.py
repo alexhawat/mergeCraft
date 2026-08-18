@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 — used at runtime for contract traversal
 
+from mergecraft.utils.bounded_text import iter_indexable_files, read_bounded_text
+
 
 @dataclass(frozen=True, slots=True)
 class ContractSurface:
@@ -43,9 +45,15 @@ def _rel(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
+def _read_contract_text(path: Path) -> str | None:
+    return read_bounded_text(path)
+
+
 def _index_openapi(path: Path, *, root: Path, commit_sha: str) -> list[ContractSurface]:
     rel = _rel(path, root)
-    text = path.read_text(encoding="utf-8")
+    text = _read_contract_text(path)
+    if text is None:
+        return []
     symbols = _OPERATION_ID_RE.findall(text)
     if symbols:
         return [
@@ -57,7 +65,9 @@ def _index_openapi(path: Path, *, root: Path, commit_sha: str) -> list[ContractS
 
 def _index_graphql(path: Path, *, root: Path, commit_sha: str) -> list[ContractSurface]:
     rel = _rel(path, root)
-    text = path.read_text(encoding="utf-8")
+    text = _read_contract_text(path)
+    if text is None:
+        return []
     symbols = _GRAPHQL_TYPE_RE.findall(text)
     if symbols:
         return [
@@ -69,7 +79,9 @@ def _index_graphql(path: Path, *, root: Path, commit_sha: str) -> list[ContractS
 
 def _index_protobuf(path: Path, *, root: Path, commit_sha: str) -> list[ContractSurface]:
     rel = _rel(path, root)
-    text = path.read_text(encoding="utf-8")
+    text = _read_contract_text(path)
+    if text is None:
+        return []
     symbols = _PROTO_SERVICE_RE.findall(text)
     if symbols:
         return [
@@ -81,7 +93,9 @@ def _index_protobuf(path: Path, *, root: Path, commit_sha: str) -> list[Contract
 
 def _index_exports(path: Path, *, root: Path, commit_sha: str) -> list[ContractSurface]:
     rel = _rel(path, root)
-    text = path.read_text(encoding="utf-8")
+    text = _read_contract_text(path)
+    if text is None:
+        return []
     symbols: list[str] = []
     try:
         tree = ast.parse(text)
@@ -111,9 +125,7 @@ def index_contracts(*, repo_root: Path, commit_sha: str) -> ContractIndex:
     protobuf: list[ContractSurface] = []
     exports: list[ContractSurface] = []
 
-    for path in sorted(repo_root.rglob("*")):
-        if not path.is_file():
-            continue
+    for path in iter_indexable_files(repo_root):
         name = path.name.lower()
         if name in _OPENAPI_GLOBS:
             openapi.extend(_index_openapi(path, root=repo_root, commit_sha=commit_sha))
