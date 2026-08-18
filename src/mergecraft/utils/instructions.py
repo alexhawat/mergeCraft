@@ -639,7 +639,7 @@ Trust the tools — do not repeatedly verify after successful operations. Except
                 for text, weight in load_weighted_active_memories(learnings_text=raw)
                 if weight > 0.0
             }
-            if weighted_texts:
+            if active_entries:
                 filtered_entries: list[dict[str, Any]] = []
                 for entry in active_entries:
                     body_lines: list[str] = []

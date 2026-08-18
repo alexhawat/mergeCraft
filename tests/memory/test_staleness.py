@@ -110,3 +110,41 @@ def test_provenanced_bullets_expire_after_ttl(tmp_path: Path) -> None:
     weighted = load_weighted_active_memories(learnings_text=text, now=now, ttl_days=365)
 
     assert weighted == []
+
+
+def test_expired_provenanced_bullets_drop_from_assembled_prompt(tmp_path: Path) -> None:
+    """Instructions assembly must filter TTL-expired bullets even when none survive weighting."""
+    from mergecraft.config.settings import RepoInfo
+    from mergecraft.modes import Mode
+    from mergecraft.utils.instructions import resolve_instructions
+    from mergecraft.utils.learnings import LearningProvenance
+
+    provenance = LearningProvenance(
+        run_id="run-old",
+        pr_number=1,
+        source_field="learnings_md",
+        author_login="alice",
+        author_association="MEMBER",
+        trust_tier="trusted",
+        timestamp=days_ago(400),
+    )
+    learnings = tmp_path / "learnings.md"
+    learnings.write_text(
+        f"# Learnings\n\n## Active\n\n{provenance.render_comment()}\n- expired provenanced note\n",
+        encoding="utf-8",
+    )
+
+    resolved = resolve_instructions(
+        payload={
+            "~mergecraft": True,
+            "prompt": "review this",
+            "shell": "restricted",
+            "event": {"trigger": "pull_request_opened", "title": "PR", "is_pr": True},
+        },
+        repo=RepoInfo(owner="acme", name="widgets", data={"default_branch": "main"}),
+        modes=[Mode(name="Review", description="Review", prompt="do")],
+        agent_id="claude",
+        learnings_file_path=str(learnings),
+    )
+
+    assert "expired provenanced note" not in resolved.full
