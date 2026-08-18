@@ -7,6 +7,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
+from mergecraft.analyzers.baseline_suppression import (
+    log_suppression_audit,
+    should_run_baseline_suppression,
+    suppress_baseline_findings,
+)
 from mergecraft.analyzers.budget import default_inline_budget, place_findings
 from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding
@@ -14,8 +19,11 @@ from mergecraft.analyzers.lockfile import lock_digest
 from mergecraft.analyzers.registry import detect_enabled
 from mergecraft.analyzers.review_gate import filter_for_review
 from mergecraft.analyzers.scope import (
+    DiffScope,
     annotate_introduced_by_pr,
     base_comparison_available,
+    introduced_by_base_diff,
+    parse_diff_scope,
     scope_findings,
     suppress_withdrawn_findings,
 )
@@ -28,6 +36,7 @@ from mergecraft.analyzers.trust import (
     resolve_selection_tier,
 )
 from mergecraft.config import load_repo_settings
+from mergecraft.findings.dedup import dedupe_findings
 from mergecraft.mcp.review import format_analyzer_inline_body
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow
 
@@ -35,6 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from mergecraft.analyzers.manifest import AnalyzerManifest
     from mergecraft.config.settings import AnalyzersSettings
 
 TrustTier = Literal["trusted", "untrusted"]
@@ -95,6 +105,72 @@ def _build_pre_merge_summary(
         parts.append(f"{len(skipped)} skipped ({reasons})")
     parts.append(f"lock {lockfile_digest_value}")
     return "; ".join(parts)
+
+
+def _apply_baseline_suppression(
+    scoped: list[Finding],
+    *,
+    repo_root: Path,
+    manifests: list[AnalyzerManifest],
+    changed_files: list[str],
+    diff_text: str,
+    base_comparison: str,
+    tier: TrustTier,
+    base_ref: str | None,
+    offline: bool,
+    allow_repo_binaries: bool,
+    base_run_performed: bool,
+    diff_scope: DiffScope | None = None,
+    head_succeeded_manifest_ids: frozenset[str] | None = None,
+) -> list[Finding]:
+    """Annotate ``introduced_by_pr`` and run base-vs-head suppression when eligible."""
+    if not should_run_baseline_suppression(
+        diff_text=diff_text,
+        base_comparison=base_comparison,
+    ):
+        return annotate_introduced_by_pr(scoped, base_run_performed=base_run_performed)
+
+    from mergecraft.analyzers.baseline_suppression import collect_base_analyzer_findings
+
+    collection = collect_base_analyzer_findings(
+        repo_root=repo_root,
+        manifests=manifests,
+        changed_files=changed_files,
+        head_findings=scoped,
+        tier=tier,
+        base_ref=base_ref,
+        offline=offline,
+        allow_repo_binaries=allow_repo_binaries,
+    )
+    expected = (
+        head_succeeded_manifest_ids
+        if head_succeeded_manifest_ids is not None
+        else collection.succeeded_manifest_ids
+    )
+    if not collection.collected or collection.succeeded_manifest_ids != expected:
+        logger.info(
+            "baseline suppression: base collection incomplete "
+            "(head={} base={}) — leaving introduced_by_pr unknown",
+            sorted(expected),
+            sorted(collection.succeeded_manifest_ids),
+        )
+        return annotate_introduced_by_pr(scoped, base_run_performed=base_run_performed)
+
+    scoped = introduced_by_base_diff(scoped, collection.findings)
+    suppression = suppress_baseline_findings(
+        head_findings=scoped,
+        base_findings=collection.findings,
+        diff_text=diff_text,
+        base_comparison=base_comparison,
+        scope=diff_scope,
+    )
+    log_suppression_audit(suppression.audit_trail)
+    logger.info(
+        "baseline suppression: reported={} suppressed={}",
+        len(suppression.reported),
+        len(suppression.suppressed),
+    )
+    return suppression.reported
 
 
 def run_analyzer_pipeline(
@@ -171,6 +247,7 @@ def run_analyzer_pipeline(
     ) as parent_span:
         rows: list[AnalyzerStatusRow] = []
         raw_findings: list[Finding] = []
+        head_succeeded_manifest_ids: set[str] = set()
 
         from mergecraft.analyzers.adapters import run_adapter
 
@@ -248,6 +325,7 @@ def run_analyzer_pipeline(
 
                 findings_count = len(result.findings)
                 status = "failed" if result.findings else "passed"
+                head_succeeded_manifest_ids.add(manifest.id)
                 rows.append(
                     AnalyzerStatusRow(
                         id=manifest.id,
@@ -263,12 +341,15 @@ def run_analyzer_pipeline(
                 )
 
         learnings_text = _load_learnings(repo_root)
+        diff_scope: DiffScope | None = None
         if diff_text.strip():
+            diff_scope = parse_diff_scope(diff_text)
             scoped = scope_findings(
                 raw_findings,
                 diff_text=diff_text,
                 repo_root=repo_root,
                 learnings_text=learnings_text,
+                scope=diff_scope,
             )
         else:
             scoped = suppress_withdrawn_findings(raw_findings, learnings_text)
@@ -277,9 +358,24 @@ def run_analyzer_pipeline(
             base_comparison=settings.base_comparison,
             offline=offline,
         )
-        scoped = annotate_introduced_by_pr(scoped, base_run_performed=base_run)
+        scoped = _apply_baseline_suppression(
+            scoped,
+            repo_root=repo_root,
+            manifests=manifests,
+            changed_files=changed_files,
+            diff_text=diff_text,
+            base_comparison=settings.base_comparison,
+            tier=tier,
+            base_ref=base_ref,
+            offline=offline,
+            allow_repo_binaries=repo_binaries_allowed,
+            base_run_performed=base_run,
+            diff_scope=diff_scope,
+            head_succeeded_manifest_ids=frozenset(head_succeeded_manifest_ids),
+        )
 
-        clustered = cluster_findings(scoped)
+        # Analyzer path: dedupe only — rubric/causality stay on agent findings.
+        clustered = dedupe_findings(cluster_findings(scoped))
         budget = (
             inline_budget
             if inline_budget is not None

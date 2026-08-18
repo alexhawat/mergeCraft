@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`docs/dev/provider-harness.md`); opt-in sanitized capture under
   `.ignorelocal/provider-harness/records/`.
 - Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews
+- Finding precision pipeline (DG1): deduplicate agent/analyzer findings before publication, apply a code-defined severity rubric at the verifier seam, require structured causality on blocking findings, suppress pre-existing analyzer hits via baseline comparison, and classify generated/minified/vendored paths for review policy
+- DG1 precision corpus gate (`evaluate_dg1_precision_corpus`) proving recall holds while corpus-confirmed precision improves over the pre-DG1 baseline
 - `mergecraft mcp serve` and `mergecraft mcp list` expose the reviewer's MCP tool surface to external clients without widening trust tier or tool-class policy (D13)
 - Named review profiles (`--profile fast|deep|security`) bundle model chain, analyzer focus, and run budgets; explicit CLI flags still win
 - `mergecraft cache info|clear|prune` inspect and maintain the byte-bounded on-disk run cache
