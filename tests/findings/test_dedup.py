@@ -90,3 +90,31 @@ def test_distinct_defects_on_one_line_are_not_merged() -> None:
     deduped = dedupe_findings(findings)
 
     assert len(deduped) == 2
+
+
+def test_same_category_distinct_defects_on_one_line_are_not_merged() -> None:
+    """Same category on one line with different defects stay separate."""
+    from mergecraft.findings.dedup import dedupe_findings
+
+    findings = [
+        make_finding(
+            category="Functional Correctness",
+            rule_id="sql-injection",
+            message="Unsanitized user input reaches SQL query",
+            path="src/db/query.py",
+            start_line=22,
+            end_line=22,
+        ),
+        make_finding(
+            category="Functional Correctness",
+            rule_id="missing-validation",
+            message="Missing validation on SQL query parameters",
+            path="src/db/query.py",
+            start_line=22,
+            end_line=22,
+        ),
+    ]
+
+    deduped = dedupe_findings(findings)
+
+    assert len(deduped) == 2

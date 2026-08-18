@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.finding import make_finding
@@ -43,12 +44,17 @@ _SECURITY_HINTS = frozenset(
 )
 
 
+def _contains_category_hint(text: str, hint: str) -> bool:
+    """Return whether ``hint`` appears as its own token, not a substring."""
+    pattern = rf"(?<![a-z0-9]){re.escape(hint.casefold())}(?![a-z0-9])"
+    return re.search(pattern, text.casefold()) is not None
+
+
 def infer_agent_finding_category(body: str) -> str:
     """Infer a taxonomy category for rubric normalization."""
-    text = body.casefold()
-    if any(hint in text for hint in _SECURITY_HINTS):
+    if any(_contains_category_hint(body, hint) for hint in _SECURITY_HINTS):
         return "Security & Privacy"
-    if any(hint in text for hint in _MAINTENANCE_HINTS):
+    if any(_contains_category_hint(body, hint) for hint in _MAINTENANCE_HINTS):
         return "Maintainability & Code Quality"
     return "Functional Correctness"
 
