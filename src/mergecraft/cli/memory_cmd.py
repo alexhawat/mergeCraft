@@ -11,10 +11,13 @@ import typer
 from loguru import logger
 from rich.console import Console
 
+from mergecraft.utils.learnings import repo_memory_paths
 from mergecraft.utils.memory import (
+    FeedbackOutcome,
     export_memory_bundle,
     import_memory_bundle,
     parse_memory_entries_from_learnings,
+    record_finding_feedback,
     remove_memory_entry_from_learnings,
 )
 
@@ -123,6 +126,55 @@ def forget_cmd(
     text = path.read_text(encoding="utf-8")
     path.write_text(remove_memory_entry_from_learnings(text, memory_id), encoding="utf-8")
     typer.echo(f"forgot {memory_id}")
+    sys.stdout.flush()
+
+
+@app.command("feedback")
+def feedback_cmd(
+    fingerprint: str,
+    outcome: FeedbackOutcome = typer.Option(
+        ...,
+        "--outcome",
+        "-o",
+        help="Developer feedback outcome for the finding fingerprint.",
+    ),
+    reason: str = typer.Option(..., "--reason", "-r", help="Why this outcome was recorded."),
+    pr_number: int | None = typer.Option(None, "--pr", help="Pull request number, when known."),
+    repo: Path = typer.Option(
+        Path("."),
+        "--repo",
+        help="Repository whose feedback ledger should be updated.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Record accepted / dismissed / disputed feedback for a finding fingerprint."""
+    feedback_path, _ = repo_memory_paths(repo)
+    record = record_finding_feedback(
+        store_path=feedback_path,
+        fingerprint=fingerprint,
+        outcome=outcome,
+        reason=reason,
+        pr_number=pr_number,
+    )
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "fingerprint": record.fingerprint,
+                    "outcome": record.outcome.value,
+                    "reason": record.reason,
+                    "pr_number": record.pr_number,
+                    "recorded_at": record.recorded_at.astimezone().isoformat(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        typer.echo(f"recorded {record.outcome.value} for {record.fingerprint}")
     sys.stdout.flush()
 
 

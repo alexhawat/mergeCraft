@@ -15,6 +15,8 @@ from mergecraft.findings.precision_pipeline import apply_precision_pipeline
 from mergecraft.findings.severity_rubric import infer_category_from_message
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from mergecraft.agents.verifier import AgentFinding
     from mergecraft.analyzers.finding import Finding
 
@@ -80,10 +82,11 @@ def _apply_row_level_precision(
     drafts: list[AgentFinding],
     *,
     rule_id: str,
+    repo_root: Path | None = None,
 ) -> list[Finding]:
     """Run rubric and causality per row without changing list cardinality."""
     converted = [agent_finding_to_finding(draft, rule_id=rule_id) for draft in drafts]
-    return apply_precision_pipeline(converted, dedupe=False)
+    return apply_precision_pipeline(converted, dedupe=False, repo_root=repo_root)
 
 
 def normalize_agent_findings_via_pipeline(
@@ -91,6 +94,7 @@ def normalize_agent_findings_via_pipeline(
     *,
     rule_id: str,
     dedupe: bool = False,
+    repo_root: Path | None = None,
 ) -> list[Any]:
     """Run the DG1 precision pipeline and map severities back onto agent rows."""
     from mergecraft.agents.verifier import AgentFinding
@@ -99,7 +103,7 @@ def normalize_agent_findings_via_pipeline(
         return []
 
     drafts = [coerce_agent_finding(item) for item in findings]
-    refined = _apply_row_level_precision(drafts, rule_id=rule_id)
+    refined = _apply_row_level_precision(drafts, rule_id=rule_id, repo_root=repo_root)
 
     if dedupe:
         dedupe_result = dedupe_findings_with_indices(refined)

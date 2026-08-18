@@ -332,8 +332,6 @@ def _match_when(*, when: str, path: str, repo_root: Path) -> bool:
     if lowered.startswith("path ends with "):
         suffix = lowered.removeprefix("path ends with ").strip()
         return norm_path.endswith(suffix)
-    if lowered.startswith("condition-"):
-        return False
     try:
         rel = str(Path(norm_path).resolve().relative_to(repo_root.resolve()))
     except ValueError:
@@ -501,6 +499,40 @@ def parse_memory_entries_from_learnings(text: str) -> list[dict[str, str]]:
     return entries
 
 
+def _remove_bullet_lines(lines: list[str], memory_id: str) -> list[str]:
+    """Drop bullet lines matching ``memory_id`` and orphaned provenance comments."""
+    from mergecraft.utils.learnings import parse_provenance_comment
+
+    kept: list[str] = []
+    pending_provenance: str | None = None
+    for line in lines:
+        stripped = line.strip()
+        prov = parse_provenance_comment(line)
+        if prov is not None:
+            pending_provenance = line
+            continue
+        bullet = stripped.lstrip("-* ").strip() if stripped else ""
+        if bullet and memory_entry_id(bullet) == memory_id:
+            pending_provenance = None
+            continue
+        if pending_provenance is not None:
+            kept.append(pending_provenance)
+            pending_provenance = None
+        kept.append(line)
+    return kept
+
+
+def _has_sectioned_learnings_layout(text: str) -> bool:
+    from mergecraft.utils.learnings import ACTIVE_SECTION_HEADING, STAGING_SECTION_HEADING
+
+    lowered_targets = {ACTIVE_SECTION_HEADING.lower(), STAGING_SECTION_HEADING.lower()}
+    for line in text.splitlines():
+        match = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
+        if match and match.group(2).strip().lower() in lowered_targets:
+            return True
+    return False
+
+
 def remove_memory_entry_from_learnings(text: str, memory_id: str) -> str:
     """Remove the active-section bullet whose id matches ``memory_id``."""
     from mergecraft.utils.learnings import (
@@ -509,18 +541,12 @@ def remove_memory_entry_from_learnings(text: str, memory_id: str) -> str:
         split_learnings_by_section,
     )
 
+    if not _has_sectioned_learnings_layout(text):
+        kept = _remove_bullet_lines(text.splitlines(), memory_id)
+        return "\n".join(kept).rstrip() + ("\n" if text.endswith("\n") else "")
+
     prefix, active_body, staging_body = split_learnings_by_section(text)
-    kept_lines: list[str] = []
-    for line in active_body.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            kept_lines.append(line)
-            continue
-        bullet = stripped.lstrip("-* ").strip()
-        if bullet and memory_entry_id(bullet) == memory_id:
-            continue
-        kept_lines.append(line)
-    new_active = "\n".join(kept_lines).strip()
+    new_active = "\n".join(_remove_bullet_lines(active_body.splitlines(), memory_id)).strip()
     seed = prefix.rstrip() or "# Learnings"
     staging_part = staging_body.strip()
     return (

@@ -268,6 +268,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
             findings,
             rule_id="agent:draft",
             dedupe=True,
+            repo_root=repo_root,
         )
         stored: dict[str, dict[str, Any]] = {}
         for item in ctx.tool_state.agent_findings:

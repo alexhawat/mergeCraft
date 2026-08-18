@@ -632,6 +632,7 @@ of them for its full flag set):
 | `mergecraft mcp list` | Print the resolved MCP tool names for a role. |
 | `mergecraft mcp serve` | Start the MCP HTTP server for a resolved workspace and role. |
 | `mergecraft memory export --output OUTPUT` | Export repo memory to a JSON bundle. |
+| `mergecraft memory feedback` | Record accepted / dismissed / disputed feedback for a finding fingerprint. |
 | `mergecraft memory forget` | Remove one active memory entry. |
 | `mergecraft memory import <bundle-path>` | Import a memory export bundle into a repository. |
 | `mergecraft memory list` | List active memory entries for a repository. |
