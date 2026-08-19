@@ -17,19 +17,31 @@ from mergecraft.mcp.tool_state import primary_repo_state
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
-_SUBCOMMAND_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+# Read-only subcommand allowlist — everything else is rejected (#257 / D7).
+_READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
+    {
+        "status",
+        "log",
+        "diff",
+        "show",
+        "rev-parse",
+        "describe",
+        "ls-files",
+        "blame",
+        "cat-file",
+        "rev-list",
+        "branch",
+    }
+)
 _AUTH_REQUIRED = {
     "push": "use push_branch instead",
     "fetch": "use git_fetch instead",
     "pull": "use git_fetch then git merge",
     "clone": "use checkout_repo / checkout_pr",
 }
-_NOSHELL_BLOCKED = {
-    "clean": "git clean is blocked when shell is disabled",
-    "filter-branch": "git filter-branch is blocked when shell is disabled",
-    "filter-repo": "git filter-repo is blocked when shell is disabled",
-}
-_NOSHELL_BLOCKED_ARGS = ("--exec", "-c", "--config-env", "--upload-pack", "--receive-pack")
+# Flags that enable arbitrary code execution via git alias expansion.
+# Rejected unconditionally regardless of payload.shell (#257 / D7).
+_CONFIG_FLAGS: tuple[str, ...] = ("-c", "--config-env")
 _SYMBOLIC_REFS = frozenset({"HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"})
 _BAD_REF_CHARS = re.compile(r"[:+^~?*[\\\s]")
 
@@ -64,6 +76,54 @@ def validate_tag_name(tag: str) -> None:
         raise ValueError(msg)
 
 
+def _reject_config_flags(tokens: list[str]) -> None:
+    """Raise ValueError if any token is a -c / --config-env flag (#257 / D7).
+
+    These flags let an agent inject an alias-expansion shell command regardless
+    of payload.shell.  Rejection is unconditional — there is no safe-key
+    allowlist for -c.
+    """
+    for tok in tokens:
+        if tok in _CONFIG_FLAGS or any(tok.startswith(f"{f}=") for f in _CONFIG_FLAGS):
+            msg = f"Blocked: '{tok}' can execute arbitrary code via git alias expansion."
+            raise ValueError(msg)
+
+
+def _confine_to_repo_root(value: str, flag: str, resolved_root: str) -> None:
+    """Raise ValueError when *value* resolves outside the primary repo root (#257 / D7)."""
+    resolved = str(Path(value).resolve())
+    if not (resolved == resolved_root or resolved.startswith(resolved_root + os.sep)):
+        msg = f"Blocked: '{flag}' '{value}' must be within the primary repo root."
+        raise ValueError(msg)
+
+
+def _validate_path_confinement(global_opts: list[str], resolved_root: str) -> None:
+    """Walk *global_opts* and confine -C / --git-dir / --work-tree to resolved_root."""
+    idx = 0
+    while idx < len(global_opts):
+        tok = global_opts[idx]
+        if tok == "-C":
+            if idx + 1 < len(global_opts):
+                _confine_to_repo_root(global_opts[idx + 1], "-C", resolved_root)
+            idx += 2
+        elif tok == "--git-dir":
+            if idx + 1 < len(global_opts):
+                _confine_to_repo_root(global_opts[idx + 1], "--git-dir", resolved_root)
+            idx += 2
+        elif tok.startswith("--git-dir="):
+            _confine_to_repo_root(tok[len("--git-dir=") :], "--git-dir", resolved_root)
+            idx += 1
+        elif tok == "--work-tree":
+            if idx + 1 < len(global_opts):
+                _confine_to_repo_root(global_opts[idx + 1], "--work-tree", resolved_root)
+            idx += 2
+        elif tok.startswith("--work-tree="):
+            _confine_to_repo_root(tok[len("--work-tree=") :], "--work-tree", resolved_root)
+            idx += 1
+        else:
+            idx += 1
+
+
 def _run_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -87,14 +147,15 @@ def _git_env(token: str) -> dict[str, str]:
     return git_env_for_token(token)
 
 
-# Git global options that may precede the subcommand. `-C`/`-c` take a
-# separate argument; the `--git-dir`/`--work-tree`/`--namespace` family may
-# be spelled as `--flag value` or `--flag=value`.
-_GLOBAL_OPTS = ("-C", "-c", "--git-dir", "--work-tree", "--namespace")
+# Git global options that may precede the subcommand. `-C` takes a separate
+# argument; the `--git-dir`/`--work-tree`/`--namespace` family may be spelled
+# as `--flag value` or `--flag=value`. `-c`/`--config-env` are intentionally
+# excluded: they are rejected unconditionally (alias-execution vector).
+_GLOBAL_OPTS = ("-C", "--git-dir", "--work-tree", "--namespace")
 _GLOBAL_OPT_RE = re.compile(r"^--(?:git-dir|work-tree|namespace)(?:=.*)?$")
 
 # Tokens that take a separate value argument rather than an inline `=value`.
-_GLOBAL_OPT_TAKES_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace")
+_GLOBAL_OPT_TAKES_VALUE = ("-C", "--git-dir", "--work-tree", "--namespace")
 
 
 def _extract_global_opts(
@@ -102,7 +163,7 @@ def _extract_global_opts(
 ) -> tuple[str, list[str], list[str]]:
     """Pull global git options out of command tokens + args, placing them first.
 
-    git requires global options (``-C``/``-c``/``--git-dir``/``--work-tree``/
+    git requires global options (``-C``/``--git-dir``/``--work-tree``/
     ``--namespace``) before the subcommand, but the reviewing agent may emit
     them anywhere (e.g. ``command="status"`` with ``args=["-C", dir]`` or
     ``command="git -C dir status"``). Extract them regardless of position,
@@ -110,6 +171,10 @@ def _extract_global_opts(
     return the real subcommand plus the remaining positional args. The
     subcommand is validated separately so these options are forwarded rather
     than rejected as an "invalid subcommand".
+
+    ``-c`` / ``--config-env`` are intentionally excluded from extraction —
+    they are rejected unconditionally by ``_reject_config_flags`` before
+    reaching ``_run_git``.
     """
     tokens: list[str] = list(cmd_tokens)
     tokens.extend(args)
@@ -168,22 +233,26 @@ def git_tool(ctx: ToolContext):
             # Agent redundantly repeated the subcommand as the first arg; honor
             # the call rather than rejecting it.
             args.pop(0)
-        if not command or not _SUBCOMMAND_RE.fullmatch(command):
+        # Unconditional: -c / --config-env are alias-execution vectors (#257 / D7).
+        # Scan global_opts (defensive) and args (the live path after -c removal from
+        # _GLOBAL_OPTS).
+        _reject_config_flags(global_opts)
+        _reject_config_flags(args)
+        # Read-only allowlist: replace the old format-only _SUBCOMMAND_RE (#257 / D7).
+        if not command or command not in _READONLY_SUBCOMMANDS:
             msg = f"invalid git subcommand: {command!r}"
+            raise ValueError(msg)
+        # 'branch' is on the allowlist for read-only use; reject mutation flags.
+        if command == "branch" and any(a in {"-D", "-d", "-m"} for a in args):
+            msg = "Blocked: 'branch' mutation flags (-D/-d/-m) are not permitted on the reviewer surface."
             raise ValueError(msg)
         cwd = primary_repo_state(ctx.tool_state).dir
         redirect = _AUTH_REQUIRED.get(command)
         if redirect:
             msg = f"git {command} is not available through this tool — {redirect}"
             raise RuntimeError(msg)
-        if ctx.payload.shell == "disabled":
-            blocked = _NOSHELL_BLOCKED.get(command)
-            if blocked:
-                raise RuntimeError(blocked)
-            for arg in args:
-                if any(arg == flag or arg.startswith(f"{flag}=") for flag in _NOSHELL_BLOCKED_ARGS):
-                    msg = f"Blocked: '{arg}' flag can execute arbitrary code."
-                    raise RuntimeError(msg)
+        # Confine -C / --git-dir / --work-tree to the primary repo root (#257 / D7).
+        _validate_path_confinement(global_opts, str(Path(cwd).resolve()))
         output = _run_git([*global_opts, command, *args], cwd=cwd)
         if len(output) > 50_000:
             temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir

@@ -141,6 +141,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `mcp/git`: replaced permissive `_SUBCOMMAND_RE` with an explicit read-only allowlist (`status`, `log`, `diff`, `show`, `rev-parse`, `describe`, `ls-files`, `blame`, `cat-file`, `rev-list`, read-only `branch`); `git reset`, `git clean`, `git stash`, and all other mutating subcommands now raise `ValueError` unconditionally (#257)
+- `mcp/git`: `-c` / `--config-env` are now rejected unconditionally regardless of `payload.shell`, closing the `git -c alias.x='!cmd'` arbitrary-shell-execution vector that bypassed the former `shell: disabled` guard (#257)
+- `mcp/git`: `-C`, `--git-dir`, and `--work-tree` are now confined to the resolved primary repo root; any path outside raises `ValueError` with the offending path in the message (#257)
 - Linked-repo reads are grant-gated (D9): a run can only load repos declared in its authorized set; linked-repo and ticket text render through the W4 fence as untrusted data
 - Discovered repo instruction and skill files (`CLAUDE.md`, `AGENTS.md`, `SKILL.md`, `.cursor/rules/*.md`) from an untrusted review source render through the W4 fence as evidence and never enter the instruction bundle
 - CLI offline reviews now derive a trust tier from review-source provenance; cloned or out-of-root paths review at untrusted tier unless the operator passes an explicit `--trust` override

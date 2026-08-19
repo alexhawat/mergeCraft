@@ -116,6 +116,20 @@ reason is recorded on `tool_state.setup_script_skip_reason` and threaded
 into the agent prompt as a `SETUP SCRIPT SKIPPED` section so the agent
 knows the setup did not run.
 
+## MCP git tool — reviewer-surface enforcement (#257 / D7)
+
+The `git` MCP tool (``ToolClass.REPOSITORY_READ``) is on the reviewer surface
+and enforces fail-closed restrictions regardless of ``payload.shell``:
+
+| Guard | What it rejects | Rationale |
+|-------|-----------------|-----------|
+| Read-only allowlist (`_READONLY_SUBCOMMANDS`) | Any subcommand not in `{status, log, diff, show, rev-parse, describe, ls-files, blame, cat-file, rev-list, branch}` — including `reset`, `clean`, `stash`, `update-ref` | The reviewer has no legitimate reason to mutate the tree |
+| `branch` mutation flags | `-D`, `-d`, `-m` args to `branch` | `branch` is allowlisted read-only; deletion / rename are write operations |
+| `-c` / `--config-env` unconditional block | Both flags in `command` string and `args`, regardless of `payload.shell` | `git -c alias.x='!cmd'` expands arbitrary shell even with `shell: disabled`; there is no safe-key allowlist |
+| Path confinement | `-C`, `--git-dir`, `--work-tree` resolving outside `primary_repo_state.dir` | Prevents redirect to an attacker-controlled repo or credentials store |
+
+The `:183-186` shell-disabled guard (`_NOSHELL_BLOCKED` / `_NOSHELL_BLOCKED_ARGS`) was deleted in W2 because every item it covered is now redundant: the three blocked subcommands (`clean`, `filter-branch`, `filter-repo`) are rejected by the allowlist, and `-c`/`--config-env` are rejected unconditionally above.
+
 ## Operator checklist
 
 1. Unknown key on a security/runtime model → fix the typo; the Action will
