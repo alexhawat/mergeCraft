@@ -11,7 +11,7 @@ import os
 import re
 import subprocess
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -104,13 +104,77 @@ def network_namespace_available() -> bool:
     return _detected_netns
 
 
+# Every construct that opens a fresh command position for the shell: the
+# separators (`;`, `&&`, `||`, `|`, newline), command substitution (`$(…)` and
+# backticks), and subshell/group openers. The previous class was `[;&|]`, which
+# omitted the newline — and `bash -c` runs every line of its argument.
+_COMMAND_SEGMENT = re.compile(r"\$\(|[;&|\n\r(){}`]")
+# Commands that take another command as their argument, so git can hide behind
+# them. `env` and the shells matter most: `env git status` and `sh -c 'git …'`
+# both put git at a command position the guard would otherwise not inspect.
+_COMMAND_WRAPPERS = frozenset(
+    {
+        "bash",
+        "builtin",
+        "command",
+        "dash",
+        "doas",
+        "env",
+        "eval",
+        "exec",
+        "ksh",
+        "nice",
+        "nohup",
+        "setsid",
+        "sh",
+        "stdbuf",
+        "sudo",
+        "time",
+        "timeout",
+        "xargs",
+        "zsh",
+    }
+)
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# A wrapper's own numeric argument — `timeout 5 git …`, `nice -n 10 git …`.
+# No command name is bare-numeric, so skipping these costs nothing.
+_NUMERIC_ARG = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+
+
+def _names_git(token: str) -> bool:
+    """Whether ``token`` names the git binary under any path spelling."""
+    stripped = token.strip("\"'")
+    return bool(stripped) and PurePosixPath(stripped).name == "git"
+
+
 def _is_git_command(command: str) -> bool:
-    trimmed = command.strip()
-    if trimmed == "git" or trimmed.startswith("git "):
-        return True
-    if trimmed.startswith("sudo git"):
-        return True
-    return bool(re.search(r"[;&|]\s*(?:sudo\s+)?git(?:\s|$)", trimmed))
+    """Whether ``command`` invokes git anywhere the shell would run it.
+
+    The shell tool must never run git: the #257 alias/config guard and the path
+    confinement live in the dedicated git tools and neither applies to a string
+    handed to ``bash -c``, so a single missed spelling reopens the whole
+    surface (``git -c alias.z='!sh …' z``, ``git clean``, ``filter-branch``).
+
+    Each command position is scanned past leading environment assignments and
+    wrapper commands, then the first real command word decides: git under any
+    path spelling is refused, anything else ends that segment. That keeps
+    ``grep git README`` and ``ls .git`` running while catching ``env git``,
+    ``xargs -n1 git``, ``/usr/bin/git`` and ``$(git …)``.
+
+    Defence in depth, not a shell parser: arbitrarily quoted payloads
+    (``sh -c 'g''it'``) are out of reach of any token scan. The tool allowlist
+    in the git tools remains the primary control.
+    """
+    for segment in _COMMAND_SEGMENT.split(command):
+        for token in segment.split():
+            if _ENV_ASSIGNMENT.match(token) or _NUMERIC_ARG.match(token) or token.startswith("-"):
+                continue
+            if _names_git(token):
+                return True
+            if token.strip("\"'") in _COMMAND_WRAPPERS:
+                continue
+            break
+    return False
 
 
 def _cap_output(output: str, tmpdir: str) -> str:
