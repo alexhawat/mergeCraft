@@ -452,12 +452,14 @@ def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
     # these tools for the primary agent either.
 
 
-def _append_read_only_mcp_network_lines(lines: list[str]) -> None:
+def _append_read_only_mcp_network_lines(
+    root_lines: list[str],
+    table_lines: list[str],
+) -> None:
     profile = CODEX_REVIEW_PERMISSION_PROFILE
-    lines.extend(
+    root_lines.append(f"default_permissions = {_toml_string(profile)}")
+    table_lines.extend(
         [
-            "",
-            f"default_permissions = {_toml_string(profile)}",
             "",
             f"[permissions.{profile}]",
             'extends = ":read-only"',
@@ -494,22 +496,28 @@ def write_mcp_config(
 
     sandbox_mode = _sandbox_mode(ctx)
     use_permission_profiles = _codex_use_permission_profiles(ctx)
-    lines = [
+    # #222 / D17 — TOML scopes a bare key to the most recent table header, so
+    # top-level keys and tables are accumulated in separate lists and the
+    # roots are flushed first. Any root key a branch below adds is top-level
+    # by construction; nobody has to re-derive the call order to keep it
+    # there.
+    root_lines = [
         f"approval_policy = {_toml_string('never' if os.environ.get('CI') == 'true' else 'on-request')}",
         f"experimental_instructions_file = {_toml_string(str(instructions_path))}",
         f"model_reasoning_effort = {_toml_string(_CODEX_MODEL_REASONING_EFFORT)}",
     ]
+    table_lines: list[str] = []
     # W3 / #71 — Codex passthrough for OpenAI-compatible providers. No-op
     # when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set, so the
     # permission-profile / ``sandbox_mode`` branch below is unchanged
     # when this is a no-op (#70 / D5).
-    _append_custom_provider_lines(lines)
+    _append_custom_provider_lines(table_lines)
     if use_permission_profiles:
-        _append_read_only_mcp_network_lines(lines)
+        _append_read_only_mcp_network_lines(root_lines, table_lines)
     else:
-        lines.append(f"sandbox_mode = {_toml_string(sandbox_mode)}")
+        root_lines.append(f"sandbox_mode = {_toml_string(sandbox_mode)}")
         if ctx.mcp_server_url and sandbox_mode == "workspace-write":
-            lines.extend(
+            table_lines.extend(
                 [
                     "",
                     "[sandbox_workspace_write]",
@@ -518,8 +526,9 @@ def write_mcp_config(
             )
 
     if ctx.mcp_server_url:
-        _append_mcp_server_lines(lines, ctx)
+        _append_mcp_server_lines(table_lines, ctx)
 
+    lines = root_lines + table_lines
     config_path = codex_home / "config.toml"
     config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return str(config_path)
