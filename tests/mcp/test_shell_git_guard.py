@@ -81,6 +81,22 @@ BYPASSES = [
     pytest.param("( git status )", id="subshell"),
     pytest.param("timeout 5 git status", id="timeout-wrapper"),
     pytest.param("nohup git push &", id="nohup-wrapper"),
+    # R7: cheap spellings a real shell resolves straight back to git. A leading
+    # backslash only suppresses alias expansion, and each wrapper below ships on
+    # macOS or a GitHub runner.
+    pytest.param("\\git rev-parse HEAD", id="backslash-escaped"),
+    pytest.param("echo x; \\git status", id="separator-then-backslash"),
+    pytest.param("\\/usr/bin/git status", id="backslash-absolute-path"),
+    pytest.param("flock /tmp/lock git push", id="flock-wrapper"),
+    pytest.param("script -q /dev/null git status", id="script-wrapper"),
+    pytest.param("strace -f git status", id="strace-wrapper"),
+    pytest.param("ionice -c3 git gc", id="ionice-wrapper"),
+    pytest.param("unbuffer git log", id="unbuffer-wrapper"),
+    pytest.param("parallel git fetch", id="parallel-wrapper"),
+    pytest.param("watch git status", id="watch-wrapper"),
+    pytest.param("proot -0 git status", id="proot-wrapper"),
+    pytest.param("ssh-agent git push", id="ssh-agent-wrapper"),
+    pytest.param("chronic git fetch", id="chronic-wrapper"),
 ]
 
 # Separator spellings the original class did cover — regression guards, so a

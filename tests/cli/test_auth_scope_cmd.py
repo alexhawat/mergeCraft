@@ -687,6 +687,34 @@ def test_write_env_value_restricts_permissions_on_a_preexisting_file(tmp_path: P
     assert _mode(env_path) == 0o600, oct(_mode(env_path))
 
 
+def test_write_env_value_narrows_the_mode_before_the_secret_lands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R3: chmod must precede the write, not follow it.
+
+    Tightening afterwards still publishes the credential at 0644 for the
+    duration of the write — the exact window the mode fix exists to close. The
+    observed mode is captured from inside ``set_key`` itself.
+    """
+    module = _load_auth_cmd()
+    env_path = tmp_path / ".env"
+    env_path.write_text("EXISTING=1\n", encoding="utf-8")
+    env_path.chmod(0o644)
+
+    observed: list[int] = []
+    real_set_key = module._dotenv_set_key
+
+    def _recording_set_key(path: str, key: str, value: str, **kwargs: object) -> object:
+        observed.append(_mode(env_path))
+        return real_set_key(path, key, value, **kwargs)
+
+    monkeypatch.setattr(module, "_dotenv_set_key", _recording_set_key)
+
+    assert module._write_env_value(env_path, "MERGECRAFT_MODE_WINDOW", "s3cret") is True
+    assert observed == [0o600], [oct(mode) for mode in observed]
+    assert _mode(env_path) == 0o600, oct(_mode(env_path))
+
+
 # ── L9: the .env fallback resolves the repo root, or fails loudly ────────────
 
 

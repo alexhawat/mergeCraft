@@ -20,7 +20,11 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import BackgroundProcess, primary_repo_state
 from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import resolve_env
-from mergecraft.utils.workspace import WorkspacePathError, resolve_allowed_working_directory
+from mergecraft.utils.workspace import (
+    WorkspacePathError,
+    git_repo_root,
+    resolve_allowed_working_directory,
+)
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -116,34 +120,58 @@ _COMMAND_WRAPPERS = frozenset(
     {
         "bash",
         "builtin",
+        "chronic",
         "command",
         "dash",
         "doas",
         "env",
         "eval",
         "exec",
+        "flock",
+        "ionice",
         "ksh",
         "nice",
         "nohup",
+        "parallel",
+        "proot",
+        "script",
         "setsid",
         "sh",
+        "ssh-agent",
         "stdbuf",
+        "strace",
         "sudo",
         "time",
         "timeout",
+        "unbuffer",
+        "watch",
         "xargs",
         "zsh",
     }
 )
+# A wrapper's own path-shaped argument — `flock /tmp/lock git …`,
+# `script -q /dev/null git …`. Without this the lock file ends the segment and
+# the git that follows is never inspected.
+_PATH_ARG = re.compile(r"^/")
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # A wrapper's own numeric argument — `timeout 5 git …`, `nice -n 10 git …`.
 # No command name is bare-numeric, so skipping these costs nothing.
 _NUMERIC_ARG = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 
 
+def _command_word(token: str) -> str:
+    """Strip the quoting and alias-suppressing ``\\`` a shell removes itself.
+
+    A leading backslash only tells the shell "do not expand this as an alias";
+    ``\\git`` still runs git. Quotes are stripped for the same reason: the shell
+    removes them before resolving the command word.
+    """
+    return token.strip("\"'").removeprefix("\\")
+
+
 def _names_git(token: str) -> bool:
     """Whether ``token`` names the git binary under any path spelling."""
-    stripped = token.strip("\"'")
+    stripped = _command_word(token)
     return bool(stripped) and PurePosixPath(stripped).name == "git"
 
 
@@ -162,16 +190,25 @@ def _is_git_command(command: str) -> bool:
     ``xargs -n1 git``, ``/usr/bin/git`` and ``$(git …)``.
 
     Defence in depth, not a shell parser: arbitrarily quoted payloads
-    (``sh -c 'g''it'``) are out of reach of any token scan. The tool allowlist
-    in the git tools remains the primary control.
+    (``sh -c 'g''it'``), variable indirection (``G=git; $G status``) and
+    ``printf 'git …' | sh`` are out of reach of any token scan, and no addition
+    here changes that. The tool allowlist in the git tools remains the primary
+    control; this only raises the cost of the spellings that cost nothing.
     """
     for segment in _COMMAND_SEGMENT.split(command):
+        after_wrapper = False
         for token in segment.split():
             if _ENV_ASSIGNMENT.match(token) or _NUMERIC_ARG.match(token) or token.startswith("-"):
                 continue
             if _names_git(token):
                 return True
-            if token.strip("\"'") in _COMMAND_WRAPPERS:
+            word = _command_word(token)
+            if PurePosixPath(word).name in _COMMAND_WRAPPERS:
+                after_wrapper = True
+                continue
+            # A wrapper's own operand (`flock /tmp/lock git …`) is not the
+            # command word, so it must not end the scan.
+            if after_wrapper and _PATH_ARG.match(word):
                 continue
             break
     return False
@@ -275,17 +312,9 @@ def _spawn_shell(
 
 
 def primary_repo_state_dir_safe(fallback: str) -> str:
-    try:
-        # best-effort without requiring ctx
-        out = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=fallback,
-            text=True,
-            timeout=5,
-        )
-        return out.strip() or fallback
-    except Exception:
-        return fallback
+    """Best-effort work-tree root for *fallback*, without requiring a ``ctx``."""
+    root = git_repo_root(fallback)
+    return str(root) if root is not None else fallback
 
 
 def shell_tool(ctx: ToolContext):

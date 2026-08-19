@@ -19,6 +19,8 @@ from dotenv import set_key as _dotenv_set_key
 from loguru import logger
 from rich.console import Console
 
+from mergecraft.utils.workspace import git_repo_root
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -128,13 +130,8 @@ def _set_gh_secret(*, name: str, value: str, repo_slug: str) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
-class LocalOnlyTarget:
-    """``--scope local``: writes ``.env`` and never touches ``gh``."""
-
-
-@dataclass(frozen=True, slots=True)
-class GitHubTarget:
-    """``--scope github`` / ``--scope both``: writes an Actions secret.
+class GitHubSecretTarget:
+    """The resolved ``gh`` half of a scope that writes an Actions secret.
 
     ``repo_slug`` is non-optional by construction, so "a scope that writes a
     secret has a resolved slug" is carried by the type rather than re-asserted
@@ -142,14 +139,18 @@ class GitHubTarget:
     """
 
     repo_slug: str
-    also_local: bool
 
 
-AuthTarget = LocalOnlyTarget | GitHubTarget
+@dataclass(frozen=True, slots=True)
+class AuthTarget:
+    """Where one ``mergecraft auth`` invocation persists its credential.
 
+    ``local`` and ``github`` are independent: ``--scope both`` sets both,
+    ``--scope local`` only the former, ``--scope github`` only the latter.
+    """
 
-def _writes_local(target: AuthTarget) -> bool:
-    return isinstance(target, LocalOnlyTarget) or target.also_local
+    local: bool
+    github: GitHubSecretTarget | None
 
 
 def _resolve_auth_target(scope: str) -> AuthTarget:
@@ -161,12 +162,15 @@ def _resolve_auth_target(scope: str) -> AuthTarget:
     """
     normalised = _normalise_scope(scope)
     if normalised == "local":
-        return LocalOnlyTarget()
+        return AuthTarget(local=True, github=None)
     _get_gh_token()
     owner, repo = _parse_git_remote()
     repo_slug = f"{owner}/{repo}"
     console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
-    return GitHubTarget(repo_slug=repo_slug, also_local=normalised == "both")
+    return AuthTarget(
+        local=normalised == "both",
+        github=GitHubSecretTarget(repo_slug=repo_slug),
+    )
 
 
 def _single_line_credential(*, name: str, value: str) -> str:
@@ -214,7 +218,7 @@ def _persist_credential(
     """
     entries = dict(local_entries) if local_entries is not None else {name: value}
     wrote_local = False
-    if _writes_local(target):
+    if target.local:
         env_path = _local_env_path()
         # Not short-circuited: every entry is attempted so a partial failure
         # still leaves the entries that could be written.
@@ -235,17 +239,17 @@ def _persist_credential(
                 f"— set {written} manually or check file permissions."
             )
 
-    if isinstance(target, LocalOnlyTarget):
+    if target.github is None:
         if not wrote_local:
             _bail(f"nothing was written — could not save {name} locally.")
         return
 
     console.print(f"saving [cyan]{name}[/cyan] via gh secret set...")
-    wrote_github = _set_gh_secret(name=name, value=value, repo_slug=target.repo_slug)
-    secrets_url = f"https://github.com/{target.repo_slug}/settings/secrets/actions"
+    wrote_github = _set_gh_secret(name=name, value=value, repo_slug=target.github.repo_slug)
+    secrets_url = f"https://github.com/{target.github.repo_slug}/settings/secrets/actions"
     if wrote_github:
         console.print(f"[green]saved {name}[/green] to GitHub Actions secrets")
-    elif not target.also_local:
+    elif not target.local:
         _bail(f"could not set secret — set it manually at:\n  {secrets_url}")
     else:
         console.print(
@@ -649,7 +653,9 @@ def _restrict_env_permissions(env_path: Path) -> None:
     ``set_key`` creates a *new* file at 0600, but the documented starting point
     is ``cp .env.example .env``, which yields 0644 under the usual umask and is
     preserved when ``set_key`` rewrites in place. A failed ``chmod`` is a
-    warning, not a write failure: the value did land.
+    warning, not a write failure: nothing has been written yet, and refusing to
+    save a credential because its container could not be narrowed is worse than
+    saving it at the mode the operator already chose for the file.
     """
     try:
         env_path.chmod(0o600)
@@ -676,6 +682,10 @@ def _write_env_value(env_path: Path, key: str, value: str) -> bool:
     double quotes — is quoted so the line survives ``source .env``.
     """
     quote_mode = "never" if _ENV_WORD_SAFE.match(value) else "always"
+    if env_path.exists():
+        # Narrow first: tightening afterwards still publishes the credential at
+        # whatever mode `cp .env.example .env` left behind for the whole write.
+        _restrict_env_permissions(env_path)
     try:
         _dotenv_set_key(str(env_path), key, value, quote_mode=quote_mode)
     except OSError as exc:
@@ -687,19 +697,14 @@ def _write_env_value(env_path: Path, key: str, value: str) -> bool:
 
 def _repo_root() -> Path:
     """Return the git repository root, bailing when there is none to anchor to."""
-    try:
-        top = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"], text=True, stderr=subprocess.DEVNULL
-        ).strip()
-    except subprocess.CalledProcessError, FileNotFoundError, OSError:
-        top = ""
-    if not top:
+    top = git_repo_root()
+    if top is None:
         _bail(
             "could not locate the repository root for the local .env — run "
             "mergecraft auth from inside the repository, or point "
             "MERGECRAFT_ENV at the .env you want written."
         )
-    return Path(top).resolve()
+    return top
 
 
 def _local_env_path() -> Path:
