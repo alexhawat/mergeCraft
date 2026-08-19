@@ -114,7 +114,7 @@ def checkout_repo_tool(ctx: ToolContext):
             access=access,
         )
         try:
-            info = await ctx.github.get_repo(owner, repo)
+            info = await ctx.scm.get_repo(owner, repo)
             default_branch = info["default_branch"]
             state.default_branch = default_branch
             url = f"https://github.com/{owner}/{repo}.git"

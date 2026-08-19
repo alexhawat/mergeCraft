@@ -24,7 +24,7 @@ async def fetch_review_threads(
 ) -> list[dict[str, Any]]:
     """Return a PR's review threads, normalized for both the tool and callers in-process."""
     page = await _fetch_review_threads(
-        ctx.github,
+        ctx.scm,
         ctx.repo.owner,
         ctx.repo.name,
         pull_number,
@@ -35,7 +35,7 @@ async def fetch_review_threads(
 
 async def resolve_review_thread(ctx: ToolContext, thread_id: str) -> bool:
     """Resolve one review thread; returns whether GitHub reports it resolved."""
-    data = await ctx.github.graphql(_RESOLVE_THREAD, {"threadId": thread_id})
+    data = await ctx.scm.graphql(_RESOLVE_THREAD, {"threadId": thread_id})
     thread = ((data or {}).get("resolveReviewThread") or {}).get("thread") or {}
     return bool(thread.get("isResolved", True))
 
@@ -74,7 +74,7 @@ def get_review_comments_tool(ctx: ToolContext):
 def list_pull_request_reviews_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         pull_number = int(params["pull_number"])
-        reviews = await ctx.github.list_reviews(
+        reviews = await ctx.scm.list_reviews(
             ctx.repo.owner, ctx.repo.name, pull_number, params={"per_page": 100}
         )
         return {

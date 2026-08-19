@@ -177,7 +177,7 @@ async def collect_ci_sarif_findings(
     repo_root = Path(primary_repo_state(ctx.tool_state).dir)
     findings: list[Finding] = []
     try:
-        payload = await ctx.github.get(
+        payload = await ctx.scm.get(
             f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs",
             params={"check_suite_id": check_suite_id, "per_page": 100},
         )
@@ -186,7 +186,7 @@ async def collect_ci_sarif_findings(
             run_id = run.get("id")
             if not isinstance(run_id, int):
                 continue
-            artifacts = await ctx.github.list_workflow_run_artifacts(
+            artifacts = await ctx.scm.list_workflow_run_artifacts(
                 ctx.repo.owner, ctx.repo.name, run_id
             )
             for artifact in artifacts:
@@ -194,7 +194,7 @@ async def collect_ci_sarif_findings(
                 artifact_id = artifact.get("id")
                 if name not in wanted or not isinstance(artifact_id, int):
                     continue
-                archive = await ctx.github.download_artifact_zip(
+                archive = await ctx.scm.download_artifact_zip(
                     ctx.repo.owner, ctx.repo.name, artifact_id
                 )
                 for document in _sarif_documents(archive):

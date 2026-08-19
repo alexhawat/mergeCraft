@@ -16,7 +16,7 @@ def add_labels_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         issue_number = int(params["issue_number"])
         labels = list(params["labels"])
-        result = await ctx.github.add_labels(ctx.repo.owner, ctx.repo.name, issue_number, labels)
+        result = await ctx.scm.add_labels(ctx.repo.owner, ctx.repo.name, issue_number, labels)
         logger.info("added labels {} to #{}", labels, issue_number)
         return {"success": True, "labels": [label.get("name") for label in result]}
 
@@ -48,11 +48,11 @@ def add_labels_tool(ctx: ToolContext):
 def remove_labels_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         issue_number = int(params["issue_number"])
-        await ctx.github.get_issue(ctx.repo.owner, ctx.repo.name, issue_number)
+        await ctx.scm.get_issue(ctx.repo.owner, ctx.repo.name, issue_number)
         removed: list[str] = []
         for name in params["labels"]:
             try:
-                await ctx.github.delete(
+                await ctx.scm.delete(
                     f"/repos/{ctx.repo.owner}/{ctx.repo.name}/issues/{issue_number}/labels/{name}"
                 )
                 removed.append(str(name))

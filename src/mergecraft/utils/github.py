@@ -531,6 +531,23 @@ class GitHubClient:
             raise RuntimeError(msg)
         return response.content
 
+    async def download_workflow_run_logs(
+        self,
+        owner: str,
+        repo: str,
+        run_id: int,
+    ) -> bytes:
+        """Download one workflow run's log archive, following GitHub's redirect."""
+        response = await self._client.get(
+            f"/repos/{owner}/{repo}/actions/runs/{run_id}/logs",
+            headers={"Accept": DEFAULT_ACCEPT},
+            follow_redirects=True,
+        )
+        if response.status_code >= 400:
+            msg = f"log download failed: {response.status_code}"
+            raise RuntimeError(msg)
+        return response.content
+
 
 async def resolve_run_context_data(
     client: GitHubClient,

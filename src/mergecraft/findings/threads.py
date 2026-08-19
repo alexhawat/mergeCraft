@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
-    from mergecraft.utils.github import GitHubClient
+    from mergecraft.scm.protocol import ScmProvider
 
 # GitHub caps both connections at 100. Comments are read to that cap and their
 # totalCount is kept: a human reply hiding past the cap would otherwise make an
@@ -76,7 +76,7 @@ class ReviewThreadPage:
 
 
 async def fetch_review_threads(
-    github: GitHubClient,
+    scm: ScmProvider,
     owner: str,
     repo: str,
     pull_number: int,
@@ -86,7 +86,7 @@ async def fetch_review_threads(
     """Return a pull request's review threads, normalized for every caller.
 
     Args:
-        github: Authenticated client used for the GraphQL call.
+        scm: SCM provider used for the GraphQL call.
         owner: Repository owner.
         repo: Repository name.
         pull_number: Pull request number.
@@ -96,7 +96,7 @@ async def fetch_review_threads(
         A :class:`ReviewThreadPage`. ``threads`` is empty when the pull request
         has none, or when every thread was filtered out as resolved.
     """
-    data = await github.graphql(
+    data = await scm.graphql(
         THREADS_QUERY,
         {"owner": owner, "repo": repo, "number": pull_number},
     )

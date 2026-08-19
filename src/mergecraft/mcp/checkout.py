@@ -88,7 +88,7 @@ def changed_paths_in_diff(diff_text: str) -> list[str]:
 async def _recover_last_reviewed_sha(ctx: ToolContext, *, pull_number: int, head_sha: str) -> str:
     """Fetch prior reviews and return the last mergeCraft-reviewed SHA (``""`` if none)."""
     try:
-        reviews = await ctx.github.list_reviews(
+        reviews = await ctx.scm.list_reviews(
             ctx.repo.owner, ctx.repo.name, pull_number, params={"per_page": 100}
         )
     except Exception as err:  # advisory; a missing review history is not fatal
@@ -146,7 +146,7 @@ def checkout_pr_tool(ctx: ToolContext):
             )
             raise RuntimeError(msg)
 
-        pr = await ctx.github.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
+        pr = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
         head = pr.get("head") or {}
         base = pr.get("base") or {}
         head_ref = head.get("ref") or ""
@@ -219,7 +219,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 cwd=cwd,
             )
         except Exception:
-            files = await ctx.github.get(
+            files = await ctx.scm.get(
                 f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
             )
             parts: list[str] = []

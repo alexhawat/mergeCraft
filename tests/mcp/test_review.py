@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
+from tests.support.tool_context import github_client_from_ctx
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -68,7 +69,7 @@ def ctx(tmp_path: Path) -> ToolContext:
 async def _submit(ctx: ToolContext, comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     spec = create_pull_request_review_tool(ctx)
     await spec.execute({"pull_number": 7, "body": "review body", "comments": comments})
-    payload = ctx.github.review_payload  # type: ignore[attr-defined]
+    payload = github_client_from_ctx(ctx).review_payload  # type: ignore[attr-defined]
     return list(payload.get("comments") or [])
 
 

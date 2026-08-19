@@ -83,7 +83,7 @@ def _typed_analyzer_findings(ctx: ToolContext) -> list[Finding]:
 
 async def _resolve_pr_head_sha(ctx: ToolContext, pull_number: int) -> str | None:
     try:
-        pull = await ctx.github.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
+        pull = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
     except Exception as err:
         logger.debug("sarif upload: failed to resolve PR #{} head sha: {}", pull_number, err)
         return None
@@ -154,7 +154,7 @@ async def report_sarif_upload(ctx: ToolContext) -> str | None:
 
     path = CODE_SCANNING_PATH.format(owner=ctx.repo.owner, repo=ctx.repo.name)
     try:
-        response = await ctx.github.post(path, json=body)
+        response = await ctx.scm.post(path, json=body)
     except Exception as err:
         # 403 without `security-events: write` and 404 on a repo without code
         # scanning are the *expected* answers for most consumers. Failing the

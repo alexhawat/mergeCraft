@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 def get_issue_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         issue_number = int(params["issue_number"])
-        data = await ctx.github.get_issue(
+        data = await ctx.scm.get_issue(
             ctx.repo.owner,
             ctx.repo.name,
             issue_number,

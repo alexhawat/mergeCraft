@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 import pytest
+from tests.support.tool_context import bind_github_client
 
 from mergecraft.mcp.check_suite import _analyze_log, get_check_suite_logs_tool
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
@@ -104,9 +105,14 @@ def test_get_check_suite_logs_tool_schema_unchanged(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_get_check_suite_logs_no_failures_message(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    ctx.github = _FakeGitHub(
-        runs=[{"id": 1, "conclusion": "success", "name": "ci", "html_url": "https://example.com"}],
-        log_bytes=b"",
+    bind_github_client(
+        ctx,
+        _FakeGitHub(
+            runs=[
+                {"id": 1, "conclusion": "success", "name": "ci", "html_url": "https://example.com"}
+            ],
+            log_bytes=b"",
+        ),
     )
     payload = json.loads(
         (await get_check_suite_logs_tool(ctx).execute({"check_suite_id": 42})).content[0]["text"]
@@ -135,7 +141,7 @@ async def test_get_check_suite_logs_return_shape_and_three_run_cap(tmp_path: Pat
         for index in range(1, 6)
     ]
     ctx = _ctx(tmp_path)
-    ctx.github = _FakeGitHub(runs=runs, log_bytes=log_bytes)
+    bind_github_client(ctx, _FakeGitHub(runs=runs, log_bytes=log_bytes))
 
     payload = json.loads(
         (await get_check_suite_logs_tool(ctx).execute({"check_suite_id": 99})).content[0]["text"]

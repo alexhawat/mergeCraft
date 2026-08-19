@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 def create_issue_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        result = await ctx.github.create_issue(
+        result = await ctx.scm.create_issue(
             ctx.repo.owner,
             ctx.repo.name,
             title=str(params["title"]),
@@ -57,7 +57,7 @@ def create_issue_tool(ctx: ToolContext):
 
 def close_issue_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        result = await ctx.github.update_issue(
+        result = await ctx.scm.update_issue(
             ctx.repo.owner,
             ctx.repo.name,
             int(params["issue_number"]),
@@ -97,7 +97,7 @@ def close_issue_tool(ctx: ToolContext):
 
 def reopen_issue_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        result = await ctx.github.update_issue(
+        result = await ctx.scm.update_issue(
             ctx.repo.owner,
             ctx.repo.name,
             int(params["issue_number"]),

@@ -418,7 +418,7 @@ def commit_changes_tool(ctx: ToolContext):
             }
         # Best-effort: update remote ref via API for Verified commits.
         try:
-            await ctx.github.patch(
+            await ctx.scm.patch(
                 f"/repos/{ctx.repo.owner}/{ctx.repo.name}/git/refs/heads/{branch}",
                 json={"sha": sha, "force": False},
             )

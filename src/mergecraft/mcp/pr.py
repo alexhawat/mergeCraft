@@ -28,7 +28,7 @@ def create_pull_request_tool(ctx: ToolContext):
         cwd = primary_dir(ctx)
         head = _current_branch(cwd)
         body = add_footer(ctx, str(params["body"]))
-        result = await ctx.github.post(
+        result = await ctx.scm.post(
             f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls",
             json={
                 "title": str(params["title"]),
@@ -42,7 +42,7 @@ def create_pull_request_tool(ctx: ToolContext):
         reviewer = ctx.payload.triggerer
         if reviewer:
             try:
-                await ctx.github.post(
+                await ctx.scm.post(
                     f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{result['number']}/requested_reviewers",
                     json={"reviewers": [reviewer]},
                 )
@@ -82,7 +82,7 @@ def create_pull_request_tool(ctx: ToolContext):
 def update_pull_request_body_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         body = add_footer(ctx, str(params["body"]))
-        result = await ctx.github.update_pull(
+        result = await ctx.scm.update_pull(
             ctx.repo.owner,
             ctx.repo.name,
             int(params["pull_number"]),
@@ -115,7 +115,7 @@ def update_pull_request_body_tool(ctx: ToolContext):
 
 def close_pull_request_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        result = await ctx.github.update_pull(
+        result = await ctx.scm.update_pull(
             ctx.repo.owner,
             ctx.repo.name,
             int(params["pull_number"]),

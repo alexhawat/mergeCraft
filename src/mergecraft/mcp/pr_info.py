@@ -25,10 +25,10 @@ query($owner: String!, $repo: String!, $number: Int!) {
 def get_pull_request_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         pull_number = int(params["pull_number"])
-        data = await ctx.github.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
+        data = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
         closing: list[dict[str, Any]] = []
         try:
-            gql = await ctx.github.graphql(
+            gql = await ctx.scm.graphql(
                 _CLOSING_ISSUES_QUERY,
                 {
                     "owner": ctx.repo.owner,
