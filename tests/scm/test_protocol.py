@@ -136,7 +136,13 @@ _SNAPSHOT_CALLS: tuple[tuple[str, str], ...] = (
     ("GET", "/repos/acme/demo/pulls/7/reviews"),
     ("POST", "/repos/acme/demo/issues/42/comments"),
     ("GET", "/repos/acme/demo/commits/abc123def456"),
-    ("GET", "/repos/acme/demo/commits/main/check-suites"),
+    # Inverted for #266 (D13): ``list_check_runs`` must reach the check-runs endpoint.
+    ("GET", "/repos/acme/demo/commits/main/check-runs"),
+)
+
+_XFAIL_W21 = pytest.mark.xfail(
+    reason="green after W21: list_check_runs calls the check-runs endpoint",
+    strict=False,
 )
 
 _SNAPSHOT_TOOL_OUTPUTS: dict[str, dict[str, Any]] = {
@@ -208,9 +214,14 @@ def test_every_github_operation_is_expressible_through_the_protocol() -> None:
     assert protocol_supports_github_operations() is True
 
 
+@_XFAIL_W21
 @pytest.mark.asyncio
 async def test_github_adapter_behaviour_is_unchanged(tmp_path: Path) -> None:
-    """Broad behavioural snapshot over GitHub MCP tools — the compatibility pin."""
+    """Broad behavioural snapshot over GitHub MCP tools — the compatibility pin.
+
+    The snapshot's last call was inverted for #266; the whole snapshot is xfail until
+    W21 lands, because a call-sequence tuple cannot be half-inverted.
+    """
     transport = github_snapshot_transport()
     github = RecordingGitHubClient(transport=transport)
     ctx = tool_ctx(tmp_path, github=github)
@@ -315,6 +326,32 @@ async def test_review_publication_goes_through_the_protocol(tmp_path: Path) -> N
     assert recording.publications, "publish_pull_request_review must delegate to ScmProvider"
     assert recording.publications[0]["pull_number"] == 7
     assert ctx.scm is recording
+
+
+@_XFAIL_W21
+@pytest.mark.asyncio
+async def test_protocol_list_check_runs_alias_reaches_the_check_runs_endpoint(
+    tmp_path: Path,
+) -> None:
+    """#266 second ingress — the ``list_check_runs`` MCP alias also delegates to suites.
+
+    ``GitHubScmAdapter.list_check_runs`` (``scm/github.py:242-245``) forwards to
+    ``list_check_suites_for_ref``. Nothing calls it today, but it is the protocol's
+    ``list_check_runs`` operation, so it carries the same defect as the MCP tool.
+    """
+    require_scm()
+    from mergecraft.scm.github import GitHubScmAdapter
+
+    _ = tmp_path
+    github = RecordingGitHubClient(transport=github_snapshot_transport())
+    adapter = GitHubScmAdapter(github)
+
+    payload = await adapter.list_check_runs("acme", "demo", "main")
+
+    assert [path for _method, path, _payload in github.calls] == [
+        "/repos/acme/demo/commits/main/check-runs"
+    ]
+    assert "check_runs" in payload
 
 
 def test_checkout_and_diff_semantics_are_preserved() -> None:

@@ -900,3 +900,131 @@ marker remains anywhere in `tests/`.**
 | 2 | W16 → DF | `tests/agents/test_structured_handoff.py` | The non-ASCII case W16 hand-verified had no test, so a refactor to `casefold().find()` could regress silently | Two arms added with length-expanding prose before the marker; verified that a `casefold().find()` split fails them |
 | 3 | W18 → DF | `tests/agents/test_opencode_session_usage.py` (new) | `agents/opencode.py:401-427` carries the identical #273 double-count on the HTTP session path, outside W18's anchor, so #273's criterion was only half met | 6 RED authored for **W18b** (operator-inserted wave) + 6 green guards; the inverted precedence and the `input`/`output` aliases are pinned so a fix cannot regress the Anthropic arm |
 | 4 | W18b → DF | `tests/agents/test_opencode_session_usage.py`, `tests/agents/test_stream_usage_cache.py` | **W18b changed a precedence the suite had pinned only indirectly.** Reusing `_resolve_cache_read` flipped the session path from details-first to native-first. Batch D pinned that ordering only via the native-only arm and left the both-present payload unpinned, so the flip broke no arm — the contract was unpinned in *both* directions and nothing recorded it as a decision | Marker-strip pass plus `test_both_cache_shapes_resolve_native_first_by_deliberate_choice` (2 details keys × `info`/`usage`), whose docstring records W18b's argument and warns against "tidying" it back. `_stream_consumer`'s equivalent pin already existed; both docstrings now cross-reference so the two paths cannot silently diverge again |
+
+---
+
+## Batch E — MCP contract (W20)
+
+**Issues:** #266 (`list_check_runs` calls the check-**suites** endpoint and returns a `check_suites`
+key), #267 (`handle_rpc`'s `tools/call` dispatches into `tool.execute` without validating
+`arguments` against `tool.input_schema`).
+**Implementation waves:** W21 (#266), W22 (#267).
+**Binding decisions:** **D13** (swap to `list_check_runs_for_ref`, return key `check_runs`, keep the
+tool name), **D14** (validate with the already-pinned `jsonschema`, `-32602` on failure, no new
+dependency).
+
+**Anchors re-grepped, not trusted from the plan body:**
+
+| Issue | Anchor used | Plan text | Verdict |
+|---|---|---|---|
+| #266 | `mcp/check_runs.py:16` (`ctx.scm.list_check_suites_for_ref`), `:20` (`"check_suites"`); client at `utils/github.py:481-500` | same | matches — but the tool calls it through `ctx.scm`, not `ctx.github` |
+| #266 | **`scm/github.py:242-245`** — `GitHubScmAdapter.list_check_runs`, the protocol's MCP-read alias, *also* forwards to `list_check_suites_for_ref` | **not in the plan** | **second ingress — new** |
+| #267 | `mcp/server.py:337-405` (`tools/call` branch inside `_register_mcp_route.handle_rpc`) | `:337+` | matches |
+
+### Files
+
+| File | Status | Issue |
+|---|---|---|
+| `tests/mcp/test_check_runs.py` | extended + **one assertion inverted** | #266 |
+| `tests/scm/test_protocol.py` | extended + **snapshot inverted** | #266 |
+| `tests/scm/conftest.py` | mock transport now also serves `/commits/main/check-runs` (additive) | #266 |
+| `tests/mcp/test_tools_call_validation.py` | **new** | #267 |
+
+### Contract → test map
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| The tool invokes `list_check_runs_for_ref` and **never** the suites sibling | `test_list_check_runs_calls_the_check_runs_endpoint` | Unit, the bug | xfail W21 |
+| The payload key is `check_runs`, `check_suites` is gone, `total_count` passes through | `test_list_check_runs_returns_check_run_data_for_ref` | Unit, D13 | xfail W21 |
+| A returned run keeps its own `name` and its parent `check_suite.id` — the id the tool description sends the agent to `get_check_suite_logs` with | `test_list_check_runs_preserves_the_run_shape_agents_navigate_by` | Unit, shape divergence | xfail W21 |
+| **Second ingress:** `GitHubScmAdapter.list_check_runs` reaches the check-runs endpoint | `test_protocol_list_check_runs_alias_reaches_the_check_runs_endpoint` | Integration, adapter | xfail W21 |
+| **Consumer:** the cross-tool behavioural snapshot records the check-runs call | `test_github_adapter_behaviour_is_unchanged` | Integration, snapshot | xfail W21 (inverted) |
+| The tool name stays `list_check_runs` and stays on the common surface | `test_list_check_runs_tool_is_registered_under_its_own_name` | Unit, contract pin | green |
+| `get_check_suite` still fetches one suite by id | `test_get_check_suite_tool_returns_suite_detail` | Unit, regression | green |
+| A missing required property is rejected **before** `tool.execute` | `test_missing_required_argument_is_rejected_before_execute` | Integration, the bug | xfail W22 |
+| An extra property under `additionalProperties: false` is likewise rejected | `test_extra_property_is_rejected_when_additional_properties_is_false` | Integration, D14 | xfail W22 |
+| A wrongly typed property is invalid params, not a tool-level crash | `test_wrongly_typed_argument_is_rejected_before_execute` | Integration, edge | xfail W22 |
+| The rejection is well-formed JSON-RPC: `id` echoed, `error` object, no `result` | `test_validation_failure_is_a_well_formed_jsonrpc_error` | Integration, wire contract | xfail W22 |
+| A schema-conforming call still reaches `tool.execute` and returns its result | `test_valid_arguments_still_reach_execute` | Integration, happy path | green |
+| A permissive schema (`properties: {}`, no ban) still admits arbitrary arguments | `test_permissive_schema_accepts_arbitrary_arguments` | Integration, permissive | green |
+| An `EMPTY_SCHEMA` tool accepts the empty argument object | `test_empty_schema_tool_accepts_the_empty_argument_object` | Integration, boundary | green |
+| A schema the validator cannot use does not crash the endpoint | `test_unusable_schema_does_not_break_the_call` | Integration, error | green |
+
+### Confirmed-RED assertions (9 xfails, verified with `--runxfail`)
+
+All 9 fail on the assertion, never on an import or a fixture:
+
+- **W21 (5)** — `github.run_calls` is `[]` where `[("acme", "demo", <sha>)]` is expected (the suites
+  sibling was called instead); the payload still carries `check_suites` and has no `check_runs` key
+  (`KeyError: 'check_runs'` on the shape arm); the adapter alias records
+  `/repos/acme/demo/commits/main/check-suites`; the cross-tool snapshot diverges at index 6,
+  `check-suites` where `check-runs` is now pinned.
+- **W22 (4)** — with no validation the tool body runs, so `probe.calls` is `[{}]`,
+  `[{'ref': 123}]`, and `[{'ref': 'main', 'unexpected': 1}]` where `[]` is expected, and the
+  response carries `result` where an `error` object is expected.
+
+### Green-today regression guards (4 new assertions, 4 existing preserved)
+
+- **#266** — the tool-name pin is split **out** of the inverted test so W21 cannot buy the endpoint
+  swap by renaming the tool, and the payload-key arm is separate from the endpoint arm so the exact
+  half-fix the plan warns about (rename the key, keep calling suites) fails the endpoint arm.
+- **#267** — the valid-call arm is the anti-over-correction guard: `-32602` on everything would pass
+  all four reds. The permissive-schema and `EMPTY_SCHEMA` arms pin that validation does not turn a
+  loose schema into a closed door, and the unusable-schema arm pins that a bad schema is not a 500.
+
+### The two endpoints are not interchangeable — what W21 inherits
+
+The `check-suites` and `check-runs` responses differ in ways that matter to a consumer:
+
+| | check suite | check run |
+|---|---|---|
+| `id` | suite id — the argument `get_check_suite` / `get_check_suite_logs` take | **run** id, useless to either |
+| `name` | absent (`app.name` is the app, not the job) | the job name a repo's `staticChecks` mapping points at |
+| suite id | is the `id` | nested at `check_suite.id` |
+| `conclusion` | rollup over every run in the suite | per job |
+
+So the tool's own **description** is a W21 deliverable, not just the call and the key: it currently
+reads "…so you can pick a `check_suite_id` for `get_check_suite_logs`", and after the swap the
+top-level `id` is no longer a suite id. `test_list_check_runs_preserves_the_run_shape_agents_navigate_by`
+pins the nesting the agent needs instead; the description wording itself is left unpinned.
+
+### Consumer audit for #266 — nothing reads the old key
+
+Grepped `check_suites` and `list_check_runs` across `src/`:
+
+- **`mcp/static_checks._apply_ci_evidence` (`:106-119`) is a false alarm.** It calls
+  `ctx.scm.list_check_runs_for_ref` **directly** and already reads `payload["check_runs"]` — it never
+  goes through the MCP tool. W21 must not "fix" it; it is the model for the fix.
+- **`evidence/build.py:197-200`** logs `len(ci_check_runs.get("check_suites") or [])`, but
+  `ci_check_runs` is a deferred parameter (`_ = (ci_check_runs, …)` at `:245`) with **no caller
+  anywhere in the tree**. Dead prose in a debug line, not a consumer. Left unpinned.
+- **No other reader.** The tool's payload is consumed only by the reviewing agent, whose contract is
+  the tool description above.
+
+### Notes for W21 / W22
+
+- **W21 owns a second ingress the plan does not name.** `GitHubScmAdapter.list_check_runs`
+  (`scm/github.py:242-245`) is the protocol's `list_check_runs` operation and forwards to
+  `list_check_suites_for_ref` — the identical defect, one layer down. Nothing calls it in production
+  today, which is exactly why it will rot. One red is authored for it; if W21 declines the scope,
+  the xfail is non-strict and stays red rather than breaking the suite.
+- **W21 must expect two inverted tests, not one.** Both are recorded below.
+- **W22's `-32602` message** is unpinned beyond "non-empty string" — the validator's own message is
+  fine, and pinning `jsonschema`'s wording would couple the suite to a library version.
+- **W22's fail-open vs fail-closed choice on an unusable schema is unpinned.** `set_output` takes a
+  consumer-supplied `output_schema` verbatim (`mcp/output.py:14-31`), so an invalid schema is
+  reachable in production and `jsonschema.validate` raises `SchemaError` (not `ValidationError`)
+  there. Only the non-crash invariant is asserted; W22 decides the arm and records it.
+- **`arguments` that is not a dict** is coerced to `{}` today (`server.py:346-347`). After W22 that
+  silently becomes `-32602` for any tool with a required property. Correct, but a behaviour change
+  no test pins in either direction.
+
+### Inverted assertions
+
+| Test | Was | Now |
+|---|---|---|
+| `tests/mcp/test_check_runs.py::test_list_check_runs_returns_check_suite_data_for_ref` | asserted `github.list_calls == [("acme", "demo", REF_SHA)]` (the **suites** recorder) and read `payload["check_suites"]` | split into `test_list_check_runs_calls_the_check_runs_endpoint` (`run_calls` populated, `list_calls` empty) + `test_list_check_runs_returns_check_run_data_for_ref`, with the tool-name pin lifted into its own green test |
+| `tests/scm/test_protocol.py::test_github_adapter_behaviour_is_unchanged` | `_SNAPSHOT_CALLS[6]` was `("GET", "/repos/acme/demo/commits/main/check-suites")` | `("GET", "/repos/acme/demo/commits/main/check-runs")`; the whole snapshot is xfail(W21) because a call-sequence tuple cannot be half-inverted, and the mock transport now serves both paths |
+
+`tests/mcp tests/scm`: **208 passed / 9 xfailed / 0 failed**. `make lint` and `make typecheck`
+(334 source files) clean.
