@@ -116,11 +116,32 @@ def _run_ruff_format_check(
         return []
     if not scoped_files:
         return []
-    rel = scoped_files[0]
+    # Parse "Would reformat: <path>" lines emitted by ruff format --check.
+    # Paths may be absolute (when ruff received absolute argv entries) or
+    # repo-relative; resolve_repo_relative_path normalises both to repo-relative.
+    reformat_paths: list[str] = []
+    for raw_line in (outcome.output or "").splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("Would reformat:"):
+            raw_path = stripped[len("Would reformat:") :].strip()
+            reformat_paths.append(resolve_repo_relative_path(raw_path, repo_root=repo_root))
+    if reformat_paths:
+        return [
+            _format_finding(
+                manifest=manifest,
+                path=rel,
+                line=1,
+                message="File would be reformatted by ruff format",
+            )
+            for rel in reformat_paths
+        ]
+    # Non-zero exit with no parseable "Would reformat:" lines — ruff invocation
+    # error or unexpected output format.  Emit at scoped_files[0] rather than
+    # silently returning nothing: a broken tool should not pass as clean.
     return [
         _format_finding(
             manifest=manifest,
-            path=rel,
+            path=scoped_files[0],
             line=1,
             message="File would be reformatted by ruff format",
         )
