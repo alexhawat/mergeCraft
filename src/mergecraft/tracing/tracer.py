@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from types import TracebackType
 
-    from mergecraft.config.settings import RepoSettings
+    from mergecraft.config.settings import RepoSettings, TracingSettings
 
 
 # G-F10 / #56 D6 — a guard, not a budget. A large review emits on the order
@@ -409,6 +409,36 @@ _ACTIVE_SPAN: ContextVar[Span | NullSpan | None] = ContextVar(
     "mergecraft_active_trace_span", default=None
 )
 
+_PROCESS_TRACER: Tracer | None = None
+_PROCESS_TRACING_FINGERPRINT: str | None = None
+
+
+def reset_process_tracer_cache() -> None:
+    """Drop the process-wide ``Tracer`` cache (test seam for MCP-style reuse)."""
+    global _PROCESS_TRACER, _PROCESS_TRACING_FINGERPRINT
+
+    _PROCESS_TRACER = None
+    _PROCESS_TRACING_FINGERPRINT = None
+
+
+def _pin_trace_id() -> str:
+    """Mint and pin ``MERGECRAFT_TRACE_ID`` once per process run (#292 / D9)."""
+    existing = os.environ.get("MERGECRAFT_TRACE_ID")
+    if existing:
+        return existing
+    minted = (
+        os.environ.get("MERGECRAFT_TRACE_SESSION_ID")
+        or os.environ.get("GITHUB_RUN_ID")
+        or uuid.uuid4().hex
+    )
+    os.environ["MERGECRAFT_TRACE_ID"] = minted
+    return minted
+
+
+def _tracing_fingerprint(active_tracing: TracingSettings) -> str:
+    """Stable key for reusing a ``Tracer`` when tracing settings match."""
+    return active_tracing.model_dump_json()
+
 
 def resolve_correlation_from_env() -> dict[str, Any]:
     """Resolve root-span correlation fields from GitHub Actions variables.
@@ -750,6 +780,8 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
         >>> isinstance(get_tracer_from_settings(RepoSettings()), NullTracer)
         True
     """
+    global _PROCESS_TRACER, _PROCESS_TRACING_FINGERPRINT
+
     # Honor the env/CLI/YAML/default precedence (``MERGECRAFT_TRACING``,
     # ``--tracing``, ``.mergecraft/config.yaml``) rather than the YAML block
     # alone, so an operator's ``.env`` token + ``--tracing-to logfire`` drives
@@ -764,6 +796,10 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     if isinstance(active, Span):
         return active.tracer
 
+    fingerprint = _tracing_fingerprint(active_tracing)
+    if _PROCESS_TRACER is not None and fingerprint == _PROCESS_TRACING_FINGERPRINT:
+        return _PROCESS_TRACER
+
     try:
         sink = claim_sink(active_tracing)
     except Exception as exc:
@@ -773,9 +809,9 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     correlation = resolve_correlation_from_env()
     session_id = resolve_session_id()
     run_id = str(correlation.get("run_id") or session_id)
-    trace_id = resolve_trace_id()
+    trace_id = _pin_trace_id()
     tier = os.environ.get("MERGECRAFT_TRUST_TIER") or "balanced"
-    return Tracer(
+    tracer = Tracer(
         sink=sink,
         session_id=session_id,
         run_id=run_id,
@@ -783,6 +819,9 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
         trace_id=trace_id,
         baseline_attrs=baseline_run_attrs(),
     )
+    _PROCESS_TRACER = tracer
+    _PROCESS_TRACING_FINGERPRINT = fingerprint
+    return tracer
 
 
 __all__ = [

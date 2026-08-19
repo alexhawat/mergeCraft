@@ -320,6 +320,9 @@ def _setup_tracer_provider(
     # Reset the active providers list so ``has_active_tracer_provider``
     # reflects only this ``OTLPSink``'s provider.
     _ACTIVE_TRACER_PROVIDERS = []
+    from mergecraft.tracing.tracer import reset_process_tracer_cache
+
+    reset_process_tracer_cache()
 
     try:
         from opentelemetry.sdk.trace.sampling import ALWAYS_ON

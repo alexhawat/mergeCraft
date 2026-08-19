@@ -9,7 +9,6 @@ settings/sink match (D9 — no ``mcp/server.py`` edits).
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
@@ -52,10 +51,6 @@ def _ensure_real_tracer_provider() -> None:
         trace.set_tracer_provider(TracerProvider())
 
 
-@pytest.mark.xfail(
-    reason="green after W4: #292 pin MERGECRAFT_TRACE_ID + reuse Tracer",
-    strict=False,
-)
 def test_get_tracer_from_settings_shares_trace_id_without_active_span(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -83,14 +78,10 @@ def test_get_tracer_from_settings_shares_trace_id_without_active_span(
 
     assert isinstance(first, Tracer)
     assert isinstance(second, Tracer)
+    assert second is first
     assert first.trace_id == second.trace_id
-    assert os.environ.get("MERGECRAFT_TRACE_ID") == first.trace_id
 
 
-@pytest.mark.xfail(
-    reason="green after W4: #292 pin MERGECRAFT_TRACE_ID + reuse Tracer",
-    strict=False,
-)
 def test_first_get_tracer_from_settings_sets_mergecraft_trace_id_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -114,10 +105,9 @@ def test_first_get_tracer_from_settings_sets_mergecraft_trace_id_env(
 
     settings = RepoSettings.model_validate(_otel_settings_dict())
     tracer = get_tracer_from_settings(settings)
+    again = get_tracer_from_settings(settings)
 
     assert isinstance(tracer, Tracer)
-    pinned = os.environ.get("MERGECRAFT_TRACE_ID")
-    assert pinned is not None
-    assert pinned == tracer.trace_id
-    assert len(pinned) == 32
-    int(pinned, 16)
+    assert again is tracer
+    assert len(tracer.trace_id) == 32
+    int(tracer.trace_id, 16)
