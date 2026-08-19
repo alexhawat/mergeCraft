@@ -162,6 +162,9 @@ jobs:
     name: mergecraft wait for CI
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
     timeout-minutes: 25
     outputs:
       # complete | timeout | absent | skipped
@@ -197,7 +200,7 @@ jobs:
             now="$(date +%s)"
             elapsed=$(( now - started ))
 
-            if runs="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" 2>/dev/null)"; then
+            if runs="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100")"; then
               total="$(printf '%s' "${runs}" | jq "${jq_verify} | length")"
               pending="$(printf '%s' "${runs}" | jq "${jq_verify} | map(select(.status != \"completed\")) | length")"
 

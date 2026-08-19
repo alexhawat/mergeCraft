@@ -2,8 +2,8 @@
 
 Wave plan: ``.ignorelocal/waves/05-review-depth-governance-wave-plan.md`` (DG9.1 RED,
 DG9.2 impl). Six tests are ``@pytest.mark.xfail(strict=False)`` pending protocol
-extraction; ``test_github_adapter_behaviour_is_unchanged`` is the pre-refactor
-behavioural snapshot that must keep passing through DG9.2.
+extraction; ``test_github_tool_endpoint_behaviour_is_unchanged`` carries the
+pre-refactor behavioural pins that must keep passing through DG9.2.
 
 Pinned contracts (W0):
     D10 — protocol before adapters; GitHub reimplemented as the first adapter
@@ -128,44 +128,70 @@ _CORE_SCM_MODULES: tuple[str, ...] = (
     "mergecraft.utils.code_scanning",
 )
 
-# Behavioural snapshot captured on ``origin/pre-0.0.1`` before any extraction.
-_SNAPSHOT_CALLS: tuple[tuple[str, str], ...] = (
-    ("GET", "/repos/acme/demo/pulls/7"),
-    ("POST", "/graphql"),
-    ("GET", "/repos/acme/demo/issues/42/comments"),
-    ("GET", "/repos/acme/demo/pulls/7/reviews"),
-    ("POST", "/repos/acme/demo/issues/42/comments"),
-    ("GET", "/repos/acme/demo/commits/abc123def456"),
-    ("GET", "/repos/acme/demo/commits/main/check-suites"),
+# Per-endpoint behavioural pins captured on ``origin/pre-0.0.1`` before any
+# extraction. One case per MCP tool: the endpoints it reaches, and the fields of
+# its rendered payload that the adapter must keep producing. Kept per tool so a
+# deliberate change to one endpoint invalidates only its own case.
+_ENDPOINT_CASES: tuple[Any, ...] = (
+    pytest.param(
+        get_pull_request_tool,
+        {"pull_number": 7},
+        (("GET", "/repos/acme/demo/pulls/7"), ("POST", "/graphql")),
+        {
+            "number": 7,
+            "title": "Add widgets",
+            "state": "open",
+            "base": "main",
+            "head": "feature/widgets",
+            "isFork": False,
+            "author": "dev1",
+            "labels": ["enhancement"],
+            "closingIssues": [{"number": 42, "title": "Track widgets"}],
+        },
+        id="get_pull_request",
+    ),
+    pytest.param(
+        get_issue_comments_tool,
+        {"issue_number": 42},
+        (("GET", "/repos/acme/demo/issues/42/comments"),),
+        {
+            "issue_number": 42,
+            "count": 1,
+            "comments": [{"id": 9001, "body": "Looks good", "user": "reviewer"}],
+        },
+        id="get_issue_comments",
+    ),
+    pytest.param(
+        list_pull_request_reviews_tool,
+        {"pull_number": 7},
+        (("GET", "/repos/acme/demo/pulls/7/reviews"),),
+        {"pull_number": 7, "count": 1},
+        id="list_pull_request_reviews",
+    ),
+    pytest.param(
+        create_issue_comment_tool,
+        {"issueNumber": 42, "body": "Progress update"},
+        (("POST", "/repos/acme/demo/issues/42/comments"),),
+        {},
+        id="create_issue_comment",
+    ),
+    pytest.param(
+        get_commit_info_tool,
+        {"sha": "abc123def456"},
+        (("GET", "/repos/acme/demo/commits/abc123def456"),),
+        {"sha": "abc123def456", "message": "Add widgets", "author": "dev1"},
+        id="get_commit_info",
+    ),
+    pytest.param(
+        list_check_runs_tool,
+        {"ref": "main"},
+        # Inverted for #266 (D13): ``list_check_runs`` must reach check-runs, not
+        # check-suites.
+        (("GET", "/repos/acme/demo/commits/main/check-runs"),),
+        {},
+        id="list_check_runs",
+    ),
 )
-
-_SNAPSHOT_TOOL_OUTPUTS: dict[str, dict[str, Any]] = {
-    "get_pull_request": {
-        "number": 7,
-        "title": "Add widgets",
-        "state": "open",
-        "base": "main",
-        "head": "feature/widgets",
-        "isFork": False,
-        "author": "dev1",
-        "labels": ["enhancement"],
-        "closingIssues": [{"number": 42, "title": "Track widgets"}],
-    },
-    "get_issue_comments": {
-        "issue_number": 42,
-        "count": 1,
-        "comments": [{"id": 9001, "body": "Looks good", "user": "reviewer"}],
-    },
-    "list_pull_request_reviews": {
-        "pull_number": 7,
-        "count": 1,
-    },
-    "get_commit_info": {
-        "sha": "abc123def456",
-        "message": "Add widgets",
-        "author": "dev1",
-    },
-}
 
 
 def test_github_adapter_satisfies_the_protocol() -> None:
@@ -209,48 +235,35 @@ def test_every_github_operation_is_expressible_through_the_protocol() -> None:
 
 
 @pytest.mark.asyncio
-async def test_github_adapter_behaviour_is_unchanged(tmp_path: Path) -> None:
-    """Broad behavioural snapshot over GitHub MCP tools — the compatibility pin."""
+@pytest.mark.parametrize(
+    ("tool_factory", "params", "expected_calls", "expected_payload"), _ENDPOINT_CASES
+)
+async def test_github_tool_endpoint_behaviour_is_unchanged(
+    tmp_path: Path,
+    tool_factory: Any,
+    params: dict[str, Any],
+    expected_calls: tuple[tuple[str, str], ...],
+    expected_payload: dict[str, Any],
+) -> None:
+    """Per-endpoint compatibility pin over the GitHub MCP tools.
+
+    Each tool is exercised against its own recording client, so a deliberate
+    change to one endpoint or one rendered payload fails only that case instead
+    of invalidating the behaviour pin for every other tool.
+    """
     transport = github_snapshot_transport()
     github = RecordingGitHubClient(transport=transport)
     ctx = tool_ctx(tmp_path, github=github)
 
-    pr_result = await get_pull_request_tool(ctx).execute({"pull_number": 7})
-    assert pr_result.is_error is False
-    pr_payload = json.loads(pr_result.content[0]["text"])
-    for key, value in _SNAPSHOT_TOOL_OUTPUTS["get_pull_request"].items():
-        assert pr_payload.get(key) == value, f"get_pull_request.{key}"
+    result = await tool_factory(ctx).execute(params)
 
-    comments_result = await get_issue_comments_tool(ctx).execute({"issue_number": 42})
-    assert comments_result.is_error is False
-    comments_payload = json.loads(comments_result.content[0]["text"])
-    assert comments_payload["count"] == _SNAPSHOT_TOOL_OUTPUTS["get_issue_comments"]["count"]
-    assert comments_payload["comments"] == _SNAPSHOT_TOOL_OUTPUTS["get_issue_comments"]["comments"]
-
-    reviews_result = await list_pull_request_reviews_tool(ctx).execute({"pull_number": 7})
-    assert reviews_result.is_error is False
-    reviews_payload = json.loads(reviews_result.content[0]["text"])
-    assert reviews_payload["count"] == _SNAPSHOT_TOOL_OUTPUTS["list_pull_request_reviews"]["count"]
-
-    comment_result = await create_issue_comment_tool(ctx).execute(
-        {"issueNumber": 42, "body": "Progress update"}
-    )
-    assert comment_result.is_error is False
-
-    commit_result = await get_commit_info_tool(ctx).execute({"sha": "abc123def456"})
-    assert commit_result.is_error is False
-    commit_payload = json.loads(commit_result.content[0]["text"])
-    assert commit_payload["sha"] == _SNAPSHOT_TOOL_OUTPUTS["get_commit_info"]["sha"]
-    assert commit_payload["message"] == _SNAPSHOT_TOOL_OUTPUTS["get_commit_info"]["message"]
-
-    checks_result = await list_check_runs_tool(ctx).execute({"ref": "main"})
-    assert checks_result.is_error is False
-
+    assert result.is_error is False
     recorded = tuple((method, path) for method, path, _payload in github.calls)
-    assert recorded == _SNAPSHOT_CALLS, (
-        "GitHub adapter behavioural snapshot drifted — update only after deliberate "
-        f"behaviour change; got {recorded!r}"
-    )
+    assert recorded == expected_calls
+    if expected_payload:
+        payload = json.loads(result.content[0]["text"])
+        for key, value in expected_payload.items():
+            assert payload.get(key) == value, key
 
 
 def test_no_github_specific_type_leaks_into_core() -> None:
@@ -315,6 +328,31 @@ async def test_review_publication_goes_through_the_protocol(tmp_path: Path) -> N
     assert recording.publications, "publish_pull_request_review must delegate to ScmProvider"
     assert recording.publications[0]["pull_number"] == 7
     assert ctx.scm is recording
+
+
+@pytest.mark.asyncio
+async def test_protocol_list_check_runs_alias_reaches_the_check_runs_endpoint(
+    tmp_path: Path,
+) -> None:
+    """#266 second ingress — the protocol alias must hit check-runs, not check-suites.
+
+    ``GitHubScmAdapter.list_check_runs`` used to forward to ``list_check_suites_for_ref``.
+    Nothing calls it today, but it is the protocol's ``list_check_runs`` operation, so it
+    carried the same defect as the MCP tool and is pinned separately from it.
+    """
+    require_scm()
+    from mergecraft.scm.github import GitHubScmAdapter
+
+    _ = tmp_path
+    github = RecordingGitHubClient(transport=github_snapshot_transport())
+    adapter = GitHubScmAdapter(github)
+
+    payload = await adapter.list_check_runs("acme", "demo", "main")
+
+    assert [path for _method, path, _payload in github.calls] == [
+        "/repos/acme/demo/commits/main/check-runs"
+    ]
+    assert "check_runs" in payload
 
 
 def test_checkout_and_diff_semantics_are_preserved() -> None:

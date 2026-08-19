@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 from loguru import logger
 
@@ -334,3 +335,55 @@ def wrap_agent_subprocess(cmd: list[str]) -> list[str]:
     from mergecraft.utils.privilege import wrap_agent_command
 
     return wrap_agent_command(cmd)
+
+
+class CacheReadTokens(NamedTuple):
+    """Cached-input tokens: what to report, and what to add to the input count.
+
+    Anthropic-native ``cache_read_input_tokens`` / ``cacheReadTokens`` are
+    **disjoint** from the reported ``input_tokens``, so they must be added to
+    it. OpenAI-style ``*_tokens_details.cached_tokens`` are a **subset** of it
+    and must not be (#273, D16).
+
+    Carrying the additive number rather than an "is inclusive" flag keeps that
+    arithmetic in one place instead of at every caller, and lets counts from
+    events of different provenance simply sum — with a flag, one event's
+    provenance relabelled another event's already-accumulated total.
+    """
+
+    reported: int
+    additive: int
+
+
+def _extract_openai_cached_tokens(usage_payload: Mapping[str, Any]) -> int:
+    """Return the cached-input count from an OpenAI Responses / Chat Completions usage dict.
+
+    The two recognised shapes are ``prompt_tokens_details.cached_tokens``
+    (Chat Completions) and ``input_tokens_details.cached_tokens`` (Responses).
+    Returns ``0`` when neither is present or the payload is not a mapping — the
+    helper is intentionally non-raising so a malformed stream event cannot
+    poison an accumulator.
+    """
+    if not isinstance(usage_payload, Mapping):
+        return 0
+    for outer_key in ("prompt_tokens_details", "input_tokens_details"):
+        details = usage_payload.get(outer_key)
+        if isinstance(details, Mapping):
+            cached = details.get("cached_tokens")
+            if isinstance(cached, (int, float)):
+                return int(cached)
+    return 0
+
+
+def resolve_cache_read(usage_payload: Mapping[str, Any]) -> CacheReadTokens:
+    """Resolve one usage payload's cached-input tokens and their provenance.
+
+    The Anthropic-native fields are consulted first, so a payload carrying both
+    shapes is read as disjoint (#273, D16).
+    """
+    native = int(
+        usage_payload.get("cache_read_input_tokens") or usage_payload.get("cacheReadTokens") or 0
+    )
+    if native:
+        return CacheReadTokens(reported=native, additive=native)
+    return CacheReadTokens(reported=_extract_openai_cached_tokens(usage_payload), additive=0)

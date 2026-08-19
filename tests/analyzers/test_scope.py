@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from tests.analyzers.support import import_module
 
@@ -156,3 +159,107 @@ index 3333333..4444444 100644
         ("README.md", 2, "added line"),
         ("src/app.py", 11, "    return 1"),
     ]
+
+
+# --------------------------------------------------------------------------- #
+# #269 — ``base_comparison_available`` must return ``not offline``, never
+# ``offline``.
+#
+# This is not a cosmetic inversion. ``pipeline.py:361`` feeds the result into
+# ``_apply_baseline_suppression(..., base_run_performed=base_run)``, which hands
+# it to ``annotate_introduced_by_pr``. Inverted, an **online** ``baseComparison:
+# full`` run annotates as if no base comparison happened, and an **offline** run
+# claims one did. The consumer cases below exist so a future refactor cannot
+# reintroduce the wrong attribution one layer up while the pure function stays
+# correct.
+# --------------------------------------------------------------------------- #
+
+
+def test_base_comparison_available_is_true_when_online_and_full() -> None:
+    scope = import_module("mergecraft.analyzers.scope")
+    assert scope.base_comparison_available(base_comparison="full", offline=False) is True
+
+
+def test_base_comparison_available_is_false_when_offline_and_full() -> None:
+    scope = import_module("mergecraft.analyzers.scope")
+    assert scope.base_comparison_available(base_comparison="full", offline=True) is False
+
+
+@pytest.mark.parametrize("base_comparison", ["diff", "none", ""])
+@pytest.mark.parametrize("offline", [False, True])
+def test_base_comparison_available_is_false_unless_comparison_is_full(
+    base_comparison: str, offline: bool
+) -> None:
+    """The ``!= "full"`` short-circuit is independent of ``offline`` — guard it."""
+    scope = import_module("mergecraft.analyzers.scope")
+    assert (
+        scope.base_comparison_available(base_comparison=base_comparison, offline=offline) is False
+    )
+
+
+def _record_base_run_performed(monkeypatch: pytest.MonkeyPatch, pipeline: Any) -> list[bool]:
+    """Capture what ``pipeline`` actually hands ``annotate_introduced_by_pr``."""
+    recorded: list[bool] = []
+    real = pipeline.annotate_introduced_by_pr
+
+    def _recording(
+        findings: list[Any], *, base_run_performed: bool, is_new_in_base: bool = False
+    ) -> list[Any]:
+        recorded.append(base_run_performed)
+        return real(  # type: ignore[no-any-return]
+            findings,
+            base_run_performed=base_run_performed,
+            is_new_in_base=is_new_in_base,
+        )
+
+    monkeypatch.setattr(pipeline, "annotate_introduced_by_pr", _recording)
+    return recorded
+
+
+def _run_full_comparison_pipeline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, offline: bool
+) -> list[bool]:
+    from mergecraft.analyzers import adapters, pipeline
+    from mergecraft.analyzers.registry import get_manifest
+
+    settings_mod = import_module("mergecraft.config.settings")
+    monkeypatch.setattr(
+        pipeline,
+        "_analyzers_settings",
+        lambda _root: settings_mod.AnalyzersSettings(baseComparison="full"),
+    )
+    monkeypatch.setattr(pipeline, "detect_enabled", lambda **_: [get_manifest("ruff")])
+
+    finding = _sample_finding("src/fixture_app/handler.py", 12)
+    monkeypatch.setattr(
+        adapters,
+        "run_adapter",
+        lambda **_: adapters.AdapterRunResult(findings=[finding], skipped=False),
+    )
+
+    recorded = _record_base_run_performed(monkeypatch, pipeline)
+    pipeline.run_analyzer_pipeline(
+        repo_root=tmp_path,
+        changed_files=["src/fixture_app/handler.py"],
+        tier="trusted",
+        offline=offline,
+        shell="restricted",
+    )
+    assert recorded, "the pipeline never reached annotate_introduced_by_pr"
+    return recorded
+
+
+def test_online_full_comparison_reaches_the_annotator_as_performed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An online ``full`` run must claim the base comparison ran."""
+    recorded = _run_full_comparison_pipeline(monkeypatch, tmp_path, offline=False)
+    assert recorded == [True]
+
+
+def test_offline_full_comparison_never_claims_a_base_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The mirror image: offline cannot have compared against base."""
+    recorded = _run_full_comparison_pipeline(monkeypatch, tmp_path, offline=True)
+    assert recorded == [False]

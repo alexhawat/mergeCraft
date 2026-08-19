@@ -36,21 +36,20 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import pytest
 
 import mergecraft.utils.token as token_mod
 from mergecraft.agents.shared import AgentResult
 from mergecraft.analyzers.trust import derive_trust_tier
-from mergecraft.config.settings import AnalyzersSettings, RepoSettings
+from mergecraft.config.settings import AnalyzersSettings, GatesSettings, RepoSettings
 from mergecraft.main import MainResult, RunOutcome
 from mergecraft.mcp.tool_state import ProgressComment as CtxProgressComment
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.utils.payload import JsonPayload, resolve_prompt_input
 from mergecraft.utils.token import resolve_tokens
 from tests.support.run_main_harness import FakeAgent, run_main_for_test
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def _rmtree_if_exists(path: str) -> None:
@@ -571,3 +570,185 @@ async def test_main_result_is_unchanged_for_each_run_outcome(
                 f"expected {expected_packet_path!r}"
             )
     assert not failures, "\n".join(failures)
+
+
+class TestFinalizeCarriesTheVerdictDiagnostic:
+    """`#265` producer half — the run's diagnostic reaches `MainResult`.
+
+    The consumer half (`tests/cli/test_gha_failure_outputs.py`'s
+    `TestVerdictDiagnosticOutput`) proves that a `MainResult` carrying a code
+    reaches `$GITHUB_OUTPUT`. On its own that is satisfied by a `MainResult`
+    nobody ever populates, which is the same observable defect as `#265` seen
+    from the other end: a documented output that is permanently empty. These
+    tests close the other half — a real `main()` run that computed a
+    diagnostic must return it — so the two suites together cover the path
+    from "the run classified the verdict protocol" to "the consumer can read
+    the code".
+
+    Assertions go through `main()` and `MainResult` only. Nothing here names
+    how the diagnostic is threaded, so a refactor that carries it on the
+    prediction object, a widened publish helper, or some third carrier stays
+    green as long as the code arrives.
+    """
+
+    @staticmethod
+    def _codes() -> set[str]:
+        from mergecraft.mcp.verdict import VerdictDiagnostic
+
+        return {member.value for member in VerdictDiagnostic}
+
+    async def test_success_path_carries_the_computed_code(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A clean run returns through the `passed` branch carrying `approved`."""
+        rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+        assert rec.result is not None
+        assert rec.result.outcome is RunOutcome.passed
+        assert rec.result.verdict_diagnostic == "approved"
+
+    async def test_failure_path_carries_the_computed_code(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The non-`passed` branch is a separate `return` — it must not drop the code.
+
+        A failed run is exactly when a consumer needs to distinguish "the
+        provider broke" from "policy rejected the review", so the failure
+        branch losing the diagnostic would be worse than the success branch
+        losing it.
+        """
+        agent = FakeAgent(result=AgentResult(success=False, error="review gate failed"))
+        rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=tmp_path, agent=agent)
+
+        assert rec.result is not None
+        assert rec.result.outcome is RunOutcome.failed
+        assert rec.result.verdict_diagnostic == "provider_failure"
+
+    async def test_policy_rejection_is_distinguishable_from_provider_failure(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Two different failures reaching the same branch keep different codes.
+
+        Both a prep failure and an agent failure leave the non-`passed`
+        return; if the branch hard-coded (or dropped and defaulted) the code,
+        this pair would collapse into one value and the output would stop
+        carrying information.
+        """
+        rec = await run_main_for_test(
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+            prep_failure="pip install -r requirements.txt failed (exit 1)",
+        )
+
+        assert rec.result is not None
+        assert rec.result.outcome is RunOutcome.inconclusive
+        assert rec.result.verdict_diagnostic == "policy_rejection"
+
+    @pytest.mark.parametrize(
+        ("scenario", "kwargs"),
+        [
+            ("passed", {}),
+            (
+                "failed",
+                {"agent": FakeAgent(result=AgentResult(success=False, error="blocked"))},
+            ),
+            ("inconclusive", {"prep_failure": "install failed"}),
+        ],
+    )
+    async def test_enforce_and_shadow_deposit_the_same_code(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        scenario: str,
+        kwargs: dict[str, Any],
+    ) -> None:
+        """The fragile seam — the code must not depend on the terminal-verdict mode.
+
+        `enforce` and `shadow` diverge in what the run *does* with the
+        prediction (only `shadow` hands it to the recorder), so an
+        implementation that reached the diagnostic through the shadow-only
+        carrier would produce a code under `shadow` and nothing under
+        `enforce` — the default. Running the same scenario under both modes
+        and comparing pins that asymmetry shut.
+        """
+        codes: dict[str, str | None] = {}
+        for mode in ("enforce", "shadow"):
+            scenario_tmp = tmp_path / f"{scenario}-{mode}"
+            scenario_tmp.mkdir()
+            rec = await run_main_for_test(
+                monkeypatch=monkeypatch,
+                tmp_path=scenario_tmp,
+                settings=RepoSettings(gates=GatesSettings(terminal_verdict=mode)),
+                **kwargs,
+            )
+            assert rec.result is not None, f"{scenario}/{mode}: main() raised ({rec.raised!r})"
+            codes[mode] = rec.result.verdict_diagnostic
+
+        assert codes["enforce"] in self._codes(), (
+            f"{scenario}: enforce deposited {codes['enforce']!r}, outside the closed vocabulary"
+        )
+        assert codes["enforce"] == codes["shadow"], (
+            f"{scenario}: enforce deposited {codes['enforce']!r} but shadow deposited "
+            f"{codes['shadow']!r} — the code a consumer reads must not depend on the mode"
+        )
+
+    async def test_every_completed_run_deposits_a_closed_code(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """No completed run leaves the documented output empty.
+
+        Every path that reaches the verdict-protocol classification has a
+        code for it, so "empty" must mean "never classified" (below) rather
+        than "classified but not carried".
+        """
+        scenarios: dict[str, dict[str, Any]] = {
+            "passed": {},
+            "failed": {"agent": FakeAgent(result=AgentResult(success=False, error="blocked"))},
+            "inconclusive": {"prep_failure": "install failed"},
+        }
+        observed: dict[str, str | None] = {}
+        for name, kwargs in scenarios.items():
+            scenario_tmp = tmp_path / name
+            scenario_tmp.mkdir()
+            rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=scenario_tmp, **kwargs)
+            assert rec.result is not None, f"{name}: main() raised ({rec.raised!r})"
+            observed[name] = rec.result.verdict_diagnostic
+
+        closed = self._codes()
+        offenders = {name: code for name, code in observed.items() if code not in closed}
+        assert not offenders, f"completed run(s) carried no closed VerdictDiagnostic: {offenders}"
+
+    @pytest.mark.parametrize(
+        ("scenario", "kwargs"),
+        [
+            ("timed_out", {"agent": FakeAgent(delay_s=5.0), "env": {"INPUT_TIMEOUT": "1s"}}),
+            ("configuration_error", {"env": {"INPUT_TIMEOUT": "not-a-duration"}}),
+            ("infra_error", {"agent": FakeAgent(result=RuntimeError("provider unreachable"))}),
+        ],
+    )
+    async def test_runs_that_never_classified_carry_no_code(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        scenario: str,
+        kwargs: dict[str, Any],
+    ) -> None:
+        """D10's empty arm at the producer end.
+
+        These three outcomes leave through `main()`'s outer handler and never
+        reach the verdict-protocol classification (the same asymmetry
+        `test_main_result_is_unchanged_for_each_run_outcome` pins for the
+        evidence packet), so there is no code to report. The value must be
+        falsy — `None` or `""` both satisfy the consumer, which writes a
+        present-but-empty key either way — and must never be a fabricated
+        code that would tell a consumer the run reached a verdict it never
+        reached.
+        """
+        rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=tmp_path, **kwargs)
+
+        assert rec.result is not None
+        assert rec.result.outcome is RunOutcome(scenario)
+        assert not rec.result.verdict_diagnostic, (
+            f"{scenario} never classified a verdict protocol but reported "
+            f"{rec.result.verdict_diagnostic!r}"
+        )

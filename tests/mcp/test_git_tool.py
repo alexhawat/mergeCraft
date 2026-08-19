@@ -1,13 +1,17 @@
-"""Tests for git MCP tool input normalization (redundant subcommand tolerance)."""
+"""Tests for git MCP tool input normalization (redundant subcommand tolerance).
+
+Also covers the reviewer-surface hardening contract for issue #257 (D7) and the
+``commit_changes`` honesty contract for issue #259 (D9).
+"""
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, Literal
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -15,19 +19,34 @@ from mergecraft.mcp.context import (
     ResolvedPayload,
     ToolContext,
 )
-from mergecraft.mcp.git import git_tool
+from mergecraft.mcp.git import commit_changes_tool, git_tool
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
 
+# A path that is deliberately outside any test repo root.
+OUTSIDE_DIR = "/some/repo/dir"
 
-def _ctx(tmp_path: Path) -> ToolContext:
+Shell = Literal["disabled", "restricted", "enabled"]
+
+
+def _resolved(path: Path) -> str:
+    return str(path.resolve())
+
+
+def _ctx(
+    tmp_path: Path,
+    *,
+    shell: Shell = "restricted",
+    push: Literal["disabled", "restricted", "enabled"] = "restricted",
+    github: GitHubClient | None = None,
+) -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
     return ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
-        payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request")),
-        github=GitHubClient(token=""),
+        payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request"), shell=shell, push=push),
+        github=github or GitHubClient(token=""),
         github_installation_token="",
         git_token="",
         api_token="",
@@ -101,46 +120,80 @@ async def test_invalid_subcommand_after_normalization_rejected(
     assert recorder.calls == []
 
 
-async def test_global_c_option_is_forwarded(
+async def test_global_c_option_inside_repo_root_is_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    inside = _resolved(tmp_path)
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": ["-C", inside]})
+    assert result.is_error is False, result.content[0]["text"]
+    # `-C` pointing at the primary repo root must still be forwarded before the
+    # subcommand, not rejected as a subcommand and not swallowed.
+    assert recorder.calls == [["-C", inside, "status"]]
+
+
+async def test_global_c_option_outside_repo_root_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#257 / D7: `-C` must not point the tool at a directory outside the repo."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["-C", OUTSIDE_DIR]}
+    )
+    assert result.is_error is True
+    assert OUTSIDE_DIR in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("flag_args", [["-c", "core.quotepath=false", "-s"], ["--config-env=x=Y"]])
+async def test_c_config_option_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag_args: list[str]
+) -> None:
+    """#257 / D7: `-c` / `--config-env` are never forwarded, they are rejected.
+
+    Any `-c` is an alias-execution vector, so even a benign
+    `-c core.quotepath=false` is refused rather than inspected.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": flag_args})
+    assert result.is_error is True
+    assert recorder.calls == []
+
+
+async def test_work_tree_outside_repo_root_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recorder = _RunGitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
 
     result = await git_tool(_ctx(tmp_path)).execute(
-        {"command": "status", "args": ["-C", "/some/repo/dir"]}
+        {"command": "git status", "args": ["--work-tree", OUTSIDE_DIR, "-s"]}
     )
-    assert result.is_error is False, result.content[0]["text"]
-    # `-C` must be forwarded before the subcommand, not rejected as a
-    # subcommand and not swallowed.
-    assert recorder.calls == [["-C", "/some/repo/dir", "status"]]
+    assert result.is_error is True
+    assert OUTSIDE_DIR in result.content[0]["text"]
+    assert recorder.calls == []
 
 
-async def test_c_config_option_forwarded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    recorder = _RunGitRecorder()
-    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
-
-    result = await git_tool(_ctx(tmp_path)).execute(
-        {"command": "status", "args": ["-c", "core.quotepath=false", "-s"]}
-    )
-    assert result.is_error is False, result.content[0]["text"]
-    assert recorder.calls == [["-c", "core.quotepath=false", "status", "-s"]]
-
-
-async def test_git_dir_global_option_forwarded(
+async def test_git_dir_outside_repo_root_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recorder = _RunGitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
 
     result = await git_tool(_ctx(tmp_path)).execute(
-        {"command": "git status", "args": ["--work-tree", "/some/repo/dir", "-s"]}
+        {"command": "status", "args": [f"--git-dir={OUTSIDE_DIR}/.git"]}
     )
-    assert result.is_error is False, result.content[0]["text"]
-    assert recorder.calls == [["--work-tree", "/some/repo/dir", "status", "-s"]]
+    assert result.is_error is True
+    assert recorder.calls == []
 
 
-async def test_global_opt_in_command_string_forwarded(
+async def test_global_opt_in_command_string_outside_repo_root_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recorder = _RunGitRecorder()
@@ -148,7 +201,797 @@ async def test_global_opt_in_command_string_forwarded(
 
     # Agent passes the global option as part of the `command` string.
     result = await git_tool(_ctx(tmp_path)).execute(
-        {"command": "git -C /some/repo/dir status", "args": []}
+        {"command": f"git -C {OUTSIDE_DIR} status", "args": []}
     )
+    assert result.is_error is True
+    assert OUTSIDE_DIR in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+def _repo_and_evil_sibling(tmp_path: Path) -> tuple[Path, Path]:
+    """A real repo root plus a real sibling whose name is a string prefix match.
+
+    ``<root>-evil`` is not inside ``<root>``, but a bare textual prefix test on
+    the resolved paths would accept it. Both directories are created on disk so
+    ``Path.resolve()`` cannot collapse the distinction away.
+    """
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    evil = (tmp_path / "repo-evil").resolve()
+    (evil / "secrets").mkdir(parents=True)
+    return root, evil
+
+
+@pytest.mark.parametrize(
+    "build_args",
+    [
+        pytest.param(lambda p: ["-C", p], id="dash-C"),
+        pytest.param(lambda p: ["--git-dir", f"{p}/.git"], id="git-dir-separate"),
+        pytest.param(lambda p: [f"--git-dir={p}/.git"], id="git-dir-equals"),
+        pytest.param(lambda p: ["--work-tree", p], id="work-tree-separate"),
+        pytest.param(lambda p: [f"--work-tree={p}"], id="work-tree-equals"),
+    ],
+)
+async def test_sibling_prefix_directory_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    build_args: Any,
+) -> None:
+    """A sibling whose path merely starts with the repo root must not be accepted."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    root, evil = _repo_and_evil_sibling(tmp_path)
+    target = str(evil / "secrets")
+    result = await git_tool(_ctx(root)).execute({"command": "status", "args": build_args(target)})
+    assert result.is_error is True, result.content[0]["text"]
+    assert target in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_sibling_prefix_without_separator_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``<root>evil`` — a prefix match with no separator at all — is still outside."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    adjacent = (tmp_path / "repoevil").resolve()
+    adjacent.mkdir()
+
+    result = await git_tool(_ctx(root)).execute(
+        {"command": "status", "args": ["-C", str(adjacent)]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert str(adjacent) in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("suffix", ["", "/", "/."], ids=["bare", "trailing-slash", "dot"])
+async def test_repo_root_itself_still_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str
+) -> None:
+    """Hardening containment must not turn into a blanket refusal of the root."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    root, _evil = _repo_and_evil_sibling(tmp_path)
+    given = f"{root}{suffix}"
+    result = await git_tool(_ctx(root)).execute({"command": "status", "args": ["-C", given]})
     assert result.is_error is False, result.content[0]["text"]
-    assert recorder.calls == [["-C", "/some/repo/dir", "status"]]
+    assert recorder.calls == [["-C", given, "status"]]
+
+
+async def test_nested_path_inside_repo_root_still_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    root, _evil = _repo_and_evil_sibling(tmp_path)
+    nested = root / "src" / "pkg"
+    nested.mkdir(parents=True)
+
+    result = await git_tool(_ctx(root)).execute({"command": "status", "args": ["-C", str(nested)]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-C", str(nested), "status"]]
+
+
+@pytest.mark.parametrize("subcommand", ["reset", "clean", "stash", "update-ref"])
+async def test_mutating_subcommands_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
+) -> None:
+    """#257 / D7: the reviewer surface exposes read-only git only."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand})
+    assert result.is_error is True
+    assert recorder.calls == []
+
+
+# Every write form of ``git branch``. The short spellings were the only ones the
+# old blocklist named; the long spellings, ``-M``/``--copy``/``-C`` and bare
+# creation all reached git. A rename in particular changes what
+# ``commit_changes`` / ``push_branch`` later resolve through
+# ``rev-parse --abbrev-ref HEAD``.
+BRANCH_WRITE_ARGS = [
+    pytest.param(["-D", "topic"], id="short-force-delete"),
+    pytest.param(["-d", "topic"], id="short-delete"),
+    pytest.param(["-m", "old", "new"], id="short-move"),
+    pytest.param(["--delete", "topic"], id="long-delete"),
+    pytest.param(["--move", "old", "new"], id="long-move"),
+    pytest.param(["-M", "old", "new"], id="short-force-move"),
+    pytest.param(["--copy", "old", "new"], id="long-copy"),
+    pytest.param(["-c", "old", "new"], id="short-copy"),
+    pytest.param(["-C", "old", "new"], id="short-force-copy"),
+    pytest.param(["newbranch"], id="bare-creation"),
+    pytest.param(["newbranch", "main"], id="creation-from-start-point"),
+    pytest.param(["--set-upstream-to=origin/main"], id="set-upstream"),
+    pytest.param(["--unset-upstream"], id="unset-upstream"),
+    pytest.param(["--edit-description"], id="edit-description"),
+    pytest.param(["--force", "topic", "main"], id="force-create"),
+]
+
+
+@pytest.mark.parametrize("args", BRANCH_WRITE_ARGS)
+async def test_branch_write_forms_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "branch", "args": args})
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param([], id="plain-list"),
+        pytest.param(["-a"], id="all"),
+        pytest.param(["-r"], id="remotes"),
+        pytest.param(["-v"], id="verbose"),
+        pytest.param(["--all"], id="long-all"),
+        pytest.param(["--remotes"], id="long-remotes"),
+        pytest.param(["--merged"], id="merged"),
+        pytest.param(["--no-merged"], id="no-merged"),
+        pytest.param(["--contains", "HEAD"], id="contains-rev"),
+        pytest.param(["--show-current"], id="show-current"),
+    ],
+)
+async def test_branch_listing_forms_still_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    """The read-only affordance must survive the write guard."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "branch", "args": args})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["branch", *args]]
+
+
+# R5: short flags are subcommand-scoped, so a flat global blocklist cannot
+# express them. Every entry below is a real read-only invocation the flat
+# blocklist refused — `-o`/`-c` mean `--others`/`--cached` to `ls-files`, `-c`
+# is the combined-diff selector for `log`/`show`, and `-C` after `diff` is
+# find-copies rather than git's chdir option.
+SUBCOMMAND_SCOPED_READONLY = [
+    pytest.param("ls-files", ["-o"], id="ls-files-others"),
+    pytest.param("ls-files", ["-c"], id="ls-files-cached"),
+    pytest.param("ls-files", ["-co"], id="ls-files-bundled"),
+    pytest.param("ls-files", ["--others", "--cached"], id="ls-files-long-forms"),
+    pytest.param("log", ["-c"], id="log-combined-diff"),
+    pytest.param("show", ["-c", "HEAD"], id="show-combined-diff"),
+    pytest.param("diff", ["-C"], id="diff-find-copies"),
+    pytest.param("diff", ["-C", "HEAD"], id="diff-find-copies-with-rev"),
+    pytest.param("branch", ["-av"], id="branch-bundled-all-verbose"),
+    pytest.param("branch", ["-ar"], id="branch-bundled-all-remotes"),
+    pytest.param("branch", ["-vvv"], id="branch-repeated-verbose"),
+    pytest.param("branch", ["--list", "topic/*"], id="branch-list-pattern"),
+]
+
+
+@pytest.mark.parametrize(("subcommand", "args"), SUBCOMMAND_SCOPED_READONLY)
+async def test_subcommand_scoped_read_only_flags_are_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str, args: list[str]
+) -> None:
+    """A read-only invocation must reach git with its flags intact."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand, "args": args})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [[subcommand, *args]], recorder.calls
+
+
+# The same short letters must stay refused on a subcommand that does not define
+# them: scoping the maps is not a licence to widen the config-flag hole.
+SUBCOMMAND_SCOPED_STILL_BLOCKED = [
+    pytest.param("status", ["-c"], id="status-has-no-short-c"),
+    pytest.param("status", ["-co"], id="status-bundled-c"),
+    pytest.param("diff", ["-cuser.name=x"], id="glued-config-on-diff"),
+    pytest.param("ls-files", ["-calias.x=!true"], id="glued-config-on-ls-files"),
+    pytest.param("log", ["-c", "alias.x=!true", "-o", "/tmp/x"], id="log-still-refuses-dash-o"),
+    pytest.param("branch", ["-aD"], id="branch-bundled-with-delete"),
+    pytest.param("branch", ["-vd", "topic"], id="branch-bundled-with-lowercase-delete"),
+    pytest.param("branch", ["topic"], id="branch-bare-creation-without-list"),
+]
+
+
+@pytest.mark.parametrize(("subcommand", "args"), SUBCOMMAND_SCOPED_STILL_BLOCKED)
+async def test_subcommand_scoping_does_not_widen_the_guards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str, args: list[str]
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand, "args": args})
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_an_unrecognised_short_bundle_is_not_called_an_alias_vector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``git log -cx`` is refused for its own reason, with its own message.
+
+    ``-cx`` carries no config assignment, so calling it an alias-execution
+    vector is simply false — it is a short bundle ``log`` does not define. Both
+    refusals stay; only the one that was inaccurate is re-worded.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "log", "args": ["-cx"]})
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+    text = result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE not in text
+    assert "does not define" in text
+
+
+async def test_a_glued_config_payload_still_names_the_alias_vector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Counterpart: the assignment-carrying spelling keeps the accurate message."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "log", "args": ["-calias.x=!true"]})
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+
+
+@pytest.mark.parametrize("subcommand", ["diff", "show", "log"])
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "--output=/tmp/mergecraft-escape.txt",
+        "--output",
+        # Abbreviations git could resolve are named exactly. Shorter forms are
+        # ambiguous with `--output-indicator-*`, so git refuses them itself.
+        "--out",
+        "--outp",
+        "--output=",
+    ],
+)
+async def test_file_writing_flags_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str, flag: str
+) -> None:
+    """An allowlisted read-only verb must not be able to write a file (H2)."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": subcommand, "args": [flag, "/tmp/mergecraft-escape.txt"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("subcommand", ["push", "fetch", "pull", "clone"])
+async def test_auth_requiring_subcommands_name_their_dedicated_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
+) -> None:
+    """The redirect is the affordance: the generic allowlist error hides it."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand})
+    assert result.is_error is True
+    assert recorder.calls == []
+    text = result.content[0]["text"]
+    assert "read-only allowlist" not in text
+    assert any(name in text for name in ("push_branch", "git_fetch", "checkout_repo"))
+
+
+async def test_relative_c_is_resolved_against_the_repo_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """L7: git resolves a relative ``-C`` against its own cwd, so validation must too.
+
+    The MCP server's process cwd is not the checkout in the Action, so a
+    ``Path(value).resolve()`` check and the executed command disagreed about what
+    a relative path means.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    nested = tmp_path / "pkg"
+    nested.mkdir()
+    monkeypatch.chdir(tmp_path.parent)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": ["-C", "pkg"]})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-C", "pkg", "status"]]
+    assert nested.is_dir()
+
+
+async def test_cumulative_c_options_that_escape_are_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """git applies successive ``-C`` cumulatively; the walk has to model that."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    nested = tmp_path / "pkg"
+    nested.mkdir()
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["-C", "pkg", "-C", "../.."]}
+    )
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_a_registered_cross_repo_checkout_is_reachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M4: a secondary checkout is registered as a workspace root, so -C must allow it."""
+    from mergecraft.utils.workspace import register_workspace_root
+
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    secondary = tmp_path.parent / "secondary-checkout"
+    secondary.mkdir(exist_ok=True)
+    register_workspace_root(str(secondary))
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["-C", str(secondary)]}
+    )
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-C", str(secondary), "status"]]
+
+
+@pytest.mark.parametrize(
+    "subcommand",
+    [
+        "status",
+        "log",
+        "diff",
+        "show",
+        "rev-parse",
+        "describe",
+        "ls-files",
+        "blame",
+        "cat-file",
+        "rev-list",
+        "branch",
+    ],
+)
+async def test_readonly_subcommands_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
+) -> None:
+    """The D7 allowlist must keep every read-only subcommand callable."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [[subcommand]]
+
+
+@pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
+async def test_dash_c_alias_rejected_regardless_of_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
+) -> None:
+    """#257: `git -c alias.x='!cmd' status` is an alias-execution vector.
+
+    Rejection must not depend on `payload.shell`: a shell-gated guard would
+    leave the vector open in the `restricted`/`enabled` modes.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path, shell=shell)).execute(
+        {"command": "git -c alias.x='!true' status", "args": []}
+    )
+    assert result.is_error is True
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
+async def test_dash_c_alias_in_args_rejected_regardless_of_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path, shell=shell)).execute(
+        {"command": "status", "args": ["-c", "alias.x=!true"]}
+    )
+    assert result.is_error is True
+    assert recorder.calls == []
+
+
+CONFIG_FLAG_MESSAGE = "can execute arbitrary code via git alias expansion"
+
+# Single-argv `-c<name>=<value>` spellings. Upstream git parses `-c` with an
+# exact `strcmp` (git.c handle_options, unchanged since v1.7.2), so git itself
+# refuses these — but `_reject_config_flags` must still refuse them at the tool
+# boundary rather than forwarding a config-shaped token and relying on git's
+# argv parser to fail closed.
+GLUED_SHORT_CONFIG_TOKENS = [
+    "-calias.x=!true",
+    "-cprotocol.ext.allow=always",
+    "-ccore.pager=!sh",
+]
+
+
+@pytest.mark.parametrize("token", GLUED_SHORT_CONFIG_TOKENS)
+async def test_glued_short_config_flag_in_args_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """#257: `-c<key>=<value>` glued into one argv token must be rejected.
+
+    `_reject_config_flags` matches only an exact `-c` or a `-c=`-prefixed token,
+    so the glued spelling is forwarded to `_run_git` untouched.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": [token]})
+    assert result.is_error is True, result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
+async def test_glued_short_config_flag_in_args_rejected_regardless_of_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
+) -> None:
+    """The glued spelling must be refused in every shell mode, like the spaced one."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path, shell=shell)).execute(
+        {"command": "status", "args": ["-calias.x=!true"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("token", GLUED_SHORT_CONFIG_TOKENS)
+async def test_glued_short_config_flag_in_global_opts_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """The same token must be refused on the `global_opts` path, not just `args`.
+
+    `--namespace` takes a separate value, so `_extract_global_opts` moves the
+    following token into `global_opts` — i.e. in front of the subcommand, the
+    only position where git honours a global config flag. `_reject_config_flags`
+    is called on both lists and the fix has to hold for both.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["--namespace", token]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
+async def test_config_flag_in_global_opts_position_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
+) -> None:
+    """A spaced `-c` smuggled into `global_opts` via `--namespace` is already refused.
+
+    This is the pre-subcommand position git actually honours, so the defensive
+    `_reject_config_flags(global_opts)` call must keep firing here.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path, shell=shell)).execute(
+        {"command": "status", "args": ["--namespace", "-c", "alias.x=!true"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param("-c", id="bare-short"),
+        pytest.param("-c=alias.x=!true", id="short-equals-attached"),
+        pytest.param("--config-env", id="bare-long"),
+        pytest.param("--config-env=alias.x=EVIL", id="long-equals-attached"),
+    ],
+)
+async def test_known_config_flag_spellings_still_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """Every spelling the current guard already catches must keep its rejection.
+
+    `--config-env` is accepted by git both as `--config-env <name>=<envvar>` and
+    as `--config-env=<name>=<envvar>`; the bare token covers the separate-value
+    form. `-c` is exact-match only upstream, so `-c` and `-c=…` are the whole
+    short-flag surface the guard has to keep refusing.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": [token]})
+    assert result.is_error is True, result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_spaced_config_flag_rejection_message_names_the_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rejection quotes the offending token — the fix must not lose that."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["-c", "alias.x=!true"]}
+    )
+    assert result.is_error is True
+    text = result.content[0]["text"]
+    assert "'-c'" in text
+    assert CONFIG_FLAG_MESSAGE in text
+    assert recorder.calls == []
+
+
+NAMESPACE_FLAG_MESSAGE = "sets a ref namespace"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["--namespace", "evil"], id="separate-value"),
+        pytest.param(["--namespace=evil"], id="inline-value"),
+        pytest.param(["--namespace", "../../etc"], id="traversal-shaped-value"),
+        pytest.param(["--namespace"], id="bare-trailing"),
+    ],
+)
+async def test_namespace_flag_is_refused_on_the_reviewer_surface(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    """`--namespace` must never reach git from the read-only tool.
+
+    It sets GIT_NAMESPACE, a ref-namespace prefix rather than a path, so
+    `confine_to_workspace` cannot bound it — and `_extract_global_opts` lifts it
+    into the pre-subcommand slot git honours. No allowlisted subcommand consumes
+    it, so refusal costs the reviewer nothing.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": args})
+    assert result.is_error is True, result.content[0]["text"]
+    assert NAMESPACE_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_namespace_flag_in_command_string_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `git …` command-string route reaches the same slot and must also refuse."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "git --namespace=evil log"})
+    assert result.is_error is True, result.content[0]["text"]
+    assert NAMESPACE_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
+async def test_namespace_flag_refused_regardless_of_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
+) -> None:
+    """Refusal is a property of the tool surface, not of the shell setting."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path, shell=shell)).execute(
+        {"command": "status", "args": ["--namespace", "evil"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param("--namespaces", id="plural-lookalike"),
+        pytest.param("--name-only", id="name-only"),
+        pytest.param("--name-status", id="name-status"),
+    ],
+)
+async def test_namespace_lookalike_flags_still_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """The refusal must match `--namespace` exactly, not by prefix.
+
+    `git log --name-only` is a routine reviewer call; a `startswith("--namespace")`
+    or looser match would buy the guard by breaking the tool.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "log", "args": [token]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["log", token]]
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param("--cached", id="cached"),
+        pytest.param("--column", id="column"),
+        pytest.param("--color=never", id="color-equals"),
+        pytest.param("--count", id="count"),
+        pytest.param("--cc", id="cc"),
+        pytest.param("--children", id="children"),
+    ],
+)
+async def test_non_config_flags_beginning_with_c_still_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """A `startswith("-c")`-style fix must not over-block legitimate flags.
+
+    These are real read-only git flags whose names begin with `c`; none of them
+    is a config flag, and blocking them would buy safety by breaking the tool.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "log", "args": [token]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["log", token]]
+
+
+async def test_capital_c_path_flag_is_not_a_config_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`-C` is git's path flag, not `-c`: the guard must stay case-sensitive.
+
+    A case-insensitive or lowercased `-c` match would take `-C` down with it,
+    so the confinement-checked path flag is pinned green here explicitly.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    inside = _resolved(tmp_path)
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": ["-C", inside]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-C", inside, "status"]]
+
+
+async def test_glued_short_config_flag_in_command_string_is_not_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In the `command` string the glued token lands as a fake subcommand.
+
+    The read-only allowlist already refuses it, so this path is safe today; pin
+    it so the glued-form fix cannot regress it into a forwarded token.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "git -calias.x=!true status", "args": []}
+    )
+    assert result.is_error is True
+    assert recorder.calls == []
+
+
+class _CommitGitRecorder:
+    """Serves the argv sequence ``commit_changes`` issues, recording each call."""
+
+    def __init__(self, *, branch: str = "topic", sha: str = "abc1234") -> None:
+        self.calls: list[list[str]] = []
+        self.branch = branch
+        self.sha = sha
+
+    def __call__(self, args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
+        argv = [str(a) for a in args]
+        self.calls.append(argv)
+        if argv == ["rev-parse", "--abbrev-ref", "HEAD"]:
+            return f"{self.branch}\n"
+        if argv == ["status", "--porcelain"]:
+            return " M src/mergecraft/mcp/git.py\n"
+        if argv == ["rev-parse", "HEAD"]:
+            return f"{self.sha}\n"
+        return ""
+
+
+class _PatchRecordingGitHub(GitHubClient):
+    """Records Git Data ref PATCH attempts made by ``commit_changes``."""
+
+    def __init__(self) -> None:
+        super().__init__(token="test-token")
+        self.patch_calls: list[str] = []
+
+    async def patch(self, path: str, **kwargs: Any) -> Any:
+        self.patch_calls.append(path)
+        return {}
+
+
+async def test_commit_changes_push_policy_skip_reports_pushed_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The policy-skip path already carries the honest `pushed` key."""
+    recorder = _CommitGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    ctx = _ctx(tmp_path, push="disabled")
+    result = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
+    assert result.is_error is False, result.content[0]["text"]
+    payload = json.loads(result.content[0]["text"])
+    assert payload["pushed"] is False
+
+
+async def test_commit_changes_always_reports_pushed_and_never_patches_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#259 / D9: no doomed Git Data ref PATCH, and `pushed` is always present."""
+    recorder = _CommitGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    github = _PatchRecordingGitHub()
+    ctx = _ctx(tmp_path, push="enabled", github=github)
+    result = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
+    assert result.is_error is False, result.content[0]["text"]
+    payload = json.loads(result.content[0]["text"])
+    assert isinstance(payload["pushed"], bool)
+    assert payload["pushed"] is False
+    assert github.patch_calls == []
+
+
+async def test_commit_changes_description_matches_the_local_only_contract(tmp_path: Path) -> None:
+    """The description must promise exactly what the body does.
+
+    ``commit_changes`` always returns ``pushed: False`` and the Git Data ref
+    PATCH that once produced a signed, remote commit is gone (#259 / D9), so the
+    description has to state the local-only contract and claim neither a push
+    nor a signature. Word boundaries keep "unsigned" from reading as a claim.
+    """
+    description = commit_changes_tool(_ctx(tmp_path)).description.lower()
+
+    assert "local commit" in description
+    assert "no push" in description
+    claims = [
+        claim
+        for claim in ("signed", "signs", "signature", "verified", "pushes", "remote commit")
+        if re.search(rf"\b{claim}\b", description)
+    ]
+    assert claims == []

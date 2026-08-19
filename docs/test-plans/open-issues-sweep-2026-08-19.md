@@ -1,0 +1,1460 @@
+# Test plan — open GitHub issues sweep (2026-08-19)
+
+**Plan:** `.ignorelocal/waves/open-issues-sweep-2026-08-19-wave-plan.md`
+**Branch:** `wave/open-issues-sweep-2026-08-19` (single worktree, waves serial)
+**Owner:** `test-creator` — the only agent that may edit `tests/`.
+
+## How to use this document
+
+The program has **six RED waves**, one per logical batch. Each RED wave appends **its own
+`## Batch <X>` section** below and touches nothing else in this file:
+
+| Batch | RED wave | Section | Status |
+|---|---|---|---|
+| A — MCP security (#257, #258, #260, #259) | W1 | [Batch A](#batch-a--mcp-security-w1) | **reconciled — all green** |
+| B — Action / workflow contract (#264, #265, #272, #271) | W6 | [Batch B](#batch-b--action--workflow-contract-w6) | **authored — 17 RED (W7/W8/W9)** |
+| C — Analyzer correctness (#270, #269, #268) | W10 | [Batch C](#batch-c--analyzer-correctness-w10) | **reconciled — all green** |
+| D — Agents + approve gate (#222, #261, #262, #273, #263) | W14 | _append below_ | pending |
+| E — MCP contract (#266, #267) | W20 | _append below_ | pending |
+| F — Auth DX + #220 close (#221, #220) | W23 | _append below_ | pending |
+
+Section template each batch follows: **Contract → test map** table, **Confirmed-RED assertions**
+list, **Green-today regression guards** list, **Inverted assertions** (if any), and
+**Escalation log** (appended only when an implementation wave exhausts its attempts and the test —
+not the code — turns out to be wrong).
+
+Conventions for every batch:
+
+- Cross-wave reds use `@pytest.mark.xfail(reason="green after W<N>: …", strict=False)`. Never
+  `strict=True` — a strict xfail that starts passing becomes `XPASS(strict)` and breaks the suite
+  the implementation wave was forbidden from touching.
+- Each implementation wave removes only the xfail markers tagged with its own wave number.
+- Verification per RED wave: `make lint`, `make typecheck`, and a clean
+  `uv run pytest --collect-only -q` on the touched paths. Assertions stay red.
+
+---
+
+## Batch A — MCP security (W1)
+
+**Authored:** 2026-08-19 (`1b1cb3e`) · **Greened by:** W2 `f8ad50f` (#257), W3 `605d3a5` (#258),
+W4 `c81c545` (#260), W5 `f1378f7` (#259) · **Markers reconciled:** 2026-08-19 —
+all 15 `xfail` decorators (27 parametrized instances) removed; the three files are
+**47 passed, 0 xfail, 0 xpass**.
+**Files:** `tests/mcp/test_git_tool.py` (extended), `tests/mcp/test_upload.py` (new),
+`tests/mcp/test_labels.py` (new)
+
+### Contract → test map
+
+| Issue | Contract (source) | Layer | Test | Greened by |
+|---|---|---|---|---|
+| #257 / D7 | Read-only subcommand allowlist — `reset`, `clean`, `stash`, `update-ref` rejected (`mcp/git.py:20` `_SUBCOMMAND_RE` is format-only) | unit | `test_mutating_subcommands_rejected[reset|clean|stash|update-ref]` | W2 |
+| #257 / D7 | `branch` is read-only: `-D` / `-d` / `-m` rejected | unit | `test_branch_mutation_flags_rejected[-D|-d|-m]` | W2 |
+| #257 / D7 | Allowlist keeps every read-only subcommand callable | unit | `test_readonly_subcommands_allowed[…11 cases]` | green today |
+| #257 | `git -c alias.x='!true' status` rejected regardless of `payload.shell` (command string form) | unit | `test_dash_c_alias_rejected_regardless_of_shell[disabled|restricted|enabled]` | W2 |
+| #257 | Same via `args` (`["-c", "alias.x=!true"]`) | unit | `test_dash_c_alias_in_args_rejected_regardless_of_shell[…]` | W2 |
+| #257 / D7 | `-c` / `--config-env` never forwarded, even benign (`core.quotepath=false`) | unit | `test_c_config_option_rejected[flag_args0|flag_args1]` | W2 |
+| #257 / D7 | `-C` outside the primary repo root rejected | unit | `test_global_c_option_outside_repo_root_rejected` | W2 |
+| #257 / D7 | `-C` inside the primary repo root still forwarded before the subcommand | unit | `test_global_c_option_inside_repo_root_is_forwarded` | green today |
+| #257 / D7 | `--work-tree` outside the repo root rejected | unit | `test_work_tree_outside_repo_root_rejected` | W2 |
+| #257 / D7 | `--git-dir=…` outside the repo root rejected | unit | `test_git_dir_outside_repo_root_rejected` | W2 |
+| #257 / D7 | Confinement also applies when the option arrives inside the `command` string | integration | `test_global_opt_in_command_string_outside_repo_root_rejected` | W2 |
+| #258 / D8 | Path outside repo root **and** `ctx.tmpdir` rejected; no `file://` URI returned | integration | `test_path_outside_repo_and_tmpdir_rejected` | W3 |
+| #258 / D8 | Symlink rejected (tmp stand-in target, not a real `/etc/passwd` read) | integration | `test_symlink_escape_rejected` | W3 |
+| #258 / D8 | Relative `..` traversal out of the repo root rejected | integration | `test_relative_traversal_out_of_repo_rejected` | W3 |
+| #258 / D8 | In-repo file still uploads in BYOK mode (`file://` under `tmpdir/uploads`) | functional | `test_in_repo_file_still_uploads_in_byok_mode` | green today |
+| #258 / D8 | File under `ctx.tmpdir` still uploads | functional | `test_tmpdir_file_still_uploads_in_byok_mode` | green today |
+| #260 | `remove_labels` percent-encodes the label segment of the delete URL (`/`, space, `..`) | integration | `test_label_name_is_percent_encoded_in_delete_url[area/mcp|needs info|../evil]` | W4 |
+| #260 | Plain label leaves the delete URL byte-identical | integration | `test_plain_label_delete_url_is_unchanged` | green today |
+| #259 / D9 | Every `commit_changes` return carries `pushed: bool`; no Git Data ref `PATCH` | integration | `test_commit_changes_always_reports_pushed_and_never_patches_ref` | W5 |
+| #259 / D9 | Tool description no longer claims a GitHub-signed commit | unit | `test_commit_changes_description_does_not_claim_signed` | W5 |
+| #259 | Push-policy-skip path already reports `pushed: False` | integration | `test_commit_changes_push_policy_skip_reports_pushed_false` | green today |
+
+### Reconciled assertions (were 27 xfailed → now 27 real passes)
+
+Every marker was xpassing before the strip, so the reconciliation removed markers only — no
+assertion was weakened and none needed escalation.
+
+- **#257 → W2 (19):** four mutating subcommands, three `branch` flags, six `-c`-alias cases
+  (3 shells × command-string and args forms), two `-c`/`--config-env` forwarding inversions,
+  and four path-confinement cases (`-C` args, `-C` command string, `--work-tree`, `--git-dir`).
+- **#258 → W3 (3):** outside-root path, symlink escape, relative traversal.
+- **#260 → W4 (3):** `area/mcp`, `needs info`, `../evil`.
+- **#259 → W5 (2):** `pushed` key + no ref `PATCH`; description wording.
+
+Docstring narration that described the pre-fix defect in the present tense
+(`test_c_config_option_rejected`, `test_dash_c_alias_rejected_regardless_of_shell`, the
+`test_labels.py` module docstring) was rewritten to state the contract instead.
+
+### Green-today regression guards (20 passed)
+
+The five pre-existing normalization tests, the eleven read-only allowlist cases, in-root `-C`
+forwarding, both BYOK upload success paths, the plain-label delete URL, and the push-policy-skip
+`pushed: False` path. These must stay green through W2–W5.
+
+### Inverted assertions
+
+Four assertions in `tests/mcp/test_git_tool.py` asserted the **vulnerable** behaviour and were
+inverted rather than left green:
+
+| Was | Now | Why the old assertion was wrong |
+|---|---|---|
+| `test_global_c_option_is_forwarded` — `-C /some/repo/dir` forwarded | `test_global_c_option_outside_repo_root_rejected` (+ in-root positive case) | Pinned unconfined `-C`: a reviewer-surface tool could be pointed at any directory on the runner. D7 confines it to the primary repo root. |
+| `test_c_config_option_forwarded` — `-c core.quotepath=false` forwarded | `test_c_config_option_rejected` | D7 drops `-c` / `--config-env` from `_extract_global_opts` **unconditionally**. There is no safe `-c`: allowing benign keys means the extraction path that makes `-c alias.x='!cmd'` reachable stays alive. This inversion is beyond the plan's literal "invert `:110-115`" note but is required by D7 — flagged for W2. |
+| `test_git_dir_global_option_forwarded` — `--work-tree /some/repo/dir` forwarded | `test_work_tree_outside_repo_root_rejected` | Same unconfined-path defect as `-C`. |
+| `test_global_opt_in_command_string_forwarded` — `git -C /some/repo/dir status` forwarded | `test_global_opt_in_command_string_outside_repo_root_rejected` | Confinement must not depend on whether the option arrived in `command` or `args`. |
+
+### Post-reconciliation contract audit
+
+Both mid-batch judgement calls were re-checked against the RED contract:
+
+- **W2 read D7 literally and rejected `-c` outright**, including the benign
+  `-c core.quotepath=false` case W1 had inverted. That matches the inverted assertion recorded
+  above — `test_c_config_option_rejected[flag_args0]` was authored expecting exactly this, so
+  no assertion had to move. `_confine_to_repo_root` is still exercised through the in-root
+  positive case (`test_global_c_option_inside_repo_root_is_forwarded`), so the allowlist cannot
+  be tightened into a blanket refusal without a red test.
+- **W3's local `_check_upload_path()` duplicates path confinement** with `mcp/git.py`'s
+  `_confine_to_repo_root()`, both using `resolved.startswith(root + os.sep)` rather than
+  `Path.is_relative_to`. **No test in this batch names either helper or asserts the matching
+  strategy** — every assertion goes through the public tool surface (`upload_file_tool`,
+  `git_tool`) and checks only `is_error` plus the message contract. A later refactor that unifies
+  the two helpers, or swaps string-prefix matching for `Path.is_relative_to`, keeps all 47 tests
+  green as long as the behaviour holds.
+- `test_symlink_escape_rejected` uses a symlink whose target escapes the repo root, so it does
+  **not** over-fit to W3's blanket "any symlink is refused" rule: a resolve-then-confine
+  implementation rejects the same fixture. Nothing pins the in-repo-symlink case either way.
+
+### Notes for W2–W5 implementers (historical)
+
+- **Error-message contract:** the three `-C` / `--work-tree` / command-string confinement tests
+  assert the offending path appears in the error text. Keep the rejected value in the message.
+- **`--git-dir`** is asserted only as "rejected" (no message contract) because the inline
+  `--flag=value` form makes the echoed value ambiguous.
+- **`commit_changes`** tests patch `mergecraft.mcp.git._run_git` with a recorder that serves the
+  real argv sequence (`rev-parse --abbrev-ref HEAD`, `status --porcelain`, `add -A`, `commit`,
+  `rev-parse HEAD`) and bind a `GitHubClient` subclass that records `patch()` calls. W5 must leave
+  the local-commit argv intact; only the ref `PATCH` and the `pushed` key change.
+- **Upload fixtures** build every path in sync fixtures (`repo_root`, `scratch`, `outside_file`,
+  `symlink_into_outside`, `traversal_path`) because `tests/**` is not exempt from ruff `ASYNC240`
+  — do not move `pathlib` calls into the async test bodies.
+
+### W5b — path-confinement hardening guards (orchestrator-inserted)
+
+Inserted after AF from a residual-risk report claiming both confinement helpers tested
+containment with a **bare string prefix**, which a sibling directory like `<root>-evil` would
+defeat. **Reading the source settles it — the claim is wrong.** Both helpers already anchor on a
+separator and both accept the exact root:
+
+| Helper | Containment expression |
+|---|---|
+| `_confine_to_repo_root` (`src/mergecraft/mcp/git.py`) | `resolved == resolved_root or resolved.startswith(resolved_root + os.sep)` |
+| `_check_upload_path` (`src/mergecraft/mcp/upload.py`) | `any(resolved == r or resolved.startswith(r + os.sep) for r in allowed)` |
+
+The 11 guards below are therefore **plain green regression tests — none are RED, none carry an
+xfail marker.** They exist to keep the `+ os.sep` anchor (or any successor) from regressing.
+
+| Contract | Coverage | Layer / class |
+|---|---|---|
+| Sibling `<root>-evil` rejected on every git path option | `tests/mcp/test_git_tool.py::test_sibling_prefix_directory_rejected` (5 params: `-C`, `--git-dir` both forms, `--work-tree` both forms) | Functional, error |
+| Prefix match with no separator (`<root>evil`) rejected | `tests/mcp/test_git_tool.py::test_sibling_prefix_without_separator_rejected` | Functional, edge |
+| Repo root itself still accepted (bare, trailing `/`, trailing `/.`) | `tests/mcp/test_git_tool.py::test_repo_root_itself_still_accepted` (3 params) | Functional, happy/edge |
+| Nested in-root path still forwarded | `tests/mcp/test_git_tool.py::test_nested_path_inside_repo_root_still_accepted` | Functional, happy |
+| Sibling rejected on **both** upload arms (repo root *and* tmpdir) | `tests/mcp/test_upload.py::test_sibling_prefix_directory_rejected` (2 params) | Functional, error |
+| Upload prefix match with no separator rejected | `tests/mcp/test_upload.py::test_sibling_prefix_without_separator_rejected` | Functional, edge |
+| Deeply nested in-repo upload still succeeds | `tests/mcp/test_upload.py::test_deeply_nested_in_repo_file_still_uploads` | Functional, happy |
+| Redundant `/./` segment inside the root still succeeds | `tests/mcp/test_upload.py::test_in_repo_file_reached_via_trailing_separator_still_uploads` | Functional, edge |
+
+Refactor-survival: as with Batch A, no assertion names `_confine_to_repo_root`,
+`_check_upload_path`, `startswith`, or `Path.is_relative_to`. Every guard drives the public tool
+surface and asserts only `is_error`, the recorded git argv, and — where the existing W2 contract
+already requires it — that the offending path appears in the rejection text. Unifying the two
+helpers or swapping to `Path.is_relative_to` keeps all 11 green.
+
+Fixtures create the sibling directories **on disk** (`tmp_path/repo` next to `tmp_path/repo-evil`)
+rather than hand-crafting strings, so `Path.resolve()` cannot collapse the distinction and the
+test genuinely exercises containment rather than normalization.
+
+### Escalation log
+
+_(empty)_
+
+---
+
+## Batch B — Action / workflow contract (W6)
+
+**Issues:** `#264` (wait-for-ci cannot read check-runs), `#265` (declared `verdict_diagnostic`
+output is never written), `#272` (inert `outputs.*.value` on a Docker action), `#271` (adversarial
+image installs a different pytest than unit CI).
+
+**Authored by:** W6 · **Greened by:** W7 (`#264`), W8 (`#265` + `#272`, one wave per **D10**),
+W9 (`#271`).
+
+Batch B is the **Action / workflow contract** batch, so most of the surface is YAML rather than
+Python. Every guard therefore parses the real `action.yml` / `.github/workflows/mergecraft.yml` /
+`docker/e2e/run_in_image_adversarial.sh` from disk — there is no runtime object to unit-test for
+three of the four issues.
+
+**Tooling decision (W6.1):** no second YAML checker was added.
+`scripts/check_action_yml_hygiene.py` scans action manifests for literal `${{ }}` expressions in
+description prose and is the wrong tool for job permissions. The repo already has
+`tests/ci/workflow_support.py` (`load_workflow`, `job`, `read_text`, `REPO_ROOT`), used by nine
+existing workflow-contract suites; W6 **extends that pattern** rather than starting a parallel one.
+Likewise `#272` extends the existing `tests/action/test_action_yml_contract.py` (which already
+carries a module-scoped `action_yml` fixture) instead of adding a new action-manifest suite.
+
+### Contract → test map
+
+| Contract | Coverage | Layer / class |
+|---|---|---|
+| **W6.1 / #264** `wait-for-ci` declares a job-level `permissions:` block | `tests/ci/test_mergecraft_workflow_permissions.py::TestWaitForCiPermissions::test_declares_job_level_permissions` | Integration (workflow), error |
+| **W6.1 / #264** that block grants `checks: read` | `…::TestWaitForCiPermissions::test_declares_checks_read` | Integration, happy |
+| **W6.1** a job-level block does not inherit, so `contents: read` is restated | `…::TestWaitForCiPermissions::test_keeps_contents_read` | Integration, edge |
+| **W6.1** W7 must not widen the job past read | `…::TestWaitForCiPermissions::test_grants_nothing_beyond_read_scopes` | Integration, error |
+| **W6.1** workflow-level block stays `contents: read` only | `…::TestWorkflowLevelPermissionsUnchanged::test_workflow_level_block_is_contents_read_only` | Integration, happy |
+| **W6.1** the `review` job keeps its own scoped block | `…::TestWorkflowLevelPermissionsUnchanged::test_review_job_keeps_its_own_permissions_block` | Integration, happy |
+| **W6.1** the poll still hits the check-runs API (else the permission is moot) | `…::TestWaitForCiBehaviourAnchors::test_job_still_queries_the_check_runs_api` | Integration, anchor |
+| **W6.1** fail-open contract preserved (the bug is the silent 403, not fail-open) | `…::TestWaitForCiBehaviourAnchors::test_job_stays_fail_open` | Integration, anchor |
+| **W6.1** optional W7.1 hardening: stop swallowing stderr on the poll | `…::TestWaitForCiBehaviourAnchors::test_check_runs_poll_does_not_swallow_stderr` | Integration, edge |
+| **W6.2 / #265** success + diagnostic → `verdict_diagnostic=<code>` | `tests/cli/test_gha_failure_outputs.py::TestVerdictDiagnosticOutput::test_success_with_diagnostic_writes_the_code` | Functional (E2E `_run_main`), happy |
+| **W6.2 / D10** success, no diagnostic → key **present and empty**, never absent | `…::TestVerdictDiagnosticOutput::test_success_without_diagnostic_writes_empty_string` | Functional, edge |
+| **W6.2** the raw closed code round-trips unmodified | `…::TestVerdictDiagnosticOutput::test_every_closed_code_round_trips` (5 params) | Functional, happy/table |
+| **W6.2** failure path writes it too, before `typer.Exit` | `…::TestVerdictDiagnosticOutput::test_failure_path_still_writes_the_diagnostic` | Functional, error |
+| **W6.2** `_set_output(name, "")` already writes `name=` (the empty arm's transport) | `…::TestVerdictDiagnosticOutput::test_set_output_writes_an_empty_value_as_a_present_key` | Unit, edge |
+| **W6.3 / #272** Docker action declares no `outputs.*.value` | `tests/action/test_action_yml_contract.py::TestActionYmlHygiene::test_docker_action_declares_no_output_values` | Integration (manifest), error |
+| **W6.3** no `${{ }}` survives anywhere under `outputs:` | `…::TestActionYmlHygiene::test_no_expression_survives_in_any_output_block` | Integration, error |
+| **W6.3** W8 deletes `value:` only — every description survives | `…::TestActionYmlHygiene::test_every_output_keeps_its_description` | Integration, happy |
+| **W6.3 / #265** the `verdict_diagnostic` output stays declared | `…::TestActionYmlHygiene::test_verdict_diagnostic_output_is_declared` | Integration, happy |
+| **W6.4 / #271** script pytest pin equals `pyproject.toml`'s | `tests/ci/test_adversarial_image_pytest_pin.py::TestPinsAgree::test_pytest_pin_matches_pyproject` | Integration, error |
+| **W6.4** `pytest-asyncio` stays in sync (already is) | `…::TestPinsAgree::test_pytest_asyncio_pin_matches_pyproject`, `…::test_no_runner_package_drifts[pytest-asyncio]` | Integration, happy |
+| **W6.4** table form so a newly-added runner pin is covered | `…::TestPinsAgree::test_no_runner_package_drifts` (2 params) | Integration, table |
+| **W6.4** the image installs nothing unit CI has never resolved | `…::TestPinsAgree::test_every_script_pin_is_declared_in_pyproject` | Integration, edge |
+| **W6.4** both pin anchors are still parseable / exact | `…::TestPinSourcesAreParseable` (3 tests) | Unit, anchor |
+
+### Confirmed-RED assertions (17 xfail, non-strict)
+
+| Target wave | Count | Tests |
+|---|---|---|
+| **W7** | 5 | 4 × `TestWaitForCiPermissions` + `test_check_runs_poll_does_not_swallow_stderr` (the last is the plan's *optional* hardening, recorded as residual risk rather than a gate) |
+| **W8** | 9 | 2 × `TestActionYmlHygiene` (`#272`) + 7 × `TestVerdictDiagnosticOutput` (`#265`, incl. 5 parametrized codes) |
+| **W9** | 2 | `test_pytest_pin_matches_pyproject`, `test_no_runner_package_drifts[pytest]` |
+
+`test_no_runner_package_drifts` carries its xfail **per `pytest.param`**, not on the function, so
+the `pytest-asyncio` case reports a real pass instead of a misleading `XPASS`.
+
+### Green-today regression guards (48 in the touched files, 14 new)
+
+New green guards: the workflow-level/`review`-job permission anchors, the check-runs and fail-open
+behaviour anchors, `_set_output("", …)`'s empty-key transport, the outputs-keep-descriptions and
+`verdict_diagnostic`-stays-declared manifest guards, the `pytest-asyncio` parity pair, the
+`every_script_pin_is_declared` guard, and the three pin-anchor parse guards.
+
+### Verified-not-drifted (checked while authoring, no test needed)
+
+- `pytest-asyncio` is **`1.3.0` in both** `pyproject.toml` and the adversarial script — only
+  `pytest` diverges (`9.0.3` in the image vs `9.1.1` pinned). W9 must bump `pytest` and leave
+  `pytest-asyncio` alone.
+- `pyproject.toml`'s pytest pin is at **`:56`** (W0's correction of `:54` is right); the script's is
+  at **`:25`**. Both are parsed at runtime, so neither line number is baked into an assertion.
+
+### Anchors that contradict the plan (input for W7/W8/W9)
+
+| Plan text | What the code actually shows | Consequence |
+|---|---|---|
+| W8.2 "thread the diagnostic … into `gha_cmd._run_main`" via "the `RunResult` object" | There is **no `RunResult`**. The carrier is `MainResult` (`src/mergecraft/main.py:109-122`, `@dataclass(slots=True)`), and it has **no diagnostic field at all** | W8 must **add a field** (`verdict_diagnostic: str \| None = None`) to `MainResult` and set it on both return paths (`main.py:1388-1403`), not just read an existing attribute |
+| W8.2 anchors the diagnostic at `main_outcome.py:127-139` | Correct, but `_verdict_protocol_publish` returns `(span_attrs, prediction)` and **`prediction` is `None` unless `settings.gates.terminal_verdict == "shadow"`** (`main_outcome.py:140-142`) | The only always-available carrier of the code on the enforce path is `attrs["verdict.diagnostic"]`. W8 should widen the return (or return the `VerdictDiagnostic` itself) rather than reaching through `prediction`, which is empty on the normal path |
+| `## Docs ↔ code reconciliation`: "`gha_cmd.py:111-126` writes only `evidence_packet` / `result` / `token`" | Accurate. `_set_output` call sites are `:111` (`evidence_packet`), `:123` and `:126` (`result`), `:135` (`token`) | No change needed |
+| W8.1 "`action.yml:187-204`" | Accurate. The three `value:` keys are at **`:189`, `:199`, `:204`**; `runs.using: "docker"` at **`:207`** | No change needed |
+| W7.1 "`mergecraft.yml:161`", "`:142-143`", "`:200`" | All accurate: `wait-for-ci:` at `:161` with **no** `permissions:` key (only `name`/`if`/`runs-on`/`timeout-minutes`/`outputs`/`steps`), workflow-level `permissions: {contents: read}` at `:142-143`, `2>/dev/null` on the poll at `:200` | No change needed |
+| D10 "empty string when no diagnostic" | `_set_output` already writes `name=` for an empty value (`gha_cmd.py:70-71`), and only skips `::add-mask::` | W8 needs **no new writer** — but it must call `_set_output` unconditionally on the terminal-verdict path, since "write nothing" is the naive implementation that leaves the key absent |
+
+### Reconciled assertions (were 17 xfailed → now 17 real passes)
+
+All three implementation waves landed (`a13afc6` W7, `32f1884` W8, `a75d43a` W9) without touching
+`tests/`. Every marker was xpassing before the strip, so reconciliation removed markers only — no
+assertion was weakened, and nothing escalated.
+
+| Target wave | Count | Reconciled |
+|---|---|---|
+| **W7** (`a13afc6`, `#264`) | 5 | 4 × `TestWaitForCiPermissions` + `test_check_runs_poll_does_not_swallow_stderr` |
+| **W8** (`32f1884`, `#265` + `#272`) | 10 | 2 × `TestActionYmlHygiene` + 8 × `TestVerdictDiagnosticOutput` (incl. 5 parametrized codes) |
+| **W9** (`a75d43a`, `#271`) | 2 | `test_pytest_pin_matches_pyproject`, `test_no_runner_package_drifts[pytest]` |
+
+The W6 table above counted W8 as 9 and W7's stderr case as *optional*; the true instance counts are
+10 and 5 (17 total either way). W7 landed the stderr hardening despite the plan marking it optional,
+so `test_check_runs_poll_does_not_swallow_stderr` is now a plain green guard, not residual risk.
+`test_no_runner_package_drifts`'s per-`pytest.param` xfail collapsed back into a plain
+`@pytest.mark.parametrize("package", ["pytest", "pytest-asyncio"])`.
+
+Docstring narration that described the pre-fix defect in the present tense
+(`TestVerdictDiagnosticOutput`'s "`MainResult` has no field for it … red today", the stderr test's
+"non-strict xfail either way") was rewritten to state the contract. The now-unnecessary
+`# type: ignore[call-arg]` on the failure-path `MainResult(...)` was dropped (mypy strict flags
+unused ignores).
+
+### Post-reconciliation contract audit (Batch B)
+
+- **The `verdict_diagnostic` tests cover the `$GITHUB_OUTPUT` write, not the dataclass field.**
+  Every case in `TestVerdictDiagnosticOutput` monkeypatches `mergecraft.main.main`, runs the real
+  `asyncio.run(_run_main())`, and asserts against the parsed `$GITHUB_OUTPUT` file. Constructing
+  `MainResult(verdict_diagnostic=…)` is only the *input* fixture; a `MainResult` that merely holds
+  the string while `_run_main` writes nothing fails all of them. The transport under test is
+  `gha_cmd.py:120` — `_set_output("verdict_diagnostic", result.verdict_diagnostic or "")`.
+- **D10's empty arm asserts presence, not absence of a crash.**
+  `test_success_without_diagnostic_writes_empty_string` asserts `"verdict_diagnostic" in entries`
+  *and* `entries["verdict_diagnostic"] == ""`. Its transport premise is separately pinned by
+  `test_set_output_writes_an_empty_value_as_a_present_key`, which asserts the file content is
+  exactly `verdict_diagnostic=\n`.
+- **Nothing pins W8's particular plumbing.** No assertion names `_verdict_protocol_publish`,
+  `diagnostic_attrs`, or `verdict.diagnostic`. W8 deliberately did *not* widen
+  `_verdict_protocol_publish`'s 2-tuple return (that would have broken
+  `tests/evidence/test_verdict_shadow.py`) and read the span-attrs dict instead; a later refactor
+  that widens the return, or threads a `VerdictDiagnostic` object, keeps this batch green as long
+  as the output is written on both `_finalize` return paths.
+- **Producer side — closed.** The gap first recorded here (nothing proved `_finalize` actually
+  populates `MainResult.verdict_diagnostic`, so a regression that stopped *computing* the code
+  would leave the write-path tests green while the output silently went empty) is now covered by
+  `tests/test_main_phases.py::TestFinalizeCarriesTheVerdictDiagnostic` — see below. `#265` is
+  covered end to end: producer → `MainResult` → `$GITHUB_OUTPUT`.
+
+### Producer-half coverage for `#265` (`TestFinalizeCarriesTheVerdictDiagnostic`)
+
+Added to `tests/test_main_phases.py`, the existing `_finalize` phase suite, so it uses the same
+`tests/support/run_main_harness.py` vehicle as `test_main_result_is_unchanged_for_each_run_outcome`
+— a real `main()` run against scripted collaborators, no new pattern. **10 tests, all green**: W8's
+producer half was correctly implemented, nothing was red, and no `xfail` was needed.
+
+| Contract | Test | Layer / class |
+|---|---|---|
+| The `passed` return carries the computed code | `test_success_path_carries_the_computed_code` | Functional, happy |
+| The non-`passed` return is a separate `return` and must not drop it | `test_failure_path_carries_the_computed_code` | Functional, happy |
+| Two different failures on the same branch keep *different* codes | `test_policy_rejection_is_distinguishable_from_provider_failure` | Functional, edge |
+| `enforce` and `shadow` deposit the same code | `test_enforce_and_shadow_deposit_the_same_code` (3 params) | Functional, seam |
+| Every completed run deposits a closed-vocabulary code | `test_every_completed_run_deposits_a_closed_code` | Functional, table |
+| A run that never classified carries a falsy value, never a fabricated code | `test_runs_that_never_classified_carry_no_code` (3 params) | Functional, D10 empty arm |
+
+Notes on what these pin and what they deliberately do not:
+
+- **The enforce/shadow seam agrees.** `_verdict_protocol_publish` returns `prediction` only when
+  `terminal_verdict == "shadow"`, which is why W8 read the always-populated carrier instead. The
+  parity test runs each of `passed` / `failed` / `inconclusive` under both modes and asserts the
+  same code lands, so an implementation that reached the diagnostic through the shadow-only carrier
+  fails under the (default) `enforce` mode rather than passing by luck.
+- **D10's empty arm, producer end.** `timed_out` / `configuration_error` / `infra_error` leave
+  through `main()`'s outer handler and never reach the verdict classification — the same asymmetry
+  `test_main_result_is_unchanged_for_each_run_outcome` already pins for the evidence packet. Those
+  three assert the value is *falsy* (`None` or `""` both satisfy the consumer, which writes a
+  present-but-empty key either way), never a fabricated code.
+- **No plumbing is named.** No assertion mentions `diagnostic_attrs`, `verdict.diagnostic`, or
+  `_verdict_protocol_publish`; everything goes through `main()` and `MainResult`. Threading the
+  diagnostic on the prediction object, a widened publish helper, or a third carrier keeps these
+  green.
+- **Codes are asserted as literals** (`approved`, `provider_failure`, `policy_rejection`) rather
+  than recomputed from the predictor, so a change to the classification policy has to be a
+  deliberate test edit rather than a silently-tracking tautology. Membership in the closed
+  `VerdictDiagnostic` vocabulary is checked separately.
+
+### Escalation log
+
+_(empty)_
+
+---
+
+## Batch C — Analyzer correctness (W10)
+
+**Issues:** #270 (OSV fixed-version regex), #269 (`base_comparison_available` inversion),
+#268 (ruff-format finding attribution).
+**Implementation waves:** W11 (#270), W12 (#269), W13 (#268).
+**Binding decision:** **D19** — analyzer waves fix parsers/adapters/scope only. No new analyzer,
+no catalog row. Nothing in this batch asserts a catalog string, a manifest id that does not
+already ship, or a severity-gate row, so `make catalog-check` stays out of the loop.
+
+**Anchors re-grepped, not trusted from the plan body** (W0 corrected two of the three):
+
+| Issue | Anchor used | Plan text | Verdict |
+|---|---|---|---|
+| #270 | `analyzers/parsers/osv_json.py:82` | same | matches |
+| #269 | `analyzers/scope.py:234-238` → consumer `analyzers/pipeline.py:361,376` | W12.1 still says `scope.py:232`; W12.2 still says `pipeline.py:276-280` | **stale in the wave body** — the Traceability table is right |
+| #268 | `analyzers/adapters.py:85-119` | W13.1 still says `:85-127` | **stale in the wave body** — the Traceability table is right |
+
+### Files
+
+| File | Status | Issue |
+|---|---|---|
+| `tests/analyzers/parsers/test_osv_json.py` | **new** | #270 |
+| `tests/analyzers/test_scope.py` | extended (pure function + pipeline consumer) | #269 |
+| `tests/analyzers/test_adapters_ruff_format.py` | **new** | #268 |
+
+### Contract → test map
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| A real `N.N.N` fix version is accepted | `test_real_three_component_version_is_accepted` (4 params) | Unit, happy | green |
+| A single-character separator substitution is rejected | `test_wildcard_separator_is_rejected[1.2x3, 1.2X3, 1.2-3, 1.2_3, "1.2 3", 1.2/3]` | Unit, edge | xfail W11 |
+| The wildcard matching a **digit** is rejected | `test_wildcard_separator_is_rejected[1.234, 1.2345, 10.234, 1.2x34]` | Unit, boundary | xfail W11 |
+| Malformed versions stay rejected after the escape | `test_malformed_version_stays_rejected` (11 params) | Unit, boundary | green |
+| No `fixed` event / non-`ECOSYSTEM` range yields nothing | `test_missing_fixed_event_yields_no_version`, `test_non_ecosystem_range_is_ignored` | Unit, edge | green |
+| The reviewer-visible remediation names a real version | `test_remediation_names_a_real_fix_version` (2 params) | Integration, happy | green |
+| No fabricated `Upgrade to 1.2x3 or later` | `test_remediation_is_omitted_for_a_malformed_fix_version` (2 params) | Integration, error | xfail W11 |
+| Clearly-malformed versions already produce no remediation | `test_remediation_already_omitted_for_clearly_malformed_versions` (2 params) | Integration, boundary | green |
+| Online + `full` ⇒ base comparison available | `test_base_comparison_available_is_true_when_online_and_full` | Unit, happy | xfail W12 |
+| Offline + `full` ⇒ not available | `test_base_comparison_available_is_false_when_offline_and_full` | Unit, error | xfail W12 |
+| `baseComparison != "full"` short-circuits regardless of `offline` | `test_base_comparison_available_is_false_unless_comparison_is_full` (6 params) | Unit, table | green |
+| **Consumer:** an online `full` run reaches `annotate_introduced_by_pr` with a truthy `base_run_performed` | `test_online_full_comparison_reaches_the_annotator_as_performed` | Integration, seam | xfail W12 |
+| **Consumer:** an offline run never claims a base run | `test_offline_full_comparison_never_claims_a_base_run` | Integration, seam | xfail W12 |
+| Only the second scoped file reformatting cites the second file | `test_only_the_second_file_reformatting_cites_the_second_file` (2 params) | Integration, the bug | xfail W13 |
+| Both files reformatting yield one finding each (W13.1) | `test_both_files_reformatting_yield_one_finding_each` (2 params) | Integration, multi-file | xfail W13 |
+| A clean *middle* file must not absorb the finding | `test_third_file_reformatting_is_not_attributed_to_the_first` (2 params) | Integration, edge | xfail W13 |
+| The one multi-file case today gets right must survive | `test_first_of_two_files_reformatting_cites_the_first` | Integration, regression | green |
+| A single-file run still reports that file | `test_single_file_run_still_reports_that_file` | Integration, happy | green |
+| Exit 0 ⇒ no findings | `test_clean_run_reports_nothing` | Integration, happy | green |
+| No scoped files ⇒ no findings | `test_no_scoped_files_reports_nothing` | Integration, edge | green |
+| Finding shape (tool, `rule_id: format`, line 1, message) is stable — D19 | `test_format_finding_metadata_is_stable` | Integration, contract | green |
+
+### Confirmed-RED assertions (22 xfails, verified with `--runxfail`)
+
+All 22 fail on the assertion, never on a stub or import error:
+
+- **W11 (12)** — `_fixed_version("1.2x3")` returns `"1.2x3"`; `_fixed_version("1.234")` returns
+  `"1.234"`; and `parse_osv_json` turns both into `Upgrade to <garbage> or later`.
+- **W12 (4)** — `base_comparison_available(base_comparison="full", offline=False)` is `False`
+  (expected `True`) and `offline=True` is `True` (expected `False`); the pipeline consumer records
+  `[False]` on an online `full` run and `[True]` offline.
+- **W13 (6)** — `_run_ruff_format_check` returns `['pkg/a.py']` when only `pkg/b.py` would
+  reformat, and one finding when two files would.
+
+### Green-today regression guards (41 assertions)
+
+The OSV boundary table (`1.2`, `1.23`, `1.2.3.4`, `1.2..3`, `1.2xy3`, `v1.2.3`, `1.2.3-rc1`,
+`1.2.x`, `abc`, `""`) exists so W11's escape cannot *narrow* the guard past `N.N.N` or start
+admitting a prerelease. `1.23` is the interesting one: it is exactly one digit short of slipping
+through the wildcard, so it pins the boundary from the other side. The `base_comparison != "full"`
+table (6 params) guards the short-circuit W12 must leave alone. The ruff-format guards pin the
+single-file and clean-run shapes plus the finding metadata, so W13 cannot buy per-file attribution
+by changing severity, rule id, or line.
+
+### What the unescaped dot actually admits
+
+`re.fullmatch(r"\d+\.\d+.\d+", fixed)` — the third separator is a wildcard, so the guard admits
+**two** families, only one of which the issue names:
+
+1. **Any single non-newline character** in the separator slot: `1.2x3`, `1.2-3`, `1.2 3`, `1.2/3`,
+   `1.2_3`, and also `1.2x34` (the trailing `\d+` is not length-bound). Two characters do not fit —
+   `1.2xy3` is correctly rejected — so the hole is exactly one character wide.
+2. **A digit**, because `.` matches digits too. Any two-component version with **three or more**
+   digits after the dot parses as three components: `1.234` → `1` `.` `2` `[3]` `4`. `1.23` fails
+   (nothing is left for the trailing `\d+`), so ≥ 3 trailing digits is the boundary. This family is
+   the more dangerous one in practice — `1.234` is a plausible real version string, and OSV
+   ecosystems that use two-component versions would silently hand the reviewer a fabricated
+   three-component "fix".
+
+`\n` is not admitted (`.` excludes newline), and `1.2.3.4` / `1.2..3` are rejected before and after
+the fix.
+
+### Notes for W11 / W12 / W13
+
+- **W12's wave text points at `scope.py:232` and `pipeline.py:276-280`.** Both are stale; the live
+  lines are `scope.py:238` (`return offline` inside `base_comparison_available`) and
+  `pipeline.py:361` (the call) → `pipeline.py:376` (`base_run_performed=base_run` passed into
+  `_apply_baseline_suppression`, which forwards to `annotate_introduced_by_pr` at `:131` / `:157`).
+  W12 is a one-word change at `scope.py:238`; nothing in `pipeline.py` needs to move.
+- **The #269 consumer test drives the real `run_analyzer_pipeline`** (`detect_enabled`,
+  `run_adapter`, and `_analyzers_settings` stubbed; `baseComparison: full`, empty diff), and records
+  what `annotate_introduced_by_pr` is actually handed. It is the same seam-pinning technique as
+  `test_shell_disabled_split.py::test_pipeline_forwards_the_shell_to_the_adapter`. The annotation
+  *output* is not observable here — `is_new_in_base` defaults to `False`, so both branches yield
+  `"unknown"` — which is precisely why the bug survived: only the argument is observable.
+- **W13 may choose either strategy.** The stub decides its verdict from the file paths in
+  `plan.argv`, so it answers correctly for a single combined invocation *and* for one run per file.
+  Per-file attribution **is** achievable from today's single invocation: `run_plan` returns the
+  combined stdout/stderr on `AnalyzerOutcome.output`, and `ruff format --check` prints one
+  `Would reformat: <path>` line per file. Per-file runs are the fallback, not a requirement.
+- **Paths reach ruff as absolute strings** (`expand_analyzer_argv` joins each relative path onto
+  `repo_root`), so W13 must relativize whatever it parses. Each attribution test is parametrized
+  over an absolute and a repo-relative `Would reformat:` line so neither form may be assumed.
+- **The stub sets `output_path=None`.** If W13 prefers the persisted output file over
+  `outcome.output`, it must tolerate a missing path — or these tests need a one-line amendment
+  (escalate rather than edit them in an implementation wave).
+- **Deliberately not pinned (resolved — see below):** what should happen when `ruff format --check`
+  exits non-zero with no `Would reformat:` line at all (a ruff-side parse error). The correct answer
+  differed between the two strategies, so pinning it would have picked the implementation for W13.
+  W13 decided; the decision is now covered by `TestRuffFailureFallback`-equivalent cases in
+  `tests/analyzers/test_adapters_ruff_format.py`.
+
+### Reconciled assertions (were 22 xfailed → now 22 real passes)
+
+All three implementation waves landed (`dde1e94` W11, `4695e6e` W12, `eddd8f7` W13) without touching
+`tests/`. Every marker was xpassing before the strip, so reconciliation removed markers only — no
+assertion was weakened, and nothing escalated.
+
+| Target wave | Count | Reconciled |
+|---|---|---|
+| **W11** (`dde1e94`, `#270`) | 12 | `test_wildcard_separator_is_rejected` (10 params) + `test_remediation_is_omitted_for_a_malformed_fix_version` (2 params) |
+| **W12** (`4695e6e`, `#269`) | 4 | both `base_comparison_available` unit cases + both pipeline-consumer seam cases |
+| **W13** (`eddd8f7`, `#268`) | 6 | the three attribution tests × the absolute/relative parametrization |
+
+Present-tense defect narration was rewritten to state the contract: the `test_osv_json.py` module
+docstring and both case-table comments, the `#269` section comment in `test_scope.py`, the
+`test_adapters_ruff_format.py` module docstring, and four docstrings that named a wave number
+(`W11 must not narrow…`, `W13 must not lose it`, `W13 changes attribution only`, `untouched by W12`).
+The stale `adapters.py:85-119` anchor in the module docstring is now `:85-148`.
+
+**Per-file counts after reconciliation — 69 passed, 0 xfail, 0 xpass:**
+`test_osv_json.py` 33, `test_scope.py` 19, `test_adapters_ruff_format.py` 17 (11 pre-existing + 6
+new fallback cases). Full `tests/analyzers` + `tests/review`: **664 passed**, no xfail, no xpass.
+
+### W13's tool-failure fallback — the decision, now covered
+
+**The decision.** A non-zero exit carrying no parseable `Would reformat:` line means ruff itself
+failed (bad config, syntax error, unexpected output shape), not that a file is unformatted. W13
+emits **one finding at `scoped_files[0]`** rather than returning nothing, so a broken analyzer
+cannot read as a clean bill of health (`adapters.py:138-148`).
+
+**Why this needed pinning beyond "it works".** `scoped_files[0]` is the exact misattribution #268
+exists to fix. Left untested, a future refactor could route parseable output back through this arm —
+restoring the bug — and every #268 attribution test could still be satisfied by an implementation
+that happened to order `pkg/a.py` first. The reachability guard closes that door.
+
+| Contract | Test | Layer / class |
+|---|---|---|
+| Tool failure with unparseable output cites `scoped_files[0]` | `test_tool_failure_without_parseable_output_reports_the_first_scoped_file` (3 params: invocation error, empty output, summary line only) | Integration, error |
+| **The fallback is unreachable while a `Would reformat:` line parses** — failure text naming `pkg/a.py`, exit 2, and one parseable line naming `pkg/b.py` ⇒ the finding cites `pkg/b.py` | `test_fallback_is_unreachable_while_would_reformat_lines_parse` | Integration, #268 regression guard |
+| No scoped files ⇒ no finding (the arm must not index into an empty list) | `test_tool_failure_with_no_scoped_files_reports_nothing` | Integration, edge |
+| One failure signal, not one per scoped file | `test_tool_failure_fallback_reports_exactly_one_finding` | Integration, edge |
+
+**Verdict on the contract: the fail-loud direction is right, the message is not.** Emitting rather
+than silencing is the correct call — an analyzer that fails open on its own crash is worse than a
+false positive, and the reviewer surface has no other channel for "this tool broke". But the
+fallback reuses `_format_finding(..., message="File would be reformatted by ruff format")`, so a
+ruff *crash* is reported to the reviewer as a *formatting violation* in a file that may be perfectly
+formatted — a factually false claim, and the same class of misattribution #268 is about, one level
+up. A message naming the real condition (`ruff format --check failed; output could not be parsed`)
+would keep the fail-loud property while telling the truth. **This is a message-text change in
+`src/`, out of scope for a test-author wave, and it is not encoded as a failing test** — the four
+cases above pin W13's behaviour as shipped. Flagged for Batch C Final or a follow-up issue.
+
+### Post-reconciliation contract audit (Batch C)
+
+- **The absolute/relative parametrization still holds and now proves more.** All three attribution
+  tests remain `@pytest.mark.parametrize("emit_absolute", [False, True])`, driving the stub to emit
+  `Would reformat: /abs/path/pkg/b.py` and `Would reformat: pkg/b.py` against the same adapter.
+  During reconciliation the assertion helper `_paths()` was **tightened**: it previously ran each
+  finding's path back through the adapter's own `resolve_repo_relative_path` before comparing, which
+  meant an implementation that leaked absolute paths into findings would still have passed. It now
+  asserts `f.path` **raw**, so the absolute arm genuinely proves the adapter relativizes. Both arms
+  pass, confirming W13's relativization handles the form ruff actually emits (absolute, since
+  `expand_analyzer_argv` joins onto `repo_root`) *and* the repo-relative form.
+- **Nothing names `resolve_repo_relative_path`.** That tightening also removed the suite's only
+  import of it; `rg resolve_repo_relative_path tests/` returns nothing. Attribution is asserted as
+  observed finding paths, so replacing the helper, inlining it, or switching to `Path.relative_to`
+  keeps the file green as long as findings stay repo-relative.
+- **Nothing names the parse strategy either.** No assertion mentions `Would reformat` as an
+  implementation detail of the adapter — the string appears only in *stub output*, i.e. in what ruff
+  is simulated as printing. An implementation that switched to per-file `ruff format --check` runs,
+  or to `--output-format json`, still satisfies every attribution case, because the stub answers
+  from the paths in `plan.argv`. The one exception is deliberate:
+  `test_fallback_is_unreachable_while_would_reformat_lines_parse` necessarily distinguishes
+  parseable from unparseable output, which is the contract it exists to pin.
+- **The `output_path=None` caveat is now closed.** The W10 note warned that if W13 preferred the
+  persisted output file over `outcome.output`, the stubs would need amending. W13 read
+  `outcome.output` (`adapters.py:123`), so no amendment was needed and no escalation occurred.
+- **`_fixed_version` is exercised directly and through `parse_osv_json`.** The unit table and the
+  remediation-string integration cases would both have to be edited to re-admit a fabricated
+  version, so a regression cannot hide behind either layer alone.
+- **#269's seam guard survives the fix.** `test_online_full_comparison_reaches_the_annotator_as_performed`
+  still drives the real `run_analyzer_pipeline` and records what `annotate_introduced_by_pr` is
+  handed; the annotation *output* remains unobservable (`is_new_in_base` defaults to `False`), which
+  is why the argument-level assertion is the only thing that can catch a re-inversion one layer up.
+
+### Escalation log
+
+_(empty)_
+
+---
+
+## Batch D — Agents + approve gate (W14)
+
+**Issues:** #222 (Codex `default_permissions` nested under `[model_providers.*]`), #261
+(`structured_handoff` casefold detect + exact-case split), #262 (ensemble disagreement drops
+secondary-only findings), #273 (`to_usage()` double-counts OpenAI cached tokens), #263
+(`submit_review_verdict(approve)` ignores unverified blocking analyzer findings).
+**Implementation waves:** W15 (#222), W16 (#261), W17 (#262), W18 (#273), W19 (#263).
+**Binding decisions:** **D17** (root keys before tables), **D15** (union on disagreement), **D16**
+(OpenAI cached tokens are inclusive), **D12** (approve fails closed on unverified blockers).
+
+**Anchors re-grepped, not trusted from the plan body:**
+
+| Issue | Anchor used | Plan text | Verdict |
+|---|---|---|---|
+| #222 | `agents/codex.py:506-508` (`_append_custom_provider_lines` then `_append_read_only_mcp_network_lines`; the root key is written at `:460`) | same | matches |
+| #261 | `agents/structured_handoff.py:44-45` | same | matches |
+| #262 | `agents/ensemble.py:210-214` (the disagreement `return`; `merged_findings=tuple(left.findings)` at `:212`) | W17.1 `:210-214`, Traceability `:211-212` | matches |
+| #273 | `agents/_stream_consumer.py:181` | same | matches |
+| #263 | `mcp/verdict.py:276-313` (`_confirmed_findings_from_state`), `:395-413` (the approve branch) | W19.1 said `~377`; the Docs↔code table said `:377+`; Traceability said `:276-292,395+` | **stale — corrected in the plan by W14** |
+
+### Files
+
+| File | Status | Issue |
+|---|---|---|
+| `tests/agents/test_codex_custom_provider.py` | extended | #222 |
+| `tests/agents/test_structured_handoff.py` | extended | #261 |
+| `tests/agents/test_ensemble.py` | extended | #262 |
+| `tests/agents/test_stream_usage_cache.py` | **new** | #273 |
+| `tests/review/test_terminal_verdict_policy.py` | extended (validator + live tool + finalize) | #263 |
+| `tests/mcp/test_submit_review_verdict.py` | extended (tool surface) | #263 |
+| `tests/agents/test_opencode_session_usage.py` | **new at DF** — second #273 ingress; reconciled after W18b (markers stripped, precedence pinned) | #273 |
+
+### Contract → test map
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| `default_permissions` parses at the TOML **top level** with custom-provider env active | `test_default_permissions_stays_a_root_key_with_custom_providers` (3 params) | Unit, the bug | xfail W15 |
+| An empty `[model_providers]` table (partial pair) also swallows the key | `test_default_permissions_survives_a_partial_provider_pair` | Unit, edge | xfail W15 |
+| No key the writer means as **document root** may appear after the first table header | `test_no_root_key_is_emitted_after_the_first_table` | Unit, invariant | xfail W15 → **rewritten at DF** (see escalation log) |
+| The scope tracker behind that invariant flags the pre-W15 emission order | `test_root_key_scope_helper_flags_the_pre_w15_emission_order` | Unit, guard-on-the-guard | green (added at DF) |
+| `[permissions.<profile>]` tree survives the reorder | `test_permission_profile_tables_are_unchanged_with_custom_providers` | Unit, regression | green |
+| The no-provider path is already correct | `test_default_permissions_is_already_a_root_key_without_custom_providers` | Unit, boundary | green |
+| Provider blocks keep `base_url` / `env_key` / `wire_api` (#71, convention 7) | `test_custom_provider_blocks_keep_their_own_keys` | Unit, regression | green |
+| A mixed-case marker parses its findings | `test_mixed_case_marker_parses_the_findings_payload` (5 casings) | Unit, the bug | xfail W16 |
+| A mixed-case marker is stripped from the reasoning | `test_mixed_case_marker_is_stripped_from_the_reasoning` (5 casings) | Unit, edge | xfail W16 |
+| A mixed-case marker with `[]` yields no findings and no raise | `test_mixed_case_marker_with_an_empty_array_yields_no_findings` (5 casings) | Unit, boundary | xfail W16 |
+| The documented lowercase casing still parses | `test_lowercase_marker_still_parses` | Unit, regression | green |
+| No marker ⇒ prose only | `test_no_marker_at_all_yields_prose_only` | Unit, edge | green |
+| A genuinely malformed tail still raises with its message contract | `test_malformed_tail_still_raises_a_value_error`, `test_non_array_tail_still_raises_a_value_error` | Unit, error | green |
+| **Non-ASCII** reasoning before the marker does not shift the split | `test_non_ascii_reasoning_before_the_marker_parses` (5 casings + lowercase) | Unit, unicode | green (added at DF) |
+| The same with an empty `[]` payload — the shape W16 hand-verified | `test_non_ascii_reasoning_with_an_empty_payload_parses` | Unit, boundary | green (added at DF) |
+| A right-only finding survives disagreement | `test_disagreement_keeps_a_right_only_finding` | Unit, the bug | xfail W17 |
+| Both sides' exclusive findings survive | `test_disagreement_unions_both_sides` | Unit, D15 | xfail W17 |
+| The union deduplicates by `_finding_key` | `test_disagreement_union_deduplicates_a_shared_finding` | Unit, boundary | xfail W17 |
+| An empty left side does not swallow the right side | `test_disagreement_with_an_empty_left_side_keeps_the_right_findings` | Unit, edge | xfail W17 |
+| `judge_dispatch` is retained (D15) | `test_disagreement_still_dispatches_the_judge` | Unit, D15 | green |
+| Disagreement claims no confidence boost | `test_disagreement_claims_no_confidence_boost` | Unit, regression | green |
+| The agreement path is untouched (#238) | `test_agreement_path_is_untouched_by_the_union` | Unit, regression | green |
+| A one-model run short-circuits | `test_single_model_run_is_returned_unmerged` | Unit, edge | green |
+| OpenAI cached tokens are **not** added to `input_tokens` | `test_openai_cached_tokens_are_not_added_to_input_tokens` (2 shapes × `replace`/`absorb`) | Unit, the bug | xfail W18 |
+| An OpenAI payload with a cache-**write** count still adds the write | `test_openai_cache_write_stays_additive_while_reads_do_not` | Unit, D16 split | xfail W18 |
+| **Consumer:** `codex turn.completed` through the real handler | `test_codex_turn_completed_reports_inclusive_cached_tokens` (2 shapes) | Integration, seam | xfail W18 |
+| `cache_read_tokens` still reports the cached count | `test_openai_cached_tokens_are_still_reported` (2 shapes) | Unit, guard | green |
+| Anthropic `cache_read_input_tokens` stays additive | `test_anthropic_cache_read_stays_additive` (`replace`/`absorb`) | Unit, the asymmetry | green |
+| Anthropic reads **and** writes both add | `test_anthropic_full_shape_sums_both_cache_buckets` | Unit, boundary | green |
+| A native Anthropic field wins over an OpenAI details block | `test_anthropic_native_field_wins_over_an_openai_details_block` | Unit, provenance | green — **cross-locked to the session path at W18b DF** |
+| No cache fields ⇒ `input_tokens` untouched, `cache_*` `None` | `test_no_cache_fields_leaves_input_tokens_untouched` | Unit, edge | green |
+| T2's extractor is the provenance signal and must not be deleted | `test_openai_extractor_still_recognises_both_shapes` | Unit, guard | green |
+| **Consumer:** Claude `message_start` + `result` keeps Anthropic accounting | `test_claude_result_event_keeps_anthropic_accounting` | Integration, seam | green |
+| An empty stream reports no usage | `test_empty_stream_still_reports_no_usage` | Integration, edge | green |
+| **Second ingress:** the opencode HTTP session path does not add inclusive cached tokens | `test_openai_cached_tokens_are_not_added_to_session_input_tokens` (2 shapes × `info`/`usage`) | Unit, the bug | green (**marker stripped at W18b DF**) |
+| …including under the short `input` / `output` aliases that path accepts | `test_openai_cached_tokens_under_the_short_input_alias` (2 shapes) | Unit, alias | green (**marker stripped at W18b DF**) |
+| **Both cache shapes present** resolve **native-first and additive** on the session path — the precedence W18b chose, pinned as a decision | `test_both_cache_shapes_resolve_native_first_by_deliberate_choice` (2 details keys × `info`/`usage`) | Unit, precedence | green (added at W18b DF) |
+| The session path's Anthropic-native arm stays additive | `test_anthropic_native_cache_read_stays_additive` (`info`/`usage`) | Unit, the asymmetry | green (added at DF) |
+| The session path still records `cache_read_tokens` | `test_openai_cached_tokens_are_still_reported` (2 shapes) | Unit, guard | green (added at DF) |
+| No cache fields / no usage on the session path | `test_no_cache_fields_leaves_session_input_tokens_untouched`, `test_session_without_usage_reports_no_usage` | Unit, edge | green (added at DF) |
+| `approve` is rejected for an unverified blocking analyzer finding | `test_approve_is_rejected_for_an_unverified_blocking_analyzer_finding` (Critical, Major) | Unit, the bug | xfail W19 |
+| **Consumer:** the live `ToolContext`-derived state also fails closed | `test_live_submit_approve_is_rejected_for_an_unverified_blocker` | Integration, seam | xfail W19 |
+| An `approve` banked before `run_analyzers` becomes unusable at finalize | `test_approve_recorded_before_analyzers_becomes_unusable` | Functional, revalidation | xfail W19 |
+| **Consumer:** the MCP tool rejects and records nothing | `test_approve_is_rejected_when_a_blocker_was_never_verified` (Critical, Major) | Integration, tool | xfail W19 |
+| A non-blocking unverified finding still allows `approve` | `test_approve_survives_a_non_blocking_unverified_analyzer_finding`, `test_approve_is_recorded_when_the_analyzer_findings_are_non_blocking` | Unit + tool, legitimate approve | green |
+| An empty analyzer run / no analyzer run still allows `approve` | `test_approve_survives_an_empty_analyzer_run`, `test_approve_is_recorded_when_no_analyzer_run_happened` | Unit + tool, boundary | green |
+| A **withdrawn** blocker must not block (D12's escape hatch) | `test_approve_survives_a_withdrawn_blocking_finding` | Unit, D12 | green |
+| The new walk belongs to the approve branch only | `test_request_changes_is_unaffected_by_an_unverified_blocker` | Unit, scope | green |
+| `apply_causality_policy` runs before the gate | `test_a_pre_existing_blocker_is_downgraded_before_the_gate` | Unit, policy | green |
+
+### Confirmed-RED assertions (37 xfails, verified with `--runxfail`)
+
+All 37 fail on the assertion, never on an import or a stub:
+
+- **W15 (5)** — with one indexed pair, two indexed pairs, or the singleton alias, `tomllib.loads`
+  finds `default_permissions` at `model_providers.<id>.default_permissions` and
+  `parsed["default_permissions"]` is `None`. A partial pair puts it at
+  `model_providers.default_permissions`. The general invariant reports `["default_permissions"]` as a
+  stray root key after the first table header.
+- **W16 (15)** — every mixed-case marker (`upper`, `title`, `mixed`, `upper-head`, `upper-tail`)
+  raises `ValueError: … not valid JSON: Expecting value: line 1 column 1 (char 0)` for the populated
+  array, the empty array, and the reasoning-strip arm alike.
+- **W17 (4)** — `merged_findings` is `(left_only,)` when the right model found `pkg/billing.go`, and
+  `()` when the left model found nothing at all.
+- **W18 (7)** — `to_usage().input_tokens` is `140` (expected `100`) for both OpenAI shapes through
+  both `replace_usage` and `absorb_usage`, `165` (expected `125`) with a cache-write count, and
+  `140` through the real `codex` `turn.completed` handler.
+- **W19 (6)** — `validate_submission` accepts `approve` with an unverified Critical or Major in
+  `analyzer_run.findings`; `submit_review_verdict` records a `TerminalSubmission`;
+  `finalize_agent_result` reports `terminal_submission_received=True`.
+
+### Green-today regression guards (28 new assertions)
+
+Four of these five fixes have an over-correcting failure mode, so each is guarded from the other
+side:
+
+- **#222** — the `[permissions.<profile>]` tree and the provider blocks are pinned separately, so
+  W15 must *reorder* emission rather than move keys into or out of tables. The no-provider arm
+  proves the same line already parses correctly at the top level, which is what makes this a
+  key-ordering bug and not a missing key.
+- **#261** — the two error arms (`not valid JSON`, `must be a JSON array`) pin the message contract,
+  so a fix cannot buy the mixed-case case by swallowing genuinely malformed tails.
+- **#262** — `judge_dispatch` is asserted present on the same disagreement input the union tests
+  use (D15 is explicit the judge stays), and the dedup arm blocks the naive
+  `tuple(left) + tuple(right)`.
+- **#273** — the Anthropic arms are the point; see the note below.
+- **#263** — five arms pin the *legitimate* approve: non-blocking findings, an empty analyzer run,
+  no analyzer run at all, a withdrawn blocker, and a pre-existing Critical that
+  `apply_causality_policy` downgrades to `Minor`. Without them, "reject when `analyzer_run.findings`
+  is non-empty" would pass every red.
+
+### The #273 asymmetry — separable today, no provider flag needed
+
+D16 hints W18 may need a flag. It does need **one bit of state**, but the provenance is already
+unambiguous in the current code, so no provider identity or driver-level flag has to be threaded in:
+
+- `absorb_usage` / `replace_usage` resolve `cache_read` as
+  `cache_read_input_tokens or cacheReadTokens or _extract_openai_cached_tokens(payload) or 0`. The
+  Anthropic-native fields are consulted **first**, so at the moment `cache_read` is assigned the
+  writer knows which branch produced it. `test_anthropic_native_field_wins_over_an_openai_details_block`
+  pins that ordering precisely so the fix can rely on it.
+- The cheapest shape is a sibling field on the accumulator (e.g. `cache_read_is_inclusive: bool`)
+  set at the same two assignment sites and read only by `to_usage()`. `AgentUsage` needs no new
+  field — `cache_read_tokens` keeps reporting the count either way.
+- **The one genuinely ambiguous case is a mixed stream**: `absorb_usage` accumulates across events,
+  so a run whose `message_start` were Anthropic-shaped and whose `message_delta` were OpenAI-shaped
+  would carry one flag for two provenances. No live driver does this — Claude is the only
+  `absorb_usage` caller and it is Anthropic-native throughout, while every OpenAI-shaped provider
+  arrives through a single terminal `replace_usage`. This suite does **not** pin the mixed case, on
+  purpose: pinning it would force W18 to pick a resolution rule for a shape no provider emits. Both
+  accumulator methods are covered independently instead.
+
+### Notes for W15 / W16 / W17 / W18 / W19
+
+- **#263's rejection reason: reuse `REJECTION_APPROVE_CONFIRMED_BLOCKER`**
+  (`approve_with_confirmed_blocker`). The string *is* pinned by existing tests —
+  `tests/review/test_terminal_verdict_policy.py:73` defines `_REASON_APPROVE_CONFIRMED_BLOCKER` and
+  four tests assert it — but only for the **verified**-blocker path
+  (`test_agent_approve_with_verified_blocker_fails_structurally`,
+  `test_live_confirm_blocks_approve_via_verified_ids`,
+  `test_live_agent_confirm_blocks_approve_without_analyzer_findings`,
+  `test_confirm_survives_analyzer_rerun`). Nothing distinguishes "unverified" from "verified", so
+  reusing the constant leaves all four intact and satisfies the plan's stated preference for one
+  reason. W19 must **not** add a new constant: the W14 reds assert this exact string at the
+  validator, at the tool, and through `finalize_agent_result`.
+- **#263 has no live `withdrawn_fingerprints` producer.** `validation_state_from_tool_state`
+  hardcodes `withdrawn_fingerprints=set()` (`verdict.py:332`), and the withdrawn-findings memory
+  suppresses findings earlier, in `analyzers/pipeline.py:355`. The withdrawn arm is therefore
+  asserted at the `validate_submission(state=…)` boundary with a hand-built state. It is green today
+  (the approve branch ignores `analyzer_run.findings` entirely) and becomes load-bearing after W19.
+- **#263's finalize arm goes through `revalidate_recorded_submission`.** An approve banked *before*
+  `run_analyzers` must not survive it; the same machinery already handles the failed-static-check
+  case (`test_approve_then_failed_static_check_is_unusable_at_finalize`), so W19 should need no new
+  revalidation hook — only the widened walk.
+- **#222's tests depend on the permission-profile branch being live.** `_permission_profiles_active`
+  asserts `_codex_use_permission_profiles(ctx)` before each nesting assertion, because with profiles
+  off the key is never emitted and "not nested" would hold for the wrong reason. The autouse env
+  fixture now also clears `MERGECRAFT_CODEX_SANDBOX`, which would otherwise flip `_sandbox_mode` off
+  `read-only` and silently disable the branch.
+- **#222 is asserted through `tomllib`, never by substring.** `default_permissions =` *is* present in
+  the broken file — it is only in the wrong scope. A string match passes on the defect.
+- **#261 and #262 have no in-`src` consumer.** `rg` finds no caller of `parse_specialist_handoff` or
+  `reconcile_ensemble` under `src/mergecraft/` — both are library seams the harness has not wired
+  yet. The function *is* the observable surface, so the Batch B/C "pin the consumer too" lesson has
+  nothing further to reach for on those two; #273 and #263 are where it applied.
+- **#273's consumer arms use the private handler builders** (`codex._codex_stream_event_handler`,
+  `claude._claude_stream_event_handler`) with `tracer=None`, driven through the real
+  `consume_stream`. If W18 renames either builder these two tests need a one-line amendment —
+  escalate rather than editing them in an implementation wave.
+- **#262's `_finding_key` is imported by the tests.** Key identity is `(path, body)` and the dedup
+  assertion depends on it. The tests compare *keys*, not dict identity, so a widened key stays green
+  as long as a finding both models reported still keys equal on both sides.
+
+### Reconciled assertions (were 37 xfailed → 36 real passes + 1 rewritten)
+
+All 17 `green after W15|W16|W17|W18|W19` marker decorators (37 parametrized instances) are removed.
+Nothing failed once unmarked.
+
+- **W15 (5)** — 4 strip cleanly. The 5th, `test_no_root_key_is_emitted_after_the_first_table`, was
+  **defective, not unsatisfied** — rewritten below rather than stripped.
+- **W16 (15)** — all five marker casings × three arms are real passes.
+- **W17 (4)** — the union arms and the dedup arm are real passes.
+- **W18 (7)** — both OpenAI shapes × both accumulator entry points, the cache-write split, and the
+  two `codex turn.completed` consumer arms are real passes.
+- **W19 (6)** — the validator, the live `ToolContext` path, the tool surface, and the
+  `finalize_agent_result` revalidation arm are real passes.
+
+`tests/agents tests/mcp tests/review`: **495 passed / 1 skipped / 6 xfailed / 93 xpassed / 0
+failed.** The 6 xfails are the new W18b reds. The 93 XPASS belong to **earlier programs** (`green
+after W3` provider-routing, `green after W6` MiniMax routing, …), not to this sweep — they are
+outside Batch D's remit and were already XPASS at the W14 baseline.
+
+### The D17 helper was vacuous — the rewrite (escalation, DF)
+
+`_root_keys_after_first_table` collected **every** `key =` line after the first `[header]` with no
+notion of table scope, so it also collected keys that legitimately belong to tables (`name`,
+`base_url`, `env_key`, `wire_api`, `extends`, `enabled`, the domain entries). `== []` could
+therefore only hold for a config whose tables were all empty — unsatisfiable for any correct
+output, which is why the test stayed XFAIL after a correct W15 fix.
+
+Two things replace it:
+
+1. **`_keys_by_table_scope(path) -> dict[str, list[str]]`** — tracks the current table header and
+   attributes each bare key to it, with the document root as the `""` scope. That makes the
+   distinction expressible: `base_url` under `[model_providers.provider_1]` is correct,
+   `default_permissions` under it is #222.
+2. **The root-key set is derived, not hardcoded.** A render with *no* custom-provider env has no
+   table in front of its root keys, so its `""` scope is the writer's intended root set — the arm
+   `test_default_permissions_is_already_a_root_key_without_custom_providers` pins that render green
+   independently. The test renders twice (no providers, then with providers) and asserts (a) no key
+   from the derived root set appears in any table scope, and (b) the derived set is still a subset of
+   the provider render's root scope. A root key added to `_append_read_only_mcp_network_lines`
+   later is covered with no edit to this test — the property W14 wanted and did not get.
+
+**Evidence it is not passing for the wrong reason.** The rewritten file was run against the
+pre-W15 source (a detached worktree at `18311c3` with `PYTHONPATH` pointed at that tree's `src/`,
+`--runxfail` so markers do not mask):
+
+```
+FAILED test_default_permissions_stays_a_root_key_with_custom_providers[one-indexed-pair]
+FAILED test_default_permissions_stays_a_root_key_with_custom_providers[two-indexed-pairs]
+FAILED test_default_permissions_stays_a_root_key_with_custom_providers[singleton-alias]
+FAILED test_default_permissions_survives_a_partial_provider_pair
+FAILED test_no_root_key_is_emitted_after_the_first_table
+E  AssertionError: assert ['model_providers.provider_1.default_permissions'] == []
+5 failed, 14 passed
+```
+
+Against the current source all 11 pass. `test_root_key_scope_helper_flags_the_pre_w15_emission_order`
+additionally feeds the tracker a reconstructed pre-W15 TOML fixture and asserts the attribution
+directly, so the discriminating behaviour is pinned at the helper level and not only end to end.
+
+### Two coverage gaps the implementation waves reported (added at DF)
+
+- **#261 non-ASCII reasoning.** W16 chose regex-over-original-text precisely because `casefold()` is
+  not length-preserving (`ß` → `ss`) and the reasoning half is arbitrary model prose, but **no test
+  covered it** — every W14 casing arm used ASCII prose, where `casefold().find()` and the regex
+  agree, so a refactor back to the length-sensitive approach would have gone unnoticed.
+  `_NON_ASCII_REASONING` puts five expanding characters *before* the marker (a five-byte shift) and
+  asserts both halves: the payload parses to one finding and the reasoning carries no marker
+  fragment. Confirmed the guard bites — under a `casefold().find()` split all four
+  casing × payload combinations raise `JSONDecodeError` and leave `---TY` in the reasoning,
+  **including the documented lowercase casing**, which is why the lowercase arm is parametrized in
+  too and why `test_lowercase_marker_still_parses` never reached this.
+- **#273 second ingress (RED for W18b).** `agents/opencode.py:401-427` — the HTTP session path
+  serving the Nous / MiniMax passthrough — re-implements the details-block scan inline and still does
+  `input_tokens = inp + cache_read`. New file `tests/agents/test_opencode_session_usage.py`: 6 reds
+  marked `xfail(reason="green after W18b: opencode HTTP session cache accounting", strict=False)` and
+  6 green guards. **Double-count confirmed live**, not inferred: every red fails
+  `assert usage.input_tokens == 100` with `140`. Two properties of this path make it a different
+  shape rather than a copy:
+  - **Precedence is inverted.** The details block is checked **first**; the Anthropic-native
+    `cache_read_input_tokens` / `cacheReadTokens` fields are only a fallback.
+    `_resolve_cache_read` consults the native fields first, so a fix that reuses the shared helper
+    also flips which field wins on a payload carrying both. `test_anthropic_native_cache_read_stays_additive`
+    pins the native-only arm green (it is correct today) so the OpenAI arms cannot be bought by
+    deleting the disjoint addition. The ambiguous **both-present** payload was deliberately left
+    unpinned — the same call W14 made for the mixed-stream case; pinning it would force W18b to
+    choose a resolution rule for a shape no provider emits. **W18b did choose one** — see the
+    reconciliation section below, which pins it.
+  - **The short `input` / `output` aliases** are accepted here and not by the accumulator, so a fix
+    scoped to the long field names would leave the alias inflated; that arm is pinned separately.
+  - Both usage container keys (`data["info"]` and `data["usage"]`) are exercised.
+
+### W18b reconciliation — markers stripped, the chosen precedence pinned (DF)
+
+W18b (`99d54f4`) made `_prompt_session_http` **import and reuse** `_resolve_cache_read` from
+`agents/_stream_consumer.py` instead of re-deriving the details-block scan inline, so the session
+path now computes `input_tokens = inp + (0 if cache_read_is_inclusive else cache_read)`.
+
+- **All 6 W18b reds XPASS; all 6 green guards hold.** The 6
+  `green after W18b: opencode HTTP session cache accounting` markers are **stripped**. Nothing failed
+  once unmarked, and no assertion was weakened.
+- **W18b flipped a precedence this suite had pinned only indirectly.** The pre-W18b inline scan was
+  details-first; `_resolve_cache_read` is native-first. Batch D pinned that ordering only *indirectly*
+  — via the native-only arm green in both usage containers — and deliberately left the
+  **both-present** payload unpinned, so the flip broke no arm and was invisible to the suite. That is
+  the gap this reconciliation closes.
+- **The chosen rule is now pinned in both directions.**
+  `test_both_cache_shapes_resolve_native_first_by_deliberate_choice` asserts the both-present payload
+  resolves native-first and **additive** (disjoint) on the session path, across both details keys and
+  both usage containers, with the two counts given different values so the assertion identifies
+  *which* field won rather than merely that a cached count survived. Its docstring records W18b's
+  argument verbatim — reuse over a duplicated rule (the duplicate is what let #273 survive W18 here),
+  a delta confined to a shape no real provider emits (the two fields come from mutually exclusive
+  APIs), and native-first as the conservative direction for budget accounting, since calling a
+  genuinely disjoint count inclusive would under-report prompt size and let a run overrun its bounds.
+  The docstring opens with **do not "tidy" this to details-first** so a future reader cannot mistake
+  the ordering for an accident.
+- **`_stream_consumer` was already pinned** — `test_anthropic_native_field_wins_over_an_openai_details_block`
+  has asserted the same native-first/additive contract since W14, so no new test was needed there.
+  Both docstrings now cross-reference each other, because the two paths holding *divergent* copies of
+  this rule is exactly the bug class that produced W18b.
+- **The separation W18b depends on stays pinned.** The native-only and details-only arms are green in
+  both usage containers, and the short `input` / `output` alias arms still hold — `_resolve_cache_read`
+  never reads the token-count fields, and the alias arms are what keep that true.
+- **Out of scope, tracked separately:** `run_bounds.record_agent_usage` adds `cache_read` / `cache_write`
+  on top of an `input_tokens` that already contains them, for every provider. Confirmed, distinct from
+  #273, and owned by its own wave — no test authored here.
+
+`tests/agents`: **237 passed / 1 skipped / 93 xpassed / 0 failed / 0 xfailed**. `make lint` and
+`make typecheck` clean. The 93 XPASS remain the pre-existing `green after W3` / `green after W6`
+earlier-program markers, outside Batch D's remit. **No `green after W15`–`W19` or `green after W18b`
+marker remains anywhere in `tests/`.**
+
+### Escalation log
+
+| # | Wave that escalated | Test | Finding | Resolution |
+|---|---|---|---|---|
+| 1 | W15 → DF | `tests/agents/test_codex_custom_provider.py::test_no_root_key_is_emitted_after_the_first_table` | The test, not the fix, was wrong: `_root_keys_after_first_table` ignored table scope, so `== []` was unsatisfiable for any non-empty config and the strongest D17 guard was vacuous | Helper rewritten as `_keys_by_table_scope` with a derived root-key oracle; verified failing against `18311c3` and passing against `3faca32`. A second test pins the helper's attribution against a reconstructed pre-W15 fixture |
+| 2 | W16 → DF | `tests/agents/test_structured_handoff.py` | The non-ASCII case W16 hand-verified had no test, so a refactor to `casefold().find()` could regress silently | Two arms added with length-expanding prose before the marker; verified that a `casefold().find()` split fails them |
+| 3 | W18 → DF | `tests/agents/test_opencode_session_usage.py` (new) | `agents/opencode.py:401-427` carries the identical #273 double-count on the HTTP session path, outside W18's anchor, so #273's criterion was only half met | 6 RED authored for **W18b** (operator-inserted wave) + 6 green guards; the inverted precedence and the `input`/`output` aliases are pinned so a fix cannot regress the Anthropic arm |
+| 4 | W18b → DF | `tests/agents/test_opencode_session_usage.py`, `tests/agents/test_stream_usage_cache.py` | **W18b changed a precedence the suite had pinned only indirectly.** Reusing `_resolve_cache_read` flipped the session path from details-first to native-first. Batch D pinned that ordering only via the native-only arm and left the both-present payload unpinned, so the flip broke no arm — the contract was unpinned in *both* directions and nothing recorded it as a decision | Marker-strip pass plus `test_both_cache_shapes_resolve_native_first_by_deliberate_choice` (2 details keys × `info`/`usage`), whose docstring records W18b's argument and warns against "tidying" it back. `_stream_consumer`'s equivalent pin already existed; both docstrings now cross-reference so the two paths cannot silently diverge again |
+
+---
+
+## Batch E — MCP contract (W20)
+
+**Issues:** #266 (`list_check_runs` calls the check-**suites** endpoint and returns a `check_suites`
+key), #267 (`handle_rpc`'s `tools/call` dispatches into `tool.execute` without validating
+`arguments` against `tool.input_schema`).
+**Implementation waves:** W21 (#266), W22 (#267).
+**Binding decisions:** **D13** (swap to `list_check_runs_for_ref`, return key `check_runs`, keep the
+tool name), **D14** (validate with the already-pinned `jsonschema`, `-32602` on failure, no new
+dependency).
+
+**Anchors re-grepped, not trusted from the plan body:**
+
+| Issue | Anchor used | Plan text | Verdict |
+|---|---|---|---|
+| #266 | `mcp/check_runs.py:16` (`ctx.scm.list_check_suites_for_ref`), `:20` (`"check_suites"`); client at `utils/github.py:481-500` | same | matches — but the tool calls it through `ctx.scm`, not `ctx.github` |
+| #266 | **`scm/github.py:242-245`** — `GitHubScmAdapter.list_check_runs`, the protocol's MCP-read alias, *also* forwards to `list_check_suites_for_ref` | **not in the plan** | **second ingress — new** |
+| #267 | `mcp/server.py:337-405` (`tools/call` branch inside `_register_mcp_route.handle_rpc`) | `:337+` | matches |
+
+### Files
+
+| File | Status | Issue |
+|---|---|---|
+| `tests/mcp/test_check_runs.py` | extended + **one assertion inverted** | #266 |
+| `tests/scm/test_protocol.py` | extended + **snapshot inverted** | #266 |
+| `tests/scm/conftest.py` | mock transport now also serves `/commits/main/check-runs` (additive) | #266 |
+| `tests/mcp/test_tools_call_validation.py` | **new** | #267 |
+
+### Contract → test map
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| The tool invokes `list_check_runs_for_ref` and **never** the suites sibling | `test_list_check_runs_calls_the_check_runs_endpoint` | Unit, the bug | xfail W21 |
+| The payload key is `check_runs`, `check_suites` is gone, `total_count` passes through | `test_list_check_runs_returns_check_run_data_for_ref` | Unit, D13 | xfail W21 |
+| A returned run keeps its own `name` and its parent `check_suite.id` — the id the tool description sends the agent to `get_check_suite_logs` with | `test_list_check_runs_preserves_the_run_shape_agents_navigate_by` | Unit, shape divergence | xfail W21 |
+| **Second ingress:** `GitHubScmAdapter.list_check_runs` reaches the check-runs endpoint | `test_protocol_list_check_runs_alias_reaches_the_check_runs_endpoint` | Integration, adapter | xfail W21 |
+| **Consumer:** the cross-tool behavioural snapshot records the check-runs call | `test_github_adapter_behaviour_is_unchanged` | Integration, snapshot | xfail W21 (inverted) |
+| The tool name stays `list_check_runs` and stays on the common surface | `test_list_check_runs_tool_is_registered_under_its_own_name` | Unit, contract pin | green |
+| `get_check_suite` still fetches one suite by id | `test_get_check_suite_tool_returns_suite_detail` | Unit, regression | green |
+| A missing required property is rejected **before** `tool.execute` | `test_missing_required_argument_is_rejected_before_execute` | Integration, the bug | xfail W22 |
+| An extra property under `additionalProperties: false` is likewise rejected | `test_extra_property_is_rejected_when_additional_properties_is_false` | Integration, D14 | xfail W22 |
+| A wrongly typed property is invalid params, not a tool-level crash | `test_wrongly_typed_argument_is_rejected_before_execute` | Integration, edge | xfail W22 |
+| The rejection is well-formed JSON-RPC: `id` echoed, `error` object, no `result` | `test_validation_failure_is_a_well_formed_jsonrpc_error` | Integration, wire contract | xfail W22 |
+| A schema-conforming call still reaches `tool.execute` and returns its result | `test_valid_arguments_still_reach_execute` | Integration, happy path | green |
+| A permissive schema (`properties: {}`, no ban) still admits arbitrary arguments | `test_permissive_schema_accepts_arbitrary_arguments` | Integration, permissive | green |
+| An `EMPTY_SCHEMA` tool accepts the empty argument object | `test_empty_schema_tool_accepts_the_empty_argument_object` | Integration, boundary | green |
+| A schema the validator cannot use does not crash the endpoint | `test_unusable_schema_does_not_break_the_call` | Integration, error | green |
+
+### Confirmed-RED assertions (9 xfails, verified with `--runxfail`)
+
+All 9 fail on the assertion, never on an import or a fixture:
+
+- **W21 (5)** — `github.run_calls` is `[]` where `[("acme", "demo", <sha>)]` is expected (the suites
+  sibling was called instead); the payload still carries `check_suites` and has no `check_runs` key
+  (`KeyError: 'check_runs'` on the shape arm); the adapter alias records
+  `/repos/acme/demo/commits/main/check-suites`; the cross-tool snapshot diverges at index 6,
+  `check-suites` where `check-runs` is now pinned.
+- **W22 (4)** — with no validation the tool body runs, so `probe.calls` is `[{}]`,
+  `[{'ref': 123}]`, and `[{'ref': 'main', 'unexpected': 1}]` where `[]` is expected, and the
+  response carries `result` where an `error` object is expected.
+
+### Green-today regression guards (4 new assertions, 4 existing preserved)
+
+- **#266** — the tool-name pin is split **out** of the inverted test so W21 cannot buy the endpoint
+  swap by renaming the tool, and the payload-key arm is separate from the endpoint arm so the exact
+  half-fix the plan warns about (rename the key, keep calling suites) fails the endpoint arm.
+- **#267** — the valid-call arm is the anti-over-correction guard: `-32602` on everything would pass
+  all four reds. The permissive-schema and `EMPTY_SCHEMA` arms pin that validation does not turn a
+  loose schema into a closed door, and the unusable-schema arm pins that a bad schema is not a 500.
+
+### The two endpoints are not interchangeable — what W21 inherits
+
+The `check-suites` and `check-runs` responses differ in ways that matter to a consumer:
+
+| | check suite | check run |
+|---|---|---|
+| `id` | suite id — the argument `get_check_suite` / `get_check_suite_logs` take | **run** id, useless to either |
+| `name` | absent (`app.name` is the app, not the job) | the job name a repo's `staticChecks` mapping points at |
+| suite id | is the `id` | nested at `check_suite.id` |
+| `conclusion` | rollup over every run in the suite | per job |
+
+So the tool's own **description** is a W21 deliverable, not just the call and the key: it currently
+reads "…so you can pick a `check_suite_id` for `get_check_suite_logs`", and after the swap the
+top-level `id` is no longer a suite id. `test_list_check_runs_preserves_the_run_shape_agents_navigate_by`
+pins the nesting the agent needs instead; the description wording itself is left unpinned.
+
+### Consumer audit for #266 — nothing reads the old key
+
+Grepped `check_suites` and `list_check_runs` across `src/`:
+
+- **`mcp/static_checks._apply_ci_evidence` (`:106-119`) is a false alarm.** It calls
+  `ctx.scm.list_check_runs_for_ref` **directly** and already reads `payload["check_runs"]` — it never
+  goes through the MCP tool. W21 must not "fix" it; it is the model for the fix.
+- **`evidence/build.py:197-200`** logs `len(ci_check_runs.get("check_suites") or [])`, but
+  `ci_check_runs` is a deferred parameter (`_ = (ci_check_runs, …)` at `:245`) with **no caller
+  anywhere in the tree**. Dead prose in a debug line, not a consumer. Left unpinned.
+- **No other reader.** The tool's payload is consumed only by the reviewing agent, whose contract is
+  the tool description above.
+
+### Notes for W21 / W22
+
+- **W21 owns a second ingress the plan does not name.** `GitHubScmAdapter.list_check_runs`
+  (`scm/github.py:242-245`) is the protocol's `list_check_runs` operation and forwards to
+  `list_check_suites_for_ref` — the identical defect, one layer down. Nothing calls it in production
+  today, which is exactly why it will rot. One red is authored for it; if W21 declines the scope,
+  the xfail is non-strict and stays red rather than breaking the suite.
+- **W21 must expect two inverted tests, not one.** Both are recorded below.
+- **W22's `-32602` message** is unpinned beyond "non-empty string" — the validator's own message is
+  fine, and pinning `jsonschema`'s wording would couple the suite to a library version.
+- **W22's fail-open vs fail-closed choice on an unusable schema is unpinned.** `set_output` takes a
+  consumer-supplied `output_schema` verbatim (`mcp/output.py:14-31`), so an invalid schema is
+  reachable in production and `jsonschema.validate` raises `SchemaError` (not `ValidationError`)
+  there. Only the non-crash invariant is asserted; W22 decides the arm and records it.
+- **`arguments` that is not a dict** is coerced to `{}` today (`server.py:346-347`). After W22 that
+  silently becomes `-32602` for any tool with a required property. Correct, but a behaviour change
+  no test pins in either direction.
+
+### Inverted assertions
+
+| Test | Was | Now |
+|---|---|---|
+| `tests/mcp/test_check_runs.py::test_list_check_runs_returns_check_suite_data_for_ref` | asserted `github.list_calls == [("acme", "demo", REF_SHA)]` (the **suites** recorder) and read `payload["check_suites"]` | split into `test_list_check_runs_calls_the_check_runs_endpoint` (`run_calls` populated, `list_calls` empty) + `test_list_check_runs_returns_check_run_data_for_ref`, with the tool-name pin lifted into its own green test |
+| `tests/scm/test_protocol.py::test_github_adapter_behaviour_is_unchanged` | `_SNAPSHOT_CALLS[6]` was `("GET", "/repos/acme/demo/commits/main/check-suites")` | `("GET", "/repos/acme/demo/commits/main/check-runs")`; the whole snapshot is xfail(W21) because a call-sequence tuple cannot be half-inverted, and the mock transport now serves both paths |
+
+`tests/mcp tests/scm`: **208 passed / 9 xfailed / 0 failed**. `make lint` and `make typecheck`
+(334 source files) clean.
+
+### Batch E reconciliation (after W21 + W22)
+
+- **All 9 W20 reds pass once unmarked; nothing failed.** The 5
+  `green after W21: list_check_runs calls the check-runs endpoint` markers (3 in
+  `tests/mcp/test_check_runs.py`, 2 in `tests/scm/test_protocol.py`) and the 4
+  `green after W22: tools/call validates arguments against input_schema` markers in
+  `tests/mcp/test_tools_call_validation.py` are **stripped**. No assertion was weakened and no
+  marker was re-added.
+- **The full cross-tool snapshot passes unmarked.** `test_github_adapter_behaviour_is_unchanged`
+  had to be xfailed *whole* at W20 — a call-sequence tuple cannot be half-inverted — which left the
+  eight unrelated tools it exercises ungated for two waves. Re-verified here as a real pass, not on
+  W21's word: every per-tool payload assertion and the full `_SNAPSHOT_CALLS` tuple hold.
+- **W21 landed the second ingress.** `GitHubScmAdapter.list_check_runs` (`scm/github.py:242-245`),
+  which Batch E found and the plan did not name, now reaches
+  `/repos/acme/demo/commits/main/check-runs`. Both stale docstrings (the snapshot's "is xfail until
+  W21 lands", the alias's "also delegates to suites") were rewritten to past tense so the file does
+  not describe a defect that no longer exists.
+- **W21 used `ctx.scm`, not the plan's `ctx.github`.** The plan's W20.1 deliverable named
+  `ctx.github` literally; `test_no_github_specific_type_leaks_into_core` — green since the SCM
+  extraction — forbids `ctx.github` in exactly that module. W21 correctly followed the test. Logged
+  below; no test change was warranted.
+
+#### The two behaviour changes W22 left unpinned — now pinned
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| A non-dict `arguments` (string / list / null / int) against a **strict** schema returns `-32602` and never enters `execute` | `test_non_dict_arguments_are_rejected_against_a_strict_schema` | Integration, behaviour change | green |
+| The same non-dict `arguments` against a **permissive** schema still executes, with `{}` | `test_non_dict_arguments_still_execute_against_a_permissive_schema` | Integration, the distinction | green |
+| An uncompilable `input_schema` is `-32603`, **not** `-32602` | `test_unusable_schema_is_an_internal_error_not_invalid_params` | Integration, error taxonomy | green |
+| `resolve_output_schema` admits a schema `check_schema` rejects — the reachability source | `test_resolve_output_schema_admits_a_schema_the_validator_cannot_compile` | Unit, reachability | green |
+
+- **2a — non-dict `arguments`.** `server.py:346-347` still coerces a non-dict `arguments` to `{}`,
+  and that coerced `{}` now flows through validation. So the rejection is **not** "your arguments
+  are not an object" — it is "the empty object you were coerced into fails this schema". Both halves
+  are pinned as a parametrized pair over the same four non-dict payloads, and both docstrings say so
+  explicitly, because the obvious later "fix" — rejecting non-dict up front — would silently break
+  the permissive arm while looking like a tidy-up of the coercion.
+- **2b — the `-32603` branch.** W22 confirmed Batch E's reachability suspicion: `set_output_tool`
+  passes the consumer-supplied schema **verbatim** as `input_schema` (`mcp/output.py:29`), and its
+  only ingress `resolve_output_schema` (`utils/payload.py:668-682`) checks merely that the value
+  parses as a JSON object — it never calls `check_schema`. An `output_schema` action input of
+  `{"type": "nope"}` therefore registers an uncompilable tool. The existing probe covered only the
+  non-crash invariant; the code is now pinned as `-32603` with the reason in the docstring: the
+  caller's arguments are valid, the *tool's* schema is broken, so "invalid params" would misdescribe
+  the failure and send the agent retrying its arguments forever.
+- **The reachability is pinned at its real source too.**
+  `test_resolve_output_schema_admits_a_schema_the_validator_cannot_compile` asserts both halves —
+  `resolve_output_schema` returns `{"type": "nope"}` unchanged, and `validator_for(...).check_schema`
+  raises `SchemaError` on it. Until now that chain was only reasoned about in prose, which is what
+  lets a `-32603` branch get written off as dead code and deleted. Pinned from `tests/` only; no
+  `src/` change is implied, and the underlying gap (an ingress that validates JSON-object-ness but
+  not schema-validity) is left to its own wave.
+
+`tests/mcp tests/scm`: **227 passed / 0 xfailed / 0 xpassed / 0 failed** — the 217 collected at W20
+(208 passed + 9 xfailed) now all pass, plus 10 new cases from the 4 pins above (two are
+parametrized over four non-dict payloads each). `make lint` and `make typecheck`
+(334 source files) clean. **No `green after W20`–`W22` marker remains anywhere in `tests/`.** The
+`green after W3` / `W4` / `W6` / `W8` / `W9-W10` markers still present in `tests/agents`,
+`tests/cli`, `tests/tracing`, `tests/utils`, `tests/evidence` and `tests/status_checks` are
+earlier-program markers, outside this program's remit.
+
+### Escalation log
+
+| # | Wave that escalated | Test | Finding | Resolution |
+|---|---|---|---|---|
+| 1 | W21 → EF | `tests/scm/test_protocol.py::test_no_github_specific_type_leaks_into_core` | **The plan contradicted a green test.** W20.1's deliverable specified swapping `mcp/check_runs.py` to `ctx.github.list_check_runs_for_ref`, but this pre-existing green test forbids the string `ctx.github` in that module — the plan text predated the SCM-protocol extraction | No test change. W21 used `ctx.scm.list_check_runs_for_ref` instead, which satisfies both the #266 endpoint pin and the no-leak guard. Recorded so the divergence from the plan's literal wording is not later read as W21 having missed its deliverable |
+
+---
+
+## Batch F — Auth DX (W23)
+
+**Issues:** #221 (`mergecraft auth codex` — and every sibling provider command — persists the
+captured credential **only** through `gh secret set`, so a contributor who authenticates cannot
+then run the CLI locally: the credential exists in GitHub Actions secrets and nowhere else).
+**Implementation wave:** W24 (#221). #220 is verify-and-close (W25, D5) and has no new tests.
+**Binding decisions:** **D11** (extend `auth_logfire`'s `--scope local|github|both` to every
+`mergecraft auth <provider>` command; default stays `github` so CI-only setups do not start writing
+`.env`), plus global convention 7 (the CLI addition is additive).
+
+**Anchors re-grepped, not trusted from the plan body:**
+
+| Item | Anchor used | Plan text | Verdict |
+|---|---|---|---|
+| #221 defect | `cli/auth_cmd.py:108-146` (`auth_codex`) — `_set_gh_secret` is the only persistence call; identical shape in `auth_claude` `:149-180`, `auth_gemini` `:203-230`, `auth_cursor` `:260-288`, `auth_nous` `:351-382`, `auth_tokenhub` `:385-420`, `auth_minimax` `:780-821` | `cli/auth_cmd.py:109-146` | matches |
+| Reference impl | `LogfireScope` `:58`, `_write_env_value` `:543-565`, `_local_env_path` `:568-580`, `_normalise_scope` `:583-598`, `auth_logfire` `:601-743` | `:58,583-733` | matches |
+| Tempdir half | `cli/auth_cmd.py:123-138` — `tempfile.TemporaryDirectory` as `CODEX_HOME`; `auth.json` is read into `value` **inside** the block, `_set_gh_secret` runs after it | `:123-138` | matches |
+| **D11** | present at plan line 183, naming all seven provider commands | W23.1 / W24.1 cite "per D11" | **plan's D11 exists — see the resolution note below** |
+
+### The "missing D11" question — resolved
+
+W23's dispatch reported that the plan has no D11 and asked for the provider set to be derived from
+code instead. **D11 does exist**, at plan line 183 (`## Decisions baked into this plan`), and it
+enumerates the set explicitly: `codex`, `claude`, `gemini`, `cursor`, `nous`, `tokenhub`, `minimax`,
+default `github`. Global convention 7 (line 148) cites it too. The independent code derivation was
+run anyway and lands on the same seven:
+
+| `auth` subcommand | Captures a credential a local run needs? | In scope | Why |
+|---|---|---|---|
+| `codex` | yes — `CODEX_AUTH_JSON`, read by `utils/agent_resolve.py:83` | **yes** | the reported defect |
+| `claude` | yes — `CLAUDE_CODE_OAUTH_TOKEN`, read by `utils/agent_resolve.py:69`, `utils/secrets.py:224` | **yes** | same shape |
+| `gemini` | yes — `GEMINI_API_KEY`, read by `utils/agent_resolve.py:96` | **yes** | same shape |
+| `cursor` | yes — `CURSOR_API_KEY`, read by `integrations/cursor_cloud/client.py:174-176` | **yes** | same shape |
+| `nous` | yes — `NOUS_API_KEY`, read by `utils/agent_resolve.py:106-108` | **yes** | same shape |
+| `tokenhub` | yes — `TOKENHUB_API_KEY`, same resolver | **yes** | same shape |
+| `minimax` | yes — `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`, read by `utils/payload.py:550` | **yes** | same shape |
+| `logfire` | yes — but already has `--scope` | **no** | it *is* the reference implementation; its default is `both`, not `github`, and changing that would be an unrelated behaviour change |
+
+Every in-scope command's Actions-secret name is also the env var the local runtime resolves out of
+`os.environ`, so the `.env` key and the secret name are the same string. That is what the suite
+pins — one name per provider, no new aliasing. `logfire` is the sole command where the two differ
+(`LOGFIRE_TOKEN` secret vs `MERGECRAFT_LOGFIRE_TOKEN` local), which is a second reason to leave it
+out of the parametrized set.
+
+### Files
+
+| File | Status | Issue |
+|---|---|---|
+| `tests/cli/test_auth_scope_cmd.py` | **new** | #221 |
+
+No existing test needed inverting or weakening. The three `tests/cli/test_auth_nous_cmd.py` arms
+that assert today's github-only behaviour (`test_auth_nous_prompts_with_getpass_and_writes_secret`,
+`test_auth_nous_rejects_on_401_or_403`, `test_auth_nous_warns_and_saves_on_network_error`) all
+invoke `auth nous` with **no** `--scope` flag, so D11's `github` default keeps them green through
+W24 unchanged.
+
+### Contract → test map
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| `--scope local` lands a credential a local run can read back, for each of the seven providers | `test_auth_scope_local_writes_env_without_gh` (7 arms) | Functional, the bug | xfail W24 |
+| `--scope local` needs **no** working `gh`: `_get_gh_token` / `_parse_git_remote` / `_set_gh_secret` are never reached and the command still exits 0 | same test, tripwire counters | Functional, the DX requirement | xfail W24 |
+| `--scope local` preserves unrelated `.env` keys | same test, `MERGECRAFT_SCOPE_RED_PRESERVED` | Integration, idempotence | xfail W24 |
+| Explicit `--scope github` sets exactly one secret, under the provider's own name, and creates no `.env` | `test_auth_scope_github_writes_secret_only` (7 arms) | Functional, compatibility | xfail W24 |
+| `--scope both` does both layers | `test_auth_scope_both_writes_env_and_secret` (7 arms) | Functional, D11 | xfail W24 |
+| **No flag == today's behaviour**: one secret, `.env` untouched | `test_auth_default_scope_is_github_only` (7 arms) | Functional, the #221 compatibility guard | **green (before and after)** |
+| An unknown `--scope` bails `Exit(1)` naming `local` / `github` / `both`, before any capture or write | `test_auth_rejects_unknown_scope` (7 arms) | Error handling, `_normalise_scope` parity | xfail W24 |
+| The local write carries the captured `auth.json` **bytes** — not the empty string a post-cleanup re-read would produce | `test_auth_codex_scope_local_persists_the_captured_auth_json` | Integration, the tempdir half | xfail W24 |
+| A failed `gh secret set` with a good local write is **partial success** (exit 0 + warning) | `test_auth_codex_scope_both_survives_a_failed_gh_secret_set` | Error handling, partial failure | xfail W24 |
+| Both halves failing is a hard failure with `nothing was written` | `test_auth_codex_scope_both_bails_when_neither_half_lands` | Error handling, fail-closed | xfail W24 |
+| All seven D11 subcommands exist on `mergecraft auth` today | `test_d11_provider_subcommands_are_all_registered` | Unit, collection guard | green |
+
+### Confirmed-RED assertions (31 xfails, verified with `--runxfail` against `7f375cc`)
+
+Every one fails on the behaviour under test, none on an import, a fixture, or a stray usage error
+mistaken for a behaviour failure:
+
+- **28 arms** (`local` / `github` / `both` / unknown-scope, × 7 providers) fail with
+  `no such option '--scope'` from Typer and `SystemExit(2)` — i.e. the option D11 mandates does not
+  exist yet. That *is* #221: the four scope-bearing contracts cannot be expressed against today's
+  surface. The unknown-scope arms are additionally pinned to `exit_code == 1` (a `_bail`), which
+  distinguishes `_normalise_scope`'s rejection from Typer's usage exit 2 — today they observe 2, so
+  a W24 that adds the option but skips the normaliser still fails them.
+- **3 codex arms** fail the same way on `--scope local` / `--scope both`, before their
+  content/partial-failure assertions are reached.
+
+The 8 green assertions (7 default-scope arms + the registration guard) pass at `7f375cc` and must
+still pass at W24: they are the only thing standing between D11's stated default and a silent
+behaviour change for every existing operator.
+
+### How the tempdir-ordering half is pinned
+
+`auth_codex` mints its credential inside a `tempfile.TemporaryDirectory` used as `CODEX_HOME` and
+lets it be deleted on block exit (`cli/auth_cmd.py:123-138`). A local-scope write bolted on *after*
+that teardown would re-read a path that no longer exists and persist nothing — and a test asserting
+only "`_dotenv_set_key` was called" would pass it.
+
+`test_auth_codex_scope_local_persists_the_captured_auth_json` therefore pins **content, not call
+order**. A stubbed `codex login` writes a known single-line JSON payload into whatever `CODEX_HOME`
+the command hands it; a spy wrapped around the module's `_dotenv_set_key` records the value actually
+passed; and the test asserts (a) `CODEX_AUTH_JSON` was written at all, (b) the written value equals
+the stub's payload **verbatim**, (c) it re-parses as JSON with the expected `access_token`, and (d)
+`dotenv_values` resolves the same value back out of the temp `.env` — the property a local run
+actually depends on. It also asserts the isolated `CODEX_HOME` is still cleaned up, so the fix
+cannot be "leak the tempdir".
+
+Call ordering is deliberately **not** asserted: an implementation that reads `auth.json` inside the
+block and writes `.env` after teardown is correct, and pinning order would reject it. Round-trip
+equality was checked against all three `python-dotenv` quote modes (`never` / `always` / `auto`) —
+all three round-trip this payload — so the pin does not covertly dictate W24's quote mode.
+
+### Partial `--scope both` failure — answered from `auth_logfire`
+
+The question does not need routing: `auth_logfire` already implements an answer at
+`cli/auth_cmd.py:697-734`, and Batch F pins it for consistency rather than inventing a second
+policy.
+
+| State | `auth_logfire` today | Pinned for the seven |
+|---|---|---|
+| local ok, `gh secret set` failed | warning naming the repo settings URL; **exit 0** | `test_auth_codex_scope_both_survives_a_failed_gh_secret_set` |
+| local failed, gh ok | warning; exit 0 | not pinned (would require faking a `.env` permissions failure *and* asserting the gh half — low value) |
+| both failed | `_bail("nothing was written — …")`; non-zero | `test_auth_codex_scope_both_bails_when_neither_half_lands` |
+
+The rationale is that partial success is still success from the operator's side: they asked for a
+usable credential in two places and got one, and telling them which half failed is more useful than
+refusing the half that worked. Note this makes `--scope both` **more** forgiving than today's
+github-only path, which `_bail`s when `_set_gh_secret` returns `False` — that stricter behaviour is
+preserved for `--scope github` and the default by the compatibility arms.
+
+### Left to W24 (deliberately unpinned)
+
+1. **Multi-line `auth.json`.** The fixture payload is single-line JSON. A real `codex login` may
+   pretty-print `auth.json`, and a multi-line value cannot survive a flat `.env` line. Whether W24
+   compacts the JSON (`json.dumps(json.loads(...), separators=…)`) before writing, or quotes it, or
+   refuses, is a design decision this suite does not make. It only requires that whatever is written
+   comes back out of `dotenv_values` equal to what went in.
+2. **Quote mode.** `_write_env_value` hard-codes `quote_mode="never"`, justified in its docstring for
+   Logfire tokens and project labels. A raw JSON value written unquoted is `dotenv`-readable but not
+   `source`-able from a shell. Whether codex needs a different quote mode is W24's call; the
+   round-trip pin passes either way.
+3. **`--scope local` and the provider CLI/validator.** `--scope local` still runs the full capture
+   path (`shutil.which("codex")`, the device-auth login, each provider's `_validate_*` probe). The
+   suite stubs those rather than asserting they are skipped, so W24 may keep or relax them.
+4. **`-s` short flag and the `gh` / `action` / `all` synonyms.** `_normalise_scope` accepts `gh`,
+   `action` and `all`, and `auth_logfire` exposes `-s`. The suite exercises only the three canonical
+   long values, so W24 can carry the synonyms across for parity without a test forcing it either way.
+5. **`make reference-docs`.** Adding `--scope` to seven commands changes the generated
+   `cli-commands` README block that `tests/docs/test_reference_docs.py` compares against the live
+   Typer app. That test is green today and will stay green only if W24.2 regenerates the docs in the
+   same commit (plan convention 13). Not a test change — a W24 obligation.
+
+### Batch F reconciliation (after W24)
+
+- **All 31 W23 reds pass once unmarked; nothing failed and no assertion was weakened.** The seven
+  `green after W24: auth --scope local/github/both` decorators (28 parametrized provider arms + 3
+  codex-specific arms) and the `XFAIL_REASON` constant are **stripped** from
+  `tests/cli/test_auth_scope_cmd.py`. No marker was re-added.
+- **W24 satisfied the contracts through one shared helper, not seven copies.** `_persist_credential`
+  (`cli/auth_cmd.py:160-209`) plus `_resolve_repo_slug` (`:122-135`) and `_single_line_credential`
+  (`:138-157`) replaced seven duplicated `gh secret set` + `_bail` blocks. `_resolve_repo_slug`
+  returns `None` for `local`, which is why the "never reaches `gh`" tripwire counters stay at zero
+  rather than merely tolerating a failure. `_normalise_scope` was reused verbatim, so the
+  `gh` / `action` / `all` synonyms and the `-s` short flag came across for free (items 4 of "Left to
+  W24", now resolved by reuse rather than by a test).
+- **The verbatim round-trip arm still passes because compaction is a no-op for it.** The Batch F
+  fixture payload is single-line, so `_single_line_credential` returns it unchanged and
+  `test_auth_codex_scope_local_persists_the_captured_auth_json`'s byte-exact assertion holds. That
+  is also why it left W24's real behaviour untested — see the two pins below.
+
+#### The two things W24's evidence turned from hypothesis into fact — now pinned
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| A pretty-printed multi-line `auth.json` lands as **one** `.env` line, round-trips out via `dotenv_values`, and re-parses to the same object | `test_multiline_credential_is_compacted_to_one_env_line` | Integration, W24 behaviour | green |
+| A multi-line value that is **not** JSON bails (exit 1, names the key) and writes **no** `.env` at all | `test_multiline_non_json_credential_bails_instead_of_writing` | Error handling, fail-closed | green |
+| `gh secret set` receives the **uncompacted** payload while the local write is compacted | `test_gh_secret_receives_the_uncompacted_payload` | Integration, the deliberate asymmetry | green |
+| The written line is **shell-sourceable**: a real `/bin/sh` sources the `.env` and echoes back the exact value | `test_local_env_line_survives_shell_sourcing` | Functional, the property `dotenv` cannot see | green |
+| `_write_env_value`'s `quote_mode` default stays `"never"` for pre-#221 callers | `test_write_env_value_defaults_to_unquoted` | Unit, load-bearing default | green |
+
+- **Multi-line compaction (item 1 of "Left to W24").** W24 confirmed empirically that `codex login`
+  pretty-prints (`~/.codex/auth.json` is ten lines), so this is the *normal* case for
+  `CODEX_AUTH_JSON`, not a corner one. The pin asserts three separable things because each fails
+  differently: exactly one non-empty line on disk (a raw multi-line write would leave the tail as
+  orphaned junk keys), a successful `dotenv_values` round trip, and **semantic** equality —
+  `json.loads(stored) == json.loads(pretty)` — since compaction legitimately changes the bytes. The
+  loud-bail branch is pinned through the CLI (`auth nous` with a multi-line non-JSON secret) rather
+  than by calling `_single_line_credential` directly, so it also asserts the file is never created.
+  The asymmetry pin exists because hoisting the `_single_line_credential` call above the
+  `local`/`both` branch looks like a tidy-up and would silently change what GitHub Actions receives.
+- **Shell-sourceability (item 2 of "Left to W24") — and why a `dotenv` assertion is not enough.**
+  `dotenv_values` parses `KEY=value` and `KEY='value'` identically, so **every** Python-level test in
+  this file stays green under *both* quote modes. A future edit dropping `quote_mode="always"` from
+  the provider path would therefore keep the whole suite green while breaking `source .env` for
+  contributors. The pin asserts the distinguishing property directly: it reads the raw file content
+  (the line must start `CODEX_AUTH_JSON='` and end with a quote) and then runs a real
+  `/bin/sh -c 'set -e; . "$1"; printf %s "$CODEX_AUTH_JSON"'` against the written file, requiring
+  exit 0, **empty stderr**, and the exact stored value on stdout. Verified to have teeth: under
+  `quote_mode="never"` that same shell exits 127 with `{access_token:: command not found` and an
+  empty variable, exactly as W24 reported. The reason a `dotenv`-only assertion is insufficient is
+  recorded in the test's docstring, not only here. One boundary is documented and deliberately out of
+  scope: `python-dotenv` escapes an embedded single quote as `\'` inside single quotes, which POSIX
+  `sh` does not honour — the pinned payload contains none, and `codex login` does not emit that shape.
+- **The `quote_mode` default is pinned too.** W24 kept `auth logfire` byte-identical by making
+  quoting opt-in, and that default is load-bearing. Pinned both ways — the declared default in
+  `inspect.signature(_write_env_value)` and the bytes a default-mode write actually produces
+  (`KEY=plain-token`, unquoted) — because a flip to `"always"` would be invisible to every
+  `dotenv`-based assertion in the repo.
+- **Note for a future wave (not pinned here, by instruction):** `_local_env_path()` falls back to
+  `Path.cwd() / ".env"`, so an auth command run from a subdirectory writes the wrong `.env`. Owned by
+  a separate wave; this suite pins `MERGECRAFT_ENV` and does not assert the fallback.
+
+`tests/cli tests/docs`: **344 passed / 1 skipped / 1 xfailed / 3 xpassed / 0 failed**;
+`tests/cli/test_auth_scope_cmd.py` alone is **44 passed / 0 xfailed** (the 39 collected at W23 —
+31 xfailed + 8 green — now all pass, plus the 5 new pins). `make lint` and `make typecheck`
+(334 source files) clean. **No `green after W20`–`W25` marker remains anywhere in `tests/`.** The
+remaining `green after W3` / `W4` / `W6` / `W8` / `W9-W10` markers in `tests/agents`, `tests/cli`,
+`tests/tracing`, `tests/utils`, `tests/evidence` and `tests/status_checks` are earlier-program
+markers — the same inventory Batch E recorded, unchanged by this program. (The three
+`tests/cli/test_models_list_minimax.py` W6 arms report XPASS; they are non-strict and belong to the
+earlier program, so they are left as found.)
+
+### Escalation log
+
+| # | Wave that escalated | Test | Finding | Resolution |
+|---|---|---|---|---|
+| 1 | W24.2 → DF | `tests/docs/test_reference_docs.py` | W24.2 expected `make reference-docs` to change the README, since `--scope` was added to seven commands ("Left to W24" item 5 said so). Regenerating produced **no diff**: the generated `cli-commands` block lists commands and their help text, not their options | No test change — the doc test was green before and after, correctly. The expectation, not the code, was wrong. The underlying gap (the reference-docs generator does not cover CLI options, so no doc test can ever catch an option regression) is tracked for a separate wave and deliberately **not** pinned here |
+| 2 | W23 dispatch → DF | — | **The "missing D11" confusion.** W23's dispatch reported that the plan had no D11 and asked for the provider set to be derived from code. D11 **does** exist, at plan line 183, enumerating all seven providers with default `github`; global convention 7 (line 148) cites it | No plan or test change. The independent code derivation was run anyway and landed on the same seven providers (table above), so nothing was authored against a wrong contract. Recorded so the derivation is not later read as the suite having invented its own scope |
+
+## Post-review RED — glued `-c` config-flag spelling (#257)
+
+Authored **after** Batch A was reconciled green, from a `security-review` finding on PR
+[#291](https://github.com/alexhawat/mergeCraft/pull/291): `_reject_config_flags`
+(`src/mergecraft/mcp/git.py`) matches only a token that is exactly `-c` / `--config-env` or that
+starts with `-c=` / `--config-env=`, so a single-argv `-calias.x=!sh` is forwarded to `_run_git`
+instead of refused. This is the **third** time in this program a fix closed one spelling of an
+ingress and missed another — `#273` needed a follow-up wave, `#266` had an unnamed second ingress,
+and now `#257`'s config-flag guard. The recurring lesson: pin the *space* of accepted spellings, not
+the one payload the report happened to quote.
+
+### What git actually accepts (derived, not assumed)
+
+Probed against `git 2.53.0` and confirmed in `git.c` `handle_options` across `v1.7.2` → `v2.53.0`:
+
+| Spelling | git accepts it? | Guard today |
+|---|---|---|
+| `-c <name>=<value>` (separate value) | yes — alias expands and executes | rejected |
+| `-c<name>=<value>` (glued, one argv) | **no** — `unknown option`; `-c` is parsed with an exact `strcmp`, never `skip_prefix`, and has been since `-c` was introduced in `v1.7.2` | **forwarded** |
+| `-c=<name>=<value>` | no — `unknown option` | rejected |
+| `--config-env <name>=<envvar>` (separate value) | yes — alias expands and executes | rejected |
+| `--config-env=<name>=<envvar>` | yes — alias expands and executes | rejected |
+| `--config-env<name>=<envvar>` (glued) | no — `unknown option` | forwarded (unreachable as config) |
+| `-C <path>` | yes — path flag, unrelated to config | allowed, confined to repo root |
+| `-C<path>` (glued) | no — `unknown option` | n/a |
+
+So the boundary the fix must respect: **reject** every `-c`-shaped and `--config-env`-shaped token
+including the glued spellings (defence in depth — the tool must not forward a config-shaped token
+and rely on git's argv parser to fail closed), while **not** rejecting `-C` (case-sensitive; it is
+git's path flag and stays allowed subject to path confinement) and not rejecting legitimate
+read-only flags whose names merely begin with `c` (`--cached`, `--column`, `--color=…`, `--count`,
+`--cc`, `--children`). A blanket `tok.startswith("-c")` would over-block; a case-insensitive match
+would break `-C`.
+
+Honest scoping note: because upstream git refuses the glued spelling itself, the finding is a
+**guard gap, not a live RCE** — a forwarded `-calias.x=!sh` makes `git` exit non-zero and
+`_run_git` raise. The one position where a smuggled token does reach the pre-subcommand slot git
+honours is via `--namespace`, whose separate value `_extract_global_opts` lifts into `global_opts`
+without confinement; the spaced `-c` on that path is already caught (pinned green below), the glued
+one is not (pinned red).
+
+### Contract → test map
+
+All reds carry `@pytest.mark.xfail(reason="green after the #257 glued-config-flag fix", strict=False)`.
+
+| Contract | Test (`tests/mcp/test_git_tool.py`) | Layer / class | Marker |
+|---|---|---|---|
+| Glued `-c<key>=<value>` in `args` is rejected (`-calias.x=!true`, `-cprotocol.ext.allow=always`, `-ccore.pager=!sh`) | `test_glued_short_config_flag_in_args_rejected` | Error handling, 3 arms | **RED** |
+| Glued spelling is rejected in every `payload.shell` mode | `test_glued_short_config_flag_in_args_rejected_regardless_of_shell` | Error handling, 3 arms | **RED** |
+| Glued spelling is rejected on the `global_opts` path too (smuggled via `--namespace`'s separate value, i.e. pre-subcommand) | `test_glued_short_config_flag_in_global_opts_rejected` | Error handling, 3 arms | **RED** |
+| Spaced `-c` smuggled into `global_opts` via `--namespace` is still refused | `test_config_flag_in_global_opts_position_rejected` | Error handling, 3 arms | green |
+| Every spelling the guard already catches keeps its rejection: `-c`, `-c=…`, bare `--config-env` (the separate-value form), `--config-env=…` | `test_known_config_flag_spellings_still_rejected` | Error handling, 4 arms | green |
+| The rejection message still quotes the offending token and names alias expansion | `test_spaced_config_flag_rejection_message_names_the_token` | Message contract | green |
+| Read-only flags beginning with `c` stay forwarded unchanged | `test_non_config_flags_beginning_with_c_still_forwarded` | Over-block guard, 6 arms | green |
+| `-C <abs path inside root>` is not a config flag — the match stays case-sensitive | `test_capital_c_path_flag_is_not_a_config_flag` | Over-block guard | green |
+| A glued token in the `command` string stays refused by the read-only allowlist | `test_glued_short_config_flag_in_command_string_is_not_forwarded` | Regression guard | green |
+
+### Confirmed-RED assertions
+
+All 9 red arms were run under `--runxfail` against `b99cb5d` and fail for the right reason — **the
+call succeeded and the argv was forwarded**, never an import or fixture error. Each reports
+`AssertionError: {"output": "ok"} / assert False is True` on `result.is_error is True`, i.e. the tool
+returned the recorder's canned success instead of raising. `tests/mcp` is **232 passed / 9 xfailed**;
+`make lint` and `make typecheck` (334 source files) clean.
+
+No existing test asserted the vulnerable behaviour — nothing in the suite required a glued `-c`
+token to be forwarded, so no test had to be weakened or deleted.
+
+### Deliberately left unpinned (fix-wave decisions)
+
+- **Whether the guard becomes a regex, a `skip_prefix`-style check, or a token normaliser.** Only the
+  observable contract is pinned (rejection + the existing `can execute arbitrary code via git alias
+  expansion` message), not the implementation.
+- **Bundled short flags after the subcommand** (`git blame -cw`). Bare `-c` in `args` is already
+  refused unconditionally by design (Batch A pinned that even a benign `-c core.quotepath=false` is
+  refused), so a bundled `-cw` is collateral of a pre-existing deliberate over-block, not new.
+- ~~**`--namespace`'s missing path/value confinement.**~~ Resolved in the follow-up: `--namespace`
+  sets `GIT_NAMESPACE`, a ref-namespace prefix rather than a path, and no subcommand on the read-only
+  allowlist consumes it (only `upload-pack` / `receive-pack` / `upload-archive` do). It is now refused
+  outright by `_reject_namespace_flag` rather than confined, since there is no path to confine and no
+  reviewer call that needs it. The `global_opts` reds keep using it as the delivery vehicle: the
+  config-flag guard runs first, so those assertions are unchanged.
+- **`-C` supplied after the subcommand** (`git blame -C <file>`), where `_extract_global_opts` lifts
+  it into `global_opts` and confines a relative path against the wrong base. Pre-existing quirk,
+  unrelated to the config-flag guard.
+
+## Deferred designs the review rounds declined (docstring overflow)
+
+Three docstrings on this branch had grown into roadmaps — ~40 lines of design that does not exist,
+in the one place that rots invisibly. The reasoning is kept here; each site now carries a one-line
+pointer back to this section.
+
+### `mcp/verification.py::_apply_non_blocking_downgrade` — the severity overlay
+
+A downgrade rewrites the stored severity in place because dropping the fingerprint from
+`verified_ids` is not enough: the originating `analyzer_run` row keeps its Critical/Major severity,
+so the approve gate sees it again as an unverified blocker and the downgrade leaves the run worse
+off than doing nothing. Severity lives in several collections, so the rewrite is several writes with
+no transaction, any future store that caches severity desyncs silently, and no row records whether
+its severity is the original or a rewrite.
+
+The structural fix, deliberately not attempted — it reaches every reader of `ToolState`:
+
+- Add `ToolState.verdicts: dict[str, FindingVerdict]` where `FindingVerdict` is a frozen dataclass
+  of `verdict` (confirm / downgrade / drop), `severity` (the downgraded value, or `None`) and
+  `reason`. The helper becomes one write, and no stored `severity` is ever mutated.
+- Add `effective_severity(row, verdicts)` and route every severity read through it — the approve
+  gate (`build_validation_state` in `mcp/verdict.py`), publication, and the packet writers. A row
+  keeps the severity the analyzer reported; the overlay says what it counts as now, which is also
+  the provenance that is currently unrecorded.
+- Retire `verified_ids` on both `ToolState` and `AnalyzerRunState` in favour of `verdicts`:
+  "verified" becomes "has a verdict", which removes the second place the set is maintained.
+
+### `mcp/server.py::_coerce_arguments` — the in-body casts it makes redundant
+
+The ~38 in-body `int(params[...])` / `bool(params.get(...))` casts are not deleted yet, and the
+split is why: 23 are `int(params["k"])` on a *required* key and are a straight `params["k"]` once
+this boundary is trusted, but 15 are `bool(params.get("k"))` on an *optional* one. Validation does
+not inject schema defaults, so an omitted optional key is still absent at the boundary and
+`bool(None)` is load-bearing at every one of those sites — the deletion is per-site default handling
+across 18 modules, not a rename. Follow-up: land the 23 mechanical ones, then give the optional keys
+real defaults at the boundary before touching them.
+
+### `agents/codex.py::_render_toml` — why it stays hand-rolled
+
+`tomli_w.dumps` was measured against this renderer on the real config shape and produces
+byte-identical output, including the empty `[model_providers]` table and the quoted
+`[model_providers."127.0.0.1"]` header. It is kept hand-rolled on dependency grounds, not
+correctness ones: `tomli_w` is currently a *dev*-only transitive of `pip-audit`, so adopting it adds
+a new runtime dependency to the shipped Action image — a real cost for a BYOK action — while
+`tomllib` on the reading side is stdlib and free. Revisit if a runtime dependency on `tomli_w` ever
+lands for another reason.

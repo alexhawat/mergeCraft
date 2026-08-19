@@ -22,7 +22,7 @@ set -euo pipefail
 # Install only the test runner into the image venv (product code stays
 # the baked /opt/mergecraft install — that is the containment boundary).
 uv pip install --python /opt/mergecraft/.venv/bin/python \
-  "pytest==9.0.3" "pytest-asyncio==1.3.0"
+  "pytest==9.1.1" "pytest-asyncio==1.3.0"
 export PYTHONPATH=/workspace
 export PYTEST_ADDOPTS="-p no:cacheprovider"
 /opt/mergecraft/.venv/bin/python -m pytest \

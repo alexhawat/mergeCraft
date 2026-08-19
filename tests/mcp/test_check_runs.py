@@ -1,4 +1,4 @@
-"""Regression tests for check-suite discovery MCP tool (issue #8 / D8)."""
+"""Regression tests for check-run discovery MCP tool (issue #8 / D8, issue #266 / D13)."""
 
 from __future__ import annotations
 
@@ -19,15 +19,40 @@ if TYPE_CHECKING:
 
 REF_SHA = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 SUITE_ID = 4242
+RUN_ID = 8484
+RUN_NAME = "Verify (lint)"
 
 
 class _RecordingGitHub(GitHubClient):
-    """Records check-suite API calls made by the MCP tool under test."""
+    """Records check-suite and check-run API calls made by the MCP tool under test."""
 
     def __init__(self) -> None:
         super().__init__(token="test-token")
         self.list_calls: list[tuple[str, str, str]] = []
+        self.run_calls: list[tuple[str, str, str]] = []
         self.get_calls: list[int] = []
+
+    async def list_check_runs_for_ref(
+        self,
+        owner: str,
+        repo: str,
+        ref: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        self.run_calls.append((owner, repo, ref))
+        return {
+            "total_count": 1,
+            "check_runs": [
+                {
+                    "id": RUN_ID,
+                    "name": RUN_NAME,
+                    "head_sha": ref,
+                    "status": "completed",
+                    "conclusion": "failure",
+                    "check_suite": {"id": SUITE_ID},
+                }
+            ],
+        }
 
     async def list_check_suites_for_ref(
         self,
@@ -82,27 +107,90 @@ def _ctx(tmp_path: Path, *, github: GitHubClient | None = None) -> ToolContext:
 
 
 @pytest.mark.asyncio
-async def test_list_check_runs_returns_check_suite_data_for_ref(tmp_path: Path) -> None:
-    """New MCP tool must expose check suites for a ref via GitHubClient list/get helpers."""
+async def test_list_check_runs_tool_is_registered_under_its_own_name(tmp_path: Path) -> None:
+    """The tool name is part of the agent contract — #266 renames the payload, not the tool."""
+    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    ctx = _ctx(tmp_path, github=_RecordingGitHub())
+
+    tool = check_runs.list_check_runs_tool(ctx)
+    assert tool.list_entry()["name"] == "list_check_runs"
+
+    names = {t.name for t in build_common_tools(ctx)}
+    assert "list_check_runs" in names
+
+
+@pytest.mark.asyncio
+async def test_list_check_runs_calls_the_check_runs_endpoint(tmp_path: Path) -> None:
+    """#266 — the tool must hit ``list_check_runs_for_ref``, never the suites sibling.
+
+    Inverted from the pre-#266 assertion that pinned ``list_check_suites_for_ref``.
+    """
+    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path, github=github)
+
+    await check_runs.list_check_runs_tool(ctx).execute({"ref": REF_SHA})
+
+    assert github.run_calls == [("acme", "demo", REF_SHA)]
+    assert github.list_calls == []
+
+
+@pytest.mark.asyncio
+async def test_list_check_runs_returns_check_run_data_for_ref(tmp_path: Path) -> None:
+    """#266 — the payload key is ``check_runs`` and carries the runs the endpoint returned."""
     check_runs = importlib.import_module("mergecraft.mcp.check_runs")
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github)
 
     tool = check_runs.list_check_runs_tool(ctx)
-    entry = tool.list_entry()
-    assert entry["name"] == "list_check_runs"
-
-    names = {t.name for t in build_common_tools(ctx)}
-    assert "list_check_runs" in names
-
     payload = json.loads((await tool.execute({"ref": REF_SHA})).content[0]["text"])
-    assert payload["ref"] == REF_SHA
-    suites = payload.get("check_suites") or payload.get("checkSuites")
-    assert isinstance(suites, list)
-    assert suites
-    assert suites[0]["id"] == SUITE_ID
 
-    assert github.list_calls == [("acme", "demo", REF_SHA)]
+    assert payload["ref"] == REF_SHA
+    assert payload["total_count"] == 1
+    assert "check_suites" not in payload
+    runs = payload["check_runs"]
+    assert [run["id"] for run in runs] == [RUN_ID]
+
+
+@pytest.mark.asyncio
+async def test_list_check_runs_preserves_the_run_shape_agents_navigate_by(
+    tmp_path: Path,
+) -> None:
+    """#266 — a run carries its own name and its parent suite id, unlike a suite.
+
+    The tool description sends the agent from this result to ``get_check_suite_logs``,
+    which takes a *suite* id. On a check run that id lives at ``check_suite.id``, so the
+    nesting must survive the swap or the documented follow-up call breaks.
+    """
+    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    ctx = _ctx(tmp_path, github=_RecordingGitHub())
+
+    tool = check_runs.list_check_runs_tool(ctx)
+    payload = json.loads((await tool.execute({"ref": REF_SHA})).content[0]["text"])
+
+    run = payload["check_runs"][0]
+    assert run["name"] == RUN_NAME
+    assert run["check_suite"]["id"] == SUITE_ID
+
+
+@pytest.mark.asyncio
+async def test_each_run_carries_the_suite_id_at_the_top_level(tmp_path: Path) -> None:
+    """Q-F11: the follow-up argument must be the obvious one, not the nested one.
+
+    The description used to spend four lines talking the agent out of passing the
+    run id, because ``id`` sits at the top level and the id the next tool wants
+    was buried at ``check_suite.id``. Lifting it makes the shape carry the rule.
+    """
+    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    ctx = _ctx(tmp_path, github=_RecordingGitHub())
+
+    tool = check_runs.list_check_runs_tool(ctx)
+    payload = json.loads((await tool.execute({"ref": REF_SHA})).content[0]["text"])
+
+    run = payload["check_runs"][0]
+    assert run["check_suite_id"] == SUITE_ID
+    # The original nesting stays: agents and tests already navigate by it.
+    assert run["check_suite"]["id"] == SUITE_ID
 
 
 @pytest.mark.asyncio

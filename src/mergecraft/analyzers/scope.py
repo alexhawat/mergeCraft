@@ -235,7 +235,7 @@ def base_comparison_available(*, base_comparison: str, offline: bool) -> bool:
     """Return whether full base-vs-head comparison may run (D6 amendment)."""
     if base_comparison != "full":
         return False
-    return offline
+    return not offline
 
 
 def introduced_by_base_diff(

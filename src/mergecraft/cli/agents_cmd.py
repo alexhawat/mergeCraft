@@ -41,7 +41,14 @@ def _bail(msg: str) -> NoReturn:
     raise typer.Exit(1)
 
 
-def _repo_root(cwd: Path) -> Path:
+def _target_dir(cwd: Path) -> Path:
+    """The directory this command operates on — ``cwd``, resolved.
+
+    Deliberately not ``git_repo_root``: these commands act on whatever tree they
+    are pointed at, including one that is not a git checkout at all. Named for
+    that so it cannot be mistaken for the canonical repo-root helper in
+    ``utils/workspace.py``.
+    """
     return cwd.resolve()
 
 
@@ -74,7 +81,7 @@ def list_cmd(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
 ) -> None:
     """List agent bindings with model chain, prompt id, and tool count."""
-    repo_root = _repo_root(cwd)
+    repo_root = _target_dir(cwd)
     settings = load_repo_settings(root=repo_root)
     try:
         registry = load_registry(settings=settings, repo_root=repo_root)
@@ -109,7 +116,7 @@ def show_cmd(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
 ) -> None:
     """Show resolved prompt text and MCP tool names for one role."""
-    repo_root = _repo_root(cwd)
+    repo_root = _target_dir(cwd)
     try:
         AgentRole(role)
     except ValueError:
@@ -155,7 +162,7 @@ def set_cmd(
         known = ", ".join(item.value for item in AgentRole)
         _bail(f"unknown role: {role!r} (expected one of: {known})")
 
-    repo_root = _repo_root(cwd)
+    repo_root = _target_dir(cwd)
     config_path = repo_root / ".mergecraft" / "config.yaml"
     if not config_path.is_file():
         _bail(f"no config at {config_path} — run mergecraft init first")

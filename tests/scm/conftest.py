@@ -173,6 +173,14 @@ def github_snapshot_transport() -> httpx.MockTransport:
             )
         if path == "/repos/acme/demo/commits/main/check-suites":
             return httpx.Response(200, json={"total_count": 1, "check_suites": [{"id": 11}]})
+        if path == "/repos/acme/demo/commits/main/check-runs":
+            return httpx.Response(
+                200,
+                json={
+                    "total_count": 1,
+                    "check_runs": [{"id": 21, "name": "lint", "check_suite": {"id": 11}}],
+                },
+            )
         return httpx.Response(404, json={"message": f"unexpected path {path}"})
 
     return httpx.MockTransport(handler)

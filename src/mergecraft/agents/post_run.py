@@ -214,7 +214,7 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
 
     validation = validate_submission(
         recorded_submission_payload(submission),
-        state=validation_state_from_tool_state(ctx.tool_state),
+        state=validation_state_from_tool_state(ctx.tool_state, tmpdir=ctx.tmpdir),
     )
     if not validation.accepted:
         diagnostics = {

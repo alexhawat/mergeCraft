@@ -30,6 +30,7 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    resolve_cache_read,
     spawn_agent_cli,
 )
 from mergecraft.tracing import current_tracer
@@ -400,29 +401,14 @@ async def _prompt_session_http(
         if isinstance(info, dict):
             inp = int(info.get("input_tokens") or info.get("input") or 0)
             out = int(info.get("output_tokens") or info.get("output") or 0)
-            # T2 — recognise the OpenAI Responses / Chat Completions
-            # cached-token paths so the Nous / MiniMax passthrough
-            # surfaces its cache_read on the same ``AgentUsage`` field
-            # the Anthropic path uses. Falls back to the explicit cache
-            # fields when a provider surfaces them separately.
-            cache_read = 0
-            for outer_key in ("prompt_tokens_details", "input_tokens_details"):
-                details = info.get(outer_key)
-                if isinstance(details, dict):
-                    cached = details.get("cached_tokens")
-                    if isinstance(cached, (int, float)):
-                        cache_read = int(cached)
-                        break
-            cache_read = cache_read or int(
-                info.get("cache_read_input_tokens") or info.get("cacheReadTokens") or 0
-            )
+            cache_read = resolve_cache_read(info)
             cost = info.get("cost") or info.get("costUsd")
             if inp or out or cost:
                 usage = AgentUsage(
                     agent="opencode",
-                    input_tokens=inp + cache_read,
+                    input_tokens=inp + cache_read.additive,
                     output_tokens=out,
-                    cache_read_tokens=cache_read or None,
+                    cache_read_tokens=cache_read.reported or None,
                     cost_usd=float(cost) if cost is not None else None,
                 )
                 log_token_table(

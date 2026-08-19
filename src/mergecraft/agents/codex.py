@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -64,6 +65,10 @@ if TYPE_CHECKING:
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
+# A Codex ``config.toml`` is built as a nested mapping and rendered once; a
+# nested value is a table, a scalar is a key in the table that holds it.
+type TomlTable = dict[str, "str | bool | TomlTable"]
+_BARE_TOML_KEY = re.compile(r"[A-Za-z0-9_-]+")
 CODEX_REVIEW_PERMISSION_PROFILE = "mergecraft-review"
 # O4 — the reasoning effort written into ``config.toml`` is the one request
 # parameter the codex harness exposes to mergeCraft; the constant keeps the
@@ -161,8 +166,50 @@ def _codex_home(ctx: AgentRunContext) -> Path:
 
 
 def _toml_string(value: str) -> str:
+    """Render ``value`` as a TOML basic string.
+
+    Control characters are escaped as well as ``\\`` and ``"``: TOML forbids a
+    raw newline or tab inside a basic string, so a value carrying one would
+    render a file ``tomllib`` refuses to parse. No current value contains any,
+    which is why this is a guard rather than a fix.
+    """
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    for char, replacement in (("\n", "\\n"), ("\r", "\\r"), ("\t", "\\t")):
+        escaped = escaped.replace(char, replacement)
     return f'"{escaped}"'
+
+
+def _toml_key(key: str) -> str:
+    """Return ``key`` as a TOML key, quoting it when it is not a bare key."""
+    return key if _BARE_TOML_KEY.fullmatch(key) else _toml_string(key)
+
+
+def _render_toml(table: TomlTable, path: tuple[str, ...] = ()) -> list[str]:
+    """Render a nested mapping as TOML text.
+
+    A bare key belongs to the most recent table header, so a builder that
+    appends lines has to keep every top-level key ahead of every table by hand
+    — the ordering defect behind #222. Rendering from a mapping removes the
+    hazard structurally: scalars of a table are always emitted directly under
+    its own header, whatever order the caller populated the mapping in.
+
+    ``tomli_w.dumps`` produces byte-identical output on the real config shape;
+    this stays hand-rolled on dependency grounds, written up under "Deferred
+    designs the review rounds declined" in
+    ``docs/test-plans/open-issues-sweep-2026-08-19.md``.
+    """
+    scalars = {key: value for key, value in table.items() if not isinstance(value, dict)}
+    tables = {key: value for key, value in table.items() if isinstance(value, dict)}
+    lines: list[str] = []
+    if path and (scalars or not tables):
+        lines.append("")
+        lines.append(f"[{'.'.join(_toml_key(part) for part in path)}]")
+    for key, value in scalars.items():
+        rendered = _toml_string(value) if isinstance(value, str) else str(value).lower()
+        lines.append(f"{_toml_key(key)} = {rendered}")
+    for key, sub_table in tables.items():
+        lines.extend(_render_toml(sub_table, (*path, key)))
+    return lines
 
 
 def _extract_refresh_token(auth_json: str) -> str | None:
@@ -380,8 +427,8 @@ def _has_any_custom_provider_env() -> bool:
     return False
 
 
-def _append_custom_provider_lines(lines: list[str]) -> None:
-    """Emit ``[model_providers.<id>]`` tables for every configured custom provider.
+def _add_custom_provider_tables(config: TomlTable) -> None:
+    """Add a ``model_providers.<id>`` table for every configured custom provider.
 
     #71 / W3: routes ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`` and
     the singleton alias into Codex CLI 0.146's ``model_providers`` config
@@ -393,30 +440,23 @@ def _append_custom_provider_lines(lines: list[str]) -> None:
     supported wire protocol since February 2026).
 
     No-op when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are touched at
-    all — the existing ``write_mcp_config`` output is byte-identical to
-    today's in that case. Partial pairs (only one half set) emit an empty
-    ``model_providers`` table; consumers reading the table find no entries
-    and skip.
+    all. Partial pairs (only one half set) emit an empty ``model_providers``
+    table; consumers reading the table find no entries and skip.
     """
     if not _has_any_custom_provider_env():
         return
-    providers = resolve_gateway_endpoints()
-    if not providers:
-        # Touched but no valid pair — emit an empty table so readers find a
-        # dict. The TOML parser does not care about an empty table.
-        lines.append("")
-        lines.append("[model_providers]")
-        return
-    for record in providers.values():
-        lines.append("")
-        lines.append(f"[model_providers.{record.provider_id}]")
-        lines.append(f"name = {_toml_string(record.provider_id)}")
-        lines.append(f"base_url = {_toml_string(record.base_url)}")
-        lines.append(f"env_key = {_toml_string(record.api_key_env)}")
-        lines.append('wire_api = "responses"')
+    model_providers: TomlTable = {}
+    config["model_providers"] = model_providers
+    for record in resolve_gateway_endpoints().values():
+        model_providers[record.provider_id] = {
+            "name": record.provider_id,
+            "base_url": record.base_url,
+            "env_key": record.api_key_env,
+            "wire_api": "responses",
+        }
 
 
-def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
+def _add_mcp_server_table(config: TomlTable, ctx: AgentRunContext) -> None:
     # D10 (OB4) — per-agent attribution for codex is NOT wired: a TOML
     # ``http_headers`` key for codex MCP servers is not part of the config
     # surface this driver has verified, and an unverified config key could
@@ -425,11 +465,9 @@ def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
     # whole, but the MCP server attributes tool calls from the request
     # header — so codex ``tool.call`` spans carry no per-agent id. Recorded
     # as a known D10 gap, not papered over.
-    lines.extend(
-        [
-            "",
-            f"[mcp_servers.{MERGECRAFT_MCP_NAME}]",
-            f"url = {_toml_string(ctx.mcp_server_url)}",
+    config["mcp_servers"] = {
+        MERGECRAFT_MCP_NAME: {
+            "url": ctx.mcp_server_url,
             # Without this, every tool call is auto-cancelled in CI. Codex
             # auto-approves an MCP call only when the permission profile grants
             # full disk write access (codex_mcp::mcp_permission_prompt_is_auto_approved),
@@ -439,9 +477,9 @@ def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
             # user anywhere in the pipeline. The server is ours and the action
             # already runs with push/shell disabled, so approving its tools up
             # front is the intended posture.
-            'default_tools_approval_mode = "approve"',
-        ]
-    )
+            "default_tools_approval_mode": "approve",
+        }
+    }
     # Do NOT put ctx.subagent_denied_tools into ``disabled_tools``. That list is
     # every mutates=True MCP tool (checkout_pr, create_pull_request_review, …)
     # and exists to keep *subagents* read-only. Wiring it onto the main session's
@@ -452,27 +490,24 @@ def _append_mcp_server_lines(lines: list[str], ctx: AgentRunContext) -> None:
     # these tools for the primary agent either.
 
 
-def _append_read_only_mcp_network_lines(lines: list[str]) -> None:
+def _add_read_only_mcp_network_profile(config: TomlTable) -> None:
     profile = CODEX_REVIEW_PERMISSION_PROFILE
-    lines.extend(
-        [
-            "",
-            f"default_permissions = {_toml_string(profile)}",
-            "",
-            f"[permissions.{profile}]",
-            'extends = ":read-only"',
-            "",
-            f"[permissions.{profile}.network]",
-            "enabled = true",
-            "allow_local_binding = true",
-            "",
-            f"[permissions.{profile}.network.domains]",
-            '"api.openai.com" = "allow"',
-            '"*.openai.com" = "allow"',
-            '"127.0.0.1" = "allow"',
-            '"localhost" = "allow"',
-        ]
-    )
+    config["default_permissions"] = profile
+    config["permissions"] = {
+        profile: {
+            "extends": ":read-only",
+            "network": {
+                "enabled": True,
+                "allow_local_binding": True,
+                "domains": {
+                    "api.openai.com": "allow",
+                    "*.openai.com": "allow",
+                    "127.0.0.1": "allow",
+                    "localhost": "allow",
+                },
+            },
+        }
+    }
 
 
 def write_mcp_config(
@@ -493,35 +528,26 @@ def write_mcp_config(
     instructions_path.write_text("\n\n".join(instructions_parts), encoding="utf-8")
 
     sandbox_mode = _sandbox_mode(ctx)
-    use_permission_profiles = _codex_use_permission_profiles(ctx)
-    lines = [
-        f"approval_policy = {_toml_string('never' if os.environ.get('CI') == 'true' else 'on-request')}",
-        f"experimental_instructions_file = {_toml_string(str(instructions_path))}",
-        f"model_reasoning_effort = {_toml_string(_CODEX_MODEL_REASONING_EFFORT)}",
-    ]
+    config: TomlTable = {
+        "approval_policy": "never" if os.environ.get("CI") == "true" else "on-request",
+        "experimental_instructions_file": str(instructions_path),
+        "model_reasoning_effort": _CODEX_MODEL_REASONING_EFFORT,
+    }
     # W3 / #71 — Codex passthrough for OpenAI-compatible providers. No-op
-    # when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set, so the
-    # permission-profile / ``sandbox_mode`` branch below is unchanged
-    # when this is a no-op (#70 / D5).
-    _append_custom_provider_lines(lines)
-    if use_permission_profiles:
-        _append_read_only_mcp_network_lines(lines)
+    # when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set.
+    _add_custom_provider_tables(config)
+    if _codex_use_permission_profiles(ctx):
+        _add_read_only_mcp_network_profile(config)
     else:
-        lines.append(f"sandbox_mode = {_toml_string(sandbox_mode)}")
+        config["sandbox_mode"] = sandbox_mode
         if ctx.mcp_server_url and sandbox_mode == "workspace-write":
-            lines.extend(
-                [
-                    "",
-                    "[sandbox_workspace_write]",
-                    "network_access = true",
-                ]
-            )
+            config["sandbox_workspace_write"] = {"network_access": True}
 
     if ctx.mcp_server_url:
-        _append_mcp_server_lines(lines, ctx)
+        _add_mcp_server_table(config, ctx)
 
     config_path = codex_home / "config.toml"
-    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    config_path.write_text("\n".join(_render_toml(config)) + "\n", encoding="utf-8")
     return str(config_path)
 
 

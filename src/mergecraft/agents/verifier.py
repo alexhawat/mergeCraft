@@ -37,13 +37,14 @@ Exports:
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from mergecraft.analyzers.scope import withdrawn_fingerprints
 from mergecraft.mcp.shared import VERIFIER_ALLOWED_TOOL_CLASSES
+from mergecraft.policy.schema import SeverityLiteral
 from mergecraft.review_taxonomy import (
     FINDING_SEVERITIES,
     WITHDRAWN_FINDINGS_HEADING,
@@ -340,6 +341,17 @@ def plan_agent_verifications(
 # ── verdicts (D11 / D14) ──────────────────────────────────────────────────────
 
 JudgeVerdictName = Literal["confirm", "downgrade", "drop"]
+# One vocabulary, two views of it: the policy schema's ``Literal`` for typing and
+# ``FINDING_SEVERITIES`` for the values. Minting a twin here is how the four
+# grades come to disagree.
+JudgeSeverity = SeverityLiteral
+# cast: `FINDING_SEVERITIES` is the same four values typed `tuple[str, ...]`, and
+# narrowing it here is what keeps them one vocabulary instead of two.
+JUDGE_SEVERITIES: tuple[JudgeSeverity, ...] = cast("tuple[JudgeSeverity, ...]", FINDING_SEVERITIES)
+DOWNGRADE_SEVERITY_REQUIRED = (
+    "a downgrade verdict must name new_severity — the severity it downgrades to "
+    "is the verdict, and defaulting it silently retires findings the approve gate holds"
+)
 
 
 class JudgePin(BaseModel):
@@ -366,8 +378,53 @@ class JudgeVerdict(BaseModel):
     # Names of the deterministic checks that ran before this judge did. Empty
     # is a contract violation, not a default — see ``record_verifier_verdict``.
     deterministic_checks: list[str] = []
-    new_severity: str | None = None
+    new_severity: JudgeSeverity | None = None
     lane: str | None = None
+
+    @model_validator(mode="after")
+    def _require_severity_on_downgrade(self) -> JudgeVerdict:
+        """Refuse a ``downgrade`` that names no replacement severity.
+
+        A downgrade with no severity used to fall back to ``Minor`` at the call
+        site, so one call retired any Critical the approve gate was holding.
+        The severity a downgrade rewrites *to* is the whole content of the
+        verdict — absent, there is no verdict to record.
+        """
+        if self.verdict == "downgrade" and self.new_severity is None:
+            raise ValueError(DOWNGRADE_SEVERITY_REQUIRED)
+        return self
+
+    @staticmethod
+    def parse_severity(raw: object) -> JudgeSeverity | None:
+        """Read an untyped ``new_severity`` argument as a judge severity.
+
+        Returns ``None`` for an absent or empty value — the model validator is
+        what decides whether that is allowed for this verdict.
+
+        Raises:
+            ValueError: when a value is present but not one of the four.
+        """
+        if raw is None or raw == "":
+            return None
+        text = str(raw)
+        for candidate in JUDGE_SEVERITIES:
+            if text == candidate:
+                return candidate
+        msg = f"new_severity {text!r} is not one of {', '.join(JUDGE_SEVERITIES)}."
+        raise ValueError(msg)
+
+    @property
+    def downgrade_severity(self) -> JudgeSeverity:
+        """The severity this ``downgrade`` rewrites to.
+
+        Raises:
+            ValueError: If the verdict carries no ``new_severity`` — the
+                constructor already refuses that, so this is the typed accessor
+                rather than a second policy.
+        """
+        if self.new_severity is None:
+            raise ValueError(DOWNGRADE_SEVERITY_REQUIRED)
+        return self.new_severity
 
 
 class VerdictOutcome(BaseModel):

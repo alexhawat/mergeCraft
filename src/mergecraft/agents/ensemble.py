@@ -137,7 +137,6 @@ def plan_ensemble_models(
 def _cap_findings(
     rows: list[dict[str, object]],
     *,
-    budget: int,
     remaining: int,
 ) -> tuple[list[dict[str, object]], int]:
     if remaining <= 0:
@@ -162,16 +161,22 @@ def run_ensemble_dispatch(
 
     for model in (primary, secondary):
         raw = list(execute(model=model))
-        capped, remaining = _cap_findings(raw, budget=binding.budget, remaining=remaining)
+        capped, remaining = _cap_findings(raw, remaining=remaining)
         model_runs.append(ModelRun(model=model, findings=tuple(capped)))
 
     return EnsembleRun(agent_id=binding.agent_id, model_runs=tuple(model_runs))
 
 
-def _finding_key(row: dict[str, object]) -> tuple[str, str]:
-    path = str(row.get("path", ""))
-    body = str(row.get("body", ""))
-    return path, body
+def _finding_key(row: dict[str, object]) -> tuple[str, str, str]:
+    """Identify a finding by its anchor and body.
+
+    ``line`` is part of the identity: the same defect reported at two call
+    sites in one file is two findings, and a key without the line collapses
+    them. A row with no line keys on ``""``, which cannot collide with any
+    line number.
+    """
+    line = row.get("line")
+    return str(row.get("path", "")), str(row.get("body", "")), "" if line is None else str(line)
 
 
 def reconcile_ensemble(run: EnsembleRun) -> EnsembleReconciliation:
@@ -207,9 +212,18 @@ def reconcile_ensemble(run: EnsembleRun) -> EnsembleReconciliation:
     brief_parts.append("")
     brief_parts.append("Return confirm / downgrade / drop for each disputed finding.")
 
+    # Union both sides so a finding only the secondary model reported is not
+    # confined to the judge brief (D15). Insertion order gives a deterministic
+    # merge: left's findings in their own order, then right-only ones in theirs.
+    # First occurrence wins, so the primary model's copy of a corroborated
+    # finding keeps its severity and evidence.
+    unioned: dict[tuple[str, str, str], dict[str, object]] = {}
+    for row in (*left.findings, *right.findings):
+        unioned.setdefault(_finding_key(row), row)
+
     return EnsembleReconciliation(
         agreement=False,
-        merged_findings=tuple(left.findings),
+        merged_findings=tuple(unioned.values()),
         judge_dispatch=JudgeDispatch(brief="\n".join(brief_parts)),
     )
 

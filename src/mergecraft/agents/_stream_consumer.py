@@ -58,6 +58,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.agents.shared import resolve_cache_read
+
 if TYPE_CHECKING:
     from mergecraft.agents.shared import AgentUsage
     from mergecraft.tracing.tracer import Span
@@ -85,6 +87,9 @@ class StreamSpanAccumulator:
     tokens_out: int = 0
     cache_read: int = 0
     cache_write: int = 0
+    # How much of ``cache_read`` is disjoint from ``tokens_in`` and therefore
+    # has to be added to it — see ``CacheReadTokens``.
+    cache_read_additive: int = 0
     cost_usd: float | None = None
     final_output: str | None = None
     parsed_event_count: int = 0
@@ -100,12 +105,9 @@ class StreamSpanAccumulator:
         self.tokens_out += int(
             usage_payload.get("output_tokens") or usage_payload.get("outputTokens") or 0
         )
-        self.cache_read += int(
-            usage_payload.get("cache_read_input_tokens")
-            or usage_payload.get("cacheReadTokens")
-            or _extract_openai_cached_tokens(usage_payload)
-            or 0
-        )
+        cache_read = resolve_cache_read(usage_payload)
+        self.cache_read += cache_read.reported
+        self.cache_read_additive += cache_read.additive
         self.cache_write += int(
             usage_payload.get("cache_creation_input_tokens")
             or usage_payload.get("cacheWriteTokens")
@@ -131,8 +133,9 @@ class StreamSpanAccumulator:
         ``input_tokens_details.cached_tokens`` recognition so the Nous /
         MiniMax / opencode Responses / Chat Completions paths populate
         ``cache_read`` alongside the Anthropic-native
-        ``cache_read_input_tokens`` field. The fold is additive: any native
-        Anthropic value still wins.
+        ``cache_read_input_tokens`` field. Any native Anthropic value still
+        wins, and how much of the count is additive is recorded on
+        ``cache_read_additive`` for ``to_usage``.
         """
         if not isinstance(usage_payload, dict):
             return
@@ -142,12 +145,9 @@ class StreamSpanAccumulator:
         self.tokens_out = int(
             usage_payload.get("output_tokens") or usage_payload.get("outputTokens") or 0
         )
-        self.cache_read = int(
-            usage_payload.get("cache_read_input_tokens")
-            or usage_payload.get("cacheReadTokens")
-            or _extract_openai_cached_tokens(usage_payload)
-            or 0
-        )
+        cache_read = resolve_cache_read(usage_payload)
+        self.cache_read = cache_read.reported
+        self.cache_read_additive = cache_read.additive
         self.cache_write = int(
             usage_payload.get("cache_creation_input_tokens")
             or usage_payload.get("cacheWriteTokens")
@@ -165,7 +165,14 @@ class StreamSpanAccumulator:
             self.final_output = output
 
     def to_usage(self) -> AgentUsage | None:
-        """Render the accumulator as an ``AgentUsage`` if any field was set."""
+        """Render the accumulator as an ``AgentUsage`` if any field was set.
+
+        ``input_tokens`` adds ``cache_read`` only when the count is disjoint
+        from the reported input total (the Anthropic-native counters).
+        OpenAI-style ``cached_tokens`` are already inside the reported input
+        count, so adding them again inflates the reported prompt size (#273,
+        D16). ``cache_read_tokens`` reports the cached count either way.
+        """
         from mergecraft.agents.shared import AgentUsage
 
         if (
@@ -178,7 +185,7 @@ class StreamSpanAccumulator:
             return None
         return AgentUsage(
             agent=self.agent_name,
-            input_tokens=self.tokens_in + self.cache_read + self.cache_write,
+            input_tokens=self.tokens_in + self.cache_read_additive + self.cache_write,
             output_tokens=self.tokens_out,
             cache_read_tokens=self.cache_read or None,
             cache_write_tokens=self.cache_write or None,
@@ -193,32 +200,6 @@ def _safe_iter_lines(stream: Iterable[str]) -> Iterator[str]:
             continue
         text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
         yield text
-
-
-def _extract_openai_cached_tokens(usage_payload: Mapping[str, Any]) -> int:
-    """Return the cached-input token count from an OpenAI Responses / Chat Completions usage dict.
-
-    T2 extends the legacy Anthropic ``cache_read_input_tokens`` path so the
-    Nous / MiniMax / opencode Responses / Chat Completions providers
-    surface their cached-input token usage on the same ``cache_read``
-    accumulator field. The two recognised shapes are:
-
-    - ``prompt_tokens_details.cached_tokens`` (Chat Completions / older)
-    - ``input_tokens_details.cached_tokens`` (Responses API / newer)
-
-    Returns ``0`` when neither field is present or the payload does not
-    match a dict shape — the helper is intentionally non-raising so a
-    malformed stream event cannot poison the accumulator.
-    """
-    if not isinstance(usage_payload, Mapping):
-        return 0
-    for outer_key in ("prompt_tokens_details", "input_tokens_details"):
-        details = usage_payload.get(outer_key)
-        if isinstance(details, Mapping):
-            cached = details.get("cached_tokens")
-            if isinstance(cached, (int, float)):
-                return int(cached)
-    return 0
 
 
 def _resolve_active_span_for_otel_bridge() -> Span | None:

@@ -272,6 +272,61 @@ class TestActionYmlHygiene:
                 f"{env_var} hard-codes a value instead of referencing inputs.*: {expr!r}"
             )
 
+    def test_docker_action_declares_no_output_values(self, action_yml: dict[str, Any]) -> None:
+        """Plan W6.3 — ``outputs.*.value`` is inert for a Docker action (``#272``).
+
+        ``value:`` under ``outputs`` is composite-action wiring: it maps a
+        *step's* output onto the action's output. A ``runs.using: docker``
+        action has no steps, so ``${{ steps.run.outputs.* }}`` resolves to
+        nothing and every declared value is dead metadata. The real transport
+        is the container writing ``$GITHUB_OUTPUT`` directly (``_set_output``
+        in ``cli/gha_cmd.py``). Keeping the ``value:`` lines advertises a
+        wiring that does not exist.
+        """
+        assert action_yml["runs"]["using"] == "docker", (
+            "this contract is docker-specific; a composite action legitimately "
+            "needs outputs.*.value"
+        )
+        with_value = sorted(
+            name
+            for name, spec in (action_yml.get("outputs") or {}).items()
+            if "value" in (spec or {})
+        )
+        assert not with_value, (
+            f"docker action declares inert outputs.*.value for: {with_value} — "
+            "delete the value: keys, keep the descriptions"
+        )
+
+    def test_every_output_keeps_its_description(self, action_yml: dict[str, Any]) -> None:
+        """W8.1 deletes ``value:`` only — the consumer-facing prose must survive."""
+        outputs = action_yml.get("outputs") or {}
+        assert outputs, "action.yml declares no outputs"
+        missing = sorted(
+            name for name, spec in outputs.items() if not (spec or {}).get("description")
+        )
+        assert not missing, f"outputs without a description: {missing}"
+
+    def test_verdict_diagnostic_output_is_declared(self, action_yml: dict[str, Any]) -> None:
+        """#265 — the output consumers read must stay declared (only its ``value:`` goes)."""
+        assert "verdict_diagnostic" in (action_yml.get("outputs") or {})
+
+    def test_no_expression_survives_in_any_output_block(self) -> None:
+        """W8.1 must not leave a ``${{ }}`` behind anywhere under ``outputs:``.
+
+        Greps the raw file: PyYAML keeps the expression as an opaque string, so
+        a parsed-dict check cannot distinguish a deleted ``value:`` from one
+        that moved into description prose. The needle is assembled from parts
+        so this test file never contains the literal that
+        ``scripts/check_action_yml_hygiene.py`` and the repo rule forbid.
+        """
+        needle = "$" + "{" * 2
+        raw = _ACTION_YML.read_text(encoding="utf-8")
+        _preamble, marker, outputs_onward = raw.partition("\noutputs:\n")
+        assert marker, "action.yml has no top-level outputs: block"
+        outputs_block, _runs_marker, _rest = outputs_onward.partition("\nruns:\n")
+        offending = [line for line in outputs_block.splitlines() if needle in line]
+        assert not offending, f"expression(s) left in the outputs block: {offending}"
+
     def test_no_secrets_expression_in_manifest_text(self) -> None:
         """A ``${{ secrets.* }}`` expression anywhere in action.yml fails to load.
 
