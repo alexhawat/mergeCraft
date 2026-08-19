@@ -60,13 +60,13 @@ class PolicyRule(BaseModel):
         return value
 
 
-def _raise_config_error(exc: ValidationError) -> NoReturn:
+def _raise_config_error(exc: ValidationError, *, document_kind: str = "policy rule") -> NoReturn:
     message = str(exc)
     lowered = message.lower()
     if "extra" in lowered or "unexpected" in lowered:
-        msg = f"unknown or unexpected key in policy rule: {message}"
+        msg = f"unknown or unexpected key in {document_kind}: {message}"
         raise PolicyConfigError(msg) from exc
-    msg = f"policy rule config error: {message}"
+    msg = f"{document_kind} config error: {message}"
     raise PolicyConfigError(msg) from exc
 
 

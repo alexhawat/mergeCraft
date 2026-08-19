@@ -32,6 +32,18 @@ rule_id: no-hardcoded-secrets
         parse_exception(incomplete)
 
 
+def test_exception_validation_errors_mention_policy_exception() -> None:
+    """Exception schema failures must not reuse policy-rule wording."""
+    from mergecraft.policy.exceptions import PolicyConfigError, parse_exception
+
+    incomplete = """
+id: incomplete-waiver
+rule_id: no-hardcoded-secrets
+"""
+    with pytest.raises(PolicyConfigError, match=r"policy exception"):
+        parse_exception(incomplete)
+
+
 def test_expired_exception_stops_applying() -> None:
     """An expired waiver no longer suppresses its scoped rule."""
     from mergecraft.policy.exceptions import exception_applies, parse_exception
