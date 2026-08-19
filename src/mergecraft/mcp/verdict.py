@@ -25,7 +25,7 @@ from mergecraft.findings.agent_adapter import (
     normalize_agent_findings_via_pipeline,
 )
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.mcp.tool_state import TerminalSubmission, primary_repo_state
+from mergecraft.mcp.tool_state import TerminalSubmission, ToolState, primary_repo_state
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
 from mergecraft.tracing.redaction import redact_attrs
 
@@ -115,16 +115,16 @@ def stamp_review_phase_on_active_span(phase: ReviewPhase) -> None:
             logger.debug("phase span emission skipped for {}", phase.value)
 
 
-def _current_review_phase(tool_state: Any) -> ReviewPhase:
-    raw = getattr(tool_state, "review_phase", ReviewPhase.INIT)
+def _current_review_phase(tool_state: ToolState) -> ReviewPhase:
+    raw = tool_state.review_phase
     if isinstance(raw, ReviewPhase):
         return raw
     return ReviewPhase(str(raw))
 
 
-def ensure_review_scope_for_terminal(tool_state: Any, tool_name: str) -> None:
+def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> None:
     """Raise when a Review-mode terminal tool runs before ``checkout_pr`` (D10)."""
-    mode = getattr(tool_state, "selected_mode", None)
+    mode = tool_state.selected_mode
     if mode not in _REVIEW_MODES or _current_review_phase(tool_state) != ReviewPhase.INIT:
         return
     if mode == "IncrementalReview":
@@ -356,17 +356,20 @@ def build_validation_state(
 
     def _grade(item: Any, *, asserted: bool) -> None:
         fingerprint = _finding_fingerprint(item)
-        if fingerprint:
-            if fingerprint in withdrawn or fingerprint in seen:
-                return
-            seen.add(fingerprint)
+        if fingerprint and (fingerprint in withdrawn or fingerprint in seen):
+            return
         coerced = _coerce_confirmed_finding(item)
         if coerced is None:
             # An asserted row the agent wrote badly is its own problem; an
-            # analyzer row nobody can read is a blocker.
+            # analyzer row nobody can read is a blocker. Either way the
+            # fingerprint stays unspent: a malformed asserted row must not
+            # claim the fingerprint of the analyzer row that carries the same
+            # one, which would drop a real blocker out of both populations.
             if not asserted:
                 ungradable.append(fingerprint or "<no fingerprint>")
             return
+        if fingerprint:
+            seen.add(fingerprint)
         if asserted or fingerprint in verified:
             confirmed.append(coerced)
         else:
@@ -418,8 +421,12 @@ def _blocks_approve(state: ValidationState) -> bool:
     from mergecraft.agents.gates import BLOCKING_SEVERITIES
     from mergecraft.findings.causality import apply_causality_policy
 
-    for fingerprint in state.ungradable_fingerprints:
-        logger.warning("analyzer finding {} could not be graded; blocking approve", fingerprint)
+    if state.ungradable_fingerprints:
+        logger.warning(
+            "{} analyzer finding(s) could not be graded; blocking approve: {}",
+            len(state.ungradable_fingerprints),
+            ", ".join(state.ungradable_fingerprints),
+        )
         return True
     for finding in (*state.confirmed_findings, *state.unverified_findings):
         if apply_causality_policy(finding).severity in BLOCKING_SEVERITIES:
@@ -427,7 +434,7 @@ def _blocks_approve(state: ValidationState) -> bool:
     return False
 
 
-def _withdrawn_fingerprints_for_state(tool_state: Any, *, tmpdir: str | None) -> set[str]:
+def _withdrawn_fingerprints_for_state(tool_state: ToolState, *, tmpdir: str | None) -> set[str]:
     """Collect the fingerprints a verifier ``drop`` retired.
 
     ``ToolState.withdrawn_fingerprints`` is authoritative **within a run** —
@@ -443,14 +450,12 @@ def _withdrawn_fingerprints_for_state(tool_state: Any, *, tmpdir: str | None) ->
     from mergecraft.utils.learnings import learnings_file_path
 
     candidates: list[str] = [
-        raw
-        for attr in ("learnings_file_path", "xrepo_learnings_file_path")
-        if (raw := getattr(tool_state, attr, None))
+        raw for raw in (tool_state.learnings_file_path, tool_state.xrepo_learnings_file_path) if raw
     ]
     if not candidates and tmpdir:
         candidates.append(learnings_file_path(tmpdir))
 
-    collected: set[str] = set(getattr(tool_state, "withdrawn_fingerprints", None) or set())
+    collected: set[str] = set(tool_state.withdrawn_fingerprints)
     for raw in candidates:
         path = Path(raw)
         if not path.is_file():
@@ -460,18 +465,18 @@ def _withdrawn_fingerprints_for_state(tool_state: Any, *, tmpdir: str | None) ->
 
 
 def validation_state_from_tool_state(
-    tool_state: Any, *, tmpdir: str | None = None
+    tool_state: ToolState, *, tmpdir: str | None = None
 ) -> ValidationState:
     """Grade a live ``ToolState`` into the state ``validate_submission`` reads."""
-    analyzer_run = getattr(tool_state, "analyzer_run", None)
-    verified: set[str] = set(getattr(tool_state, "verified_ids", None) or set())
+    analyzer_run = tool_state.analyzer_run
+    verified: set[str] = set(tool_state.verified_ids)
     if analyzer_run is not None:
-        verified |= set(getattr(analyzer_run, "verified_ids", None) or set())
+        verified |= set(analyzer_run.verified_ids)
     return build_validation_state(
         terminal_submission=tool_state.terminal_submission,
         terminal_submission_conflict=tool_state.terminal_submission_conflict,
-        asserted_findings=getattr(tool_state, "confirmed_findings", None) or (),
-        analyzer_findings=(getattr(analyzer_run, "findings", None) or ()) if analyzer_run else (),
+        asserted_findings=tool_state.confirmed_findings,
+        analyzer_findings=analyzer_run.findings if analyzer_run is not None else (),
         verified_fingerprints=verified,
         static_checks=tool_state.static_checks,
         withdrawn_fingerprints=_withdrawn_fingerprints_for_state(tool_state, tmpdir=tmpdir),

@@ -364,6 +364,31 @@ def test_a_union_declaring_string_is_left_alone(
     assert probe.calls == [{"either": "7"}]
 
 
+@pytest.mark.parametrize("digits", [309, 321, 400])
+def test_an_all_digit_number_never_escapes_as_an_unhandled_overflow(
+    probe_tool: Callable[[dict[str, Any]], tuple[CallTool, _Probe]],
+    digits: int,
+) -> None:
+    """An arbitrarily long integer literal must stay inside the JSON-RPC envelope.
+
+    ``int(text)`` is exact at any width, but ``math.isfinite()`` converts its
+    argument to a float first, so the non-finite guard itself raises
+    ``OverflowError`` from 10**309 up. ``_coerce_arguments`` runs *outside* the
+    ``tools/call`` try block, so that escape became an HTTP 500 with no envelope
+    and no ``id`` — the shape Codex's rmcp client cannot deserialize. A Python
+    ``int`` is finite by construction, so the guard must only apply to floats.
+    """
+    call, probe = probe_tool(LOOSE_SCHEMA)
+    literal = "9" * digits
+
+    body = call({"timeout": literal})
+
+    assert body["jsonrpc"] == "2.0"
+    assert body["id"] == REQ_ID
+    assert "error" not in body, body
+    assert probe.calls == [{"timeout": int(literal)}]
+
+
 def test_already_typed_scalars_pass_through_untouched(
     probe_tool: Callable[[dict[str, Any]], tuple[CallTool, _Probe]],
 ) -> None:

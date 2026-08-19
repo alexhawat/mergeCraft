@@ -1481,6 +1481,46 @@ def test_a_finding_with_no_severity_blocks_approve(tmp_path: Path) -> None:
     )
 
 
+def test_an_ungradable_asserted_row_cannot_neutralise_an_analyzer_blocker(
+    tmp_path: Path,
+) -> None:
+    """A malformed agent row must not spend the fingerprint of a real blocker.
+
+    The grader marks a fingerprint ``seen`` before it knows the row is
+    readable, and asserted rows are graded first. An asserted row that fails
+    coercion therefore claimed the fingerprint and recorded nothing, so the
+    analyzer row carrying the same fingerprint was skipped as already seen —
+    landing in neither ``unverified_findings`` nor ``ungradable_fingerprints``.
+    Under a fail-closed gate that must not be reachable from agent input.
+    """
+    from mergecraft.mcp.verdict import build_validation_state
+
+    ctx = _ctx(tmp_path)
+    blocker = _unverified_blocker("Critical")
+    state = build_validation_state(
+        terminal_submission=ctx.tool_state.terminal_submission,
+        asserted_findings=[
+            {
+                "fingerprint": blocker.fingerprint,
+                "path": "src/app.py",
+                "severity": "Catastrophic",
+            }
+        ],
+        analyzer_findings=[blocker.model_dump()],
+    )
+
+    graded = {
+        *state.ungradable_fingerprints,
+        *(finding.fingerprint for finding in state.unverified_findings),
+    }
+    assert state.confirmed_findings == ()
+    assert blocker.fingerprint in graded
+    _assert_typed_rejection(
+        _validate(_approve_payload(), state=state),
+        _REASON_APPROVE_CONFIRMED_BLOCKER,
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_dropped_blocker_releases_approve(tmp_path: Path) -> None:
     """Valve 1: ``record_finding_verdict(drop)`` must clear the analyzer row.

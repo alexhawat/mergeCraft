@@ -359,8 +359,11 @@ def _coerce_scalar(value: object, types: frozenset[str]) -> object:
         except ValueError:
             return value
         # `inf`/`nan` satisfy jsonschema's `number`, so coercing them would swap
-        # a clean -32602 for an OverflowError inside the tool body.
-        if not isfinite(number):
+        # a clean -32602 for an OverflowError inside the tool body. Only floats
+        # can be non-finite, and asking `isfinite` about a wide `int` raises the
+        # very OverflowError this guard exists to avoid — this runs outside the
+        # `tools/call` try block, so it would escape as a 500 with no envelope.
+        if isinstance(number, float) and not isfinite(number):
             return value
         return number
     if "boolean" in types:
