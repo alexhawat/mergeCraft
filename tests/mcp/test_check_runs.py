@@ -22,11 +22,6 @@ SUITE_ID = 4242
 RUN_ID = 8484
 RUN_NAME = "Verify (lint)"
 
-XFAIL_W21 = pytest.mark.xfail(
-    reason="green after W21: list_check_runs calls the check-runs endpoint",
-    strict=False,
-)
-
 
 class _RecordingGitHub(GitHubClient):
     """Records check-suite and check-run API calls made by the MCP tool under test."""
@@ -124,7 +119,6 @@ async def test_list_check_runs_tool_is_registered_under_its_own_name(tmp_path: P
     assert "list_check_runs" in names
 
 
-@XFAIL_W21
 @pytest.mark.asyncio
 async def test_list_check_runs_calls_the_check_runs_endpoint(tmp_path: Path) -> None:
     """#266 — the tool must hit ``list_check_runs_for_ref``, never the suites sibling.
@@ -141,7 +135,6 @@ async def test_list_check_runs_calls_the_check_runs_endpoint(tmp_path: Path) -> 
     assert github.list_calls == []
 
 
-@XFAIL_W21
 @pytest.mark.asyncio
 async def test_list_check_runs_returns_check_run_data_for_ref(tmp_path: Path) -> None:
     """#266 — the payload key is ``check_runs`` and carries the runs the endpoint returned."""
@@ -159,7 +152,6 @@ async def test_list_check_runs_returns_check_run_data_for_ref(tmp_path: Path) ->
     assert [run["id"] for run in runs] == [RUN_ID]
 
 
-@XFAIL_W21
 @pytest.mark.asyncio
 async def test_list_check_runs_preserves_the_run_shape_agents_navigate_by(
     tmp_path: Path,

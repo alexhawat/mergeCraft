@@ -140,11 +140,6 @@ _SNAPSHOT_CALLS: tuple[tuple[str, str], ...] = (
     ("GET", "/repos/acme/demo/commits/main/check-runs"),
 )
 
-_XFAIL_W21 = pytest.mark.xfail(
-    reason="green after W21: list_check_runs calls the check-runs endpoint",
-    strict=False,
-)
-
 _SNAPSHOT_TOOL_OUTPUTS: dict[str, dict[str, Any]] = {
     "get_pull_request": {
         "number": 7,
@@ -214,13 +209,12 @@ def test_every_github_operation_is_expressible_through_the_protocol() -> None:
     assert protocol_supports_github_operations() is True
 
 
-@_XFAIL_W21
 @pytest.mark.asyncio
 async def test_github_adapter_behaviour_is_unchanged(tmp_path: Path) -> None:
     """Broad behavioural snapshot over GitHub MCP tools — the compatibility pin.
 
-    The snapshot's last call was inverted for #266; the whole snapshot is xfail until
-    W21 lands, because a call-sequence tuple cannot be half-inverted.
+    The snapshot's last call was inverted for #266 and the whole snapshot ran xfail
+    until W21 landed, because a call-sequence tuple cannot be half-inverted.
     """
     transport = github_snapshot_transport()
     github = RecordingGitHubClient(transport=transport)
@@ -328,16 +322,15 @@ async def test_review_publication_goes_through_the_protocol(tmp_path: Path) -> N
     assert ctx.scm is recording
 
 
-@_XFAIL_W21
 @pytest.mark.asyncio
 async def test_protocol_list_check_runs_alias_reaches_the_check_runs_endpoint(
     tmp_path: Path,
 ) -> None:
-    """#266 second ingress — the ``list_check_runs`` MCP alias also delegates to suites.
+    """#266 second ingress — the protocol alias must hit check-runs, not check-suites.
 
-    ``GitHubScmAdapter.list_check_runs`` (``scm/github.py:242-245``) forwards to
-    ``list_check_suites_for_ref``. Nothing calls it today, but it is the protocol's
-    ``list_check_runs`` operation, so it carries the same defect as the MCP tool.
+    ``GitHubScmAdapter.list_check_runs`` used to forward to ``list_check_suites_for_ref``.
+    Nothing calls it today, but it is the protocol's ``list_check_runs`` operation, so it
+    carried the same defect as the MCP tool and is pinned separately from it.
     """
     require_scm()
     from mergecraft.scm.github import GitHubScmAdapter

@@ -1028,3 +1028,70 @@ Grepped `check_suites` and `list_check_runs` across `src/`:
 
 `tests/mcp tests/scm`: **208 passed / 9 xfailed / 0 failed**. `make lint` and `make typecheck`
 (334 source files) clean.
+
+### Batch E reconciliation (after W21 + W22)
+
+- **All 9 W20 reds pass once unmarked; nothing failed.** The 5
+  `green after W21: list_check_runs calls the check-runs endpoint` markers (3 in
+  `tests/mcp/test_check_runs.py`, 2 in `tests/scm/test_protocol.py`) and the 4
+  `green after W22: tools/call validates arguments against input_schema` markers in
+  `tests/mcp/test_tools_call_validation.py` are **stripped**. No assertion was weakened and no
+  marker was re-added.
+- **The full cross-tool snapshot passes unmarked.** `test_github_adapter_behaviour_is_unchanged`
+  had to be xfailed *whole* at W20 — a call-sequence tuple cannot be half-inverted — which left the
+  eight unrelated tools it exercises ungated for two waves. Re-verified here as a real pass, not on
+  W21's word: every per-tool payload assertion and the full `_SNAPSHOT_CALLS` tuple hold.
+- **W21 landed the second ingress.** `GitHubScmAdapter.list_check_runs` (`scm/github.py:242-245`),
+  which Batch E found and the plan did not name, now reaches
+  `/repos/acme/demo/commits/main/check-runs`. Both stale docstrings (the snapshot's "is xfail until
+  W21 lands", the alias's "also delegates to suites") were rewritten to past tense so the file does
+  not describe a defect that no longer exists.
+- **W21 used `ctx.scm`, not the plan's `ctx.github`.** The plan's W20.1 deliverable named
+  `ctx.github` literally; `test_no_github_specific_type_leaks_into_core` — green since the SCM
+  extraction — forbids `ctx.github` in exactly that module. W21 correctly followed the test. Logged
+  below; no test change was warranted.
+
+#### The two behaviour changes W22 left unpinned — now pinned
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| A non-dict `arguments` (string / list / null / int) against a **strict** schema returns `-32602` and never enters `execute` | `test_non_dict_arguments_are_rejected_against_a_strict_schema` | Integration, behaviour change | green |
+| The same non-dict `arguments` against a **permissive** schema still executes, with `{}` | `test_non_dict_arguments_still_execute_against_a_permissive_schema` | Integration, the distinction | green |
+| An uncompilable `input_schema` is `-32603`, **not** `-32602` | `test_unusable_schema_is_an_internal_error_not_invalid_params` | Integration, error taxonomy | green |
+| `resolve_output_schema` admits a schema `check_schema` rejects — the reachability source | `test_resolve_output_schema_admits_a_schema_the_validator_cannot_compile` | Unit, reachability | green |
+
+- **2a — non-dict `arguments`.** `server.py:346-347` still coerces a non-dict `arguments` to `{}`,
+  and that coerced `{}` now flows through validation. So the rejection is **not** "your arguments
+  are not an object" — it is "the empty object you were coerced into fails this schema". Both halves
+  are pinned as a parametrized pair over the same four non-dict payloads, and both docstrings say so
+  explicitly, because the obvious later "fix" — rejecting non-dict up front — would silently break
+  the permissive arm while looking like a tidy-up of the coercion.
+- **2b — the `-32603` branch.** W22 confirmed Batch E's reachability suspicion: `set_output_tool`
+  passes the consumer-supplied schema **verbatim** as `input_schema` (`mcp/output.py:29`), and its
+  only ingress `resolve_output_schema` (`utils/payload.py:668-682`) checks merely that the value
+  parses as a JSON object — it never calls `check_schema`. An `output_schema` action input of
+  `{"type": "nope"}` therefore registers an uncompilable tool. The existing probe covered only the
+  non-crash invariant; the code is now pinned as `-32603` with the reason in the docstring: the
+  caller's arguments are valid, the *tool's* schema is broken, so "invalid params" would misdescribe
+  the failure and send the agent retrying its arguments forever.
+- **The reachability is pinned at its real source too.**
+  `test_resolve_output_schema_admits_a_schema_the_validator_cannot_compile` asserts both halves —
+  `resolve_output_schema` returns `{"type": "nope"}` unchanged, and `validator_for(...).check_schema`
+  raises `SchemaError` on it. Until now that chain was only reasoned about in prose, which is what
+  lets a `-32603` branch get written off as dead code and deleted. Pinned from `tests/` only; no
+  `src/` change is implied, and the underlying gap (an ingress that validates JSON-object-ness but
+  not schema-validity) is left to its own wave.
+
+`tests/mcp tests/scm`: **227 passed / 0 xfailed / 0 xpassed / 0 failed** — the 217 collected at W20
+(208 passed + 9 xfailed) now all pass, plus 10 new cases from the 4 pins above (two are
+parametrized over four non-dict payloads each). `make lint` and `make typecheck`
+(334 source files) clean. **No `green after W20`–`W22` marker remains anywhere in `tests/`.** The
+`green after W3` / `W4` / `W6` / `W8` / `W9-W10` markers still present in `tests/agents`,
+`tests/cli`, `tests/tracing`, `tests/utils`, `tests/evidence` and `tests/status_checks` are
+earlier-program markers, outside this program's remit.
+
+### Escalation log
+
+| # | Wave that escalated | Test | Finding | Resolution |
+|---|---|---|---|---|
+| 1 | W21 → EF | `tests/scm/test_protocol.py::test_no_github_specific_type_leaks_into_core` | **The plan contradicted a green test.** W20.1's deliverable specified swapping `mcp/check_runs.py` to `ctx.github.list_check_runs_for_ref`, but this pre-existing green test forbids the string `ctx.github` in that module — the plan text predated the SCM-protocol extraction | No test change. W21 used `ctx.scm.list_check_runs_for_ref` instead, which satisfies both the #266 endpoint pin and the no-leak guard. Recorded so the divergence from the plan's literal wording is not later read as W21 having missed its deliverable |
