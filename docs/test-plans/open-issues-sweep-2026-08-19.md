@@ -1248,3 +1248,80 @@ preserved for `--scope github` and the default by the compatibility arms.
    `cli-commands` README block that `tests/docs/test_reference_docs.py` compares against the live
    Typer app. That test is green today and will stay green only if W24.2 regenerates the docs in the
    same commit (plan convention 13). Not a test change — a W24 obligation.
+
+### Batch F reconciliation (after W24)
+
+- **All 31 W23 reds pass once unmarked; nothing failed and no assertion was weakened.** The seven
+  `green after W24: auth --scope local/github/both` decorators (28 parametrized provider arms + 3
+  codex-specific arms) and the `XFAIL_REASON` constant are **stripped** from
+  `tests/cli/test_auth_scope_cmd.py`. No marker was re-added.
+- **W24 satisfied the contracts through one shared helper, not seven copies.** `_persist_credential`
+  (`cli/auth_cmd.py:160-209`) plus `_resolve_repo_slug` (`:122-135`) and `_single_line_credential`
+  (`:138-157`) replaced seven duplicated `gh secret set` + `_bail` blocks. `_resolve_repo_slug`
+  returns `None` for `local`, which is why the "never reaches `gh`" tripwire counters stay at zero
+  rather than merely tolerating a failure. `_normalise_scope` was reused verbatim, so the
+  `gh` / `action` / `all` synonyms and the `-s` short flag came across for free (items 4 of "Left to
+  W24", now resolved by reuse rather than by a test).
+- **The verbatim round-trip arm still passes because compaction is a no-op for it.** The Batch F
+  fixture payload is single-line, so `_single_line_credential` returns it unchanged and
+  `test_auth_codex_scope_local_persists_the_captured_auth_json`'s byte-exact assertion holds. That
+  is also why it left W24's real behaviour untested — see the two pins below.
+
+#### The two things W24's evidence turned from hypothesis into fact — now pinned
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| A pretty-printed multi-line `auth.json` lands as **one** `.env` line, round-trips out via `dotenv_values`, and re-parses to the same object | `test_multiline_credential_is_compacted_to_one_env_line` | Integration, W24 behaviour | green |
+| A multi-line value that is **not** JSON bails (exit 1, names the key) and writes **no** `.env` at all | `test_multiline_non_json_credential_bails_instead_of_writing` | Error handling, fail-closed | green |
+| `gh secret set` receives the **uncompacted** payload while the local write is compacted | `test_gh_secret_receives_the_uncompacted_payload` | Integration, the deliberate asymmetry | green |
+| The written line is **shell-sourceable**: a real `/bin/sh` sources the `.env` and echoes back the exact value | `test_local_env_line_survives_shell_sourcing` | Functional, the property `dotenv` cannot see | green |
+| `_write_env_value`'s `quote_mode` default stays `"never"` for pre-#221 callers | `test_write_env_value_defaults_to_unquoted` | Unit, load-bearing default | green |
+
+- **Multi-line compaction (item 1 of "Left to W24").** W24 confirmed empirically that `codex login`
+  pretty-prints (`~/.codex/auth.json` is ten lines), so this is the *normal* case for
+  `CODEX_AUTH_JSON`, not a corner one. The pin asserts three separable things because each fails
+  differently: exactly one non-empty line on disk (a raw multi-line write would leave the tail as
+  orphaned junk keys), a successful `dotenv_values` round trip, and **semantic** equality —
+  `json.loads(stored) == json.loads(pretty)` — since compaction legitimately changes the bytes. The
+  loud-bail branch is pinned through the CLI (`auth nous` with a multi-line non-JSON secret) rather
+  than by calling `_single_line_credential` directly, so it also asserts the file is never created.
+  The asymmetry pin exists because hoisting the `_single_line_credential` call above the
+  `local`/`both` branch looks like a tidy-up and would silently change what GitHub Actions receives.
+- **Shell-sourceability (item 2 of "Left to W24") — and why a `dotenv` assertion is not enough.**
+  `dotenv_values` parses `KEY=value` and `KEY='value'` identically, so **every** Python-level test in
+  this file stays green under *both* quote modes. A future edit dropping `quote_mode="always"` from
+  the provider path would therefore keep the whole suite green while breaking `source .env` for
+  contributors. The pin asserts the distinguishing property directly: it reads the raw file content
+  (the line must start `CODEX_AUTH_JSON='` and end with a quote) and then runs a real
+  `/bin/sh -c 'set -e; . "$1"; printf %s "$CODEX_AUTH_JSON"'` against the written file, requiring
+  exit 0, **empty stderr**, and the exact stored value on stdout. Verified to have teeth: under
+  `quote_mode="never"` that same shell exits 127 with `{access_token:: command not found` and an
+  empty variable, exactly as W24 reported. The reason a `dotenv`-only assertion is insufficient is
+  recorded in the test's docstring, not only here. One boundary is documented and deliberately out of
+  scope: `python-dotenv` escapes an embedded single quote as `\'` inside single quotes, which POSIX
+  `sh` does not honour — the pinned payload contains none, and `codex login` does not emit that shape.
+- **The `quote_mode` default is pinned too.** W24 kept `auth logfire` byte-identical by making
+  quoting opt-in, and that default is load-bearing. Pinned both ways — the declared default in
+  `inspect.signature(_write_env_value)` and the bytes a default-mode write actually produces
+  (`KEY=plain-token`, unquoted) — because a flip to `"always"` would be invisible to every
+  `dotenv`-based assertion in the repo.
+- **Note for a future wave (not pinned here, by instruction):** `_local_env_path()` falls back to
+  `Path.cwd() / ".env"`, so an auth command run from a subdirectory writes the wrong `.env`. Owned by
+  a separate wave; this suite pins `MERGECRAFT_ENV` and does not assert the fallback.
+
+`tests/cli tests/docs`: **344 passed / 1 skipped / 1 xfailed / 3 xpassed / 0 failed**;
+`tests/cli/test_auth_scope_cmd.py` alone is **44 passed / 0 xfailed** (the 39 collected at W23 —
+31 xfailed + 8 green — now all pass, plus the 5 new pins). `make lint` and `make typecheck`
+(334 source files) clean. **No `green after W20`–`W25` marker remains anywhere in `tests/`.** The
+remaining `green after W3` / `W4` / `W6` / `W8` / `W9-W10` markers in `tests/agents`, `tests/cli`,
+`tests/tracing`, `tests/utils`, `tests/evidence` and `tests/status_checks` are earlier-program
+markers — the same inventory Batch E recorded, unchanged by this program. (The three
+`tests/cli/test_models_list_minimax.py` W6 arms report XPASS; they are non-strict and belong to the
+earlier program, so they are left as found.)
+
+### Escalation log
+
+| # | Wave that escalated | Test | Finding | Resolution |
+|---|---|---|---|---|
+| 1 | W24.2 → DF | `tests/docs/test_reference_docs.py` | W24.2 expected `make reference-docs` to change the README, since `--scope` was added to seven commands ("Left to W24" item 5 said so). Regenerating produced **no diff**: the generated `cli-commands` block lists commands and their help text, not their options | No test change — the doc test was green before and after, correctly. The expectation, not the code, was wrong. The underlying gap (the reference-docs generator does not cover CLI options, so no doc test can ever catch an option regression) is tracked for a separate wave and deliberately **not** pinned here |
+| 2 | W23 dispatch → DF | — | **The "missing D11" confusion.** W23's dispatch reported that the plan had no D11 and asked for the provider set to be derived from code. D11 **does** exist, at plan line 183, enumerating all seven providers with default `github`; global convention 7 (line 148) cites it | No plan or test change. The independent code derivation was run anyway and landed on the same seven providers (table above), so nothing was authored against a wrong contract. Recorded so the derivation is not later read as the suite having invented its own scope |

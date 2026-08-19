@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import getpass
 import importlib
+import inspect
 import json
 import subprocess
 from typing import TYPE_CHECKING, Any
@@ -60,7 +61,7 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 
-XFAIL_REASON = "green after W24: auth --scope local/github/both"
+_REAL_SUBPROCESS_RUN = subprocess.run
 
 # D11's provider set → the env key the local runtime reads for that provider.
 PROVIDERS: list[tuple[str, str]] = [
@@ -73,13 +74,17 @@ PROVIDERS: list[tuple[str, str]] = [
     ("minimax", "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"),
 ]
 
-# Single-line JSON so the payload survives a ``.env`` round trip regardless of
-# the quote mode W24 picks. Multi-line ``auth.json`` handling is deliberately
-# left unpinned — see the test-plan doc's "left to W24" section.
+# Single-line JSON, so the round-trip arms above assert the value verbatim and
+# ``_single_line_credential`` is a no-op for them. The multi-line shape a real
+# ``codex login`` writes is pinned separately by ``PRETTY_CODEX_PAYLOAD``.
 CODEX_AUTH_PAYLOAD = (
     '{"tokens": {"access_token": "codex-red-access", "refresh_token": "codex-red-refresh"}, '
     '"last_refresh": "2026-08-19T00:00:00Z"}'
 )
+# What ``codex login`` actually leaves in ``~/.codex/auth.json``: pretty-printed
+# across several lines. A ``.env`` entry is one line, so this is the payload
+# ``_single_line_credential`` exists for.
+PRETTY_CODEX_PAYLOAD = json.dumps(json.loads(CODEX_AUTH_PAYLOAD), indent=2)
 # ``sk-ant-oat`` prefix so ``auth claude`` takes the no-warning branch.
 CLAUDE_TOKEN = "sk-ant-oat-scope-red-token"
 
@@ -205,7 +210,6 @@ def _flat(result: Any) -> str:
 # ── --scope local: writes .env, needs no working gh ──────────────────────────
 
 
-@pytest.mark.xfail(reason=XFAIL_REASON, strict=False)
 @pytest.mark.parametrize(("provider", "env_key"), PROVIDERS)
 def test_auth_scope_local_writes_env_without_gh(
     provider: str, env_key: str, tmp_path: Path, monkeypatch: MonkeyPatch
@@ -238,7 +242,6 @@ def test_auth_scope_local_writes_env_without_gh(
 # ── --scope github: today's behaviour, .env untouched ───────────────────────
 
 
-@pytest.mark.xfail(reason=XFAIL_REASON, strict=False)
 @pytest.mark.parametrize(("provider", "env_key"), PROVIDERS)
 def test_auth_scope_github_writes_secret_only(
     provider: str, env_key: str, tmp_path: Path, monkeypatch: MonkeyPatch
@@ -262,7 +265,6 @@ def test_auth_scope_github_writes_secret_only(
 # ── --scope both: both layers ───────────────────────────────────────────────
 
 
-@pytest.mark.xfail(reason=XFAIL_REASON, strict=False)
 @pytest.mark.parametrize(("provider", "env_key"), PROVIDERS)
 def test_auth_scope_both_writes_env_and_secret(
     provider: str, env_key: str, tmp_path: Path, monkeypatch: MonkeyPatch
@@ -316,7 +318,6 @@ def test_auth_default_scope_is_github_only(
 # ── invalid --scope: _normalise_scope's existing contract ───────────────────
 
 
-@pytest.mark.xfail(reason=XFAIL_REASON, strict=False)
 @pytest.mark.parametrize(("provider", "env_key"), PROVIDERS)
 def test_auth_rejects_unknown_scope(
     provider: str, env_key: str, tmp_path: Path, monkeypatch: MonkeyPatch
@@ -351,7 +352,6 @@ def test_auth_rejects_unknown_scope(
 # ── the tempdir-ordering half of #221 (auth codex only) ─────────────────────
 
 
-@pytest.mark.xfail(reason=XFAIL_REASON, strict=False)
 def test_auth_codex_scope_local_persists_the_captured_auth_json(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -405,7 +405,6 @@ def test_auth_codex_scope_local_persists_the_captured_auth_json(
 # ── partial success under --scope both (the logfire contract) ───────────────
 
 
-@pytest.mark.xfail(reason=XFAIL_REASON, strict=False)
 def test_auth_codex_scope_both_survives_a_failed_gh_secret_set(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -431,7 +430,6 @@ def test_auth_codex_scope_both_survives_a_failed_gh_secret_set(
     assert "warning" in output or "manually" in output, output
 
 
-@pytest.mark.xfail(reason=XFAIL_REASON, strict=False)
 def test_auth_codex_scope_both_bails_when_neither_half_lands(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -453,6 +451,168 @@ def test_auth_codex_scope_both_bails_when_neither_half_lands(
 
     assert result.exit_code != 0, _flat(result)
     assert "nothing was written" in _flat(result), _flat(result)
+
+
+# ── multi-line credential compaction (W25 pin) ──────────────────────────────
+
+
+def _arrange_pretty_codex(module: Any, monkeypatch: MonkeyPatch) -> CodexLoginStub:
+    """Wire ``auth codex`` so the faked login writes a pretty-printed ``auth.json``."""
+    _stub_validators(module, monkeypatch)
+    stub = CodexLoginStub(PRETTY_CODEX_PAYLOAD)
+    stub.install(module, monkeypatch)
+    return stub
+
+
+def _env_lines(env_path: Path) -> list[str]:
+    """Return the non-empty lines of ``env_path`` as written on disk."""
+    return [line for line in env_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_multiline_credential_is_compacted_to_one_env_line(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A pretty-printed ``auth.json`` lands as a single, equivalent ``.env`` line.
+
+    ``codex login`` really does pretty-print (``~/.codex/auth.json`` is ten
+    lines), and a ``.env`` entry is one line — so this is the normal case for
+    ``CODEX_AUTH_JSON``, not a corner one. The assertion is deliberately
+    three-part: **one** line on disk (a raw multi-line write would leave the
+    tail as junk keys), the value round-trips out through ``dotenv_values``,
+    and it re-parses to the *same object* as the original — semantic equality,
+    not byte equality, because compaction legitimately changes the bytes.
+    """
+    module = _load_auth_cmd()
+    _arrange_pretty_codex(module, monkeypatch)
+    gh = GhRecorder()
+    gh.install(module, monkeypatch)
+    env_path = _pin_env_path(tmp_path, monkeypatch, precreate=False)
+
+    result = runner.invoke(app, ["auth", "codex", "--scope", "local"])
+
+    assert result.exit_code == 0, _flat(result)
+    assert len(_env_lines(env_path)) == 1, _env_lines(env_path)
+    stored = _read_back(env_path, "CODEX_AUTH_JSON")
+    assert stored is not None
+    assert "\n" not in stored
+    assert json.loads(stored) == json.loads(PRETTY_CODEX_PAYLOAD)
+
+
+def test_multiline_non_json_credential_bails_instead_of_writing(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A multi-line value that is not JSON must fail loudly, not write a broken entry.
+
+    Compaction is JSON-shaped re-serialisation, so a multi-line credential
+    that is not JSON has no safe flattening. The contract is a ``_bail``
+    (exit 1) naming the key, and — the half that actually matters — **no**
+    ``.env`` written at all, rather than a first line plus orphaned junk.
+    """
+    module = _load_auth_cmd()
+    _stub_validators(module, monkeypatch)
+    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "-----BEGIN KEY-----\nabc\n")
+    gh = GhRecorder()
+    gh.install(module, monkeypatch)
+    env_path = _pin_env_path(tmp_path, monkeypatch, precreate=False)
+
+    result = runner.invoke(app, ["auth", "nous", "--scope", "local"])
+
+    assert result.exit_code == 1, _flat(result)
+    output = _flat(result)
+    assert "nous_api_key" in output, output
+    assert not env_path.exists(), env_path.read_text(encoding="utf-8")
+
+
+def test_gh_secret_receives_the_uncompacted_payload(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Only the local write is compacted; ``gh secret set`` gets the payload verbatim.
+
+    The asymmetry is deliberate and easy to "simplify" away by hoisting the
+    ``_single_line_credential`` call above the branch: an Actions secret has no
+    one-line constraint, and rewriting the credential before shipping it to
+    GitHub would change what the runtime receives for no reason.
+    """
+    module = _load_auth_cmd()
+    _arrange_pretty_codex(module, monkeypatch)
+    gh = GhRecorder()
+    gh.install(module, monkeypatch)
+    env_path = _pin_env_path(tmp_path, monkeypatch, precreate=False)
+
+    result = runner.invoke(app, ["auth", "codex", "--scope", "both"])
+
+    assert result.exit_code == 0, _flat(result)
+    assert [record["name"] for record in gh.secrets] == ["CODEX_AUTH_JSON"]
+    assert gh.secrets[0]["value"] == PRETTY_CODEX_PAYLOAD
+    stored = _read_back(env_path, "CODEX_AUTH_JSON")
+    assert stored is not None
+    assert "\n" not in stored
+
+
+# ── shell-sourceability under quote_mode="always" (W25 pin) ─────────────────
+
+
+def test_local_env_line_survives_shell_sourcing(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """The written ``CODEX_AUTH_JSON`` line survives ``source .env`` in a POSIX shell.
+
+    This is the property a ``dotenv``-only assertion cannot see.
+    ``dotenv_values`` parses ``KEY=value`` and ``KEY='value'`` identically, so
+    every Python-level test in this file stays green under **both** quote
+    modes — a future edit dropping ``quote_mode="always"`` from the provider
+    path would break ``source .env`` for contributors with the whole suite
+    still passing. Under ``never``, a raw-JSON line makes the shell try to run
+    ``{access_token::`` as a command and leaves the variable empty.
+
+    So the assertion runs a real ``/bin/sh``: source the file, echo the
+    variable, and require a clean exit, empty stderr, and the exact stored
+    value back. The on-disk quoting is asserted alongside it so a failure says
+    *why*. (The payload deliberately contains no single quote: ``python-dotenv``
+    escapes those as ``\\'`` inside single quotes, which POSIX ``sh`` does not
+    honour — out of scope here, and not a shape ``codex login`` produces.)
+    """
+    module = _load_auth_cmd()
+    _arrange_pretty_codex(module, monkeypatch)
+    gh = GhRecorder()
+    gh.install(module, monkeypatch)
+    env_path = _pin_env_path(tmp_path, monkeypatch, precreate=False)
+
+    result = runner.invoke(app, ["auth", "codex", "--scope", "local"])
+    assert result.exit_code == 0, _flat(result)
+
+    line = _env_lines(env_path)[0]
+    assert line.startswith("CODEX_AUTH_JSON='"), line
+    assert line.endswith("'"), line
+
+    # ``CodexLoginStub`` patches ``subprocess.run`` on the shared module object,
+    # so use the reference captured at import time to reach the real shell.
+    sourced = _REAL_SUBPROCESS_RUN(
+        ["/bin/sh", "-c", 'set -e; . "$1"; printf %s "$CODEX_AUTH_JSON"', "sh", str(env_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert sourced.returncode == 0, sourced.stderr
+    assert sourced.stderr == "", sourced.stderr
+    assert sourced.stdout == _read_back(env_path, "CODEX_AUTH_JSON")
+    assert json.loads(sourced.stdout) == json.loads(PRETTY_CODEX_PAYLOAD)
+
+
+def test_write_env_value_defaults_to_unquoted(tmp_path: Path) -> None:
+    """``_write_env_value``'s default stays ``never`` for pre-#221 callers.
+
+    W24 made quoting opt-in precisely so ``auth logfire``'s two writes stayed
+    byte-identical; that default is load-bearing, and flipping it to
+    ``"always"`` would be invisible to every ``dotenv``-based assertion.
+    Pinned both ways: the declared default in the signature, and the bytes a
+    default-mode write actually produces.
+    """
+    module = _load_auth_cmd()
+    assert inspect.signature(module._write_env_value).parameters["quote_mode"].default == "never"
+
+    env_path = tmp_path / ".env"
+    assert module._write_env_value(env_path, "MERGECRAFT_QUOTE_DEFAULT", "plain-token") is True
+    assert _env_lines(env_path) == ["MERGECRAFT_QUOTE_DEFAULT=plain-token"]
 
 
 # ── structural / collection smoke (green today) ─────────────────────────────
