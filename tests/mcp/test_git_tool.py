@@ -384,6 +384,205 @@ async def test_dash_c_alias_in_args_rejected_regardless_of_shell(
     assert recorder.calls == []
 
 
+CONFIG_FLAG_MESSAGE = "can execute arbitrary code via git alias expansion"
+
+# Single-argv `-c<name>=<value>` spellings. Upstream git parses `-c` with an
+# exact `strcmp` (git.c handle_options, unchanged since v1.7.2), so git itself
+# refuses these — but `_reject_config_flags` must still refuse them at the tool
+# boundary rather than forwarding a config-shaped token and relying on git's
+# argv parser to fail closed.
+GLUED_SHORT_CONFIG_TOKENS = [
+    "-calias.x=!true",
+    "-cprotocol.ext.allow=always",
+    "-ccore.pager=!sh",
+]
+
+
+@pytest.mark.xfail(reason="green after the #257 glued-config-flag fix", strict=False)
+@pytest.mark.parametrize("token", GLUED_SHORT_CONFIG_TOKENS)
+async def test_glued_short_config_flag_in_args_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """#257: `-c<key>=<value>` glued into one argv token must be rejected.
+
+    `_reject_config_flags` matches only an exact `-c` or a `-c=`-prefixed token,
+    so the glued spelling is forwarded to `_run_git` untouched.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": [token]})
+    assert result.is_error is True, result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.xfail(reason="green after the #257 glued-config-flag fix", strict=False)
+@pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
+async def test_glued_short_config_flag_in_args_rejected_regardless_of_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
+) -> None:
+    """The glued spelling must be refused in every shell mode, like the spaced one."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path, shell=shell)).execute(
+        {"command": "status", "args": ["-calias.x=!true"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.xfail(reason="green after the #257 glued-config-flag fix", strict=False)
+@pytest.mark.parametrize("token", GLUED_SHORT_CONFIG_TOKENS)
+async def test_glued_short_config_flag_in_global_opts_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """The same token must be refused on the `global_opts` path, not just `args`.
+
+    `--namespace` takes a separate value, so `_extract_global_opts` moves the
+    following token into `global_opts` — i.e. in front of the subcommand, the
+    only position where git honours a global config flag. `_reject_config_flags`
+    is called on both lists and the fix has to hold for both.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["--namespace", token]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
+async def test_config_flag_in_global_opts_position_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
+) -> None:
+    """A spaced `-c` smuggled into `global_opts` via `--namespace` is already refused.
+
+    This is the pre-subcommand position git actually honours, so the defensive
+    `_reject_config_flags(global_opts)` call must keep firing here.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path, shell=shell)).execute(
+        {"command": "status", "args": ["--namespace", "-c", "alias.x=!true"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param("-c", id="bare-short"),
+        pytest.param("-c=alias.x=!true", id="short-equals-attached"),
+        pytest.param("--config-env", id="bare-long"),
+        pytest.param("--config-env=alias.x=EVIL", id="long-equals-attached"),
+    ],
+)
+async def test_known_config_flag_spellings_still_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """Every spelling the current guard already catches must keep its rejection.
+
+    `--config-env` is accepted by git both as `--config-env <name>=<envvar>` and
+    as `--config-env=<name>=<envvar>`; the bare token covers the separate-value
+    form. `-c` is exact-match only upstream, so `-c` and `-c=…` are the whole
+    short-flag surface the guard has to keep refusing.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": [token]})
+    assert result.is_error is True, result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_spaced_config_flag_rejection_message_names_the_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rejection quotes the offending token — the fix must not lose that."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["-c", "alias.x=!true"]}
+    )
+    assert result.is_error is True
+    text = result.content[0]["text"]
+    assert "'-c'" in text
+    assert CONFIG_FLAG_MESSAGE in text
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param("--cached", id="cached"),
+        pytest.param("--column", id="column"),
+        pytest.param("--color=never", id="color-equals"),
+        pytest.param("--count", id="count"),
+        pytest.param("--cc", id="cc"),
+        pytest.param("--children", id="children"),
+    ],
+)
+async def test_non_config_flags_beginning_with_c_still_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """A `startswith("-c")`-style fix must not over-block legitimate flags.
+
+    These are real read-only git flags whose names begin with `c`; none of them
+    is a config flag, and blocking them would buy safety by breaking the tool.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "log", "args": [token]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["log", token]]
+
+
+async def test_capital_c_path_flag_is_not_a_config_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`-C` is git's path flag, not `-c`: the guard must stay case-sensitive.
+
+    A case-insensitive or lowercased `-c` match would take `-C` down with it,
+    so the confinement-checked path flag is pinned green here explicitly.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    inside = _resolved(tmp_path)
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": ["-C", inside]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-C", inside, "status"]]
+
+
+async def test_glued_short_config_flag_in_command_string_is_not_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In the `command` string the glued token lands as a fake subcommand.
+
+    The read-only allowlist already refuses it, so this path is safe today; pin
+    it so the glued-form fix cannot regress it into a forwarded token.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "git -calias.x=!true status", "args": []}
+    )
+    assert result.is_error is True
+    assert recorder.calls == []
+
+
 class _CommitGitRecorder:
     """Serves the argv sequence ``commit_changes`` issues, recording each call."""
 

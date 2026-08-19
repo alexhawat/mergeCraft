@@ -1325,3 +1325,86 @@ earlier program, so they are left as found.)
 |---|---|---|---|---|
 | 1 | W24.2 → DF | `tests/docs/test_reference_docs.py` | W24.2 expected `make reference-docs` to change the README, since `--scope` was added to seven commands ("Left to W24" item 5 said so). Regenerating produced **no diff**: the generated `cli-commands` block lists commands and their help text, not their options | No test change — the doc test was green before and after, correctly. The expectation, not the code, was wrong. The underlying gap (the reference-docs generator does not cover CLI options, so no doc test can ever catch an option regression) is tracked for a separate wave and deliberately **not** pinned here |
 | 2 | W23 dispatch → DF | — | **The "missing D11" confusion.** W23's dispatch reported that the plan had no D11 and asked for the provider set to be derived from code. D11 **does** exist, at plan line 183, enumerating all seven providers with default `github`; global convention 7 (line 148) cites it | No plan or test change. The independent code derivation was run anyway and landed on the same seven providers (table above), so nothing was authored against a wrong contract. Recorded so the derivation is not later read as the suite having invented its own scope |
+
+## Post-review RED — glued `-c` config-flag spelling (#257)
+
+Authored **after** Batch A was reconciled green, from a `security-review` finding on PR
+[#291](https://github.com/alexhawat/mergeCraft/pull/291): `_reject_config_flags`
+(`src/mergecraft/mcp/git.py`) matches only a token that is exactly `-c` / `--config-env` or that
+starts with `-c=` / `--config-env=`, so a single-argv `-calias.x=!sh` is forwarded to `_run_git`
+instead of refused. This is the **third** time in this program a fix closed one spelling of an
+ingress and missed another — `#273` needed a follow-up wave, `#266` had an unnamed second ingress,
+and now `#257`'s config-flag guard. The recurring lesson: pin the *space* of accepted spellings, not
+the one payload the report happened to quote.
+
+### What git actually accepts (derived, not assumed)
+
+Probed against `git 2.53.0` and confirmed in `git.c` `handle_options` across `v1.7.2` → `v2.53.0`:
+
+| Spelling | git accepts it? | Guard today |
+|---|---|---|
+| `-c <name>=<value>` (separate value) | yes — alias expands and executes | rejected |
+| `-c<name>=<value>` (glued, one argv) | **no** — `unknown option`; `-c` is parsed with an exact `strcmp`, never `skip_prefix`, and has been since `-c` was introduced in `v1.7.2` | **forwarded** |
+| `-c=<name>=<value>` | no — `unknown option` | rejected |
+| `--config-env <name>=<envvar>` (separate value) | yes — alias expands and executes | rejected |
+| `--config-env=<name>=<envvar>` | yes — alias expands and executes | rejected |
+| `--config-env<name>=<envvar>` (glued) | no — `unknown option` | forwarded (unreachable as config) |
+| `-C <path>` | yes — path flag, unrelated to config | allowed, confined to repo root |
+| `-C<path>` (glued) | no — `unknown option` | n/a |
+
+So the boundary the fix must respect: **reject** every `-c`-shaped and `--config-env`-shaped token
+including the glued spellings (defence in depth — the tool must not forward a config-shaped token
+and rely on git's argv parser to fail closed), while **not** rejecting `-C` (case-sensitive; it is
+git's path flag and stays allowed subject to path confinement) and not rejecting legitimate
+read-only flags whose names merely begin with `c` (`--cached`, `--column`, `--color=…`, `--count`,
+`--cc`, `--children`). A blanket `tok.startswith("-c")` would over-block; a case-insensitive match
+would break `-C`.
+
+Honest scoping note: because upstream git refuses the glued spelling itself, the finding is a
+**guard gap, not a live RCE** — a forwarded `-calias.x=!sh` makes `git` exit non-zero and
+`_run_git` raise. The one position where a smuggled token does reach the pre-subcommand slot git
+honours is via `--namespace`, whose separate value `_extract_global_opts` lifts into `global_opts`
+without confinement; the spaced `-c` on that path is already caught (pinned green below), the glued
+one is not (pinned red).
+
+### Contract → test map
+
+All reds carry `@pytest.mark.xfail(reason="green after the #257 glued-config-flag fix", strict=False)`.
+
+| Contract | Test (`tests/mcp/test_git_tool.py`) | Layer / class | Marker |
+|---|---|---|---|
+| Glued `-c<key>=<value>` in `args` is rejected (`-calias.x=!true`, `-cprotocol.ext.allow=always`, `-ccore.pager=!sh`) | `test_glued_short_config_flag_in_args_rejected` | Error handling, 3 arms | **RED** |
+| Glued spelling is rejected in every `payload.shell` mode | `test_glued_short_config_flag_in_args_rejected_regardless_of_shell` | Error handling, 3 arms | **RED** |
+| Glued spelling is rejected on the `global_opts` path too (smuggled via `--namespace`'s separate value, i.e. pre-subcommand) | `test_glued_short_config_flag_in_global_opts_rejected` | Error handling, 3 arms | **RED** |
+| Spaced `-c` smuggled into `global_opts` via `--namespace` is still refused | `test_config_flag_in_global_opts_position_rejected` | Error handling, 3 arms | green |
+| Every spelling the guard already catches keeps its rejection: `-c`, `-c=…`, bare `--config-env` (the separate-value form), `--config-env=…` | `test_known_config_flag_spellings_still_rejected` | Error handling, 4 arms | green |
+| The rejection message still quotes the offending token and names alias expansion | `test_spaced_config_flag_rejection_message_names_the_token` | Message contract | green |
+| Read-only flags beginning with `c` stay forwarded unchanged | `test_non_config_flags_beginning_with_c_still_forwarded` | Over-block guard, 6 arms | green |
+| `-C <abs path inside root>` is not a config flag — the match stays case-sensitive | `test_capital_c_path_flag_is_not_a_config_flag` | Over-block guard | green |
+| A glued token in the `command` string stays refused by the read-only allowlist | `test_glued_short_config_flag_in_command_string_is_not_forwarded` | Regression guard | green |
+
+### Confirmed-RED assertions
+
+All 9 red arms were run under `--runxfail` against `b99cb5d` and fail for the right reason — **the
+call succeeded and the argv was forwarded**, never an import or fixture error. Each reports
+`AssertionError: {"output": "ok"} / assert False is True` on `result.is_error is True`, i.e. the tool
+returned the recorder's canned success instead of raising. `tests/mcp` is **232 passed / 9 xfailed**;
+`make lint` and `make typecheck` (334 source files) clean.
+
+No existing test asserted the vulnerable behaviour — nothing in the suite required a glued `-c`
+token to be forwarded, so no test had to be weakened or deleted.
+
+### Deliberately left unpinned (fix-wave decisions)
+
+- **Whether the guard becomes a regex, a `skip_prefix`-style check, or a token normaliser.** Only the
+  observable contract is pinned (rejection + the existing `can execute arbitrary code via git alias
+  expansion` message), not the implementation.
+- **Bundled short flags after the subcommand** (`git blame -cw`). Bare `-c` in `args` is already
+  refused unconditionally by design (Batch A pinned that even a benign `-c core.quotepath=false` is
+  refused), so a bundled `-cw` is collateral of a pre-existing deliberate over-block, not new.
+- **`--namespace`'s missing path/value confinement.** The `global_opts` reds use it as the delivery
+  vehicle because it is the one route to the pre-subcommand slot, but whether `--namespace` should
+  validate its value at all is a separate contract and is not asserted here.
+- **`-C` supplied after the subcommand** (`git blame -C <file>`), where `_extract_global_opts` lifts
+  it into `global_opts` and confines a relative path against the wrong base. Pre-existing quirk,
+  unrelated to the config-flag guard.
