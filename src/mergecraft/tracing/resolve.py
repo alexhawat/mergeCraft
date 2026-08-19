@@ -63,7 +63,9 @@ def _build_sinks(merged: dict[str, Any]) -> list[TraceSinkEntry]:
             # dump / config on disk.
         ]
 
-    if tracing_to == "otel":
+    if tracing_to == "otel" or (tracing_to is None and otel_endpoint is not None):
+        # Explicit ``--tracing-to otel`` *or* an OTel endpoint env var without an
+        # explicit destination (``MERGECRAFT_OTEL_ENDPOINT`` implies OTLP).
         return [TraceSinkEntry(type="otel", endpoint=otel_endpoint)]
 
     # Default destinations:

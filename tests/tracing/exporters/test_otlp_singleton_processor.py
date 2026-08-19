@@ -58,10 +58,6 @@ def _otel_settings_dict() -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("construction_count", [_N_CONSTRUCTIONS])
-@pytest.mark.xfail(
-    reason="green after W2: #293 singleton OTLP processor",
-    strict=False,
-)
 def test_setup_tracer_provider_stacks_at_most_one_batch_processor(
     construction_count: int,
 ) -> None:
@@ -111,10 +107,6 @@ def test_setup_tracer_provider_stacks_at_most_one_batch_processor(
 
 
 @pytest.mark.parametrize("construction_count", [_N_CONSTRUCTIONS])
-@pytest.mark.xfail(
-    reason="green after W2: #293 singleton OTLP processor",
-    strict=False,
-)
 def test_n_otlp_sinks_export_one_payload_per_span(
     construction_count: int,
     trace_event_payload: dict[str, Any],
@@ -150,10 +142,6 @@ def test_n_otlp_sinks_export_one_payload_per_span(
 
 
 @pytest.mark.parametrize("construction_count", [_N_CONSTRUCTIONS])
-@pytest.mark.xfail(
-    reason="green after W2: #293 singleton OTLP processor",
-    strict=False,
-)
 def test_get_tracer_from_settings_does_not_multiply_otlp_exports(
     construction_count: int,
     monkeypatch: pytest.MonkeyPatch,
