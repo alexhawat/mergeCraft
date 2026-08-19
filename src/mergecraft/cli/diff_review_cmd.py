@@ -34,6 +34,75 @@ error_console = Console(stderr=True)
 
 OutputFormat = Literal["text", "json", "jsonl", "sarif"]
 
+_PANEL_SOURCE = "Source"
+_PANEL_DIFF = "Diff selection"
+_PANEL_OUTPUT = "Output"
+_PANEL_AGENT = "Agent"
+_PANEL_TRACING = "Tracing"
+_PANEL_TRUST = "Trust"
+
+# Click treats a leading ``\b`` (backspace) as "do not rewrap this paragraph",
+# so example commands stay copy-pasteable in ``mergecraft review --help``.
+_REVIEW_COMMAND_HELP = """Review a local git diff offline (no GitHub Action / PR posting).
+
+No flags are required. The minimum invocation is:
+
+\b
+  mergecraft review
+
+That reviews the current git checkout: uncommitted edits plus commits since the
+detected base (upstream, else origin/main or origin/master). You need:
+
+* a git repository here, or --cwd PATH, or --repo, or --diff FILE
+* a provider credential (`mergecraft auth …`) unless you pass --dry-run
+
+This command never posts GitHub review comments. To review a GitHub PR, pass its
+diff (--head pull/N/head, `gh pr diff`, or a local checkout of the PR branch).
+
+Required vs optional:
+
+* flags — none; `mergecraft review` is enough inside a git checkout
+* source — cwd git repo (default), else one of --cwd / --repo / --diff
+* credentials — required for a live review; skip with --dry-run
+* --base / --head / --range / --staged / --unstaged — optional diff selectors
+* --token — only for private --repo clones (else GH_TOKEN, GITHUB_TOKEN, or `gh auth token`)
+
+Examples — local checkout / worktree vs a GitHub branch:
+
+\b
+  mergecraft review
+  mergecraft review --dry-run
+  mergecraft review --staged
+  mergecraft review --unstaged
+  mergecraft review --base origin/main
+  mergecraft review --cwd ../feature-wt --base origin/main
+  mergecraft review --head HEAD --base origin/pre-0.0.1
+  mergecraft review --range HEAD~3..HEAD
+  mergecraft review --range origin/main..HEAD
+  mergecraft review --diff changes.patch --dry-run
+
+Examples — present or past GitHub PR (diff only; no comments posted):
+
+\b
+  mergecraft review --repo owner/repo --head feature --base main
+  mergecraft review --repo owner/repo --head pull/42/head --base main
+  mergecraft review --repo owner/repo --head pull/42/head --token "$GH_TOKEN"
+  gh pr checkout 42
+  mergecraft review --base origin/main
+  gh pr diff 42 > /tmp/pr-42.diff
+  mergecraft review --diff /tmp/pr-42.diff
+  gh pr diff 42 --repo owner/repo > /tmp/pr-42.diff
+  mergecraft review --diff /tmp/pr-42.diff --dry-run
+
+Examples — output:
+
+\b
+  mergecraft review --json findings.json
+  mergecraft review --format sarif --output report.sarif.json
+  mergecraft review --format jsonl --output stream.jsonl
+  mergecraft review --agent
+"""
+
 
 def _exit_with_message(msg: str, exit_code: int, *, agent_mode: bool = False) -> NoReturn:
     target = error_console if agent_mode else console
@@ -91,41 +160,56 @@ def run(
         None,
         "--base",
         "-b",
-        help="Git base ref for merge-base diff (default: upstream or origin/main|master).",
+        help=(
+            "Git base ref for the diff (branch, origin/name, or SHA). "
+            "Optional; default is upstream or origin/main|master."
+        ),
+        rich_help_panel=_PANEL_DIFF,
     ),
     repo: str | None = typer.Option(
         None,
         "--repo",
         help=(
-            "Review source: local path, https://github.com/owner/repo URL, or owner/repo shorthand."
+            "Optional review source: local path, owner/repo, or "
+            "https://github.com/owner/repo URL. Omit to use --cwd / the current checkout."
         ),
+        rich_help_panel=_PANEL_SOURCE,
     ),
     head: str | None = typer.Option(
         None,
         "--head",
-        help="Head ref to review (default: current HEAD or clone ref).",
+        help=(
+            "Head ref to review (branch, SHA, or GitHub pull ref like pull/42/head). "
+            "Optional; default is current HEAD or the cloned --repo ref."
+        ),
+        rich_help_panel=_PANEL_DIFF,
     ),
     staged: bool = typer.Option(
         False,
         "--staged",
-        help="Review only staged changes (`git diff --cached`).",
+        help="Review only staged changes (`git diff --cached`). Optional.",
+        rich_help_panel=_PANEL_DIFF,
     ),
     unstaged: bool = typer.Option(
         False,
         "--unstaged",
-        help="Review only unstaged working-tree changes.",
+        help="Review only unstaged working-tree changes. Optional.",
+        rich_help_panel=_PANEL_DIFF,
     ),
     commit_range: str | None = typer.Option(
         None,
         "--range",
-        help="Explicit commit range (e.g. HEAD~3..HEAD).",
+        help="Optional explicit commit range (e.g. HEAD~3..HEAD or origin/main..HEAD).",
+        rich_help_panel=_PANEL_DIFF,
     ),
     token: str | None = typer.Option(
         None,
         "--token",
         help=(
-            "GitHub token for private clone (wins over GH_TOKEN/GITHUB_TOKEN and `gh auth token`)."
+            "GitHub token for a private --repo clone (wins over GH_TOKEN/GITHUB_TOKEN "
+            "and `gh auth token`). Not needed for a local checkout."
         ),
+        rich_help_panel=_PANEL_SOURCE,
     ),
     diff: Path | None = typer.Option(
         None,
@@ -134,39 +218,52 @@ def run(
         exists=True,
         dir_okay=False,
         readable=True,
-        help="Use an existing unified diff/patch file instead of computing one.",
+        help=(
+            "Use an existing unified diff/patch file instead of computing one. "
+            "Optional alternative to a git checkout (e.g. `gh pr diff 42 > pr.diff`)."
+        ),
+        rich_help_panel=_PANEL_SOURCE,
     ),
     cwd: Path = typer.Option(
         Path("."),
         "--cwd",
-        help="Repository working directory (default: current directory).",
+        help=(
+            "Repository or linked-worktree path (default: current directory). "
+            "Optional; the minimum `mergecraft review` uses `.`."
+        ),
+        rich_help_panel=_PANEL_SOURCE,
     ),
     model: str | None = typer.Option(
         None,
         "--model",
         "-m",
         help="Model slug override (otherwise .mergecraft/config.yaml / MERGECRAFT_MODEL).",
+        rich_help_panel=_PANEL_AGENT,
     ),
     output: Path | None = typer.Option(
         None,
         "--output",
         "-o",
         help="Write review markdown or structured output (depends on --format) to this file.",
+        rich_help_panel=_PANEL_OUTPUT,
     ),
     json_output: Path | None = typer.Option(
         None,
         "--json",
         help="Write structured findings JSON to this file.",
+        rich_help_panel=_PANEL_OUTPUT,
     ),
     output_format: OutputFormat = typer.Option(
         "text",
         "--format",
         help="Machine output format: text (default), json, jsonl, or sarif.",
+        rich_help_panel=_PANEL_OUTPUT,
     ),
     agent_mode: bool = typer.Option(
         False,
         "--agent",
         help="Stream the agent JSONL protocol on stdout (orchestrator mode).",
+        rich_help_panel=_PANEL_OUTPUT,
     ),
     evidence_packet: Path | None = typer.Option(
         None,
@@ -175,17 +272,20 @@ def run(
             "Write the Merge Evidence Packet JSON to this file. "
             "Defaults to the run's temp directory (the path is logged either way)."
         ),
+        rich_help_panel=_PANEL_OUTPUT,
     ),
     prompt: str | None = typer.Option(
         None,
         "--prompt",
         "-p",
         help="Extra instructions appended to the offline Review prompt.",
+        rich_help_panel=_PANEL_AGENT,
     ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
         help="Materialize the diff and print the Review prompt without invoking an agent.",
+        rich_help_panel=_PANEL_AGENT,
     ),
     tracing: bool | None = typer.Option(
         None,
@@ -194,6 +294,7 @@ def run(
             "Override tracing enablement for this invocation. "
             "Wins over MERGECRAFT_TRACING and .mergecraft/config.yaml (W8.4 / W7.6)."
         ),
+        rich_help_panel=_PANEL_TRACING,
     ),
     tracing_to: str | None = typer.Option(
         None,
@@ -202,11 +303,13 @@ def run(
             "Override the tracing shorthand: local_files, logfire, or otel. "
             "Wins over MERGECRAFT_TRACING_TO and the config block (W8.4 / W7.6)."
         ),
+        rich_help_panel=_PANEL_TRACING,
     ),
     trace_dir: Path | None = typer.Option(
         None,
         "--trace-dir",
         help="Override the jsonl_file sink path for local traces (W8.4 / W7.6).",
+        rich_help_panel=_PANEL_TRACING,
     ),
     logfire_token: str | None = typer.Option(
         None,
@@ -215,6 +318,7 @@ def run(
             "Resolve the logfire token directly. Wins over MERGECRAFT_LOGFIRE_TOKEN "
             "and the config block (W8.4 / W7.6)."
         ),
+        rich_help_panel=_PANEL_TRACING,
     ),
     otel_endpoint: str | None = typer.Option(
         None,
@@ -223,6 +327,7 @@ def run(
             "Override the OTLP collector endpoint. Wins over MERGECRAFT_OTEL_ENDPOINT "
             "and the config block (W8.4 / W7.6)."
         ),
+        rich_help_panel=_PANEL_TRACING,
     ),
     trust: str | None = typer.Option(
         None,
@@ -231,14 +336,9 @@ def run(
             "Explicit trust tier override for this review source (trusted or untrusted). "
             "Never read from repo config — operator flag only (TS1 / D3)."
         ),
+        rich_help_panel=_PANEL_TRUST,
     ),
 ) -> None:
-    """Review a local git diff offline (no GitHub Action / PR posting).
-
-    Computes ``git diff --merge-base <base>`` (or uses ``--diff``), then runs the
-    Review-mode agent against that on-disk patch. Use ``--dry-run`` to inspect the
-    prompt without LLM credentials.
-    """
     configure_logging()
     invocation_root = Path.cwd().resolve()
     root = cwd.resolve()
@@ -407,3 +507,6 @@ def run(
         if internal_json_sink:
             with contextlib.suppress(OSError):
                 json_path_for_run.unlink(missing_ok=True)
+
+
+run.__doc__ = _REVIEW_COMMAND_HELP
