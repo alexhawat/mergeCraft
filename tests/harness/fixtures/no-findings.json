@@ -1,0 +1,21 @@
+{
+  "name": "no-findings",
+  "match": {
+    "provider": "default",
+    "model": "dummy",
+    "streaming": false
+  },
+  "response": {
+    "body": {
+      "id": "no-findings",
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "No findings."
+          }
+        }
+      ]
+    }
+  }
+}

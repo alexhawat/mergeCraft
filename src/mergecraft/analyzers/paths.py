@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mergecraft.review_policy.paths import normalize_repo_path
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -20,4 +22,4 @@ def safe_repo_relative_path(repo_root: Path, rel: str) -> Path | None:
     return None
 
 
-__all__ = ["safe_repo_relative_path"]
+__all__ = ["normalize_repo_path", "safe_repo_relative_path"]

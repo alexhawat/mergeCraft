@@ -608,6 +608,7 @@ of them for its full flag set):
 | `mergecraft config show <key>` | Show a resolved config value and the precedence layer that supplied it. |
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
 | `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
+| `mergecraft context inspect` | Report sources, scope, provenance citations, and token totals. |
 | `mergecraft diff-review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
@@ -630,6 +631,12 @@ of them for its full flag set):
 | `mergecraft lens test <lens-id>` | Preview one lens dispatch (rubric + routing context) for a diff fixture. |
 | `mergecraft mcp list` | Print the resolved MCP tool names for a role. |
 | `mergecraft mcp serve` | Start the MCP HTTP server for a resolved workspace and role. |
+| `mergecraft memory export --output OUTPUT` | Export repo memory to a JSON bundle. |
+| `mergecraft memory feedback` | Record accepted / dismissed / disputed feedback for a finding fingerprint. |
+| `mergecraft memory forget` | Remove one active memory entry. |
+| `mergecraft memory import <bundle-path>` | Import a memory export bundle into a repository. |
+| `mergecraft memory list` | List active memory entries for a repository. |
+| `mergecraft memory show` | Show one memory entry by id. |
 | `mergecraft models list` | List curated model slugs and whether credentials are detected locally. |
 | `mergecraft models set <slugs>` | Write an ordered `models:` list to `.mergecraft/config.yaml`. |
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |
@@ -637,6 +644,9 @@ of them for its full flag set):
 | `mergecraft pipeline lint` | Validate the pipeline file and registry agent references. |
 | `mergecraft pipeline show --diff DIFF` | Preview which pipeline steps would run or skip for a diff. |
 | `mergecraft plan` | Preview model chain, toolset, analyzers, and token estimate without provider calls. |
+| `mergecraft policy explain --path PATH` | List effective rules for a path and name each rule's source layer. |
+| `mergecraft policy lint` | Validate policy rule YAML under `.mergecraft/policy/`. |
+| `mergecraft policy test --fixtures FIXTURES` | Run should-trigger and should-not policy fixtures. |
 | `mergecraft review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft traces show <run-id>` | Read back the local JSONL traces for the given run id (re-redacts on render). |
 | `mergecraft tracing logfire disable` | Disable Logfire tracing by removing the token + project locally and on GitHub. |

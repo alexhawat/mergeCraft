@@ -276,11 +276,10 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     if inline:
         payload["comments"] = inline
 
+    scm = ctx.scm
     approve_fallback = False
     try:
-        result = await ctx.github.create_review(
-            ctx.repo.owner, ctx.repo.name, pull_number, **payload
-        )
+        result = await scm.create_review(ctx.repo.owner, ctx.repo.name, pull_number, **payload)
     except httpx.HTTPStatusError as exc:
         if event != "APPROVE" or exc.response.status_code != 422:
             raise
@@ -290,9 +289,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
         )
         fallback = dict(payload)
         fallback["event"] = "COMMENT"
-        result = await ctx.github.create_review(
-            ctx.repo.owner, ctx.repo.name, pull_number, **fallback
-        )
+        result = await scm.create_review(ctx.repo.owner, ctx.repo.name, pull_number, **fallback)
         approve_fallback = True
     review_id = int(result["id"])
     ctx.tool_state.review = ReviewRecord(

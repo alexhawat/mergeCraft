@@ -103,7 +103,7 @@ async def _apply_ci_evidence(
         logger.debug("ci evidence: no checkout SHA on this run — skipping gate substitution")
         return outcomes, []
     try:
-        payload = await ctx.github.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
+        payload = await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
     except Exception as err:
         logger.warning("ci evidence: could not read check runs for {} — {}", ref, err)
         return outcomes, []

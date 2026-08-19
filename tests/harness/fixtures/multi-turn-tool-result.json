@@ -1,0 +1,23 @@
+{
+  "name": "multi-turn-tool-result",
+  "match": {
+    "provider": "default",
+    "model": "dummy",
+    "turn_index": 1,
+    "has_tool_results": true,
+    "tool_result_content": "analyzer output"
+  },
+  "response": {
+    "body": {
+      "id": "turn-1",
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "second turn"
+          }
+        }
+      ]
+    }
+  }
+}

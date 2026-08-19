@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 def list_check_runs_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         ref = str(params["ref"])
-        data = await ctx.github.list_check_suites_for_ref(ctx.repo.owner, ctx.repo.name, ref)
+        data = await ctx.scm.list_check_suites_for_ref(ctx.repo.owner, ctx.repo.name, ref)
         return {
             "ref": ref,
             "total_count": data.get("total_count"),
@@ -41,7 +41,7 @@ def list_check_runs_tool(ctx: ToolContext):
 def get_check_suite_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         check_suite_id = int(params["check_suite_id"])
-        return await ctx.github.get_check_suite(
+        return await ctx.scm.get_check_suite(
             ctx.repo.owner,
             ctx.repo.name,
             check_suite_id,

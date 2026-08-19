@@ -12,6 +12,7 @@ from loguru import logger
 
 from mergecraft.ci.log_excerpt import analyze_log
 from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation
+from mergecraft.scm.github import GitHubScmAdapter
 
 if TYPE_CHECKING:
     from mergecraft.ci.types import ProviderContext, RawFailure
@@ -39,7 +40,7 @@ class GitHubActionsProvider:
         truncation_cap: int = DEFAULT_TRUNCATION_CAP,
     ) -> dict[str, Any]:
         """Download failed workflow logs for a check suite (legacy MCP contract)."""
-        payload = await ctx.github.get(
+        payload = await ctx.scm.get(
             f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs",
             params={"check_suite_id": check_suite_id, "per_page": 100},
         )
@@ -63,14 +64,14 @@ class GitHubActionsProvider:
         for run in selected:
             run_id = run["id"]
             try:
-                response = await ctx.github._client.get(
-                    f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{run_id}/logs",
-                    headers={"Accept": "application/vnd.github+json"},
-                    follow_redirects=True,
+                scm = ctx.scm
+                if not isinstance(scm, GitHubScmAdapter):
+                    raise RuntimeError("log download requires a GitHub SCM adapter")
+                raw = await scm.download_workflow_run_logs(
+                    ctx.repo.owner,
+                    ctx.repo.name,
+                    run_id,
                 )
-                if response.status_code >= 400:
-                    raise RuntimeError(f"log download failed: {response.status_code}")
-                raw = response.content
             except Exception as err:
                 logger.info("failed to download logs for run {}: {}", run_id, err)
                 continue

@@ -7,43 +7,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mergecraft.review_policy.manifest_names import DEPENDENCY_MANIFEST_NAMES, LOCKFILE_NAMES
 from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING, finding_fingerprint
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from mergecraft.analyzers.finding import Finding
 
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(.+?) b/(.+?)$")
 _NEW_FILE_RE = re.compile(r"^new file mode ")
 _DEV_NULL_RE = re.compile(r"^--- /dev/null")
-
-# Scope exceptions (W5.2) — explicit paths, not heuristics.
-_LOCKFILE_NAMES: frozenset[str] = frozenset(
-    {
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "yarn.lock",
-        "poetry.lock",
-        "Pipfile.lock",
-        "uv.lock",
-        "Cargo.lock",
-        "go.sum",
-        "composer.lock",
-        "Gemfile.lock",
-    }
-)
-_DEPENDENCY_MANIFEST_NAMES: frozenset[str] = frozenset(
-    {
-        "requirements.txt",
-        "requirements-dev.txt",
-        "pyproject.toml",
-        "package.json",
-        "go.mod",
-        "Cargo.toml",
-        "Gemfile",
-        "composer.json",
-    }
-)
 _MIGRATION_PREFIXES: tuple[str, ...] = (
     "db/migrations/",
     "migrations/",
@@ -138,6 +113,36 @@ def parse_diff_scope(diff_text: str) -> DiffScope:
     )
 
 
+def iter_added_diff_lines(diff_text: str) -> Iterator[tuple[str, int, str]]:
+    """Yield ``(path, new-file line number, added line content)`` from a unified diff."""
+    current_path: str | None = None
+    new_line = 0
+
+    for raw_line in diff_text.splitlines():
+        file_match = _DIFF_FILE_RE.match(raw_line)
+        if file_match:
+            current_path = file_match.group(2)
+            continue
+
+        if current_path is None:
+            continue
+
+        hunk_match = _HUNK_RE.match(raw_line)
+        if hunk_match:
+            new_line = int(hunk_match.group(1))
+            continue
+
+        if raw_line.startswith(("--- ", "+++ ")):
+            continue
+
+        prefix = raw_line[:1]
+        if prefix == "+":
+            yield current_path, new_line, raw_line[1:]
+            new_line += 1
+        elif prefix == " ":
+            new_line += 1
+
+
 def _record_exception_paths(
     path: str,
     *,
@@ -150,9 +155,9 @@ def _record_exception_paths(
     name = Path(path).name
     if is_new_file:
         changed_dependency_manifests.add(path)
-    if name in _LOCKFILE_NAMES:
+    if name in LOCKFILE_NAMES:
         changed_lockfiles.add(path)
-    if name in _DEPENDENCY_MANIFEST_NAMES:
+    if name in DEPENDENCY_MANIFEST_NAMES:
         changed_dependency_manifests.add(path)
     if path.startswith((".github/workflows/", ".github/actions/")):
         changed_workflows.add(path)
@@ -194,10 +199,11 @@ def apply_scope_exceptions(
     *,
     diff_text: str,
     repo_root: Path | None = None,
+    scope: DiffScope | None = None,
 ) -> list[Finding]:
     """Keep findings on changed hunks or on explicit PR-scope exception paths."""
     _ = repo_root
-    scope = parse_diff_scope(diff_text)
+    scope = scope if scope is not None else parse_diff_scope(diff_text)
     kept: list[Finding] = []
     for finding in findings:
         on_hunk = _line_intersects_hunks(finding.path, finding.start_line, finding.end_line, scope)
@@ -237,10 +243,12 @@ def introduced_by_base_diff(
     base_findings: list[Finding],
 ) -> list[Finding]:
     """Mark findings present on head but absent on base as PR-introduced."""
-    base_fps = {finding.fingerprint for finding in base_findings}
+    from mergecraft.analyzers.baseline_suppression import _baseline_identity
+
+    base_identities = {_baseline_identity(finding) for finding in base_findings}
     result: list[Finding] = []
     for finding in head_findings:
-        is_new = finding.fingerprint not in base_fps
+        is_new = _baseline_identity(finding) not in base_identities
         result.append(
             finding.model_copy(update={"introduced_by_pr": "true" if is_new else "false"})
         )
@@ -287,15 +295,51 @@ def withdrawn_fingerprints(learnings_text: str) -> frozenset[str]:
     return frozenset(fingerprints)
 
 
+def changed_paths_from_scope(scope: DiffScope) -> list[str]:
+    paths = set(scope.hunk_ranges.keys())
+    paths.update(scope.added_files)
+    paths.update(scope.changed_lockfiles)
+    paths.update(scope.changed_workflows)
+    paths.update(scope.changed_migrations)
+    paths.update(scope.changed_dependency_manifests)
+    return sorted(paths)
+
+
+def filter_generated_scope(
+    findings: list[Finding],
+    *,
+    diff_text: str,
+    scope: DiffScope | None = None,
+) -> list[Finding]:
+    """Drop generated/minified/vendored findings policy excludes (D4)."""
+    from mergecraft.classify.generated_files import ChangeSet, finding_survives_generated_policy
+
+    scope = scope if scope is not None else parse_diff_scope(diff_text)
+    change: ChangeSet = {"changed_paths": changed_paths_from_scope(scope)}
+    kept: list[Finding] = []
+    for finding in findings:
+        if finding_survives_generated_policy(finding.path, change=change):
+            kept.append(finding)
+    return kept
+
+
 def scope_findings(
     findings: list[Finding],
     *,
     diff_text: str,
     repo_root: Path | None = None,
     learnings_text: str = "",
+    scope: DiffScope | None = None,
 ) -> list[Finding]:
-    """Apply diff scoping, exceptions, and withdrawn suppression."""
-    scoped = apply_scope_exceptions(findings, diff_text=diff_text, repo_root=repo_root)
+    """Apply diff scoping, exceptions, generated policy, and withdrawn suppression."""
+    parsed = scope if scope is not None else parse_diff_scope(diff_text)
+    scoped = apply_scope_exceptions(
+        findings,
+        diff_text=diff_text,
+        repo_root=repo_root,
+        scope=parsed,
+    )
+    scoped = filter_generated_scope(scoped, diff_text=diff_text, scope=parsed)
     return suppress_withdrawn_findings(scoped, learnings_text)
 
 
@@ -304,8 +348,11 @@ __all__ = [
     "annotate_introduced_by_pr",
     "apply_scope_exceptions",
     "base_comparison_available",
+    "changed_paths_from_scope",
+    "filter_generated_scope",
     "filter_to_diff",
     "introduced_by_base_diff",
+    "iter_added_diff_lines",
     "parse_diff_scope",
     "scope_findings",
     "suppress_withdrawn_findings",

@@ -178,8 +178,10 @@ async def plan_carryover(
         A :class:`CarryoverPlan`; ``to_file`` is empty when nothing survives or
         everything was already filed.
     """
+    from mergecraft.scm.github import GitHubScmAdapter
+
     page = await fetch_review_threads(
-        github, owner, repo, pull_number, include_resolved=include_resolved
+        GitHubScmAdapter(github), owner, repo, pull_number, include_resolved=include_resolved
     )
     if page.truncated:
         logger.warning(

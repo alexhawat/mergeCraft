@@ -16,6 +16,7 @@ from mergecraft.cli import (
     auth_cmd,
     cache_cmd,
     config_surface_cmd,
+    context_cmd,
     diff_review_cmd,
     doctor_cmd,
     eval_cmd,
@@ -25,9 +26,11 @@ from mergecraft.cli import (
     learnings_cmd,
     lens_cmd,
     mcp_cmd,
+    memory_cmd,
     models_cmd,
     pipeline_cmd,
     plan_cmd,
+    policy_cmd,
     tracing_cmd,
     tracing_logfire_cmd,
     watch_cmd,
@@ -47,6 +50,7 @@ app.add_typer(lens_cmd.app, name="lens")
 app.add_typer(pipeline_cmd.app, name="pipeline")
 app.add_typer(mcp_cmd.app, name="mcp")
 app.add_typer(cache_cmd.app, name="cache")
+app.add_typer(context_cmd.app, name="context")
 app.add_typer(auth_cmd.app, name="auth")
 app.add_typer(models_cmd.app, name="models")
 app.add_typer(analyzers_cmd.app, name="analyzers")
@@ -58,6 +62,8 @@ app.command("review")(diff_review_cmd.run)
 app.command("diff-review", hidden=True)(diff_review_cmd.run)
 app.add_typer(gha_cmd.app, name="gha")
 app.add_typer(learnings_cmd.app, name="learnings")
+app.add_typer(memory_cmd.app, name="memory")
+app.add_typer(policy_cmd.app, name="policy")
 app.add_typer(findings_cmd.app, name="findings")
 app.add_typer(eval_cmd.app, name="eval")
 # W8.4 — ``mergecraft config tracing`` + ``mergecraft traces <run-id>``.

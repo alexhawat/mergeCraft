@@ -31,6 +31,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import ToolState
 
@@ -298,6 +299,40 @@ def split_learnings_by_section(
         "\n".join(lines[staging_start + 1 : staging_end]) if staging_start is not None else ""
     )
     return prefix, active_body, staging_body
+
+
+def tail_after_staging_section(text: str) -> str:
+    """Return markdown from the first ``##`` heading after ``## Staging``, if any."""
+    lines = text.splitlines()
+    staging_start: int | None = None
+    staging_depth: int | None = None
+    staging_end = len(lines)
+
+    for idx, line in enumerate(lines):
+        match = _heading_re().match(line)
+        if not match:
+            continue
+        depth = len(match.group(1))
+        title = match.group(2).strip().lower()
+        if title == STAGING_SECTION_HEADING.lower() and staging_start is None:
+            staging_start = idx
+            staging_depth = depth
+
+    if staging_start is None or staging_depth is None:
+        return ""
+
+    for idx in range(staging_start + 1, len(lines)):
+        match = _heading_re().match(lines[idx])
+        if not match:
+            continue
+        if len(match.group(1)) <= staging_depth:
+            staging_end = idx
+            break
+
+    if staging_end >= len(lines):
+        return ""
+    tail = "\n".join(lines[staging_end:]).strip()
+    return f"{tail}\n" if tail else ""
 
 
 def build_provenance_record(tool_state: ToolState) -> LearningProvenance:
@@ -729,6 +764,127 @@ async def persist_xrepo_learnings(ctx: ToolContext) -> None:
         logger.warning("xrepo learnings persist failed: {}", exc)
 
 
+# ── DG7 — memory wiring for review runs ────────────────────────────────────
+
+
+def repo_memory_paths(repo_root: Path) -> tuple[Path, Path]:
+    """Return ``(feedback.json, memory.json)`` paths under ``repo_root/.mergecraft``."""
+    base = repo_root / ".mergecraft"
+    from mergecraft.utils.memory import FEEDBACK_FILE_NAME, MEMORY_FILE_NAME
+
+    return base / FEEDBACK_FILE_NAME, base / MEMORY_FILE_NAME
+
+
+def apply_repo_memory_to_findings(
+    findings: list[Finding],
+    *,
+    repo_root: Path,
+    trust_tier: Literal["trusted", "untrusted"] = "trusted",
+) -> list[Finding]:
+    """Apply dismissed feedback and negative-memory rules before publication."""
+    from mergecraft.utils.memory import (
+        FeedbackOutcome,
+        NegativeMemoryStore,
+        apply_negative_memory,
+        load_feedback_store,
+    )
+
+    if not findings:
+        return []
+    if trust_tier != "trusted":
+        logger.debug(
+            "Skipping repo memory suppression on untrusted tier — "
+            "PR-authored feedback.json/memory.json must not suppress findings (D5/D9)"
+        )
+        return list(findings)
+    feedback_path, memory_path = repo_memory_paths(repo_root)
+    try:
+        feedback = load_feedback_store(feedback_path)
+    except Exception as exc:
+        logger.warning(
+            "Skipping repo feedback suppression — unreadable {}: {}",
+            feedback_path,
+            exc,
+        )
+        from mergecraft.utils.memory import FeedbackStore
+
+        feedback = FeedbackStore()
+    surviving: list[Finding] = []
+    for finding in findings:
+        record = feedback.entries.get(finding.fingerprint)
+        if record is not None and record.outcome == FeedbackOutcome.DISMISSED:
+            continue
+        surviving.append(finding)
+    if not memory_path.is_file():
+        return surviving
+    store = NegativeMemoryStore(path=memory_path)
+    result = apply_negative_memory(findings=surviving, store=store, repo_root=repo_root)
+    return result.reported
+
+
+def load_weighted_active_memories(
+    repo_root: Path | None = None,
+    *,
+    learnings_text: str | None = None,
+    now: datetime | None = None,
+    ttl_days: int | None = None,
+) -> list[tuple[str, float]]:
+    """Return active learnings bullets with recency weights for prompt injection."""
+    from mergecraft.utils.memory import (
+        DEFAULT_ACTIVE_MEMORY_TTL_DAYS,
+        MemoryEntry,
+        apply_recency_weighting,
+        memory_entry_id,
+    )
+
+    if learnings_text is not None:
+        text = learnings_text
+    elif repo_root is not None:
+        learn_path = repo_root / ".mergecraft" / "learnings.md"
+        if not learn_path.is_file():
+            return []
+        text = learn_path.read_text(encoding="utf-8")
+    else:
+        return []
+    effective_ttl = ttl_days if ttl_days is not None else DEFAULT_ACTIVE_MEMORY_TTL_DAYS
+    ts = now or datetime.now(UTC)
+    provenanced: list[MemoryEntry] = []
+    unprovenanced: list[str] = []
+    for item in list_active_entries(text):
+        body = str(item.get("body") or "").strip()
+        if not body:
+            continue
+        prov = item.get("provenance")
+        for line in body.splitlines():
+            bullet = line.strip().lstrip("-* ").strip()
+            if not bullet:
+                continue
+            if isinstance(prov, LearningProvenance):
+                provenanced.append(
+                    MemoryEntry(
+                        id=memory_entry_id(bullet),
+                        text=bullet,
+                        recorded_at=prov.timestamp,
+                        ttl_days=effective_ttl,
+                    )
+                )
+            else:
+                unprovenanced.append(bullet)
+    weighted: list[tuple[str, float]] = []
+    for entry, weight in apply_recency_weighting(provenanced, now=ts):
+        if weight > 0.0:
+            weighted.append((entry.text, weight))
+        else:
+            logger.debug(
+                "Skipping expired provenanced learnings bullet (ttl_days={}): {}",
+                effective_ttl,
+                entry.text[:120],
+            )
+    for bullet in unprovenanced:
+        weighted.append((bullet, 1.0))
+    return weighted
+
+
 __all__ = [
     "ACTIVE_SECTION_HEADING",
     "LEARNINGS_FILE_NAME",
@@ -737,6 +893,7 @@ __all__ = [
     "TRUSTED_AUTHOR_ASSOCIATIONS",
     "XREPO_LEARNINGS_FILE_NAME",
     "LearningProvenance",
+    "apply_repo_memory_to_findings",
     "build_learnings_review_delta",
     "build_provenance_record",
     "ensure_learnings_review_delta",
@@ -744,17 +901,20 @@ __all__ = [
     "learnings_file_path",
     "list_active_entries",
     "list_staging_entries",
+    "load_weighted_active_memories",
     "merge_learnings_delta_into_review_body",
     "parse_provenance_comment",
     "persist_is_ephemeral",
     "persist_learnings",
     "persist_xrepo_learnings",
     "read_learnings_file",
+    "repo_memory_paths",
     "route_learnings_for_persist",
     "seed_learnings_file",
     "seed_xrepo_learnings_file",
     "split_learnings_by_section",
     "split_learnings_for_persist",
+    "tail_after_staging_section",
     "truncate_at_line_boundary",
     "xrepo_learnings_file_path",
 ]

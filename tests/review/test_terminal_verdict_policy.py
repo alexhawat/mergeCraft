@@ -46,6 +46,7 @@ from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.review_taxonomy import FINDING_MARKER_PREFIX, finding_fingerprint
 from mergecraft.run_outcome import RunOutcome, run_succeeded_for_outcome
 from mergecraft.utils.github import GitHubClient
+from tests.support.tool_context import bind_github_client
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -850,7 +851,7 @@ async def test_publication_cannot_bypass_structural_policy(tmp_path: Path) -> No
     _assert_decide_approval_signature_unchanged()
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path)
-    ctx.github = github
+    bind_github_client(ctx, github)
     primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
 
     spec = create_pull_request_review_tool(ctx)
@@ -873,7 +874,7 @@ async def test_existing_review_and_comment_behaviour_unchanged(tmp_path: Path) -
     """Regression pin: ``create_pull_request_review`` and comment tools still behave as today."""
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path)
-    ctx.github = github
+    bind_github_client(ctx, github)
     primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
 
     review_spec = create_pull_request_review_tool(ctx)
@@ -917,7 +918,7 @@ async def test_body_only_comment_is_not_recorded_as_request_changes(tmp_path: Pa
     """A plain COMMENT review must not fabricate a terminal ``request_changes``."""
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path)
-    ctx.github = github
+    bind_github_client(ctx, github)
     primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
 
     result = await create_pull_request_review_tool(ctx).execute(
@@ -933,7 +934,7 @@ async def test_body_only_request_changes_is_rejected_without_findings(tmp_path: 
     """Body-only ``request_changes`` must not evade D9 with a fabricated finding."""
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path)
-    ctx.github = github
+    bind_github_client(ctx, github)
     primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
 
     result = await create_pull_request_review_tool(ctx).execute(
@@ -956,7 +957,7 @@ async def test_publication_cannot_flip_recorded_request_changes_to_approve(
     """A recorded ``request_changes`` must not publish as ``approved=True``."""
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path)
-    ctx.github = github
+    bind_github_client(ctx, github)
     primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
 
     recorded = await _submit_verdict(
@@ -990,7 +991,7 @@ async def test_publication_revalidates_stale_approve_after_failed_gate(
         static_checks=[StaticCheckConfig(name="lint", command="python -c 'raise SystemExit(1)'")],
         static_checks_enabled=True,
     )
-    ctx.github = github
+    bind_github_client(ctx, github)
     primary_repo_state(ctx.tool_state).checkout_sha = "abc123"
 
     first = await _submit_verdict(ctx, _approve_payload())

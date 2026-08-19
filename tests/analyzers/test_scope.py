@@ -78,3 +78,81 @@ def test_introduced_by_pr_true_only_with_base_confirmation() -> None:
         [finding], base_run_performed=True, is_new_in_base=True
     )
     assert scoped[0].introduced_by_pr == "true"
+
+
+def test_introduced_by_base_diff_uses_line_and_rule_not_message() -> None:
+    """Same message on a new line must not inherit base ``introduced_by_pr=false``."""
+    scope = import_module("mergecraft.analyzers.scope")
+    finding_mod = import_module("mergecraft.analyzers.finding")
+    shared = {
+        "tool": "ruff",
+        "rule_id": "F401",
+        "category": "Maintainability & Code Quality",
+        "severity": "Minor",
+        "confidence": "certain",
+        "message": "Unused import os",
+        "path": "src/fixture_app/handler.py",
+        "source": "analyzer",
+    }
+    base = finding_mod.make_finding(**shared, start_line=10, end_line=10, introduced_by_pr="false")
+    head = finding_mod.make_finding(
+        **shared, start_line=20, end_line=20, introduced_by_pr="unknown"
+    )
+
+    annotated = scope.introduced_by_base_diff([head], [base])
+
+    assert annotated[0].introduced_by_pr == "true"
+
+
+def test_filter_generated_scope_drops_generated_findings_without_config_change() -> None:
+    """Generated findings on touched paths drop unless generator config changed."""
+    scope = import_module("mergecraft.analyzers.scope")
+    finding = _sample_finding("src/generated/schema.py", 1)
+    diff = """diff --git a/src/generated/schema.py b/src/generated/schema.py
+@@ -1 +1,2 @@
+ # generated
++extra
+"""
+    kept = scope.filter_generated_scope([finding], diff_text=diff)
+    assert kept == []
+
+
+def test_filter_generated_scope_keeps_generated_findings_when_config_changed() -> None:
+    scope = import_module("mergecraft.analyzers.scope")
+    finding = _sample_finding("src/generated/schema.py", 1)
+    diff = """diff --git a/Makefile b/Makefile
+@@ -1 +1,2 @@
+ gen:
++	@echo regen
+diff --git a/src/generated/schema.py b/src/generated/schema.py
+@@ -1 +1,2 @@
+ # generated
++extra
+"""
+    kept = scope.filter_generated_scope([finding], diff_text=diff)
+    assert len(kept) == 1
+
+
+def test_iter_added_diff_lines_yields_path_line_and_content() -> None:
+    scope = import_module("mergecraft.analyzers.scope")
+    diff = """diff --git a/README.md b/README.md
+index 1111111..2222222 100644
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,4 @@
+ # Title
++added line
+ unchanged
+diff --git a/src/app.py b/src/app.py
+index 3333333..4444444 100644
+--- a/src/app.py
++++ b/src/app.py
+@@ -10,1 +10,2 @@
+ def run():
++    return 1
+"""
+    added = list(scope.iter_added_diff_lines(diff))
+    assert added == [
+        ("README.md", 2, "added line"),
+        ("src/app.py", 11, "    return 1"),
+    ]

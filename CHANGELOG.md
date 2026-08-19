@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- SCM abstraction: `ScmProvider` protocol with `GitHubScmAdapter` (behaviour-preserving) and demand-gated `GitLabScmAdapter` that declares unsupported capabilities instead of emulating GitHub; core MCP tools and review publication route through `ToolContext.scm`
+
 ### Security
 
+- Linked-repo reads are grant-gated (D9): a run can only load repos declared in its authorized set; linked-repo and ticket text render through the W4 fence as untrusted data
+- Discovered repo instruction and skill files (`CLAUDE.md`, `AGENTS.md`, `SKILL.md`, `.cursor/rules/*.md`) from an untrusted review source render through the W4 fence as evidence and never enter the instruction bundle
 - CLI offline reviews now derive a trust tier from review-source provenance; cloned or out-of-root paths review at untrusted tier unless the operator passes an explicit `--trust` override
 - Executable repo config (`setupScript`, `prepushScript`, `stopScript`, `staticChecks[].command`) from an untrusted review source is ignored; declarative config still applies
 - Third-party clone acquisition is bounded and credential-safe: HTTPS GitHub URLs only, no redirect following, no submodule recursion by default, size and file-count ceilings, symlink/path containment, tokens never persisted in `.git/config` or process argv
@@ -16,7 +22,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added: a test-only provider-harness fixture schema and strict matcher
+  (`tests/support/provider_harness`) so deterministic review tests can name
+  the exact provider interaction they expect. Not used in production.
+- Added: provider-harness recording workflow and operator docs
+  (`docs/dev/provider-harness.md`); opt-in sanitized capture under
+  `.ignorelocal/provider-harness/records/`.
+- Cross-repository intelligence indexes linked repos at pinned commits, contract surfaces (OpenAPI, GraphQL, protobuf, exports), cross-repo blast radius, reproducible citations, and ticket acceptance-criteria mapping under `mergecraft.xrepo` and `mergecraft.requirements`
+- Repository context engine indexes repo maps, per-file symbol indexes (tree-sitter with generic fallback), provenance citations, and trust-gated instruction/skill discovery under `mergecraft.context`
+- Call graph, change graph (changed symbol → dependents → tests → contracts), budget-aware dynamic expansion, targeted git blame, and `mergecraft context inspect` for provenance-backed context retrieval
+- Feedback capture for findings (accepted / dismissed / disputed) keyed by fingerprint, with bounded negative-memory suppression, TTL/recency weighting, contradiction detection, and `mergecraft memory list|show|forget|export|import|feedback` lifecycle verbs (DG7)
+- Policy-as-code package (`mergecraft.policy`) with schema-validated YAML rules, deterministic org/repo/path scoping, enforcement modes mapped onto the existing approval gate (D7), required-evidence inconclusive handling (D8), and bounded exceptions with expiry
+- `mergecraft policy lint|test|explain` — validate policy rules, run should-trigger/should-not fixtures, and list effective rules with source layers
 - Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews
+- Large-PR review engine (DG2): cluster changed paths by dependency and intent, build hierarchical diff context (map → summaries → raw hunks) with token-budget scope reduction that reserves verbatim hunks for high-risk regions, record disputed/waived/stale finding lifecycle states, and emit advisory-only PR split recommendations from independent change groups
+- Finding precision pipeline (DG1): deduplicate agent/analyzer findings before publication, apply a code-defined severity rubric at the verifier seam, require structured causality on blocking findings, suppress pre-existing analyzer hits via baseline comparison, and classify generated/minified/vendored paths for review policy
+- DG1 precision corpus gate (`evaluate_dg1_precision_corpus`) proving recall holds while corpus-confirmed precision improves over the pre-DG1 baseline
+- PR utilities (DG8): standalone describe output (`mergecraft.pr.describe`), text-only changelog/docs/test suggestions (D11), deterministic TODO scan, classifier-derived effort bands, advisory label suggestions, and `/mergecraft review` comment routing with author-association and permission gating (`mergecraft.mcp.comment_router`)
 - `mergecraft mcp serve` and `mergecraft mcp list` expose the reviewer's MCP tool surface to external clients without widening trust tier or tool-class policy (D13)
 - Named review profiles (`--profile fast|deep|security`) bundle model chain, analyzer focus, and run budgets; explicit CLI flags still win
 - `mergecraft cache info|clear|prune` inspect and maintain the byte-bounded on-disk run cache

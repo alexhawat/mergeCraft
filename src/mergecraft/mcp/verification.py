@@ -27,6 +27,12 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.config import load_repo_settings
+from mergecraft.findings.agent_adapter import (
+    finding_for_publication_validation,
+    normalize_agent_findings_via_pipeline,
+)
+from mergecraft.findings.causality import CausalityValidationError, validate_blocking_finding
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
 from mergecraft.utils.learnings import learnings_file_path
@@ -39,6 +45,30 @@ _NOT_READY_REASON = (
     "run_analyzers (and run_static_checks when available) first so mechanically "
     "checkable facts are settled before any judge sees the finding (D14, #45)."
 )
+
+
+def _validate_publication_finding(
+    ctx: ToolContext,
+    fingerprint: str,
+    *,
+    causality: str,
+    severity: str | None = None,
+) -> None:
+    """Require structured causality before a blocking finding is confirmed (D2)."""
+    row = _finding_row_for_fingerprint(ctx, fingerprint)
+    if row is None:
+        msg = f"finding fingerprint {fingerprint!r} not found for blocking publication validation"
+        raise ValueError(msg)
+    finding = finding_for_publication_validation(
+        row,
+        fingerprint=fingerprint,
+        causality=causality,
+        severity=severity,
+    )
+    try:
+        validate_blocking_finding(finding)
+    except CausalityValidationError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _deterministic_checks_ran(ctx: ToolContext) -> list[str]:
@@ -81,7 +111,8 @@ def _persist_confirmed_fingerprint(
     row = _finding_row_for_fingerprint(ctx, fingerprint)
     if row is None:
         if not severity:
-            return
+            msg = f"finding fingerprint {fingerprint!r} not found for confirm persistence"
+            raise ValueError(msg)
         row = {"fingerprint": fingerprint, "severity": severity}
     else:
         row.setdefault("fingerprint", fingerprint)
@@ -214,7 +245,6 @@ def verify_agent_findings_tool(ctx: ToolContext):
             AgentFinding,
             plan_agent_verifications,
         )
-        from mergecraft.config import load_repo_settings
 
         completed = _deterministic_checks_ran(ctx)
         if not completed:
@@ -234,12 +264,24 @@ def verify_agent_findings_tool(ctx: ToolContext):
             )
             for row in (params.get("findings") or [])
         ]
+        trust = (
+            ctx.tool_state.trust_tier
+            if ctx.tool_state.trust_tier in {"trusted", "untrusted"}
+            else "trusted"
+        )
+        normalized_findings = normalize_agent_findings_via_pipeline(
+            findings,
+            rule_id="agent:draft",
+            dedupe=True,
+            repo_root=repo_root,
+            trust_tier=trust,  # type: ignore[arg-type]
+        )
         stored: dict[str, dict[str, Any]] = {}
         for item in ctx.tool_state.agent_findings:
             fingerprint = item.get("fingerprint") if isinstance(item, dict) else None
             if isinstance(fingerprint, str) and fingerprint:
                 stored[fingerprint] = item
-        for finding in findings:
+        for finding in normalized_findings:
             row = finding.model_dump(mode="json")
             row["fingerprint"] = finding.identity()
             stored[str(row["fingerprint"])] = row
@@ -248,7 +290,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
             ctx, [AgentFindingLike(**row) for row in stored.values()], stage="proposed"
         )
         plan = plan_agent_verifications(
-            findings,
+            normalized_findings,
             budget=settings.inline_budget,
             learnings_text=_learnings_text(ctx),
             repo_root=repo_root,
@@ -329,6 +371,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
 
 def record_finding_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
+        from mergecraft.agents.gates import BLOCKING_SEVERITIES
         from mergecraft.agents.verifier import JudgeVerdict, judge_pin, record_verifier_verdict
 
         completed = _deterministic_checks_ran(ctx)
@@ -369,12 +412,21 @@ def record_finding_verdict_tool(ctx: ToolContext):
         if outcome.recorded_withdrawn:
             ctx.tool_state.was_updated = True
         if outcome.verdict == "confirm" and outcome.publishable:
+            _validate_publication_finding(
+                ctx,
+                outcome.fingerprint,
+                causality=verdict.reason,
+            )
             _persist_confirmed_fingerprint(ctx, outcome.fingerprint)
         elif outcome.verdict == "downgrade" and outcome.publishable:
-            from mergecraft.agents.gates import BLOCKING_SEVERITIES
-
             new_severity = verdict.new_severity
             if new_severity in BLOCKING_SEVERITIES:
+                _validate_publication_finding(
+                    ctx,
+                    outcome.fingerprint,
+                    causality=verdict.reason,
+                    severity=new_severity,
+                )
                 _persist_confirmed_fingerprint(
                     ctx,
                     outcome.fingerprint,
