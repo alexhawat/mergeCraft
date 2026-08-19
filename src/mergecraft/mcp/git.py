@@ -140,6 +140,25 @@ def _reject_config_flags(tokens: list[str]) -> None:
             raise ValueError(msg)
 
 
+def _reject_namespace_flag(tokens: list[str]) -> None:
+    """Raise ValueError if any token is a ``--namespace`` spelling.
+
+    ``--namespace`` sets ``GIT_NAMESPACE``, a ref-namespace prefix rather than a
+    filesystem path, so ``confine_to_workspace`` cannot bound it the way it
+    bounds ``-C`` / ``--git-dir`` / ``--work-tree``. Only ``upload-pack``,
+    ``receive-pack`` and ``upload-archive`` consume it, and none of those is on
+    the read-only allowlist, so refusal costs the reviewer no capability while
+    keeping the pre-subcommand slot to options this tool can validate.
+    """
+    for tok in tokens:
+        if tok == "--namespace" or tok.startswith("--namespace="):
+            msg = (
+                f"Blocked: '{tok}' sets a ref namespace the reviewer surface "
+                "cannot confine, and no read-only subcommand honours it."
+            )
+            raise ValueError(msg)
+
+
 def _reject_branch_writes(args: list[str]) -> None:
     """Keep ``git branch`` to listing only (H2, #257 / D7).
 
@@ -256,8 +275,10 @@ def _git_env(token: str) -> dict[str, str]:
 
 # Git global options that may precede the subcommand. `-C` takes a separate
 # argument; the `--git-dir`/`--work-tree`/`--namespace` family may be spelled
-# as `--flag value` or `--flag=value`. `-c`/`--config-env` are intentionally
-# excluded: they are rejected unconditionally (alias-execution vector).
+# as `--flag value` or `--flag=value`. `--namespace` is extracted so its value
+# is pulled out of the args too, then refused by `_reject_namespace_flag`.
+# `-c`/`--config-env` are intentionally excluded: they are rejected
+# unconditionally (alias-execution vector).
 _GLOBAL_OPTS = ("-C", "--git-dir", "--work-tree", "--namespace")
 _GLOBAL_OPT_RE = re.compile(r"^--(?:git-dir|work-tree|namespace)(?:=.*)?$")
 
@@ -345,6 +366,10 @@ def git_tool(ctx: ToolContext):
         # _GLOBAL_OPTS).
         _reject_config_flags(global_opts)
         _reject_config_flags(args)
+        # Unconditional: --namespace reaches the same pre-subcommand slot and is
+        # the one extracted global option no path rule can confine.
+        _reject_namespace_flag(global_opts)
+        _reject_namespace_flag(args)
         # Name the dedicated tool before the allowlist rejects the subcommand:
         # "use push_branch instead" is the affordance the agent needs, and the
         # generic allowlist error hides it.

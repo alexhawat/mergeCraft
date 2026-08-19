@@ -661,6 +661,89 @@ async def test_spaced_config_flag_rejection_message_names_the_token(
     assert recorder.calls == []
 
 
+NAMESPACE_FLAG_MESSAGE = "sets a ref namespace"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["--namespace", "evil"], id="separate-value"),
+        pytest.param(["--namespace=evil"], id="inline-value"),
+        pytest.param(["--namespace", "../../etc"], id="traversal-shaped-value"),
+        pytest.param(["--namespace"], id="bare-trailing"),
+    ],
+)
+async def test_namespace_flag_is_refused_on_the_reviewer_surface(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    """`--namespace` must never reach git from the read-only tool.
+
+    It sets GIT_NAMESPACE, a ref-namespace prefix rather than a path, so
+    `confine_to_workspace` cannot bound it — and `_extract_global_opts` lifts it
+    into the pre-subcommand slot git honours. No allowlisted subcommand consumes
+    it, so refusal costs the reviewer nothing.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": args})
+    assert result.is_error is True, result.content[0]["text"]
+    assert NAMESPACE_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_namespace_flag_in_command_string_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `git …` command-string route reaches the same slot and must also refuse."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "git --namespace=evil log"})
+    assert result.is_error is True, result.content[0]["text"]
+    assert NAMESPACE_FLAG_MESSAGE in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
+async def test_namespace_flag_refused_regardless_of_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
+) -> None:
+    """Refusal is a property of the tool surface, not of the shell setting."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path, shell=shell)).execute(
+        {"command": "status", "args": ["--namespace", "evil"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param("--namespaces", id="plural-lookalike"),
+        pytest.param("--name-only", id="name-only"),
+        pytest.param("--name-status", id="name-status"),
+    ],
+)
+async def test_namespace_lookalike_flags_still_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """The refusal must match `--namespace` exactly, not by prefix.
+
+    `git log --name-only` is a routine reviewer call; a `startswith("--namespace")`
+    or looser match would buy the guard by breaking the tool.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "log", "args": [token]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["log", token]]
+
+
 @pytest.mark.parametrize(
     "token",
     [

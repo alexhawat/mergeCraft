@@ -1402,9 +1402,12 @@ token to be forwarded, so no test had to be weakened or deleted.
 - **Bundled short flags after the subcommand** (`git blame -cw`). Bare `-c` in `args` is already
   refused unconditionally by design (Batch A pinned that even a benign `-c core.quotepath=false` is
   refused), so a bundled `-cw` is collateral of a pre-existing deliberate over-block, not new.
-- **`--namespace`'s missing path/value confinement.** The `global_opts` reds use it as the delivery
-  vehicle because it is the one route to the pre-subcommand slot, but whether `--namespace` should
-  validate its value at all is a separate contract and is not asserted here.
+- ~~**`--namespace`'s missing path/value confinement.**~~ Resolved in the follow-up: `--namespace`
+  sets `GIT_NAMESPACE`, a ref-namespace prefix rather than a path, and no subcommand on the read-only
+  allowlist consumes it (only `upload-pack` / `receive-pack` / `upload-archive` do). It is now refused
+  outright by `_reject_namespace_flag` rather than confined, since there is no path to confine and no
+  reviewer call that needs it. The `global_opts` reds keep using it as the delivery vehicle: the
+  config-flag guard runs first, so those assertions are unchanged.
 - **`-C` supplied after the subcommand** (`git blame -C <file>`), where `_extract_global_opts` lifts
   it into `global_opts` and confines a relative path against the wrong base. Pre-existing quirk,
   unrelated to the config-flag guard.
