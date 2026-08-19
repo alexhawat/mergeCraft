@@ -1095,3 +1095,156 @@ earlier-program markers, outside this program's remit.
 | # | Wave that escalated | Test | Finding | Resolution |
 |---|---|---|---|---|
 | 1 | W21 → EF | `tests/scm/test_protocol.py::test_no_github_specific_type_leaks_into_core` | **The plan contradicted a green test.** W20.1's deliverable specified swapping `mcp/check_runs.py` to `ctx.github.list_check_runs_for_ref`, but this pre-existing green test forbids the string `ctx.github` in that module — the plan text predated the SCM-protocol extraction | No test change. W21 used `ctx.scm.list_check_runs_for_ref` instead, which satisfies both the #266 endpoint pin and the no-leak guard. Recorded so the divergence from the plan's literal wording is not later read as W21 having missed its deliverable |
+
+---
+
+## Batch F — Auth DX (W23)
+
+**Issues:** #221 (`mergecraft auth codex` — and every sibling provider command — persists the
+captured credential **only** through `gh secret set`, so a contributor who authenticates cannot
+then run the CLI locally: the credential exists in GitHub Actions secrets and nowhere else).
+**Implementation wave:** W24 (#221). #220 is verify-and-close (W25, D5) and has no new tests.
+**Binding decisions:** **D11** (extend `auth_logfire`'s `--scope local|github|both` to every
+`mergecraft auth <provider>` command; default stays `github` so CI-only setups do not start writing
+`.env`), plus global convention 7 (the CLI addition is additive).
+
+**Anchors re-grepped, not trusted from the plan body:**
+
+| Item | Anchor used | Plan text | Verdict |
+|---|---|---|---|
+| #221 defect | `cli/auth_cmd.py:108-146` (`auth_codex`) — `_set_gh_secret` is the only persistence call; identical shape in `auth_claude` `:149-180`, `auth_gemini` `:203-230`, `auth_cursor` `:260-288`, `auth_nous` `:351-382`, `auth_tokenhub` `:385-420`, `auth_minimax` `:780-821` | `cli/auth_cmd.py:109-146` | matches |
+| Reference impl | `LogfireScope` `:58`, `_write_env_value` `:543-565`, `_local_env_path` `:568-580`, `_normalise_scope` `:583-598`, `auth_logfire` `:601-743` | `:58,583-733` | matches |
+| Tempdir half | `cli/auth_cmd.py:123-138` — `tempfile.TemporaryDirectory` as `CODEX_HOME`; `auth.json` is read into `value` **inside** the block, `_set_gh_secret` runs after it | `:123-138` | matches |
+| **D11** | present at plan line 183, naming all seven provider commands | W23.1 / W24.1 cite "per D11" | **plan's D11 exists — see the resolution note below** |
+
+### The "missing D11" question — resolved
+
+W23's dispatch reported that the plan has no D11 and asked for the provider set to be derived from
+code instead. **D11 does exist**, at plan line 183 (`## Decisions baked into this plan`), and it
+enumerates the set explicitly: `codex`, `claude`, `gemini`, `cursor`, `nous`, `tokenhub`, `minimax`,
+default `github`. Global convention 7 (line 148) cites it too. The independent code derivation was
+run anyway and lands on the same seven:
+
+| `auth` subcommand | Captures a credential a local run needs? | In scope | Why |
+|---|---|---|---|
+| `codex` | yes — `CODEX_AUTH_JSON`, read by `utils/agent_resolve.py:83` | **yes** | the reported defect |
+| `claude` | yes — `CLAUDE_CODE_OAUTH_TOKEN`, read by `utils/agent_resolve.py:69`, `utils/secrets.py:224` | **yes** | same shape |
+| `gemini` | yes — `GEMINI_API_KEY`, read by `utils/agent_resolve.py:96` | **yes** | same shape |
+| `cursor` | yes — `CURSOR_API_KEY`, read by `integrations/cursor_cloud/client.py:174-176` | **yes** | same shape |
+| `nous` | yes — `NOUS_API_KEY`, read by `utils/agent_resolve.py:106-108` | **yes** | same shape |
+| `tokenhub` | yes — `TOKENHUB_API_KEY`, same resolver | **yes** | same shape |
+| `minimax` | yes — `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`, read by `utils/payload.py:550` | **yes** | same shape |
+| `logfire` | yes — but already has `--scope` | **no** | it *is* the reference implementation; its default is `both`, not `github`, and changing that would be an unrelated behaviour change |
+
+Every in-scope command's Actions-secret name is also the env var the local runtime resolves out of
+`os.environ`, so the `.env` key and the secret name are the same string. That is what the suite
+pins — one name per provider, no new aliasing. `logfire` is the sole command where the two differ
+(`LOGFIRE_TOKEN` secret vs `MERGECRAFT_LOGFIRE_TOKEN` local), which is a second reason to leave it
+out of the parametrized set.
+
+### Files
+
+| File | Status | Issue |
+|---|---|---|
+| `tests/cli/test_auth_scope_cmd.py` | **new** | #221 |
+
+No existing test needed inverting or weakening. The three `tests/cli/test_auth_nous_cmd.py` arms
+that assert today's github-only behaviour (`test_auth_nous_prompts_with_getpass_and_writes_secret`,
+`test_auth_nous_rejects_on_401_or_403`, `test_auth_nous_warns_and_saves_on_network_error`) all
+invoke `auth nous` with **no** `--scope` flag, so D11's `github` default keeps them green through
+W24 unchanged.
+
+### Contract → test map
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| `--scope local` lands a credential a local run can read back, for each of the seven providers | `test_auth_scope_local_writes_env_without_gh` (7 arms) | Functional, the bug | xfail W24 |
+| `--scope local` needs **no** working `gh`: `_get_gh_token` / `_parse_git_remote` / `_set_gh_secret` are never reached and the command still exits 0 | same test, tripwire counters | Functional, the DX requirement | xfail W24 |
+| `--scope local` preserves unrelated `.env` keys | same test, `MERGECRAFT_SCOPE_RED_PRESERVED` | Integration, idempotence | xfail W24 |
+| Explicit `--scope github` sets exactly one secret, under the provider's own name, and creates no `.env` | `test_auth_scope_github_writes_secret_only` (7 arms) | Functional, compatibility | xfail W24 |
+| `--scope both` does both layers | `test_auth_scope_both_writes_env_and_secret` (7 arms) | Functional, D11 | xfail W24 |
+| **No flag == today's behaviour**: one secret, `.env` untouched | `test_auth_default_scope_is_github_only` (7 arms) | Functional, the #221 compatibility guard | **green (before and after)** |
+| An unknown `--scope` bails `Exit(1)` naming `local` / `github` / `both`, before any capture or write | `test_auth_rejects_unknown_scope` (7 arms) | Error handling, `_normalise_scope` parity | xfail W24 |
+| The local write carries the captured `auth.json` **bytes** — not the empty string a post-cleanup re-read would produce | `test_auth_codex_scope_local_persists_the_captured_auth_json` | Integration, the tempdir half | xfail W24 |
+| A failed `gh secret set` with a good local write is **partial success** (exit 0 + warning) | `test_auth_codex_scope_both_survives_a_failed_gh_secret_set` | Error handling, partial failure | xfail W24 |
+| Both halves failing is a hard failure with `nothing was written` | `test_auth_codex_scope_both_bails_when_neither_half_lands` | Error handling, fail-closed | xfail W24 |
+| All seven D11 subcommands exist on `mergecraft auth` today | `test_d11_provider_subcommands_are_all_registered` | Unit, collection guard | green |
+
+### Confirmed-RED assertions (31 xfails, verified with `--runxfail` against `7f375cc`)
+
+Every one fails on the behaviour under test, none on an import, a fixture, or a stray usage error
+mistaken for a behaviour failure:
+
+- **28 arms** (`local` / `github` / `both` / unknown-scope, × 7 providers) fail with
+  `no such option '--scope'` from Typer and `SystemExit(2)` — i.e. the option D11 mandates does not
+  exist yet. That *is* #221: the four scope-bearing contracts cannot be expressed against today's
+  surface. The unknown-scope arms are additionally pinned to `exit_code == 1` (a `_bail`), which
+  distinguishes `_normalise_scope`'s rejection from Typer's usage exit 2 — today they observe 2, so
+  a W24 that adds the option but skips the normaliser still fails them.
+- **3 codex arms** fail the same way on `--scope local` / `--scope both`, before their
+  content/partial-failure assertions are reached.
+
+The 8 green assertions (7 default-scope arms + the registration guard) pass at `7f375cc` and must
+still pass at W24: they are the only thing standing between D11's stated default and a silent
+behaviour change for every existing operator.
+
+### How the tempdir-ordering half is pinned
+
+`auth_codex` mints its credential inside a `tempfile.TemporaryDirectory` used as `CODEX_HOME` and
+lets it be deleted on block exit (`cli/auth_cmd.py:123-138`). A local-scope write bolted on *after*
+that teardown would re-read a path that no longer exists and persist nothing — and a test asserting
+only "`_dotenv_set_key` was called" would pass it.
+
+`test_auth_codex_scope_local_persists_the_captured_auth_json` therefore pins **content, not call
+order**. A stubbed `codex login` writes a known single-line JSON payload into whatever `CODEX_HOME`
+the command hands it; a spy wrapped around the module's `_dotenv_set_key` records the value actually
+passed; and the test asserts (a) `CODEX_AUTH_JSON` was written at all, (b) the written value equals
+the stub's payload **verbatim**, (c) it re-parses as JSON with the expected `access_token`, and (d)
+`dotenv_values` resolves the same value back out of the temp `.env` — the property a local run
+actually depends on. It also asserts the isolated `CODEX_HOME` is still cleaned up, so the fix
+cannot be "leak the tempdir".
+
+Call ordering is deliberately **not** asserted: an implementation that reads `auth.json` inside the
+block and writes `.env` after teardown is correct, and pinning order would reject it. Round-trip
+equality was checked against all three `python-dotenv` quote modes (`never` / `always` / `auto`) —
+all three round-trip this payload — so the pin does not covertly dictate W24's quote mode.
+
+### Partial `--scope both` failure — answered from `auth_logfire`
+
+The question does not need routing: `auth_logfire` already implements an answer at
+`cli/auth_cmd.py:697-734`, and Batch F pins it for consistency rather than inventing a second
+policy.
+
+| State | `auth_logfire` today | Pinned for the seven |
+|---|---|---|
+| local ok, `gh secret set` failed | warning naming the repo settings URL; **exit 0** | `test_auth_codex_scope_both_survives_a_failed_gh_secret_set` |
+| local failed, gh ok | warning; exit 0 | not pinned (would require faking a `.env` permissions failure *and* asserting the gh half — low value) |
+| both failed | `_bail("nothing was written — …")`; non-zero | `test_auth_codex_scope_both_bails_when_neither_half_lands` |
+
+The rationale is that partial success is still success from the operator's side: they asked for a
+usable credential in two places and got one, and telling them which half failed is more useful than
+refusing the half that worked. Note this makes `--scope both` **more** forgiving than today's
+github-only path, which `_bail`s when `_set_gh_secret` returns `False` — that stricter behaviour is
+preserved for `--scope github` and the default by the compatibility arms.
+
+### Left to W24 (deliberately unpinned)
+
+1. **Multi-line `auth.json`.** The fixture payload is single-line JSON. A real `codex login` may
+   pretty-print `auth.json`, and a multi-line value cannot survive a flat `.env` line. Whether W24
+   compacts the JSON (`json.dumps(json.loads(...), separators=…)`) before writing, or quotes it, or
+   refuses, is a design decision this suite does not make. It only requires that whatever is written
+   comes back out of `dotenv_values` equal to what went in.
+2. **Quote mode.** `_write_env_value` hard-codes `quote_mode="never"`, justified in its docstring for
+   Logfire tokens and project labels. A raw JSON value written unquoted is `dotenv`-readable but not
+   `source`-able from a shell. Whether codex needs a different quote mode is W24's call; the
+   round-trip pin passes either way.
+3. **`--scope local` and the provider CLI/validator.** `--scope local` still runs the full capture
+   path (`shutil.which("codex")`, the device-auth login, each provider's `_validate_*` probe). The
+   suite stubs those rather than asserting they are skipped, so W24 may keep or relax them.
+4. **`-s` short flag and the `gh` / `action` / `all` synonyms.** `_normalise_scope` accepts `gh`,
+   `action` and `all`, and `auth_logfire` exposes `-s`. The suite exercises only the three canonical
+   long values, so W24 can carry the synonyms across for parity without a test forcing it either way.
+5. **`make reference-docs`.** Adding `--scope` to seven commands changes the generated
+   `cli-commands` README block that `tests/docs/test_reference_docs.py` compares against the live
+   Typer app. That test is green today and will stay green only if W24.2 regenerates the docs in the
+   same commit (plan convention 13). Not a test change — a W24 obligation.
