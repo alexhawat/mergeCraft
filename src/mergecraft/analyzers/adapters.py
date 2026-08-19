@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -82,6 +83,56 @@ def _format_finding(
     )
 
 
+_ANSI_SGR = re.compile(r"\x1b\[[0-9;]*m")
+
+# ruff <= 0.15 lists one `Would reformat: <path>` line per file. ruff >= 0.16
+# routes `format --check` through the shared diagnostic renderer instead:
+# an `unformatted:` header followed by ` --> <path>:<line>:<col>`. The manifest
+# pins 0.15.12 but declares `runtime: repo-native`, so the reviewed repo's own
+# ruff decides which spelling arrives and both have to parse.
+_LEGACY_REFORMAT_PREFIX = "Would reformat:"
+_UNFORMATTED_PREFIX = "unformatted:"
+_LOCATION_PREFIX = "-->"
+
+
+def _location_path(location: str) -> str:
+    """Strip the trailing ``:<line>:<col>`` from a diagnostic location."""
+    head, _, column = location.rpartition(":")
+    path, _, line = head.rpartition(":")
+    if path and line.isdigit() and column.isdigit():
+        return path
+    return location
+
+
+def _parse_reformat_paths(output: str, *, repo_root: Path) -> list[str]:
+    """Collect the files ruff says would be reformatted, in either output format.
+
+    Only paths introduced by an ``unformatted:`` header are taken from the
+    diagnostic renderer: ``format --check`` renders ``invalid-syntax:``
+    diagnostics with the same ``-->`` arrow, and those are tool failures rather
+    than unformatted files. Paths arrive absolute or repo-relative depending on
+    how the argv was expanded; ``resolve_repo_relative_path`` normalises both.
+    """
+    paths: list[str] = []
+    awaiting_location = False
+    for raw_line in output.splitlines():
+        stripped = _ANSI_SGR.sub("", raw_line).strip()
+        if stripped.startswith(_LEGACY_REFORMAT_PREFIX):
+            raw_path = stripped[len(_LEGACY_REFORMAT_PREFIX) :].strip()
+            if raw_path:
+                paths.append(resolve_repo_relative_path(raw_path, repo_root=repo_root))
+            continue
+        if stripped.startswith(_UNFORMATTED_PREFIX):
+            awaiting_location = True
+            continue
+        if awaiting_location and stripped.startswith(_LOCATION_PREFIX):
+            awaiting_location = False
+            raw_path = _location_path(stripped[len(_LOCATION_PREFIX) :].strip())
+            if raw_path:
+                paths.append(resolve_repo_relative_path(raw_path, repo_root=repo_root))
+    return paths
+
+
 def _run_ruff_format_check(
     plan: AnalyzerPlan,
     *,
@@ -112,19 +163,17 @@ def _run_ruff_format_check(
         tier=tier,
     )
     outcome = run_plan(format_plan, sandbox_context=sandbox_context)
-    if outcome.ran and outcome.exit_code == 0:
+    # "Did not run here" is a skip, never a finding (see run_analyzers' contract
+    # in mcp/analyzers.py): a sandbox refusal or a repo ruff too old for
+    # `format --check` must not be reported as an unformatted file.
+    if not outcome.ran:
+        logger.info("skipped ruff format check: {}", outcome.output or "analyzer did not run")
+        return []
+    if outcome.exit_code == 0:
         return []
     if not scoped_files:
         return []
-    # Parse "Would reformat: <path>" lines emitted by ruff format --check.
-    # Paths may be absolute (when ruff received absolute argv entries) or
-    # repo-relative; resolve_repo_relative_path normalises both to repo-relative.
-    reformat_paths: list[str] = []
-    for raw_line in (outcome.output or "").splitlines():
-        stripped = raw_line.strip()
-        if stripped.startswith("Would reformat:"):
-            raw_path = stripped[len("Would reformat:") :].strip()
-            reformat_paths.append(resolve_repo_relative_path(raw_path, repo_root=repo_root))
+    reformat_paths = _parse_reformat_paths(outcome.output or "", repo_root=repo_root)
     if reformat_paths:
         return [
             _format_finding(
@@ -135,9 +184,9 @@ def _run_ruff_format_check(
             )
             for rel in reformat_paths
         ]
-    # Non-zero exit with no parseable "Would reformat:" lines — ruff invocation
-    # error or unexpected output format.  Emit at scoped_files[0] rather than
-    # silently returning nothing: a broken tool should not pass as clean.
+    # Non-zero exit with no unformatted file named at all — a genuine ruff
+    # failure (bad config, unparseable source). Emit at scoped_files[0] rather
+    # than silently returning nothing: a broken tool should not pass as clean.
     return [
         _format_finding(
             manifest=manifest,
