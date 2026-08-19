@@ -59,6 +59,13 @@ mergecraft --help
 Marketplace is **not** automated by Craft. After the public GitHub release and
 Docker `:latest` promotion:
 
+> **Prerequisite — verify image attestations before listing.**
+> Run the `cosign verify` and `gh attestation verify` commands in
+> [CONTRIBUTING.md § Verify a published image](../CONTRIBUTING.md#verify-a-published-image)
+> against the release-tag digest. The signatures and attestations are produced by
+> the `sign-attest` job in `.github/workflows/ci-cd.yml`. Do **not** submit the
+> Marketplace listing until both verifications pass for the release tag.
+
 1. Open [GitHub Marketplace new action](https://github.com/marketplace/actions/new).
 2. Point at `alexhawat/mergeCraft` and the release tag (`v0.1.0`).
 3. Use the Docker action entry (`action.yml` + `ghcr.io/alexhawat/mergecraft` image).
