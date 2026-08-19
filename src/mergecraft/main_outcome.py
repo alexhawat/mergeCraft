@@ -18,6 +18,7 @@ from mergecraft.tracing.event import trace_attrs_for_mode
 if TYPE_CHECKING:
     from mergecraft.action.inputs import SetupFailurePolicy
     from mergecraft.agents.shared import AgentResult
+    from mergecraft.evidence.shadow import VerdictProtocolPrediction
     from mergecraft.mcp.verdict import VerdictDiagnostic
     from mergecraft.modes import Mode
 
@@ -32,7 +33,7 @@ class VerdictProtocolPublish(NamedTuple):
 
     attrs: dict[str, Any]
     diagnostic: VerdictDiagnostic
-    prediction: Any | None
+    prediction: VerdictProtocolPrediction | None
 
 
 _REVIEW_MODE_NAMES = frozenset({"Review", "IncrementalReview"})

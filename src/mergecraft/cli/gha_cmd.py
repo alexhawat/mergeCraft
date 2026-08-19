@@ -117,7 +117,10 @@ async def _run_main() -> None:
     result = await main()
     if result.evidence_packet_path:
         _write_evidence_packet_output(result.evidence_packet_path)
-    _set_output("verdict_diagnostic", result.verdict_diagnostic or "")
+    # The GHA output file is the one surface that needs the bare code: the enum
+    # is what every other consumer reads.
+    diagnostic = result.verdict_diagnostic
+    _set_output("verdict_diagnostic", diagnostic.value if diagnostic is not None else "")
     if not result.success:
         outcome = result.outcome or RunOutcome.infra_error
         error_message = result.error or "agent execution failed"

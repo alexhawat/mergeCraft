@@ -38,7 +38,7 @@ from typing import Any
 import pytest
 
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
-from mergecraft.agents.shared import extract_openai_cached_tokens
+from mergecraft.agents.shared import CacheReadTokens, resolve_cache_read
 
 _INPUT = 100
 _CACHED = 40
@@ -195,11 +195,18 @@ def test_no_cache_fields_leaves_input_tokens_untouched() -> None:
 
 
 def test_openai_extractor_still_recognises_both_shapes() -> None:
-    """Green guard: T2's extractor is the provenance signal — it must not be deleted."""
-    assert extract_openai_cached_tokens(_OPENAI_CHAT_USAGE) == _CACHED
-    assert extract_openai_cached_tokens(_OPENAI_RESPONSES_USAGE) == _CACHED
-    assert extract_openai_cached_tokens(_ANTHROPIC_USAGE) == 0
-    assert extract_openai_cached_tokens({}) == 0
+    """Green guard: T2's extractor is the provenance signal — it must not be deleted.
+
+    Exercised through ``resolve_cache_read``, the module's public entry point and
+    the extractor's only production caller: a payload with an OpenAI cache shape
+    and no Anthropic-native field must report the cached count as non-additive.
+    """
+    assert resolve_cache_read(_OPENAI_CHAT_USAGE) == CacheReadTokens(reported=_CACHED, additive=0)
+    assert resolve_cache_read(_OPENAI_RESPONSES_USAGE) == CacheReadTokens(
+        reported=_CACHED, additive=0
+    )
+    assert resolve_cache_read(_ANTHROPIC_USAGE).reported != 0
+    assert resolve_cache_read({}) == CacheReadTokens(reported=0, additive=0)
 
 
 # ---------------------------------------------------------------------------

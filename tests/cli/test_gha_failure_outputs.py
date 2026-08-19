@@ -276,7 +276,7 @@ class TestVerdictDiagnosticOutput:
             success=True,
             output="ok",
             result="ok",
-            verdict_diagnostic=VerdictDiagnostic.approved.value,
+            verdict_diagnostic=VerdictDiagnostic.approved,
         )
         assert entries.get("verdict_diagnostic") == VerdictDiagnostic.approved.value
 
@@ -321,7 +321,7 @@ class TestVerdictDiagnosticOutput:
             success=True,
             output="ok",
             result="ok",
-            verdict_diagnostic=code,
+            verdict_diagnostic=VerdictDiagnostic(code),
         )
         assert entries.get("verdict_diagnostic") == code
 
@@ -334,6 +334,7 @@ class TestVerdictDiagnosticOutput:
         outputs are written, so the write has to happen before that exit.
         """
         from mergecraft.main import MainResult
+        from mergecraft.mcp.verdict import VerdictDiagnostic
 
         out = tmp_path / "github_output"
         out.touch()
@@ -343,7 +344,7 @@ class TestVerdictDiagnosticOutput:
             MainResult(
                 success=False,
                 error="agent blocked",
-                verdict_diagnostic="policy_rejection",
+                verdict_diagnostic=VerdictDiagnostic.policy_rejection,
             ),
         )
 

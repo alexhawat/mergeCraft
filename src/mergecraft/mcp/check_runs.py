@@ -10,6 +10,21 @@ if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
 
+def _with_suite_id(run: dict[str, Any]) -> dict[str, Any]:
+    """Lift a run's parent-suite id to the top level beside its own ``id``.
+
+    ``get_check_suite_logs`` takes a *suite* id, which GitHub nests at
+    ``check_suite.id`` while the run's own id sits at ``id`` — an invitation to
+    pass the wrong one that four lines of tool description used to argue
+    against. The nested field is left in place for callers already reading it.
+    """
+    suite = run.get("check_suite")
+    suite_id = suite.get("id") if isinstance(suite, dict) else None
+    if suite_id is None:
+        return run
+    return {**run, "check_suite_id": suite_id}
+
+
 def list_check_runs_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         ref = str(params["ref"])
@@ -17,19 +32,16 @@ def list_check_runs_tool(ctx: ToolContext):
         return {
             "ref": ref,
             "total_count": data.get("total_count"),
-            "check_runs": data.get("check_runs") or [],
+            "check_runs": [_with_suite_id(run) for run in data.get("check_runs") or []],
         }
 
     return tool(
         name="list_check_runs",
         tool_class=ToolClass.REPOSITORY_READ,
         description=(
-            "List GitHub check runs for a commit ref. Returns one entry per run with "
-            "its name, status, and conclusion, so you can see which individual job "
-            "failed rather than only the suite rollup. Each run's top-level id is a "
-            "check *run* id; the id of its parent suite is nested at check_suite.id. "
-            "Pass that nested check_suite.id — never the top-level id — as the "
-            "check_suite_id argument to get_check_suite_logs or get_check_suite."
+            "List GitHub check runs for a commit ref — one entry per run with its "
+            "name, status, conclusion, and the check_suite_id to pass on to "
+            "get_check_suite_logs or get_check_suite."
         ),
         input_schema={
             "type": "object",

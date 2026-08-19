@@ -174,6 +174,26 @@ async def test_list_check_runs_preserves_the_run_shape_agents_navigate_by(
 
 
 @pytest.mark.asyncio
+async def test_each_run_carries_the_suite_id_at_the_top_level(tmp_path: Path) -> None:
+    """Q-F11: the follow-up argument must be the obvious one, not the nested one.
+
+    The description used to spend four lines talking the agent out of passing the
+    run id, because ``id`` sits at the top level and the id the next tool wants
+    was buried at ``check_suite.id``. Lifting it makes the shape carry the rule.
+    """
+    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    ctx = _ctx(tmp_path, github=_RecordingGitHub())
+
+    tool = check_runs.list_check_runs_tool(ctx)
+    payload = json.loads((await tool.execute({"ref": REF_SHA})).content[0]["text"])
+
+    run = payload["check_runs"][0]
+    assert run["check_suite_id"] == SUITE_ID
+    # The original nesting stays: agents and tests already navigate by it.
+    assert run["check_suite"]["id"] == SUITE_ID
+
+
+@pytest.mark.asyncio
 async def test_get_check_suite_tool_returns_suite_detail(tmp_path: Path) -> None:
     """Companion tool must fetch one suite by id (GitHubClient.get_check_suite)."""
     check_runs = importlib.import_module("mergecraft.mcp.check_runs")

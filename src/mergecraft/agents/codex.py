@@ -183,6 +183,18 @@ def _render_toml(table: TomlTable, path: tuple[str, ...] = ()) -> list[str]:
     — the ordering defect behind #222. Rendering from a mapping removes the
     hazard structurally: scalars of a table are always emitted directly under
     its own header, whatever order the caller populated the mapping in.
+
+    ``tomli_w.dumps`` was measured against this on the real config shape and
+    produces byte-identical output, including the empty ``[model_providers]``
+    table and the quoted ``[model_providers."127.0.0.1"]`` header. It is kept
+    hand-rolled anyway on dependency grounds, not correctness ones: ``tomli_w``
+    is currently a *dev*-only transitive of ``pip-audit``, so adopting it adds a
+    new runtime dependency to the shipped Action image — a real cost for a BYOK
+    action — while ``tomllib`` on the reading side is stdlib and free. The 30
+    lines here serialise ``str | bool`` scalars into a mapping whose type
+    (``TomlTable``) already excludes the dates, floats, arrays and multiline
+    strings where hand-rolled escaping actually bites. Revisit if a runtime
+    dependency on ``tomli_w`` ever lands for another reason.
     """
     scalars = {key: value for key, value in table.items() if not isinstance(value, dict)}
     tables = {key: value for key, value in table.items() if isinstance(value, dict)}

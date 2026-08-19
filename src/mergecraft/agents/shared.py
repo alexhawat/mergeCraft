@@ -355,7 +355,7 @@ class CacheReadTokens(NamedTuple):
     additive: int
 
 
-def extract_openai_cached_tokens(usage_payload: Mapping[str, Any]) -> int:
+def _extract_openai_cached_tokens(usage_payload: Mapping[str, Any]) -> int:
     """Return the cached-input count from an OpenAI Responses / Chat Completions usage dict.
 
     The two recognised shapes are ``prompt_tokens_details.cached_tokens``
@@ -386,4 +386,4 @@ def resolve_cache_read(usage_payload: Mapping[str, Any]) -> CacheReadTokens:
     )
     if native:
         return CacheReadTokens(reported=native, additive=native)
-    return CacheReadTokens(reported=extract_openai_cached_tokens(usage_payload), additive=0)
+    return CacheReadTokens(reported=_extract_openai_cached_tokens(usage_payload), additive=0)

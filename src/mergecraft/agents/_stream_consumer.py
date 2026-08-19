@@ -145,7 +145,9 @@ class StreamSpanAccumulator:
         self.tokens_out = int(
             usage_payload.get("output_tokens") or usage_payload.get("outputTokens") or 0
         )
-        self.cache_read, self.cache_read_additive = resolve_cache_read(usage_payload)
+        cache_read = resolve_cache_read(usage_payload)
+        self.cache_read = cache_read.reported
+        self.cache_read_additive = cache_read.additive
         self.cache_write = int(
             usage_payload.get("cache_creation_input_tokens")
             or usage_payload.get("cacheWriteTokens")

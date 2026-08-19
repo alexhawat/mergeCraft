@@ -103,6 +103,8 @@ if TYPE_CHECKING:
 
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.config.settings import RepoSettings, RunContextData
+    from mergecraft.evidence.shadow import VerdictProtocolPrediction
+    from mergecraft.mcp.verdict import VerdictDiagnostic
     from mergecraft.scm.protocol import ScmProvider
 
 
@@ -123,7 +125,7 @@ class MainResult:
     # W8 / #265 — closed VerdictDiagnostic code for the terminal-verdict policy
     # path. ``None`` for early-exit paths that bypass ``_finalize``; the GHA
     # surface writes an empty string in that case (D10).
-    verdict_diagnostic: str | None = None
+    verdict_diagnostic: VerdictDiagnostic | None = None
 
 
 @dataclass
@@ -329,7 +331,7 @@ async def _publish(
     outcome: RunOutcome,
     failure_reason: str | None,
     attrs_source: Callable[[], dict[str, Any]],
-    verdict_prediction: Any | None = None,
+    verdict_prediction: VerdictProtocolPrediction | None = None,
     actual_outcome: str | None = None,
 ) -> str | None:
     """Tracer span + status check + evidence packet — the run's publish block.
@@ -1352,7 +1354,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
     )
     diagnostic_attrs = verdict_publish.attrs
     verdict_prediction = verdict_publish.prediction
-    verdict_diagnostic_code = verdict_publish.diagnostic.value
+    verdict_diagnostic_code = verdict_publish.diagnostic
 
     selected_mode_obj = next(
         (m for m in tool_context.modes if m.name == tool_context.tool_state.selected_mode),
