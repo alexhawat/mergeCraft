@@ -178,18 +178,38 @@ def _config_flag_message(token: str) -> str:
     return f"Blocked: '{token}' can execute arbitrary code via git alias expansion."
 
 
+def _bare_dash_c_message(subcommand: str) -> str:
+    """Explain a refused bare ``-c`` without claiming the token is the config flag.
+
+    A bare ``-c`` carries no key=value, so nothing in it says whether it is
+    git's config flag misplaced after the verb or the subcommand's own short
+    flag. The guard refuses it on that ambiguity, not on evidence of an alias
+    payload, and the message has to say so: ``git blame -c`` is a real
+    read-only invocation and ``git diff -c`` is one git accepts silently.
+    """
+    forwarded = ", ".join(
+        sorted(name for name, shorts in _SUBCOMMAND_SHORT_FLAGS.items() if "c" in shorts)
+    )
+    return (
+        f"Blocked: '{subcommand} -c' — a bare '-c' cannot be told apart from git's own "
+        f"config flag at this position, and '{subcommand}' is not recorded as defining "
+        f"'-c', so it is refused rather than forwarded. Subcommands whose '-c' is "
+        f"forwarded: {forwarded}."
+    )
+
+
 def _reject_config_flags(tokens: list[str], *, subcommand: str = "") -> None:
-    """Reject git's config flag, and any ``-c`` bundle *subcommand* cannot own.
+    """Reject git's config flag, and any ``-c`` token *subcommand* cannot own.
 
     ``-c`` / ``--config-env`` let an agent inject an alias-expansion shell
     command regardless of ``payload.shell``, and rejection is unconditional —
-    there is no safe-key allowlist for ``-c``. A ``-c``-shaped token the
-    subcommand does not define is refused too, but for the other reason and
-    with its own message: it is an unrecognised short bundle, not proof of an
-    alias payload.
+    there is no safe-key allowlist for ``-c``. Two other ``-c``-shaped tokens
+    are refused for their own reasons and with their own messages: a bare
+    ``-c`` after a subcommand that does not declare it, which is ambiguous
+    rather than proven hostile, and an unrecognised short bundle.
 
     Raises:
-        ValueError: on either refusal.
+        ValueError: on any of the three refusals.
     """
     for tok in tokens:
         if tok.startswith("--"):
@@ -198,12 +218,11 @@ def _reject_config_flags(tokens: list[str], *, subcommand: str = "") -> None:
             continue
         if not tok.startswith("-c") or _subcommand_declares_shorts(tok, subcommand):
             continue
+        if tok == "-c" and subcommand:
+            raise ValueError(_bare_dash_c_message(subcommand))
         if _is_config_flag(tok):
             raise ValueError(_config_flag_message(tok))
-        msg = (
-            f"Blocked: '{tok}' bundles short flags {subcommand or 'git'} does not "
-            "define — only each subcommand's own read-only short flags are forwarded."
-        )
+        msg = f"Blocked: '{tok}' bundles short flags {subcommand or 'git'} does not define."
         raise ValueError(msg)
 
 

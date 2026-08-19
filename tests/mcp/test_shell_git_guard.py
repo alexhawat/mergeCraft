@@ -104,6 +104,15 @@ BYPASSES = [
     pytest.param("sudo -g devs git status", id="sudo-target-group"),
     pytest.param("sudo -u ci -g devs git clean -fdx", id="sudo-user-and-group"),
     pytest.param("doas -u ci git status", id="doas-target-user"),
+    # `-u` takes an operand to `sudo` but not to every wrapper: to `parallel` it
+    # is `--ungroup` and to `sh`/`bash` it is `set -u`, so the token behind it is
+    # the command. Skipping the operand unconditionally swallowed that git.
+    pytest.param("parallel -u git clean -fdx", id="parallel-ungroup-then-git"),
+    pytest.param("parallel -u " + ALIAS_PAYLOAD, id="parallel-ungroup-then-alias-payload"),
+    pytest.param("sh -u git", id="sh-nounset-then-git"),
+    pytest.param("bash -u git status", id="bash-nounset-then-git"),
+    pytest.param("env -u GIT_DIR -u HOME git status", id="env-unset-then-git"),
+    pytest.param("strace -u ci git status", id="strace-target-user"),
 ]
 
 # Separator spellings the original class did cover — regression guards, so a

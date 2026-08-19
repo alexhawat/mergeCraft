@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from mergecraft.agents.registry import load_registry
+from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.orchestrator.executor import PipelineExecutor
 from mergecraft.orchestrator.pipeline import (
@@ -31,28 +32,17 @@ def _bail(msg: str) -> NoReturn:
     raise typer.Exit(1)
 
 
-def _target_dir(cwd: Path) -> Path:
-    """The directory this command operates on — ``cwd``, resolved.
-
-    Deliberately not ``git_repo_root``: these commands act on whatever tree they
-    are pointed at, including one that is not a git checkout at all. Named for
-    that so it cannot be mistaken for the canonical repo-root helper in
-    ``utils/workspace.py``.
-    """
-    return cwd.resolve()
-
-
-def _default_pipeline_path(repo_root: Path, settings: object) -> Path:
+def _default_pipeline_path(target_dir: Path, settings: object) -> Path:
     configured = getattr(settings, "pipeline", None)
     if configured:
         path = Path(configured)
-        return path if path.is_absolute() else repo_root / path
-    return repo_root / ".mergecraft" / "pipeline.yaml"
+        return path if path.is_absolute() else target_dir / path
+    return target_dir / ".mergecraft" / "pipeline.yaml"
 
 
-def _load_pipeline(repo_root: Path) -> tuple[PipelineDefinition, Path]:
-    settings = load_repo_settings(root=repo_root)
-    path = _default_pipeline_path(repo_root, settings)
+def _load_pipeline(target_dir: Path) -> tuple[PipelineDefinition, Path]:
+    settings = load_repo_settings(root=target_dir)
+    path = _default_pipeline_path(target_dir, settings)
     if not path.is_file():
         _bail(f"pipeline file not found: {path}")
     text = path.read_text(encoding="utf-8")
@@ -61,13 +51,13 @@ def _load_pipeline(repo_root: Path) -> tuple[PipelineDefinition, Path]:
 
 @app.command("lint")
 def lint_cmd(
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """Validate the pipeline file and registry agent references."""
-    repo_root = _target_dir(cwd)
-    settings = load_repo_settings(root=repo_root)
-    pipeline, path = _load_pipeline(repo_root)
-    registry = load_registry(settings=settings, repo_root=repo_root)
+    target_dir = resolve_target_dir(cwd)
+    settings = load_repo_settings(root=target_dir)
+    pipeline, path = _load_pipeline(target_dir)
+    registry = load_registry(settings=settings, repo_root=target_dir)
     errors = lint_pipeline_agents(pipeline, registry)
     if errors:
         for err in errors:
@@ -79,17 +69,17 @@ def lint_cmd(
 @app.command("show")
 def show_cmd(
     diff: Path = typer.Option(..., "--diff", help="Unified diff to preview against."),
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """Preview which pipeline steps would run or skip for a diff."""
-    repo_root = _target_dir(cwd)
-    settings = load_repo_settings(root=repo_root)
-    pipeline, _path = _load_pipeline(repo_root)
-    registry = load_registry(settings=settings, repo_root=repo_root)
+    target_dir = resolve_target_dir(cwd)
+    settings = load_repo_settings(root=target_dir)
+    pipeline, _path = _load_pipeline(target_dir)
+    registry = load_registry(settings=settings, repo_root=target_dir)
     executor = PipelineExecutor(registry=registry, settings=settings)
     result = executor.run(
         pipeline,
-        repo_root=repo_root,
+        repo_root=target_dir,
         diff_path=diff.resolve(),
     )
     table = Table(title="Pipeline preview")
@@ -104,11 +94,11 @@ def show_cmd(
 
 @app.command("explain")
 def explain_cmd(
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """Print pipeline step ids and predicate vocabulary."""
-    repo_root = _target_dir(cwd)
-    pipeline, path = _load_pipeline(repo_root)
+    target_dir = resolve_target_dir(cwd)
+    pipeline, path = _load_pipeline(target_dir)
     console.print(f"pipeline: {path}")
     for step_id in pipeline.step_ids():
         console.print(f"  - {step_id}")

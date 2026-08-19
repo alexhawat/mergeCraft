@@ -116,10 +116,7 @@ def stamp_review_phase_on_active_span(phase: ReviewPhase) -> None:
 
 
 def _current_review_phase(tool_state: ToolState) -> ReviewPhase:
-    raw = tool_state.review_phase
-    if isinstance(raw, ReviewPhase):
-        return raw
-    return ReviewPhase(str(raw))
+    return ReviewPhase(tool_state.review_phase)
 
 
 def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> None:

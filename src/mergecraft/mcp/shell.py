@@ -161,7 +161,8 @@ _NUMERIC_ARG = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 # git status`, `doas -g devs git …`. The user name is neither path-shaped nor
 # numeric, so without this it reads as the command word and ends the segment
 # before the git behind it is inspected. Glued spellings (`--user=ci`) already
-# fall out as flags.
+# fall out as flags. The set is not per-wrapper, so the skip yields to a token
+# that names git — see the operand branch in ``_is_git_command``.
 _WRAPPER_FLAG_TAKES_VALUE = frozenset({"-u", "--user", "-g", "--group"})
 
 
@@ -207,7 +208,13 @@ def _is_git_command(command: str) -> bool:
         for token in segment.split():
             if skip_operand:
                 skip_operand = False
-                continue
+                # The same letter takes an operand to one wrapper and none to
+                # the next — `-u` is the target user to `sudo` but `--ungroup`
+                # to `parallel` and `set -u` to `sh`, where the token behind it
+                # is the command. Reading a git there costs a false positive on
+                # `sudo -u git ls`, which is the cheaper side to be wrong on.
+                if not _names_git(token):
+                    continue
             if _ENV_ASSIGNMENT.match(token) or _NUMERIC_ARG.match(token) or token.startswith("-"):
                 skip_operand = token in _WRAPPER_FLAG_TAKES_VALUE
                 continue
