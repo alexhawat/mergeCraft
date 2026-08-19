@@ -168,14 +168,19 @@ def _codex_home(ctx: AgentRunContext) -> Path:
 def _toml_string(value: str) -> str:
     """Render ``value`` as a TOML basic string.
 
-    Control characters are escaped as well as ``\\`` and ``"``: TOML forbids a
-    raw newline or tab inside a basic string, so a value carrying one would
-    render a file ``tomllib`` refuses to parse. No current value contains any,
-    which is why this is a guard rather than a fix.
+    ``\\`` and ``"`` are escaped, and so is every control character TOML
+    forbids raw inside a basic string — U+0000 to U+0008, U+000A to U+001F,
+    and U+007F. The three with a named escape get it; the rest get ``\\uXXXX``,
+    which is what ``tomli_w`` emits. A value carrying any of them otherwise
+    renders a file ``tomllib`` refuses to parse, and ``base_url`` comes from a
+    consumer-supplied env var, so this is reachable rather than theoretical.
     """
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     for char, replacement in (("\n", "\\n"), ("\r", "\\r"), ("\t", "\\t")):
         escaped = escaped.replace(char, replacement)
+    escaped = "".join(
+        f"\\u{ord(char):04x}" if ord(char) < 0x20 or ord(char) == 0x7F else char for char in escaped
+    )
     return f'"{escaped}"'
 
 

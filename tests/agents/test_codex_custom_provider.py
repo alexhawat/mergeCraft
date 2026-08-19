@@ -652,3 +652,91 @@ def test_custom_provider_blocks_keep_their_own_keys(
     assert block.get("env_key") == INDEXED_API_KEY_FMT.format(n=1)
     # Convention 7 — the env-var *name* is written, never the resolved value.
     assert PROVIDER_1_API_KEY not in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "control",
+    [
+        pytest.param("\x1b", id="escape"),
+        pytest.param("\x01", id="start-of-heading"),
+        pytest.param("\x08", id="backspace"),
+        pytest.param("\x7f", id="delete"),
+    ],
+)
+def test_control_character_in_a_base_url_still_parses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    control: str,
+) -> None:
+    """A consumer-supplied control character must not render an unparseable file.
+
+    ``base_url`` reaches the renderer straight from the environment, and TOML
+    forbids every control character in a basic string, not just the three with
+    a named escape. A raw one lands in ``config.toml`` and ``tomllib`` refuses
+    the whole file — the failure the escaping was added to prevent.
+    """
+    hostile = f"{PROVIDER_1_BASE_URL}{control}"
+    monkeypatch.setenv(INDEXED_BASE_URL_FMT.format(n=1), hostile)
+    monkeypatch.setenv(INDEXED_API_KEY_FMT.format(n=1), PROVIDER_1_API_KEY)
+
+    parsed = _parse_toml(_write_config(tmp_path, model="openai/gpt-5.3-codex"))
+
+    providers = parsed.get("model_providers")
+    assert isinstance(providers, dict)
+    block = providers.get(PROVIDER_1_ID)
+    assert isinstance(block, dict)
+    assert block.get("base_url") == hostile
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param({}, id="bare"),
+        pytest.param(
+            {INDEXED_API_KEY_FMT.format(n=1): PROVIDER_1_API_KEY}, id="empty-model-providers"
+        ),
+        pytest.param(
+            {
+                INDEXED_BASE_URL_FMT.format(n=1): PROVIDER_1_BASE_URL,
+                INDEXED_API_KEY_FMT.format(n=1): PROVIDER_1_API_KEY,
+            },
+            id="indexed-provider",
+        ),
+    ],
+)
+def test_rendered_codex_config_matches_tomli_w_byte_for_byte(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    env: dict[str, str],
+) -> None:
+    """The hand-rolled renderer stays byte-identical to ``tomli_w`` on real shapes.
+
+    Covers the no-provider path, the empty ``[model_providers]`` table a
+    partial pair emits, and a full provider block with the quoted
+    ``127.0.0.1`` domain key the permission profile carries.
+    """
+    import tomli_w
+
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+
+    text = _write_config(tmp_path, model=_CODEX_MODEL).read_text(encoding="utf-8")
+    parsed = tomllib.loads(text)
+    redump = tomli_w.dumps(parsed)
+
+    assert text == redump
+
+
+@pytest.mark.parametrize("codepoint", [*range(0x01, 0x20), 0x7F])
+def test_toml_string_escapes_every_forbidden_control_character(codepoint: int) -> None:
+    """Each control character TOML forbids must survive a ``tomllib`` round-trip.
+
+    U+0000 is excluded because the OS refuses it in an env var, so it cannot
+    reach the renderer; every other code point below U+0020, plus U+007F, can.
+    """
+    codex_module = _load_codex_module()
+    value = f"a{chr(codepoint)}b"
+
+    rendered = codex_module._toml_string(value)
+
+    assert tomllib.loads(f"k = {rendered}")["k"] == value
