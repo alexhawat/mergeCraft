@@ -1031,3 +1031,287 @@ def test_both_harness_paths_obey_the_same_contract() -> None:
     assert opencode_outcome is RunOutcome.inconclusive
     assert opencode_reason == _MISSING_VERDICT_REASON
     assert RunOutcome.passed not in {opencode_outcome, codex_outcome}
+
+
+# ---------------------------------------------------------------------------
+# W14.5 / #263 — approve fails open on unverified blocking analyzer findings
+# ---------------------------------------------------------------------------
+#
+# ``validate_submission``'s approve branch walks only
+# ``_confirmed_findings_from_state``, which returns analyzer findings whose
+# fingerprint is in ``verified_ids``. A Critical the analyzers found and the
+# agent never dispatched a verifier for is therefore invisible to the gate,
+# and ``approve`` is accepted. D12: reject when a blocking-severity finding
+# exists in ``analyzer_run.findings`` that is neither verified nor withdrawn.
+#
+# Rejection-reason contract chosen for W19: reuse the existing
+# ``REJECTION_APPROVE_CONFIRMED_BLOCKER`` ("approve_with_confirmed_blocker").
+# The string is pinned above at ``_REASON_APPROVE_CONFIRMED_BLOCKER``, but
+# only for the *verified* case; reusing it for the unverified case leaves
+# every existing assertion intact, so the plan's stated preference for one
+# reason holds. No new constant is required.
+
+_UNVERIFIED_BLOCKER_FINGERPRINTS = {
+    "Critical": "w14-unverified-critical",
+    "Major": "w14-unverified-major",
+}
+
+
+def _unverified_blocker(severity: str) -> Finding:
+    """A blocking-severity analyzer finding that no verifier ever confirmed."""
+    return make_finding(
+        tool="bandit",
+        rule_id=f"B105-{severity.lower()}",
+        category="Security & Privacy",
+        severity=severity,
+        confidence="certain",
+        message="Hardcoded credential committed in the diff.",
+        path="src/app.py",
+        start_line=30,
+        end_line=30,
+        source="analyzer",
+        evidence=["PASSWORD = 'hunter2'"],
+        fingerprint=_UNVERIFIED_BLOCKER_FINGERPRINTS[severity],
+        introduced_by_pr="true",
+    )
+
+
+def _nonblocking_analyzer_finding() -> Finding:
+    return make_finding(
+        tool="ruff",
+        rule_id="E501",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="Line too long.",
+        path="src/app.py",
+        start_line=3,
+        end_line=3,
+        source="analyzer",
+        fingerprint="w14-unverified-minor",
+        introduced_by_pr="true",
+    )
+
+
+def _state_with_analyzer_findings(
+    tool_state: Any,
+    findings: list[Finding],
+    *,
+    verified: set[str] | None = None,
+    withdrawn: frozenset[str] | None = None,
+) -> Any:
+    """Seed ``AnalyzerRunState`` and derive the validator's consultation object.
+
+    ``confirmed_findings`` is deliberately left to the derivation in
+    ``_confirmed_findings_from_state`` rather than injected, so an unverified
+    finding really is absent from the confirmed set — injecting it would test
+    the wrong seam.
+    """
+    tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[finding.model_dump() for finding in findings],
+        verified_ids=set(verified or set()),
+    )
+    state = _validation_state(tool_state, withdrawn_fingerprints=withdrawn)
+    state.confirmed_findings = _confirmed_findings(state)
+    return state
+
+
+def _confirmed_findings(state: Any) -> list[Any]:
+    from mergecraft.mcp.verdict import _confirmed_findings_from_state
+
+    return _confirmed_findings_from_state(state)
+
+
+@pytest.mark.xfail(
+    reason="green after W19: approve only walks verified analyzer findings (#263 / D12)",
+    strict=False,
+)
+@pytest.mark.parametrize("severity", ["Critical", "Major"])
+def test_approve_is_rejected_for_an_unverified_blocking_analyzer_finding(
+    tmp_path: Path,
+    severity: str,
+) -> None:
+    """#263 / D12 — an unverified blocker must reject ``approve``.
+
+    The finding is in ``analyzer_run.findings`` with an empty ``verified_ids``,
+    which is exactly the state a run reaches when the agent calls
+    ``run_analyzers`` and then skips verification.
+    """
+    ctx = _ctx(tmp_path)
+    blocker = _unverified_blocker(severity)
+    state = _state_with_analyzer_findings(ctx.tool_state, [blocker])
+    # Precondition: the finding is genuinely *not* in the confirmed set, so
+    # the rejection cannot come from the pre-existing verified-blocker path.
+    assert state.confirmed_findings == []
+
+    validation = _validate(_approve_payload(), state=state)
+    _assert_typed_rejection(validation, _REASON_APPROVE_CONFIRMED_BLOCKER)
+
+
+@pytest.mark.xfail(
+    reason="green after W19: the live ToolContext-derived state also fails open (#263)",
+    strict=False,
+)
+@pytest.mark.asyncio
+async def test_live_submit_approve_is_rejected_for_an_unverified_blocker(
+    tmp_path: Path,
+) -> None:
+    """Consumer half: the tool — not just the validator — must fail closed.
+
+    ``validation_state_from_tool_context`` is the only state builder the live
+    ``submit_review_verdict`` path uses, and it hardcodes
+    ``withdrawn_fingerprints=set()``. Driving the tool proves the fix reaches
+    the surface the reviewing agent actually calls, and that no
+    ``TerminalSubmission`` is recorded.
+    """
+    from mergecraft.mcp.verdict import (
+        submit_review_verdict_tool,
+        validation_state_from_tool_context,
+    )
+
+    ctx = _ctx(tmp_path)
+    blocker = _unverified_blocker("Critical")
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[blocker.model_dump()],
+        verified_ids=set(),
+    )
+    derived = validation_state_from_tool_context(ctx)
+    assert derived.confirmed_findings == []
+
+    _assert_typed_rejection(
+        _validate(_approve_payload(), state=derived),
+        _REASON_APPROVE_CONFIRMED_BLOCKER,
+    )
+    verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert verdict.is_error is True
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in verdict.content[0]["text"]
+    assert ctx.tool_state.terminal_submission is None
+
+
+@pytest.mark.xfail(
+    reason="green after W19: a stored approve must be revalidated against unverified blockers",
+    strict=False,
+)
+@pytest.mark.asyncio
+async def test_approve_recorded_before_analyzers_becomes_unusable(tmp_path: Path) -> None:
+    """An ``approve`` banked before ``run_analyzers`` must not survive the findings.
+
+    Same shape as the failed-static-check revalidation above: the ordering
+    the agent chooses must not decide whether the gate applies.
+    """
+    ctx = _ctx(tmp_path)
+    first = await _submit_verdict(ctx, _approve_payload())
+    assert first.is_error is False
+
+    blocker = _unverified_blocker("Critical")
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[blocker.model_dump()],
+        verified_ids=set(),
+    )
+
+    finalized = await finalize_agent_result(_run_ctx(ctx), AgentResult(success=True))
+    assert finalized.terminal_submission_received is False
+    assert finalized.diagnostics.get("rejection_reason") == _REASON_APPROVE_CONFIRMED_BLOCKER
+    outcome, _reason = _classify(finalized, mode="Review")
+    assert outcome is RunOutcome.inconclusive
+
+
+def test_approve_survives_a_non_blocking_unverified_analyzer_finding(tmp_path: Path) -> None:
+    """Green guard: D12 blocks on blocking severities only.
+
+    Without this arm the fix could degrade into "approve is always rejected
+    once the analyzers found anything", which would make every clean review
+    inconclusive.
+    """
+    ctx = _ctx(tmp_path)
+    state = _state_with_analyzer_findings(ctx.tool_state, [_nonblocking_analyzer_finding()])
+    validation = _validate(_approve_payload(), state=state)
+
+    assert isinstance(validation, _validation_type())
+    assert validation.accepted is True
+    assert validation.rejection_reason is None
+
+
+def test_approve_survives_an_empty_analyzer_run(tmp_path: Path) -> None:
+    """Green guard: analyzers ran and found nothing ⇒ approve is legitimate."""
+    ctx = _ctx(tmp_path)
+    state = _state_with_analyzer_findings(ctx.tool_state, [])
+    validation = _validate(_approve_payload(), state=state)
+
+    assert validation.accepted is True
+    assert validation.rejection_reason is None
+
+
+def test_approve_survives_a_withdrawn_blocking_finding(tmp_path: Path) -> None:
+    """Green guard (D12's escape hatch): a withdrawn blocker must not block.
+
+    Green today because the approve branch ignores ``analyzer_run.findings``
+    entirely. After W19 it is load-bearing: the walk must honour
+    ``state.withdrawn_fingerprints``, which is the seam the withdrawn-findings
+    memory feeds.
+    """
+    ctx = _ctx(tmp_path)
+    blocker = _unverified_blocker("Critical")
+    state = _state_with_analyzer_findings(
+        ctx.tool_state,
+        [blocker],
+        withdrawn=frozenset({blocker.fingerprint}),
+    )
+    assert blocker.fingerprint in state.withdrawn_fingerprints
+
+    validation = _validate(_approve_payload(), state=state)
+    assert validation.accepted is True
+    assert validation.rejection_reason is None
+
+
+def test_request_changes_is_unaffected_by_an_unverified_blocker(tmp_path: Path) -> None:
+    """Green guard: the new walk belongs to the approve branch only."""
+    ctx = _ctx(tmp_path)
+    state = _state_with_analyzer_findings(ctx.tool_state, [_unverified_blocker("Critical")])
+    validation = _validate(
+        {
+            "verdict": "request_changes",
+            "summary": "One critical finding stands.",
+            "findings": [_agent_blocker().model_dump()],
+        },
+        state=state,
+    )
+
+    assert validation.accepted is True
+    assert validation.rejection_reason is None
+
+
+def test_a_pre_existing_blocker_is_downgraded_before_the_gate(tmp_path: Path) -> None:
+    """Green guard: ``apply_causality_policy`` runs first, as the verified path does.
+
+    A Critical marked ``introduced_by_pr: "false"`` becomes ``Minor``, so it
+    must not reject an approve. Skipping the policy in the new walk would
+    make every pre-existing repo-wide Critical un-approvable.
+    """
+    from mergecraft.findings.causality import apply_causality_policy
+
+    pre_existing = make_finding(
+        tool="bandit",
+        rule_id="B105-preexisting",
+        category="Security & Privacy",
+        severity="Critical",
+        confidence="certain",
+        message="Hardcoded credential outside the diff.",
+        path="src/legacy.py",
+        start_line=9,
+        end_line=9,
+        source="analyzer",
+        fingerprint="w14-preexisting-critical",
+        introduced_by_pr="false",
+    )
+    assert apply_causality_policy(pre_existing).severity == "Minor"
+
+    ctx = _ctx(tmp_path)
+    state = _state_with_analyzer_findings(ctx.tool_state, [pre_existing])
+    validation = _validate(_approve_payload(), state=state)
+
+    assert validation.accepted is True
+    assert validation.rejection_reason is None

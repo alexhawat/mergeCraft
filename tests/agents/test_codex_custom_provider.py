@@ -87,6 +87,10 @@ def _clear_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "NOUS_BASE_URL",
         "TOKENHUB_API_KEY",
         "TOKENHUB_BASE_URL",
+        # W14.1 / #222 — the operator sandbox override would flip
+        # ``_sandbox_mode`` off ``read-only`` and silently disable the
+        # permission profiles the #222 tests depend on.
+        "MERGECRAFT_CODEX_SANDBOX",
     ):
         monkeypatch.delenv(name, raising=False)
     # Wipe a generous index range so stray env vars from prior tests do
@@ -374,3 +378,233 @@ def test_generated_configs_never_log_either_api_key(
     joined = "\n".join(captured + [r.getMessage() for r in caplog.records])
     assert SENTINEL_KEY_1 not in joined, "api_key 1 leaked into logs"
     assert SENTINEL_KEY_2 not in joined, "api_key 2 leaked into logs"
+
+
+# ---------------------------------------------------------------------------
+# W14.1 / #222 — TOML root keys must precede tables (D17)
+# ---------------------------------------------------------------------------
+#
+# ``write_mcp_config`` appends ``_append_custom_provider_lines`` (which emits
+# ``[model_providers.<id>]`` *tables*) before ``_append_read_only_mcp_network_lines``
+# (which emits the ``default_permissions`` *root key*). TOML scopes every
+# bare key to the most recent table header, so with custom-provider env set
+# the profile name lands at ``model_providers.<id>.default_permissions`` and
+# Codex rejects the config — every review dies before it starts.
+#
+# These assertions parse with ``tomllib`` on purpose. A substring check for
+# ``default_permissions =`` passes on the broken file, because the line *is*
+# written — just in the wrong scope. Only a parse shows the nesting.
+
+_PERMISSION_PROFILE = "mergecraft-review"
+
+
+def _permission_profiles_active(tmp_path: Path, *, model: str | None) -> bool:
+    """True when this context resolves to the permission-profile branch.
+
+    Guard against a vacuous pass: if ``_codex_use_permission_profiles`` were
+    False, ``default_permissions`` would never be emitted at all and the
+    "not nested" assertions below would hold for the wrong reason.
+    """
+    codex_module = _load_codex_module()
+    ctx = make_agent_run_context(tmp_path, resolved_model=model)
+    ctx.payload.shell = "disabled"
+    return bool(codex_module._codex_use_permission_profiles(ctx))
+
+
+def _root_keys_after_first_table(path: Path) -> list[str]:
+    """Return bare ``key =`` lines that appear after the first table header.
+
+    Structural invariant behind D17: once a ``[table]`` header is emitted,
+    every later bare key belongs to that table. Any root key the writer
+    still intends as top-level must come first.
+    """
+    stray: list[str] = []
+    seen_table = False
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            seen_table = True
+            continue
+        if seen_table and "=" in line:
+            stray.append(line.split("=", 1)[0].strip())
+    return stray
+
+
+@pytest.mark.xfail(
+    reason="green after W15: default_permissions is emitted after [model_providers.*] (#222)",
+    strict=False,
+)
+@pytest.mark.parametrize(
+    ("env", "expected_provider_ids"),
+    [
+        pytest.param(
+            {
+                INDEXED_BASE_URL_FMT.format(n=1): PROVIDER_1_BASE_URL,
+                INDEXED_API_KEY_FMT.format(n=1): PROVIDER_1_API_KEY,
+            },
+            (PROVIDER_1_ID,),
+            id="one-indexed-pair",
+        ),
+        pytest.param(
+            {
+                INDEXED_BASE_URL_FMT.format(n=1): PROVIDER_1_BASE_URL,
+                INDEXED_API_KEY_FMT.format(n=1): PROVIDER_1_API_KEY,
+                INDEXED_BASE_URL_FMT.format(n=2): PROVIDER_2_BASE_URL,
+                INDEXED_API_KEY_FMT.format(n=2): PROVIDER_2_API_KEY,
+            },
+            (PROVIDER_1_ID, PROVIDER_2_ID),
+            id="two-indexed-pairs",
+        ),
+        pytest.param(
+            {SINGLETON_BASE_URL_ENV: SINGLETON_BASE_URL, SINGLETON_API_KEY_ENV: SINGLETON_API_KEY},
+            (DEFAULT_PROVIDER_ID,),
+            id="singleton-alias",
+        ),
+    ],
+)
+def test_default_permissions_stays_a_root_key_with_custom_providers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    env: dict[str, str],
+    expected_provider_ids: tuple[str, ...],
+) -> None:
+    """#222 / D17 — ``default_permissions`` must parse at the TOML top level.
+
+    Both surfaces are active: custom-provider env vars *and* the read-only
+    permission profiles. The key must not be scoped into any
+    ``model_providers.<id>`` table.
+    """
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    assert _permission_profiles_active(tmp_path, model="openai/gpt-5.3-codex")
+
+    path = _write_config(tmp_path, model="openai/gpt-5.3-codex")
+    parsed = _parse_toml(path)
+
+    assert parsed.get("default_permissions") == _PERMISSION_PROFILE
+    providers = parsed.get("model_providers")
+    assert isinstance(providers, dict)
+    for provider_id in expected_provider_ids:
+        block = providers.get(provider_id)
+        assert isinstance(block, dict), f"expected provider block for {provider_id}"
+        assert "default_permissions" not in block, (
+            f"default_permissions leaked into model_providers.{provider_id}"
+        )
+
+
+@pytest.mark.xfail(
+    reason="green after W15: an empty [model_providers] table also swallows the root key (#222)",
+    strict=False,
+)
+def test_default_permissions_survives_a_partial_provider_pair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A touched-but-incomplete pair emits a bare ``[model_providers]`` table.
+
+    ``_append_custom_provider_lines`` writes an empty table in that case, so
+    the nesting bug fires without any provider block existing at all.
+    """
+    monkeypatch.setenv(INDEXED_API_KEY_FMT.format(n=1), PROVIDER_1_API_KEY)
+    assert _permission_profiles_active(tmp_path, model="openai/gpt-5.3-codex")
+
+    parsed = _parse_toml(_write_config(tmp_path, model="openai/gpt-5.3-codex"))
+
+    assert parsed.get("default_permissions") == _PERMISSION_PROFILE
+    providers = parsed.get("model_providers")
+    assert isinstance(providers, dict)
+    assert "default_permissions" not in providers
+
+
+@pytest.mark.xfail(
+    reason="green after W15: no root key may follow the first table header (#222 / D17)",
+    strict=False,
+)
+def test_no_root_key_is_emitted_after_the_first_table(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D17's general invariant, not just the one key that broke.
+
+    Any bare key written after a ``[table]`` header silently changes scope.
+    Pinning the invariant means a later addition to
+    ``_append_read_only_mcp_network_lines`` cannot reintroduce #222.
+    """
+    monkeypatch.setenv(INDEXED_BASE_URL_FMT.format(n=1), PROVIDER_1_BASE_URL)
+    monkeypatch.setenv(INDEXED_API_KEY_FMT.format(n=1), PROVIDER_1_API_KEY)
+    assert _permission_profiles_active(tmp_path, model="openai/gpt-5.3-codex")
+
+    path = _write_config(tmp_path, model="openai/gpt-5.3-codex")
+    assert _root_keys_after_first_table(path) == []
+
+
+def test_permission_profile_tables_are_unchanged_with_custom_providers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Green guard: W15 must reorder, not drop, the profile tables.
+
+    The ``[permissions.<profile>]`` tree already parses correctly today
+    because it is written as tables. Reordering the emission must leave the
+    profile, its ``extends``, and the localhost network allowances intact.
+    """
+    monkeypatch.setenv(INDEXED_BASE_URL_FMT.format(n=1), PROVIDER_1_BASE_URL)
+    monkeypatch.setenv(INDEXED_API_KEY_FMT.format(n=1), PROVIDER_1_API_KEY)
+
+    parsed = _parse_toml(_write_config(tmp_path, model="openai/gpt-5.3-codex"))
+
+    permissions = parsed.get("permissions")
+    assert isinstance(permissions, dict)
+    profile = permissions.get(_PERMISSION_PROFILE)
+    assert isinstance(profile, dict)
+    assert profile.get("extends") == ":read-only"
+    network = profile.get("network")
+    assert isinstance(network, dict)
+    assert network.get("enabled") is True
+    assert network.get("allow_local_binding") is True
+    domains = network.get("domains")
+    assert isinstance(domains, dict)
+    assert domains.get("127.0.0.1") == "allow"
+    assert domains.get("localhost") == "allow"
+
+
+def test_default_permissions_is_already_a_root_key_without_custom_providers(
+    tmp_path: Path,
+) -> None:
+    """Green guard: the no-provider path is correct today and must stay so.
+
+    This is the arm that proves #222 is a key-ordering bug rather than a
+    missing key — with no ``[model_providers.*]`` table in front of it, the
+    same line parses at the top level.
+    """
+    assert _permission_profiles_active(tmp_path, model="openai/gpt-5.3-codex")
+
+    parsed = _parse_toml(_write_config(tmp_path, model="openai/gpt-5.3-codex"))
+
+    assert parsed.get("default_permissions") == _PERMISSION_PROFILE
+    assert "model_providers" not in parsed
+
+
+def test_custom_provider_blocks_keep_their_own_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Green guard: reordering must not disturb the provider table contents (#71)."""
+    monkeypatch.setenv(INDEXED_BASE_URL_FMT.format(n=1), PROVIDER_1_BASE_URL)
+    monkeypatch.setenv(INDEXED_API_KEY_FMT.format(n=1), PROVIDER_1_API_KEY)
+
+    path = _write_config(tmp_path, model="openai/gpt-5.3-codex")
+    parsed = _parse_toml(path)
+
+    providers = parsed.get("model_providers")
+    assert isinstance(providers, dict)
+    block = providers.get(PROVIDER_1_ID)
+    assert isinstance(block, dict)
+    assert block.get("base_url") == PROVIDER_1_BASE_URL
+    assert block.get("wire_api") == "responses"
+    assert block.get("env_key") == INDEXED_API_KEY_FMT.format(n=1)
+    # Convention 7 — the env-var *name* is written, never the resolved value.
+    assert PROVIDER_1_API_KEY not in path.read_text(encoding="utf-8")

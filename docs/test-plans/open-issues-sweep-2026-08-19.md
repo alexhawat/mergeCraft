@@ -568,3 +568,188 @@ cases above pin W13's behaviour as shipped. Flagged for Batch C Final or a follo
 ### Escalation log
 
 _(empty)_
+
+---
+
+## Batch D — Agents + approve gate (W14)
+
+**Issues:** #222 (Codex `default_permissions` nested under `[model_providers.*]`), #261
+(`structured_handoff` casefold detect + exact-case split), #262 (ensemble disagreement drops
+secondary-only findings), #273 (`to_usage()` double-counts OpenAI cached tokens), #263
+(`submit_review_verdict(approve)` ignores unverified blocking analyzer findings).
+**Implementation waves:** W15 (#222), W16 (#261), W17 (#262), W18 (#273), W19 (#263).
+**Binding decisions:** **D17** (root keys before tables), **D15** (union on disagreement), **D16**
+(OpenAI cached tokens are inclusive), **D12** (approve fails closed on unverified blockers).
+
+**Anchors re-grepped, not trusted from the plan body:**
+
+| Issue | Anchor used | Plan text | Verdict |
+|---|---|---|---|
+| #222 | `agents/codex.py:506-508` (`_append_custom_provider_lines` then `_append_read_only_mcp_network_lines`; the root key is written at `:460`) | same | matches |
+| #261 | `agents/structured_handoff.py:44-45` | same | matches |
+| #262 | `agents/ensemble.py:210-214` (the disagreement `return`; `merged_findings=tuple(left.findings)` at `:212`) | W17.1 `:210-214`, Traceability `:211-212` | matches |
+| #273 | `agents/_stream_consumer.py:181` | same | matches |
+| #263 | `mcp/verdict.py:276-313` (`_confirmed_findings_from_state`), `:395-413` (the approve branch) | W19.1 said `~377`; the Docs↔code table said `:377+`; Traceability said `:276-292,395+` | **stale — corrected in the plan by W14** |
+
+### Files
+
+| File | Status | Issue |
+|---|---|---|
+| `tests/agents/test_codex_custom_provider.py` | extended | #222 |
+| `tests/agents/test_structured_handoff.py` | extended | #261 |
+| `tests/agents/test_ensemble.py` | extended | #262 |
+| `tests/agents/test_stream_usage_cache.py` | **new** | #273 |
+| `tests/review/test_terminal_verdict_policy.py` | extended (validator + live tool + finalize) | #263 |
+| `tests/mcp/test_submit_review_verdict.py` | extended (tool surface) | #263 |
+
+### Contract → test map
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| `default_permissions` parses at the TOML **top level** with custom-provider env active | `test_default_permissions_stays_a_root_key_with_custom_providers` (3 params) | Unit, the bug | xfail W15 |
+| An empty `[model_providers]` table (partial pair) also swallows the key | `test_default_permissions_survives_a_partial_provider_pair` | Unit, edge | xfail W15 |
+| No bare key may follow the first table header | `test_no_root_key_is_emitted_after_the_first_table` | Unit, invariant | xfail W15 |
+| `[permissions.<profile>]` tree survives the reorder | `test_permission_profile_tables_are_unchanged_with_custom_providers` | Unit, regression | green |
+| The no-provider path is already correct | `test_default_permissions_is_already_a_root_key_without_custom_providers` | Unit, boundary | green |
+| Provider blocks keep `base_url` / `env_key` / `wire_api` (#71, convention 7) | `test_custom_provider_blocks_keep_their_own_keys` | Unit, regression | green |
+| A mixed-case marker parses its findings | `test_mixed_case_marker_parses_the_findings_payload` (5 casings) | Unit, the bug | xfail W16 |
+| A mixed-case marker is stripped from the reasoning | `test_mixed_case_marker_is_stripped_from_the_reasoning` (5 casings) | Unit, edge | xfail W16 |
+| A mixed-case marker with `[]` yields no findings and no raise | `test_mixed_case_marker_with_an_empty_array_yields_no_findings` (5 casings) | Unit, boundary | xfail W16 |
+| The documented lowercase casing still parses | `test_lowercase_marker_still_parses` | Unit, regression | green |
+| No marker ⇒ prose only | `test_no_marker_at_all_yields_prose_only` | Unit, edge | green |
+| A genuinely malformed tail still raises with its message contract | `test_malformed_tail_still_raises_a_value_error`, `test_non_array_tail_still_raises_a_value_error` | Unit, error | green |
+| A right-only finding survives disagreement | `test_disagreement_keeps_a_right_only_finding` | Unit, the bug | xfail W17 |
+| Both sides' exclusive findings survive | `test_disagreement_unions_both_sides` | Unit, D15 | xfail W17 |
+| The union deduplicates by `_finding_key` | `test_disagreement_union_deduplicates_a_shared_finding` | Unit, boundary | xfail W17 |
+| An empty left side does not swallow the right side | `test_disagreement_with_an_empty_left_side_keeps_the_right_findings` | Unit, edge | xfail W17 |
+| `judge_dispatch` is retained (D15) | `test_disagreement_still_dispatches_the_judge` | Unit, D15 | green |
+| Disagreement claims no confidence boost | `test_disagreement_claims_no_confidence_boost` | Unit, regression | green |
+| The agreement path is untouched (#238) | `test_agreement_path_is_untouched_by_the_union` | Unit, regression | green |
+| A one-model run short-circuits | `test_single_model_run_is_returned_unmerged` | Unit, edge | green |
+| OpenAI cached tokens are **not** added to `input_tokens` | `test_openai_cached_tokens_are_not_added_to_input_tokens` (2 shapes × `replace`/`absorb`) | Unit, the bug | xfail W18 |
+| An OpenAI payload with a cache-**write** count still adds the write | `test_openai_cache_write_stays_additive_while_reads_do_not` | Unit, D16 split | xfail W18 |
+| **Consumer:** `codex turn.completed` through the real handler | `test_codex_turn_completed_reports_inclusive_cached_tokens` (2 shapes) | Integration, seam | xfail W18 |
+| `cache_read_tokens` still reports the cached count | `test_openai_cached_tokens_are_still_reported` (2 shapes) | Unit, guard | green |
+| Anthropic `cache_read_input_tokens` stays additive | `test_anthropic_cache_read_stays_additive` (`replace`/`absorb`) | Unit, the asymmetry | green |
+| Anthropic reads **and** writes both add | `test_anthropic_full_shape_sums_both_cache_buckets` | Unit, boundary | green |
+| A native Anthropic field wins over an OpenAI details block | `test_anthropic_native_field_wins_over_an_openai_details_block` | Unit, provenance | green |
+| No cache fields ⇒ `input_tokens` untouched, `cache_*` `None` | `test_no_cache_fields_leaves_input_tokens_untouched` | Unit, edge | green |
+| T2's extractor is the provenance signal and must not be deleted | `test_openai_extractor_still_recognises_both_shapes` | Unit, guard | green |
+| **Consumer:** Claude `message_start` + `result` keeps Anthropic accounting | `test_claude_result_event_keeps_anthropic_accounting` | Integration, seam | green |
+| An empty stream reports no usage | `test_empty_stream_still_reports_no_usage` | Integration, edge | green |
+| `approve` is rejected for an unverified blocking analyzer finding | `test_approve_is_rejected_for_an_unverified_blocking_analyzer_finding` (Critical, Major) | Unit, the bug | xfail W19 |
+| **Consumer:** the live `ToolContext`-derived state also fails closed | `test_live_submit_approve_is_rejected_for_an_unverified_blocker` | Integration, seam | xfail W19 |
+| An `approve` banked before `run_analyzers` becomes unusable at finalize | `test_approve_recorded_before_analyzers_becomes_unusable` | Functional, revalidation | xfail W19 |
+| **Consumer:** the MCP tool rejects and records nothing | `test_approve_is_rejected_when_a_blocker_was_never_verified` (Critical, Major) | Integration, tool | xfail W19 |
+| A non-blocking unverified finding still allows `approve` | `test_approve_survives_a_non_blocking_unverified_analyzer_finding`, `test_approve_is_recorded_when_the_analyzer_findings_are_non_blocking` | Unit + tool, legitimate approve | green |
+| An empty analyzer run / no analyzer run still allows `approve` | `test_approve_survives_an_empty_analyzer_run`, `test_approve_is_recorded_when_no_analyzer_run_happened` | Unit + tool, boundary | green |
+| A **withdrawn** blocker must not block (D12's escape hatch) | `test_approve_survives_a_withdrawn_blocking_finding` | Unit, D12 | green |
+| The new walk belongs to the approve branch only | `test_request_changes_is_unaffected_by_an_unverified_blocker` | Unit, scope | green |
+| `apply_causality_policy` runs before the gate | `test_a_pre_existing_blocker_is_downgraded_before_the_gate` | Unit, policy | green |
+
+### Confirmed-RED assertions (37 xfails, verified with `--runxfail`)
+
+All 37 fail on the assertion, never on an import or a stub:
+
+- **W15 (5)** — with one indexed pair, two indexed pairs, or the singleton alias, `tomllib.loads`
+  finds `default_permissions` at `model_providers.<id>.default_permissions` and
+  `parsed["default_permissions"]` is `None`. A partial pair puts it at
+  `model_providers.default_permissions`. The general invariant reports `["default_permissions"]` as a
+  stray root key after the first table header.
+- **W16 (15)** — every mixed-case marker (`upper`, `title`, `mixed`, `upper-head`, `upper-tail`)
+  raises `ValueError: … not valid JSON: Expecting value: line 1 column 1 (char 0)` for the populated
+  array, the empty array, and the reasoning-strip arm alike.
+- **W17 (4)** — `merged_findings` is `(left_only,)` when the right model found `pkg/billing.go`, and
+  `()` when the left model found nothing at all.
+- **W18 (7)** — `to_usage().input_tokens` is `140` (expected `100`) for both OpenAI shapes through
+  both `replace_usage` and `absorb_usage`, `165` (expected `125`) with a cache-write count, and
+  `140` through the real `codex` `turn.completed` handler.
+- **W19 (6)** — `validate_submission` accepts `approve` with an unverified Critical or Major in
+  `analyzer_run.findings`; `submit_review_verdict` records a `TerminalSubmission`;
+  `finalize_agent_result` reports `terminal_submission_received=True`.
+
+### Green-today regression guards (28 new assertions)
+
+Four of these five fixes have an over-correcting failure mode, so each is guarded from the other
+side:
+
+- **#222** — the `[permissions.<profile>]` tree and the provider blocks are pinned separately, so
+  W15 must *reorder* emission rather than move keys into or out of tables. The no-provider arm
+  proves the same line already parses correctly at the top level, which is what makes this a
+  key-ordering bug and not a missing key.
+- **#261** — the two error arms (`not valid JSON`, `must be a JSON array`) pin the message contract,
+  so a fix cannot buy the mixed-case case by swallowing genuinely malformed tails.
+- **#262** — `judge_dispatch` is asserted present on the same disagreement input the union tests
+  use (D15 is explicit the judge stays), and the dedup arm blocks the naive
+  `tuple(left) + tuple(right)`.
+- **#273** — the Anthropic arms are the point; see the note below.
+- **#263** — five arms pin the *legitimate* approve: non-blocking findings, an empty analyzer run,
+  no analyzer run at all, a withdrawn blocker, and a pre-existing Critical that
+  `apply_causality_policy` downgrades to `Minor`. Without them, "reject when `analyzer_run.findings`
+  is non-empty" would pass every red.
+
+### The #273 asymmetry — separable today, no provider flag needed
+
+D16 hints W18 may need a flag. It does need **one bit of state**, but the provenance is already
+unambiguous in the current code, so no provider identity or driver-level flag has to be threaded in:
+
+- `absorb_usage` / `replace_usage` resolve `cache_read` as
+  `cache_read_input_tokens or cacheReadTokens or _extract_openai_cached_tokens(payload) or 0`. The
+  Anthropic-native fields are consulted **first**, so at the moment `cache_read` is assigned the
+  writer knows which branch produced it. `test_anthropic_native_field_wins_over_an_openai_details_block`
+  pins that ordering precisely so the fix can rely on it.
+- The cheapest shape is a sibling field on the accumulator (e.g. `cache_read_is_inclusive: bool`)
+  set at the same two assignment sites and read only by `to_usage()`. `AgentUsage` needs no new
+  field — `cache_read_tokens` keeps reporting the count either way.
+- **The one genuinely ambiguous case is a mixed stream**: `absorb_usage` accumulates across events,
+  so a run whose `message_start` were Anthropic-shaped and whose `message_delta` were OpenAI-shaped
+  would carry one flag for two provenances. No live driver does this — Claude is the only
+  `absorb_usage` caller and it is Anthropic-native throughout, while every OpenAI-shaped provider
+  arrives through a single terminal `replace_usage`. This suite does **not** pin the mixed case, on
+  purpose: pinning it would force W18 to pick a resolution rule for a shape no provider emits. Both
+  accumulator methods are covered independently instead.
+
+### Notes for W15 / W16 / W17 / W18 / W19
+
+- **#263's rejection reason: reuse `REJECTION_APPROVE_CONFIRMED_BLOCKER`**
+  (`approve_with_confirmed_blocker`). The string *is* pinned by existing tests —
+  `tests/review/test_terminal_verdict_policy.py:73` defines `_REASON_APPROVE_CONFIRMED_BLOCKER` and
+  four tests assert it — but only for the **verified**-blocker path
+  (`test_agent_approve_with_verified_blocker_fails_structurally`,
+  `test_live_confirm_blocks_approve_via_verified_ids`,
+  `test_live_agent_confirm_blocks_approve_without_analyzer_findings`,
+  `test_confirm_survives_analyzer_rerun`). Nothing distinguishes "unverified" from "verified", so
+  reusing the constant leaves all four intact and satisfies the plan's stated preference for one
+  reason. W19 must **not** add a new constant: the W14 reds assert this exact string at the
+  validator, at the tool, and through `finalize_agent_result`.
+- **#263 has no live `withdrawn_fingerprints` producer.** `validation_state_from_tool_state`
+  hardcodes `withdrawn_fingerprints=set()` (`verdict.py:332`), and the withdrawn-findings memory
+  suppresses findings earlier, in `analyzers/pipeline.py:355`. The withdrawn arm is therefore
+  asserted at the `validate_submission(state=…)` boundary with a hand-built state. It is green today
+  (the approve branch ignores `analyzer_run.findings` entirely) and becomes load-bearing after W19.
+- **#263's finalize arm goes through `revalidate_recorded_submission`.** An approve banked *before*
+  `run_analyzers` must not survive it; the same machinery already handles the failed-static-check
+  case (`test_approve_then_failed_static_check_is_unusable_at_finalize`), so W19 should need no new
+  revalidation hook — only the widened walk.
+- **#222's tests depend on the permission-profile branch being live.** `_permission_profiles_active`
+  asserts `_codex_use_permission_profiles(ctx)` before each nesting assertion, because with profiles
+  off the key is never emitted and "not nested" would hold for the wrong reason. The autouse env
+  fixture now also clears `MERGECRAFT_CODEX_SANDBOX`, which would otherwise flip `_sandbox_mode` off
+  `read-only` and silently disable the branch.
+- **#222 is asserted through `tomllib`, never by substring.** `default_permissions =` *is* present in
+  the broken file — it is only in the wrong scope. A string match passes on the defect.
+- **#261 and #262 have no in-`src` consumer.** `rg` finds no caller of `parse_specialist_handoff` or
+  `reconcile_ensemble` under `src/mergecraft/` — both are library seams the harness has not wired
+  yet. The function *is* the observable surface, so the Batch B/C "pin the consumer too" lesson has
+  nothing further to reach for on those two; #273 and #263 are where it applied.
+- **#273's consumer arms use the private handler builders** (`codex._codex_stream_event_handler`,
+  `claude._claude_stream_event_handler`) with `tracer=None`, driven through the real
+  `consume_stream`. If W18 renames either builder these two tests need a one-line amendment —
+  escalate rather than editing them in an implementation wave.
+- **#262's `_finding_key` is imported by the tests.** Key identity is `(path, body)` and the dedup
+  assertion depends on it. The tests compare *keys*, not dict identity, so a widened key stays green
+  as long as a finding both models reported still keys equal on both sides.
+
+### Escalation log
+
+_(empty)_
