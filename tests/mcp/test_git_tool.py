@@ -741,14 +741,18 @@ async def test_known_config_flag_spellings_still_rejected(
     `--config-env` is accepted by git both as `--config-env <name>=<envvar>` and
     as `--config-env=<name>=<envvar>`; the bare token covers the separate-value
     form. `-c` is exact-match only upstream, so `-c` and `-c=…` are the whole
-    short-flag surface the guard has to keep refusing.
+    short-flag surface the guard has to keep refusing. The bare `-c` is refused
+    on ambiguity rather than on an alias claim, so only the refusal is asserted
+    here; its message is pinned in
+    `test_bare_dash_c_after_subcommand_is_refused_without_an_alias_claim`.
     """
     recorder = _RunGitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
 
     result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": [token]})
     assert result.is_error is True, result.content[0]["text"]
-    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+    if token != "-c":
+        assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
     assert recorder.calls == []
 
 
@@ -765,7 +769,51 @@ async def test_spaced_config_flag_rejection_message_names_the_token(
     assert result.is_error is True
     text = result.content[0]["text"]
     assert "'-c'" in text
-    assert CONFIG_FLAG_MESSAGE in text
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize(
+    "subcommand",
+    [
+        pytest.param("blame", id="blame-annotate-output"),
+        pytest.param("diff", id="diff-combined"),
+        pytest.param("status", id="status-owns-no-dash-c"),
+    ],
+)
+async def test_bare_dash_c_after_subcommand_is_refused_without_an_alias_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
+) -> None:
+    """A bare `-c` stays refused, but the message must stop lying about why.
+
+    git's config flag must precede the subcommand, so a `-c` sitting after one
+    cannot be it: `git blame -c` selects git-annotate output and `git diff -c`
+    is accepted silently. The guard cannot tell those from a misplaced config
+    flag and keeps refusing them — what it must not do is assert alias
+    execution about a token that carries no payload.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand, "args": ["-c"]})
+    assert result.is_error is True, result.content[0]["text"]
+    text = result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE not in text
+    assert "cannot be told apart from git's own config flag" in text
+    assert recorder.calls == []
+
+
+async def test_glued_alias_payload_still_claims_alias_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The honest alias claim survives where it is true: `-c<key>=<value>`."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["-calias.x=!true"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
     assert recorder.calls == []
 
 
