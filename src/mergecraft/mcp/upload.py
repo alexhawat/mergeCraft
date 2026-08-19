@@ -19,20 +19,23 @@ if TYPE_CHECKING:
 
 
 def _check_upload_path(path: Path, resolved_repo_root: str, resolved_tmpdir: str) -> None:
-    """Raise ValueError when *path* is a symlink or escapes both allowed roots (#258 / D8).
+    """Raise ValueError when *path* is a symlink or escapes the allowed roots (#258 / D8).
 
-    A path must be a regular file (not a symlink) and must resolve to within the
-    primary repo root or, when non-empty, the session tmpdir.  No file:// URI is
-    emitted for a rejected path — the caller raises before reaching URI creation.
+    A path must be a regular file (not a symlink) and must resolve into the repo
+    checkout, a registered cross-repo checkout, or the session tmpdir — the same
+    containment rule the git tool and shell cwd use. No file:// URI is emitted
+    for a rejected path: the caller raises before reaching URI creation.
     """
+    from mergecraft.utils.workspace import WorkspacePathError, confine_to_workspace
+
     if path.is_symlink():
         msg = f"Blocked: '{path}' is a symlink — symlink escapes are not permitted."
         raise ValueError(msg)
-    resolved = str(path.resolve())
-    allowed = [r for r in (resolved_repo_root, resolved_tmpdir) if r]
-    if not any(resolved == r or resolved.startswith(r + os.sep) for r in allowed):
-        msg = f"Blocked: '{path}' resolves outside the allowed upload roots."
-        raise ValueError(msg)
+    try:
+        confine_to_workspace(str(path), base=resolved_repo_root, extra_roots=(resolved_tmpdir,))
+    except WorkspacePathError as exc:
+        msg = f"Blocked: '{path}' resolves outside the allowed upload roots — {exc}"
+        raise ValueError(msg) from exc
 
 
 def upload_file_tool(ctx: ToolContext):

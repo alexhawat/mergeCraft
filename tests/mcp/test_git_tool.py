@@ -312,16 +312,158 @@ async def test_mutating_subcommands_rejected(
     assert recorder.calls == []
 
 
-@pytest.mark.parametrize("flag", ["-D", "-d", "-m"])
-async def test_branch_mutation_flags_rejected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+# Every write form of ``git branch``. The short spellings were the only ones the
+# old blocklist named; the long spellings, ``-M``/``--copy``/``-C`` and bare
+# creation all reached git. A rename in particular changes what
+# ``commit_changes`` / ``push_branch`` later resolve through
+# ``rev-parse --abbrev-ref HEAD``.
+BRANCH_WRITE_ARGS = [
+    pytest.param(["-D", "topic"], id="short-force-delete"),
+    pytest.param(["-d", "topic"], id="short-delete"),
+    pytest.param(["-m", "old", "new"], id="short-move"),
+    pytest.param(["--delete", "topic"], id="long-delete"),
+    pytest.param(["--move", "old", "new"], id="long-move"),
+    pytest.param(["-M", "old", "new"], id="short-force-move"),
+    pytest.param(["--copy", "old", "new"], id="long-copy"),
+    pytest.param(["-c", "old", "new"], id="short-copy"),
+    pytest.param(["-C", "old", "new"], id="short-force-copy"),
+    pytest.param(["newbranch"], id="bare-creation"),
+    pytest.param(["newbranch", "main"], id="creation-from-start-point"),
+    pytest.param(["--set-upstream-to=origin/main"], id="set-upstream"),
+    pytest.param(["--unset-upstream"], id="unset-upstream"),
+    pytest.param(["--edit-description"], id="edit-description"),
+    pytest.param(["--force", "topic", "main"], id="force-create"),
+]
+
+
+@pytest.mark.parametrize("args", BRANCH_WRITE_ARGS)
+async def test_branch_write_forms_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
 ) -> None:
     recorder = _RunGitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
 
-    result = await git_tool(_ctx(tmp_path)).execute({"command": "branch", "args": [flag, "topic"]})
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "branch", "args": args})
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param([], id="plain-list"),
+        pytest.param(["-a"], id="all"),
+        pytest.param(["-r"], id="remotes"),
+        pytest.param(["-v"], id="verbose"),
+        pytest.param(["--all"], id="long-all"),
+        pytest.param(["--remotes"], id="long-remotes"),
+        pytest.param(["--merged"], id="merged"),
+        pytest.param(["--no-merged"], id="no-merged"),
+        pytest.param(["--contains", "HEAD"], id="contains-rev"),
+        pytest.param(["--show-current"], id="show-current"),
+    ],
+)
+async def test_branch_listing_forms_still_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    """The read-only affordance must survive the write guard."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "branch", "args": args})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["branch", *args]]
+
+
+@pytest.mark.parametrize("subcommand", ["diff", "show", "log"])
+@pytest.mark.parametrize("flag", ["--output=/tmp/mergecraft-escape.txt", "--output"])
+async def test_file_writing_flags_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str, flag: str
+) -> None:
+    """An allowlisted read-only verb must not be able to write a file (H2)."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": subcommand, "args": [flag, "/tmp/mergecraft-escape.txt"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("subcommand", ["push", "fetch", "pull", "clone"])
+async def test_auth_requiring_subcommands_name_their_dedicated_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
+) -> None:
+    """The redirect is the affordance: the generic allowlist error hides it."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand})
     assert result.is_error is True
     assert recorder.calls == []
+    text = result.content[0]["text"]
+    assert "read-only allowlist" not in text
+    assert any(name in text for name in ("push_branch", "git_fetch", "checkout_repo"))
+
+
+async def test_relative_c_is_resolved_against_the_repo_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """L7: git resolves a relative ``-C`` against its own cwd, so validation must too.
+
+    The MCP server's process cwd is not the checkout in the Action, so a
+    ``Path(value).resolve()`` check and the executed command disagreed about what
+    a relative path means.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    nested = tmp_path / "pkg"
+    nested.mkdir()
+    monkeypatch.chdir(tmp_path.parent)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "status", "args": ["-C", "pkg"]})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-C", "pkg", "status"]]
+    assert nested.is_dir()
+
+
+async def test_cumulative_c_options_that_escape_are_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """git applies successive ``-C`` cumulatively; the walk has to model that."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    nested = tmp_path / "pkg"
+    nested.mkdir()
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["-C", "pkg", "-C", "../.."]}
+    )
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_a_registered_cross_repo_checkout_is_reachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M4: a secondary checkout is registered as a workspace root, so -C must allow it."""
+    from mergecraft.utils.workspace import register_workspace_root
+
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    secondary = tmp_path.parent / "secondary-checkout"
+    secondary.mkdir(exist_ok=True)
+    register_workspace_root(str(secondary))
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "status", "args": ["-C", str(secondary)]}
+    )
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-C", str(secondary), "status"]]
 
 
 @pytest.mark.parametrize(
@@ -399,7 +541,6 @@ GLUED_SHORT_CONFIG_TOKENS = [
 ]
 
 
-@pytest.mark.xfail(reason="green after the #257 glued-config-flag fix", strict=False)
 @pytest.mark.parametrize("token", GLUED_SHORT_CONFIG_TOKENS)
 async def test_glued_short_config_flag_in_args_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str
@@ -418,7 +559,6 @@ async def test_glued_short_config_flag_in_args_rejected(
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(reason="green after the #257 glued-config-flag fix", strict=False)
 @pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
 async def test_glued_short_config_flag_in_args_rejected_regardless_of_shell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
@@ -434,7 +574,6 @@ async def test_glued_short_config_flag_in_args_rejected_regardless_of_shell(
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(reason="green after the #257 glued-config-flag fix", strict=False)
 @pytest.mark.parametrize("token", GLUED_SHORT_CONFIG_TOKENS)
 async def test_glued_short_config_flag_in_global_opts_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str

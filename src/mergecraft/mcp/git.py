@@ -42,6 +42,42 @@ _AUTH_REQUIRED = {
 # Flags that enable arbitrary code execution via git alias expansion.
 # Rejected unconditionally regardless of payload.shell (#257 / D7).
 _CONFIG_FLAGS: tuple[str, ...] = ("-c", "--config-env")
+# ``branch`` is allowlisted for listing only. Every other flag either writes
+# (delete / move / copy / upstream / description edit) or is unknown, so the
+# guard is an allowlist rather than a blocklist: a new git release cannot add a
+# write flag this tool then forwards.
+_BRANCH_READONLY_FLAGS: frozenset[str] = frozenset(
+    {
+        "-a",
+        "-r",
+        "-v",
+        "-vv",
+        "--all",
+        "--remotes",
+        "--list",
+        "--merged",
+        "--no-merged",
+        "--contains",
+        "--no-contains",
+        "--points-at",
+        "--show-current",
+        "--verbose",
+        "--sort",
+        "--format",
+        "--color",
+        "--no-color",
+        "--column",
+        "--no-column",
+        "-i",
+        "--ignore-case",
+    }
+)
+_BRANCH_FLAGS_TAKING_VALUE: frozenset[str] = frozenset(
+    {"--contains", "--no-contains", "--points-at", "--merged", "--no-merged", "--sort", "--format"}
+)
+# Flags of an allowlisted read-only subcommand that write a file. The subcommand
+# allowlist constrains the verb, not the flags the verb accepts.
+_FILE_WRITING_FLAGS: tuple[str, ...] = ("--output", "-o")
 _SYMBOLIC_REFS = frozenset({"HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"})
 _BAD_REF_CHARS = re.compile(r"[:+^~?*[\\\s]")
 
@@ -76,6 +112,21 @@ def validate_tag_name(tag: str) -> None:
         raise ValueError(msg)
 
 
+def _is_config_flag(token: str) -> bool:
+    """Whether *token* is any spelling of git's ``-c`` / ``--config-env``.
+
+    Covers the spaced forms (``-c key=value``), the glued short form
+    (``-ckey=value``) and the inline long form (``--config-env=key=VAR``).
+    ``-C`` is a different flag and stays allowed: the comparison is
+    case-sensitive.
+    """
+    if token in _CONFIG_FLAGS:
+        return True
+    if token.startswith("-c") and len(token) > 2:
+        return True
+    return token.startswith("--config-env=")
+
+
 def _reject_config_flags(tokens: list[str]) -> None:
     """Raise ValueError if any token is a -c / --config-env flag (#257 / D7).
 
@@ -84,41 +135,97 @@ def _reject_config_flags(tokens: list[str]) -> None:
     allowlist for -c.
     """
     for tok in tokens:
-        if tok in _CONFIG_FLAGS or any(tok.startswith(f"{f}=") for f in _CONFIG_FLAGS):
+        if _is_config_flag(tok):
             msg = f"Blocked: '{tok}' can execute arbitrary code via git alias expansion."
             raise ValueError(msg)
 
 
-def _confine_to_repo_root(value: str, flag: str, resolved_root: str) -> None:
-    """Raise ValueError when *value* resolves outside the primary repo root (#257 / D7)."""
-    resolved = str(Path(value).resolve())
-    if not (resolved == resolved_root or resolved.startswith(resolved_root + os.sep)):
-        msg = f"Blocked: '{flag}' '{value}' must be within the primary repo root."
+def _reject_branch_writes(args: list[str]) -> None:
+    """Keep ``git branch`` to listing only (H2, #257 / D7).
+
+    Deletion, rename and copy all write refs, and a rename of the checked-out
+    branch changes what ``commit_changes`` / ``push_branch`` later resolve
+    through ``rev-parse --abbrev-ref HEAD``. Bare ``git branch <name>`` creates a
+    branch, so a positional argument is a write too unless a listing flag that
+    takes a value consumed it.
+    """
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
+        if arg.startswith("-"):
+            name = arg.split("=", 1)[0]
+            if name not in _BRANCH_READONLY_FLAGS:
+                msg = (
+                    f"Blocked: 'branch {arg}' — only listing flags "
+                    "are permitted on the reviewer surface."
+                )
+                raise ValueError(msg)
+            # A listing flag spelled ``--contains <rev>`` consumes its value, so
+            # the value must not be read as a branch name to create.
+            if "=" not in arg and name in _BRANCH_FLAGS_TAKING_VALUE:
+                idx += 2
+                continue
+            idx += 1
+            continue
+        msg = (
+            f"Blocked: 'branch {arg}' would create a branch — "
+            "branch creation is not available on the reviewer surface."
+        )
         raise ValueError(msg)
 
 
-def _validate_path_confinement(global_opts: list[str], resolved_root: str) -> None:
-    """Walk *global_opts* and confine -C / --git-dir / --work-tree to resolved_root."""
+def _reject_file_writing_flags(command: str, args: list[str]) -> None:
+    """Reject flags that make a read-only subcommand write a file (H2).
+
+    ``git diff --output=<path>`` writes wherever it is pointed, so the read-only
+    allowlist alone does not make the verb read-only.
+    """
+    for arg in args:
+        name = arg.split("=", 1)[0]
+        if name in _FILE_WRITING_FLAGS:
+            msg = f"Blocked: '{command} {arg}' writes a file — the reviewer surface is read-only."
+            raise ValueError(msg)
+
+
+def _confine_to_repo_root(value: str, flag: str, base: str) -> Path:
+    """Confine *value* to an allowed workspace root, resolved against *base*.
+
+    Delegates to the canonical workspace rule so the git tool, ``upload_file``
+    and shell cwd containment cannot drift apart, and so a cross-repo checkout
+    registered as a workspace root is reachable (#257 / D7).
+    """
+    from mergecraft.utils.workspace import WorkspacePathError, confine_to_workspace
+
+    try:
+        return confine_to_workspace(value, base=base)
+    except WorkspacePathError as exc:
+        msg = f"Blocked: '{flag}' '{value}' must be within the repo checkout — {exc}"
+        raise ValueError(msg) from exc
+
+
+def _validate_path_confinement(global_opts: list[str], cwd: str) -> None:
+    """Confine -C / --git-dir / --work-tree in *global_opts* to an allowed root.
+
+    git applies successive ``-C`` options **cumulatively** and resolves each
+    relative to the previous one, so the walk carries the accumulated directory
+    forward rather than validating every value against the starting cwd — which
+    would accept a pair whose combined effect escapes.
+    """
+    current = cwd
     idx = 0
     while idx < len(global_opts):
         tok = global_opts[idx]
         if tok == "-C":
             if idx + 1 < len(global_opts):
-                _confine_to_repo_root(global_opts[idx + 1], "-C", resolved_root)
+                current = str(_confine_to_repo_root(global_opts[idx + 1], "-C", current))
             idx += 2
-        elif tok == "--git-dir":
+        elif tok in {"--git-dir", "--work-tree"}:
             if idx + 1 < len(global_opts):
-                _confine_to_repo_root(global_opts[idx + 1], "--git-dir", resolved_root)
+                _confine_to_repo_root(global_opts[idx + 1], tok, current)
             idx += 2
-        elif tok.startswith("--git-dir="):
-            _confine_to_repo_root(tok[len("--git-dir=") :], "--git-dir", resolved_root)
-            idx += 1
-        elif tok == "--work-tree":
-            if idx + 1 < len(global_opts):
-                _confine_to_repo_root(global_opts[idx + 1], "--work-tree", resolved_root)
-            idx += 2
-        elif tok.startswith("--work-tree="):
-            _confine_to_repo_root(tok[len("--work-tree=") :], "--work-tree", resolved_root)
+        elif tok.startswith(("--git-dir=", "--work-tree=")):
+            flag, _, value = tok.partition("=")
+            _confine_to_repo_root(value, flag, current)
             idx += 1
         else:
             idx += 1
@@ -238,21 +345,24 @@ def git_tool(ctx: ToolContext):
         # _GLOBAL_OPTS).
         _reject_config_flags(global_opts)
         _reject_config_flags(args)
-        # Read-only allowlist: replace the old format-only _SUBCOMMAND_RE (#257 / D7).
-        if not command or command not in _READONLY_SUBCOMMANDS:
-            msg = f"invalid git subcommand: {command!r} — not available through this tool (read-only allowlist)"
-            raise ValueError(msg)
-        # 'branch' is on the allowlist for read-only use; reject mutation flags.
-        if command == "branch" and any(a in {"-D", "-d", "-m"} for a in args):
-            msg = "Blocked: 'branch' mutation flags (-D/-d/-m) are not permitted on the reviewer surface."
-            raise ValueError(msg)
-        cwd = primary_repo_state(ctx.tool_state).dir
+        # Name the dedicated tool before the allowlist rejects the subcommand:
+        # "use push_branch instead" is the affordance the agent needs, and the
+        # generic allowlist error hides it.
         redirect = _AUTH_REQUIRED.get(command)
         if redirect:
             msg = f"git {command} is not available through this tool — {redirect}"
             raise RuntimeError(msg)
-        # Confine -C / --git-dir / --work-tree to the primary repo root (#257 / D7).
-        _validate_path_confinement(global_opts, str(Path(cwd).resolve()))
+        # Read-only allowlist: replace the old format-only _SUBCOMMAND_RE (#257 / D7).
+        if not command or command not in _READONLY_SUBCOMMANDS:
+            msg = f"invalid git subcommand: {command!r} — not available through this tool (read-only allowlist)"
+            raise ValueError(msg)
+        if command == "branch":
+            _reject_branch_writes(args)
+        _reject_file_writing_flags(command, args)
+        cwd = primary_repo_state(ctx.tool_state).dir
+        # Confine -C / --git-dir / --work-tree to an allowed workspace root, with
+        # relative values resolved against the cwd git will run in (#257 / D7).
+        _validate_path_confinement(global_opts, cwd)
         output = _run_git([*global_opts, command, *args], cwd=cwd)
         if len(output) > 50_000:
             temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
@@ -477,17 +587,12 @@ def commit_changes_tool(ctx: ToolContext):
         _run_git(["add", "-A"], cwd=cwd)
         _run_git(["-c", "core.hooksPath=/dev/null", "commit", "-m", message], cwd=cwd)
         sha = _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
+        # The commit is local either way — the push policy decides nothing about
+        # the response, it only records why no remote update was attempted.
         try:
             _require_push_allowed(ctx, branch=branch, action="update")
         except RuntimeError as err:
             logger.info("API ref update skipped (push policy): {}", err)
-            return {
-                "success": True,
-                "sha": sha,
-                "branch": branch,
-                "message": message,
-                "pushed": False,
-            }
         return {"success": True, "sha": sha, "branch": branch, "message": message, "pushed": False}
 
     repo_class = repository_mutation_class_for_push(ctx.payload.push)

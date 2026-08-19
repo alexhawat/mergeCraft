@@ -124,9 +124,10 @@ and enforces fail-closed restrictions regardless of ``payload.shell``:
 | Guard | What it rejects | Rationale |
 |-------|-----------------|-----------|
 | Read-only allowlist (`_READONLY_SUBCOMMANDS`) | Any subcommand not in `{status, log, diff, show, rev-parse, describe, ls-files, blame, cat-file, rev-list, branch}` — including `reset`, `clean`, `stash`, `update-ref` | The reviewer has no legitimate reason to mutate the tree |
-| `branch` mutation flags | `-D`, `-d`, `-m` args to `branch` | `branch` is allowlisted read-only; deletion / rename are write operations |
-| `-c` / `--config-env` unconditional block | Both flags in `command` string and `args`, regardless of `payload.shell` | `git -c alias.x='!cmd'` expands arbitrary shell even with `shell: disabled`; there is no safe-key allowlist |
-| Path confinement | `-C`, `--git-dir`, `--work-tree` resolving outside `primary_repo_state.dir` | Prevents redirect to an attacker-controlled repo or credentials store |
+| `branch` write forms | Any `branch` argument that is not on the listing-flag allowlist (`-a`/`-r`/`-v`/`--all`/`--remotes`/`--merged`/`--no-merged`/`--contains`/…), including bare `git branch <name>` creation | `branch` is allowlisted read-only; deletion, rename, copy, upstream edits and creation are writes, and a rename of the checked-out branch changes what a later `commit_changes` / `push_branch` targets |
+| File-writing flags | `--output` / `-o` on any allowlisted subcommand | The subcommand allowlist constrains the verb, not its flags — `git diff --output=<path>` writes an arbitrary file |
+| `-c` / `--config-env` unconditional block | Both flags in `command` string and `args`, in spaced (`-c key=v`), glued (`-ckey=v`) and inline (`--config-env=…`) spellings, regardless of `payload.shell` | `git -c alias.x='!cmd'` expands arbitrary shell even with `shell: disabled`; there is no safe-key allowlist |
+| Path confinement | `-C`, `--git-dir`, `--work-tree` resolving outside the repo checkout, a registered cross-repo checkout, or the session tmpdir — with relative values resolved against the cwd git will run in, and successive `-C` applied cumulatively as git applies them | Prevents redirect to an attacker-controlled repo or credentials store; shares `utils/workspace.confine_to_workspace` with `upload_file` and shell cwd containment so the rule cannot drift |
 ## MCP upload tool — orchestrator-surface enforcement (#258 / D8)
 
 The `upload_file` MCP tool (`ToolClass.GITHUB_MUTATION`) is on the orchestrator surface.  It enforces fail-closed path confinement before reading any bytes:
@@ -134,7 +135,7 @@ The `upload_file` MCP tool (`ToolClass.GITHUB_MUTATION`) is on the orchestrator 
 | Guard | What it rejects | Rationale |
 |-------|-----------------|-----------|
 | Symlink rejection | Any path where `Path.is_symlink()` is true | Symlinks can escape the repo tree even when the link itself is inside the root |
-| Root confinement | Any path whose `resolve()` is not within the primary repo root and is not within `ctx.tmpdir` | Prevents prompt-injectable arbitrary read / exfiltration of files outside the review workspace |
+| Root confinement | Any path that resolves outside the repo checkout, a registered cross-repo checkout, and `ctx.tmpdir` | Prevents prompt-injectable arbitrary read / exfiltration of files outside the review workspace |
 
 Both checks fail closed: no `file://` URI is emitted and no bytes are read from a rejected path.  The guards fire before the `path.is_file()` existence check so a non-existent out-of-root path is rejected with a confinement error, not a misleading "file not found".
 

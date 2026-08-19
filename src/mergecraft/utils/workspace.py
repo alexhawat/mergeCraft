@@ -6,8 +6,12 @@ import os
 import subprocess
 from contextlib import suppress
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _workspace_roots: set[str] = set()
 _safe_directories_added: set[str] = set()
@@ -118,10 +122,64 @@ def resolve_allowed_working_directory(requested: str | None, *, default: str) ->
     raise WorkspacePathError(msg)
 
 
+def confine_to_workspace(
+    value: str,
+    *,
+    base: str,
+    extra_roots: Sequence[str] = (),
+) -> Path:
+    """Resolve *value* and require it to sit under an allowed workspace root.
+
+    The single containment rule for every tool that accepts a path. Two things it
+    fixes over a hand-rolled prefix test:
+
+    - A relative value is resolved against *base* — the directory the command
+      will actually run in — not the MCP server's process cwd, which in the
+      Action is not the checkout.
+    - Every root registered by a cross-repo checkout is allowed, not only the
+      primary repo, so a secondary checkout is reachable at all.
+
+    Raises:
+        WorkspacePathError: when the resolved path is under none of the roots.
+    """
+    try:
+        base_path = Path(base).resolve()
+    except OSError as exc:
+        msg = f"invalid base directory {base!r}: {exc}"
+        raise WorkspacePathError(msg) from exc
+
+    candidate = Path(value)
+    try:
+        resolved = (
+            candidate.resolve() if candidate.is_absolute() else (base_path / candidate).resolve()
+        )
+    except OSError as exc:
+        msg = f"path {value!r} could not be resolved: {exc}"
+        raise WorkspacePathError(msg) from exc
+
+    roots = [base_path, *allowed_workspace_roots()]
+    for raw in extra_roots:
+        if not raw:
+            continue
+        with suppress(OSError):
+            roots.append(Path(raw).resolve())
+
+    for root in roots:
+        if _is_under_root(resolved, root):
+            return resolved
+
+    msg = (
+        f"path {value!r} is outside the allowed workspace roots "
+        "(the repo checkout, a registered cross-repo checkout, or the session tmpdir)"
+    )
+    raise WorkspacePathError(msg)
+
+
 __all__ = [
     "WorkspacePathError",
     "add_safe_directory",
     "allowed_workspace_roots",
+    "confine_to_workspace",
     "ensure_github_workspace_registered",
     "register_workspace_root",
     "resolve_allowed_working_directory",
