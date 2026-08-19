@@ -56,7 +56,9 @@ def index_symbols(
     if cache is not None:
         cached = cache.get(blob_sha)
         if cached is not None:
-            return cast("SymbolIndexResult", cached)
+            return cast(  # cache stores SymbolIndexResult values; Any return type from cache.get narrows back to concrete type
+                "SymbolIndexResult", cached
+            )
 
     if source is None:
         source = read_bounded_text(repo_root / rel_path)

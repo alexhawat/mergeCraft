@@ -35,7 +35,9 @@ def loads_trivy_object(raw: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
         if isinstance(payload, dict):
-            return cast("dict[str, Any]", payload)
+            return cast(  # json.loads returns Any; isinstance(payload, dict) confirmed above
+                "dict[str, Any]", payload
+            )
     msg = "trivy JSON output must be an object"
     raise ValueError(msg)
 

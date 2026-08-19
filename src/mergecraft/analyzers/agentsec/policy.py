@@ -97,7 +97,7 @@ def _load_rule_file(path: Path) -> list[NativeRule]:
         NativeRule(
             rule_id=rule_id,
             source_path=path.name,
-            kind=kind,  # type: ignore[arg-type]
+            kind=kind,  # type: ignore[arg-type]  # — kind is str from YAML; NativeRule.kind is a Literal narrowing validated by the rule loader
             severity=str(raw.get("severity") or "Major"),
             confidence=str(raw.get("confidence") or "likely"),
             message=str(raw.get("message") or rule_id),

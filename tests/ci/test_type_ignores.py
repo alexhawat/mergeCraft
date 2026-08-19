@@ -212,10 +212,6 @@ def test_scan_tree_skips_d6_from_allowed_on_live_src() -> None:
     assert inventory.cast_count >= inventory.d6_cast_count
 
 
-@pytest.mark.xfail(
-    reason="green after W9: #275 justify type: ignore / cast reasons",
-    strict=False,
-)
 def test_allowed_tree_ignores_and_casts_have_reasons() -> None:
     """Live ``src/mergecraft/`` (D6 excluded) must have a reason on every site."""
     module = _load_check_type_ignores()

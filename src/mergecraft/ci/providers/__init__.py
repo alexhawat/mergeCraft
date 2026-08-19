@@ -35,10 +35,18 @@ def _build_registry() -> dict[str, PipelineProvider]:
     from mergecraft.ci.providers.gitlab import GitLabCIProvider
 
     return {
-        "github_actions": cast("PipelineProvider", GitHubActionsProvider()),
-        "circleci": cast("PipelineProvider", CircleCIProvider()),
-        "gitlab": cast("PipelineProvider", GitLabCIProvider()),
-        "azure": cast("PipelineProvider", AzurePipelinesProvider()),
+        "github_actions": cast(  # concrete provider implements PipelineProvider; cast removes subclass widening
+            "PipelineProvider", GitHubActionsProvider()
+        ),
+        "circleci": cast(  # concrete provider implements PipelineProvider; cast removes subclass widening
+            "PipelineProvider", CircleCIProvider()
+        ),
+        "gitlab": cast(  # concrete provider implements PipelineProvider; cast removes subclass widening
+            "PipelineProvider", GitLabCIProvider()
+        ),
+        "azure": cast(  # concrete provider implements PipelineProvider; cast removes subclass widening
+            "PipelineProvider", AzurePipelinesProvider()
+        ),
     }
 
 

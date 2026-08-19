@@ -737,9 +737,9 @@ async def _run_agent_review(
             ],
             # D7 — untrusted CLI sources must not run repo-authored commands,
             # including Makefile-discovery fallback in ``plan_checks``.
-            static_checks_enabled=allow_repo_command_overrides(trust_tier),  # type: ignore[arg-type]
+            static_checks_enabled=allow_repo_command_overrides(trust_tier),  # type: ignore[arg-type]  # — trust_tier is str | None here; allow_repo_command_overrides expects TrustTier literal
             analyzers_mode="auto",
-            trust_tier=trust_tier,  # type: ignore[arg-type]
+            trust_tier=trust_tier,  # type: ignore[arg-type]  # — trust_tier is str | None; callee expects TrustTier literal narrowing
             analyzers_settings_enabled=settings.analyzers.enabled,
             suggest_eval_add=False,
             # Carried so the evidence packet can attribute findings to the

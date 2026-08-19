@@ -196,7 +196,7 @@ def _first_runnable_in_chain(chain: list[str]) -> str:
     return pick_runnable_slug_from_chain(chain, allow_fallback=allow)
 
 
-_first_runnable_in_chain.allow_fallback = True  # type: ignore[attr-defined]
+_first_runnable_in_chain.allow_fallback = True  # type: ignore[attr-defined]  # — allow_fallback is a runtime attribute added to the function object for chain control
 
 
 def _payload_to_ctx(payload: dict[str, Any]) -> ResolvedPayload:
@@ -632,7 +632,7 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     selected_slug: str | None
 
     if use_model_chain:
-        _first_runnable_in_chain.allow_fallback = settings.allow_fallback  # type: ignore[attr-defined]
+        _first_runnable_in_chain.allow_fallback = settings.allow_fallback  # type: ignore[attr-defined]  # — allow_fallback is a runtime attribute added to the function object for chain control
         selected_slug = _first_runnable_in_chain(chain_for_decision)
         if not selected_slug:
             msg = "no runnable model slug in chain — configure credentials for at least one entry"

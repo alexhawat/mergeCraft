@@ -679,7 +679,9 @@ def resolve_output_schema(raw: str | None = None) -> dict[str, Any] | None:
         msg = "invalid output_schema: must be a JSON object"
         raise ValueError(msg)
     logger.info("» structured output schema provided — output will be required")
-    return cast("dict[str, Any]", parsed)
+    return cast(  # json.loads returns Any; isinstance(parsed, dict) confirmed above
+        "dict[str, Any]", parsed
+    )
 
 
 __all__ = [

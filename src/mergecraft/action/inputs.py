@@ -181,7 +181,7 @@ def resolve_setup_failure_policy() -> SetupFailurePolicy | None:
     if candidate in _SETUP_FAILURE_POLICY_VALUES:
         # Safe cast: ``_SETUP_FAILURE_POLICY_VALUES`` is a frozenset of literal
         # values whose type is exactly ``SetupFailurePolicy``.
-        return candidate  # type: ignore[return-value]
+        return candidate  # type: ignore[return-value]  # — candidate verified against _SETUP_FAILURE_POLICY_VALUES above
     msg = (
         f"unknown setup_failure_policy: {raw!r} "
         f"(expected one of {sorted(_SETUP_FAILURE_POLICY_VALUES)})"

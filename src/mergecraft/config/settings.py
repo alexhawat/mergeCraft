@@ -776,6 +776,6 @@ def parse_cli_trust_override(raw: str | None) -> CliTrustOverride | None:
     if not value:
         return None
     if value in {"trusted", "untrusted"}:
-        return value  # type: ignore[return-value]
+        return value  # type: ignore[return-value]  # — value verified against {"trusted","untrusted"} above
     msg = f"invalid --trust value: {raw!r} (expected trusted or untrusted)"
     raise ValueError(msg)

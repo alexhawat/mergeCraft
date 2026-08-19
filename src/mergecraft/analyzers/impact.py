@@ -154,7 +154,11 @@ def _run_ast_grep(
     except json.JSONDecodeError as exc:
         msg = f"ast-grep produced unparsable output ({rule_path.name}): {exc}"
         raise _ExtractionFailed(msg) from exc
-    return cast("list[dict[str, Any]]", matches)
+    return (
+        cast(  # json.loads of validated ast-grep output; confirmed to be list[dict] by the caller
+            "list[dict[str, Any]]", matches
+        )
+    )
 
 
 def _find_declarations_batch(

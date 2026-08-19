@@ -43,7 +43,7 @@ class _AgentsTable(Mapping[str, AgentImpl]):
         return len(_agent_table())
 
 
-agents: dict[str, AgentImpl] = _AgentsTable()  # type: ignore[assignment]
+agents: dict[str, AgentImpl] = _AgentsTable()  # type: ignore[assignment]  # — _AgentsTable is a MutableMapping; declared as dict for the public API surface
 
 
 def resolve_agent(agent_id: AgentId | str) -> Agent:

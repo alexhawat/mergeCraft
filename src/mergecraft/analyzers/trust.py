@@ -329,7 +329,7 @@ def resolve_analyzers_mode(raw: str | None) -> AnalyzersMode:
     if not value:
         return "auto"
     if value in ANALYZERS_MODES:
-        return value  # type: ignore[return-value]
+        return value  # type: ignore[return-value]  # — value verified against ANALYZERS_MODES above
     logger.warning(
         "unrecognised analyzers input {!r}; falling back to the more restrictive {!r} "
         "(valid values: {})",

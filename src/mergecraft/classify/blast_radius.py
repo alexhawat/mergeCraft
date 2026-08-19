@@ -177,7 +177,9 @@ def _merged_rules(rule_set: RuleSet | None) -> dict[Category, dict[str, object]]
         category: dict(values) for category, values in DEFAULT_RULE_SET.items()
     }
     if rule_set:
-        overrides = cast("dict[str, RuleOverride]", rule_set)
+        overrides = cast(  # rule_set is RuleSet = dict[str, RuleOverride] | None; None excluded by enclosing if
+            "dict[str, RuleOverride]", rule_set
+        )
         for raw_category, override in overrides.items():
             if raw_category not in DEFAULT_RULE_SET:
                 continue
@@ -205,7 +207,9 @@ def classify_blast_radius(
     rules = _merged_rules(rule_set)
 
     lanes: list[Lane] = [
-        cast("Lane", rules[category]["lane"])
+        cast(  # rules values are Lane literals set by DEFAULT_RULE_SET; dict access returns object
+            "Lane", rules[category]["lane"]
+        )
         for category in rule_categories
         if "lane" in rules[category]
     ]

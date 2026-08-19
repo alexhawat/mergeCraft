@@ -179,17 +179,17 @@ async def report_status_checks(
     approval_conclusion: Conclusion = decide_approval(
         findings,
         run_succeeded=run_succeeded,
-        tier=tier,  # type: ignore[arg-type]
+        tier=tier,  # type: ignore[arg-type]  # — tier is str from getattr; callee expects TrustTier literal
     )
     decision_inputs = approval_decision_inputs(
         findings,
         run_succeeded=run_succeeded,
-        tier=tier,  # type: ignore[arg-type]
+        tier=tier,  # type: ignore[arg-type]  # — tier is str from getattr; callee expects TrustTier literal
     )
     log_decision(
         findings,
         run_succeeded=run_succeeded,
-        tier=tier,  # type: ignore[arg-type]
+        tier=tier,  # type: ignore[arg-type]  # — tier is str from getattr; callee expects TrustTier literal
         conclusion=approval_conclusion,
     )
 

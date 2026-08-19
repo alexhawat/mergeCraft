@@ -81,12 +81,12 @@ def create_process_output_activity_timeout(
 
         return wrapped
 
-    sys.stdout.write = _on_write(original_stdout_write, sys.stdout)  # type: ignore[method-assign]
-    sys.stderr.write = _on_write(original_stderr_write, sys.stderr)  # type: ignore[method-assign]
+    sys.stdout.write = _on_write(original_stdout_write, sys.stdout)  # type: ignore[method-assign]  # — monkey-patching stdout.write to intercept CI output; restored in _restore
+    sys.stderr.write = _on_write(original_stderr_write, sys.stderr)  # type: ignore[method-assign]  # — monkey-patching stderr.write to intercept CI output; restored in _restore
 
     def _restore() -> None:
-        sys.stdout.write = original_stdout_write  # type: ignore[method-assign]
-        sys.stderr.write = original_stderr_write  # type: ignore[method-assign]
+        sys.stdout.write = original_stdout_write  # type: ignore[method-assign]  # — restoring original stdout.write after interception
+        sys.stderr.write = original_stderr_write  # type: ignore[method-assign]  # — restoring original stderr.write after interception
 
     async def _poll() -> None:
         nonlocal reject_armed

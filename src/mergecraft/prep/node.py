@@ -34,11 +34,11 @@ def _detect_package_manager(cwd: Path) -> NodePackageManager:
             if isinstance(pm, str):
                 name = pm.split("@")[0].strip().lower()
                 if name in {"npm", "pnpm", "yarn", "bun", "deno"}:
-                    return name  # type: ignore[return-value]
+                    return name  # type: ignore[return-value]  # — name verified against the PackageManager literal set above
             if isinstance(pm, dict):
                 name = str(pm.get("name", "")).split("@")[0].strip().lower()
                 if name in {"npm", "pnpm", "yarn", "bun", "deno"}:
-                    return name  # type: ignore[return-value]
+                    return name  # type: ignore[return-value]  # — name verified against the PackageManager literal set above
         except OSError, ValueError, TypeError:
             pass
     for lockfile, manager in _LOCKFILES.items():

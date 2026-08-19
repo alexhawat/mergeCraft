@@ -221,7 +221,7 @@ def parse_provenance_comment(line: str) -> LearningProvenance | None:
         source_field=parts["source_field"],
         author_login=parts["author_login"],
         author_association=assoc,
-        trust_tier=trust,  # type: ignore[arg-type]
+        trust_tier=trust,  # type: ignore[arg-type]  # — trust is str; callee expects TrustTier literal narrowing
         timestamp=ts,
     )
 
@@ -352,7 +352,7 @@ def build_provenance_record(tool_state: ToolState) -> LearningProvenance:
     author_login = tool_state.author or tool_state.author_association or "unknown"
     trust_tier: Literal["trusted", "untrusted"]
     if tool_state.trust_tier in {"trusted", "untrusted"}:
-        trust_tier = tool_state.trust_tier  # type: ignore[assignment]
+        trust_tier = tool_state.trust_tier  # type: ignore[assignment]  # — tool_state.trust_tier verified against {"trusted","untrusted"} above
     else:
         trust_tier = "trusted"
     return LearningProvenance(

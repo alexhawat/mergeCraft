@@ -60,7 +60,7 @@ def parse_profile_name(raw: str | None) -> ProfileName | None:
     if key not in _PROFILE_NAMES:
         msg = f"unknown profile {raw!r} (expected one of: fast, deep, security)"
         raise ValueError(msg)
-    return key  # type: ignore[return-value]
+    return key  # type: ignore[return-value]  # — key verified against _PROFILE_NAMES above
 
 
 def resolve_profile(name: str | None) -> ReviewProfile | None:

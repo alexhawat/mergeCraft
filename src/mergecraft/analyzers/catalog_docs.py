@@ -155,8 +155,8 @@ def _shell_trust_matrix_lines() -> list[str]:
 
     def _selected(*, tier: str, mode: str, shell: str) -> list[str]:
         """Replay the pipeline's own skip chain for one cell."""
-        effective = resolve_effective_analyzers_mode(mode=mode, tier=tier)  # type: ignore[arg-type]
-        selection_tier = resolve_selection_tier(mode=effective, tier=tier)  # type: ignore[arg-type]
+        effective = resolve_effective_analyzers_mode(mode=mode, tier=tier)  # type: ignore[arg-type]  # — mode/tier are str loop vars; callee expects Literal narrowings
+        selection_tier = resolve_selection_tier(mode=effective, tier=tier)  # type: ignore[arg-type]  # — effective/tier are str; callee expects Literal narrowings
         chosen: list[str] = []
         for manifest in manifests:
             if evaluate_manifest_for_tier(manifest=manifest, tier=selection_tier).skipped:

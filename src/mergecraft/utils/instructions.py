@@ -349,7 +349,7 @@ def resolve_instructions(
     assert isinstance(event, dict)
 
     def t(tool_name: str) -> str:
-        return format_mcp_tool_ref(agent_id, tool_name)  # type: ignore[arg-type]
+        return format_mcp_tool_ref(agent_id, tool_name)  # type: ignore[arg-type]  # — agent_id is str here; callee expects AgentId literal
 
     user = str(payload.get("prompt") or "")
     fence = Fence()

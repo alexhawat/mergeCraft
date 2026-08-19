@@ -96,7 +96,7 @@ def configure_logging(*, force: bool = False) -> None:
     level = resolve_log_level()
     log_format = resolve_log_format()
     logger.remove()
-    logger.configure(patcher=_patch_bound_context)  # type: ignore[arg-type]
+    logger.configure(patcher=_patch_bound_context)  # type: ignore[arg-type]  # — loguru patcher stub is overly restrictive; _patch_bound_context(record) signature is compatible at runtime
 
     if log_format == "json":
         logger.add(
