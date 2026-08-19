@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 import httpx
 from loguru import logger
 
-from mergecraft.agents._stream_consumer import _resolve_cache_read
 from mergecraft.agents.gates import build_opencode_native_fs_permission
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
@@ -31,6 +30,7 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    resolve_cache_read,
     spawn_agent_cli,
 )
 from mergecraft.tracing import current_tracer
@@ -401,29 +401,14 @@ async def _prompt_session_http(
         if isinstance(info, dict):
             inp = int(info.get("input_tokens") or info.get("input") or 0)
             out = int(info.get("output_tokens") or info.get("output") or 0)
-            # T2 — recognise the OpenAI Responses / Chat Completions
-            # cached-token paths so the Nous / MiniMax passthrough
-            # surfaces its cache_read on the same ``AgentUsage`` field
-            # the Anthropic path uses. W18b routes this through the shared
-            # ``_resolve_cache_read`` rather than re-deriving the scan
-            # inline: the duplicate rule is what let #273 survive here
-            # after the accumulator was fixed. The shared helper resolves
-            # the Anthropic-native fields first, so a payload carrying
-            # both shapes is now read as disjoint on this path too — the
-            # inline scan preferred the details block.
-            cache_read, cache_read_is_inclusive = _resolve_cache_read(info)
+            cache_read = resolve_cache_read(info)
             cost = info.get("cost") or info.get("costUsd")
             if inp or out or cost:
                 usage = AgentUsage(
                     agent="opencode",
-                    # OpenAI-style ``*_tokens_details.cached_tokens`` are
-                    # already inside the reported input count; adding them
-                    # again inflated prompt size for every Nous / MiniMax
-                    # run (#273, D16). Anthropic-native counters stay
-                    # additive because they are disjoint.
-                    input_tokens=inp + (0 if cache_read_is_inclusive else cache_read),
+                    input_tokens=inp + cache_read.additive,
                     output_tokens=out,
-                    cache_read_tokens=cache_read or None,
+                    cache_read_tokens=cache_read.reported or None,
                     cost_usd=float(cost) if cost is not None else None,
                 )
                 log_token_table(

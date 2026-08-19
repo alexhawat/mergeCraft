@@ -37,11 +37,8 @@ from typing import Any
 
 import pytest
 
-from mergecraft.agents._stream_consumer import (
-    StreamSpanAccumulator,
-    _extract_openai_cached_tokens,
-    consume_stream,
-)
+from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
+from mergecraft.agents.shared import extract_openai_cached_tokens
 
 _INPUT = 100
 _CACHED = 40
@@ -162,11 +159,11 @@ def test_anthropic_native_field_wins_over_an_openai_details_block() -> None:
     """Green guard: the resolution order that makes the two paths separable.
 
     ``cache_read_input_tokens`` is consulted before
-    ``_extract_openai_cached_tokens``, so a payload carrying both is
+    ``extract_openai_cached_tokens``, so a payload carrying both is
     unambiguously Anthropic-native — which is what lets W18 tell the two
     provenances apart with a single flag.
 
-    W18b made ``_prompt_session_http`` reuse ``_resolve_cache_read``, so this
+    W18b made ``_prompt_session_http`` reuse ``resolve_cache_read``, so this
     rule now governs the opencode HTTP session path too; the same contract is
     pinned there by ``tests/agents/test_opencode_session_usage.py::
     test_both_cache_shapes_resolve_native_first_by_deliberate_choice``. The two
@@ -199,10 +196,10 @@ def test_no_cache_fields_leaves_input_tokens_untouched() -> None:
 
 def test_openai_extractor_still_recognises_both_shapes() -> None:
     """Green guard: T2's extractor is the provenance signal — it must not be deleted."""
-    assert _extract_openai_cached_tokens(_OPENAI_CHAT_USAGE) == _CACHED
-    assert _extract_openai_cached_tokens(_OPENAI_RESPONSES_USAGE) == _CACHED
-    assert _extract_openai_cached_tokens(_ANTHROPIC_USAGE) == 0
-    assert _extract_openai_cached_tokens({}) == 0
+    assert extract_openai_cached_tokens(_OPENAI_CHAT_USAGE) == _CACHED
+    assert extract_openai_cached_tokens(_OPENAI_RESPONSES_USAGE) == _CACHED
+    assert extract_openai_cached_tokens(_ANTHROPIC_USAGE) == 0
+    assert extract_openai_cached_tokens({}) == 0
 
 
 # ---------------------------------------------------------------------------

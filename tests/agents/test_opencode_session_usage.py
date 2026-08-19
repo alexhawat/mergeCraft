@@ -11,14 +11,14 @@ MiniMax passthrough — **re-implemented the same details-block scan inline**
 and still did ``input_tokens = inp + cache_read``. OpenAI-style
 ``*_tokens_details.cached_tokens`` are already inside the reported input
 count, so that path kept over-reporting prompt size by the whole cached
-count. W18b closed it by importing and reusing ``_resolve_cache_read``
+count. W18b closed it by importing and reusing ``resolve_cache_read``
 instead of re-deriving the scan, which is why the duplicated-rule bug class
 that let #273 survive W18 here cannot recur.
 
 Reusing the helper **changed one thing beyond the fix**: the inline scan
 checked the details block *first* and consulted the Anthropic-native
 ``cache_read_input_tokens`` / ``cacheReadTokens`` fields only as a fallback,
-whereas ``_resolve_cache_read`` reads the native fields first. That flips
+whereas ``resolve_cache_read`` reads the native fields first. That flips
 which field wins on a payload carrying both shapes. W18b took native-first
 deliberately (see
 ``test_both_cache_shapes_resolve_native_first_by_deliberate_choice``); this
@@ -27,7 +27,7 @@ rather than drifting back by accident.
 
 ``input_tokens``/``output_tokens`` also accept the short ``input`` /
 ``output`` aliases here, which the accumulator does not — the alias arms
-stay pinned because the fix depends on ``_resolve_cache_read`` never
+stay pinned because the fix depends on ``resolve_cache_read`` never
 reading the token-count fields at all.
 """
 
@@ -224,7 +224,7 @@ async def test_both_cache_shapes_resolve_native_first_by_deliberate_choice(
     **Do not "tidy" this to details-first.** Before W18b this path scanned the
     details block first and treated the native fields as a fallback, so a
     both-present payload was read as inclusive. W18b flipped it to native-first
-    by reusing ``_resolve_cache_read`` from ``agents/_stream_consumer.py``, and
+    by reusing ``resolve_cache_read`` from ``agents/_stream_consumer.py``, and
     that was an argued trade, not an oversight:
 
     - Keeping details-first would have needed either a second implementation of
