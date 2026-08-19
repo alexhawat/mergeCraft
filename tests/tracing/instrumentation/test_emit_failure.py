@@ -65,7 +65,7 @@ def _drive_chain_with_raising_sink(results: list[Any]) -> tuple[Any, Any]:
     # ``MultiSink`` constructor — until W4 lands, the swap is a no-op
     # and the test will be xfail.
     from mergecraft.tracing import sink_factory
-    from mergecraft.tracing.sinks import MultiSink
+    from mergecraft.tracing.sinks import _PENDING_SINK, MultiSink
 
     real_multi = MultiSink
 
@@ -81,9 +81,15 @@ def _drive_chain_with_raising_sink(results: list[Any]) -> tuple[Any, Any]:
         return next(iterator)
 
     try:
+        # ``sink_factory`` stashes the resolved sink on a ContextVar that
+        # ``asyncio.run`` copies. A leftover from ``captured_sink`` (or any
+        # sibling ``sink_factory`` call) would make ``claim_sink`` skip the
+        # patched ``MultiSink``. Drop the handoff in this context first.
+        _PENDING_SINK.set(None)
         outcome = asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
     finally:
         sink_factory.__globals__["MultiSink"] = real_multi  # type: ignore[attr-defined]
+        _PENDING_SINK.set(None)
     return outcome, raising_sink
 
 
