@@ -10,7 +10,6 @@ from mergecraft.scm.protocol import (
     ScmProvider,
     protocol_operation_names,
     protocol_supports_github_operations,
-    resolve_scm_provider,
     validate_provider,
 )
 
@@ -20,6 +19,5 @@ __all__ = [
     "UnsupportedScmCapability",
     "protocol_operation_names",
     "protocol_supports_github_operations",
-    "resolve_scm_provider",
     "validate_provider",
 ]

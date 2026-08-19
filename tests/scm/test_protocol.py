@@ -168,6 +168,17 @@ _SNAPSHOT_TOOL_OUTPUTS: dict[str, dict[str, Any]] = {
 }
 
 
+def test_github_adapter_satisfies_the_protocol() -> None:
+    """GitHubScmAdapter fully implements ``ScmProvider`` (not just name coverage)."""
+    require_scm()
+    from mergecraft.scm.github import create_github_scm
+    from mergecraft.scm.protocol import validate_provider
+
+    adapter = create_github_scm("test-token")
+    report = validate_provider(adapter)
+    assert report.complete is True, report.missing
+
+
 def test_every_github_operation_is_expressible_through_the_protocol() -> None:
     """Every GitHub REST helper and MCP tool maps to a protocol operation."""
     require_scm()
@@ -281,7 +292,6 @@ async def test_review_publication_goes_through_the_protocol(tmp_path: Path) -> N
 
     from mergecraft.mcp.review import publish_pull_request_review
     from mergecraft.mcp.tool_state import TerminalSubmission, primary_repo_state
-    from mergecraft.scm.protocol import resolve_scm_provider
 
     recording = RecordingScmProvider()
     ctx = tool_ctx(tmp_path)
@@ -304,15 +314,13 @@ async def test_review_publication_goes_through_the_protocol(tmp_path: Path) -> N
     assert outcome is not None
     assert recording.publications, "publish_pull_request_review must delegate to ScmProvider"
     assert recording.publications[0]["pull_number"] == 7
-    assert resolve_scm_provider(ctx) is recording
+    assert ctx.scm is recording
 
 
 def test_checkout_and_diff_semantics_are_preserved() -> None:
     """Checkout + incremental diff semantics survive the protocol extraction."""
     require_scm()
-    from tests.scm.support import InMemoryScmProvider
-
-    from mergecraft.scm.checkout import checkout_pull_request
+    from tests.scm.support import InMemoryScmProvider, checkout_pull_request
 
     provider = InMemoryScmProvider(
         reviews=[

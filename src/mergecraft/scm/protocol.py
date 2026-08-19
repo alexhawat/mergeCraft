@@ -5,10 +5,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
-
-if TYPE_CHECKING:
-    from mergecraft.mcp.context import ToolContext
+from typing import Any, Protocol, runtime_checkable
 
 # GitHub REST helpers exercised today (mirrors tests/scm/test_protocol.py).
 _GITHUB_REST_OPERATIONS: frozenset[str] = frozenset(
@@ -335,8 +332,3 @@ def validate_provider(provider: object) -> ProviderValidationReport:
         elif name not in async_ops and is_async:
             missing.append(f"{name} (expected sync)")
     return ProviderValidationReport(complete=not missing, missing=tuple(missing))
-
-
-def resolve_scm_provider(ctx: ToolContext) -> ScmProvider:
-    """Return the SCM provider bound on a tool context."""
-    return ctx.scm

@@ -20,7 +20,6 @@ from mergecraft.mcp.verdict import (
 )
 from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
 from mergecraft.review_taxonomy import stamp_finding_fingerprint
-from mergecraft.scm.protocol import resolve_scm_provider
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
 from mergecraft.utils.learnings import (
     ensure_learnings_review_delta,
@@ -277,7 +276,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     if inline:
         payload["comments"] = inline
 
-    scm = resolve_scm_provider(ctx)
+    scm = ctx.scm
     approve_fallback = False
     try:
         result = await scm.create_review(ctx.repo.owner, ctx.repo.name, pull_number, **payload)
