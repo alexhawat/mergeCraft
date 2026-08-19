@@ -565,10 +565,6 @@ def _seed_analyzer_run(ctx: ToolContext, findings: list[Any], *, verified: set[s
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W19: submit_review_verdict(approve) ignores unverified blockers (#263)",
-    strict=False,
-)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("severity", ["Critical", "Major"])
 async def test_approve_is_rejected_when_a_blocker_was_never_verified(

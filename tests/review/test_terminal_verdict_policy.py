@@ -1123,10 +1123,6 @@ def _confirmed_findings(state: Any) -> list[Any]:
     return _confirmed_findings_from_state(state)
 
 
-@pytest.mark.xfail(
-    reason="green after W19: approve only walks verified analyzer findings (#263 / D12)",
-    strict=False,
-)
 @pytest.mark.parametrize("severity", ["Critical", "Major"])
 def test_approve_is_rejected_for_an_unverified_blocking_analyzer_finding(
     tmp_path: Path,
@@ -1149,10 +1145,6 @@ def test_approve_is_rejected_for_an_unverified_blocking_analyzer_finding(
     _assert_typed_rejection(validation, _REASON_APPROVE_CONFIRMED_BLOCKER)
 
 
-@pytest.mark.xfail(
-    reason="green after W19: the live ToolContext-derived state also fails open (#263)",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_live_submit_approve_is_rejected_for_an_unverified_blocker(
     tmp_path: Path,
@@ -1190,10 +1182,6 @@ async def test_live_submit_approve_is_rejected_for_an_unverified_blocker(
     assert ctx.tool_state.terminal_submission is None
 
 
-@pytest.mark.xfail(
-    reason="green after W19: a stored approve must be revalidated against unverified blockers",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_approve_recorded_before_analyzers_becomes_unusable(tmp_path: Path) -> None:
     """An ``approve`` banked before ``run_analyzers`` must not survive the findings.

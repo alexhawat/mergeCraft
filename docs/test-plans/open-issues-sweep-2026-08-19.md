@@ -601,6 +601,7 @@ secondary-only findings), #273 (`to_usage()` double-counts OpenAI cached tokens)
 | `tests/agents/test_stream_usage_cache.py` | **new** | #273 |
 | `tests/review/test_terminal_verdict_policy.py` | extended (validator + live tool + finalize) | #263 |
 | `tests/mcp/test_submit_review_verdict.py` | extended (tool surface) | #263 |
+| `tests/agents/test_opencode_session_usage.py` | **new at DF** — second #273 ingress, RED for W18b | #273 |
 
 ### Contract → test map
 
@@ -608,7 +609,8 @@ secondary-only findings), #273 (`to_usage()` double-counts OpenAI cached tokens)
 |---|---|---|---|
 | `default_permissions` parses at the TOML **top level** with custom-provider env active | `test_default_permissions_stays_a_root_key_with_custom_providers` (3 params) | Unit, the bug | xfail W15 |
 | An empty `[model_providers]` table (partial pair) also swallows the key | `test_default_permissions_survives_a_partial_provider_pair` | Unit, edge | xfail W15 |
-| No bare key may follow the first table header | `test_no_root_key_is_emitted_after_the_first_table` | Unit, invariant | xfail W15 |
+| No key the writer means as **document root** may appear after the first table header | `test_no_root_key_is_emitted_after_the_first_table` | Unit, invariant | xfail W15 → **rewritten at DF** (see escalation log) |
+| The scope tracker behind that invariant flags the pre-W15 emission order | `test_root_key_scope_helper_flags_the_pre_w15_emission_order` | Unit, guard-on-the-guard | green (added at DF) |
 | `[permissions.<profile>]` tree survives the reorder | `test_permission_profile_tables_are_unchanged_with_custom_providers` | Unit, regression | green |
 | The no-provider path is already correct | `test_default_permissions_is_already_a_root_key_without_custom_providers` | Unit, boundary | green |
 | Provider blocks keep `base_url` / `env_key` / `wire_api` (#71, convention 7) | `test_custom_provider_blocks_keep_their_own_keys` | Unit, regression | green |
@@ -618,6 +620,8 @@ secondary-only findings), #273 (`to_usage()` double-counts OpenAI cached tokens)
 | The documented lowercase casing still parses | `test_lowercase_marker_still_parses` | Unit, regression | green |
 | No marker ⇒ prose only | `test_no_marker_at_all_yields_prose_only` | Unit, edge | green |
 | A genuinely malformed tail still raises with its message contract | `test_malformed_tail_still_raises_a_value_error`, `test_non_array_tail_still_raises_a_value_error` | Unit, error | green |
+| **Non-ASCII** reasoning before the marker does not shift the split | `test_non_ascii_reasoning_before_the_marker_parses` (5 casings + lowercase) | Unit, unicode | green (added at DF) |
+| The same with an empty `[]` payload — the shape W16 hand-verified | `test_non_ascii_reasoning_with_an_empty_payload_parses` | Unit, boundary | green (added at DF) |
 | A right-only finding survives disagreement | `test_disagreement_keeps_a_right_only_finding` | Unit, the bug | xfail W17 |
 | Both sides' exclusive findings survive | `test_disagreement_unions_both_sides` | Unit, D15 | xfail W17 |
 | The union deduplicates by `_finding_key` | `test_disagreement_union_deduplicates_a_shared_finding` | Unit, boundary | xfail W17 |
@@ -637,6 +641,11 @@ secondary-only findings), #273 (`to_usage()` double-counts OpenAI cached tokens)
 | T2's extractor is the provenance signal and must not be deleted | `test_openai_extractor_still_recognises_both_shapes` | Unit, guard | green |
 | **Consumer:** Claude `message_start` + `result` keeps Anthropic accounting | `test_claude_result_event_keeps_anthropic_accounting` | Integration, seam | green |
 | An empty stream reports no usage | `test_empty_stream_still_reports_no_usage` | Integration, edge | green |
+| **Second ingress:** the opencode HTTP session path does not add inclusive cached tokens | `test_openai_cached_tokens_are_not_added_to_session_input_tokens` (2 shapes × `info`/`usage`) | Unit, the bug | **xfail W18b** (added at DF) |
+| …including under the short `input` / `output` aliases that path accepts | `test_openai_cached_tokens_under_the_short_input_alias` (2 shapes) | Unit, alias | **xfail W18b** (added at DF) |
+| The session path's Anthropic-native arm stays additive | `test_anthropic_native_cache_read_stays_additive` (`info`/`usage`) | Unit, the asymmetry | green (added at DF) |
+| The session path still records `cache_read_tokens` | `test_openai_cached_tokens_are_still_reported` (2 shapes) | Unit, guard | green (added at DF) |
+| No cache fields / no usage on the session path | `test_no_cache_fields_leaves_session_input_tokens_untouched`, `test_session_without_usage_reports_no_usage` | Unit, edge | green (added at DF) |
 | `approve` is rejected for an unverified blocking analyzer finding | `test_approve_is_rejected_for_an_unverified_blocking_analyzer_finding` (Critical, Major) | Unit, the bug | xfail W19 |
 | **Consumer:** the live `ToolContext`-derived state also fails closed | `test_live_submit_approve_is_rejected_for_an_unverified_blocker` | Integration, seam | xfail W19 |
 | An `approve` banked before `run_analyzers` becomes unusable at finalize | `test_approve_recorded_before_analyzers_becomes_unusable` | Functional, revalidation | xfail W19 |
@@ -750,6 +759,100 @@ unambiguous in the current code, so no provider identity or driver-level flag ha
   assertion depends on it. The tests compare *keys*, not dict identity, so a widened key stays green
   as long as a finding both models reported still keys equal on both sides.
 
+### Reconciled assertions (were 37 xfailed → 36 real passes + 1 rewritten)
+
+All 17 `green after W15|W16|W17|W18|W19` marker decorators (37 parametrized instances) are removed.
+Nothing failed once unmarked.
+
+- **W15 (5)** — 4 strip cleanly. The 5th, `test_no_root_key_is_emitted_after_the_first_table`, was
+  **defective, not unsatisfied** — rewritten below rather than stripped.
+- **W16 (15)** — all five marker casings × three arms are real passes.
+- **W17 (4)** — the union arms and the dedup arm are real passes.
+- **W18 (7)** — both OpenAI shapes × both accumulator entry points, the cache-write split, and the
+  two `codex turn.completed` consumer arms are real passes.
+- **W19 (6)** — the validator, the live `ToolContext` path, the tool surface, and the
+  `finalize_agent_result` revalidation arm are real passes.
+
+`tests/agents tests/mcp tests/review`: **495 passed / 1 skipped / 6 xfailed / 93 xpassed / 0
+failed.** The 6 xfails are the new W18b reds. The 93 XPASS belong to **earlier programs** (`green
+after W3` provider-routing, `green after W6` MiniMax routing, …), not to this sweep — they are
+outside Batch D's remit and were already XPASS at the W14 baseline.
+
+### The D17 helper was vacuous — the rewrite (escalation, DF)
+
+`_root_keys_after_first_table` collected **every** `key =` line after the first `[header]` with no
+notion of table scope, so it also collected keys that legitimately belong to tables (`name`,
+`base_url`, `env_key`, `wire_api`, `extends`, `enabled`, the domain entries). `== []` could
+therefore only hold for a config whose tables were all empty — unsatisfiable for any correct
+output, which is why the test stayed XFAIL after a correct W15 fix.
+
+Two things replace it:
+
+1. **`_keys_by_table_scope(path) -> dict[str, list[str]]`** — tracks the current table header and
+   attributes each bare key to it, with the document root as the `""` scope. That makes the
+   distinction expressible: `base_url` under `[model_providers.provider_1]` is correct,
+   `default_permissions` under it is #222.
+2. **The root-key set is derived, not hardcoded.** A render with *no* custom-provider env has no
+   table in front of its root keys, so its `""` scope is the writer's intended root set — the arm
+   `test_default_permissions_is_already_a_root_key_without_custom_providers` pins that render green
+   independently. The test renders twice (no providers, then with providers) and asserts (a) no key
+   from the derived root set appears in any table scope, and (b) the derived set is still a subset of
+   the provider render's root scope. A root key added to `_append_read_only_mcp_network_lines`
+   later is covered with no edit to this test — the property W14 wanted and did not get.
+
+**Evidence it is not passing for the wrong reason.** The rewritten file was run against the
+pre-W15 source (a detached worktree at `18311c3` with `PYTHONPATH` pointed at that tree's `src/`,
+`--runxfail` so markers do not mask):
+
+```
+FAILED test_default_permissions_stays_a_root_key_with_custom_providers[one-indexed-pair]
+FAILED test_default_permissions_stays_a_root_key_with_custom_providers[two-indexed-pairs]
+FAILED test_default_permissions_stays_a_root_key_with_custom_providers[singleton-alias]
+FAILED test_default_permissions_survives_a_partial_provider_pair
+FAILED test_no_root_key_is_emitted_after_the_first_table
+E  AssertionError: assert ['model_providers.provider_1.default_permissions'] == []
+5 failed, 14 passed
+```
+
+Against the current source all 11 pass. `test_root_key_scope_helper_flags_the_pre_w15_emission_order`
+additionally feeds the tracker a reconstructed pre-W15 TOML fixture and asserts the attribution
+directly, so the discriminating behaviour is pinned at the helper level and not only end to end.
+
+### Two coverage gaps the implementation waves reported (added at DF)
+
+- **#261 non-ASCII reasoning.** W16 chose regex-over-original-text precisely because `casefold()` is
+  not length-preserving (`ß` → `ss`) and the reasoning half is arbitrary model prose, but **no test
+  covered it** — every W14 casing arm used ASCII prose, where `casefold().find()` and the regex
+  agree, so a refactor back to the length-sensitive approach would have gone unnoticed.
+  `_NON_ASCII_REASONING` puts five expanding characters *before* the marker (a five-byte shift) and
+  asserts both halves: the payload parses to one finding and the reasoning carries no marker
+  fragment. Confirmed the guard bites — under a `casefold().find()` split all four
+  casing × payload combinations raise `JSONDecodeError` and leave `---TY` in the reasoning,
+  **including the documented lowercase casing**, which is why the lowercase arm is parametrized in
+  too and why `test_lowercase_marker_still_parses` never reached this.
+- **#273 second ingress (RED for W18b).** `agents/opencode.py:401-427` — the HTTP session path
+  serving the Nous / MiniMax passthrough — re-implements the details-block scan inline and still does
+  `input_tokens = inp + cache_read`. New file `tests/agents/test_opencode_session_usage.py`: 6 reds
+  marked `xfail(reason="green after W18b: opencode HTTP session cache accounting", strict=False)` and
+  6 green guards. **Double-count confirmed live**, not inferred: every red fails
+  `assert usage.input_tokens == 100` with `140`. Two properties of this path make it a different
+  shape rather than a copy:
+  - **Precedence is inverted.** The details block is checked **first**; the Anthropic-native
+    `cache_read_input_tokens` / `cacheReadTokens` fields are only a fallback.
+    `_resolve_cache_read` consults the native fields first, so a fix that reuses the shared helper
+    also flips which field wins on a payload carrying both. `test_anthropic_native_cache_read_stays_additive`
+    pins the native-only arm green (it is correct today) so the OpenAI arms cannot be bought by
+    deleting the disjoint addition. The ambiguous **both-present** payload is deliberately left
+    unpinned — the same call W14 made for the mixed-stream case; pinning it would force W18b to
+    choose a resolution rule for a shape no provider emits.
+  - **The short `input` / `output` aliases** are accepted here and not by the accumulator, so a fix
+    scoped to the long field names would leave the alias inflated; that arm is pinned separately.
+  - Both usage container keys (`data["info"]` and `data["usage"]`) are exercised.
+
 ### Escalation log
 
-_(empty)_
+| # | Wave that escalated | Test | Finding | Resolution |
+|---|---|---|---|---|
+| 1 | W15 → DF | `tests/agents/test_codex_custom_provider.py::test_no_root_key_is_emitted_after_the_first_table` | The test, not the fix, was wrong: `_root_keys_after_first_table` ignored table scope, so `== []` was unsatisfiable for any non-empty config and the strongest D17 guard was vacuous | Helper rewritten as `_keys_by_table_scope` with a derived root-key oracle; verified failing against `18311c3` and passing against `3faca32`. A second test pins the helper's attribution against a reconstructed pre-W15 fixture |
+| 2 | W16 → DF | `tests/agents/test_structured_handoff.py` | The non-ASCII case W16 hand-verified had no test, so a refactor to `casefold().find()` could regress silently | Two arms added with length-expanding prose before the marker; verified that a `casefold().find()` split fails them |
+| 3 | W18 → DF | `tests/agents/test_opencode_session_usage.py` (new) | `agents/opencode.py:401-427` carries the identical #273 double-count on the HTTP session path, outside W18's anchor, so #273's criterion was only half met | 6 RED authored for **W18b** (operator-inserted wave) + 6 green guards; the inverted precedence and the `input`/`output` aliases are pinned so a fix cannot regress the Anthropic arm |

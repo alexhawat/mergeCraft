@@ -324,10 +324,6 @@ def _keys(rows: tuple[dict[str, object], ...]) -> set[tuple[str, str]]:
     return {_finding_key(row) for row in rows}
 
 
-@pytest.mark.xfail(
-    reason="green after W17: disagreement returns left.findings only, dropping right-only rows",
-    strict=False,
-)
 def test_disagreement_keeps_a_right_only_finding(tmp_path: Path) -> None:
     """#262 / D15 — a finding only the secondary model reported must survive."""
     from mergecraft.agents.ensemble import _finding_key, reconcile_ensemble
@@ -338,10 +334,6 @@ def test_disagreement_keeps_a_right_only_finding(tmp_path: Path) -> None:
     assert _finding_key(_RIGHT_ONLY) in _keys(reconciliation.merged_findings)
 
 
-@pytest.mark.xfail(
-    reason="green after W17: the union must carry both sides' exclusive findings",
-    strict=False,
-)
 def test_disagreement_unions_both_sides(tmp_path: Path) -> None:
     """The merge is a union, not a swap: neither side may be dropped.
 
@@ -360,10 +352,6 @@ def test_disagreement_unions_both_sides(tmp_path: Path) -> None:
     assert _finding_key(_SHARED) in merged_keys
 
 
-@pytest.mark.xfail(
-    reason="green after W17: the union must deduplicate by _finding_key, not concatenate",
-    strict=False,
-)
 def test_disagreement_union_deduplicates_a_shared_finding(tmp_path: Path) -> None:
     """A finding both models reported appears once, not twice.
 
@@ -383,10 +371,6 @@ def test_disagreement_union_deduplicates_a_shared_finding(tmp_path: Path) -> Non
     assert sum(1 for row in merged if _finding_key(row) == shared_key) == 1
 
 
-@pytest.mark.xfail(
-    reason="green after W17: an empty left side must not swallow the right side's findings",
-    strict=False,
-)
 def test_disagreement_with_an_empty_left_side_keeps_the_right_findings(tmp_path: Path) -> None:
     """The worst case: the primary model found nothing, the secondary found a Critical.
 

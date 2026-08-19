@@ -151,10 +151,6 @@ def _handoff_text(marker: str, *, payload: str = _FINDINGS_JSON) -> str:
     return f"{_REASONING}\n{marker}\n{payload}"
 
 
-@pytest.mark.xfail(
-    reason="green after W16: exact-case partition empties the payload for a mixed-case marker",
-    strict=False,
-)
 @pytest.mark.parametrize("marker", _MARKER_CASINGS)
 def test_mixed_case_marker_parses_the_findings_payload(marker: str) -> None:
     """#261 — a marker that passes the case-insensitive detect must also split.
@@ -175,10 +171,6 @@ def test_mixed_case_marker_parses_the_findings_payload(marker: str) -> None:
     assert "double-spend" in finding.body
 
 
-@pytest.mark.xfail(
-    reason="green after W16: the mixed-case marker must not be left in the reasoning",
-    strict=False,
-)
 @pytest.mark.parametrize("marker", _MARKER_CASINGS)
 def test_mixed_case_marker_is_stripped_from_the_reasoning(marker: str) -> None:
     """The prose half must stop at the marker regardless of its casing.
@@ -196,10 +188,6 @@ def test_mixed_case_marker_is_stripped_from_the_reasoning(marker: str) -> None:
     assert "double-spend" not in handoff.reasoning
 
 
-@pytest.mark.xfail(
-    reason="green after W16: an empty array tail after a mixed-case marker must parse",
-    strict=False,
-)
 @pytest.mark.parametrize("marker", _MARKER_CASINGS)
 def test_mixed_case_marker_with_an_empty_array_yields_no_findings(marker: str) -> None:
     """A specialist that found nothing must not raise either.
@@ -215,6 +203,67 @@ def test_mixed_case_marker_with_an_empty_array_yields_no_findings(marker: str) -
 
     assert handoff.findings == ()
     assert "race is real" in handoff.reasoning
+
+
+# W16 resolved #261 with a case-insensitive regex matched against the
+# *original* text rather than the plan's ``text.casefold().find(marker)``,
+# because ``casefold()`` is not length-preserving — ``ß`` folds to ``ss``, so
+# an index taken in the folded copy is too large by one per such character
+# and slicing the original by it cuts into the marker and the payload. The
+# reasoning half is arbitrary model prose, so that is reachable in normal
+# operation, not a contrived input. Nothing above notices the difference:
+# every casing arm uses ASCII prose, where the two approaches agree. These
+# arms make the length-sensitive approach fail, so a later refactor cannot
+# quietly reintroduce it.
+
+# Five length-expanding characters ahead of the marker ⇒ a five-byte shift,
+# enough to corrupt both halves of the split.
+_NON_ASCII_REASONING = "Die Straße war groß — ß ß ß. Ich habe den Pfad geprüft.\n"
+
+# The documented lowercase casing is included: the shift is a property of the
+# prose, not the marker's casing, so lowercase is affected too — which is why
+# ``test_lowercase_marker_still_parses`` above does not cover this.
+_MARKER_CASINGS_WITH_LOWER = [
+    *_MARKER_CASINGS,
+    pytest.param("---typed-findings---", id="lower"),
+]
+
+
+@pytest.mark.parametrize("marker", _MARKER_CASINGS_WITH_LOWER)
+def test_non_ascii_reasoning_before_the_marker_parses(marker: str) -> None:
+    """#261 — length-expanding prose ahead of the marker must not shift the split.
+
+    Both halves are asserted: a shifted index leaves marker fragments in the
+    reasoning *and* truncates the payload's leading ``[``, so the finding is
+    either lost or the parse raises.
+    """
+    from mergecraft.agents.structured_handoff import parse_specialist_handoff
+
+    handoff = parse_specialist_handoff(f"{_NON_ASCII_REASONING}\n{marker}\n{_FINDINGS_JSON}")
+
+    assert len(handoff.findings) == 1
+    finding = handoff.findings[0]
+    assert finding.path == "internal/store/checkout.go"
+    assert finding.line == 142
+    assert "double-spend" in finding.body
+    assert handoff.reasoning == _NON_ASCII_REASONING.strip()
+    assert "typed-findings" not in handoff.reasoning.casefold()
+    assert "-" * 3 not in handoff.reasoning
+
+
+def test_non_ascii_reasoning_with_an_empty_payload_parses() -> None:
+    """The clean-review shape W16 hand-verified, now pinned.
+
+    ``[]`` is only two characters, so a shifted end offset empties the
+    payload entirely and ``json.loads`` raises — the loudest form of the
+    same defect.
+    """
+    from mergecraft.agents.structured_handoff import parse_specialist_handoff
+
+    handoff = parse_specialist_handoff(f"{_NON_ASCII_REASONING}\n---TYPED-FINDINGS---\n[]")
+
+    assert handoff.findings == ()
+    assert handoff.reasoning == _NON_ASCII_REASONING.strip()
 
 
 def test_lowercase_marker_still_parses() -> None:

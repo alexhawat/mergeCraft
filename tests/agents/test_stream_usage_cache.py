@@ -84,10 +84,6 @@ def _accumulate(usage: dict[str, Any], *, mode: str) -> StreamSpanAccumulator:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W18: OpenAI-style cached tokens are added into input_tokens (#273)",
-    strict=False,
-)
 @pytest.mark.parametrize("usage", _OPENAI_SHAPES)
 @pytest.mark.parametrize("mode", ["replace", "absorb"])
 def test_openai_cached_tokens_are_not_added_to_input_tokens(
@@ -116,10 +112,6 @@ def test_openai_cached_tokens_are_still_reported(usage: dict[str, Any]) -> None:
     assert rendered.output_tokens == _OUTPUT
 
 
-@pytest.mark.xfail(
-    reason="green after W18: an OpenAI payload with a cache-write count double-counts reads",
-    strict=False,
-)
 def test_openai_cache_write_stays_additive_while_reads_do_not() -> None:
     """D16 splits the two buckets: writes add, inclusive reads do not.
 
@@ -239,10 +231,6 @@ def _drive(events: list[dict[str, Any]], *, handler: Any, agent_name: str) -> An
     return acc
 
 
-@pytest.mark.xfail(
-    reason="green after W18: a codex turn.completed with cached tokens over-reports input (#273)",
-    strict=False,
-)
 @pytest.mark.parametrize("usage", _OPENAI_SHAPES)
 def test_codex_turn_completed_reports_inclusive_cached_tokens(usage: dict[str, Any]) -> None:
     """Consumer path: ``codex exec --json`` usage reaches ``AgentResult.usage``.
