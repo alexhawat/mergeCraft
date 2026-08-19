@@ -120,6 +120,10 @@ class MainResult:
     # ``None`` only for call sites that predate W5 (tests constructing a
     # ``MainResult`` directly); every real ``main()`` return path sets it.
     outcome: RunOutcome | None = None
+    # W8 / #265 — closed VerdictDiagnostic code for the terminal-verdict policy
+    # path. ``None`` for early-exit paths that bypass ``_finalize``; the GHA
+    # surface writes an empty string in that case (D10).
+    verdict_diagnostic: str | None = None
 
 
 @dataclass
@@ -1346,6 +1350,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         final_summary_written=tool_state.final_summary_written,
         terminal_verdict=settings.gates.terminal_verdict,
     )
+    verdict_diagnostic_code: str = diagnostic_attrs.get("verdict.diagnostic", "")
 
     selected_mode_obj = next(
         (m for m in tool_context.modes if m.name == tool_context.tool_state.selected_mode),
@@ -1391,6 +1396,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
             error=failure_reason or result.error or "agent execution failed",
             evidence_packet_path=packet_path,
             outcome=outcome,
+            verdict_diagnostic=verdict_diagnostic_code,
         )
 
     output = tool_state.output or result.output
@@ -1400,6 +1406,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         result=output,
         evidence_packet_path=packet_path,
         outcome=outcome,
+        verdict_diagnostic=verdict_diagnostic_code,
     )
 
 

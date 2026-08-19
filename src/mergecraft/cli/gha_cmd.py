@@ -117,6 +117,7 @@ async def _run_main() -> None:
     result = await main()
     if result.evidence_packet_path:
         _write_evidence_packet_output(result.evidence_packet_path)
+    _set_output("verdict_diagnostic", result.verdict_diagnostic or "")
     if not result.success:
         outcome = result.outcome or RunOutcome.infra_error
         error_message = result.error or "agent execution failed"
