@@ -12,7 +12,7 @@ The program has **six RED waves**, one per logical batch. Each RED wave appends 
 | Batch | RED wave | Section | Status |
 |---|---|---|---|
 | A — MCP security (#257, #258, #260, #259) | W1 | [Batch A](#batch-a--mcp-security-w1) | **reconciled — all green** |
-| B — Action / workflow contract (#264, #265, #272, #271) | W6 | _append below_ | pending |
+| B — Action / workflow contract (#264, #265, #272, #271) | W6 | [Batch B](#batch-b--action--workflow-contract-w6) | **authored — 17 RED (W7/W8/W9)** |
 | C — Analyzer correctness (#270, #269, #268) | W10 | _append below_ | pending |
 | D — Agents + approve gate (#222, #261, #262, #273, #263) | W14 | _append below_ | pending |
 | E — MCP contract (#266, #267) | W20 | _append below_ | pending |
@@ -173,6 +173,99 @@ helpers or swapping to `Path.is_relative_to` keeps all 11 green.
 Fixtures create the sibling directories **on disk** (`tmp_path/repo` next to `tmp_path/repo-evil`)
 rather than hand-crafting strings, so `Path.resolve()` cannot collapse the distinction and the
 test genuinely exercises containment rather than normalization.
+
+### Escalation log
+
+_(empty)_
+
+---
+
+## Batch B — Action / workflow contract (W6)
+
+**Issues:** `#264` (wait-for-ci cannot read check-runs), `#265` (declared `verdict_diagnostic`
+output is never written), `#272` (inert `outputs.*.value` on a Docker action), `#271` (adversarial
+image installs a different pytest than unit CI).
+
+**Authored by:** W6 · **Greened by:** W7 (`#264`), W8 (`#265` + `#272`, one wave per **D10**),
+W9 (`#271`).
+
+Batch B is the **Action / workflow contract** batch, so most of the surface is YAML rather than
+Python. Every guard therefore parses the real `action.yml` / `.github/workflows/mergecraft.yml` /
+`docker/e2e/run_in_image_adversarial.sh` from disk — there is no runtime object to unit-test for
+three of the four issues.
+
+**Tooling decision (W6.1):** no second YAML checker was added.
+`scripts/check_action_yml_hygiene.py` scans action manifests for literal `${{ }}` expressions in
+description prose and is the wrong tool for job permissions. The repo already has
+`tests/ci/workflow_support.py` (`load_workflow`, `job`, `read_text`, `REPO_ROOT`), used by nine
+existing workflow-contract suites; W6 **extends that pattern** rather than starting a parallel one.
+Likewise `#272` extends the existing `tests/action/test_action_yml_contract.py` (which already
+carries a module-scoped `action_yml` fixture) instead of adding a new action-manifest suite.
+
+### Contract → test map
+
+| Contract | Coverage | Layer / class |
+|---|---|---|
+| **W6.1 / #264** `wait-for-ci` declares a job-level `permissions:` block | `tests/ci/test_mergecraft_workflow_permissions.py::TestWaitForCiPermissions::test_declares_job_level_permissions` | Integration (workflow), error |
+| **W6.1 / #264** that block grants `checks: read` | `…::TestWaitForCiPermissions::test_declares_checks_read` | Integration, happy |
+| **W6.1** a job-level block does not inherit, so `contents: read` is restated | `…::TestWaitForCiPermissions::test_keeps_contents_read` | Integration, edge |
+| **W6.1** W7 must not widen the job past read | `…::TestWaitForCiPermissions::test_grants_nothing_beyond_read_scopes` | Integration, error |
+| **W6.1** workflow-level block stays `contents: read` only | `…::TestWorkflowLevelPermissionsUnchanged::test_workflow_level_block_is_contents_read_only` | Integration, happy |
+| **W6.1** the `review` job keeps its own scoped block | `…::TestWorkflowLevelPermissionsUnchanged::test_review_job_keeps_its_own_permissions_block` | Integration, happy |
+| **W6.1** the poll still hits the check-runs API (else the permission is moot) | `…::TestWaitForCiBehaviourAnchors::test_job_still_queries_the_check_runs_api` | Integration, anchor |
+| **W6.1** fail-open contract preserved (the bug is the silent 403, not fail-open) | `…::TestWaitForCiBehaviourAnchors::test_job_stays_fail_open` | Integration, anchor |
+| **W6.1** optional W7.1 hardening: stop swallowing stderr on the poll | `…::TestWaitForCiBehaviourAnchors::test_check_runs_poll_does_not_swallow_stderr` | Integration, edge |
+| **W6.2 / #265** success + diagnostic → `verdict_diagnostic=<code>` | `tests/cli/test_gha_failure_outputs.py::TestVerdictDiagnosticOutput::test_success_with_diagnostic_writes_the_code` | Functional (E2E `_run_main`), happy |
+| **W6.2 / D10** success, no diagnostic → key **present and empty**, never absent | `…::TestVerdictDiagnosticOutput::test_success_without_diagnostic_writes_empty_string` | Functional, edge |
+| **W6.2** the raw closed code round-trips unmodified | `…::TestVerdictDiagnosticOutput::test_every_closed_code_round_trips` (5 params) | Functional, happy/table |
+| **W6.2** failure path writes it too, before `typer.Exit` | `…::TestVerdictDiagnosticOutput::test_failure_path_still_writes_the_diagnostic` | Functional, error |
+| **W6.2** `_set_output(name, "")` already writes `name=` (the empty arm's transport) | `…::TestVerdictDiagnosticOutput::test_set_output_writes_an_empty_value_as_a_present_key` | Unit, edge |
+| **W6.3 / #272** Docker action declares no `outputs.*.value` | `tests/action/test_action_yml_contract.py::TestActionYmlHygiene::test_docker_action_declares_no_output_values` | Integration (manifest), error |
+| **W6.3** no `${{ }}` survives anywhere under `outputs:` | `…::TestActionYmlHygiene::test_no_expression_survives_in_any_output_block` | Integration, error |
+| **W6.3** W8 deletes `value:` only — every description survives | `…::TestActionYmlHygiene::test_every_output_keeps_its_description` | Integration, happy |
+| **W6.3 / #265** the `verdict_diagnostic` output stays declared | `…::TestActionYmlHygiene::test_verdict_diagnostic_output_is_declared` | Integration, happy |
+| **W6.4 / #271** script pytest pin equals `pyproject.toml`'s | `tests/ci/test_adversarial_image_pytest_pin.py::TestPinsAgree::test_pytest_pin_matches_pyproject` | Integration, error |
+| **W6.4** `pytest-asyncio` stays in sync (already is) | `…::TestPinsAgree::test_pytest_asyncio_pin_matches_pyproject`, `…::test_no_runner_package_drifts[pytest-asyncio]` | Integration, happy |
+| **W6.4** table form so a newly-added runner pin is covered | `…::TestPinsAgree::test_no_runner_package_drifts` (2 params) | Integration, table |
+| **W6.4** the image installs nothing unit CI has never resolved | `…::TestPinsAgree::test_every_script_pin_is_declared_in_pyproject` | Integration, edge |
+| **W6.4** both pin anchors are still parseable / exact | `…::TestPinSourcesAreParseable` (3 tests) | Unit, anchor |
+
+### Confirmed-RED assertions (17 xfail, non-strict)
+
+| Target wave | Count | Tests |
+|---|---|---|
+| **W7** | 5 | 4 × `TestWaitForCiPermissions` + `test_check_runs_poll_does_not_swallow_stderr` (the last is the plan's *optional* hardening, recorded as residual risk rather than a gate) |
+| **W8** | 9 | 2 × `TestActionYmlHygiene` (`#272`) + 7 × `TestVerdictDiagnosticOutput` (`#265`, incl. 5 parametrized codes) |
+| **W9** | 2 | `test_pytest_pin_matches_pyproject`, `test_no_runner_package_drifts[pytest]` |
+
+`test_no_runner_package_drifts` carries its xfail **per `pytest.param`**, not on the function, so
+the `pytest-asyncio` case reports a real pass instead of a misleading `XPASS`.
+
+### Green-today regression guards (48 in the touched files, 14 new)
+
+New green guards: the workflow-level/`review`-job permission anchors, the check-runs and fail-open
+behaviour anchors, `_set_output("", …)`'s empty-key transport, the outputs-keep-descriptions and
+`verdict_diagnostic`-stays-declared manifest guards, the `pytest-asyncio` parity pair, the
+`every_script_pin_is_declared` guard, and the three pin-anchor parse guards.
+
+### Verified-not-drifted (checked while authoring, no test needed)
+
+- `pytest-asyncio` is **`1.3.0` in both** `pyproject.toml` and the adversarial script — only
+  `pytest` diverges (`9.0.3` in the image vs `9.1.1` pinned). W9 must bump `pytest` and leave
+  `pytest-asyncio` alone.
+- `pyproject.toml`'s pytest pin is at **`:56`** (W0's correction of `:54` is right); the script's is
+  at **`:25`**. Both are parsed at runtime, so neither line number is baked into an assertion.
+
+### Anchors that contradict the plan (input for W7/W8/W9)
+
+| Plan text | What the code actually shows | Consequence |
+|---|---|---|
+| W8.2 "thread the diagnostic … into `gha_cmd._run_main`" via "the `RunResult` object" | There is **no `RunResult`**. The carrier is `MainResult` (`src/mergecraft/main.py:109-122`, `@dataclass(slots=True)`), and it has **no diagnostic field at all** | W8 must **add a field** (`verdict_diagnostic: str \| None = None`) to `MainResult` and set it on both return paths (`main.py:1388-1403`), not just read an existing attribute |
+| W8.2 anchors the diagnostic at `main_outcome.py:127-139` | Correct, but `_verdict_protocol_publish` returns `(span_attrs, prediction)` and **`prediction` is `None` unless `settings.gates.terminal_verdict == "shadow"`** (`main_outcome.py:140-142`) | The only always-available carrier of the code on the enforce path is `attrs["verdict.diagnostic"]`. W8 should widen the return (or return the `VerdictDiagnostic` itself) rather than reaching through `prediction`, which is empty on the normal path |
+| `## Docs ↔ code reconciliation`: "`gha_cmd.py:111-126` writes only `evidence_packet` / `result` / `token`" | Accurate. `_set_output` call sites are `:111` (`evidence_packet`), `:123` and `:126` (`result`), `:135` (`token`) | No change needed |
+| W8.1 "`action.yml:187-204`" | Accurate. The three `value:` keys are at **`:189`, `:199`, `:204`**; `runs.using: "docker"` at **`:207`** | No change needed |
+| W7.1 "`mergecraft.yml:161`", "`:142-143`", "`:200`" | All accurate: `wait-for-ci:` at `:161` with **no** `permissions:` key (only `name`/`if`/`runs-on`/`timeout-minutes`/`outputs`/`steps`), workflow-level `permissions: {contents: read}` at `:142-143`, `2>/dev/null` on the poll at `:200` | No change needed |
+| D10 "empty string when no diagnostic" | `_set_output` already writes `name=` for an empty value (`gha_cmd.py:70-71`), and only skips `::add-mask::` | W8 needs **no new writer** — but it must call `_set_output` unconditionally on the terminal-verdict path, since "write nothing" is the naive implementation that leaves the key absent |
 
 ### Escalation log
 

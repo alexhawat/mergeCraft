@@ -231,6 +231,159 @@ class TestWriteEvidencePacketOutput:
         assert "evidence_packet" not in _read_output_file(out)
 
 
+class TestVerdictDiagnosticOutput:
+    """Plan W6.2 / D10 — the declared ``verdict_diagnostic`` output is actually written (``#265``).
+
+    ``action.yml`` has declared a ``verdict_diagnostic`` output since the
+    terminal-verdict work landed, but ``_run_main`` writes only
+    ``evidence_packet`` and ``result``: no code path ever calls
+    ``_set_output("verdict_diagnostic", …)``, so the documented output is
+    permanently empty and consumers cannot branch on the closed
+    ``VerdictDiagnostic`` code the run already computed.
+
+    D10 pins **both** arms deliberately. The empty arm is the one a naive
+    implementation misses: writing nothing at all leaves the key absent, so a
+    consumer's ``steps.run.outputs.verdict_diagnostic`` is undefined rather
+    than the documented empty string ("Empty when the run did not evaluate
+    terminal protocol policy").
+
+    The diagnostic is currently computed in ``main_outcome._verdict_protocol_publish``
+    and only reaches ``span_attrs_for_verdict_diagnostic`` — ``MainResult`` has
+    no field for it, which is why constructing one below is red today.
+    """
+
+    @staticmethod
+    def _run(monkeypatch: pytest.MonkeyPatch, out: Path, **fields: object) -> dict[str, str]:
+        from mergecraft.main import MainResult
+
+        out.touch()
+        monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+        _patch_main(monkeypatch, MainResult(**fields))  # type: ignore[arg-type]
+        asyncio.run(_run_main())
+        return _read_output_file(out)
+
+    @pytest.mark.xfail(
+        reason="green after W8: thread the diagnostic into _set_output('verdict_diagnostic', …)",
+        strict=False,
+    )
+    def test_success_with_diagnostic_writes_the_code(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A successful run that produced a diagnostic exposes its closed code."""
+        from mergecraft.mcp.verdict import VerdictDiagnostic
+
+        entries = self._run(
+            monkeypatch,
+            tmp_path / "github_output",
+            success=True,
+            output="ok",
+            result="ok",
+            verdict_diagnostic=VerdictDiagnostic.approved.value,
+        )
+        assert entries.get("verdict_diagnostic") == VerdictDiagnostic.approved.value
+
+    @pytest.mark.xfail(
+        reason="green after W8: thread the diagnostic into _set_output('verdict_diagnostic', …)",
+        strict=False,
+    )
+    def test_success_without_diagnostic_writes_empty_string(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D10's empty arm — the key is present and empty, never absent."""
+        entries = self._run(
+            monkeypatch,
+            tmp_path / "github_output",
+            success=True,
+            output="ok",
+            result="ok",
+        )
+        assert "verdict_diagnostic" in entries, (
+            "no diagnostic must still write the output as an empty string, not omit it"
+        )
+        assert entries["verdict_diagnostic"] == ""
+
+    @pytest.mark.xfail(
+        reason="green after W8: thread the diagnostic into _set_output('verdict_diagnostic', …)",
+        strict=False,
+    )
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "approved",
+            "policy_rejection",
+            "provider_failure",
+            "provider_success_without_submission",
+            "fallback_triggered",
+        ],
+    )
+    def test_every_closed_code_round_trips(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str
+    ) -> None:
+        """The output is the raw closed code — no prefixing, quoting, or truncation."""
+        from mergecraft.mcp.verdict import VerdictDiagnostic
+
+        assert code in {member.value for member in VerdictDiagnostic}, (
+            f"{code!r} left the closed VerdictDiagnostic vocabulary"
+        )
+        entries = self._run(
+            monkeypatch,
+            tmp_path / "github_output",
+            success=True,
+            output="ok",
+            result="ok",
+            verdict_diagnostic=code,
+        )
+        assert entries.get("verdict_diagnostic") == code
+
+    @pytest.mark.xfail(
+        reason="green after W8: thread the diagnostic into _set_output('verdict_diagnostic', …)",
+        strict=False,
+    )
+    def test_failure_path_still_writes_the_diagnostic(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed run is exactly when the consumer needs the code — it must not be dropped.
+
+        ``_run_main`` raises ``typer.Exit`` on the failure path *after* the
+        outputs are written, so the write has to happen before that exit.
+        """
+        from mergecraft.main import MainResult
+
+        out = tmp_path / "github_output"
+        out.touch()
+        monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+        _patch_main(
+            monkeypatch,
+            MainResult(  # type: ignore[call-arg]
+                success=False,
+                error="agent blocked",
+                verdict_diagnostic="policy_rejection",
+            ),
+        )
+
+        with pytest.raises(typer.Exit):
+            asyncio.run(_run_main())
+
+        assert _read_output_file(out).get("verdict_diagnostic") == "policy_rejection"
+
+    def test_set_output_writes_an_empty_value_as_a_present_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Green today — the transport D10's empty arm relies on already behaves.
+
+        ``_set_output`` short-circuits masking on an empty value but still
+        appends ``name=``, so W8 does not need a new writer for the empty case.
+        """
+        out = tmp_path / "github_output"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+        from mergecraft.cli.gha_cmd import _set_output
+
+        _set_output("verdict_diagnostic", "")
+
+        assert out.read_text(encoding="utf-8") == "verdict_diagnostic=\n"
+        assert _read_output_file(out)["verdict_diagnostic"] == ""
+
+
 def test_action_entry_module_is_gone() -> None:
     """W5.5 — the dead, malformed entry writer must not exist or be referenced.
 
