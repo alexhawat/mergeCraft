@@ -313,6 +313,43 @@ def _confirmed_findings_from_state(state: Any) -> list[Any]:
     return collected
 
 
+def _has_unverified_blocking_analyzer_finding(state: Any) -> bool:
+    """Whether a blocking analyzer finding exists that nobody verified (D12, #263).
+
+    ``_confirmed_findings_from_state`` only surfaces analyzer findings whose
+    fingerprint is in ``verified_ids``, so an analyzer Critical the agent never
+    dispatched a verifier for is invisible to the confirmed-blocker gate. The
+    causality policy is applied to each candidate *before* the severity test,
+    matching the confirmed walk: a pre-existing Critical is downgraded and must
+    not reject an approve.
+    """
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES
+    from mergecraft.findings.causality import apply_causality_policy
+
+    tool_state = getattr(state, "tool_state", None)
+    analyzer_run = getattr(state, "analyzer_run", None)
+    if analyzer_run is None and tool_state is not None:
+        analyzer_run = getattr(tool_state, "analyzer_run", None)
+    if analyzer_run is None:
+        return False
+
+    excluded: set[str] = set(getattr(analyzer_run, "verified_ids", None) or set())
+    if tool_state is not None:
+        excluded |= set(getattr(tool_state, "verified_ids", None) or set())
+    excluded |= set(getattr(state, "withdrawn_fingerprints", None) or set())
+
+    for item in getattr(analyzer_run, "findings", None) or []:
+        fingerprint = _finding_fingerprint(item)
+        if fingerprint and fingerprint in excluded:
+            continue
+        finding = _coerce_confirmed_finding(item)
+        if finding is None:
+            continue
+        if apply_causality_policy(finding).severity in BLOCKING_SEVERITIES:
+            return True
+    return False
+
+
 def _static_checks_from_state(state: Any) -> list[dict[str, str]]:
     explicit = getattr(state, "static_checks", None)
     if explicit:
@@ -406,6 +443,11 @@ def validate_submission(submission: dict[str, Any], *, state: Any) -> Submission
                     accepted=False,
                     rejection_reason=REJECTION_APPROVE_CONFIRMED_BLOCKER,
                 )
+        if _has_unverified_blocking_analyzer_finding(state):
+            return SubmissionValidation(
+                accepted=False,
+                rejection_reason=REJECTION_APPROVE_CONFIRMED_BLOCKER,
+            )
         if has_failed_required_static_check(_static_checks_from_state(state)):
             return SubmissionValidation(
                 accepted=False,
