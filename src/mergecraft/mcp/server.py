@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
+from jsonschema import SchemaError
+from jsonschema.exceptions import best_match
+from jsonschema.validators import validator_for
 from loguru import logger
 from starlette.responses import JSONResponse
 
@@ -87,6 +90,8 @@ from mergecraft.utils.process_group import kill_process_groups
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from jsonschema.protocols import Validator
 
     from mergecraft.mcp.context import ToolContext
 
@@ -305,6 +310,39 @@ def _record_trajectory(
         logger.debug("trajectory: failed to record {} — {}", name, exc)
 
 
+def _argument_schema_error(
+    tool: ToolSpec,
+    arguments: dict[str, Any],
+    cache: dict[str, Validator],
+) -> dict[str, Any] | None:
+    """Check ``arguments`` against ``tool.input_schema``; return a JSON-RPC error or ``None``.
+
+    A schema the validator cannot compile is the tool's defect, not the caller's:
+    ``set_output`` adopts a consumer-supplied schema verbatim, so an unusable one
+    is reachable in production. That case fails closed as ``-32603`` rather than
+    mislabelling perfectly good arguments as ``-32602``.
+    """
+    validator = cache.get(tool.name)
+    if validator is None:
+        validator_cls = validator_for(tool.input_schema)
+        try:
+            validator_cls.check_schema(tool.input_schema)
+        except SchemaError as exc:
+            return {
+                "code": -32603,
+                "message": f"tool {tool.name} declares an invalid input schema: {exc.message}",
+            }
+        validator = validator_cls(tool.input_schema)
+        cache[tool.name] = validator
+    error = best_match(validator.iter_errors(arguments))
+    if error is None:
+        return None
+    return {
+        "code": -32602,
+        "message": f"invalid arguments for {tool.name} at {error.json_path}: {error.message}",
+    }
+
+
 def _register_mcp_route(
     app: FastAPI,
     path: str,
@@ -313,6 +351,7 @@ def _register_mcp_route(
 ) -> None:
     """Mount one JSON-RPC MCP endpoint with a fixed tool surface."""
     by_name = {t.name: t for t in tools}
+    validators: dict[str, Validator] = {}
 
     async def handle_rpc(body: dict[str, Any], *, agent_id: str | None = None) -> dict[str, Any]:
         req_id = body.get("id")
@@ -362,6 +401,9 @@ def _register_mcp_route(
                     "id": req_id,
                     "error": {"code": -32000, "message": str(exc)},
                 }
+            schema_error = _argument_schema_error(tool, arguments, validators)
+            if schema_error is not None:
+                return {"jsonrpc": "2.0", "id": req_id, "error": schema_error}
             from mergecraft.config.settings import RepoSettings
 
             tracer = get_tracer_from_settings(RepoSettings())
