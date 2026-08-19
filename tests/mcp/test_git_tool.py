@@ -133,7 +133,6 @@ async def test_global_c_option_inside_repo_root_is_forwarded(
     assert recorder.calls == [["-C", inside, "status"]]
 
 
-@pytest.mark.xfail(reason="green after W2: -C confined to the primary repo root", strict=False)
 async def test_global_c_option_outside_repo_root_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -149,15 +148,14 @@ async def test_global_c_option_outside_repo_root_rejected(
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(reason="green after W2: -c is never forwarded", strict=False)
 @pytest.mark.parametrize("flag_args", [["-c", "core.quotepath=false", "-s"], ["--config-env=x=Y"]])
 async def test_c_config_option_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag_args: list[str]
 ) -> None:
-    """#257 / D7: `-c` / `--config-env` are dropped from global-opt extraction and rejected.
+    """#257 / D7: `-c` / `--config-env` are never forwarded, they are rejected.
 
-    This inverts the previous ``test_c_config_option_forwarded``: any `-c` is an
-    alias-execution vector, so a benign `-c core.quotepath=false` is refused too.
+    Any `-c` is an alias-execution vector, so even a benign
+    `-c core.quotepath=false` is refused rather than inspected.
     """
     recorder = _RunGitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
@@ -167,9 +165,6 @@ async def test_c_config_option_rejected(
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(
-    reason="green after W2: --work-tree confined to the primary repo root", strict=False
-)
 async def test_work_tree_outside_repo_root_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -184,9 +179,6 @@ async def test_work_tree_outside_repo_root_rejected(
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(
-    reason="green after W2: --git-dir confined to the primary repo root", strict=False
-)
 async def test_git_dir_outside_repo_root_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -200,7 +192,6 @@ async def test_git_dir_outside_repo_root_rejected(
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(reason="green after W2: -C in the command string is confined too", strict=False)
 async def test_global_opt_in_command_string_outside_repo_root_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -216,7 +207,6 @@ async def test_global_opt_in_command_string_outside_repo_root_rejected(
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(reason="green after W2: read-only subcommand allowlist", strict=False)
 @pytest.mark.parametrize("subcommand", ["reset", "clean", "stash", "update-ref"])
 async def test_mutating_subcommands_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
@@ -230,7 +220,6 @@ async def test_mutating_subcommands_rejected(
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(reason="green after W2: branch is read-only on the allowlist", strict=False)
 @pytest.mark.parametrize("flag", ["-D", "-d", "-m"])
 async def test_branch_mutation_flags_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
@@ -271,18 +260,14 @@ async def test_readonly_subcommands_allowed(
     assert recorder.calls == [[subcommand]]
 
 
-@pytest.mark.xfail(
-    reason="green after W2: -c alias rejected regardless of payload.shell", strict=False
-)
 @pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
 async def test_dash_c_alias_rejected_regardless_of_shell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
 ) -> None:
-    """#257: `git -c alias.x='!cmd' status` executes shell even with shell disabled.
+    """#257: `git -c alias.x='!cmd' status` is an alias-execution vector.
 
-    `_extract_global_opts` strips `-c` into `global_opts` before the
-    `_NOSHELL_BLOCKED_ARGS` scan, and that scan only walks `args` and only when
-    `payload.shell == "disabled"` — so today the guard never fires.
+    Rejection must not depend on `payload.shell`: a shell-gated guard would
+    leave the vector open in the `restricted`/`enabled` modes.
     """
     recorder = _RunGitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
@@ -294,9 +279,6 @@ async def test_dash_c_alias_rejected_regardless_of_shell(
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(
-    reason="green after W2: -c alias in args rejected regardless of payload.shell", strict=False
-)
 @pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
 async def test_dash_c_alias_in_args_rejected_regardless_of_shell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: Shell
@@ -357,9 +339,6 @@ async def test_commit_changes_push_policy_skip_reports_pushed_false(
     assert payload["pushed"] is False
 
 
-@pytest.mark.xfail(
-    reason="green after W5: every commit_changes return carries pushed: bool", strict=False
-)
 async def test_commit_changes_always_reports_pushed_and_never_patches_ref(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -377,9 +356,6 @@ async def test_commit_changes_always_reports_pushed_and_never_patches_ref(
     assert github.patch_calls == []
 
 
-@pytest.mark.xfail(
-    reason="green after W5: description no longer claims a GitHub-signed commit", strict=False
-)
 async def test_commit_changes_description_does_not_claim_signed(tmp_path: Path) -> None:
     description = commit_changes_tool(_ctx(tmp_path)).description.lower()
     assert "signed" not in description

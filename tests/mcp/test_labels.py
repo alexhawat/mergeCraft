@@ -1,8 +1,8 @@
 """URL-encoding tests for the label MCP tools (issue #260).
 
-``remove_labels`` interpolates the label name straight into the delete path, so
-a label containing ``/`` or a space shifts or corrupts the path segment. Note
-the f-string's ``{name}`` is the **label**, not the repository name.
+``remove_labels`` must percent-encode the label into the delete path, or a
+label containing ``/`` or a space shifts or corrupts the path segment. Note the
+encoded segment is the **label**, not the repository name.
 """
 
 from __future__ import annotations
@@ -68,7 +68,6 @@ async def test_plain_label_delete_url_is_unchanged(tmp_path: Path) -> None:
     assert github.delete_paths == [f"{BASE_PATH}bug"]
 
 
-@pytest.mark.xfail(reason="green after W4: label percent-encoded in the delete URL", strict=False)
 @pytest.mark.parametrize(
     ("label", "encoded"),
     [

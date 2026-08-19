@@ -86,9 +86,6 @@ def ctx(repo_root: Path, scratch: Path, monkeypatch: pytest.MonkeyPatch) -> Tool
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W3: upload_file confined to repo root or ctx.tmpdir", strict=False
-)
 async def test_path_outside_repo_and_tmpdir_rejected(ctx: ToolContext, outside_file: Path) -> None:
     result = await upload_file_tool(ctx).execute({"path": str(outside_file)})
     assert result.is_error is True
@@ -96,16 +93,12 @@ async def test_path_outside_repo_and_tmpdir_rejected(ctx: ToolContext, outside_f
     assert "file://" not in result.content[0]["text"]
 
 
-@pytest.mark.xfail(reason="green after W3: upload_file rejects symlinks", strict=False)
 async def test_symlink_escape_rejected(ctx: ToolContext, symlink_into_outside: Path) -> None:
     result = await upload_file_tool(ctx).execute({"path": str(symlink_into_outside)})
     assert result.is_error is True
     assert SECRET_MARKER not in result.content[0]["text"]
 
 
-@pytest.mark.xfail(
-    reason="green after W3: relative traversal out of the repo root rejected", strict=False
-)
 async def test_relative_traversal_out_of_repo_rejected(
     ctx: ToolContext, traversal_path: str
 ) -> None:
