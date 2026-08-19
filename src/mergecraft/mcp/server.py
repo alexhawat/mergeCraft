@@ -7,6 +7,7 @@ import json
 import os
 import random
 import socket
+from math import isfinite
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import uvicorn
@@ -326,12 +327,15 @@ def _rpc_error(req_id: Any, error: RpcError) -> dict[str, Any]:
     }
 
 
-_TRUE_STRINGS = frozenset({"true", "1", "yes"})
-_FALSE_STRINGS = frozenset({"false", "0", "no"})
+# The JSON vocabulary and its two string encodings, nothing invented: a model
+# writing `yes` has not written a boolean any JSON Schema consumer recognises.
+_TRUE_STRINGS = frozenset({"true", "1"})
+_FALSE_STRINGS = frozenset({"false", "0"})
 
 
-def _declared_types(schema: object) -> frozenset[str]:
-    declared = schema.get("type") if isinstance(schema, dict) else None
+def _declared_types(schema: JsonSchema | None) -> frozenset[str]:
+    """Return the ``type`` keywords a property schema declares."""
+    declared = schema.get("type") if schema is not None else None
     if isinstance(declared, str):
         return frozenset({declared})
     if isinstance(declared, list):
@@ -351,9 +355,14 @@ def _coerce_scalar(value: object, types: frozenset[str]) -> object:
             return value
     if "number" in types:
         try:
-            return int(text) if text.lstrip("+-").isdigit() else float(text)
+            number = int(text) if text.lstrip("+-").isdigit() else float(text)
         except ValueError:
             return value
+        # `inf`/`nan` satisfy jsonschema's `number`, so coercing them would swap
+        # a clean -32602 for an OverflowError inside the tool body.
+        if not isfinite(number):
+            return value
+        return number
     if "boolean" in types:
         folded = text.casefold()
         if folded in _TRUE_STRINGS:
@@ -363,7 +372,7 @@ def _coerce_scalar(value: object, types: frozenset[str]) -> object:
     return value
 
 
-def _coerce_arguments(arguments: dict[str, Any], schema: object) -> dict[str, Any]:
+def _coerce_arguments(arguments: dict[str, Any], schema: JsonSchema) -> dict[str, Any]:
     """Absorb the loosely-typed scalars models routinely send.
 
     Around 37 tool bodies call ``int(params[...])`` / ``bool(params[...])``
@@ -379,13 +388,24 @@ def _coerce_arguments(arguments: dict[str, Any], schema: object) -> dict[str, An
     touched, and a union that already admits ``string`` is left alone. A value
     that cannot be read as the declared type falls through unchanged and is
     still reported as the schema violation it is.
+
+    The in-body casts this makes redundant are not deleted yet, and the split
+    is why: of the 38 sites, 23 are ``int(params["k"])`` on a *required* key and
+    are a straight ``params["k"]`` once this boundary is trusted, but 15 are
+    ``bool(params.get("k"))`` on an *optional* one. Validation does not inject
+    schema defaults, so an omitted optional key is still absent here and
+    ``bool(None)`` is load-bearing at every one of those sites — the deletion is
+    per-site default handling across 18 modules, not a rename. Tracked as a
+    follow-up: land the 23 mechanical ones, then give the optional keys real
+    defaults at the boundary before touching them.
     """
-    properties = schema.get("properties") if isinstance(schema, dict) else None
+    properties = schema.get("properties")
     if not isinstance(properties, dict):
         return arguments
     coerced = dict(arguments)
     for key, value in arguments.items():
-        types = _declared_types(properties.get(key))
+        declared = properties.get(key)
+        types = _declared_types(declared if isinstance(declared, dict) else None)
         if types:
             coerced[key] = _coerce_scalar(value, types)
     return coerced

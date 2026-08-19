@@ -325,6 +325,18 @@ def test_string_encoded_scalars_are_coerced_and_reach_execute(
         pytest.param({"depth": "1.5"}, id="float-for-integer"),
         pytest.param({"ref": 123}, id="number-for-string"),
         pytest.param({"unexpected": "1"}, id="undeclared-property"),
+        # R4: `float()` reads these happily, and `inf`/`nan` satisfy jsonschema's
+        # `number`, so the coercion used to convert a clean -32602 into an
+        # OverflowError/ValueError inside the tool body.
+        pytest.param({"timeout": "1e999"}, id="overflows-to-inf"),
+        pytest.param({"timeout": "-1e999"}, id="overflows-to-negative-inf"),
+        pytest.param({"timeout": "nan"}, id="not-a-number-literal"),
+        pytest.param({"timeout": "inf"}, id="infinity-literal"),
+        pytest.param({"timeout": "Infinity"}, id="capitalised-infinity"),
+        # Q-F5: `yes`/`no` is a truthiness vocabulary no JSON Schema consumer
+        # expects, so it is a violation like any other unreadable boolean.
+        pytest.param({"verbose": "yes"}, id="yes-is-not-a-boolean"),
+        pytest.param({"verbose": "no"}, id="no-is-not-a-boolean"),
     ],
 )
 def test_genuine_type_violations_are_still_rejected(

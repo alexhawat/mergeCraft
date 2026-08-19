@@ -525,6 +525,54 @@ def test_mixed_diagnostics_attribute_only_the_unformatted_file(
     assert _paths(findings) == [SECOND]
 
 
+def test_an_unformatted_header_without_its_own_arrow_captures_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The ``unformatted:`` flag must not survive to a later diagnostic's arrow.
+
+    ruff renders each diagnostic as header-then-arrow. Leaving the flag set
+    across unrelated lines means an ``unformatted:`` header whose own arrow is
+    missing or malformed silently adopts the location of whatever diagnostic
+    comes next — here, the ``invalid-syntax:`` file, which is the one file the
+    reviewer must not be told to reformat.
+    """
+    repo_root = _repo(tmp_path, FIRST, SECOND)
+    findings = _failing_findings(
+        monkeypatch,
+        repo_root=repo_root,
+        scoped_files=[FIRST, SECOND],
+        output=(
+            "unformatted: File would be reformatted\n"
+            "  |\n"
+            f"{_diagnostic_block(SECOND, rule='invalid-syntax', message='Expected a parameter')}"
+        ),
+    )
+    assert _paths(findings) == [FIRST]
+    assert "no parseable output" in findings[0].message
+
+
+def test_a_malformed_location_is_not_read_as_a_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A location without a parseable ``:line:col`` yields no path, not a fake one.
+
+    Returning the whole location string produced a plausible-looking path that
+    ``resolve_repo_relative_path`` then normalised into a finding pointing at a
+    file that does not exist.
+    """
+    repo_root = _repo(tmp_path, FIRST, SECOND)
+    findings = _failing_findings(
+        monkeypatch,
+        repo_root=repo_root,
+        scoped_files=[FIRST, SECOND],
+        output=(
+            f"unformatted: File would be reformatted\n --> {SECOND}:not-a-line:not-a-col\n  |\n"
+        ),
+    )
+    assert _paths(findings) == [FIRST]
+    assert "no parseable output" in findings[0].message
+
+
 def test_ansi_coloured_diagnostic_output_still_parses(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

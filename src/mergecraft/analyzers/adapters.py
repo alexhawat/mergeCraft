@@ -96,12 +96,18 @@ _LOCATION_PREFIX = "-->"
 
 
 def _location_path(location: str) -> str:
-    """Strip the trailing ``:<line>:<col>`` from a diagnostic location."""
+    """Strip the trailing ``:<line>:<col>`` from a diagnostic location.
+
+    Returns ``""`` when the suffix does not parse: a location ruff did not
+    render in this shape is not a path, and returning the whole string produced
+    a plausible-looking one that then normalised into a finding against a file
+    that does not exist.
+    """
     head, _, column = location.rpartition(":")
     path, _, line = head.rpartition(":")
     if path and line.isdigit() and column.isdigit():
         return path
-    return location
+    return ""
 
 
 def _parse_reformat_paths(output: str, *, repo_root: Path) -> list[str]:
@@ -112,12 +118,19 @@ def _parse_reformat_paths(output: str, *, repo_root: Path) -> list[str]:
     diagnostics with the same ``-->`` arrow, and those are tool failures rather
     than unformatted files. Paths arrive absolute or repo-relative depending on
     how the argv was expanded; ``resolve_repo_relative_path`` normalises both.
+
+    ruff renders each diagnostic as header-then-arrow, so the header only claims
+    the arrow on the line immediately after it. Any other line clears the claim:
+    letting it persist meant an ``unformatted:`` header with no arrow of its own
+    adopted a *later* diagnostic's location — attributing a reformat to the file
+    that could not be parsed.
     """
     paths: list[str] = []
     awaiting_location = False
     for raw_line in output.splitlines():
         stripped = _ANSI_SGR.sub("", raw_line).strip()
         if stripped.startswith(_LEGACY_REFORMAT_PREFIX):
+            awaiting_location = False
             raw_path = stripped[len(_LEGACY_REFORMAT_PREFIX) :].strip()
             if raw_path:
                 paths.append(resolve_repo_relative_path(raw_path, repo_root=repo_root))
@@ -126,10 +139,10 @@ def _parse_reformat_paths(output: str, *, repo_root: Path) -> list[str]:
             awaiting_location = True
             continue
         if awaiting_location and stripped.startswith(_LOCATION_PREFIX):
-            awaiting_location = False
             raw_path = _location_path(stripped[len(_LOCATION_PREFIX) :].strip())
             if raw_path:
                 paths.append(resolve_repo_relative_path(raw_path, repo_root=repo_root))
+        awaiting_location = False
     return paths
 
 
