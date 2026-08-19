@@ -7,6 +7,7 @@ Also covers the reviewer-surface hardening contract for issue #257 (D7) and the
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -646,6 +647,21 @@ async def test_commit_changes_always_reports_pushed_and_never_patches_ref(
     assert github.patch_calls == []
 
 
-async def test_commit_changes_description_does_not_claim_signed(tmp_path: Path) -> None:
+async def test_commit_changes_description_matches_the_local_only_contract(tmp_path: Path) -> None:
+    """The description must promise exactly what the body does.
+
+    ``commit_changes`` always returns ``pushed: False`` and the Git Data ref
+    PATCH that once produced a signed, remote commit is gone (#259 / D9), so the
+    description has to state the local-only contract and claim neither a push
+    nor a signature. Word boundaries keep "unsigned" from reading as a claim.
+    """
     description = commit_changes_tool(_ctx(tmp_path)).description.lower()
-    assert "signed" not in description
+
+    assert "local commit" in description
+    assert "no push" in description
+    claims = [
+        claim
+        for claim in ("signed", "signs", "signature", "verified", "pushes", "remote commit")
+        if re.search(rf"\b{claim}\b", description)
+    ]
+    assert claims == []
