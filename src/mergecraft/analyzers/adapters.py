@@ -123,7 +123,10 @@ def _parse_reformat_paths(output: str, *, repo_root: Path) -> list[str]:
     the arrow on the line immediately after it. Any other line clears the claim:
     letting it persist meant an ``unformatted:`` header with no arrow of its own
     adopted a *later* diagnostic's location — attributing a reformat to the file
-    that could not be parsed.
+    that could not be parsed. The tradeoff is that a non-adjacent arrow is
+    dropped rather than mis-attributed: real ruff (measured on 0.16.2) always
+    emits them adjacently, so nothing is lost today, but a renderer change would
+    show up as missing reformat paths rather than wrong ones.
     """
     paths: list[str] = []
     awaiting_location = False

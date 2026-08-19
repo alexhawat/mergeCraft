@@ -392,15 +392,9 @@ def _coerce_arguments(arguments: dict[str, Any], schema: JsonSchema) -> dict[str
     that cannot be read as the declared type falls through unchanged and is
     still reported as the schema violation it is.
 
-    The in-body casts this makes redundant are not deleted yet, and the split
-    is why: of the 38 sites, 23 are ``int(params["k"])`` on a *required* key and
-    are a straight ``params["k"]`` once this boundary is trusted, but 15 are
-    ``bool(params.get("k"))`` on an *optional* one. Validation does not inject
-    schema defaults, so an omitted optional key is still absent here and
-    ``bool(None)`` is load-bearing at every one of those sites — the deletion is
-    per-site default handling across 18 modules, not a rename. Tracked as a
-    follow-up: land the 23 mechanical ones, then give the optional keys real
-    defaults at the boundary before touching them.
+    The ~38 in-body casts this makes redundant are not deleted yet; why, and in
+    what order they can go, is under "Deferred designs the review rounds
+    declined" in ``docs/test-plans/open-issues-sweep-2026-08-19.md``.
     """
     properties = schema.get("properties")
     if not isinstance(properties, dict):

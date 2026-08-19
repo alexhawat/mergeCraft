@@ -1411,3 +1411,50 @@ token to be forwarded, so no test had to be weakened or deleted.
 - **`-C` supplied after the subcommand** (`git blame -C <file>`), where `_extract_global_opts` lifts
   it into `global_opts` and confines a relative path against the wrong base. Pre-existing quirk,
   unrelated to the config-flag guard.
+
+## Deferred designs the review rounds declined (docstring overflow)
+
+Three docstrings on this branch had grown into roadmaps — ~40 lines of design that does not exist,
+in the one place that rots invisibly. The reasoning is kept here; each site now carries a one-line
+pointer back to this section.
+
+### `mcp/verification.py::_apply_non_blocking_downgrade` — the severity overlay
+
+A downgrade rewrites the stored severity in place because dropping the fingerprint from
+`verified_ids` is not enough: the originating `analyzer_run` row keeps its Critical/Major severity,
+so the approve gate sees it again as an unverified blocker and the downgrade leaves the run worse
+off than doing nothing. Severity lives in several collections, so the rewrite is several writes with
+no transaction, any future store that caches severity desyncs silently, and no row records whether
+its severity is the original or a rewrite.
+
+The structural fix, deliberately not attempted — it reaches every reader of `ToolState`:
+
+- Add `ToolState.verdicts: dict[str, FindingVerdict]` where `FindingVerdict` is a frozen dataclass
+  of `verdict` (confirm / downgrade / drop), `severity` (the downgraded value, or `None`) and
+  `reason`. The helper becomes one write, and no stored `severity` is ever mutated.
+- Add `effective_severity(row, verdicts)` and route every severity read through it — the approve
+  gate (`build_validation_state` in `mcp/verdict.py`), publication, and the packet writers. A row
+  keeps the severity the analyzer reported; the overlay says what it counts as now, which is also
+  the provenance that is currently unrecorded.
+- Retire `verified_ids` on both `ToolState` and `AnalyzerRunState` in favour of `verdicts`:
+  "verified" becomes "has a verdict", which removes the second place the set is maintained.
+
+### `mcp/server.py::_coerce_arguments` — the in-body casts it makes redundant
+
+The ~38 in-body `int(params[...])` / `bool(params.get(...))` casts are not deleted yet, and the
+split is why: 23 are `int(params["k"])` on a *required* key and are a straight `params["k"]` once
+this boundary is trusted, but 15 are `bool(params.get("k"))` on an *optional* one. Validation does
+not inject schema defaults, so an omitted optional key is still absent at the boundary and
+`bool(None)` is load-bearing at every one of those sites — the deletion is per-site default handling
+across 18 modules, not a rename. Follow-up: land the 23 mechanical ones, then give the optional keys
+real defaults at the boundary before touching them.
+
+### `agents/codex.py::_render_toml` — why it stays hand-rolled
+
+`tomli_w.dumps` was measured against this renderer on the real config shape and produces
+byte-identical output, including the empty `[model_providers]` table and the quoted
+`[model_providers."127.0.0.1"]` header. It is kept hand-rolled on dependency grounds, not
+correctness ones: `tomli_w` is currently a *dev*-only transitive of `pip-audit`, so adopting it adds
+a new runtime dependency to the shipped Action image — a real cost for a BYOK action — while
+`tomllib` on the reading side is stdlib and free. Revisit if a runtime dependency on `tomli_w` ever
+lands for another reason.

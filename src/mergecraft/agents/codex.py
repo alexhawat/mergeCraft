@@ -166,7 +166,16 @@ def _codex_home(ctx: AgentRunContext) -> Path:
 
 
 def _toml_string(value: str) -> str:
+    """Render ``value`` as a TOML basic string.
+
+    Control characters are escaped as well as ``\\`` and ``"``: TOML forbids a
+    raw newline or tab inside a basic string, so a value carrying one would
+    render a file ``tomllib`` refuses to parse. No current value contains any,
+    which is why this is a guard rather than a fix.
+    """
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    for char, replacement in (("\n", "\\n"), ("\r", "\\r"), ("\t", "\\t")):
+        escaped = escaped.replace(char, replacement)
     return f'"{escaped}"'
 
 
@@ -184,17 +193,10 @@ def _render_toml(table: TomlTable, path: tuple[str, ...] = ()) -> list[str]:
     hazard structurally: scalars of a table are always emitted directly under
     its own header, whatever order the caller populated the mapping in.
 
-    ``tomli_w.dumps`` was measured against this on the real config shape and
-    produces byte-identical output, including the empty ``[model_providers]``
-    table and the quoted ``[model_providers."127.0.0.1"]`` header. It is kept
-    hand-rolled anyway on dependency grounds, not correctness ones: ``tomli_w``
-    is currently a *dev*-only transitive of ``pip-audit``, so adopting it adds a
-    new runtime dependency to the shipped Action image — a real cost for a BYOK
-    action — while ``tomllib`` on the reading side is stdlib and free. The 30
-    lines here serialise ``str | bool`` scalars into a mapping whose type
-    (``TomlTable``) already excludes the dates, floats, arrays and multiline
-    strings where hand-rolled escaping actually bites. Revisit if a runtime
-    dependency on ``tomli_w`` ever lands for another reason.
+    ``tomli_w.dumps`` produces byte-identical output on the real config shape;
+    this stays hand-rolled on dependency grounds, written up under "Deferred
+    designs the review rounds declined" in
+    ``docs/test-plans/open-issues-sweep-2026-08-19.md``.
     """
     scalars = {key: value for key, value in table.items() if not isinstance(value, dict)}
     tables = {key: value for key, value in table.items() if isinstance(value, dict)}

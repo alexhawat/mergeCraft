@@ -141,26 +141,11 @@ def _apply_non_blocking_downgrade(
     sees it again as an unverified blocker and the downgrade leaves the run worse
     off than doing nothing. The stored severity is rewritten instead.
 
-    Severity is stored in four collections, so this write is four writes with no
-    transaction, any future store that caches severity desyncs silently, and no
-    row records whether its severity is the original or a rewrite.
-
-    The structural fix, deliberately not attempted here because it reaches every
-    reader of ``ToolState``:
-
-    - Add ``ToolState.verdicts: dict[str, FindingVerdict]`` where
-      ``FindingVerdict`` is a frozen dataclass of ``verdict`` (confirm /
-      downgrade / drop), ``severity`` (the downgraded value, or ``None``) and
-      ``reason``. This helper then becomes one write: ``verdicts[fingerprint] =
-      FindingVerdict(...)``, and no stored ``severity`` is ever mutated.
-    - Add ``effective_severity(row, verdicts)`` and route every severity read
-      through it — the approve gate (``build_validation_state`` in
-      ``mcp/verdict.py``), publication, and the packet writers. A row keeps the
-      severity the analyzer reported; the overlay says what it counts as now,
-      which is also the provenance that is currently unrecorded.
-    - Retire ``verified_ids`` on both ``ToolState`` and ``AnalyzerRunState`` in
-      favour of ``verdicts``: "verified" becomes "has a verdict", which removes
-      the second place the set is maintained and the discard pair above.
+    Severity is stored in five places, so this is five writes with no
+    transaction and no record of whether a row's severity is the original or a
+    rewrite. The overlay design that would make it one write is declined and
+    written up under "Deferred designs the review rounds declined" in
+    ``docs/test-plans/open-issues-sweep-2026-08-19.md``.
     """
     ctx.tool_state.verified_ids.discard(fingerprint)
     if ctx.tool_state.analyzer_run is not None:

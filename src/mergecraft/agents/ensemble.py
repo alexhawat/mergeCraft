@@ -137,7 +137,6 @@ def plan_ensemble_models(
 def _cap_findings(
     rows: list[dict[str, object]],
     *,
-    budget: int,
     remaining: int,
 ) -> tuple[list[dict[str, object]], int]:
     if remaining <= 0:
@@ -162,7 +161,7 @@ def run_ensemble_dispatch(
 
     for model in (primary, secondary):
         raw = list(execute(model=model))
-        capped, remaining = _cap_findings(raw, budget=binding.budget, remaining=remaining)
+        capped, remaining = _cap_findings(raw, remaining=remaining)
         model_runs.append(ModelRun(model=model, findings=tuple(capped)))
 
     return EnsembleRun(agent_id=binding.agent_id, model_runs=tuple(model_runs))

@@ -31,7 +31,14 @@ def _bail(msg: str) -> NoReturn:
     raise typer.Exit(1)
 
 
-def _repo_root(cwd: Path) -> Path:
+def _target_dir(cwd: Path) -> Path:
+    """The directory this command operates on — ``cwd``, resolved.
+
+    Deliberately not ``git_repo_root``: these commands act on whatever tree they
+    are pointed at, including one that is not a git checkout at all. Named for
+    that so it cannot be mistaken for the canonical repo-root helper in
+    ``utils/workspace.py``.
+    """
     return cwd.resolve()
 
 
@@ -57,7 +64,7 @@ def lint_cmd(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
 ) -> None:
     """Validate the pipeline file and registry agent references."""
-    repo_root = _repo_root(cwd)
+    repo_root = _target_dir(cwd)
     settings = load_repo_settings(root=repo_root)
     pipeline, path = _load_pipeline(repo_root)
     registry = load_registry(settings=settings, repo_root=repo_root)
@@ -75,7 +82,7 @@ def show_cmd(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
 ) -> None:
     """Preview which pipeline steps would run or skip for a diff."""
-    repo_root = _repo_root(cwd)
+    repo_root = _target_dir(cwd)
     settings = load_repo_settings(root=repo_root)
     pipeline, _path = _load_pipeline(repo_root)
     registry = load_registry(settings=settings, repo_root=repo_root)
@@ -100,7 +107,7 @@ def explain_cmd(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
 ) -> None:
     """Print pipeline step ids and predicate vocabulary."""
-    repo_root = _repo_root(cwd)
+    repo_root = _target_dir(cwd)
     pipeline, path = _load_pipeline(repo_root)
     console.print(f"pipeline: {path}")
     for step_id in pipeline.step_ids():
