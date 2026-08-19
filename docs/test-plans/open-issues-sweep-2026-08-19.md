@@ -13,7 +13,7 @@ The program has **six RED waves**, one per logical batch. Each RED wave appends 
 |---|---|---|---|
 | A — MCP security (#257, #258, #260, #259) | W1 | [Batch A](#batch-a--mcp-security-w1) | **reconciled — all green** |
 | B — Action / workflow contract (#264, #265, #272, #271) | W6 | [Batch B](#batch-b--action--workflow-contract-w6) | **authored — 17 RED (W7/W8/W9)** |
-| C — Analyzer correctness (#270, #269, #268) | W10 | _append below_ | pending |
+| C — Analyzer correctness (#270, #269, #268) | W10 | [Batch C](#batch-c--analyzer-correctness-w10) | **authored — 22 RED (W11/W12/W13)** |
 | D — Agents + approve gate (#222, #261, #262, #273, #263) | W14 | _append below_ | pending |
 | E — MCP contract (#266, #267) | W20 | _append below_ | pending |
 | F — Auth DX + #220 close (#221, #220) | W23 | _append below_ | pending |
@@ -352,6 +352,131 @@ Notes on what these pin and what they deliberately do not:
   than recomputed from the predictor, so a change to the classification policy has to be a
   deliberate test edit rather than a silently-tracking tautology. Membership in the closed
   `VerdictDiagnostic` vocabulary is checked separately.
+
+### Escalation log
+
+_(empty)_
+
+---
+
+## Batch C — Analyzer correctness (W10)
+
+**Issues:** #270 (OSV fixed-version regex), #269 (`base_comparison_available` inversion),
+#268 (ruff-format finding attribution).
+**Implementation waves:** W11 (#270), W12 (#269), W13 (#268).
+**Binding decision:** **D19** — analyzer waves fix parsers/adapters/scope only. No new analyzer,
+no catalog row. Nothing in this batch asserts a catalog string, a manifest id that does not
+already ship, or a severity-gate row, so `make catalog-check` stays out of the loop.
+
+**Anchors re-grepped, not trusted from the plan body** (W0 corrected two of the three):
+
+| Issue | Anchor used | Plan text | Verdict |
+|---|---|---|---|
+| #270 | `analyzers/parsers/osv_json.py:82` | same | matches |
+| #269 | `analyzers/scope.py:234-238` → consumer `analyzers/pipeline.py:361,376` | W12.1 still says `scope.py:232`; W12.2 still says `pipeline.py:276-280` | **stale in the wave body** — the Traceability table is right |
+| #268 | `analyzers/adapters.py:85-119` | W13.1 still says `:85-127` | **stale in the wave body** — the Traceability table is right |
+
+### Files
+
+| File | Status | Issue |
+|---|---|---|
+| `tests/analyzers/parsers/test_osv_json.py` | **new** | #270 |
+| `tests/analyzers/test_scope.py` | extended (pure function + pipeline consumer) | #269 |
+| `tests/analyzers/test_adapters_ruff_format.py` | **new** | #268 |
+
+### Contract → test map
+
+| Contract | Test | Layer / class | Marker |
+|---|---|---|---|
+| A real `N.N.N` fix version is accepted | `test_real_three_component_version_is_accepted` (4 params) | Unit, happy | green |
+| A single-character separator substitution is rejected | `test_wildcard_separator_is_rejected[1.2x3, 1.2X3, 1.2-3, 1.2_3, "1.2 3", 1.2/3]` | Unit, edge | xfail W11 |
+| The wildcard matching a **digit** is rejected | `test_wildcard_separator_is_rejected[1.234, 1.2345, 10.234, 1.2x34]` | Unit, boundary | xfail W11 |
+| Malformed versions stay rejected after the escape | `test_malformed_version_stays_rejected` (11 params) | Unit, boundary | green |
+| No `fixed` event / non-`ECOSYSTEM` range yields nothing | `test_missing_fixed_event_yields_no_version`, `test_non_ecosystem_range_is_ignored` | Unit, edge | green |
+| The reviewer-visible remediation names a real version | `test_remediation_names_a_real_fix_version` (2 params) | Integration, happy | green |
+| No fabricated `Upgrade to 1.2x3 or later` | `test_remediation_is_omitted_for_a_malformed_fix_version` (2 params) | Integration, error | xfail W11 |
+| Clearly-malformed versions already produce no remediation | `test_remediation_already_omitted_for_clearly_malformed_versions` (2 params) | Integration, boundary | green |
+| Online + `full` ⇒ base comparison available | `test_base_comparison_available_is_true_when_online_and_full` | Unit, happy | xfail W12 |
+| Offline + `full` ⇒ not available | `test_base_comparison_available_is_false_when_offline_and_full` | Unit, error | xfail W12 |
+| `baseComparison != "full"` short-circuits regardless of `offline` | `test_base_comparison_available_is_false_unless_comparison_is_full` (6 params) | Unit, table | green |
+| **Consumer:** an online `full` run reaches `annotate_introduced_by_pr` with a truthy `base_run_performed` | `test_online_full_comparison_reaches_the_annotator_as_performed` | Integration, seam | xfail W12 |
+| **Consumer:** an offline run never claims a base run | `test_offline_full_comparison_never_claims_a_base_run` | Integration, seam | xfail W12 |
+| Only the second scoped file reformatting cites the second file | `test_only_the_second_file_reformatting_cites_the_second_file` (2 params) | Integration, the bug | xfail W13 |
+| Both files reformatting yield one finding each (W13.1) | `test_both_files_reformatting_yield_one_finding_each` (2 params) | Integration, multi-file | xfail W13 |
+| A clean *middle* file must not absorb the finding | `test_third_file_reformatting_is_not_attributed_to_the_first` (2 params) | Integration, edge | xfail W13 |
+| The one multi-file case today gets right must survive | `test_first_of_two_files_reformatting_cites_the_first` | Integration, regression | green |
+| A single-file run still reports that file | `test_single_file_run_still_reports_that_file` | Integration, happy | green |
+| Exit 0 ⇒ no findings | `test_clean_run_reports_nothing` | Integration, happy | green |
+| No scoped files ⇒ no findings | `test_no_scoped_files_reports_nothing` | Integration, edge | green |
+| Finding shape (tool, `rule_id: format`, line 1, message) is stable — D19 | `test_format_finding_metadata_is_stable` | Integration, contract | green |
+
+### Confirmed-RED assertions (22 xfails, verified with `--runxfail`)
+
+All 22 fail on the assertion, never on a stub or import error:
+
+- **W11 (12)** — `_fixed_version("1.2x3")` returns `"1.2x3"`; `_fixed_version("1.234")` returns
+  `"1.234"`; and `parse_osv_json` turns both into `Upgrade to <garbage> or later`.
+- **W12 (4)** — `base_comparison_available(base_comparison="full", offline=False)` is `False`
+  (expected `True`) and `offline=True` is `True` (expected `False`); the pipeline consumer records
+  `[False]` on an online `full` run and `[True]` offline.
+- **W13 (6)** — `_run_ruff_format_check` returns `['pkg/a.py']` when only `pkg/b.py` would
+  reformat, and one finding when two files would.
+
+### Green-today regression guards (41 assertions)
+
+The OSV boundary table (`1.2`, `1.23`, `1.2.3.4`, `1.2..3`, `1.2xy3`, `v1.2.3`, `1.2.3-rc1`,
+`1.2.x`, `abc`, `""`) exists so W11's escape cannot *narrow* the guard past `N.N.N` or start
+admitting a prerelease. `1.23` is the interesting one: it is exactly one digit short of slipping
+through the wildcard, so it pins the boundary from the other side. The `base_comparison != "full"`
+table (6 params) guards the short-circuit W12 must leave alone. The ruff-format guards pin the
+single-file and clean-run shapes plus the finding metadata, so W13 cannot buy per-file attribution
+by changing severity, rule id, or line.
+
+### What the unescaped dot actually admits
+
+`re.fullmatch(r"\d+\.\d+.\d+", fixed)` — the third separator is a wildcard, so the guard admits
+**two** families, only one of which the issue names:
+
+1. **Any single non-newline character** in the separator slot: `1.2x3`, `1.2-3`, `1.2 3`, `1.2/3`,
+   `1.2_3`, and also `1.2x34` (the trailing `\d+` is not length-bound). Two characters do not fit —
+   `1.2xy3` is correctly rejected — so the hole is exactly one character wide.
+2. **A digit**, because `.` matches digits too. Any two-component version with **three or more**
+   digits after the dot parses as three components: `1.234` → `1` `.` `2` `[3]` `4`. `1.23` fails
+   (nothing is left for the trailing `\d+`), so ≥ 3 trailing digits is the boundary. This family is
+   the more dangerous one in practice — `1.234` is a plausible real version string, and OSV
+   ecosystems that use two-component versions would silently hand the reviewer a fabricated
+   three-component "fix".
+
+`\n` is not admitted (`.` excludes newline), and `1.2.3.4` / `1.2..3` are rejected before and after
+the fix.
+
+### Notes for W11 / W12 / W13
+
+- **W12's wave text points at `scope.py:232` and `pipeline.py:276-280`.** Both are stale; the live
+  lines are `scope.py:238` (`return offline` inside `base_comparison_available`) and
+  `pipeline.py:361` (the call) → `pipeline.py:376` (`base_run_performed=base_run` passed into
+  `_apply_baseline_suppression`, which forwards to `annotate_introduced_by_pr` at `:131` / `:157`).
+  W12 is a one-word change at `scope.py:238`; nothing in `pipeline.py` needs to move.
+- **The #269 consumer test drives the real `run_analyzer_pipeline`** (`detect_enabled`,
+  `run_adapter`, and `_analyzers_settings` stubbed; `baseComparison: full`, empty diff), and records
+  what `annotate_introduced_by_pr` is actually handed. It is the same seam-pinning technique as
+  `test_shell_disabled_split.py::test_pipeline_forwards_the_shell_to_the_adapter`. The annotation
+  *output* is not observable here — `is_new_in_base` defaults to `False`, so both branches yield
+  `"unknown"` — which is precisely why the bug survived: only the argument is observable.
+- **W13 may choose either strategy.** The stub decides its verdict from the file paths in
+  `plan.argv`, so it answers correctly for a single combined invocation *and* for one run per file.
+  Per-file attribution **is** achievable from today's single invocation: `run_plan` returns the
+  combined stdout/stderr on `AnalyzerOutcome.output`, and `ruff format --check` prints one
+  `Would reformat: <path>` line per file. Per-file runs are the fallback, not a requirement.
+- **Paths reach ruff as absolute strings** (`expand_analyzer_argv` joins each relative path onto
+  `repo_root`), so W13 must relativize whatever it parses. Each attribution test is parametrized
+  over an absolute and a repo-relative `Would reformat:` line so neither form may be assumed.
+- **The stub sets `output_path=None`.** If W13 prefers the persisted output file over
+  `outcome.output`, it must tolerate a missing path — or these tests need a one-line amendment
+  (escalate rather than edit them in an implementation wave).
+- **Deliberately not pinned:** what should happen when `ruff format --check` exits non-zero with no
+  `Would reformat:` line at all (a ruff-side parse error). The correct answer differs between the
+  two strategies, so pinning it would pick the implementation for W13. Worth a decision in W13.
 
 ### Escalation log
 
