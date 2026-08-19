@@ -267,6 +267,57 @@ behaviour anchors, `_set_output("", …)`'s empty-key transport, the outputs-kee
 | W7.1 "`mergecraft.yml:161`", "`:142-143`", "`:200`" | All accurate: `wait-for-ci:` at `:161` with **no** `permissions:` key (only `name`/`if`/`runs-on`/`timeout-minutes`/`outputs`/`steps`), workflow-level `permissions: {contents: read}` at `:142-143`, `2>/dev/null` on the poll at `:200` | No change needed |
 | D10 "empty string when no diagnostic" | `_set_output` already writes `name=` for an empty value (`gha_cmd.py:70-71`), and only skips `::add-mask::` | W8 needs **no new writer** — but it must call `_set_output` unconditionally on the terminal-verdict path, since "write nothing" is the naive implementation that leaves the key absent |
 
+### Reconciled assertions (were 17 xfailed → now 17 real passes)
+
+All three implementation waves landed (`a13afc6` W7, `32f1884` W8, `a75d43a` W9) without touching
+`tests/`. Every marker was xpassing before the strip, so reconciliation removed markers only — no
+assertion was weakened, and nothing escalated.
+
+| Target wave | Count | Reconciled |
+|---|---|---|
+| **W7** (`a13afc6`, `#264`) | 5 | 4 × `TestWaitForCiPermissions` + `test_check_runs_poll_does_not_swallow_stderr` |
+| **W8** (`32f1884`, `#265` + `#272`) | 10 | 2 × `TestActionYmlHygiene` + 8 × `TestVerdictDiagnosticOutput` (incl. 5 parametrized codes) |
+| **W9** (`a75d43a`, `#271`) | 2 | `test_pytest_pin_matches_pyproject`, `test_no_runner_package_drifts[pytest]` |
+
+The W6 table above counted W8 as 9 and W7's stderr case as *optional*; the true instance counts are
+10 and 5 (17 total either way). W7 landed the stderr hardening despite the plan marking it optional,
+so `test_check_runs_poll_does_not_swallow_stderr` is now a plain green guard, not residual risk.
+`test_no_runner_package_drifts`'s per-`pytest.param` xfail collapsed back into a plain
+`@pytest.mark.parametrize("package", ["pytest", "pytest-asyncio"])`.
+
+Docstring narration that described the pre-fix defect in the present tense
+(`TestVerdictDiagnosticOutput`'s "`MainResult` has no field for it … red today", the stderr test's
+"non-strict xfail either way") was rewritten to state the contract. The now-unnecessary
+`# type: ignore[call-arg]` on the failure-path `MainResult(...)` was dropped (mypy strict flags
+unused ignores).
+
+### Post-reconciliation contract audit (Batch B)
+
+- **The `verdict_diagnostic` tests cover the `$GITHUB_OUTPUT` write, not the dataclass field.**
+  Every case in `TestVerdictDiagnosticOutput` monkeypatches `mergecraft.main.main`, runs the real
+  `asyncio.run(_run_main())`, and asserts against the parsed `$GITHUB_OUTPUT` file. Constructing
+  `MainResult(verdict_diagnostic=…)` is only the *input* fixture; a `MainResult` that merely holds
+  the string while `_run_main` writes nothing fails all of them. The transport under test is
+  `gha_cmd.py:120` — `_set_output("verdict_diagnostic", result.verdict_diagnostic or "")`.
+- **D10's empty arm asserts presence, not absence of a crash.**
+  `test_success_without_diagnostic_writes_empty_string` asserts `"verdict_diagnostic" in entries`
+  *and* `entries["verdict_diagnostic"] == ""`. Its transport premise is separately pinned by
+  `test_set_output_writes_an_empty_value_as_a_present_key`, which asserts the file content is
+  exactly `verdict_diagnostic=\n`.
+- **Nothing pins W8's particular plumbing.** No assertion names `_verdict_protocol_publish`,
+  `diagnostic_attrs`, or `verdict.diagnostic`. W8 deliberately did *not* widen
+  `_verdict_protocol_publish`'s 2-tuple return (that would have broken
+  `tests/evidence/test_verdict_shadow.py`) and read the span-attrs dict instead; a later refactor
+  that widens the return, or threads a `VerdictDiagnostic` object, keeps this batch green as long
+  as the output is written on both `_finalize` return paths.
+- **Known coverage gap (producer side, not a Batch B contract).** No test asserts that
+  `main._finalize` populates `MainResult.verdict_diagnostic` from
+  `diagnostic_attrs["verdict.diagnostic"]` (`main.py:1353`, `:1399`, `:1409`). The batch pins the
+  consumer half — given a populated `MainResult`, the output is written correctly — so a regression
+  that stopped *computing* the code would leave every Batch B test green while the output silently
+  went empty. W6.2's contract is scoped to the write path, so this is recorded rather than fixed
+  here; it belongs to a `main._finalize` suite.
+
 ### Escalation log
 
 _(empty)_

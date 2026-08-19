@@ -34,10 +34,6 @@ def wait_for_ci() -> dict[str, object]:
 class TestWaitForCiPermissions:
     """The polling job needs ``checks: read`` at job level, and nothing more."""
 
-    @pytest.mark.xfail(
-        reason="green after W7: wait-for-ci job-level permissions.checks: read",
-        strict=False,
-    )
     def test_declares_job_level_permissions(self, wait_for_ci: dict[str, object]) -> None:
         """Without a job-level block the job inherits ``contents: read`` only."""
         assert isinstance(wait_for_ci.get("permissions"), dict), (
@@ -45,10 +41,6 @@ class TestWaitForCiPermissions:
             "workflow-level block, which has no Checks scope"
         )
 
-    @pytest.mark.xfail(
-        reason="green after W7: wait-for-ci job-level permissions.checks: read",
-        strict=False,
-    )
     def test_declares_checks_read(self, wait_for_ci: dict[str, object]) -> None:
         """``gh api …/check-runs`` needs the Checks read scope or it 403s."""
         permissions = wait_for_ci.get("permissions")
@@ -57,10 +49,6 @@ class TestWaitForCiPermissions:
             f"{_WAIT_JOB} must declare `checks: read`, got {permissions!r}"
         )
 
-    @pytest.mark.xfail(
-        reason="green after W7: wait-for-ci job-level permissions.checks: read",
-        strict=False,
-    )
     def test_keeps_contents_read(self, wait_for_ci: dict[str, object]) -> None:
         """A job-level block replaces inheritance — ``contents: read`` must be restated."""
         permissions = wait_for_ci.get("permissions")
@@ -70,10 +58,6 @@ class TestWaitForCiPermissions:
             "job-level block does not inherit"
         )
 
-    @pytest.mark.xfail(
-        reason="green after W7: wait-for-ci job-level permissions.checks: read",
-        strict=False,
-    )
     def test_grants_nothing_beyond_read_scopes(self, wait_for_ci: dict[str, object]) -> None:
         """W7 must not widen the job past read — no ``write`` anywhere."""
         permissions = wait_for_ci.get("permissions")
@@ -119,15 +103,11 @@ class TestWaitForCiBehaviourAnchors:
             "the documented fail-open contract for wait-for-ci disappeared"
         )
 
-    @pytest.mark.xfail(
-        reason="green after W7: optional — stop swallowing stderr on the check-runs poll",
-        strict=False,
-    )
     def test_check_runs_poll_does_not_swallow_stderr(self) -> None:
-        """Optional W7.1 hardening: a remaining 403 should be visible in the logs.
+        """W7.1 hardening: a remaining 403 must stay visible in the logs.
 
-        The plan marks this optional, so it is a non-strict xfail either way —
-        it records the residual risk rather than gating W7.
+        The plan marked this optional; W7 landed it anyway, because the silent
+        403 is the defect. Pinned plain so it cannot regress.
         """
         text = read_text(_WORKFLOW_PATH)
         offenders = [

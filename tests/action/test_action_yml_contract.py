@@ -272,10 +272,6 @@ class TestActionYmlHygiene:
                 f"{env_var} hard-codes a value instead of referencing inputs.*: {expr!r}"
             )
 
-    @pytest.mark.xfail(
-        reason="green after W8: delete the inert outputs.*.value keys",
-        strict=False,
-    )
     def test_docker_action_declares_no_output_values(self, action_yml: dict[str, Any]) -> None:
         """Plan W6.3 — ``outputs.*.value`` is inert for a Docker action (``#272``).
 
@@ -314,10 +310,6 @@ class TestActionYmlHygiene:
         """#265 — the output consumers read must stay declared (only its ``value:`` goes)."""
         assert "verdict_diagnostic" in (action_yml.get("outputs") or {})
 
-    @pytest.mark.xfail(
-        reason="green after W8: delete the inert outputs.*.value keys",
-        strict=False,
-    )
     def test_no_expression_survives_in_any_output_block(self) -> None:
         """W8.1 must not leave a ``${{ }}`` behind anywhere under ``outputs:``.
 

@@ -247,9 +247,11 @@ class TestVerdictDiagnosticOutput:
     than the documented empty string ("Empty when the run did not evaluate
     terminal protocol policy").
 
-    The diagnostic is currently computed in ``main_outcome._verdict_protocol_publish``
-    and only reaches ``span_attrs_for_verdict_diagnostic`` — ``MainResult`` has
-    no field for it, which is why constructing one below is red today.
+    Green since W8: ``MainResult`` carries ``verdict_diagnostic`` and
+    ``_run_main`` writes it unconditionally. The assertions below read the
+    ``$GITHUB_OUTPUT`` file that ``_run_main`` produced, so they pin the
+    *transport*, not the dataclass field — any later refactor that threads the
+    diagnostic differently keeps them green as long as the output is written.
     """
 
     @staticmethod
@@ -262,10 +264,6 @@ class TestVerdictDiagnosticOutput:
         asyncio.run(_run_main())
         return _read_output_file(out)
 
-    @pytest.mark.xfail(
-        reason="green after W8: thread the diagnostic into _set_output('verdict_diagnostic', …)",
-        strict=False,
-    )
     def test_success_with_diagnostic_writes_the_code(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -282,10 +280,6 @@ class TestVerdictDiagnosticOutput:
         )
         assert entries.get("verdict_diagnostic") == VerdictDiagnostic.approved.value
 
-    @pytest.mark.xfail(
-        reason="green after W8: thread the diagnostic into _set_output('verdict_diagnostic', …)",
-        strict=False,
-    )
     def test_success_without_diagnostic_writes_empty_string(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -302,10 +296,6 @@ class TestVerdictDiagnosticOutput:
         )
         assert entries["verdict_diagnostic"] == ""
 
-    @pytest.mark.xfail(
-        reason="green after W8: thread the diagnostic into _set_output('verdict_diagnostic', …)",
-        strict=False,
-    )
     @pytest.mark.parametrize(
         "code",
         [
@@ -335,10 +325,6 @@ class TestVerdictDiagnosticOutput:
         )
         assert entries.get("verdict_diagnostic") == code
 
-    @pytest.mark.xfail(
-        reason="green after W8: thread the diagnostic into _set_output('verdict_diagnostic', …)",
-        strict=False,
-    )
     def test_failure_path_still_writes_the_diagnostic(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -354,7 +340,7 @@ class TestVerdictDiagnosticOutput:
         monkeypatch.setenv("GITHUB_OUTPUT", str(out))
         _patch_main(
             monkeypatch,
-            MainResult(  # type: ignore[call-arg]
+            MainResult(
                 success=False,
                 error="agent blocked",
                 verdict_diagnostic="policy_rejection",

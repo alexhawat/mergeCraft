@@ -72,10 +72,6 @@ class TestPinSourcesAreParseable:
 class TestPinsAgree:
     """Every runner package the script installs must match ``pyproject.toml``."""
 
-    @pytest.mark.xfail(
-        reason="green after W9: bump the adversarial-image pytest pin to pyproject's",
-        strict=False,
-    )
     def test_pytest_pin_matches_pyproject(self) -> None:
         assert _script_pins()["pytest"] == _pyproject_pins()["pytest"], (
             f"{_SCRIPT_RELATIVE} installs pytest=={_script_pins()['pytest']} but "
@@ -90,19 +86,7 @@ class TestPinsAgree:
             f"pins pytest-asyncio=={_pyproject_pins()['pytest-asyncio']}"
         )
 
-    @pytest.mark.parametrize(
-        "package",
-        [
-            pytest.param(
-                "pytest",
-                marks=pytest.mark.xfail(
-                    reason="green after W9: bump the adversarial-image pytest pin to pyproject's",
-                    strict=False,
-                ),
-            ),
-            "pytest-asyncio",
-        ],
-    )
+    @pytest.mark.parametrize("package", ["pytest", "pytest-asyncio"])
     def test_no_runner_package_drifts(self, package: str) -> None:
         """Table form so a newly-added runner pin is covered without editing logic."""
         script = _script_pins()
