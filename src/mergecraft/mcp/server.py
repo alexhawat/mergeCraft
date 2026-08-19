@@ -7,7 +7,7 @@ import json
 import os
 import random
 import socket
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
@@ -310,12 +310,93 @@ def _record_trajectory(
         logger.debug("trajectory: failed to record {} — {}", name, exc)
 
 
+class RpcError(NamedTuple):
+    """A JSON-RPC error code/message pair, before it is wrapped in an envelope."""
+
+    code: int
+    message: str
+
+
+def _rpc_error(req_id: Any, error: RpcError) -> dict[str, Any]:
+    """Wrap ``error`` in the JSON-RPC response envelope for ``req_id``."""
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "error": {"code": error.code, "message": error.message},
+    }
+
+
+_TRUE_STRINGS = frozenset({"true", "1", "yes"})
+_FALSE_STRINGS = frozenset({"false", "0", "no"})
+
+
+def _declared_types(schema: object) -> frozenset[str]:
+    declared = schema.get("type") if isinstance(schema, dict) else None
+    if isinstance(declared, str):
+        return frozenset({declared})
+    if isinstance(declared, list):
+        return frozenset(item for item in declared if isinstance(item, str))
+    return frozenset()
+
+
+def _coerce_scalar(value: object, types: frozenset[str]) -> object:
+    """Read a string-encoded scalar as the type the schema declares, or leave it."""
+    if not isinstance(value, str) or "string" in types:
+        return value
+    text = value.strip()
+    if "integer" in types:
+        try:
+            return int(text)
+        except ValueError:
+            return value
+    if "number" in types:
+        try:
+            return int(text) if text.lstrip("+-").isdigit() else float(text)
+        except ValueError:
+            return value
+    if "boolean" in types:
+        folded = text.casefold()
+        if folded in _TRUE_STRINGS:
+            return True
+        if folded in _FALSE_STRINGS:
+            return False
+    return value
+
+
+def _coerce_arguments(arguments: dict[str, Any], schema: object) -> dict[str, Any]:
+    """Absorb the loosely-typed scalars models routinely send.
+
+    Around 37 tool bodies call ``int(params[...])`` / ``bool(params[...])``
+    against schemas declaring ``number`` / ``boolean`` precisely because models
+    send them as strings — ``.github/workflows/mergecraft.yml`` instructs the
+    agent to call ``get_check_suite_logs`` with a bare number quoted in prose,
+    which arrives JSON-encoded as a string often enough to matter. Rejecting
+    those at the boundary turns a tolerated shape into a hard ``-32602`` and
+    silently degrades CI-log grounding, so they are coerced here instead and
+    the typed value is what the tool receives.
+
+    Only top-level scalars whose declared type they can actually satisfy are
+    touched, and a union that already admits ``string`` is left alone. A value
+    that cannot be read as the declared type falls through unchanged and is
+    still reported as the schema violation it is.
+    """
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(properties, dict):
+        return arguments
+    coerced = dict(arguments)
+    for key, value in arguments.items():
+        types = _declared_types(properties.get(key))
+        if types:
+            coerced[key] = _coerce_scalar(value, types)
+    return coerced
+
+
 def _argument_schema_error(
     tool: ToolSpec,
     arguments: dict[str, Any],
     cache: dict[str, Validator],
-) -> dict[str, Any] | None:
-    """Check ``arguments`` against ``tool.input_schema``; return a JSON-RPC error or ``None``.
+) -> RpcError | None:
+    """Check ``arguments`` against ``tool.input_schema``; return an error or ``None``.
 
     A schema the validator cannot compile is the tool's defect, not the caller's:
     ``set_output`` adopts a consumer-supplied schema verbatim, so an unusable one
@@ -328,19 +409,17 @@ def _argument_schema_error(
         try:
             validator_cls.check_schema(tool.input_schema)
         except SchemaError as exc:
-            return {
-                "code": -32603,
-                "message": f"tool {tool.name} declares an invalid input schema: {exc.message}",
-            }
+            return RpcError(
+                -32603, f"tool {tool.name} declares an invalid input schema: {exc.message}"
+            )
         validator = validator_cls(tool.input_schema)
         cache[tool.name] = validator
     error = best_match(validator.iter_errors(arguments))
     if error is None:
         return None
-    return {
-        "code": -32602,
-        "message": f"invalid arguments for {tool.name} at {error.json_path}: {error.message}",
-    }
+    return RpcError(
+        -32602, f"invalid arguments for {tool.name} at {error.json_path}: {error.message}"
+    )
 
 
 def _register_mcp_route(
@@ -377,33 +456,28 @@ def _register_mcp_route(
             name = params.get("name")
             arguments = params.get("arguments") or {}
             if not isinstance(name, str):
-                return {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {"code": -32602, "message": "tools/call requires string name"},
-                }
+                return _rpc_error(req_id, RpcError(-32602, "tools/call requires string name"))
             if not isinstance(arguments, dict):
                 arguments = {}
             tool = by_name.get(name)
             if tool is None:
-                return {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {"code": -32601, "message": f"Unknown tool: {name}"},
-                }
+                return _rpc_error(req_id, RpcError(-32601, f"Unknown tool: {name}"))
+            arguments = _coerce_arguments(arguments, tool.input_schema)
+            # Validate before charging: a call rejected here never ran, so it
+            # costs no tool call — otherwise a schema mismatch the agent keeps
+            # retrying burns the run budget with nothing executed. It is still
+            # recorded on the trajectory, which is the only place the rejection
+            # would otherwise be visible.
+            schema_error = _argument_schema_error(tool, arguments, validators)
+            if schema_error is not None:
+                _record_trajectory(tool_ctx, name, arguments, ok=False, error=schema_error.message)
+                return _rpc_error(req_id, schema_error)
             try:
                 from mergecraft.utils.run_bounds import BudgetExhausted
 
                 _charge_tool_call_budget(tool_ctx)
             except BudgetExhausted as exc:
-                return {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {"code": -32000, "message": str(exc)},
-                }
-            schema_error = _argument_schema_error(tool, arguments, validators)
-            if schema_error is not None:
-                return {"jsonrpc": "2.0", "id": req_id, "error": schema_error}
+                return _rpc_error(req_id, RpcError(-32000, str(exc)))
             from mergecraft.config.settings import RepoSettings
 
             tracer = get_tracer_from_settings(RepoSettings())
@@ -445,11 +519,7 @@ def _register_mcp_route(
                     "id": req_id,
                     "result": _tool_result_to_rpc(result),
                 }
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "error": {"code": -32601, "message": f"Method not found: {method}"},
-        }
+        return _rpc_error(req_id, RpcError(-32601, f"Method not found: {method}"))
 
     async def mcp_endpoint(request: Request) -> Response:
         if request.method == "GET":
@@ -465,11 +535,10 @@ def _register_mcp_route(
         try:
             body = await request.json()
         except Exception:
+            # No envelope helper here: a parse failure has no request id to echo,
+            # so this response deliberately carries no ``id`` field at all.
             return JSONResponse(
-                {
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32700, "message": "Parse error"},
-                },
+                {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}},
                 status_code=400,
             )
         items = body if isinstance(body, list) else [body]
