@@ -69,7 +69,7 @@ dev = [
     "types-jsonschema==4.25.1.20250822",
     "pyright==1.1.411",
     "basedpyright==1.39.9",
-    "pytest-cov==6.0.0",
+    "pytest-cov==7.1.0",
     "pytest-randomly==4.1.0",
     "pytest-split==0.11.0",
     "types-aiofiles==25.1.0.20251011",
