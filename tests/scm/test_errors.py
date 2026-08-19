@@ -7,17 +7,11 @@ capability token. Today's wording is the capability form (W12 rewrites it).
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.scm.errors import UnsupportedScmCapability
 
 _RELEASE_UNAVAILABLE = "not available in this release"
 
 
-@pytest.mark.xfail(
-    reason="green after W12: GitLab not available in this release",
-    strict=False,
-)
 def test_gitlab_unsupported_capability_names_this_release() -> None:
     """#279 / D11 — GitLab get_pr error names the release, not only a capability."""
     exc = UnsupportedScmCapability("get_pr", provider="GitLabScmAdapter")

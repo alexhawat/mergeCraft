@@ -9,6 +9,13 @@ class UnsupportedScmCapability(RuntimeError):
     def __init__(self, capability: str, *, provider: str = "scm") -> None:
         self.capability = capability
         self.provider = provider
-        super().__init__(
-            f"{provider} does not support capability {capability!r}; operation was not emulated"
-        )
+        if "GitLab" in provider:
+            msg = (
+                f"GitLab support is not available in this release"
+                f" (capability {capability!r} was requested)"
+            )
+        else:
+            msg = (
+                f"{provider} does not support capability {capability!r}; operation was not emulated"
+            )
+        super().__init__(msg)
