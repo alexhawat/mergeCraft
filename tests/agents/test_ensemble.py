@@ -272,3 +272,224 @@ def test_ensemble_respects_the_agent_budget(
     )
     total_findings = sum(len(model_run.findings) for model_run in run.model_runs)
     assert total_findings <= reviewer.budget
+
+
+# ---------------------------------------------------------------------------
+# W14.3 / #262 — the disagreement path drops secondary-only findings (D15)
+# ---------------------------------------------------------------------------
+#
+# ``reconcile_ensemble`` returns ``merged_findings=tuple(left.findings)`` when
+# the two key sets differ, so anything only the right-hand model found exists
+# nowhere except the judge brief. D15: union left+right by ``_finding_key``,
+# keep ``judge_dispatch``.
+
+_LEFT_ONLY = {
+    "path": "pkg/auth.go",
+    "body": "race on session refresh",
+    "severity": "Major",
+    "line": 41,
+}
+_RIGHT_ONLY = {
+    "path": "pkg/billing.go",
+    "body": "refund can be applied twice",
+    "severity": "Critical",
+    "line": 88,
+}
+_SHARED = {
+    "path": "pkg/store.go",
+    "body": "unchecked error on write",
+    "severity": "Major",
+    "line": 12,
+}
+
+
+def _disagreeing_run(
+    left: tuple[dict[str, object], ...],
+    right: tuple[dict[str, object], ...],
+) -> object:
+    from mergecraft.agents.ensemble import EnsembleRun, ModelRun
+
+    return EnsembleRun(
+        agent_id="mergecraft-reviewer",
+        model_runs=(
+            ModelRun(model="anthropic/claude-sonnet", findings=left),
+            ModelRun(model="openai/gpt-5.3-codex", findings=right),
+        ),
+    )
+
+
+def _keys(rows: tuple[dict[str, object], ...]) -> set[tuple[str, str, str]]:
+    from mergecraft.agents.ensemble import _finding_key
+
+    return {_finding_key(row) for row in rows}
+
+
+_SAME_BODY_LINE_41 = {
+    "path": "pkg/store.go",
+    "body": "unchecked error on write",
+    "severity": "Major",
+    "line": 41,
+}
+_SAME_BODY_LINE_88 = {**_SAME_BODY_LINE_41, "line": 88}
+
+
+def test_two_lines_sharing_a_body_are_distinct_findings() -> None:
+    """The same defect at two call sites is two findings, not one.
+
+    ``_finding_key`` ignored ``line``, so the union collapsed both rows and the
+    reviewer only ever saw the first site — a real finding silently dropped.
+    """
+    from mergecraft.agents.ensemble import _finding_key
+
+    assert _finding_key(_SAME_BODY_LINE_41) != _finding_key(_SAME_BODY_LINE_88)
+
+
+def test_disagreement_union_keeps_both_lines_of_a_repeated_body() -> None:
+    """The dedup must not swallow the second occurrence of a repeated body."""
+    from mergecraft.agents.ensemble import reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(
+        _disagreeing_run((_SAME_BODY_LINE_41,), (_SAME_BODY_LINE_88, _RIGHT_ONLY))
+    )
+
+    anchors = {(row.get("path"), row.get("line")) for row in reconciliation.merged_findings}
+    assert anchors == {
+        ("pkg/store.go", 41),
+        ("pkg/store.go", 88),
+        (_RIGHT_ONLY["path"], _RIGHT_ONLY["line"]),
+    }
+
+
+def test_the_same_body_on_different_lines_is_not_agreement() -> None:
+    """Corroboration means the same site, so a line difference is disagreement."""
+    from mergecraft.agents.ensemble import reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(
+        _disagreeing_run((_SAME_BODY_LINE_41,), (_SAME_BODY_LINE_88,))
+    )
+
+    assert reconciliation.agreement is False
+    assert reconciliation.confidence_boost == 0.0
+
+
+def test_a_missing_line_does_not_collide_with_line_zero() -> None:
+    """An unlocated finding and one at line 0 are different rows."""
+    from mergecraft.agents.ensemble import _finding_key
+
+    unlocated = {"path": "pkg/a.go", "body": "no anchor"}
+    at_zero = {**unlocated, "line": 0}
+
+    assert _finding_key(unlocated) != _finding_key(at_zero)
+
+
+def test_disagreement_keeps_a_right_only_finding(tmp_path: Path) -> None:
+    """#262 / D15 — a finding only the secondary model reported must survive."""
+    from mergecraft.agents.ensemble import _finding_key, reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(_disagreeing_run((_LEFT_ONLY,), (_RIGHT_ONLY,)))
+
+    assert reconciliation.agreement is False
+    assert _finding_key(_RIGHT_ONLY) in _keys(reconciliation.merged_findings)
+
+
+def test_disagreement_unions_both_sides(tmp_path: Path) -> None:
+    """The merge is a union, not a swap: neither side may be dropped.
+
+    Pinning both directions stops a fix that simply returns
+    ``right.findings`` instead of ``left.findings``.
+    """
+    from mergecraft.agents.ensemble import _finding_key, reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(
+        _disagreeing_run((_SHARED, _LEFT_ONLY), (_SHARED, _RIGHT_ONLY))
+    )
+
+    merged_keys = _keys(reconciliation.merged_findings)
+    assert _finding_key(_LEFT_ONLY) in merged_keys
+    assert _finding_key(_RIGHT_ONLY) in merged_keys
+    assert _finding_key(_SHARED) in merged_keys
+
+
+def test_disagreement_union_deduplicates_a_shared_finding(tmp_path: Path) -> None:
+    """A finding both models reported appears once, not twice.
+
+    ``tuple(left.findings) + tuple(right.findings)`` would satisfy the two
+    tests above while double-reporting every corroborated finding to the
+    reviewer — the failure mode this arm exists to block.
+    """
+    from mergecraft.agents.ensemble import _finding_key, reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(
+        _disagreeing_run((_SHARED, _LEFT_ONLY), (_SHARED, _RIGHT_ONLY))
+    )
+
+    merged = reconciliation.merged_findings
+    assert len(merged) == 3
+    shared_key = _finding_key(_SHARED)
+    assert sum(1 for row in merged if _finding_key(row) == shared_key) == 1
+
+
+def test_disagreement_with_an_empty_left_side_keeps_the_right_findings(tmp_path: Path) -> None:
+    """The worst case: the primary model found nothing, the secondary found a Critical.
+
+    Today ``merged_findings`` is ``()`` — a Critical the ensemble paid for is
+    invisible outside the judge brief.
+    """
+    from mergecraft.agents.ensemble import _finding_key, reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(_disagreeing_run((), (_RIGHT_ONLY,)))
+
+    assert reconciliation.agreement is False
+    assert _keys(reconciliation.merged_findings) == {_finding_key(_RIGHT_ONLY)}
+
+
+def test_disagreement_still_dispatches_the_judge(tmp_path: Path) -> None:
+    """Green guard (D15): the union must not replace the judge escalation.
+
+    D15 is explicit that ``judge_dispatch`` stays — the union exists so the
+    right-only finding is not *only* in the brief, not so the brief goes away.
+    """
+    from mergecraft.agents.ensemble import reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(_disagreeing_run((_LEFT_ONLY,), (_RIGHT_ONLY,)))
+
+    assert reconciliation.agreement is False
+    assert reconciliation.judge_dispatch is not None
+    assert reconciliation.judge_dispatch.role == "judge"
+    assert str(_LEFT_ONLY["body"]) in reconciliation.judge_dispatch.brief
+    assert str(_RIGHT_ONLY["body"]) in reconciliation.judge_dispatch.brief
+
+
+def test_disagreement_claims_no_confidence_boost(tmp_path: Path) -> None:
+    """Green guard: unioning is not corroboration — no boost on disagreement."""
+    from mergecraft.agents.ensemble import reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(_disagreeing_run((_LEFT_ONLY,), (_RIGHT_ONLY,)))
+
+    assert reconciliation.confidence_boost == 0.0
+
+
+def test_agreement_path_is_untouched_by_the_union(tmp_path: Path) -> None:
+    """Green guard: identical key sets keep one copy and the boost (#238)."""
+    from mergecraft.agents.ensemble import reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(_disagreeing_run((_SHARED,), (_SHARED,)))
+
+    assert reconciliation.agreement is True
+    assert reconciliation.confidence_boost > 0
+    assert len(reconciliation.merged_findings) == 1
+    assert reconciliation.judge_dispatch is None
+
+
+def test_single_model_run_is_returned_unmerged(tmp_path: Path) -> None:
+    """Green guard: a one-model run short-circuits before the union."""
+    from mergecraft.agents.ensemble import EnsembleRun, ModelRun, reconcile_ensemble
+
+    run = EnsembleRun(
+        agent_id="mergecraft-reviewer",
+        model_runs=(ModelRun(model="anthropic/claude-sonnet", findings=(_LEFT_ONLY,)),),
+    )
+    reconciliation = reconcile_ensemble(run)
+
+    assert reconciliation.agreement is True
+    assert len(reconciliation.merged_findings) == 1

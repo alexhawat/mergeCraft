@@ -329,7 +329,7 @@ def render_agents(
     ctx: AgentRunContext | ToolContext,
 ) -> HarnessRenderResult:
     """Project ``selected`` registry bindings into ``harness`` config (D2)."""
-    harness_name: HarnessName = harness  # type: ignore[assignment]
+    harness_name: HarnessName = harness  # type: ignore[assignment]  # — harness is HarnessName | str; callers pass a valid HarnessName literal
     bindings = _resolve_selected_bindings(registry, selected)
     settings = _settings_for_ctx(ctx)
 

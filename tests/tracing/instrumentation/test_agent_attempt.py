@@ -81,7 +81,7 @@ def test_one_agent_attempt_span_per_fallback_entry(captured_sink: Any) -> None:
     assert indices == [0, 1, 2], f"fallback indices out of order: {indices}"
 
 
-@pytest.mark.xfail(reason="green after W4: agent.attempt per fallback entry", strict=False)
+@pytest.mark.xfail(reason="green after W4: agent.attempt per fallback entry (#276)", strict=True)
 def test_one_agent_attempt_span_for_skipped_entry(captured_sink: Any) -> None:
     """W3.2 (skipped) — entry 0 is skipped (missing creds); entry 1 succeeds.
 

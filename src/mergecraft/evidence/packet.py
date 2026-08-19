@@ -73,7 +73,7 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 PACKET_SCHEMA_VERSION = "1.7.0"
 
 
-class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]
+class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
     """``FieldInfo`` whose ``default`` advertises the pinned version while the
     validator still treats the field as required.
 
@@ -221,7 +221,7 @@ class MergeEvidencePacket(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = _pinned_version_field()  # type: ignore[assignment]
+    schema_version: str = _pinned_version_field()  # type: ignore[assignment]  # — _pinned_version_field() returns FieldInfo; Pydantic resolves it to str at model-build time
     change_id: str
     agent: AgentMetadata
     files_changed: list[str]

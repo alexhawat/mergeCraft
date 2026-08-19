@@ -242,7 +242,7 @@ class GitHubScmAdapter:
     async def list_check_runs(
         self, owner: str, repo: str, ref: str, **kwargs: Any
     ) -> dict[str, Any]:
-        return await self.list_check_suites_for_ref(owner, repo, ref, **kwargs)
+        return await self.list_check_runs_for_ref(owner, repo, ref, **kwargs)
 
     async def edit_issue_comment(
         self, owner: str, repo: str, comment_id: int, body: str

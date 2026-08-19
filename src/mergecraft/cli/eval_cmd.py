@@ -152,7 +152,7 @@ def _resolve_synthetic_provenance(
         source_field="eval_bank",
         author_login=author,
         author_association="OWNER",
-        trust_tier=trust_tier,  # type: ignore[arg-type]
+        trust_tier=trust_tier,  # type: ignore[arg-type]  # — trust_tier is str; callee expects TrustTier literal narrowing
         timestamp=datetime.now(UTC),
     )
 

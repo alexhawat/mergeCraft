@@ -103,6 +103,8 @@ if TYPE_CHECKING:
 
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.config.settings import RepoSettings, RunContextData
+    from mergecraft.evidence.shadow import VerdictProtocolPrediction
+    from mergecraft.mcp.verdict import VerdictDiagnostic
     from mergecraft.scm.protocol import ScmProvider
 
 
@@ -120,6 +122,10 @@ class MainResult:
     # ``None`` only for call sites that predate W5 (tests constructing a
     # ``MainResult`` directly); every real ``main()`` return path sets it.
     outcome: RunOutcome | None = None
+    # W8 / #265 — closed VerdictDiagnostic code for the terminal-verdict policy
+    # path. ``None`` for early-exit paths that bypass ``_finalize``; the GHA
+    # surface writes an empty string in that case (D10).
+    verdict_diagnostic: VerdictDiagnostic | None = None
 
 
 @dataclass
@@ -196,7 +202,7 @@ def _first_runnable_in_chain(chain: list[str]) -> str:
     return pick_runnable_slug_from_chain(chain, allow_fallback=allow)
 
 
-_first_runnable_in_chain.allow_fallback = True  # type: ignore[attr-defined]
+_first_runnable_in_chain.allow_fallback = True  # type: ignore[attr-defined]  # — allow_fallback is a runtime attribute added to the function object for chain control
 
 
 def _payload_to_ctx(payload: dict[str, Any]) -> ResolvedPayload:
@@ -325,7 +331,7 @@ async def _publish(
     outcome: RunOutcome,
     failure_reason: str | None,
     attrs_source: Callable[[], dict[str, Any]],
-    verdict_prediction: Any | None = None,
+    verdict_prediction: VerdictProtocolPrediction | None = None,
     actual_outcome: str | None = None,
 ) -> str | None:
     """Tracer span + status check + evidence packet — the run's publish block.
@@ -632,7 +638,7 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     selected_slug: str | None
 
     if use_model_chain:
-        _first_runnable_in_chain.allow_fallback = settings.allow_fallback  # type: ignore[attr-defined]
+        _first_runnable_in_chain.allow_fallback = settings.allow_fallback  # type: ignore[attr-defined]  # — allow_fallback is a runtime attribute added to the function object for chain control
         selected_slug = _first_runnable_in_chain(chain_for_decision)
         if not selected_slug:
             msg = "no runnable model slug in chain — configure credentials for at least one entry"
@@ -1337,7 +1343,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
             verdict_protocol=settings.gates.terminal_verdict,
             final_summary_written=tool_state.final_summary_written,
         )
-    diagnostic_attrs, verdict_prediction = _verdict_protocol_publish(
+    verdict_publish = _verdict_protocol_publish(
         result=result,
         mode=tool_state.selected_mode,
         setup_reason=setup_reason,
@@ -1346,6 +1352,9 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         final_summary_written=tool_state.final_summary_written,
         terminal_verdict=settings.gates.terminal_verdict,
     )
+    diagnostic_attrs = verdict_publish.attrs
+    verdict_prediction = verdict_publish.prediction
+    verdict_diagnostic_code = verdict_publish.diagnostic
 
     selected_mode_obj = next(
         (m for m in tool_context.modes if m.name == tool_context.tool_state.selected_mode),
@@ -1391,6 +1400,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
             error=failure_reason or result.error or "agent execution failed",
             evidence_packet_path=packet_path,
             outcome=outcome,
+            verdict_diagnostic=verdict_diagnostic_code,
         )
 
     output = tool_state.output or result.output
@@ -1400,6 +1410,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         result=output,
         evidence_packet_path=packet_path,
         outcome=outcome,
+        verdict_diagnostic=verdict_diagnostic_code,
     )
 
 

@@ -320,7 +320,9 @@ rules in trusted mergeCraft code: `request_changes` with zero findings,
 a failing required deterministic check are all rejected with a typed
 `rejection_reason`. A rejected submission leaves
 `terminal_submission_received=false` — fallback-eligible, same as no
-submission (D8).
+submission (D8). The approve path fails closed on *unverified* blockers too: a
+Critical/Major analyzer finding that is neither verifier-confirmed nor withdrawn
+rejects `approve`, so skipping verification is not a route to approval.
 
 **Outcome resolution.** In `Review` and `IncrementalReview` modes, a provider
 that returns process success without a usable terminal submission maps to

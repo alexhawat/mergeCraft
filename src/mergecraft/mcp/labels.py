@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from loguru import logger
 
@@ -53,7 +54,7 @@ def remove_labels_tool(ctx: ToolContext):
         for name in params["labels"]:
             try:
                 await ctx.scm.delete(
-                    f"/repos/{ctx.repo.owner}/{ctx.repo.name}/issues/{issue_number}/labels/{name}"
+                    f"/repos/{ctx.repo.owner}/{ctx.repo.name}/issues/{issue_number}/labels/{quote(name, safe='')}"
                 )
                 removed.append(str(name))
             except Exception as err:

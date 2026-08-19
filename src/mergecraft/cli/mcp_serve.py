@@ -48,7 +48,7 @@ def _parse_role(role: str) -> ServeRole:
     if key not in {"orchestrator", "reviewer", "verifier"}:
         msg = f"unknown role {role!r} (expected orchestrator, reviewer, or verifier)"
         raise ValueError(msg)
-    return key  # type: ignore[return-value]
+    return key  # type: ignore[return-value]  # — key verified against {"orchestrator","reviewer","verifier"} above
 
 
 def build_mcp_tool_context(
@@ -107,7 +107,7 @@ def build_mcp_tool_context(
         auto_merge_enabled=False,
         static_checks_enabled=trust_tier == "trusted",
         analyzers_mode="auto",
-        trust_tier=trust_tier,  # type: ignore[arg-type]
+        trust_tier=trust_tier,  # type: ignore[arg-type]  # — trust_tier is TrustTier; ToolContext.trust_tier field expects str supertype
         analyzers_settings_enabled=settings.analyzers.enabled,
         xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
     )

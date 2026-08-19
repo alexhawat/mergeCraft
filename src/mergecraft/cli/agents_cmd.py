@@ -16,6 +16,7 @@ from mergecraft.agents.registry import (
     load_registry,
     resolve_prompt_text,
 )
+from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.config.settings import AgentBindingOverride, load_repo_settings
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -41,12 +42,8 @@ def _bail(msg: str) -> NoReturn:
     raise typer.Exit(1)
 
 
-def _repo_root(cwd: Path) -> Path:
-    return cwd.resolve()
-
-
-def _tool_ctx(repo_root: Path) -> ToolContext:
-    state = init_tool_state(owner="acme", name="demo", dir=str(repo_root))
+def _tool_ctx(target_dir: Path) -> ToolContext:
+    state = init_tool_state(owner="acme", name="demo", dir=str(target_dir))
     return ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
@@ -62,7 +59,7 @@ def _tool_ctx(repo_root: Path) -> ToolContext:
         modes=compute_modes("claude"),
         tool_state=state,
         mcp_server_url="",
-        tmpdir=str(repo_root),
+        tmpdir=str(target_dir),
         signed_commits=True,
         xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
         static_checks_enabled=True,
@@ -71,16 +68,16 @@ def _tool_ctx(repo_root: Path) -> ToolContext:
 
 @app.command("list")
 def list_cmd(
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """List agent bindings with model chain, prompt id, and tool count."""
-    repo_root = _repo_root(cwd)
-    settings = load_repo_settings(root=repo_root)
+    target_dir = resolve_target_dir(cwd)
+    settings = load_repo_settings(root=target_dir)
     try:
-        registry = load_registry(settings=settings, repo_root=repo_root)
+        registry = load_registry(settings=settings, repo_root=target_dir)
     except RegistryValidationError as exc:
         _bail(str(exc))
-    ctx = _tool_ctx(repo_root)
+    ctx = _tool_ctx(target_dir)
 
     table = Table(title="Agent registry")
     table.add_column("role")
@@ -106,18 +103,18 @@ def list_cmd(
 @app.command("show")
 def show_cmd(
     role: str = typer.Argument(..., help="Agent role (e.g. reviewer)."),
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """Show resolved prompt text and MCP tool names for one role."""
-    repo_root = _repo_root(cwd)
+    target_dir = resolve_target_dir(cwd)
     try:
         AgentRole(role)
     except ValueError:
         _bail(f"unknown role: {role!r}")
 
-    settings = load_repo_settings(root=repo_root)
+    settings = load_repo_settings(root=target_dir)
     try:
-        registry = load_registry(settings=settings, repo_root=repo_root)
+        registry = load_registry(settings=settings, repo_root=target_dir)
         binding = registry.resolve_role(role)
     except RegistryValidationError as exc:
         _bail(str(exc))
@@ -125,7 +122,7 @@ def show_cmd(
         _bail(f"unknown role: {role!r}")
 
     prompt = resolve_prompt_text(binding.prompt_id, version=binding.prompt_version)
-    tools = registry.resolve_tool_names(binding, _tool_ctx(repo_root))
+    tools = registry.resolve_tool_names(binding, _tool_ctx(target_dir))
 
     console.print(f"[bold]{binding.role.value}[/bold] ({binding.agent_id})")
     console.print(f"model chain: {', '.join(binding.model_chain)}")
@@ -142,7 +139,7 @@ def show_cmd(
 def set_cmd(
     role: str = typer.Argument(..., help="Agent role to override."),
     model: str | None = typer.Option(None, "--model", help="Primary model slug override."),
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """Write a single agent binding override into ``.mergecraft/config.yaml``."""
     if model is None:
@@ -155,8 +152,8 @@ def set_cmd(
         known = ", ".join(item.value for item in AgentRole)
         _bail(f"unknown role: {role!r} (expected one of: {known})")
 
-    repo_root = _repo_root(cwd)
-    config_path = repo_root / ".mergecraft" / "config.yaml"
+    target_dir = resolve_target_dir(cwd)
+    config_path = target_dir / ".mergecraft" / "config.yaml"
     if not config_path.is_file():
         _bail(f"no config at {config_path} — run mergecraft init first")
 

@@ -22,6 +22,8 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -54,6 +56,37 @@ def _wait_until_dead(pid: int, *, timeout_s: float = 5.0) -> bool:
             return True
         time.sleep(0.05)
     return not _pid_alive(pid)
+
+
+def _wait_until_exists(path: Path, *, timeout_s: float) -> bool:
+    """Poll until ``path`` exists and is non-empty.
+
+    Readiness helper for #277 / D12 — the timeout is caller-supplied and must
+    not be the ``wait_or_kill_process_group(..., timeout=0.5)`` kill clock.
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            if path.is_file() and path.stat().st_size > 0:
+                return True
+        except OSError:
+            pass
+        time.sleep(0.05)
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _record_pid_reaped(pid: int, *, deadline_s: float) -> bool:
+    """Return whether ``pid`` is reaped by ``deadline_s``.
+
+    ``deadline_s`` is required so a reap poll cannot silently inherit the
+    0.5s ``wait_or_kill`` timeout (#277 / D12).
+    """
+    if deadline_s <= 0:
+        raise ValueError("deadline_s must be positive")
+    return _wait_until_dead(pid, timeout_s=deadline_s)
 
 
 # ── Pending (RED — green after S1.2) ─────────────────────────────────────────
@@ -295,6 +328,74 @@ async def test_timed_out_setup_script_yields_inconclusive(
     )
 
 
+def test_wait_until_exists_returns_false_when_file_never_appears(tmp_path: Path) -> None:
+    """Edge — a missing readiness file must not be treated as ready."""
+    path = tmp_path / "never.pid"
+    started = time.monotonic()
+    assert _wait_until_exists(path, timeout_s=0.2) is False
+    assert time.monotonic() - started >= 0.15
+
+
+def test_record_pid_reaped_rejects_non_positive_deadline() -> None:
+    """Error — a non-positive reap deadline is a caller bug, not a 0.5s default."""
+    with pytest.raises(ValueError, match="deadline_s must be positive"):
+        _record_pid_reaped(1, deadline_s=0.0)
+    with pytest.raises(ValueError, match="deadline_s must be positive"):
+        _record_pid_reaped(1, deadline_s=-1.0)
+
+
+def test_wait_until_exists_does_not_assume_half_second_grace(tmp_path: Path) -> None:
+    """#277 / D12 — readiness polling must outlive the 0.5s kill clock.
+
+    A pid file that appears after 0.8s is missed by ``wait_or_kill(..., timeout=0.5)``
+    but observed by ``_wait_until_exists`` with an independent deadline.
+    """
+    path = tmp_path / "grandchild.pid"
+    delay_s = 0.8
+
+    def _write() -> None:
+        time.sleep(delay_s)
+        path.write_text("4242\n", encoding="utf-8")
+
+    thread = threading.Thread(target=_write, daemon=True)
+    thread.start()
+    try:
+        assert not path.exists(), "precondition: readiness file must not exist yet"
+        started = time.monotonic()
+        assert _wait_until_exists(path, timeout_s=3.0), (
+            f"{path} never appeared — readiness poll must not share the 0.5s kill timeout"
+        )
+        elapsed = time.monotonic() - started
+        assert elapsed >= delay_s - 0.15, (
+            f"readiness returned in {elapsed:.2f}s; expected to wait ~{delay_s}s "
+            f"(longer than wait_or_kill's 0.5s window)"
+        )
+        assert path.read_text(encoding="utf-8").strip() == "4242"
+    finally:
+        thread.join(timeout=2.0)
+
+
+@pytest.mark.skipif(not hasattr(os, "kill"), reason="POSIX pid probe")
+def test_record_pid_reaped_deadline_is_independent_of_wait_or_kill_timeout() -> None:
+    """#277 — reap recording takes an explicit deadline, not the 0.5s kill clock."""
+    proc = subprocess.Popen(
+        ["sleep", "10"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert proc.pid is not None
+        assert _record_pid_reaped(proc.pid, deadline_s=0.25) is False, (
+            "sleep 10 must still be alive after a 0.25s reap poll — the helper "
+            "must not silently wait the 5s post-kill window"
+        )
+    finally:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(proc.pid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=2)
+
+
 @pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups are POSIX-only")
 def test_setup_script_grandchildren_are_reaped(tmp_path: Path) -> None:
     """F6 + convention 9 — a setup script that backgrounds a child must not
@@ -306,9 +407,11 @@ def test_setup_script_grandchildren_are_reaped(tmp_path: Path) -> None:
 
     The script writes the grandchild PID to a file so we can probe ``os.kill``
     on it directly after the timeout.
-    """
-    import subprocess
 
+    #277 / D12: wait for ``pid_file`` with an independent deadline *before*
+    starting the kill clock so xdist scheduling variance cannot cause the
+    readiness poll to race the 0.5s ``wait_or_kill`` timeout.
+    """
     from mergecraft.utils.process_group import wait_or_kill_process_group
 
     pid_file = tmp_path / "grandchild.pid"
@@ -316,6 +419,7 @@ def test_setup_script_grandchildren_are_reaped(tmp_path: Path) -> None:
     cli.write_text(
         "#!/bin/bash\n"
         "sleep 300 </dev/null >/dev/null 2>&1 &\n"
+        "sleep 1\n"
         f"echo $! > {pid_file}\n"
         "exec 1>&- 2>&-\n"
         "sleep 300\n",
@@ -330,11 +434,18 @@ def test_setup_script_grandchildren_are_reaped(tmp_path: Path) -> None:
         start_new_session=True,
     )
     try:
+        # Wait for pid_file BEFORE starting the kill clock (#277 / D12).
+        # The independent 5s deadline must not share the 0.5s wait_or_kill
+        # timeout — this is the timing-assertion fix that makes the test
+        # deterministic under xdist.
+        assert _wait_until_exists(pid_file, timeout_s=5.0), (
+            "setup script never wrote its grandchild pid within 5s"
+        )
+        grandchild = int(pid_file.read_text(encoding="utf-8").strip())
+        # Kill clock starts only after the readiness file is confirmed.
         with pytest.raises(subprocess.TimeoutExpired):
             wait_or_kill_process_group(proc, timeout=0.5)
-        assert pid_file.exists(), "setup script never wrote its grandchild pid"
-        grandchild = int(pid_file.read_text().strip())
-        assert _wait_until_dead(grandchild, timeout_s=5.0), (
+        assert _record_pid_reaped(grandchild, deadline_s=5.0), (
             f"grandchild pid {grandchild} survived the timeout kill — "
             f"the kill path reached the session leader but not the group"
         )
@@ -439,9 +550,13 @@ async def test_setup_timeout_is_deducted_from_the_run_budget(
 
 __all__ = [
     "test_hanging_setup_script_is_killed_at_deadline",
+    "test_record_pid_reaped_deadline_is_independent_of_wait_or_kill_timeout",
+    "test_record_pid_reaped_rejects_non_positive_deadline",
     "test_setup_script_grandchildren_are_reaped",
     "test_setup_timeout_error_message_reports_configured_value",
     "test_setup_timeout_exceeding_run_budget_raises_configuration_error",
     "test_setup_timeout_is_deducted_from_the_run_budget",
     "test_timed_out_setup_script_yields_inconclusive",
+    "test_wait_until_exists_does_not_assume_half_second_grace",
+    "test_wait_until_exists_returns_false_when_file_never_appears",
 ]

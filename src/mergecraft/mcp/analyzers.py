@@ -54,7 +54,7 @@ def run_analyzers_tool(ctx: ToolContext):
         run_state = run_analyzer_pipeline(
             repo_root=repo_root,
             changed_files=changed,
-            tier=_resolve_tier(ctx),  # type: ignore[arg-type]
+            tier=_resolve_tier(ctx),  # type: ignore[arg-type]  # — _resolve_tier returns str; run_analyzer_pipeline expects AnalyzerTier literal
             diff_text=diff_text,
             inline_budget=settings.inline_budget,
             offline=offline,

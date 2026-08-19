@@ -79,7 +79,7 @@ def _fixed_version(vulnerability: dict[str, Any]) -> str | None:
             for event in item_range.get("events") or []:
                 if isinstance(event, dict) and "fixed" in event:
                     fixed = str(event["fixed"])
-                    if re.fullmatch(r"\d+\.\d+.\d+", fixed):
+                    if re.fullmatch(r"\d+\.\d+\.\d+", fixed):
                         return fixed
     return None
 

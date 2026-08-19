@@ -8,6 +8,7 @@ emits typed findings (``---typed-findings---`` tail or structured output schema)
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Final
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -20,6 +21,12 @@ if TYPE_CHECKING:
     from mergecraft.agents.registry import AgentBinding
 
 _TYPED_FINDINGS_MARKER: Final[str] = "---typed-findings---"
+# Matched against the original text so the offsets stay byte-for-byte valid:
+# ``casefold()`` is not length-preserving (``ß`` → ``ss``), and the reasoning
+# half is arbitrary model output.
+_TYPED_FINDINGS_PATTERN: Final[re.Pattern[str]] = re.compile(
+    re.escape(_TYPED_FINDINGS_MARKER), re.IGNORECASE
+)
 _AGENT_FINDING_SCHEMA_ID: Final[str] = "mergecraft.agent_finding"
 
 
@@ -40,11 +47,10 @@ def agent_finding_output_schema_id() -> str:
 def parse_specialist_handoff(raw: str) -> SpecialistHandoff:
     """Split prose reasoning from a typed findings tail (D6)."""
     text = raw.strip()
-    marker = _TYPED_FINDINGS_MARKER
-    if marker.casefold() in text.casefold():
-        head, _, tail = text.partition(marker)
-        reasoning = head.strip()
-        payload = tail.strip()
+    match = _TYPED_FINDINGS_PATTERN.search(text)
+    if match is not None:
+        reasoning = text[: match.start()].strip()
+        payload = text[match.end() :].strip()
     else:
         reasoning = text
         payload = "[]"

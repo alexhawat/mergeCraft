@@ -35,6 +35,7 @@ from mergecraft.findings.agent_adapter import (
 from mergecraft.findings.causality import CausalityValidationError, validate_blocking_finding
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
+from mergecraft.review_taxonomy import FINDING_SEVERITIES
 from mergecraft.utils.learnings import learnings_file_path
 
 if TYPE_CHECKING:
@@ -125,6 +126,39 @@ def _persist_confirmed_fingerprint(
     }
     if fingerprint not in existing:
         ctx.tool_state.confirmed_findings.append(row)
+
+
+def _apply_non_blocking_downgrade(
+    ctx: ToolContext,
+    fingerprint: str,
+    *,
+    severity: str,
+) -> None:
+    """Record a downgrade to a non-blocking severity on every row that carries it.
+
+    Dropping the fingerprint from ``verified_ids`` is not enough: the originating
+    ``analyzer_run`` row keeps its Critical/Major severity, so the approve gate
+    sees it again as an unverified blocker and the downgrade leaves the run worse
+    off than doing nothing. The stored severity is rewritten instead.
+
+    Severity is stored in five places, so this is five writes with no
+    transaction and no record of whether a row's severity is the original or a
+    rewrite. The overlay design that would make it one write is declined and
+    written up under "Deferred designs the review rounds declined" in
+    ``docs/test-plans/open-issues-sweep-2026-08-19.md``.
+    """
+    ctx.tool_state.verified_ids.discard(fingerprint)
+    if ctx.tool_state.analyzer_run is not None:
+        ctx.tool_state.analyzer_run.verified_ids.discard(fingerprint)
+        for row in ctx.tool_state.analyzer_run.findings:
+            if isinstance(row, dict) and row.get("fingerprint") == fingerprint:
+                row["severity"] = severity
+    for row in ctx.tool_state.agent_findings:
+        if row.get("fingerprint") == fingerprint:
+            row["severity"] = severity
+    ctx.tool_state.confirmed_findings = [
+        row for row in ctx.tool_state.confirmed_findings if row.get("fingerprint") != fingerprint
+    ]
 
 
 def _finding_row_for_fingerprint(ctx: ToolContext, fingerprint: str) -> dict[str, Any] | None:
@@ -274,7 +308,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
             rule_id="agent:draft",
             dedupe=True,
             repo_root=repo_root,
-            trust_tier=trust,  # type: ignore[arg-type]
+            trust_tier=trust,  # type: ignore[arg-type]  # — trust is str; callee expects TrustTier literal narrowing
         )
         stored: dict[str, dict[str, Any]] = {}
         for item in ctx.tool_state.agent_findings:
@@ -352,7 +386,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
                             "line": {"type": "number"},
                             "severity": {
                                 "type": "string",
-                                "enum": ["Critical", "Major", "Minor", "Trivial"],
+                                "enum": list(FINDING_SEVERITIES),
                             },
                             "body": {"type": "string"},
                             "fingerprint": {"type": "string"},
@@ -385,7 +419,7 @@ def record_finding_verdict_tool(ctx: ToolContext):
             reason=str(params.get("reason") or ""),
             pin=pin,
             deterministic_checks=completed,
-            new_severity=(str(params["new_severity"]) if params.get("new_severity") else None),
+            new_severity=JudgeVerdict.parse_severity(params.get("new_severity")),
             lane=_run_lane(ctx),
         )
         path = ctx.tool_state.learnings_file_path or learnings_file_path(ctx.tmpdir)
@@ -411,6 +445,7 @@ def record_finding_verdict_tool(ctx: ToolContext):
         )
         if outcome.recorded_withdrawn:
             ctx.tool_state.was_updated = True
+            ctx.tool_state.withdrawn_fingerprints.add(outcome.fingerprint)
         if outcome.verdict == "confirm" and outcome.publishable:
             _validate_publication_finding(
                 ctx,
@@ -419,28 +454,24 @@ def record_finding_verdict_tool(ctx: ToolContext):
             )
             _persist_confirmed_fingerprint(ctx, outcome.fingerprint)
         elif outcome.verdict == "downgrade" and outcome.publishable:
-            new_severity = verdict.new_severity
+            new_severity = verdict.downgrade_severity
+            # Symmetric with the confirm branch: the row has to exist, and a
+            # downgrade that lands on a still-blocking severity needs the same
+            # structured causality a confirm does.
+            _validate_publication_finding(
+                ctx,
+                outcome.fingerprint,
+                causality=verdict.reason,
+                severity=new_severity,
+            )
             if new_severity in BLOCKING_SEVERITIES:
-                _validate_publication_finding(
-                    ctx,
-                    outcome.fingerprint,
-                    causality=verdict.reason,
-                    severity=new_severity,
-                )
                 _persist_confirmed_fingerprint(
                     ctx,
                     outcome.fingerprint,
                     severity=new_severity,
                 )
             else:
-                ctx.tool_state.verified_ids.discard(outcome.fingerprint)
-                if ctx.tool_state.analyzer_run is not None:
-                    ctx.tool_state.analyzer_run.verified_ids.discard(outcome.fingerprint)
-                ctx.tool_state.confirmed_findings = [
-                    row
-                    for row in ctx.tool_state.confirmed_findings
-                    if row.get("fingerprint") != outcome.fingerprint
-                ]
+                _apply_non_blocking_downgrade(ctx, outcome.fingerprint, severity=new_severity)
         return {
             "recorded": True,
             "fingerprint": outcome.fingerprint,
@@ -485,8 +516,12 @@ def record_finding_verdict_tool(ctx: ToolContext):
                 },
                 "new_severity": {
                     "type": "string",
-                    "enum": ["Critical", "Major", "Minor", "Trivial"],
-                    "description": "Required on a downgrade verdict.",
+                    "enum": list(FINDING_SEVERITIES),
+                    "description": (
+                        "The severity a downgrade rewrites the finding to. Mandatory on a "
+                        "downgrade verdict — one without it is rejected, not defaulted. "
+                        "Ignored on confirm and drop."
+                    ),
                 },
             },
             "required": ["fingerprint", "verdict", "reason"],

@@ -3,8 +3,8 @@
 Ported from `.claude/skills/github-issue-triage/scripts/envelope.py` per
 D7 of `.ignorelocal/waves/issues-security-trust-boundary-wave-plan.md`.
 W4 will land `src/mergecraft/utils/fence.py`; this file pins the public
-contract W4 must satisfy. Every test is `@pytest.mark.xfail(strict=False)`
-because the impl wave (W4) is the green half of the test-first pair.
+contract W4 must satisfy. Pending tests are `@pytest.mark.xfail(strict=True)`
+until the impl wave (W4) lands.
 
 Contract surface (must hold after W4):
 
@@ -119,9 +119,9 @@ _FORGED_OPEN = (
         "attacker's _FORGED_CLOSE substring (which contains nonce=0000000000000000) "
         "must appear in the rendered output AND that nonce=0000000000000000 must "
         "not appear. The security-correct implementation neutralizes the forged "
-        "nonce, removing the literal substring. Deferred to B-Final test redesign."
+        "nonce, removing the literal substring. Deferred to B-Final test redesign (#276)."
     ),
-    strict=False,
+    strict=True,
 )
 def test_forged_close_does_not_escape_fence() -> None:
     """An attacker text that contains a plausible closing delimiter with a

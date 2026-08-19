@@ -56,7 +56,7 @@ def write_packet_from_sources(
     callers should prefer this when the source data is already in hand
     and only the artifact is needed.
     """
-    packet = build_packet(**build_kwargs)  # type: ignore[arg-type]
+    packet = build_packet(**build_kwargs)  # type: ignore[arg-type]  # — build_kwargs matches build_packet signature; TypedDict ** spread not fully supported by mypy
     return write_packet(packet, output_path=output_path)
 
 
@@ -67,7 +67,9 @@ def load_packet(path: Path) -> dict[str, Any]:
     the caller's job (the emitter does not validate the round-trip — the
     separate tests at ``tests/evidence/test_packet_round_trip.py`` do).
     """
-    return cast("dict[str, Any]", json.loads(Path(path).read_text(encoding="utf-8")))
+    return cast(  # json.loads returns Any; packet files are always JSON objects
+        "dict[str, Any]", json.loads(Path(path).read_text(encoding="utf-8"))
+    )
 
 
 __all__ = ["load_packet", "write_packet", "write_packet_from_sources"]

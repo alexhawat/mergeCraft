@@ -1,23 +1,98 @@
 version: 2
+
+# Grouping policy (2026-08-19)
+# ---------------------------------------------------------------------------
+# Ungrouped, Dependabot opens one PR per package. A single weekly cycle across
+# four ecosystems produced ten open PRs, each dragging the full CI matrix plus
+# a `mergecraft review` run — for changes that are, individually, a version
+# string. Every group below therefore batches **patch + minor** into one PR per
+# ecosystem, so the weekly cost is one review per ecosystem instead of one per
+# package.
+#
+# Majors are deliberately left OUT of every group (`update-types` omits
+# `version-update:semver-major`): they still arrive as their own PR, because a
+# major is the case that actually needs a human to read a changelog. Grouping
+# one into a batch would let it ride along behind a green check.
+#
+# `dependabot[bot]` is exempted from the `mergecraft review` gate — see the
+# comment in .github/workflows/mergecraft.yml. `changelog-preview` is
+# deliberately NOT exempted: it already passes on bot PRs, and skipping a
+# reusable-workflow caller changes the reported check name.
 updates:
   - package-ecosystem: pip
     directory: /
     target-branch: pre-0.0.1
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-patch-minor:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types:
+          - patch
+          - minor
+      # Security fixes never wait for the weekly batch, and never share a PR
+      # with a routine bump — they get their own group so the review reads as
+      # "this is a CVE" rather than "this is Tuesday".
+      python-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
   - package-ecosystem: github-actions
     directory: /
     target-branch: pre-0.0.1
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      github-actions-patch-minor:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types:
+          - patch
+          - minor
+      github-actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
   - package-ecosystem: docker
     directory: /
     target-branch: pre-0.0.1
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      docker-patch-minor:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types:
+          - patch
+          - minor
+      docker-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
   # Agent CLI lockfile for Dockerfile / Dockerfile.analyzers (W7 / D7).
+  #
+  # These three CLIs (claude-code, opencode-ai, gemini-cli) ship several
+  # releases a week each and are the loudest source of dependency PRs in the
+  # repo. They are also the ones whose bumps are least individually meaningful
+  # — the pin exists so the image is reproducible, not because any one patch
+  # matters. Batch them hard.
   - package-ecosystem: npm
     directory: /docker/agent-clis
     target-branch: pre-0.0.1
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      agent-clis-patch-minor:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types:
+          - patch
+          - minor
+      agent-clis-security:
+        applies-to: security-updates
+        patterns: ["*"]

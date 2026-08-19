@@ -17,19 +17,98 @@ from mergecraft.mcp.tool_state import primary_repo_state
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
-_SUBCOMMAND_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-_AUTH_REQUIRED = {
+# Read-only subcommand allowlist — everything else is rejected (#257 / D7).
+_READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
+    {
+        "status",
+        "log",
+        "diff",
+        "show",
+        "rev-parse",
+        "describe",
+        "ls-files",
+        "blame",
+        "cat-file",
+        "rev-list",
+        "branch",
+    }
+)
+# Rejected verbs that have a dedicated tool. Not an auth gate — a redirect
+# table, consulted before the allowlist so the agent is told where to go rather
+# than only that it cannot go here.
+_REDIRECT_TO_TOOL = {
     "push": "use push_branch instead",
     "fetch": "use git_fetch instead",
     "pull": "use git_fetch then git merge",
     "clone": "use checkout_repo / checkout_pr",
 }
-_NOSHELL_BLOCKED = {
-    "clean": "git clean is blocked when shell is disabled",
-    "filter-branch": "git filter-branch is blocked when shell is disabled",
-    "filter-repo": "git filter-repo is blocked when shell is disabled",
+# Flags that enable arbitrary code execution via git alias expansion.
+# Rejected unconditionally regardless of payload.shell (#257 / D7).
+_CONFIG_FLAGS: tuple[str, ...] = ("-c", "--config-env")
+# ``branch`` is allowlisted for listing only. Every other flag either writes
+# (delete / move / copy / upstream / description edit) or is unknown, so the
+# guard is an allowlist rather than a blocklist: a new git release cannot add a
+# write flag this tool then forwards.
+_BRANCH_READONLY_FLAGS: frozenset[str] = frozenset(
+    {
+        "-a",
+        "-r",
+        "-v",
+        "-vv",
+        "--all",
+        "--remotes",
+        "--list",
+        "--merged",
+        "--no-merged",
+        "--contains",
+        "--no-contains",
+        "--points-at",
+        "--show-current",
+        "--verbose",
+        "--sort",
+        "--format",
+        "--color",
+        "--no-color",
+        "--column",
+        "--no-column",
+        "-i",
+        "--ignore-case",
+    }
+)
+_BRANCH_FLAGS_TAKING_VALUE: frozenset[str] = frozenset(
+    {"--contains", "--no-contains", "--points-at", "--merged", "--no-merged", "--sort", "--format"}
+)
+# Short letters each allowlisted subcommand defines for itself, and the single
+# home of that policy. Short flags are subcommand-scoped: ``-c`` is ``--cached``
+# to ``ls-files`` and the combined-diff selector to ``log``/``show``, while to
+# ``status`` it can only be git's alias-executing config flag. A flat blocklist
+# cannot express that, and reading it as one refused real read-only usage
+# (``ls-files -co``).
+_SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
+    "ls-files": frozenset("cdikmostuvz"),
+    "log": frozenset("cmpuz"),
+    "show": frozenset("cmpuz"),
+    "diff": frozenset("mpuz"),
+    # ``branch`` is listing-only here. Bundling is real (``branch -av``) and
+    # repetition is meaningful (``-vvv``), so the check is per letter; every
+    # write letter — ``d``/``D``/``m``/``M``/``c``/``C`` — is absent, which is
+    # what keeps the bundled write forms refused.
+    "branch": frozenset("arvi"),
 }
-_NOSHELL_BLOCKED_ARGS = ("--exec", "-c", "--config-env", "--upload-pack", "--receive-pack")
+# Subcommands that define ``-C`` themselves, where it is not git's chdir option
+# and must not be pulled into the global slot. It means find-copies to ``diff``,
+# ``log`` and ``show``, whitespace-insensitive blame to ``blame``, and
+# copy-force to ``branch`` — a write, which ``_reject_branch_writes`` refuses on
+# its own; what matters here is only that none of them is the chdir option.
+_SUBCOMMAND_OWNS_DASH_C: frozenset[str] = frozenset({"diff", "log", "show", "blame", "branch"})
+# Flags of an allowlisted read-only subcommand that write a file. The subcommand
+# allowlist constrains the verb, not the flags the verb accepts. Every abbreviation
+# of ``--output`` git actually resolves is named: ``--out``/``--outp``/``--outpu``
+# are ambiguous with the ``--output-indicator-*`` family and git refuses them
+# itself, and so are the shorter ``--o``/``--ou``, which is why matching these
+# four exactly suffices. ``-o`` is scoped, because it is ``--others`` to
+# ``ls-files`` and writes nothing.
+_OUTPUT_FLAG_SPELLINGS: frozenset[str] = frozenset({"--out", "--outp", "--outpu", "--output"})
 _SYMBOLIC_REFS = frozenset({"HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"})
 _BAD_REF_CHARS = re.compile(r"[:+^~?*[\\\s]")
 
@@ -64,6 +143,222 @@ def validate_tag_name(tag: str) -> None:
         raise ValueError(msg)
 
 
+def _is_config_flag(token: str) -> bool:
+    """Whether *token* is a spelling of git's ``-c`` / ``--config-env`` itself.
+
+    Covers the spaced forms (``-c key=value``), the inline long form
+    (``--config-env=key=VAR``) and the glued short form (``-ckey=value``) — the
+    last identified by the ``=`` a config assignment always carries, since
+    ``git -cfoo`` with no value is an error git refuses on its own. ``-C`` is a
+    different flag and stays allowed: the comparison is case-sensitive.
+
+    This says nothing about whether the token is *acceptable*: a bare ``-c`` is
+    also ``log``'s combined-diff selector, which is what
+    ``_subcommand_declares_shorts`` is for.
+    """
+    if token in _CONFIG_FLAGS or token.startswith("--config-env="):
+        return True
+    return token.startswith("-c") and len(token) > 2 and "=" in token
+
+
+def _subcommand_declares_shorts(token: str, subcommand: str) -> bool:
+    """Whether *subcommand* defines every short letter bundled in *token*.
+
+    Short flags are subcommand-scoped, so this — not the config-flag test — is
+    what tells ``ls-files -co`` and ``log -c`` (read-only invocations) apart from
+    ``status -c`` (which can only be git's config flag, misplaced). With no
+    subcommand in hand — the pre-subcommand global slot — nothing is declared and
+    the strict reading applies.
+    """
+    known = _SUBCOMMAND_SHORT_FLAGS.get(subcommand, frozenset())
+    return all(char in known for char in token[1:])
+
+
+def _config_flag_message(token: str) -> str:
+    return f"Blocked: '{token}' can execute arbitrary code via git alias expansion."
+
+
+def _bare_dash_c_message(subcommand: str) -> str:
+    """Explain a refused bare ``-c`` without claiming the token is the config flag.
+
+    A bare ``-c`` carries no key=value, so nothing in it says whether it is
+    git's config flag misplaced after the verb or the subcommand's own short
+    flag. The guard refuses it on that ambiguity, not on evidence of an alias
+    payload, and the message has to say so: ``git blame -c`` is a real
+    read-only invocation and ``git diff -c`` is one git accepts silently.
+    """
+    forwarded = ", ".join(
+        sorted(name for name, shorts in _SUBCOMMAND_SHORT_FLAGS.items() if "c" in shorts)
+    )
+    return (
+        f"Blocked: '{subcommand} -c' — a bare '-c' cannot be told apart from git's own "
+        f"config flag at this position, and '{subcommand}' is not recorded as defining "
+        f"'-c', so it is refused rather than forwarded. Subcommands whose '-c' is "
+        f"forwarded: {forwarded}."
+    )
+
+
+def _reject_config_flags(tokens: list[str], *, subcommand: str = "") -> None:
+    """Reject git's config flag, and any ``-c`` token *subcommand* cannot own.
+
+    ``-c`` / ``--config-env`` let an agent inject an alias-expansion shell
+    command regardless of ``payload.shell``, and rejection is unconditional —
+    there is no safe-key allowlist for ``-c``. Two other ``-c``-shaped tokens
+    are refused for their own reasons and with their own messages: a bare
+    ``-c`` after a subcommand that does not declare it, which is ambiguous
+    rather than proven hostile, and an unrecognised short bundle.
+
+    Raises:
+        ValueError: on any of the three refusals.
+    """
+    for tok in tokens:
+        if tok.startswith("--"):
+            if _is_config_flag(tok):
+                raise ValueError(_config_flag_message(tok))
+            continue
+        if not tok.startswith("-c") or _subcommand_declares_shorts(tok, subcommand):
+            continue
+        if tok == "-c" and subcommand:
+            raise ValueError(_bare_dash_c_message(subcommand))
+        if _is_config_flag(tok):
+            raise ValueError(_config_flag_message(tok))
+        msg = f"Blocked: '{tok}' bundles short flags {subcommand or 'git'} does not define."
+        raise ValueError(msg)
+
+
+def _reject_namespace_flag(tokens: list[str]) -> None:
+    """Raise ValueError if any token is a ``--namespace`` spelling.
+
+    ``--namespace`` sets ``GIT_NAMESPACE``, a ref-namespace prefix rather than a
+    filesystem path, so ``confine_to_workspace`` cannot bound it the way it
+    bounds ``-C`` / ``--git-dir`` / ``--work-tree``. Only ``upload-pack``,
+    ``receive-pack`` and ``upload-archive`` consume it, and none of those is on
+    the read-only allowlist, so refusal costs the reviewer no capability while
+    keeping the pre-subcommand slot to options this tool can validate.
+    """
+    for tok in tokens:
+        if tok == "--namespace" or tok.startswith("--namespace="):
+            msg = (
+                f"Blocked: '{tok}' sets a ref namespace the reviewer surface "
+                "cannot confine, and no read-only subcommand honours it."
+            )
+            raise ValueError(msg)
+
+
+def _reject_branch_writes(args: list[str]) -> None:
+    """Keep ``git branch`` to listing only (H2, #257 / D7).
+
+    Deletion, rename and copy all write refs, and a rename of the checked-out
+    branch changes what ``commit_changes`` / ``push_branch`` later resolve
+    through ``rev-parse --abbrev-ref HEAD``. Bare ``git branch <name>`` creates a
+    branch, so a positional argument is a write too unless a listing flag that
+    takes a value consumed it.
+    """
+    listing = False
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
+        if arg.startswith("--"):
+            name = arg.split("=", 1)[0]
+            if name not in _BRANCH_READONLY_FLAGS:
+                msg = (
+                    f"Blocked: 'branch {arg}' — only listing flags "
+                    "are permitted on the reviewer surface."
+                )
+                raise ValueError(msg)
+            listing = listing or name == "--list"
+            # A listing flag spelled ``--contains <rev>`` consumes its value, so
+            # the value must not be read as a branch name to create.
+            if "=" not in arg and name in _BRANCH_FLAGS_TAKING_VALUE:
+                idx += 2
+                continue
+            idx += 1
+            continue
+        if arg.startswith("-") and len(arg) > 1:
+            # Short flags bundle (``-av``) and repeat (``-vvv``), so each letter
+            # is checked: one write letter in the bundle refuses the whole token.
+            if not _subcommand_declares_shorts(arg, "branch"):
+                msg = (
+                    f"Blocked: 'branch {arg}' — only listing flags "
+                    "are permitted on the reviewer surface."
+                )
+                raise ValueError(msg)
+            idx += 1
+            continue
+        if listing:
+            # In list mode a positional is a glob to match, not a branch to make.
+            idx += 1
+            continue
+        msg = (
+            f"Blocked: 'branch {arg}' would create a branch — "
+            "branch creation is not available on the reviewer surface."
+        )
+        raise ValueError(msg)
+
+
+def _reject_file_writing_flags(command: str, args: list[str]) -> None:
+    """Reject flags that make a read-only subcommand write a file (H2).
+
+    ``git diff --output=<path>`` writes wherever it is pointed, so the read-only
+    allowlist alone does not make the verb read-only. The four spellings named in
+    ``_OUTPUT_FLAG_SPELLINGS`` are compared exactly, which is enough: git resolves
+    an option abbreviation only when it is unambiguous, and every shorter form
+    (``--o``, ``--ou``) collides with the ``--output-indicator-*`` family, so git
+    refuses those before they can write anything. ``-o`` is judged against the
+    subcommand: it is ``--others`` to ``ls-files`` and writes nothing there.
+    """
+    writes_dash_o = "o" not in _SUBCOMMAND_SHORT_FLAGS.get(command, frozenset())
+    for arg in args:
+        name = arg.split("=", 1)[0]
+        if name in _OUTPUT_FLAG_SPELLINGS or (writes_dash_o and name == "-o"):
+            msg = f"Blocked: '{command} {arg}' writes a file — the reviewer surface is read-only."
+            raise ValueError(msg)
+
+
+def _confine_to_repo_root(value: str, flag: str, base: str) -> Path:
+    """Confine *value* to an allowed workspace root, resolved against *base*.
+
+    Delegates to the canonical workspace rule so the git tool, ``upload_file``
+    and shell cwd containment cannot drift apart, and so a cross-repo checkout
+    registered as a workspace root is reachable (#257 / D7).
+    """
+    from mergecraft.utils.workspace import WorkspacePathError, confine_to_workspace
+
+    try:
+        return confine_to_workspace(value, base=base)
+    except WorkspacePathError as exc:
+        msg = f"Blocked: '{flag}' '{value}' must be within the repo checkout — {exc}"
+        raise ValueError(msg) from exc
+
+
+def _validate_path_confinement(global_opts: list[str], cwd: str) -> None:
+    """Confine -C / --git-dir / --work-tree in *global_opts* to an allowed root.
+
+    git applies successive ``-C`` options **cumulatively** and resolves each
+    relative to the previous one, so the walk carries the accumulated directory
+    forward rather than validating every value against the starting cwd — which
+    would accept a pair whose combined effect escapes.
+    """
+    current = cwd
+    idx = 0
+    while idx < len(global_opts):
+        tok = global_opts[idx]
+        if tok == "-C":
+            if idx + 1 < len(global_opts):
+                current = str(_confine_to_repo_root(global_opts[idx + 1], "-C", current))
+            idx += 2
+        elif tok in {"--git-dir", "--work-tree"}:
+            if idx + 1 < len(global_opts):
+                _confine_to_repo_root(global_opts[idx + 1], tok, current)
+            idx += 2
+        elif tok.startswith(("--git-dir=", "--work-tree=")):
+            flag, _, value = tok.partition("=")
+            _confine_to_repo_root(value, flag, current)
+            idx += 1
+        else:
+            idx += 1
+
+
 def _run_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -87,14 +382,14 @@ def _git_env(token: str) -> dict[str, str]:
     return git_env_for_token(token)
 
 
-# Git global options that may precede the subcommand. `-C`/`-c` take a
-# separate argument; the `--git-dir`/`--work-tree`/`--namespace` family may
-# be spelled as `--flag value` or `--flag=value`.
-_GLOBAL_OPTS = ("-C", "-c", "--git-dir", "--work-tree", "--namespace")
+# Git global options that may precede the subcommand. `-C` takes a separate
+# argument; the `--git-dir`/`--work-tree`/`--namespace` family may be spelled
+# as `--flag value` or `--flag=value`. `--namespace` is extracted so its value
+# is pulled out of the args too, then refused by `_reject_namespace_flag`.
+# `-c`/`--config-env` are intentionally excluded: they are rejected
+# unconditionally (alias-execution vector).
+_GLOBAL_OPTS = ("-C", "--git-dir", "--work-tree", "--namespace")
 _GLOBAL_OPT_RE = re.compile(r"^--(?:git-dir|work-tree|namespace)(?:=.*)?$")
-
-# Tokens that take a separate value argument rather than an inline `=value`.
-_GLOBAL_OPT_TAKES_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace")
 
 
 def _extract_global_opts(
@@ -102,7 +397,7 @@ def _extract_global_opts(
 ) -> tuple[str, list[str], list[str]]:
     """Pull global git options out of command tokens + args, placing them first.
 
-    git requires global options (``-C``/``-c``/``--git-dir``/``--work-tree``/
+    git requires global options (``-C``/``--git-dir``/``--work-tree``/
     ``--namespace``) before the subcommand, but the reviewing agent may emit
     them anywhere (e.g. ``command="status"`` with ``args=["-C", dir]`` or
     ``command="git -C dir status"``). Extract them regardless of position,
@@ -110,6 +405,14 @@ def _extract_global_opts(
     return the real subcommand plus the remaining positional args. The
     subcommand is validated separately so these options are forwarded rather
     than rejected as an "invalid subcommand".
+
+    ``-c`` / ``--config-env`` are intentionally excluded from extraction —
+    they are rejected unconditionally by ``_reject_config_flags`` before
+    reaching ``_run_git``.
+
+    ``-C`` *after* a subcommand that defines it is left alone: to ``git diff``
+    it is find-copies, and swallowing it as the chdir option also ate the next
+    token as its directory, mangling the invocation.
     """
     tokens: list[str] = list(cmd_tokens)
     tokens.extend(args)
@@ -120,7 +423,10 @@ def _extract_global_opts(
     idx = 0
     while idx < len(tokens):
         tok = tokens[idx]
-        is_global = tok in _GLOBAL_OPTS or _GLOBAL_OPT_RE.fullmatch(tok) is not None
+        owns_dash_c = tok == "-C" and subcommand in _SUBCOMMAND_OWNS_DASH_C
+        is_global = not owns_dash_c and (
+            tok in _GLOBAL_OPTS or _GLOBAL_OPT_RE.fullmatch(tok) is not None
+        )
         if not is_global:
             if not subcommand:
                 subcommand = tok
@@ -137,6 +443,50 @@ def _extract_global_opts(
             idx += 1
 
     return subcommand, rest, global_opts
+
+
+def _validate_git_invocation(
+    command: str, args: list[str], global_opts: list[str], cwd: str
+) -> None:
+    """Run every guard a normalized git invocation must pass, in order.
+
+    The order is the contract, which is why it lives in one function rather than
+    as a comment over six sequential calls: the config-flag and ``--namespace``
+    refusals come first because they apply whatever the verb is, the redirect
+    precedes the allowlist so a rejected verb names its dedicated tool instead
+    of producing a generic "invalid subcommand", and path confinement runs last
+    because it needs the cwd git will actually run in.
+
+    Raises:
+        RuntimeError: when the verb has a dedicated tool to redirect to.
+        ValueError: for every other refusal.
+    """
+    # Unconditional: -c / --config-env are alias-execution vectors (#257 / D7).
+    # global_opts is scanned with no subcommand — the pre-subcommand slot has no
+    # verb to scope short flags against, so the strict reading applies there.
+    _reject_config_flags(global_opts)
+    _reject_config_flags(args, subcommand=command)
+    # Unconditional: --namespace reaches the same pre-subcommand slot and is
+    # the one extracted global option no path rule can confine.
+    _reject_namespace_flag(global_opts)
+    _reject_namespace_flag(args)
+    redirect = _REDIRECT_TO_TOOL.get(command)
+    if redirect:
+        msg = f"git {command} is not available through this tool — {redirect}"
+        raise RuntimeError(msg)
+    # Read-only allowlist: replace the old format-only _SUBCOMMAND_RE (#257 / D7).
+    if not command or command not in _READONLY_SUBCOMMANDS:
+        msg = (
+            f"invalid git subcommand: {command!r} — not available through this "
+            "tool (read-only allowlist)"
+        )
+        raise ValueError(msg)
+    if command == "branch":
+        _reject_branch_writes(args)
+    _reject_file_writing_flags(command, args)
+    # Confine -C / --git-dir / --work-tree to an allowed workspace root, with
+    # relative values resolved against the cwd git will run in (#257 / D7).
+    _validate_path_confinement(global_opts, cwd)
 
 
 def git_tool(ctx: ToolContext):
@@ -168,22 +518,8 @@ def git_tool(ctx: ToolContext):
             # Agent redundantly repeated the subcommand as the first arg; honor
             # the call rather than rejecting it.
             args.pop(0)
-        if not command or not _SUBCOMMAND_RE.fullmatch(command):
-            msg = f"invalid git subcommand: {command!r}"
-            raise ValueError(msg)
         cwd = primary_repo_state(ctx.tool_state).dir
-        redirect = _AUTH_REQUIRED.get(command)
-        if redirect:
-            msg = f"git {command} is not available through this tool — {redirect}"
-            raise RuntimeError(msg)
-        if ctx.payload.shell == "disabled":
-            blocked = _NOSHELL_BLOCKED.get(command)
-            if blocked:
-                raise RuntimeError(blocked)
-            for arg in args:
-                if any(arg == flag or arg.startswith(f"{flag}=") for flag in _NOSHELL_BLOCKED_ARGS):
-                    msg = f"Blocked: '{arg}' flag can execute arbitrary code."
-                    raise RuntimeError(msg)
+        _validate_git_invocation(command, args, global_opts, cwd)
         output = _run_git([*global_opts, command, *args], cwd=cwd)
         if len(output) > 50_000:
             temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
@@ -392,7 +728,6 @@ def delete_branch_tool(ctx: ToolContext):
 
 def commit_changes_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        """Signed commit via GitHub Git Data API (simplified tree commit)."""
         message = str(params["message"])
         cwd = primary_repo_state(ctx.tool_state).dir
         branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()
@@ -400,31 +735,22 @@ def commit_changes_tool(ctx: ToolContext):
         # update (W4.2 — same local-vs-remote split as ``delete_branch``).
         status = _run_git(["status", "--porcelain"], cwd=cwd)
         if not status.strip():
-            return {"success": True, "skipped": True, "reason": "nothing to commit"}
+            return {
+                "success": True,
+                "skipped": True,
+                "pushed": False,
+                "reason": "nothing to commit",
+            }
         _run_git(["add", "-A"], cwd=cwd)
-        # Local commit first so tree is consistent; API signing can replace later.
         _run_git(["-c", "core.hooksPath=/dev/null", "commit", "-m", message], cwd=cwd)
         sha = _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
+        # The commit is local either way — the push policy decides nothing about
+        # the response, it only records why no remote update was attempted.
         try:
             _require_push_allowed(ctx, branch=branch, action="update")
         except RuntimeError as err:
             logger.info("API ref update skipped (push policy): {}", err)
-            return {
-                "success": True,
-                "sha": sha,
-                "branch": branch,
-                "message": message,
-                "pushed": False,
-            }
-        # Best-effort: update remote ref via API for Verified commits.
-        try:
-            await ctx.scm.patch(
-                f"/repos/{ctx.repo.owner}/{ctx.repo.name}/git/refs/heads/{branch}",
-                json={"sha": sha, "force": False},
-            )
-        except Exception as err:
-            logger.info("API ref update skipped/failed: {}", err)
-        return {"success": True, "sha": sha, "branch": branch, "message": message}
+        return {"success": True, "sha": sha, "branch": branch, "message": message, "pushed": False}
 
     repo_class = repository_mutation_class_for_push(ctx.payload.push)
     return tool(
@@ -432,7 +758,7 @@ def commit_changes_tool(ctx: ToolContext):
         tool_class=repo_class,
         mutates=True,
         description=(
-            "Commit working-tree changes as a GitHub-signed commit (signed-commits mode)."
+            "Commit working-tree changes as a local commit (no push, no remote ref update)."
         ),
         input_schema={
             "type": "object",

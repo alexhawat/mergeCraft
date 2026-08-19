@@ -120,7 +120,7 @@ def serve_cmd(
 
         listen_port = port if port is not None else _read_env_port() or _select_port()
         endpoint = _role_endpoint(
-            role.strip().lower()  # type: ignore[arg-type]
+            role.strip().lower()  # type: ignore[arg-type]  # — role.strip().lower() is str; callee expects Literal["orchestrator","reviewer","verifier"]
             if role.strip().lower() in {"orchestrator", "reviewer", "verifier"}
             else "reviewer"
         )

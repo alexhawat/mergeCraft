@@ -517,3 +517,96 @@ async def test_model_chain_does_not_advance_after_incremental_progress(
     assert result.success is True
     assert ctx.tool_state.final_summary_written is True
     assert ctx.tool_state.terminal_submission is None
+
+
+# ---------------------------------------------------------------------------
+# W14.5 / #263 — the tool surface must fail closed on unverified blockers
+# ---------------------------------------------------------------------------
+#
+# Live anchors: ``mcp/verdict.py:276-313`` (``_confirmed_findings_from_state``)
+# and ``:395-413`` (the approve branch). Wave text W19.1 says "~377", which is
+# stale — the approve branch begins at ``:395``.
+#
+# D12: reject ``approve`` when a blocking-severity finding exists in
+# ``analyzer_run.findings`` that is neither verified nor withdrawn. The
+# rejection reason reuses the existing ``approve_with_confirmed_blocker``
+# (see the note in ``tests/review/test_terminal_verdict_policy.py``).
+
+_REASON_APPROVE_CONFIRMED_BLOCKER = "approve_with_confirmed_blocker"
+
+
+def _analyzer_blocker(severity: str = "Critical") -> Any:
+    from mergecraft.analyzers.finding import make_finding
+
+    return make_finding(
+        tool="bandit",
+        rule_id="B105-w14",
+        category="Security & Privacy",
+        severity=severity,
+        confidence="certain",
+        message="Hardcoded credential committed in the diff.",
+        path="src/app.py",
+        start_line=30,
+        end_line=30,
+        source="analyzer",
+        evidence=["PASSWORD = 'hunter2'"],
+        fingerprint=f"w14-mcp-unverified-{severity.lower()}",
+        introduced_by_pr="true",
+    )
+
+
+def _seed_analyzer_run(ctx: ToolContext, findings: list[Any], *, verified: set[str]) -> None:
+    from mergecraft.mcp.tool_state import AnalyzerRunState
+
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[finding.model_dump() for finding in findings],
+        verified_ids=set(verified),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("severity", ["Critical", "Major"])
+async def test_approve_is_rejected_when_a_blocker_was_never_verified(
+    tmp_path: Path,
+    severity: str,
+) -> None:
+    """#263 / D12 — the terminal tool must not bank an approve over an unverified blocker."""
+    ctx = _ctx(tmp_path)
+    _seed_analyzer_run(ctx, [_analyzer_blocker(severity)], verified=set())
+
+    result = await _submit(ctx, _valid_payload())
+
+    assert result.is_error is True
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in _error_text(result)
+    assert ctx.tool_state.terminal_submission is None
+
+
+@pytest.mark.asyncio
+async def test_approve_is_recorded_when_the_analyzer_findings_are_non_blocking(
+    tmp_path: Path,
+) -> None:
+    """Green guard: a Minor analyzer finding must still allow an approve.
+
+    The legitimate-approve arm at the tool surface. Without it, W19 could
+    reject every approve made after ``run_analyzers`` reported anything.
+    """
+    ctx = _ctx(tmp_path)
+    _seed_analyzer_run(ctx, [_analyzer_blocker("Minor")], verified=set())
+
+    result = await _submit(ctx, _valid_payload())
+
+    assert result.is_error is False
+    recorded = ctx.tool_state.terminal_submission
+    assert recorded is not None
+    assert recorded.verdict == "approve"
+
+
+@pytest.mark.asyncio
+async def test_approve_is_recorded_when_no_analyzer_run_happened(tmp_path: Path) -> None:
+    """Green guard: no analyzer state at all must not become a blanket rejection."""
+    ctx = _ctx(tmp_path)
+    result = await _submit(ctx, _valid_payload())
+
+    assert result.is_error is False
+    assert ctx.tool_state.terminal_submission is not None

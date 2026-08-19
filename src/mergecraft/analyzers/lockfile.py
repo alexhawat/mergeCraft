@@ -44,7 +44,7 @@ def _coerce_entry(raw: dict[str, Any]) -> LockEntry:
     return LockEntry(
         tool_id=str(raw["tool_id"]),
         version=str(raw["version"]),
-        mode=str(raw.get("mode", "managed")),  # type: ignore[arg-type]
+        mode=str(raw.get("mode", "managed")),  # type: ignore[arg-type]  # — mode is str from JSON; LockEntry.mode is a Literal narrowing enforced by the schema
         source=str(raw.get("source", "unknown")),
         sha256=str(raw["sha256"]),
     )

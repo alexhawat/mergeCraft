@@ -122,7 +122,7 @@ def test_usage_entries_field_may_be_deleted(captured_sink: Any) -> None:
         pass
 
 
-@pytest.mark.xfail(reason="green after W4: usage_entries consumer or deletion", strict=False)
+@pytest.mark.xfail(reason="green after W4: usage_entries consumer or deletion (#276)", strict=True)
 def test_usage_entries_aggregation_across_multiple_attempts(captured_sink: Any) -> None:
     """W3.5 — multi-attempt chain: each ``llm.call`` span carries *its* usage.
 

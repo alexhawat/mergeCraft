@@ -11,7 +11,7 @@ import os
 import re
 import subprocess
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -20,7 +20,11 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import BackgroundProcess, primary_repo_state
 from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import resolve_env
-from mergecraft.utils.workspace import WorkspacePathError, resolve_allowed_working_directory
+from mergecraft.utils.workspace import (
+    WorkspacePathError,
+    git_repo_root,
+    resolve_allowed_working_directory,
+)
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -104,13 +108,128 @@ def network_namespace_available() -> bool:
     return _detected_netns
 
 
+# Every construct that opens a fresh command position for the shell: the
+# separators (`;`, `&&`, `||`, `|`, newline), command substitution (`$(…)` and
+# backticks), and subshell/group openers. The previous class was `[;&|]`, which
+# omitted the newline — and `bash -c` runs every line of its argument.
+_COMMAND_SEGMENT = re.compile(r"\$\(|[;&|\n\r(){}`]")
+# Commands that take another command as their argument, so git can hide behind
+# them. `env` and the shells matter most: `env git status` and `sh -c 'git …'`
+# both put git at a command position the guard would otherwise not inspect.
+_COMMAND_WRAPPERS = frozenset(
+    {
+        "bash",
+        "builtin",
+        "chronic",
+        "command",
+        "dash",
+        "doas",
+        "env",
+        "eval",
+        "exec",
+        "flock",
+        "ionice",
+        "ksh",
+        "nice",
+        "nohup",
+        "parallel",
+        "proot",
+        "script",
+        "setsid",
+        "sh",
+        "ssh-agent",
+        "stdbuf",
+        "strace",
+        "sudo",
+        "time",
+        "timeout",
+        "unbuffer",
+        "watch",
+        "xargs",
+        "zsh",
+    }
+)
+# A wrapper's own path-shaped argument — `flock /tmp/lock git …`,
+# `script -q /dev/null git …`. Without this the lock file ends the segment and
+# the git that follows is never inspected.
+_PATH_ARG = re.compile(r"^/")
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# A wrapper's own numeric argument — `timeout 5 git …`, `nice -n 10 git …`.
+# No command name is bare-numeric, so skipping these costs nothing.
+_NUMERIC_ARG = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+# A wrapper flag whose separate operand is a name, not a command — `sudo -u ci
+# git status`, `doas -g devs git …`. The user name is neither path-shaped nor
+# numeric, so without this it reads as the command word and ends the segment
+# before the git behind it is inspected. Glued spellings (`--user=ci`) already
+# fall out as flags. The set is not per-wrapper, so the skip yields to a token
+# that names git — see the operand branch in ``_is_git_command``.
+_WRAPPER_FLAG_TAKES_VALUE = frozenset({"-u", "--user", "-g", "--group"})
+
+
+def _command_word(token: str) -> str:
+    """Strip the quoting and alias-suppressing ``\\`` a shell removes itself.
+
+    A leading backslash only tells the shell "do not expand this as an alias";
+    ``\\git`` still runs git. Quotes are stripped for the same reason: the shell
+    removes them before resolving the command word.
+    """
+    return token.strip("\"'").removeprefix("\\")
+
+
+def _names_git(token: str) -> bool:
+    """Whether ``token`` names the git binary under any path spelling."""
+    stripped = _command_word(token)
+    return bool(stripped) and PurePosixPath(stripped).name == "git"
+
+
 def _is_git_command(command: str) -> bool:
-    trimmed = command.strip()
-    if trimmed == "git" or trimmed.startswith("git "):
-        return True
-    if trimmed.startswith("sudo git"):
-        return True
-    return bool(re.search(r"[;&|]\s*(?:sudo\s+)?git(?:\s|$)", trimmed))
+    """Whether ``command`` invokes git anywhere the shell would run it.
+
+    The shell tool must never run git: the #257 alias/config guard and the path
+    confinement live in the dedicated git tools and neither applies to a string
+    handed to ``bash -c``, so a single missed spelling reopens the whole
+    surface (``git -c alias.z='!sh …' z``, ``git clean``, ``filter-branch``).
+
+    Each command position is scanned past leading environment assignments and
+    wrapper commands, then the first real command word decides: git under any
+    path spelling is refused, anything else ends that segment. That keeps
+    ``grep git README`` and ``ls .git`` running while catching ``env git``,
+    ``xargs -n1 git``, ``/usr/bin/git``, ``sudo -u ci git`` and ``$(git …)``.
+
+    Defence in depth, not a shell parser: arbitrarily quoted payloads
+    (``sh -c 'g''it'``), variable indirection (``G=git; $G status``) and
+    ``printf 'git …' | sh`` are out of reach of any token scan, and no addition
+    here changes that. The tool allowlist in the git tools remains the primary
+    control; this only raises the cost of the spellings that cost nothing.
+    """
+    for segment in _COMMAND_SEGMENT.split(command):
+        after_wrapper = False
+        skip_operand = False
+        for token in segment.split():
+            if skip_operand:
+                skip_operand = False
+                # The same letter takes an operand to one wrapper and none to
+                # the next — `-u` is the target user to `sudo` but `--ungroup`
+                # to `parallel` and `set -u` to `sh`, where the token behind it
+                # is the command. Reading a git there costs a false positive on
+                # `sudo -u git ls`, which is the cheaper side to be wrong on.
+                if not _names_git(token):
+                    continue
+            if _ENV_ASSIGNMENT.match(token) or _NUMERIC_ARG.match(token) or token.startswith("-"):
+                skip_operand = token in _WRAPPER_FLAG_TAKES_VALUE
+                continue
+            if _names_git(token):
+                return True
+            word = _command_word(token)
+            if PurePosixPath(word).name in _COMMAND_WRAPPERS:
+                after_wrapper = True
+                continue
+            # A wrapper's own operand (`flock /tmp/lock git …`) is not the
+            # command word, so it must not end the scan.
+            if after_wrapper and _PATH_ARG.match(word):
+                continue
+            break
+    return False
 
 
 def _cap_output(output: str, tmpdir: str) -> str:
@@ -211,17 +330,9 @@ def _spawn_shell(
 
 
 def primary_repo_state_dir_safe(fallback: str) -> str:
-    try:
-        # best-effort without requiring ctx
-        out = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=fallback,
-            text=True,
-            timeout=5,
-        )
-        return out.strip() or fallback
-    except Exception:
-        return fallback
+    """Best-effort work-tree root for *fallback*, without requiring a ``ctx``."""
+    root = git_repo_root(fallback)
+    return str(root) if root is not None else fallback
 
 
 def shell_tool(ctx: ToolContext):

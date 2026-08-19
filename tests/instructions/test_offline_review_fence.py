@@ -7,10 +7,9 @@ twice — once with a benign operator-supplied "PR body" via
 are identical. The agent is stubbed in-process so the test proves the
 *prompt* is fenced, not that a live model resists.
 
-All tests are `@pytest.mark.xfail(strict=False)` for the same reason
-as the rest of the W3 suite — W4 will land the fence; these tests
-un-xfail when the fence is in place. They pin the public outcome,
-not the impl signature.
+Pending tests are `@pytest.mark.xfail(strict=True)` — W4 will land the
+fence; these tests fail-strict until the implementation arrives. They pin
+the public outcome, not the impl signature.
 """
 
 from __future__ import annotations
@@ -114,9 +113,9 @@ def _build_stub_agent(monkeypatch: pytest.MonkeyPatch, capture_path: Path) -> No
         "name='stub', but _run_agent_review calls compute_modes(agent.name, "
         "...) which requires a real agent id. The test was meant to mock "
         "compute_modes too, but does not. Deferred to B-Final: patch the "
-        "stub to monkeypatch compute_modes or use a real agent id."
+        "stub to monkeypatch compute_modes or use a real agent id (#276)."
     ),
-    strict=False,
+    strict=True,
 )
 def test_injected_pr_body_does_not_change_findings(
     tmp_path: Path,
@@ -255,9 +254,9 @@ def _extract_fenced(prompt: str) -> str:
     reason=(
         "W3 stub infrastructure issue: see test_injected_pr_body_does_not_change_findings "
         "for details. The stub agent uses name='stub' which fails in compute_modes(). "
-        "Deferred to B-Final."
+        "Deferred to B-Final (#276)."
     ),
-    strict=False,
+    strict=True,
 )
 def test_offline_diff_review_fences_commit_messages_and_patch_headers(
     tmp_path: Path,

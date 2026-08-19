@@ -116,6 +116,30 @@ reason is recorded on `tool_state.setup_script_skip_reason` and threaded
 into the agent prompt as a `SETUP SCRIPT SKIPPED` section so the agent
 knows the setup did not run.
 
+## MCP git tool — reviewer-surface enforcement (#257 / D7)
+
+The `git` MCP tool (``ToolClass.REPOSITORY_READ``) is on the reviewer surface
+and enforces fail-closed restrictions regardless of ``payload.shell``:
+
+| Guard | What it rejects | Rationale |
+|-------|-----------------|-----------|
+| Read-only allowlist (`_READONLY_SUBCOMMANDS`) | Any subcommand not in `{status, log, diff, show, rev-parse, describe, ls-files, blame, cat-file, rev-list, branch}` — including `reset`, `clean`, `stash`, `update-ref` | The reviewer has no legitimate reason to mutate the tree |
+| `branch` write forms | Any `branch` argument that is not on the listing-flag allowlist (`-a`/`-r`/`-v`/`--all`/`--remotes`/`--merged`/`--no-merged`/`--contains`/…), including bare `git branch <name>` creation | `branch` is allowlisted read-only; deletion, rename, copy, upstream edits and creation are writes, and a rename of the checked-out branch changes what a later `commit_changes` / `push_branch` targets |
+| File-writing flags | `--output` and every unambiguous prefix of it (`--out`, `--outp`, …) on any allowlisted subcommand, plus `-o` on the subcommands that do not define it themselves | The subcommand allowlist constrains the verb, not its flags — `git diff --output=<path>` writes an arbitrary file. `-o` is scoped because it means `--others` to `ls-files` and writes nothing there |
+| `-c` / `--config-env` unconditional block | Both flags in `command` string and `args`, in spaced (`-c key=v`), glued (`-ckey=v`) and inline (`--config-env=…`) spellings, regardless of `payload.shell`. Read against the subcommand's own short flags first, so `ls-files -co` and `log -c` are forwarded while every glued config payload stays refused | `git -c alias.x='!cmd'` expands arbitrary shell even with `shell: disabled`; there is no safe-key allowlist |
+| Path confinement | `-C`, `--git-dir`, `--work-tree` resolving outside the repo checkout, a registered cross-repo checkout, or the session tmpdir — with relative values resolved against the cwd git will run in, and successive `-C` applied cumulatively as git applies them | Prevents redirect to an attacker-controlled repo or credentials store; shares `utils/workspace.confine_to_workspace` with `upload_file` and shell cwd containment so the rule cannot drift |
+
+## MCP upload tool — orchestrator-surface enforcement (#258 / D8)
+
+The `upload_file` MCP tool (`ToolClass.GITHUB_MUTATION`) is on the orchestrator surface.  It enforces fail-closed path confinement before reading any bytes:
+
+| Guard | What it rejects | Rationale |
+|-------|-----------------|-----------|
+| Symlink rejection | Any path where `Path.is_symlink()` is true | Symlinks can escape the repo tree even when the link itself is inside the root |
+| Root confinement | Any path that resolves outside the repo checkout, a registered cross-repo checkout, and `ctx.tmpdir` | Prevents prompt-injectable arbitrary read / exfiltration of files outside the review workspace |
+
+Both checks fail closed: no `file://` URI is emitted and no bytes are read from a rejected path.  The guards fire before the `path.is_file()` existence check so a non-existent out-of-root path is rejected with a confinement error, not a misleading "file not found".
+
 ## Operator checklist
 
 1. Unknown key on a security/runtime model → fix the typo; the Action will

@@ -25,11 +25,13 @@ from mergecraft.findings.agent_adapter import (
     normalize_agent_findings_via_pipeline,
 )
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.mcp.tool_state import TerminalSubmission, primary_repo_state
+from mergecraft.mcp.tool_state import TerminalSubmission, ToolState, primary_repo_state
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
 from mergecraft.tracing.redaction import redact_attrs
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
 
@@ -113,16 +115,13 @@ def stamp_review_phase_on_active_span(phase: ReviewPhase) -> None:
             logger.debug("phase span emission skipped for {}", phase.value)
 
 
-def _current_review_phase(tool_state: Any) -> ReviewPhase:
-    raw = getattr(tool_state, "review_phase", ReviewPhase.INIT)
-    if isinstance(raw, ReviewPhase):
-        return raw
-    return ReviewPhase(str(raw))
+def _current_review_phase(tool_state: ToolState) -> ReviewPhase:
+    return ReviewPhase(tool_state.review_phase)
 
 
-def ensure_review_scope_for_terminal(tool_state: Any, tool_name: str) -> None:
+def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> None:
     """Raise when a Review-mode terminal tool runs before ``checkout_pr`` (D10)."""
-    mode = getattr(tool_state, "selected_mode", None)
+    mode = tool_state.selected_mode
     if mode not in _REVIEW_MODES or _current_review_phase(tool_state) != ReviewPhase.INIT:
         return
     if mode == "IncrementalReview":
@@ -240,111 +239,257 @@ def _coerce_confirmed_finding(item: Any) -> Finding | None:
 
     if isinstance(item, Finding):
         return item
-    if isinstance(item, dict):
-        try:
-            return Finding.model_validate(item)
-        except (FindingValidationError, ValueError, TypeError):  # fmt: skip
-            severity = item.get("severity")
-            if not severity:
-                return None
-            from typing import cast
+    if not isinstance(item, dict):
+        return None
+    try:
+        return Finding.model_validate(item)
+    except (FindingValidationError, ValueError, TypeError):  # fmt: skip
+        pass
+    severity = item.get("severity")
+    if not severity:
+        return None
+    from typing import cast
 
-            from mergecraft.analyzers.finding import IntroducedByPr
+    from mergecraft.analyzers.finding import IntroducedByPr
 
-            introduced_raw = str(item.get("introduced_by_pr") or "unknown")
-            introduced = cast(
-                "IntroducedByPr",
-                introduced_raw if introduced_raw in {"true", "false", "unknown"} else "unknown",
-            )
-            return make_finding(
-                tool=str(item.get("tool") or "agent"),
-                rule_id=str(item.get("rule_id") or "agent:confirmed"),
-                category=str(item.get("category") or "Functional Correctness"),
-                severity=str(severity),
-                confidence=str(item.get("confidence") or "likely"),
-                message=str(item.get("message") or item.get("body") or ""),
-                path=str(item.get("path") or ""),
-                start_line=int(item.get("start_line") or item.get("line") or 1),
-                end_line=int(item.get("end_line") or item.get("line") or 1),
-                source="agent",
-                fingerprint=str(item.get("fingerprint") or "") or None,
-                introduced_by_pr=introduced,
-            )
-    return None
+    introduced_raw = str(item.get("introduced_by_pr") or "unknown")
+    introduced = cast(
+        "IntroducedByPr",
+        introduced_raw if introduced_raw in {"true", "false", "unknown"} else "unknown",
+    )
+    # The fallback constructor validates too — a present-but-invalid category,
+    # severity or confidence, or a non-numeric line, must return ``None`` like
+    # any other unreadable row rather than raising out through the approve gate.
+    try:
+        return make_finding(
+            tool=str(item.get("tool") or "agent"),
+            rule_id=str(item.get("rule_id") or "agent:confirmed"),
+            category=str(item.get("category") or "Functional Correctness"),
+            severity=str(severity),
+            confidence=str(item.get("confidence") or "likely"),
+            message=str(item.get("message") or item.get("body") or ""),
+            path=str(item.get("path") or ""),
+            start_line=int(item.get("start_line") or item.get("line") or 1),
+            end_line=int(item.get("end_line") or item.get("line") or 1),
+            source="agent",
+            fingerprint=str(item.get("fingerprint") or "") or None,
+            introduced_by_pr=introduced,
+        )
+    except (FindingValidationError, ValueError, TypeError):  # fmt: skip
+        return None
 
 
-def _confirmed_findings_from_state(state: Any) -> list[Any]:
-    collected: list[Any] = []
+@dataclass(frozen=True, slots=True)
+class ValidationState:
+    """The graded consultation inputs ``validate_submission`` reads (D5, D12).
+
+    Every analyzer and agent row this run knows about is graded exactly once,
+    by ``build_validation_state``, into one of three populations. Producer and
+    consumer therefore agree by construction instead of by ``getattr`` — the
+    approve gate cannot silently read ``None`` for a renamed field.
+
+    Attributes:
+        terminal_submission: The verdict already recorded on this run, if any.
+        terminal_submission_conflict: True once a conflicting payload arrived.
+        confirmed_findings: Findings the agent itself asserted — verifier
+            confirms and agent-authored rows. Withdrawn rows are already gone.
+        unverified_findings: Analyzer rows nobody verified or withdrew.
+        ungradable_fingerprints: Rows no coercion could read. They block, since
+            approving over a finding nobody could grade is the fail-open branch.
+        static_checks: The last ``run_static_checks`` status rows.
+        withdrawn_fingerprints: What a verifier ``drop`` retired this run.
+    """
+
+    terminal_submission: TerminalSubmission | None = None
+    terminal_submission_conflict: bool = False
+    confirmed_findings: tuple[Finding, ...] = ()
+    unverified_findings: tuple[Finding, ...] = ()
+    ungradable_fingerprints: tuple[str, ...] = ()
+    static_checks: tuple[dict[str, str], ...] = ()
+    withdrawn_fingerprints: frozenset[str] = frozenset()
+
+
+def build_validation_state(
+    *,
+    terminal_submission: TerminalSubmission | None = None,
+    terminal_submission_conflict: bool = False,
+    asserted_findings: Iterable[Any] = (),
+    analyzer_findings: Iterable[Any] = (),
+    verified_fingerprints: Iterable[str] = (),
+    static_checks: Iterable[Any] = (),
+    withdrawn_fingerprints: Iterable[str] = (),
+) -> ValidationState:
+    """Grade every known finding once and return the partitioned state.
+
+    One pass, not two inverted ones: a row is withdrawn (dropped), asserted or
+    verified (confirmed), readable but unverified, or ungradable. ``asserted``
+    rows are graded first so a fingerprint the agent confirmed is never also
+    counted as unverified.
+
+    Args:
+        terminal_submission (TerminalSubmission | None): Recorded verdict.
+        terminal_submission_conflict (bool): Whether a conflict was recorded.
+        asserted_findings (Iterable[Any]): Rows the agent asserted itself.
+        analyzer_findings (Iterable[Any]): Rows the analyzer run produced.
+        verified_fingerprints (Iterable[str]): Fingerprints a verifier confirmed.
+        static_checks (Iterable[Any]): ``run_static_checks`` status rows.
+        withdrawn_fingerprints (Iterable[str]): Fingerprints a ``drop`` retired.
+
+    Returns:
+        ValidationState: The graded populations, ready for the gate.
+
+    Examples:
+        >>> state = build_validation_state()
+        >>> state.confirmed_findings, state.unverified_findings
+        ((), ())
+    """
+    withdrawn = frozenset(withdrawn_fingerprints)
+    verified = frozenset(verified_fingerprints)
+
+    confirmed: list[Finding] = []
+    unverified: list[Finding] = []
+    ungradable: list[str] = []
     seen: set[str] = set()
 
-    def _add(item: Any) -> None:
+    def _grade(item: Any, *, asserted: bool) -> None:
+        fingerprint = _finding_fingerprint(item)
+        if fingerprint and (fingerprint in withdrawn or fingerprint in seen):
+            return
         coerced = _coerce_confirmed_finding(item)
         if coerced is None:
+            # An asserted row the agent wrote badly is its own problem; an
+            # analyzer row nobody can read is a blocker. Either way the
+            # fingerprint stays unspent: a malformed asserted row must not
+            # claim the fingerprint of the analyzer row that carries the same
+            # one, which would drop a real blocker out of both populations.
+            if not asserted:
+                ungradable.append(fingerprint or "<no fingerprint>")
             return
-        fingerprint = _finding_fingerprint(coerced)
         if fingerprint:
-            if fingerprint in seen:
-                return
             seen.add(fingerprint)
-        collected.append(coerced)
+        if asserted or fingerprint in verified:
+            confirmed.append(coerced)
+        else:
+            unverified.append(coerced)
 
-    explicit = getattr(state, "confirmed_findings", None)
-    if explicit:
-        for item in explicit:
-            _add(item)
-        return collected
+    for item in asserted_findings:
+        _grade(item, asserted=True)
+    for item in analyzer_findings:
+        _grade(item, asserted=False)
 
-    tool_state = getattr(state, "tool_state", None)
-    if tool_state is not None:
-        for item in getattr(tool_state, "confirmed_findings", None) or []:
-            _add(item)
+    return ValidationState(
+        terminal_submission=terminal_submission,
+        terminal_submission_conflict=terminal_submission_conflict,
+        confirmed_findings=tuple(confirmed),
+        unverified_findings=tuple(unverified),
+        ungradable_fingerprints=tuple(ungradable),
+        static_checks=tuple(dict(row) for row in static_checks if isinstance(row, dict)),
+        withdrawn_fingerprints=withdrawn,
+    )
 
-    analyzer_run = getattr(state, "analyzer_run", None)
-    if analyzer_run is None and tool_state is not None:
-        analyzer_run = getattr(tool_state, "analyzer_run", None)
-    verified_ids: set[str] = set()
-    if tool_state is not None:
-        verified_ids |= set(getattr(tool_state, "verified_ids", None) or set())
-    if analyzer_run is not None:
-        verified_ids |= set(getattr(analyzer_run, "verified_ids", None) or set())
-        for item in getattr(analyzer_run, "findings", None) or []:
-            if _finding_fingerprint(item) in verified_ids:
-                _add(item)
+
+def _blocks_approve(state: ValidationState) -> bool:
+    """Whether any finding this run knows about must prevent an ``approve`` (D12, #263).
+
+    One walk over both populations, because the rejection is the same either
+    way: a blocking severity that survives the causality policy closes the
+    approve path, whether a verifier confirmed the finding or nobody looked at
+    it. Attribution is *not* a second condition — under the default
+    ``base_comparison: "diff"`` no base run happens, so every diff-scoped
+    finding stays ``introduced_by_pr: "unknown"`` and gating on ``"true"`` would
+    exempt ruff, mypy, bandit and semgrep from the gate entirely. Where a base
+    run *did* happen, a pre-existing finding is stamped ``"false"`` and the
+    causality policy already downgrades it below the blocking threshold.
+
+    The agent's valves are ``drop`` (the fingerprint leaves the state) and
+    ``downgrade`` (the stored severity is rewritten), both applied before this
+    runs — so approve stays reachable under a fail-closed gate.
+
+    Args:
+        state (ValidationState): The graded populations for this run.
+
+    Returns:
+        bool: True when ``approve`` must be rejected.
+
+    Examples:
+        >>> _blocks_approve(build_validation_state())
+        False
+    """
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES
+    from mergecraft.findings.causality import apply_causality_policy
+
+    if state.ungradable_fingerprints:
+        logger.warning(
+            "{} analyzer finding(s) could not be graded; blocking approve: {}",
+            len(state.ungradable_fingerprints),
+            ", ".join(state.ungradable_fingerprints),
+        )
+        return True
+    for finding in (*state.confirmed_findings, *state.unverified_findings):
+        if apply_causality_policy(finding).severity in BLOCKING_SEVERITIES:
+            return True
+    return False
+
+
+def _withdrawn_fingerprints_for_state(tool_state: ToolState, *, tmpdir: str | None) -> set[str]:
+    """Collect the fingerprints a verifier ``drop`` retired.
+
+    ``ToolState.withdrawn_fingerprints`` is authoritative **within a run** —
+    only canonical fingerprints survive the learnings round trip, so the live
+    set is what makes the valve reliable here. The learnings file is the
+    **cross-run** memory of the same decision, read through the parser analyzer
+    suppression uses, and is unioned in so a drop recorded before this state was
+    built (or by an earlier run) still counts. The default tmpdir path is
+    resolved the way the writer resolves it, or a run that never set an explicit
+    learnings path would not see its own file.
+    """
+    from mergecraft.analyzers.scope import withdrawn_fingerprints
+    from mergecraft.utils.learnings import learnings_file_path
+
+    candidates: list[str] = [
+        raw for raw in (tool_state.learnings_file_path, tool_state.xrepo_learnings_file_path) if raw
+    ]
+    if not candidates and tmpdir:
+        candidates.append(learnings_file_path(tmpdir))
+
+    collected: set[str] = set(tool_state.withdrawn_fingerprints)
+    for raw in candidates:
+        path = Path(raw)
+        if not path.is_file():
+            continue
+        collected |= set(withdrawn_fingerprints(path.read_text(encoding="utf-8")))
     return collected
 
 
-def _static_checks_from_state(state: Any) -> list[dict[str, str]]:
-    explicit = getattr(state, "static_checks", None)
-    if explicit:
-        return [dict(row) for row in explicit if isinstance(row, dict)]
-    return []
-
-
-def validation_state_from_tool_state(tool_state: Any) -> Any:
-    """Build the duck-typed consultation object ``validate_submission`` reads."""
-    from types import SimpleNamespace
-
-    state = SimpleNamespace(
+def validation_state_from_tool_state(
+    tool_state: ToolState, *, tmpdir: str | None = None
+) -> ValidationState:
+    """Grade a live ``ToolState`` into the state ``validate_submission`` reads."""
+    analyzer_run = tool_state.analyzer_run
+    verified: set[str] = set(tool_state.verified_ids)
+    if analyzer_run is not None:
+        verified |= set(analyzer_run.verified_ids)
+    return build_validation_state(
         terminal_submission=tool_state.terminal_submission,
         terminal_submission_conflict=tool_state.terminal_submission_conflict,
-        confirmed_findings=[],
-        static_checks=[dict(row) for row in tool_state.static_checks if isinstance(row, dict)],
-        withdrawn_fingerprints=set(),
-        tool_state=tool_state,
-        analyzer_run=getattr(tool_state, "analyzer_run", None),
+        asserted_findings=tool_state.confirmed_findings,
+        analyzer_findings=analyzer_run.findings if analyzer_run is not None else (),
+        verified_fingerprints=verified,
+        static_checks=tool_state.static_checks,
+        withdrawn_fingerprints=_withdrawn_fingerprints_for_state(tool_state, tmpdir=tmpdir),
     )
-    state.confirmed_findings = _confirmed_findings_from_state(state)
-    return state
 
 
-def validation_state_from_tool_context(ctx: ToolContext) -> Any:
+def validation_state_from_tool_context(ctx: ToolContext) -> ValidationState:
     """Build the consultation object from a live ``ToolContext``."""
-    return validation_state_from_tool_state(ctx.tool_state)
+    return validation_state_from_tool_state(ctx.tool_state, tmpdir=ctx.tmpdir)
 
 
-def validate_submission(submission: dict[str, Any], *, state: Any) -> SubmissionValidation:
+def validate_submission(
+    submission: dict[str, Any], *, state: ValidationState
+) -> SubmissionValidation:
     """Pure semantic + structural validation for a terminal verdict payload (D5, D9)."""
-    if getattr(state, "terminal_submission_conflict", False):
+    if state.terminal_submission_conflict:
         return SubmissionValidation(
             accepted=False,
             rejection_reason=REJECTION_CONFLICTING_SUBMISSION,
@@ -393,20 +538,14 @@ def validate_submission(submission: dict[str, Any], *, state: Any) -> Submission
         )
 
     if verdict == "approve":
-        from mergecraft.agents.gates import BLOCKING_SEVERITIES, has_failed_required_static_check
-        from mergecraft.analyzers.finding import Finding
-        from mergecraft.findings.causality import apply_causality_policy
+        from mergecraft.agents.gates import has_failed_required_static_check
 
-        for finding in _confirmed_findings_from_state(state):
-            if not isinstance(finding, Finding):
-                continue
-            adjusted = apply_causality_policy(finding)
-            if adjusted.severity in BLOCKING_SEVERITIES:
-                return SubmissionValidation(
-                    accepted=False,
-                    rejection_reason=REJECTION_APPROVE_CONFIRMED_BLOCKER,
-                )
-        if has_failed_required_static_check(_static_checks_from_state(state)):
+        if _blocks_approve(state):
+            return SubmissionValidation(
+                accepted=False,
+                rejection_reason=REJECTION_APPROVE_CONFIRMED_BLOCKER,
+            )
+        if has_failed_required_static_check(list(state.static_checks)):
             return SubmissionValidation(
                 accepted=False,
                 rejection_reason=REJECTION_APPROVE_FAILED_GATE,
@@ -567,7 +706,9 @@ __all__ = [
     "ReviewPhase",
     "SubmissionValidation",
     "SubmitReviewVerdictParams",
+    "ValidationState",
     "VerdictDiagnostic",
+    "build_validation_state",
     "ensure_review_scope_for_terminal",
     "record_validated_terminal_submission",
     "recorded_submission_payload",

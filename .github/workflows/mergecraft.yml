@@ -160,8 +160,13 @@ jobs:
   # context, which is the pre-existing behavior.
   wait-for-ci:
     name: mergecraft wait for CI
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    if: >-
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
     timeout-minutes: 25
     outputs:
       # complete | timeout | absent | skipped
@@ -197,7 +202,7 @@ jobs:
             now="$(date +%s)"
             elapsed=$(( now - started ))
 
-            if runs="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" 2>/dev/null)"; then
+            if runs="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100")"; then
               total="$(printf '%s' "${runs}" | jq "${jq_verify} | length")"
               pending="$(printf '%s' "${runs}" | jq "${jq_verify} | map(select(.status != \"completed\")) | length")"
 
@@ -256,9 +261,33 @@ jobs:
     # `always()` keeps the required check reporting even if the (fail-open) wait
     # job errors out on a runner fault; a skipped wait job still skips the review,
     # because the draft/dispatch condition below is the same one it uses.
+    #
+    # Dependabot exemption (2026-08-19): a `mergecraft review` on a version bump
+    # is a 60-minute Docker run over a one-line diff, and it failed *closed* on
+    # every one of them. Two independent reasons, neither fixable from the PR:
+    #   - the reviewer graded the bumps `request_changes` in shadow mode and
+    #     posted no `mergecraft-approval` check-run at all, so the enforce step
+    #     below hit its "no check posted" branch and exited 1 by design;
+    #   - a lockfile bump has no logic to review, so even a completed review
+    #     carries no signal the CI matrix (which does run, and does gate) is not
+    #     already providing.
+    # The result was ten open PRs blocked on a gate that could not go green.
+    # Supply-chain safety does not rest on this gate: ci.yml, codeql.yml, the
+    # `security audit` Verify job, and pinned SHAs all still run on these PRs.
+    #
+    # Skipping the job rather than deleting the trigger is deliberate — GitHub
+    # records a conditionally skipped job as a completed, non-failing check, so
+    # a branch protection rule that requires `mergecraft review` is satisfied.
+    # Removing the PR from the workflow's trigger instead would leave the check
+    # never reported and block the PR permanently.
+    #
+    # Gate on the PR author, not github.actor: a maintainer rebase or an
+    # `@dependabot recreate` makes the human the actor on the resulting
+    # synchronize, while user.login stays dependabot[bot].
     if: >-
       always() &&
-      (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false)
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:

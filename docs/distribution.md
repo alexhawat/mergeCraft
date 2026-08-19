@@ -53,8 +53,18 @@ mergecraft --help
 
 ### GitHub Marketplace listing
 
+> **SCM scope:** mergeCraft 0.1.0 supports **GitHub** repositories only. GitLab support
+> is planned via the `ScmProvider` abstraction and will be documented when available.
+
 Marketplace is **not** automated by Craft. After the public GitHub release and
 Docker `:latest` promotion:
+
+> **Prerequisite — verify image attestations before listing.**
+> Run the `cosign verify` and `gh attestation verify` commands in
+> [CONTRIBUTING.md § Verify a published image](../CONTRIBUTING.md#verify-a-published-image)
+> against the release-tag digest. The signatures and attestations are produced by
+> the `sign-attest` job in `.github/workflows/ci-cd.yml`. Do **not** submit the
+> Marketplace listing until both verifications pass for the release tag.
 
 1. Open [GitHub Marketplace new action](https://github.com/marketplace/actions/new).
 2. Point at `alexhawat/mergeCraft` and the release tag (`v0.1.0`).
@@ -62,6 +72,7 @@ Docker `:latest` promotion:
 4. Categories: **Code review**, **Continuous integration**.
 5. Link docs: `docs/`, `REVIEW-CHECKS.md`, `docs/ANALYZERS.md`.
 6. Note BYOK / no SaaS backend in the listing description (see README positioning).
+7. Note GitHub-only SCM scope for 0.1.0 in the listing description.
 
 ### README assets
 

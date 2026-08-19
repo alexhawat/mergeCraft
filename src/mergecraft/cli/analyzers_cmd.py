@@ -17,6 +17,7 @@ from mergecraft.analyzers.lockfile import LockEntry, read_lock, write_lock
 from mergecraft.analyzers.provision import resolve_with_lock
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.analyzers.sarif import export_sarif
+from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
@@ -34,15 +35,11 @@ def _bail(msg: str) -> NoReturn:
     raise typer.Exit(1)
 
 
-def _repo_root(cwd: Path) -> Path:
-    return cwd.resolve()
-
-
-def _git_changed_files(repo_root: Path) -> list[str]:
+def _git_changed_files(target_dir: Path) -> list[str]:
     try:
         completed = subprocess.run(
             ["git", "diff", "--name-only", "HEAD"],
-            cwd=repo_root,
+            cwd=target_dir,
             capture_output=True,
             text=True,
             check=False,
@@ -63,12 +60,12 @@ def _manifest_by_id(analyzer_id: str) -> AnalyzerManifest:
 
 @app.command("list")
 def list_cmd(
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """List catalog analyzers and whether they would enable here."""
-    repo_root = _repo_root(cwd)
-    changed = _git_changed_files(repo_root) or ["."]
-    enabled = {m.id for m in detect_enabled(repo_root=repo_root, changed_files=changed)}
+    target_dir = resolve_target_dir(cwd)
+    changed = _git_changed_files(target_dir) or ["."]
+    enabled = {m.id for m in detect_enabled(repo_root=target_dir, changed_files=changed)}
     table = Table(title="Analyzer catalog")
     table.add_column("id")
     table.add_column("category")
@@ -83,15 +80,15 @@ def list_cmd(
 
 @app.command("detect")
 def detect_cmd(
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     files: list[str] = typer.Option(None, "--file", "-f", help="Changed paths (repeatable)."),
 ) -> None:
     """Show analyzers that would run for changed paths in this repo."""
-    repo_root = _repo_root(cwd)
-    changed = files or _git_changed_files(repo_root)
+    target_dir = resolve_target_dir(cwd)
+    changed = files or _git_changed_files(target_dir)
     if not changed:
         _bail("no changed files — pass --file or run inside a git repo with local changes")
-    enabled = detect_enabled(repo_root=repo_root, changed_files=changed)
+    enabled = detect_enabled(repo_root=target_dir, changed_files=changed)
     for manifest in enabled:
         console.print(f"{manifest.id} ({manifest.category}, {manifest.runtime})")
 
@@ -99,17 +96,17 @@ def detect_cmd(
 @app.command("run")
 def run_cmd(
     analyzer_id: str = typer.Argument(..., help="Catalog analyzer id."),
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     files: list[str] = typer.Option(None, "--file", "-f", help="Changed paths (repeatable)."),
 ) -> None:
     """Execute one analyzer against the working tree."""
-    repo_root = _repo_root(cwd)
-    changed = files or _git_changed_files(repo_root)
+    target_dir = resolve_target_dir(cwd)
+    changed = files or _git_changed_files(target_dir)
     if not changed:
         _bail("no changed files — pass --file or run inside a git repo with local changes")
     result = run_adapter(
         tool_id=analyzer_id,
-        repo_root=repo_root,
+        repo_root=target_dir,
         changed_files=changed,
         tier="trusted",
     )
@@ -146,7 +143,7 @@ def explain_cmd(analyzer_id: str = typer.Argument(..., help="Catalog analyzer id
 @app.command("export")
 def export_cmd(
     analyzer_id: str = typer.Argument(..., help="Catalog analyzer id."),
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     files: list[str] = typer.Option(None, "--file", "-f", help="Changed paths (repeatable)."),
     sarif: bool = typer.Option(False, "--sarif", help="Write SARIF 2.1.0 JSON to stdout."),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write SARIF to this file."),
@@ -154,13 +151,13 @@ def export_cmd(
     """Run one analyzer and export findings as SARIF."""
     if not sarif and output is None:
         _bail("pass --sarif or --output")
-    repo_root = _repo_root(cwd)
-    changed = files or _git_changed_files(repo_root)
+    target_dir = resolve_target_dir(cwd)
+    changed = files or _git_changed_files(target_dir)
     if not changed:
         _bail("no changed files — pass --file or run inside a git repo with local changes")
     result = run_adapter(
         tool_id=analyzer_id,
-        repo_root=repo_root,
+        repo_root=target_dir,
         changed_files=changed,
         tier="trusted",
     )
@@ -177,16 +174,16 @@ def export_cmd(
 
 @app.command("lock")
 def lock_cmd(
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     refresh: bool = typer.Option(False, "--refresh", help="Re-resolve managed binaries."),
 ) -> None:
     """Write or refresh ``.mergecraft/analyzers.lock`` for managed tools."""
     import platform
     import sys
 
-    repo_root = _repo_root(cwd)
-    lock_path = repo_root / ".mergecraft" / "analyzers.lock"
-    cache_dir = repo_root / ".mergecraft" / "analyzer-cache"
+    target_dir = resolve_target_dir(cwd)
+    lock_path = target_dir / ".mergecraft" / "analyzers.lock"
+    cache_dir = target_dir / ".mergecraft" / "analyzer-cache"
     machine = platform.machine().casefold()
     if sys.platform == "darwin":
         plat = "darwin-arm64" if machine in {"arm64", "aarch64"} else "darwin-amd64"

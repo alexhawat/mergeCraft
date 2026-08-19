@@ -61,11 +61,6 @@ def _clear_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
 # -- W1.4: shared helper returns a multi-provider shape --------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W3: shared helper exposes a multi-provider resolver "
-    "(dict of ProviderConfig keyed by provider id)",
-    strict=False,
-)
 def test_shared_helper_exposes_multi_provider_resolver() -> None:
     """The shared module exposes a callable returning a multi-provider shape.
 
@@ -94,10 +89,6 @@ def test_shared_helper_exposes_multi_provider_resolver() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W3: multi-provider resolver returns dict keyed by provider id",
-    strict=False,
-)
 def test_shared_multi_provider_resolver_handles_indexed_pairs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -123,10 +114,6 @@ def test_shared_multi_provider_resolver_handles_indexed_pairs(
     assert PROVIDER_2_ID in as_dict
 
 
-@pytest.mark.xfail(
-    reason="green after W3: multi-provider resolver preserves gaps (no renumbering)",
-    strict=False,
-)
 def test_shared_multi_provider_resolver_preserves_index_gaps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -151,10 +138,6 @@ def test_shared_multi_provider_resolver_preserves_index_gaps(
     assert PROVIDER_2_ID not in as_dict
 
 
-@pytest.mark.xfail(
-    reason="green after W3: partial indexed pair (only one half set) is dropped",
-    strict=False,
-)
 def test_shared_multi_provider_resolver_drops_partial_pairs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -171,10 +154,6 @@ def test_shared_multi_provider_resolver_drops_partial_pairs(
     assert PROVIDER_1_ID not in as_dict
 
 
-@pytest.mark.xfail(
-    reason="green after W3: singleton maps to 'default' when no indexed pair set",
-    strict=False,
-)
 def test_shared_multi_provider_resolver_singleton_maps_to_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -192,10 +171,6 @@ def test_shared_multi_provider_resolver_singleton_maps_to_default(
     assert PROVIDER_1_ID not in as_dict
 
 
-@pytest.mark.xfail(
-    reason="green after W3: when any indexed pair is set, the singleton is ignored",
-    strict=False,
-)
 def test_shared_multi_provider_resolver_indexed_overrides_singleton(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

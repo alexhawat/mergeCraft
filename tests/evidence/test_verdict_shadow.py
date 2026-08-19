@@ -388,7 +388,7 @@ def test_verdict_protocol_publish_records_only_in_shadow_mode() -> None:
     from mergecraft.mcp.verdict import VerdictDiagnostic
 
     result = _missing_verdict_result()
-    attrs, prediction = _verdict_protocol_publish(
+    publish = _verdict_protocol_publish(
         result=result,
         mode="Review",
         setup_reason="",
@@ -397,13 +397,14 @@ def test_verdict_protocol_publish_records_only_in_shadow_mode() -> None:
         final_summary_written=False,
         terminal_verdict="shadow",
     )
-    assert prediction is not None
-    assert _as_outcome(_prediction_outcome(prediction)) is RunOutcome.inconclusive
-    assert attrs.get("verdict.diagnostic") == (
+    assert publish.prediction is not None
+    assert _as_outcome(_prediction_outcome(publish.prediction)) is RunOutcome.inconclusive
+    assert publish.diagnostic is VerdictDiagnostic.provider_success_without_submission
+    assert publish.attrs.get("verdict.diagnostic") == (
         VerdictDiagnostic.provider_success_without_submission.value
     )
 
-    _enforce_attrs, enforce_prediction = _verdict_protocol_publish(
+    enforce_publish = _verdict_protocol_publish(
         result=result,
         mode="Review",
         setup_reason="",
@@ -412,4 +413,4 @@ def test_verdict_protocol_publish_records_only_in_shadow_mode() -> None:
         final_summary_written=False,
         terminal_verdict="enforce",
     )
-    assert enforce_prediction is None
+    assert enforce_publish.prediction is None

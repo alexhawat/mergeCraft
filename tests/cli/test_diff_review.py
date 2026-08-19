@@ -29,6 +29,23 @@ def test_cli_diff_review_help() -> None:
     assert "--dry-run" in out
 
 
+def test_cli_review_help_includes_examples() -> None:
+    result = runner.invoke(app, ["review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
+    assert result.exit_code == 0
+    out = _plain(result.stdout)
+    assert "No flags are required" in out
+    assert "mergecraft review --dry-run" in out
+    assert "mergecraft review --base origin/main" in out
+    assert "mergecraft review --cwd ../feature-wt --base origin/main" in out
+    assert "mergecraft review --head HEAD --base origin/pre-0.0.1" in out
+    assert "mergecraft review --repo owner/repo --head pull/42/head --base main" in out
+    assert "gh pr checkout 42" in out
+    assert "gh pr diff 42 > /tmp/pr-42.diff" in out
+    assert "mergecraft review --diff /tmp/pr-42.diff" in out
+    assert "--head" in out
+    assert "pull/42/head" in out
+
+
 def test_cli_help_lists_review() -> None:
     result = runner.invoke(app, ["--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0
