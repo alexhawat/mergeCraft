@@ -313,37 +313,61 @@ def _confirmed_findings_from_state(state: Any) -> list[Any]:
     return collected
 
 
-def _has_unverified_blocking_analyzer_finding(state: Any) -> bool:
-    """Whether a blocking analyzer finding exists that nobody verified (D12, #263).
+def _blocks_approve(state: Any) -> bool:
+    """Whether any finding this run knows about must prevent an ``approve`` (D12, #263).
 
-    ``_confirmed_findings_from_state`` only surfaces analyzer findings whose
-    fingerprint is in ``verified_ids``, so an analyzer Critical the agent never
-    dispatched a verifier for is invisible to the confirmed-blocker gate. The
-    causality policy is applied to each candidate *before* the severity test,
-    matching the confirmed walk: a pre-existing Critical is downgraded and must
-    not reject an approve.
+    One walk over both populations, because the rejection is the same either way:
+
+    - A **confirmed** finding — one the agent's own verifier confirmed, or an
+      agent-authored finding it recorded — blocks on severity alone. The agent
+      asserted the finding itself, so provenance adds nothing.
+    - An **unverified analyzer** finding blocks only when it is attributed to
+      this PR (``introduced_by_pr == "true"``). Under the default
+      ``base_comparison: "diff"`` no base run happens, so every diff-scoped
+      finding stays ``"unknown"``; treating those as blockers made a single ruff
+      error close the approve path for the rest of the run with no valve the
+      agent could reach.
+
+    Withdrawn fingerprints are excluded outright — that is the ``drop`` valve.
+    The causality policy runs before the severity test, so a finding known to
+    pre-date the PR is downgraded rather than blocking.
     """
     from mergecraft.agents.gates import BLOCKING_SEVERITIES
     from mergecraft.findings.causality import apply_causality_policy
 
     tool_state = getattr(state, "tool_state", None)
+    withdrawn: set[str] = set(getattr(state, "withdrawn_fingerprints", None) or set())
+
+    for finding in _confirmed_findings_from_state(state):
+        if _finding_fingerprint(finding) in withdrawn:
+            continue
+        if apply_causality_policy(finding).severity in BLOCKING_SEVERITIES:
+            return True
+
     analyzer_run = getattr(state, "analyzer_run", None)
     if analyzer_run is None and tool_state is not None:
         analyzer_run = getattr(tool_state, "analyzer_run", None)
     if analyzer_run is None:
         return False
 
-    excluded: set[str] = set(getattr(analyzer_run, "verified_ids", None) or set())
+    verified: set[str] = set(getattr(analyzer_run, "verified_ids", None) or set())
     if tool_state is not None:
-        excluded |= set(getattr(tool_state, "verified_ids", None) or set())
-    excluded |= set(getattr(state, "withdrawn_fingerprints", None) or set())
+        verified |= set(getattr(tool_state, "verified_ids", None) or set())
 
     for item in getattr(analyzer_run, "findings", None) or []:
         fingerprint = _finding_fingerprint(item)
-        if fingerprint and fingerprint in excluded:
+        if fingerprint and (fingerprint in verified or fingerprint in withdrawn):
             continue
         finding = _coerce_confirmed_finding(item)
         if finding is None:
+            # A row the gate cannot grade is treated as a blocker: approving
+            # over a finding nobody could read is the fail-open branch.
+            logger.warning(
+                "analyzer finding {} could not be graded; blocking approve",
+                fingerprint or "<no fingerprint>",
+            )
+            return True
+        if finding.introduced_by_pr != "true":
             continue
         if apply_causality_policy(finding).severity in BLOCKING_SEVERITIES:
             return True
@@ -357,7 +381,36 @@ def _static_checks_from_state(state: Any) -> list[dict[str, str]]:
     return []
 
 
-def validation_state_from_tool_state(tool_state: Any) -> Any:
+def _withdrawn_fingerprints_for_state(tool_state: Any, *, tmpdir: str | None) -> set[str]:
+    """Read the withdrawn-findings memory a ``drop`` writes to.
+
+    ``record_finding_verdict(drop)`` records the refutation in the learnings
+    file, so the file — read through the same parser analyzer suppression uses —
+    is the only place the drop valve is visible to the approve gate. The default
+    tmpdir path is resolved the same way the writer resolves it, or the valve is
+    invisible whenever the run never set an explicit learnings path.
+    """
+    from mergecraft.analyzers.scope import withdrawn_fingerprints
+    from mergecraft.utils.learnings import learnings_file_path
+
+    candidates: list[str] = [
+        raw
+        for attr in ("learnings_file_path", "xrepo_learnings_file_path")
+        if (raw := getattr(tool_state, attr, None))
+    ]
+    if not candidates and tmpdir:
+        candidates.append(learnings_file_path(tmpdir))
+
+    collected: set[str] = set(getattr(tool_state, "withdrawn_fingerprints", None) or set())
+    for raw in candidates:
+        path = Path(raw)
+        if not path.is_file():
+            continue
+        collected |= set(withdrawn_fingerprints(path.read_text(encoding="utf-8")))
+    return collected
+
+
+def validation_state_from_tool_state(tool_state: Any, *, tmpdir: str | None = None) -> Any:
     """Build the duck-typed consultation object ``validate_submission`` reads."""
     from types import SimpleNamespace
 
@@ -366,7 +419,7 @@ def validation_state_from_tool_state(tool_state: Any) -> Any:
         terminal_submission_conflict=tool_state.terminal_submission_conflict,
         confirmed_findings=[],
         static_checks=[dict(row) for row in tool_state.static_checks if isinstance(row, dict)],
-        withdrawn_fingerprints=set(),
+        withdrawn_fingerprints=_withdrawn_fingerprints_for_state(tool_state, tmpdir=tmpdir),
         tool_state=tool_state,
         analyzer_run=getattr(tool_state, "analyzer_run", None),
     )
@@ -376,7 +429,7 @@ def validation_state_from_tool_state(tool_state: Any) -> Any:
 
 def validation_state_from_tool_context(ctx: ToolContext) -> Any:
     """Build the consultation object from a live ``ToolContext``."""
-    return validation_state_from_tool_state(ctx.tool_state)
+    return validation_state_from_tool_state(ctx.tool_state, tmpdir=ctx.tmpdir)
 
 
 def validate_submission(submission: dict[str, Any], *, state: Any) -> SubmissionValidation:
@@ -430,20 +483,9 @@ def validate_submission(submission: dict[str, Any], *, state: Any) -> Submission
         )
 
     if verdict == "approve":
-        from mergecraft.agents.gates import BLOCKING_SEVERITIES, has_failed_required_static_check
-        from mergecraft.analyzers.finding import Finding
-        from mergecraft.findings.causality import apply_causality_policy
+        from mergecraft.agents.gates import has_failed_required_static_check
 
-        for finding in _confirmed_findings_from_state(state):
-            if not isinstance(finding, Finding):
-                continue
-            adjusted = apply_causality_policy(finding)
-            if adjusted.severity in BLOCKING_SEVERITIES:
-                return SubmissionValidation(
-                    accepted=False,
-                    rejection_reason=REJECTION_APPROVE_CONFIRMED_BLOCKER,
-                )
-        if _has_unverified_blocking_analyzer_finding(state):
+        if _blocks_approve(state):
             return SubmissionValidation(
                 accepted=False,
                 rejection_reason=REJECTION_APPROVE_CONFIRMED_BLOCKER,

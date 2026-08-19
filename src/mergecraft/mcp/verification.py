@@ -127,6 +127,33 @@ def _persist_confirmed_fingerprint(
         ctx.tool_state.confirmed_findings.append(row)
 
 
+def _apply_non_blocking_downgrade(
+    ctx: ToolContext,
+    fingerprint: str,
+    *,
+    severity: str,
+) -> None:
+    """Record a downgrade to a non-blocking severity on every row that carries it.
+
+    Dropping the fingerprint from ``verified_ids`` is not enough: the originating
+    ``analyzer_run`` row keeps its Critical/Major severity, so the approve gate
+    sees it again as an unverified blocker and the downgrade leaves the run worse
+    off than doing nothing. The stored severity is rewritten instead.
+    """
+    ctx.tool_state.verified_ids.discard(fingerprint)
+    if ctx.tool_state.analyzer_run is not None:
+        ctx.tool_state.analyzer_run.verified_ids.discard(fingerprint)
+        for row in ctx.tool_state.analyzer_run.findings:
+            if isinstance(row, dict) and row.get("fingerprint") == fingerprint:
+                row["severity"] = severity
+    for row in ctx.tool_state.agent_findings:
+        if row.get("fingerprint") == fingerprint:
+            row["severity"] = severity
+    ctx.tool_state.confirmed_findings = [
+        row for row in ctx.tool_state.confirmed_findings if row.get("fingerprint") != fingerprint
+    ]
+
+
 def _finding_row_for_fingerprint(ctx: ToolContext, fingerprint: str) -> dict[str, Any] | None:
     run = ctx.tool_state.analyzer_run
     if run is not None:
@@ -411,6 +438,7 @@ def record_finding_verdict_tool(ctx: ToolContext):
         )
         if outcome.recorded_withdrawn:
             ctx.tool_state.was_updated = True
+            ctx.tool_state.withdrawn_fingerprints.add(outcome.fingerprint)
         if outcome.verdict == "confirm" and outcome.publishable:
             _validate_publication_finding(
                 ctx,
@@ -433,14 +461,11 @@ def record_finding_verdict_tool(ctx: ToolContext):
                     severity=new_severity,
                 )
             else:
-                ctx.tool_state.verified_ids.discard(outcome.fingerprint)
-                if ctx.tool_state.analyzer_run is not None:
-                    ctx.tool_state.analyzer_run.verified_ids.discard(outcome.fingerprint)
-                ctx.tool_state.confirmed_findings = [
-                    row
-                    for row in ctx.tool_state.confirmed_findings
-                    if row.get("fingerprint") != outcome.fingerprint
-                ]
+                _apply_non_blocking_downgrade(
+                    ctx,
+                    outcome.fingerprint,
+                    severity=new_severity or "Minor",
+                )
         return {
             "recorded": True,
             "fingerprint": outcome.fingerprint,

@@ -294,6 +294,11 @@ class ToolState:
     # Session-scoped verifier confirms. ``run_analyzers`` replaces
     # ``analyzer_run`` wholesale, so confirmations must not live only there.
     verified_ids: set[str] = field(default_factory=set)
+    # Fingerprints a verifier ``drop`` retired during this run. The refutation is
+    # also written to the learnings file, but only canonical fingerprints survive
+    # that round trip, so the live set is what makes the drop valve reliable
+    # within the run.
+    withdrawn_fingerprints: set[str] = field(default_factory=set)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
     agent_findings: list[dict[str, Any]] = field(default_factory=list)
     # Evidence normalised from the consumer's finished CI (#36). ``None`` until
