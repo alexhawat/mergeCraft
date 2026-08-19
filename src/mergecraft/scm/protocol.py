@@ -41,6 +41,7 @@ _GITHUB_REST_OPERATIONS: frozenset[str] = frozenset(
         "list_check_runs_for_ref",
         "list_workflow_run_artifacts",
         "download_artifact_zip",
+        "download_workflow_run_logs",
         "graphql",
         "get",
         "post",
@@ -242,6 +243,7 @@ class ScmProvider(Protocol):
         self, owner: str, repo: str, run_id: int
     ) -> list[dict[str, Any]]: ...
     async def download_artifact_zip(self, owner: str, repo: str, artifact_id: int) -> bytes: ...
+    async def download_workflow_run_logs(self, owner: str, repo: str, run_id: int) -> bytes: ...
 
     # MCP-level aliases (tool names differ from REST helpers).
     async def get_pull_request(self, owner: str, repo: str, pull_number: int) -> dict[str, Any]: ...

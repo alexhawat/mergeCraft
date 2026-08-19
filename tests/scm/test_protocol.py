@@ -68,6 +68,7 @@ _GITHUB_REST_OPERATIONS: frozenset[str] = frozenset(
         "list_check_runs_for_ref",
         "list_workflow_run_artifacts",
         "download_artifact_zip",
+        "download_workflow_run_logs",
         "graphql",
     }
 )
@@ -88,9 +89,7 @@ _GITHUB_MCP_READ_TOOLS: frozenset[str] = frozenset(
 # protocol methods (declare, don't fake).
 _MCP_TOOL_REQUIRED_OPS: dict[str, frozenset[str]] = {
     "get_issue_events": frozenset({"get"}),
-    "get_check_suite_logs": frozenset(
-        {"get", "list_workflow_run_artifacts", "download_artifact_zip"}
-    ),
+    "get_check_suite_logs": frozenset({"get", "download_workflow_run_logs"}),
     "get_review_comments": frozenset({"graphql"}),
     "checkout_pr": frozenset({"get_pull", "list_reviews", "get"}),
 }
