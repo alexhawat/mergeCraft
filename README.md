@@ -129,6 +129,8 @@ into a comment changes nothing. Details:
 > **Without Python 3.14**, use the [Docker Action](#example-1--auto-review-every-pr)
 > (`alexhawat/mergeCraft@…`) — the container image ships a compatible runtime; no
 > local Python install needed ([`docs/distribution.md`](docs/distribution.md)).
+> **SCM:** mergeCraft 0.1.0 supports **GitHub** repositories only. GitLab support is
+> planned via the `ScmProvider` abstraction.
 
 **1. Install and scaffold** (in the repo you want reviewed):
 

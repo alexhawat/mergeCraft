@@ -53,6 +53,9 @@ mergecraft --help
 
 ### GitHub Marketplace listing
 
+> **SCM scope:** mergeCraft 0.1.0 supports **GitHub** repositories only. GitLab support
+> is planned via the `ScmProvider` abstraction and will be documented when available.
+
 Marketplace is **not** automated by Craft. After the public GitHub release and
 Docker `:latest` promotion:
 
@@ -62,6 +65,7 @@ Docker `:latest` promotion:
 4. Categories: **Code review**, **Continuous integration**.
 5. Link docs: `docs/`, `REVIEW-CHECKS.md`, `docs/ANALYZERS.md`.
 6. Note BYOK / no SaaS backend in the listing description (see README positioning).
+7. Note GitHub-only SCM scope for 0.1.0 in the listing description.
 
 ### README assets
 
