@@ -397,10 +397,6 @@ def test_record_pid_reaped_deadline_is_independent_of_wait_or_kill_timeout() -> 
 
 
 @pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups are POSIX-only")
-@pytest.mark.xfail(
-    reason="green after W3: #277 wait for pid_file before kill clock",
-    strict=False,
-)
 def test_setup_script_grandchildren_are_reaped(tmp_path: Path) -> None:
     """F6 + convention 9 — a setup script that backgrounds a child must not
     leak that child when the script itself is killed.
@@ -412,11 +408,9 @@ def test_setup_script_grandchildren_are_reaped(tmp_path: Path) -> None:
     The script writes the grandchild PID to a file so we can probe ``os.kill``
     on it directly after the timeout.
 
-    #277 pin: the readiness file is delayed past ``wait_or_kill(..., timeout=0.5)``
-    so starting the kill clock before ``_wait_until_exists(pid_file)`` fails
-    deterministically (the old ordering passed in isolation and flaked under
-    xdist). W3 must wait for ``pid_file`` *before* ``wait_or_kill``; do not
-    mock ``kill_process_group``.
+    #277 / D12: wait for ``pid_file`` with an independent deadline *before*
+    starting the kill clock so xdist scheduling variance cannot cause the
+    readiness poll to race the 0.5s ``wait_or_kill`` timeout.
     """
     from mergecraft.utils.process_group import wait_or_kill_process_group
 
@@ -425,8 +419,6 @@ def test_setup_script_grandchildren_are_reaped(tmp_path: Path) -> None:
     cli.write_text(
         "#!/bin/bash\n"
         "sleep 300 </dev/null >/dev/null 2>&1 &\n"
-        # Hold the readiness file so a 0.5s kill clock cannot double as the
-        # spawn window (#277 / D12). W3 waits for pid_file before kill.
         "sleep 1\n"
         f"echo $! > {pid_file}\n"
         "exec 1>&- 2>&-\n"
@@ -442,10 +434,17 @@ def test_setup_script_grandchildren_are_reaped(tmp_path: Path) -> None:
         start_new_session=True,
     )
     try:
+        # Wait for pid_file BEFORE starting the kill clock (#277 / D12).
+        # The independent 5s deadline must not share the 0.5s wait_or_kill
+        # timeout — this is the timing-assertion fix that makes the test
+        # deterministic under xdist.
+        assert _wait_until_exists(pid_file, timeout_s=5.0), (
+            "setup script never wrote its grandchild pid within 5s"
+        )
+        grandchild = int(pid_file.read_text(encoding="utf-8").strip())
+        # Kill clock starts only after the readiness file is confirmed.
         with pytest.raises(subprocess.TimeoutExpired):
             wait_or_kill_process_group(proc, timeout=0.5)
-        assert pid_file.exists(), "setup script never wrote its grandchild pid"
-        grandchild = int(pid_file.read_text().strip())
         assert _record_pid_reaped(grandchild, deadline_s=5.0), (
             f"grandchild pid {grandchild} survived the timeout kill — "
             f"the kill path reached the session leader but not the group"
