@@ -59,9 +59,8 @@ class ToolContext:
     """Runtime context for MCP tools and the review harness.
 
     Production code must use :attr:`scm` (:class:`~mergecraft.scm.protocol.ScmProvider`).
-    The ``github`` attribute is an **interim test/harness seam** only — read via
-    :meth:`__getattr__` and set via :meth:`__setattr__` so tests can assign
-    ``ctx.github = fake_client`` without touching production call sites.
+    Tests may pass ``github=`` at construction or bind a client via
+    ``tests.support.tool_context.bind_github_client``.
     """
 
     agent_id: AgentId
@@ -185,25 +184,3 @@ class ToolContext:
         self.resolved_model = resolved_model
         self.suggest_eval_add = suggest_eval_add
         self.budget_tracker = budget_tracker
-
-    def __getattr__(self, name: str) -> Any:
-        """Interim test/harness seam — expose ``GitHubClient`` when ``scm`` is GitHub-backed."""
-        if name == "github":
-            from mergecraft.scm.github import GitHubScmAdapter
-
-            scm = object.__getattribute__(self, "scm")
-            if isinstance(scm, GitHubScmAdapter):
-                return scm.client
-            msg = "ToolContext.scm is not a GitHub adapter"
-            raise AttributeError(msg)
-        msg = f"{type(self).__name__!s} has no attribute {name!r}"
-        raise AttributeError(msg)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        """Interim test/harness seam — ``ctx.github = client`` wraps ``scm`` in ``GitHubScmAdapter``."""
-        if name == "github":
-            from mergecraft.scm.github import GitHubScmAdapter
-
-            object.__setattr__(self, "scm", GitHubScmAdapter(value))
-            return
-        object.__setattr__(self, name, value)

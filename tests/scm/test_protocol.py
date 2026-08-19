@@ -278,9 +278,11 @@ def test_no_github_specific_type_leaks_into_core() -> None:
 async def test_review_publication_goes_through_the_protocol(tmp_path: Path) -> None:
     """Validated terminal submissions publish via the SCM provider, not ctx.github."""
     require_scm()
+    from tests.scm.support import RecordingScmProvider
+
     from mergecraft.mcp.review import publish_pull_request_review
     from mergecraft.mcp.tool_state import TerminalSubmission, primary_repo_state
-    from mergecraft.scm.protocol import RecordingScmProvider, resolve_scm_provider
+    from mergecraft.scm.protocol import resolve_scm_provider
 
     recording = RecordingScmProvider()
     ctx = tool_ctx(tmp_path)
@@ -309,8 +311,9 @@ async def test_review_publication_goes_through_the_protocol(tmp_path: Path) -> N
 def test_checkout_and_diff_semantics_are_preserved() -> None:
     """Checkout + incremental diff semantics survive the protocol extraction."""
     require_scm()
+    from tests.scm.support import InMemoryScmProvider
+
     from mergecraft.scm.checkout import checkout_pull_request
-    from mergecraft.scm.protocol import InMemoryScmProvider
 
     provider = InMemoryScmProvider(
         reviews=[

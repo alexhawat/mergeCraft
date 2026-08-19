@@ -22,6 +22,7 @@ import mergecraft.mcp.git as git_mod
 from mergecraft.mcp.server import build_orchestrator_tools
 from tests.security.conftest import PUSH_MODES, SHELL_MODES
 from tests.support.run_main_harness import FakeGitHubClient
+from tests.support.tool_context import github_client_from_ctx
 
 CELL_IDS = [f"shell-{s}__push-{p}" for s in SHELL_MODES for p in PUSH_MODES]
 CELLS = [(s, p) for s in SHELL_MODES for p in PUSH_MODES]
@@ -181,7 +182,7 @@ async def test_commit_changes_does_not_mutate_remote_ref_when_push_disabled(
     tools = {t.name: t for t in build_orchestrator_tools(ctx)}
     commit = tools["commit_changes"]
     await commit.execute({"message": "attempt remote mutation"})
-    github: FakeGitHubClient = ctx.github  # type: ignore[assignment]
+    github: FakeGitHubClient = github_client_from_ctx(ctx)  # type: ignore[assignment]
     ref_mutations = [c for c in github.calls if c[0] == "patch" and "git/refs" in str(c[1])]
     assert not ref_mutations, f"API ref mutation attempted under push=disabled: {ref_mutations}"
 
@@ -200,7 +201,7 @@ async def test_commit_changes_does_not_mutate_default_branch_when_restricted(
     primary_repo_state(ctx.tool_state).default_branch = "main"
     tools = {t.name: t for t in build_orchestrator_tools(ctx)}
     await tools["commit_changes"].execute({"message": "attempt default-branch mutation"})
-    github: FakeGitHubClient = ctx.github  # type: ignore[assignment]
+    github: FakeGitHubClient = github_client_from_ctx(ctx)  # type: ignore[assignment]
     ref_mutations = [c for c in github.calls if c[0] == "patch" and "git/refs" in str(c[1])]
     assert not ref_mutations, (
         f"API ref mutation on default branch attempted under push=restricted: {ref_mutations}"

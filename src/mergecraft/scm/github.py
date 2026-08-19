@@ -218,6 +218,9 @@ class GitHubScmAdapter:
     async def download_artifact_zip(self, owner: str, repo: str, artifact_id: int) -> bytes:
         return await self._client.download_artifact_zip(owner, repo, artifact_id)
 
+    async def download_workflow_run_logs(self, owner: str, repo: str, run_id: int) -> bytes:
+        return await self._client.download_workflow_run_logs(owner, repo, run_id)
+
     # MCP aliases -----------------------------------------------------------
 
     async def get_pull_request(self, owner: str, repo: str, pull_number: int) -> dict[str, Any]:

@@ -28,6 +28,7 @@ from mergecraft.mcp.context import (
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
+from tests.support.tool_context import bind_github_client
 
 _PHASES: tuple[str, ...] = (
     "INIT",
@@ -185,7 +186,7 @@ async def test_create_pull_request_review_before_scope_is_rejected(tmp_path: Pat
 
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path)
-    ctx.github = github
+    bind_github_client(ctx, github)
     assert ctx.tool_state.selected_mode == "Review"
     assert str(getattr(ctx.tool_state, "review_phase", "INIT")) == "INIT"
 
@@ -219,7 +220,7 @@ async def test_phase_reaches_the_trace(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
     clone, head = _pr_clone(tmp_path)
     ctx = _ctx(tmp_path, repo_dir=clone)
-    ctx.github = _StubGitHub(head_sha=head)
+    bind_github_client(ctx, _StubGitHub(head_sha=head))
 
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="vp4-phase", run_id="vp4-phase-run")
