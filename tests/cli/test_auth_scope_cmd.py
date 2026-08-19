@@ -110,11 +110,32 @@ def _load_auth_cmd() -> Any:
         pytest.fail(f"mergecraft.cli.auth_cmd not importable: {exc}")
 
 
+# Every credential validator this suite must neutralise. Named explicitly so a
+# rename cannot turn the discovery loop below into a silent no-op that lets the
+# whole suite start making real HTTP calls (T2).
+EXPECTED_VALIDATORS = frozenset(
+    {
+        "_validate_gemini_api_key",
+        "_validate_cursor_api_key",
+        "_validate_openai_compatible_key",
+        "_validate_nous_api_key",
+        "_validate_minimax_api_key",
+        "_validate_logfire_token",
+    }
+)
+
+
 def _stub_validators(module: Any, monkeypatch: MonkeyPatch) -> None:
     """Make every ``_validate_*`` helper accept, so no test reaches the network."""
-    for name in dir(module):
-        if name.startswith("_validate_"):
-            monkeypatch.setattr(module, name, lambda *_a, **_kw: True)
+    stubbed = {name for name in dir(module) if name.startswith("_validate_")}
+    missing = EXPECTED_VALIDATORS - stubbed
+    assert not missing, (
+        f"{sorted(missing)} no longer exist on mergecraft.cli.auth_cmd — this helper would "
+        "stop stubbing them and the suite would make real network calls. Update "
+        "EXPECTED_VALIDATORS deliberately."
+    )
+    for name in stubbed:
+        monkeypatch.setattr(module, name, lambda *_a, **_kw: True)
 
 
 class GhRecorder:
@@ -598,21 +619,124 @@ def test_local_env_line_survives_shell_sourcing(tmp_path: Path, monkeypatch: Mon
     assert json.loads(sourced.stdout) == json.loads(PRETTY_CODEX_PAYLOAD)
 
 
-def test_write_env_value_defaults_to_unquoted(tmp_path: Path) -> None:
-    """``_write_env_value``'s default stays ``never`` for pre-#221 callers.
+def test_write_env_value_derives_quoting_from_the_value(tmp_path: Path) -> None:
+    """Quoting follows the value's word-safety; it is not a caller's choice.
 
-    W24 made quoting opt-in precisely so ``auth logfire``'s two writes stayed
-    byte-identical; that default is load-bearing, and flipping it to
-    ``"always"`` would be invisible to every ``dotenv``-based assertion.
-    Pinned both ways: the declared default in the signature, and the bytes a
-    default-mode write actually produces.
+    Before, ``quote_mode`` was a parameter defaulting to ``"never"``, so
+    persisting a value with spaces or braces was correct only if the caller
+    remembered to pass ``"always"`` — a per-call decision that the value itself
+    already determines. Pinned both ways: a shell-word-safe value stays
+    unquoted (the byte-identical shape ``auth logfire``'s writes have always
+    had), and a value that would not survive ``source .env`` is quoted.
     """
     module = _load_auth_cmd()
-    assert inspect.signature(module._write_env_value).parameters["quote_mode"].default == "never"
+    assert "quote_mode" not in inspect.signature(module._write_env_value).parameters
 
     env_path = tmp_path / ".env"
     assert module._write_env_value(env_path, "MERGECRAFT_QUOTE_DEFAULT", "plain-token") is True
     assert _env_lines(env_path) == ["MERGECRAFT_QUOTE_DEFAULT=plain-token"]
+
+    json_path = tmp_path / "json.env"
+    payload = '{"tokens": {"access_token": "x"}}'
+    assert module._write_env_value(json_path, "MERGECRAFT_QUOTE_JSON", payload) is True
+    assert _env_lines(json_path) == [f"MERGECRAFT_QUOTE_JSON='{payload}'"]
+
+
+# ── M7: credential files are not world-readable ─────────────────────────────
+
+
+def _mode(path: Path) -> int:
+    return path.stat().st_mode & 0o777
+
+
+@pytest.mark.parametrize(("provider", "env_key"), PROVIDERS)
+def test_local_write_restricts_env_permissions(
+    provider: str, env_key: str, tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A ``.env`` holding a credential must not be group/world readable.
+
+    ``dotenv.set_key`` creates a *new* file at 0600, so a fresh install is
+    already safe — but ``_local_env_path``'s own documented starting point is
+    ``cp .env.example .env``, and ``cp`` yields 0644 under the usual umask,
+    which ``set_key`` preserves when it rewrites in place. This is the first
+    path that writes OAuth JSON and provider API keys to disk outside a
+    tmpdir, so the mode is asserted rather than inherited.
+    """
+    module = _load_auth_cmd()
+    _arrange_provider(provider, module, monkeypatch)
+    gh = GhRecorder()
+    gh.install(module, monkeypatch)
+    env_path = _pin_env_path(tmp_path, monkeypatch, precreate=True)
+    env_path.chmod(0o644)
+
+    result = runner.invoke(app, ["auth", provider, "--scope", "local"])
+
+    assert result.exit_code == 0, _flat(result)
+    assert _read_back(env_path, env_key) is not None
+    assert _mode(env_path) == 0o600, oct(_mode(env_path))
+
+
+def test_write_env_value_restricts_permissions_on_a_preexisting_file(tmp_path: Path) -> None:
+    """The helper itself tightens the mode, so every caller inherits the fix."""
+    module = _load_auth_cmd()
+    env_path = tmp_path / ".env"
+    env_path.write_text("EXISTING=1\n", encoding="utf-8")
+    env_path.chmod(0o644)
+
+    assert module._write_env_value(env_path, "MERGECRAFT_MODE_PIN", "value") is True
+    assert _mode(env_path) == 0o600, oct(_mode(env_path))
+
+
+# ── L9: the .env fallback resolves the repo root, or fails loudly ────────────
+
+
+def _git_repo(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    (root / "src" / "deep").mkdir(parents=True)
+    _REAL_SUBPROCESS_RUN(
+        ["git", "init", "--quiet", str(root)], check=True, capture_output=True, text=True
+    )
+    return root
+
+
+def test_local_env_path_resolves_the_repo_root_from_a_subdirectory(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Running ``auth`` from a subdirectory must not write a stray nested ``.env``.
+
+    ``Path.cwd() / ".env"`` silently produced ``src/deep/.env``, which nothing
+    reads — the operator sees a success message and the credential is
+    unreachable. W24 widened this to seven more credentials.
+    """
+    module = _load_auth_cmd()
+    root = _git_repo(tmp_path)
+    monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    monkeypatch.chdir(root / "src" / "deep")
+
+    assert module._local_env_path() == (root / ".env").resolve()
+
+
+def test_local_env_path_bails_outside_a_git_repository(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """With no repo root to anchor to, fail loudly instead of guessing ``cwd``."""
+    module = _load_auth_cmd()
+    outside = tmp_path / "not-a-repo"
+    outside.mkdir()
+    monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    monkeypatch.chdir(outside)
+
+    with pytest.raises(module.typer.Exit):
+        module._local_env_path()
+
+
+def test_configured_env_path_still_wins(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """``MERGECRAFT_ENV`` overrides the repo-root resolution, as before."""
+    module = _load_auth_cmd()
+    pinned = tmp_path / "pinned.env"
+    monkeypatch.setenv("MERGECRAFT_ENV", str(pinned))
+
+    assert module._local_env_path() == pinned.resolve()
 
 
 # ── structural / collection smoke (green today) ─────────────────────────────
