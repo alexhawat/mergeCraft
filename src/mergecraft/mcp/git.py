@@ -240,7 +240,7 @@ def git_tool(ctx: ToolContext):
         _reject_config_flags(args)
         # Read-only allowlist: replace the old format-only _SUBCOMMAND_RE (#257 / D7).
         if not command or command not in _READONLY_SUBCOMMANDS:
-            msg = f"invalid git subcommand: {command!r}"
+            msg = f"invalid git subcommand: {command!r} — not available through this tool (read-only allowlist)"
             raise ValueError(msg)
         # 'branch' is on the allowlist for read-only use; reject mutation flags.
         if command == "branch" and any(a in {"-D", "-d", "-m"} for a in args):
