@@ -23,12 +23,12 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-from loguru import logger
 from tests.tracing.instrumentation.conftest import (
     make_agent_result,
     make_agent_usage,
 )
+
+from mergecraft.utils.log import logger
 
 
 class _RaisingSink:
@@ -65,7 +65,7 @@ def _drive_chain_with_raising_sink(results: list[Any]) -> tuple[Any, Any]:
     # ``MultiSink`` constructor — until W4 lands, the swap is a no-op
     # and the test will be xfail.
     from mergecraft.tracing import sink_factory
-    from mergecraft.tracing.sinks import MultiSink
+    from mergecraft.tracing.sinks import _PENDING_SINK, MultiSink
 
     real_multi = MultiSink
 
@@ -81,13 +81,18 @@ def _drive_chain_with_raising_sink(results: list[Any]) -> tuple[Any, Any]:
         return next(iterator)
 
     try:
+        # ``sink_factory`` stashes the resolved sink on a ContextVar that
+        # ``asyncio.run`` copies. A leftover from ``captured_sink`` (or any
+        # sibling ``sink_factory`` call) would make ``claim_sink`` skip the
+        # patched ``MultiSink``. Drop the handoff in this context first.
+        _PENDING_SINK.set(None)
         outcome = asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
     finally:
         sink_factory.__globals__["MultiSink"] = real_multi  # type: ignore[attr-defined]
+        _PENDING_SINK.set(None)
     return outcome, raising_sink
 
 
-@pytest.mark.xfail(reason="green after W4: best-effort emit failure handling", strict=False)
 def test_emit_failure_never_fails_the_run() -> None:
     """W3.8 — a sink that raises on every write is swallowed.
 
@@ -108,26 +113,25 @@ def test_emit_failure_never_fails_the_run() -> None:
     assert raising_sink.write_calls >= 1, "raising sink was never invoked — emit path not exercised"
 
 
-@pytest.mark.xfail(reason="green after W4: best-effort emit failure handling", strict=False)
 def test_emit_failure_logs_a_warning() -> None:
     """W3.8 (error logging) — sink failures are logged at ``logger.warning``.
 
-    Captures loguru's warning stream during the run and asserts at least
-    one warning carries the failure signature.
+    A dedicated ``logger.add`` sink is used because loguru binds ``sys.stderr``
+    at configure time; ``capsys`` misses warnings after an earlier test has
+    already configured logging.
     """
+    results = [make_agent_result(success=True, usage=make_agent_usage())]
     messages: list[str] = []
     sink_id = logger.add(
         lambda record: messages.append(record.record["message"]),
         level="WARNING",
     )
     try:
-        results = [make_agent_result(success=True, usage=make_agent_usage())]
         _drive_chain_with_raising_sink(results)
     finally:
         logger.remove(sink_id)
-
     assert any("trace sink" in message for message in messages), (
-        f"expected a warning naming the trace sink; got: {messages}"
+        f"expected a warning naming the trace sink; got: {messages!r}"
     )
 
 

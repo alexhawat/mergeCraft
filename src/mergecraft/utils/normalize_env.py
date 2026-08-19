@@ -15,7 +15,7 @@ def normalize_env(environ: dict[str, str] | None = None) -> None:
     When ``environ`` is ``None``, mutates ``os.environ``. Conflicts across
     differently-cased keys keep the uppercase value (or the first seen).
     """
-    env: dict[str, str] = os.environ if environ is None else environ  # type: ignore[assignment]
+    env: dict[str, str] = os.environ if environ is None else environ  # type: ignore[assignment]  # — os.environ is Environ[str]; compatible with dict[str, str] for read/write mutation
 
     upper_keys: dict[str, list[str]] = {}
     for key in list(env.keys()):

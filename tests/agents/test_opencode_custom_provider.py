@@ -171,10 +171,6 @@ INDEXED_API_KEY_FMT = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{n}"
 INDEXED_BASE_URL_FMT = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_{n}"
 
 
-@pytest.mark.xfail(
-    reason="green after W3: indexed env-var pairs populate a dict[str, ProviderConfig]",
-    strict=False,
-)
 def test_opencode_emits_provider_blocks_for_each_indexed_pair(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -196,10 +192,6 @@ def test_opencode_emits_provider_blocks_for_each_indexed_pair(
     assert "provider_2" in config["enabled_providers"]
 
 
-@pytest.mark.xfail(
-    reason="green after W3: helper enumerates all indices, no gap-renumbering",
-    strict=False,
-)
 def test_opencode_emits_blocks_for_non_contiguous_indices(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -220,10 +212,6 @@ def test_opencode_emits_blocks_for_non_contiguous_indices(
     assert "provider_2" not in provider
 
 
-@pytest.mark.xfail(
-    reason="green after W3: partial indexed pair (only one half set) is dropped",
-    strict=False,
-)
 def test_opencode_partial_indexed_pair_is_dropped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -238,10 +226,6 @@ def test_opencode_partial_indexed_pair_is_dropped(
         assert "provider_1" not in provider
 
 
-@pytest.mark.xfail(
-    reason="green after W3: singleton maps to provider id 'default' when set alone",
-    strict=False,
-)
 def test_opencode_singleton_alone_emits_default_provider_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -259,10 +243,6 @@ def test_opencode_singleton_alone_emits_default_provider_block(
     assert config["provider"]["default"]["options"]["apiKey"] == "default-key"
 
 
-@pytest.mark.xfail(
-    reason="green after W3: when any indexed pair is set, the singleton is ignored",
-    strict=False,
-)
 def test_opencode_indexed_wins_singleton_ignored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

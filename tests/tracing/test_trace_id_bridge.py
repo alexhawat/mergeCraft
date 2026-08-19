@@ -247,8 +247,8 @@ def test_jsonl_sink_includes_trace_id(trace_dir: Path) -> None:
 
 
 @pytest.mark.xfail(
-    reason="green after T3.2: OTel trace_id set on span + recording capture",
-    strict=False,
+    reason="green after T3.2: OTel trace_id set on span + recording capture (#276)",
+    strict=True,
 )
 def test_otel_sink_forwards_real_trace_id(trace_event_payload: dict[str, Any]) -> None:
     """OTLPSink writes a span whose OTel ``trace_id`` matches ``event.trace_id``."""

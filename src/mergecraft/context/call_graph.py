@@ -47,7 +47,9 @@ def build_call_graph(
     if cache is not None:
         cached = cache.get(tree_sha)
         if cached is not None:
-            return cast("CallGraph", cached)
+            return cast(  # cache stores CallGraph values; Any return type from cache.get narrows back to concrete type
+                "CallGraph", cached
+            )
 
     edges: list[CallEdge] = []
     for rel_path in git_ls_tree_paths(repo_root, tree_sha, suffix=_PYTHON_SUFFIX):

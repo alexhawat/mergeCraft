@@ -15,8 +15,8 @@ through ``sink_factory``). W4 must wire the production emit sites so:
 - when tracing is disabled (convention 9), no emit site produces a span and
   the production code does not touch the filesystem.
 
-Until W4 lands, every test in this file is ``@pytest.mark.xfail(strict=False)``
-with the wave tag ``green after W4: …``.
+Pending tests are ``@pytest.mark.xfail(strict=True)`` with the wave tag
+``green after W4: …`` until the implementation lands.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ _EXPECTED_KINDS = (
 )
 
 
-@pytest.mark.xfail(reason="green after W4: span tree instrumentation", strict=False)
+@pytest.mark.xfail(reason="green after W4: span tree instrumentation (#276)", strict=True)
 def test_span_tree_shape(captured_sink: Any) -> None:
     """W3.1 — issue §3: ``mergecraft.run`` is the root; every other kind nests under it.
 

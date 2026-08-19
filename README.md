@@ -129,6 +129,8 @@ into a comment changes nothing. Details:
 > **Without Python 3.14**, use the [Docker Action](#example-1--auto-review-every-pr)
 > (`alexhawat/mergeCraft@…`) — the container image ships a compatible runtime; no
 > local Python install needed ([`docs/distribution.md`](docs/distribution.md)).
+> **SCM:** mergeCraft 0.1.0 supports **GitHub** repositories only. GitLab support is
+> planned via the `ScmProvider` abstraction.
 
 **1. Install and scaffold** (in the repo you want reviewed):
 
@@ -180,6 +182,8 @@ jobs:
 > **Pin to the exact tag**, e.g. `@v0.1.0` — it is an immutable release ref and
 > will not move, so a workflow run always reviews with the code that tag names.
 > For the strictest supply-chain posture, pin a full commit SHA instead.
+> To verify the published image's Cosign signature and GitHub build-provenance attestation,
+> see the one-liners in [CONTRIBUTING.md § Verify a published image](CONTRIBUTING.md#verify-a-published-image).
 
 ### Example 2 — hardened, review as a required check
 

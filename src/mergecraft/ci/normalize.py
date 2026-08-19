@@ -62,7 +62,9 @@ def _coerce_artifacts(raw: RawFailure) -> list[str]:
 
 def normalize_failure(raw: dict[str, Any]) -> NormalizedFailure:
     """Normalize a raw provider failure to the K1.4 field table with ingest redaction."""
-    typed = cast("RawFailure", raw)
+    typed = cast(  # raw is dict[str, Any]; cast to TypedDict for typed field access
+        "RawFailure", raw
+    )
     job = str(raw.get("job_name") or raw.get("job") or "unknown")
     step = str(raw.get("step_name") or raw.get("step") or "unknown")
     command = redact_secrets(str(raw.get("command") or ""))

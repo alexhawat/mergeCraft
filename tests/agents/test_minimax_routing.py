@@ -208,14 +208,6 @@ def _config_block_for_minimax(
     return block
 
 
-@pytest.mark.xfail(
-    reason=(
-        "green after W6: MiniMax routed via the W3 custom-provider helper — "
-        "opencode harness emits a provider block whose baseURL is MiniMax's "
-        "published OpenAI-compatible endpoint"
-    ),
-    strict=False,
-)
 def test_minimax_routes_via_opencode_with_singleton_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -249,14 +241,6 @@ def test_minimax_routes_via_opencode_with_singleton_env(
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "green after W6: MiniMax routed via the W3 custom-provider helper — "
-        "codex config.toml emits a [model_providers.<id>] block whose base_url "
-        "is MiniMax's published OpenAI-compatible endpoint"
-    ),
-    strict=False,
-)
 def test_minimax_routes_via_codex_with_singleton_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -289,13 +273,6 @@ def test_minimax_routes_via_codex_with_singleton_env(
     assert SENTINEL_MINIMAX_KEY not in block_text
 
 
-@pytest.mark.xfail(
-    reason=(
-        "green after W6: MiniMax routed via the W3 custom-provider helper — "
-        "indexed pair (provider_1) works the same as the singleton"
-    ),
-    strict=False,
-)
 def test_minimax_routes_via_indexed_provider_pair(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -335,14 +312,6 @@ _FAIL_LOUD_MODELS = (
 
 
 @pytest.mark.parametrize("model", _FAIL_LOUD_MODELS)
-@pytest.mark.xfail(
-    reason=(
-        "green after W6: MiniMax slugs selected without a credential must raise "
-        "with an actionable message naming MiniMax + the env vars, never "
-        "silently fall through to the opencode harness (convention 5 / D12)"
-    ),
-    strict=False,
-)
 def test_minimax_missing_credential_fails_loud(
     model: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -389,14 +358,6 @@ def test_minimax_missing_credential_fails_loud(
 # ── W5.5 — raw pass-through still resolves (D12 regression pin) ─────────────
 
 
-@pytest.mark.xfail(
-    reason=(
-        "green after W6: ``resolve_model()`` continues to pass slash-containing "
-        "slugs through unchanged when no curated entry exists (D12 regression pin) — "
-        "the MiniMax slug must keep resolving even without a curated catalog entry"
-    ),
-    strict=False,
-)
 def test_minimax_raw_passthrough_slug_resolves(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -508,13 +469,6 @@ _EXISTING_SLUGS: tuple[str, ...] = (
 
 
 @pytest.mark.parametrize("slug", _EXISTING_SLUGS)
-@pytest.mark.xfail(
-    reason=(
-        "green after W6: catalog entries added for MiniMax do not change the "
-        "resolution of any pre-existing curated slug (D12 additive invariant)"
-    ),
-    strict=False,
-)
 def test_existing_curated_slug_resolution_is_unchanged(slug: str) -> None:
     """Snapshot every curated slug's resolution today; assert it again
     after W6 lands. Today the test pins a snapshot of ``resolve_cli_model``

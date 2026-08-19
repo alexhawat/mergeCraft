@@ -22,6 +22,7 @@ What this conftest pins for W3:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,7 @@ class CapturedSink:
 
 
 @pytest.fixture
-def captured_sink() -> CapturedSink:
+def captured_sink() -> Iterator[CapturedSink]:
     """Resolve ``RepoSettings.tracing`` to a live ``MemorySink``.
 
     W4 must expose the same ``sink_factory``-driven surface from
@@ -69,6 +70,7 @@ def captured_sink() -> CapturedSink:
     """
     from mergecraft.config import RepoSettings
     from mergecraft.tracing import sink_factory
+    from mergecraft.tracing.sinks import _PENDING_SINK
 
     settings = RepoSettings.model_validate(
         {
@@ -79,7 +81,12 @@ def captured_sink() -> CapturedSink:
         }
     ).tracing
     memory = sink_factory(settings).inner.sinks[0]
-    return CapturedSink(memory=memory)
+    try:
+        yield CapturedSink(memory=memory)
+    finally:
+        # ``asyncio.run`` copies ContextVars and does not write back; the
+        # pending handoff otherwise leaks into later tests on this worker.
+        _PENDING_SINK.set(None)
 
 
 @pytest.fixture

@@ -8,9 +8,9 @@ W6 will land the provenance record type, the quarantine + staging flow
 in `src/mergecraft/utils/learnings.py`, the opt-in auto-promote flag in
 `RepoSettings`, the seed-time fence reuse from W4, and the influence
 listing CLI subcommand (`mergecraft learnings influence`). This file
-pins the public contract W6 must satisfy; every test is
-``@pytest.mark.xfail(reason="green after W6", strict=False)`` for the
-same reason as `tests/utils/test_fence.py`.
+pins the public contract that security-trust W6 landed. Stale
+``xfail(strict=False)`` markers were promoted in open-issues-sweep
+2026-08-19b W6 (#276).
 
 The contract under test (D10, D11):
 
@@ -37,9 +37,7 @@ into `pre-0.0.1`, and the import will resolve.
 
 The provenance / quarantine / influence symbols do not exist on this
 base either. The same ``pytest.importorskip`` discipline keeps the
-suite collecting while the implementation lands, and the xfail marker
-keeps the cases visible (rather than silently skipped) until W6 flips
-them green.
+suite collecting when a symbol is absent.
 """
 
 from __future__ import annotations
@@ -114,9 +112,6 @@ _ACTIVE_SECTION_NAME = "Active"
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="green after W6: provenance gate + quarantine + opt-in auto-promote", strict=False
-)
 async def test_fork_pr_injected_learning_text_promotes_nothing(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -179,7 +174,6 @@ async def test_fork_pr_injected_learning_text_promotes_nothing(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after W6: provenance record type", strict=False)
 async def test_every_learning_entry_carries_provenance(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -235,7 +229,6 @@ async def test_every_learning_entry_carries_provenance(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after W6: quarantine + staging section", strict=False)
 async def test_entry_without_maintainer_provenance_is_quarantined(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -294,7 +287,6 @@ async def test_entry_without_maintainer_provenance_is_quarantined(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after W6: quarantine + prompt route", strict=False)
 async def test_quarantined_entry_never_reaches_reviewer_prompt(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -368,7 +360,6 @@ async def test_quarantined_entry_never_reaches_reviewer_prompt(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after W6: opt-in auto-promote flag", strict=False)
 async def test_promotion_requires_explicit_approval_by_default(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -418,7 +409,6 @@ async def test_promotion_requires_explicit_approval_by_default(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after W6: opt-in auto-promote flag", strict=False)
 async def test_legacy_autopromote_available_as_optin(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -471,7 +461,6 @@ async def test_legacy_autopromote_available_as_optin(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after W6: seed-time fence reuse from W4", strict=False)
 async def test_approved_learnings_are_fenced_at_seed_time(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -568,7 +557,6 @@ async def test_approved_learnings_are_fenced_at_seed_time(
 # ── W5.7 — influence listing names seeded entries (D11). ──────────────────
 
 
-@pytest.mark.xfail(reason="green after W6: influence listing CLI subcommand", strict=False)
 def test_influence_listing_names_seeded_entries(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

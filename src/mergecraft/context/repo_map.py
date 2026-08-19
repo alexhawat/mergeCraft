@@ -57,7 +57,9 @@ def build_repo_map(
     if cache is not None:
         cached = cache.get(tree_sha)
         if cached is not None:
-            return cast("RepoMap", cached)
+            return cast(  # cache stores RepoMap values; Any return type from cache.get narrows back to concrete type
+                "RepoMap", cached
+            )
 
     repo_map = RepoMap(
         packages=_index_packages(repo_root),

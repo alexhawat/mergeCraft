@@ -157,7 +157,7 @@ def verifier_denied_tool_names(
         ctx,
         VERIFIER_ALLOWED_TOOL_CLASSES,
         role="verifier",
-        output_schema=output_schema,  # type: ignore[arg-type]
+        output_schema=output_schema,  # type: ignore[arg-type]  # — output_schema is dict[str, Any] | None; callee accepts None-narrowed variant
     )
 
 

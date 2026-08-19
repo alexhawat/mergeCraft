@@ -97,7 +97,7 @@ def install_loguru_redaction_filter() -> None:
     def _patcher(record: dict[str, object]) -> None:
         record["message"] = redact_log_message(str(record["message"]))
 
-    logger.configure(patcher=_patcher)  # type: ignore[arg-type]
+    logger.configure(patcher=_patcher)  # type: ignore[arg-type]  # — loguru patcher stub is overly restrictive; _patcher(record) signature is compatible at runtime
 
 
 def assert_no_canary(text: str, canary: str) -> None:

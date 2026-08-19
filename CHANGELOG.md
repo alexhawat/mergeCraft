@@ -9,19 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `scripts/check_type_ignores.py` fails when a `type: ignore` or `cast(` in allowed `src/mergecraft/` lacks a one-line reason (#275); wired into `make lint`
+- `scripts/check_xpass.py` fails when unexpected pytest xpasses remain on the allowed test tree (#276)
+- xpass ratchet now runs as a `pytest_sessionfinish` conftest hook inside the coverage-gate pytest session — no standalone log file or extra CI step (#276)
+- `MERGECRAFT_LIVE=1` opt-in gate for live provider tests (#278): `tests/conftest.py` centralizes skip policy via `pytest_collection_modifyitems`; `make test-integration-live` and the CI `integration-live` job export the flag so the suite stays fail-closed when secrets are absent
+- `UnsupportedScmCapability` raised by `GitLabScmAdapter` now reports `"GitLab support is not available in this release"` instead of only the raw capability token; GitLab message is passed explicitly via `message=` so the generic format string stays clean (#279)
+- docs: README requirements and `docs/distribution.md` Marketplace copy state that mergeCraft 0.1.0 is GitHub-only; GitLab support is planned via the `ScmProvider` abstraction (#279)
+- docs: README SHA-pin advice now links to CONTRIBUTING.md verify one-liners (`cosign verify` / `gh attestation verify`); `docs/distribution.md` Marketplace gate requires image attestations to pass before listing, pointing at the existing `sign-attest` job (#280)
 - SCM abstraction: `ScmProvider` protocol with `GitHubScmAdapter` (behaviour-preserving) and demand-gated `GitLabScmAdapter` that declares unsupported capabilities instead of emulating GitHub; core MCP tools and review publication route through `ToolContext.scm`
-
-### Security
-
-- Linked-repo reads are grant-gated (D9): a run can only load repos declared in its authorized set; linked-repo and ticket text render through the W4 fence as untrusted data
-- Discovered repo instruction and skill files (`CLAUDE.md`, `AGENTS.md`, `SKILL.md`, `.cursor/rules/*.md`) from an untrusted review source render through the W4 fence as evidence and never enter the instruction bundle
-- CLI offline reviews now derive a trust tier from review-source provenance; cloned or out-of-root paths review at untrusted tier unless the operator passes an explicit `--trust` override
-- Executable repo config (`setupScript`, `prepushScript`, `stopScript`, `staticChecks[].command`) from an untrusted review source is ignored; declarative config still applies
-- Third-party clone acquisition is bounded and credential-safe: HTTPS GitHub URLs only, no redirect following, no submodule recursion by default, size and file-count ceilings, symlink/path containment, tokens never persisted in `.git/config` or process argv
-- Added `mergecraft review` to target any local worktree, public GitHub repo, or private repo (with `--token` / `GH_TOKEN` / `gh auth token`), with `--head`, `--base`, `--staged`, `--unstaged`, and `--range` diff selection; `diff-review` remains as a hidden alias
-
-### Added
-
 - Added: a test-only provider-harness fixture schema and strict matcher
   (`tests/support/provider_harness`) so deterministic review tests can name
   the exact provider interaction they expect. Not used in production.
@@ -65,33 +60,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Promoted 20 themed review lenses from Review prose into registry entries with `mergecraft lens list|show|test`
 - Added pluggable orchestrator with declarative pipeline file, trust gate for untrusted sources, and `mergecraft pipeline lint|show|explain`
 - Added declared decision nodes for hybrid orchestration — typed triviality, lens selection, and finding disposition seams with pipeline-owned control flow
-
-### Fixed
-
-- Fixed `mergecraft review --format jsonl|sarif` writing empty output files and exiting 0 even with blockers — the CLI now threads a structured-findings sink through to the review so jsonl/sarif writers see real findings (#242 / `mergecraft-finding:v1:3f363546e98dad517048b8b9`)
-- Fixed the empty-diff early return in `run_offline_diff_review` silently reporting `RunOutcome.passed` when `apply_diff_line_budget` fully truncated (or untrusted-path filtering emptied) the diff; the run now applies the scope-reduction downgrade and reports `inconclusive` (D12) (#242 / `mergecraft-finding:v1:2e1cb9c2153087658c3481bd`)
-- Fixed `mergecraft review` default text mode never producing exit codes 10/11 — the CLI now requests structured findings internally so a CI script running `review` can block on the documented exit-code contract (#242 / `mergecraft-finding:v1:7a3cdf5ef1994610113e8e37`)
-- Fixed `mergecraft plan` reporting `diff_path` that pointed at a path inside a torn-down `TemporaryDirectory`; the materialized diff is now persisted to `<repo>/.mergecraft/plan-review.diff` so the report's `diff_path` is reachable after return (#242 / `mergecraft-finding:v1:e8bc195570ae6f1cc8ab5bc6`)
-- Fixed tool-call budget exhaustion only surfacing as a JSON-RPC error to the agent — `BudgetTracker` now records the `BudgetExhausted` it raises (`last_exhausted`) and `main._finalize` drains the tracker at finalize time, so a run that exhausts its tool-call budget is tagged `inconclusive` rather than approving on a partial signal (D12) (#242 / `mergecraft-finding:v1:aeb5d964c1d35e5a41784ded`)
-- Fixed eval corpus run directories splitting on slashes in model slugs (e.g. `openrouter/openai/gpt-5`) — run ids are sanitized to a single flat component (#219)
-- Fixed live corpus reviews running in an empty scratch directory — the case's repo context is materialized before the review (#220)
-- Benchmark result sets now record full version pins and a reproducibility digest, so same-commit runs are comparable (#140)
-- Two ensemble models that both report no findings no longer escalate to a judge (#238)
-- Reviews of Python repositories with `shell: disabled` no longer fail closed after a completed review just because dependency installation was skipped as a security policy
-- Fixed: model-chain fallback now advances when the provider succeeds without a terminal verdict; a valid `request_changes` is a usable result and does not trigger fallback
-- Fixed: explicit `harness:` now selects the runtime agent, not only span labels
-- Fixed: a previously recorded `approve` is re-validated before GitHub publish, so a later confirmed blocker cannot ship an `APPROVE` review
-- Fixed: body-only `create_pull_request_review` with `approved: false` no longer posts a GitHub `APPROVE`
-- Fixed: `create_pull_request_review` now requires established review scope in Review modes, matching `submit_review_verdict`
-
-### Changed
-
-- `mergecraft review --help` now states that no flags are required and includes full example commands for local worktrees, GitHub branches, and present or past PRs
-- Changed: `gates.terminal_verdict` now defaults to `enforce`; missing terminal verdict reports `inconclusive`. Operators can still set `shadow`
-- Changed: `create_pull_request_review` now records through the same validator as `submit_review_verdict`; GitHub posting is an internal publisher, not an agent tool
-
-### Added
-
 - Added: optional `harness` setting (`opencode` / `codex` / `claude` / `gemini` / `cursor`) to select the agent runtime independently of provider/model. Existing configs with the key unset keep today's inference
 - Added: terminal-verdict protocol shadow mode (`gates.terminal_verdict`, default `shadow`) with a closed `VerdictDiagnostic` vocabulary; enforce still applies the fail-closed missing-verdict branch
 - Added: server-side semantic validation of the terminal verdict — `request_changes` with no findings, `approve` over a verifier-confirmed blocker, and `approve` with a failing required deterministic check are all rejected and fail closed
@@ -119,15 +87,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (PR G2): the README table documented 9 of 24 real `action.yml` inputs and
   neither declared output anywhere
 
-### Security
-
-- Reviewer and verifier now hold distinct, class-derived MCP toolsets; the live
-  MCP server exposes those surfaces at `/mcp/reviewer` and `/mcp/verifier`,
-  mutating tools stay off both except `checkout_pr` on the reviewer, and
-  finding-verdict persistence stays orchestrator-only
-
 ### Fixed
 
+- Fixed `mergecraft review --format jsonl|sarif` writing empty output files and exiting 0 even with blockers — the CLI now threads a structured-findings sink through to the review so jsonl/sarif writers see real findings (#242 / `mergecraft-finding:v1:3f363546e98dad517048b8b9`)
+- Fixed the empty-diff early return in `run_offline_diff_review` silently reporting `RunOutcome.passed` when `apply_diff_line_budget` fully truncated (or untrusted-path filtering emptied) the diff; the run now applies the scope-reduction downgrade and reports `inconclusive` (D12) (#242 / `mergecraft-finding:v1:2e1cb9c2153087658c3481bd`)
+- Fixed `mergecraft review` default text mode never producing exit codes 10/11 — the CLI now requests structured findings internally so a CI script running `review` can block on the documented exit-code contract (#242 / `mergecraft-finding:v1:7a3cdf5ef1994610113e8e37`)
+- Fixed `mergecraft plan` reporting `diff_path` that pointed at a path inside a torn-down `TemporaryDirectory`; the materialized diff is now persisted to `<repo>/.mergecraft/plan-review.diff` so the report's `diff_path` is reachable after return (#242 / `mergecraft-finding:v1:e8bc195570ae6f1cc8ab5bc6`)
+- Fixed tool-call budget exhaustion only surfacing as a JSON-RPC error to the agent — `BudgetTracker` now records the `BudgetExhausted` it raises (`last_exhausted`) and `main._finalize` drains the tracker at finalize time, so a run that exhausts its tool-call budget is tagged `inconclusive` rather than approving on a partial signal (D12) (#242 / `mergecraft-finding:v1:aeb5d964c1d35e5a41784ded`)
+- Fixed eval corpus run directories splitting on slashes in model slugs (e.g. `openrouter/openai/gpt-5`) — run ids are sanitized to a single flat component (#219)
+- Fixed live corpus reviews running in an empty scratch directory — the case's repo context is materialized before the review (#220)
+- Benchmark result sets now record full version pins and a reproducibility digest, so same-commit runs are comparable (#140)
+- Two ensemble models that both report no findings no longer escalate to a judge (#238)
+- Reviews of Python repositories with `shell: disabled` no longer fail closed after a completed review just because dependency installation was skipped as a security policy
+- Fixed: model-chain fallback now advances when the provider succeeds without a terminal verdict; a valid `request_changes` is a usable result and does not trigger fallback
+- Fixed: explicit `harness:` now selects the runtime agent, not only span labels
+- Fixed: a previously recorded `approve` is re-validated before GitHub publish, so a later confirmed blocker cannot ship an `APPROVE` review
+- Fixed: body-only `create_pull_request_review` with `approved: false` no longer posts a GitHub `APPROVE`
+- Fixed: `create_pull_request_review` now requires established review scope in Review modes, matching `submit_review_verdict`
 - Fixed: terminal-verdict shadow mode now records a predicted outcome beside the legacy result on the live finalize path
 - Fixed: a body-only COMMENT is no longer recorded as `request_changes`, and body-only `request_changes` is rejected unless it has real findings
 - Fixed: publication must match the recorded terminal verdict and is re-validated before sending `APPROVE`
@@ -155,6 +131,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now also synthesises a `with:` block when absent (symmetric with
   `_create_env_block`) — every `action.yml` input is `required: false`, and
   the comment claiming otherwise was wrong
+
+### Changed
+
+- `mergecraft review --help` now states that no flags are required and includes full example commands for local worktrees, GitHub branches, and present or past PRs
+- Stale pytest `xfail(strict=False)` markers that were already passing are now real tests; remaining allowed-tree xfails are strict (#276)
+- Changed: `gates.terminal_verdict` now defaults to `enforce`; missing terminal verdict reports `inconclusive`. Operators can still set `shadow`
+- Changed: `create_pull_request_review` now records through the same validator as `submit_review_verdict`; GitHub posting is an internal publisher, not an agent tool
+
+### Security
+
+- Linked-repo reads are grant-gated (D9): a run can only load repos declared in its authorized set; linked-repo and ticket text render through the W4 fence as untrusted data
+- Discovered repo instruction and skill files (`CLAUDE.md`, `AGENTS.md`, `SKILL.md`, `.cursor/rules/*.md`) from an untrusted review source render through the W4 fence as evidence and never enter the instruction bundle
+- CLI offline reviews now derive a trust tier from review-source provenance; cloned or out-of-root paths review at untrusted tier unless the operator passes an explicit `--trust` override
+- Executable repo config (`setupScript`, `prepushScript`, `stopScript`, `staticChecks[].command`) from an untrusted review source is ignored; declarative config still applies
+- Third-party clone acquisition is bounded and credential-safe: HTTPS GitHub URLs only, no redirect following, no submodule recursion by default, size and file-count ceilings, symlink/path containment, tokens never persisted in `.git/config` or process argv
+- Added `mergecraft review` to target any local worktree, public GitHub repo, or private repo (with `--token` / `GH_TOKEN` / `gh auth token`), with `--head`, `--base`, `--staged`, `--unstaged`, and `--range` diff selection; `diff-review` remains as a hidden alias
+- Reviewer and verifier now hold distinct, class-derived MCP toolsets; the live
+  MCP server exposes those surfaces at `/mcp/reviewer` and `/mcp/verifier`,
+  mutating tools stay off both except `checkout_pr` on the reviewer, and
+  finding-verdict persistence stays orchestrator-only
 
 ### Removed
 

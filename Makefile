@@ -44,13 +44,14 @@ install: ## Sync dev environment after dependency changes
 lockcheck: ## Fail if uv.lock is out of date
 	$(UV) lock --check
 
-lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-check + privilege-drop chown
+lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-check + privilege-drop chown + type-ignore reasons
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
 	$(MAKE) action-yml-hygiene-check
 	$(MAKE) hook-pins-check
 	$(UV) run python scripts/check_privilege_drop_chown.py
+	$(UV) run python scripts/check_type_ignores.py
 
 action-yml-hygiene-check: ## Fail when an action.yml description embeds a literal ${{ }} expression
 	$(UV) run python scripts/check_action_yml_hygiene.py
@@ -78,7 +79,6 @@ agents-check: ## Agent registry model/prompt/tool validation gate (AP1)
 	$(UV) run python -m mergecraft.agents.catalog_docs
 
 PYTEST_SPLIT := $(if $(MERGECRAFT_TEST_SPLITS),--splits $(MERGECRAFT_TEST_SPLITS) --group $(MERGECRAFT_TEST_GROUP) --splitting-algorithm least_duration,)
-
 test: ## Unit tests
 	$(PYTEST) tests -v --tb=short --strict-markers -m "not integration" $(PYTEST_XDIST) $(PYTEST_SPLIT) \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
@@ -94,16 +94,17 @@ test-integration: ## Integration tests (PR CI; self-skip without live secrets)
 
 test-integration-live: ## Live-provider integration (scheduled / release precondition)
 	@live_selector='-m "live"'; \
-	MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/check_live_integration_contract.py || exit 1; \
-	MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/run_live_integration.py || exit 1
+	MERGECRAFT_LIVE=1 MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/check_live_integration_contract.py || exit 1; \
+	MERGECRAFT_LIVE=1 MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/run_live_integration.py || exit 1
 
 test-otlp-collector: ## OTLP collector integration — spans must leave the process (#143)
 	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py
 
-coverage-gate: ## Unit tests + coverage floors (global + critical paths)
+coverage-gate: ## Unit tests + coverage floors (global + critical paths; xpass ratchet runs via conftest hook)
 	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
 		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
-		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} \
+		-rX
 	$(UV) run python scripts/check_coverage_ratchet.py coverage.json
 	$(UV) run python scripts/check_coverage_floors.py coverage.json
 
