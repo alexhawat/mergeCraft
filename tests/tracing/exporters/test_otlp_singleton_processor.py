@@ -69,6 +69,7 @@ def test_setup_tracer_provider_stacks_at_most_one_batch_processor(
 
     import mergecraft.tracing.exporters as exporters
 
+    exporters._reset_test_seam()
     _ensure_real_tracer_provider()
     endpoint = "http://127.0.0.1:1/canary-singleton-processor"
     headers = {"x-test": "batch-p"}
@@ -89,6 +90,7 @@ def test_setup_tracer_provider_stacks_at_most_one_batch_processor(
         for processor in processors
         if isinstance(processor, BatchSpanProcessor)
         and isinstance(getattr(processor, "span_exporter", None), OTLPSpanExporter)
+        and getattr(getattr(processor, "span_exporter", None), "_endpoint", None) == endpoint
     ]
     recording_processors = [
         processor
