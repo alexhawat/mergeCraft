@@ -6,11 +6,11 @@ This ratchet exits 1 when any XPASS remains outside the morning-plan D6
 exclusion list. D6 xpasses are counted and printed, then ignored.
 
 Parses pytest ``-rX`` / ``-ra`` terminal output (``XPASS nodeid - reason``
-lines). Pass ``--from-log`` for a cheap post-test parse (W7); with no log,
-runs the unit suite so the gate is RED today while allowed-tree xpasses exist.
+lines) from a log file passed via ``--from-log``. The live gate runs inside
+the pytest session via the conftest ``pytest_sessionfinish`` hook.
 
 Module: scripts.check_xpass
-Depends: argparse, pathlib, subprocess, sys, typing
+Depends: argparse, pathlib, sys, typing
 
 Exports:
     D6_TEST_PATHS — morning-plan test files excluded from the fail condition.
@@ -23,7 +23,6 @@ Exports:
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 from typing import NamedTuple, TextIO
@@ -48,8 +47,6 @@ D6_TEST_PATHS: frozenset[str] = frozenset(
         "tests/review/test_terminal_verdict_policy.py",
     }
 )
-
-_PYTEST_SELECTOR = ("tests", "-m", "not integration", "--strict-markers", "-q", "--tb=no", "-rX")
 
 
 class XpassRecord(NamedTuple):
@@ -157,21 +154,8 @@ def check_xpass(inventory: XpassInventory, *, stream: TextIO | None = None) -> i
     return 1
 
 
-def _run_pytest(repo_root: Path) -> str:
-    """Run the unit suite and return combined stdout+stderr."""
-    cmd = [sys.executable, "-m", "pytest", *_PYTEST_SELECTOR]
-    completed = subprocess.run(
-        cmd,
-        cwd=repo_root,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return (completed.stdout or "") + (completed.stderr or "")
-
-
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry: parse a pytest log or run the unit suite, then ratchet.
+    """CLI entry: parse a pytest log file, then ratchet.
 
     Args:
         argv: Argument vector (defaults to ``sys.argv[1:]``).
@@ -183,20 +167,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--from-log",
         metavar="PATH",
-        help="Pytest terminal log to parse ('-' = stdin). Omit to run the unit suite.",
-    )
-    parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=REPO,
-        help="Repo root when running pytest (default: parent of scripts/)",
+        required=True,
+        help="Pytest terminal log to parse ('-' = stdin).",
     )
     args = parser.parse_args(argv)
 
     try:
-        if args.from_log is None:
-            text = _run_pytest(Path(args.repo_root))
-        elif args.from_log == "-":
+        if args.from_log == "-":
             text = sys.stdin.read()
         else:
             text = Path(args.from_log).read_text(encoding="utf-8")

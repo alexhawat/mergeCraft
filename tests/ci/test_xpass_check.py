@@ -1,8 +1,8 @@
-"""W5 — xpass ratchet (#276 / Batch H RED).
+"""xpass ratchet tests (#276).
 
-``scripts/check_xpass.py`` is the RED artifact: it exits 1 while allowed-tree
-xpasses remain. ``make xpass-check`` wiring is W7 — that assertion stays
-``xfail(strict=False)`` until then. Do not promote that xfail in W6.
+``scripts/check_xpass.py`` provides the shared D6 exclusion list and
+``check_xpass`` helper. The live gate runs inside the pytest session via the
+``tests/conftest.py`` ``pytest_sessionfinish`` hook.
 """
 
 from __future__ import annotations

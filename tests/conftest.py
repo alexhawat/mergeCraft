@@ -42,11 +42,18 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 def _load_check_xpass() -> Any:
-    """Load ``scripts/check_xpass.py`` via importlib (single source for D6 list)."""
+    """Load ``scripts/check_xpass.py`` via importlib (single source for D6 list).
+
+    Raises:
+        SystemExit: When the module cannot be loaded (fail-closed — aborts the session).
+    """
     path = _ROOT / "scripts" / "check_xpass.py"
     spec = importlib.util.spec_from_file_location("_check_xpass_hook", path)
-    if spec is None or spec.loader is None:  # pragma: no cover
-        return None
+    if spec is None or spec.loader is None:
+        pytest.exit(
+            f"xpass-ratchet: cannot load {path} — ensure scripts/check_xpass.py exists",
+            returncode=3,
+        )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
@@ -61,30 +68,15 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     tr = session.config.pluginmanager.getplugin("terminalreporter")
     if tr is None:
         return
+
+    mod = _load_check_xpass()
+
     xpassed = tr.stats.get("xpassed", [])
     if not xpassed:
         return
 
-    mod = _load_check_xpass()
-    if mod is None:  # pragma: no cover
-        return
-
-    is_d6 = mod.is_d6_nodeid
-    allowed = [r for r in xpassed if not is_d6(r.nodeid)]
-    d6_count = len(xpassed) - len(allowed)
-
-    if d6_count:
-        tr.write_line(
-            f"xpass-ratchet: {d6_count} D6-excluded xpass(es) — not failing the gate.",
-        )
-    if not allowed:
-        return
-
-    tr.write_sep("=", "XPASS RATCHET FAILED", red=True)
-    for r in allowed:
-        tr.write_line(f"  XPASS {r.nodeid}", red=True)
-    tr.write_line(
-        f"xpass-ratchet: {len(allowed)} allowed-tree xpass(es); promote or fix these tests.",
-        red=True,
-    )
-    session.exitstatus = 1
+    records = tuple(mod.XpassRecord(nodeid=r.nodeid, reason="") for r in xpassed)
+    inventory = mod.XpassInventory(records=records)
+    rc = mod.check_xpass(inventory)
+    if rc != 0 and exitstatus == 0:
+        session.exitstatus = 1

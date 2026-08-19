@@ -78,4 +78,3 @@ tests/security/fixtures/outside-target/
 !/.mergecraft/xrepo-brief.md
 
 /.agents
-.pytest-xpass.log

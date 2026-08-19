@@ -18,7 +18,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 	examples example-workflows-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
 	bench-detect \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory hook-pins-check xpass-check
+	lint-ruff-advisory hook-pins-check
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -191,4 +191,3 @@ docker-build: ## Build action Docker image
 
 clean: ## Remove caches and build artifacts
 	rm -rf .venv dist build .mypy_cache .ruff_cache .pytest_cache htmlcov coverage.xml .cache
-	rm -f .pytest-xpass.log
