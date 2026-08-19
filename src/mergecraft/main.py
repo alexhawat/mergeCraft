@@ -1341,7 +1341,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
             verdict_protocol=settings.gates.terminal_verdict,
             final_summary_written=tool_state.final_summary_written,
         )
-    diagnostic_attrs, verdict_prediction = _verdict_protocol_publish(
+    verdict_publish = _verdict_protocol_publish(
         result=result,
         mode=tool_state.selected_mode,
         setup_reason=setup_reason,
@@ -1350,7 +1350,9 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         final_summary_written=tool_state.final_summary_written,
         terminal_verdict=settings.gates.terminal_verdict,
     )
-    verdict_diagnostic_code: str = diagnostic_attrs.get("verdict.diagnostic", "")
+    diagnostic_attrs = verdict_publish.attrs
+    verdict_prediction = verdict_publish.prediction
+    verdict_diagnostic_code = verdict_publish.diagnostic.value
 
     selected_mode_obj = next(
         (m for m in tool_context.modes if m.name == tool_context.tool_state.selected_mode),

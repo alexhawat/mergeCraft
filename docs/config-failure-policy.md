@@ -127,9 +127,6 @@ and enforces fail-closed restrictions regardless of ``payload.shell``:
 | `branch` mutation flags | `-D`, `-d`, `-m` args to `branch` | `branch` is allowlisted read-only; deletion / rename are write operations |
 | `-c` / `--config-env` unconditional block | Both flags in `command` string and `args`, regardless of `payload.shell` | `git -c alias.x='!cmd'` expands arbitrary shell even with `shell: disabled`; there is no safe-key allowlist |
 | Path confinement | `-C`, `--git-dir`, `--work-tree` resolving outside `primary_repo_state.dir` | Prevents redirect to an attacker-controlled repo or credentials store |
-
-The `:183-186` shell-disabled guard (`_NOSHELL_BLOCKED` / `_NOSHELL_BLOCKED_ARGS`) was deleted in W2 because every item it covered is now redundant: the three blocked subcommands (`clean`, `filter-branch`, `filter-repo`) are rejected by the allowlist, and `-c`/`--config-env` are rejected unconditionally above.
-
 ## MCP upload tool — orchestrator-surface enforcement (#258 / D8)
 
 The `upload_file` MCP tool (`ToolClass.GITHUB_MUTATION`) is on the orchestrator surface.  It enforces fail-closed path confinement before reading any bytes:

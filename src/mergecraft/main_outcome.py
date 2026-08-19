@@ -8,7 +8,7 @@ Both helpers carry over verbatim — the audit confirmed ``NO_ISSUES`` on the
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from loguru import logger
 
@@ -18,7 +18,22 @@ from mergecraft.tracing.event import trace_attrs_for_mode
 if TYPE_CHECKING:
     from mergecraft.action.inputs import SetupFailurePolicy
     from mergecraft.agents.shared import AgentResult
+    from mergecraft.mcp.verdict import VerdictDiagnostic
     from mergecraft.modes import Mode
+
+
+class VerdictProtocolPublish(NamedTuple):
+    """What the publish seam needs from one verdict-protocol prediction.
+
+    ``diagnostic`` is carried as the enum rather than re-read out of ``attrs``:
+    the span attrs are a redacted, stringly-typed payload, so digging the code
+    back out of them loses the closed vocabulary the predictor already resolved.
+    """
+
+    attrs: dict[str, Any]
+    diagnostic: VerdictDiagnostic
+    prediction: Any | None
+
 
 _REVIEW_MODE_NAMES = frozenset({"Review", "IncrementalReview"})
 _INCREMENTAL_REVIEW_NAMES = frozenset({"IncrementalReview"})
@@ -116,7 +131,7 @@ def _verdict_protocol_publish(
     prep_reason: str | None,
     final_summary_written: bool,
     terminal_verdict: str,
-) -> tuple[dict[str, Any], Any | None]:
+) -> VerdictProtocolPublish:
     """Predict the enforce-path verdict protocol and build publish span attrs.
 
     The prediction is always computed so the ``mergecraft.publish`` span
@@ -137,12 +152,15 @@ def _verdict_protocol_publish(
     )
     diagnostic = VerdictDiagnostic(prediction.diagnostic)
     attrs = span_attrs_for_verdict_diagnostic(diagnostic, summary=result.output or "")
-    if terminal_verdict != "shadow":
-        return attrs, None
-    return attrs, prediction
+    return VerdictProtocolPublish(
+        attrs=attrs,
+        diagnostic=diagnostic,
+        prediction=prediction if terminal_verdict == "shadow" else None,
+    )
 
 
 __all__ = [
+    "VerdictProtocolPublish",
     "_classify_outcome",
     "_is_review_mode",
     "_publish_span_attrs",
