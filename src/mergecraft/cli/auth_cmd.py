@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import json
 import os
 import re
 import shutil
@@ -56,6 +57,19 @@ _LOGFIRE_REGION_PROBE_URLS: dict[str, str] = {
 # always exactly two letters.
 _LOGFIRE_WRITE_TOKEN_RE = re.compile(r"^pylf_v\d+_(?P<region>[a-z]{2})_")
 LogfireScope = Literal["local", "github", "both"]
+# Shared by every ``mergecraft auth <provider>`` command (#221 / D11). The
+# default stays ``github`` so a CI-only setup keeps today's behaviour and does
+# not start writing ``.env``; ``auth logfire`` keeps its own ``both`` default.
+_SCOPE_OPTION: str = typer.Option(
+    "github",
+    "--scope",
+    "-s",
+    help=(
+        "Where to persist the credential: 'local' (.env only), 'github' "
+        "(gh secret set, the default), or 'both'. Use 'local' or 'both' to be "
+        "able to run the CLI locally after authenticating."
+    ),
+)
 
 
 def _bail(msg: str) -> NoReturn:
@@ -105,13 +119,102 @@ def _set_gh_secret(*, name: str, value: str, repo_slug: str) -> bool:
         return False
 
 
-@app.command("codex")
-def auth_codex() -> None:
-    """Mint a Codex subscription credential and save it as CODEX_AUTH_JSON."""
+def _resolve_repo_slug(target: LogfireScope) -> str | None:
+    """Return the ``owner/repo`` slug, or ``None`` when the scope needs no ``gh``.
+
+    ``--scope local`` must work on a machine with no ``gh`` auth and no
+    network, so the ``gh``/``git`` probes only run for the scopes that
+    actually write an Actions secret.
+    """
+    if target == "local":
+        return None
     _get_gh_token()
     owner, repo = _parse_git_remote()
     repo_slug = f"{owner}/{repo}"
     console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    return repo_slug
+
+
+def _single_line_credential(*, name: str, value: str) -> str:
+    """Return ``value`` collapsed onto the single line a ``.env`` entry can hold.
+
+    A ``.env`` entry is one line, so a multi-line credential cannot be stored
+    verbatim. ``codex login`` writes a pretty-printed ``auth.json``, so this is
+    the normal case for ``CODEX_AUTH_JSON``, not a corner one: the payload is
+    re-serialised as compact JSON, which is byte-identical for a credential
+    that was already single-line. A multi-line value that is *not* JSON has no
+    safe flattening, so it bails rather than writing a broken ``.env``.
+    """
+    if "\n" not in value:
+        return value
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        _bail(
+            f"{name} spans multiple lines and is not JSON — refusing to write a "
+            f"broken .env entry. Set {name} manually, or use --scope github."
+        )
+    return json.dumps(parsed)
+
+
+def _persist_credential(
+    *, target: LogfireScope, name: str, value: str, repo_slug: str | None
+) -> None:
+    """Persist one provider credential under ``target`` (#221 / D11).
+
+    ``github`` (the default) keeps the pre-``--scope`` contract exactly: one
+    ``gh secret set``, no ``.env``, and a hard bail when the secret write
+    fails. ``both`` follows ``auth_logfire``'s more forgiving contract — a
+    failed secret write with a good local write is a warning and exit 0,
+    because the operator did get a usable local credential — and only bails
+    when neither half lands.
+    """
+    wrote_local = False
+    if target in {"local", "both"}:
+        env_path = _local_env_path()
+        wrote_local = _write_env_value(
+            env_path, name, _single_line_credential(name=name, value=value), quote_mode="always"
+        )
+        if wrote_local:
+            console.print(f"[green]wrote {name}[/green] to {env_path}")
+        else:
+            # Bandit's B608 fires on the interpolated `env_path`; this is a
+            # console warning, not a SQL statement (no DB engine involved).
+            console.print(
+                f"[yellow]warning:[/yellow] could not update {env_path} "  # nosec B608
+                f"— set {name} manually or check file permissions."
+            )
+
+    if target == "local":
+        if not wrote_local:
+            _bail(f"nothing was written — could not save {name} locally.")
+        return
+
+    assert repo_slug is not None
+    console.print(f"saving [cyan]{name}[/cyan] via gh secret set...")
+    wrote_github = _set_gh_secret(name=name, value=value, repo_slug=repo_slug)
+    secrets_url = f"https://github.com/{repo_slug}/settings/secrets/actions"
+    if wrote_github:
+        console.print(f"[green]saved {name}[/green] to GitHub Actions secrets")
+    elif target == "github":
+        _bail(f"could not set secret — set it manually at:\n  {secrets_url}")
+    else:
+        console.print(
+            f"[yellow]warning:[/yellow] gh secret set failed — set it manually at:\n  {secrets_url}"
+        )
+
+    if not wrote_local and not wrote_github:
+        _bail(
+            "nothing was written — both local and github scopes failed. "
+            "retry with --scope local or --scope github to isolate the failure."
+        )
+
+
+@app.command("codex")
+def auth_codex(scope: str = _SCOPE_OPTION) -> None:
+    """Mint a Codex subscription credential and save it as CODEX_AUTH_JSON."""
+    target = _normalise_scope(scope)
+    repo_slug = _resolve_repo_slug(target)
 
     if not shutil.which("codex"):
         _bail(
@@ -135,24 +238,19 @@ def auth_codex() -> None:
         auth_path = Path(tmp) / "auth.json"
         if not auth_path.is_file():
             _bail("no auth.json was written — enable device-code auth and retry")
+        # Read inside the block: ``tmp`` is deleted on exit, so the captured
+        # bytes must be in scope before teardown for the local write to have
+        # anything to persist (#221).
         value = auth_path.read_text(encoding="utf-8")
 
-    console.print(f"saving [cyan]{CODEX_AUTH_SECRET}[/cyan] via gh secret set...")
-    if not _set_gh_secret(name=CODEX_AUTH_SECRET, value=value, repo_slug=repo_slug):
-        _bail(
-            f"could not set secret — set it manually at:\n"
-            f"  https://github.com/{repo_slug}/settings/secrets/actions"
-        )
-    console.print(f"[green]saved {CODEX_AUTH_SECRET}[/green] to GitHub Actions secrets")
+    _persist_credential(target=target, name=CODEX_AUTH_SECRET, value=value, repo_slug=repo_slug)
 
 
 @app.command("claude")
-def auth_claude() -> None:
+def auth_claude(scope: str = _SCOPE_OPTION) -> None:
     """Save a Claude Code OAuth token as CLAUDE_CODE_OAUTH_TOKEN."""
-    _get_gh_token()
-    owner, repo = _parse_git_remote()
-    repo_slug = f"{owner}/{repo}"
-    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    target = _normalise_scope(scope)
+    repo_slug = _resolve_repo_slug(target)
     console.print(
         "mint a token with [cyan]claude setup-token[/cyan], then paste it below "
         f"(expected prefix [cyan]{CLAUDE_OAUTH_TOKEN_PREFIX}…[/cyan])."
@@ -171,13 +269,9 @@ def auth_claude() -> None:
             f"(expected {CLAUDE_OAUTH_TOKEN_PREFIX}…). saving it anyway."
         )
 
-    console.print(f"saving [cyan]{CLAUDE_OAUTH_SECRET}[/cyan] via gh secret set...")
-    if not _set_gh_secret(name=CLAUDE_OAUTH_SECRET, value=oauth_token, repo_slug=repo_slug):
-        _bail(
-            f"could not set secret — set it manually at:\n"
-            f"  https://github.com/{repo_slug}/settings/secrets/actions"
-        )
-    console.print(f"[green]saved {CLAUDE_OAUTH_SECRET}[/green] to GitHub Actions secrets")
+    _persist_credential(
+        target=target, name=CLAUDE_OAUTH_SECRET, value=oauth_token, repo_slug=repo_slug
+    )
 
 
 def _validate_gemini_api_key(api_key: str) -> bool:
@@ -201,12 +295,10 @@ def _validate_gemini_api_key(api_key: str) -> bool:
 
 
 @app.command("gemini")
-def auth_gemini() -> None:
+def auth_gemini(scope: str = _SCOPE_OPTION) -> None:
     """Save a Gemini API key as GEMINI_API_KEY."""
-    _get_gh_token()
-    owner, repo = _parse_git_remote()
-    repo_slug = f"{owner}/{repo}"
-    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    target = _normalise_scope(scope)
+    repo_slug = _resolve_repo_slug(target)
     console.print(
         "create an API key at [cyan]https://aistudio.google.com/apikey[/cyan], then paste it below."
     )
@@ -221,13 +313,7 @@ def auth_gemini() -> None:
     if not _validate_gemini_api_key(api_key):
         _bail("Gemini API key validation failed (401/403). Check the key and retry.")
 
-    console.print(f"saving [cyan]{GEMINI_API_SECRET}[/cyan] via gh secret set...")
-    if not _set_gh_secret(name=GEMINI_API_SECRET, value=api_key, repo_slug=repo_slug):
-        _bail(
-            f"could not set secret — set it manually at:\n"
-            f"  https://github.com/{repo_slug}/settings/secrets/actions"
-        )
-    console.print(f"[green]saved {GEMINI_API_SECRET}[/green] to GitHub Actions secrets")
+    _persist_credential(target=target, name=GEMINI_API_SECRET, value=api_key, repo_slug=repo_slug)
 
 
 def _validate_cursor_api_key(api_key: str) -> bool:
@@ -258,12 +344,10 @@ def _validate_cursor_api_key(api_key: str) -> bool:
 
 
 @app.command("cursor")
-def auth_cursor() -> None:
+def auth_cursor(scope: str = _SCOPE_OPTION) -> None:
     """Save a Cursor API key as CURSOR_API_KEY."""
-    _get_gh_token()
-    owner, repo = _parse_git_remote()
-    repo_slug = f"{owner}/{repo}"
-    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    target = _normalise_scope(scope)
+    repo_slug = _resolve_repo_slug(target)
     console.print(
         "create an API key in the Cursor dashboard, then paste it below "
         "(Cloud Agent API — Phase A; local Cursor CLI is not wired yet)."
@@ -279,13 +363,7 @@ def auth_cursor() -> None:
     if not _validate_cursor_api_key(api_key):
         _bail("Cursor API key validation failed (401/403). Check the key and retry.")
 
-    console.print(f"saving [cyan]{CURSOR_API_SECRET}[/cyan] via gh secret set...")
-    if not _set_gh_secret(name=CURSOR_API_SECRET, value=api_key, repo_slug=repo_slug):
-        _bail(
-            f"could not set secret — set it manually at:\n"
-            f"  https://github.com/{repo_slug}/settings/secrets/actions"
-        )
-    console.print(f"[green]saved {CURSOR_API_SECRET}[/green] to GitHub Actions secrets")
+    _persist_credential(target=target, name=CURSOR_API_SECRET, value=api_key, repo_slug=repo_slug)
 
 
 def _validate_openai_compatible_key(*, api_key: str, base_url: str, label: str) -> bool:
@@ -349,12 +427,10 @@ def _validate_nous_api_key(api_key: str) -> bool:
 
 
 @app.command("nous")
-def auth_nous() -> None:
+def auth_nous(scope: str = _SCOPE_OPTION) -> None:
     """Save a Nous Portal API key as NOUS_API_KEY."""
-    _get_gh_token()
-    owner, repo = _parse_git_remote()
-    repo_slug = f"{owner}/{repo}"
-    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    target = _normalise_scope(scope)
+    repo_slug = _resolve_repo_slug(target)
     console.print(
         "create an API key at [cyan]https://portal.nousresearch.com[/cyan], then paste it below."
     )
@@ -369,13 +445,7 @@ def auth_nous() -> None:
     if not _validate_nous_api_key(api_key):
         _bail("Nous API key validation failed (401/403). Check the key and retry.")
 
-    console.print(f"saving [cyan]{NOUS_API_SECRET}[/cyan] via gh secret set...")
-    if not _set_gh_secret(name=NOUS_API_SECRET, value=api_key, repo_slug=repo_slug):
-        _bail(
-            f"could not set secret — set it manually at:\n"
-            f"  https://github.com/{repo_slug}/settings/secrets/actions"
-        )
-    console.print(f"[green]saved {NOUS_API_SECRET}[/green] to GitHub Actions secrets")
+    _persist_credential(target=target, name=NOUS_API_SECRET, value=api_key, repo_slug=repo_slug)
     console.print(
         "use model [cyan]nous/deepseek/deepseek-v4-flash[/cyan] "
         "(opencode harness; no MERGECRAFT_CUSTOM_PROVIDER_* required)."
@@ -383,12 +453,10 @@ def auth_nous() -> None:
 
 
 @app.command("tokenhub")
-def auth_tokenhub() -> None:
+def auth_tokenhub(scope: str = _SCOPE_OPTION) -> None:
     """Save a Tencent TokenHub API key as TOKENHUB_API_KEY."""
-    _get_gh_token()
-    owner, repo = _parse_git_remote()
-    repo_slug = f"{owner}/{repo}"
-    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    target = _normalise_scope(scope)
+    repo_slug = _resolve_repo_slug(target)
     console.print(
         "create an API key in the TokenHub console, then paste it below "
         f"(OpenAI-compatible endpoint [cyan]{DEFAULT_TOKENHUB}[/cyan]; models include "
@@ -407,13 +475,7 @@ def auth_tokenhub() -> None:
     ):
         _bail("TokenHub API key validation failed (401/403). Check the key and retry.")
 
-    console.print(f"saving [cyan]{TOKENHUB_API_SECRET}[/cyan] via gh secret set...")
-    if not _set_gh_secret(name=TOKENHUB_API_SECRET, value=api_key, repo_slug=repo_slug):
-        _bail(
-            f"could not set secret — set it manually at:\n"
-            f"  https://github.com/{repo_slug}/settings/secrets/actions"
-        )
-    console.print(f"[green]saved {TOKENHUB_API_SECRET}[/green] to GitHub Actions secrets")
+    _persist_credential(target=target, name=TOKENHUB_API_SECRET, value=api_key, repo_slug=repo_slug)
     console.print(
         "use model [cyan]tokenhub/hy3[/cyan] (or any TokenHub model id as "
         "[cyan]tokenhub/<id>[/cyan]; opencode harness)."
@@ -540,7 +602,7 @@ def _logfire_extra_installed() -> bool:
         return False
 
 
-def _write_env_value(env_path: Path, key: str, value: str) -> bool:
+def _write_env_value(env_path: Path, key: str, value: str, *, quote_mode: str = "never") -> bool:
     """Write ``key=value`` into ``env_path`` idempotently via ``python-dotenv``.
 
     Returns ``True`` when the write landed, ``False`` when ``python-dotenv``
@@ -552,13 +614,16 @@ def _write_env_value(env_path: Path, key: str, value: str) -> bool:
     absent, and returns the new value verbatim. We do not return the value to
     the caller — it is already in scope — only success/failure.
 
-    Quote mode is ``"never"`` (not ``"always"``): the only values we write are
-    Logfire write tokens (``[A-Za-z0-9_-]+``) and project labels
-    (``[A-Za-z0-9_-/]+``), neither of which needs quoting, and ``"always"``
-    produced a ``'value'`` wrapper that made downstream grep / ``diff`` noisy.
+    Quote mode defaults to ``"never"`` (not ``"always"``): the values the
+    Logfire callers write are write tokens (``[A-Za-z0-9_-]+``) and project
+    labels (``[A-Za-z0-9_-/]+``), neither of which needs quoting, and
+    ``"always"`` produced a ``'value'`` wrapper that made downstream grep /
+    ``diff`` noisy. Callers persisting a value that is not shell-word-safe —
+    ``CODEX_AUTH_JSON`` is raw JSON, with spaces, braces and double quotes —
+    pass ``quote_mode="always"`` so the line survives ``source .env``.
     """
     try:
-        _dotenv_set_key(str(env_path), key, value, quote_mode="never")
+        _dotenv_set_key(str(env_path), key, value, quote_mode=quote_mode)
     except OSError as exc:
         logger.warning("dotenv set_key failed for {}: {}", env_path, exc)
         return False
@@ -778,7 +843,7 @@ def _validate_minimax_api_key(api_key: str) -> bool:
 
 
 @app.command("minimax")
-def auth_minimax() -> None:
+def auth_minimax(scope: str = _SCOPE_OPTION) -> None:
     """Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY.
 
     MiniMax is reachable through the existing custom-provider helper
@@ -788,10 +853,8 @@ def auth_minimax() -> None:
     operator may override, or rely on the preset's default
     ``https://api.minimax.io/v1``).
     """
-    _get_gh_token()
-    owner, repo = _parse_git_remote()
-    repo_slug = f"{owner}/{repo}"
-    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    target = _normalise_scope(scope)
+    repo_slug = _resolve_repo_slug(target)
     console.print(
         "create an API key on the MiniMax platform "
         f"([cyan]{MINIMAX_BASE_URL}[/cyan]), then paste it below."
@@ -807,13 +870,7 @@ def auth_minimax() -> None:
     if not _validate_minimax_api_key(api_key):
         _bail("MiniMax API key validation failed (401/403). Check the key and retry.")
 
-    console.print(f"saving [cyan]{MINIMAX_API_SECRET}[/cyan] via gh secret set...")
-    if not _set_gh_secret(name=MINIMAX_API_SECRET, value=api_key, repo_slug=repo_slug):
-        _bail(
-            f"could not set secret — set it manually at:\n"
-            f"  https://github.com/{repo_slug}/settings/secrets/actions"
-        )
-    console.print(f"[green]saved {MINIMAX_API_SECRET}[/green] to GitHub Actions secrets")
+    _persist_credential(target=target, name=MINIMAX_API_SECRET, value=api_key, repo_slug=repo_slug)
     console.print(
         "use model [cyan]minimax/MiniMax-M3[/cyan] (opencode harness; no "
         "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL required if you accept the "
