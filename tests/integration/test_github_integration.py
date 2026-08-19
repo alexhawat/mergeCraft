@@ -14,6 +14,11 @@ pytestmark = [
     pytest.mark.live,
 ]
 
+if os.environ.get("MERGECRAFT_LIVE") != "1":
+    pytest.skip(
+        "MERGECRAFT_LIVE=1 required to run live GitHub integration tests", allow_module_level=True
+    )
+
 
 def _require(name: str) -> str:
     value = os.environ.get(name, "").strip()

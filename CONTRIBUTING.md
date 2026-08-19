@@ -17,6 +17,18 @@ make test
 make ci
 ```
 
+`make test` runs the unit and mocked-integration suite — **no API keys or secrets required**.
+Live-provider tests are excluded by default (`-m "not integration"`).
+
+To run the live slice (requires provider secrets such as `ANTHROPIC_API_KEY`):
+
+```bash
+MERGECRAFT_LIVE=1 make test-integration-live
+```
+
+`MERGECRAFT_LIVE=1` is the opt-in gate: without it, the live modules skip collection.
+With the flag set but secrets absent the suite still fails loudly (D9 — fail-closed).
+
 ## Commits
 
 Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`,

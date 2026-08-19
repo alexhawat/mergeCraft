@@ -94,8 +94,8 @@ test-integration: ## Integration tests (PR CI; self-skip without live secrets)
 
 test-integration-live: ## Live-provider integration (scheduled / release precondition)
 	@live_selector='-m "live"'; \
-	MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/check_live_integration_contract.py || exit 1; \
-	MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/run_live_integration.py || exit 1
+	MERGECRAFT_LIVE=1 MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/check_live_integration_contract.py || exit 1; \
+	MERGECRAFT_LIVE=1 MERGECRAFT_LIVE_PYTEST_MARKER=live $(UV) run python scripts/run_live_integration.py || exit 1
 
 test-otlp-collector: ## OTLP collector integration — spans must leave the process (#143)
 	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py

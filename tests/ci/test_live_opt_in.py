@@ -103,7 +103,6 @@ def _run_live_module_pytest(relpath: str, *, live: str | None, tmp_path: Path) -
 
 @pytest.mark.parametrize("relpath", _LIVE_MODULES)
 @pytest.mark.parametrize("live_value", [None, "", "0"])
-@pytest.mark.xfail(reason="green after W4: MERGECRAFT_LIVE skip gate", strict=False)
 def test_live_module_skips_when_mergecraft_live_unset(
     relpath: str,
     live_value: str | None,
@@ -112,7 +111,9 @@ def test_live_module_skips_when_mergecraft_live_unset(
     """D8 — collected live tests skip unless ``MERGECRAFT_LIVE=1`` (not fail)."""
     code, output = _run_live_module_pytest(relpath, live=live_value, tmp_path=tmp_path)
     counts = _summary_counts(output)
-    assert code == 0, (
+    # Exit code 5 means "no tests collected" — emitted by pytest.skip(allow_module_level=True);
+    # exit code 0 means tests ran and were individually skipped. Both are "did not fail".
+    assert code in (0, 5), (
         f"{relpath} with MERGECRAFT_LIVE={live_value!r} must skip, not fail "
         f"(exit {code}):\n{output}"
     )
