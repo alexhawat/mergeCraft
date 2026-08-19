@@ -33,6 +33,7 @@ import importlib
 import json
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tests.agents.conftest import make_agent_run_context
@@ -414,40 +415,31 @@ def _permission_profiles_active(tmp_path: Path, *, model: str | None) -> bool:
 _CODEX_MODEL = "openai/gpt-5.3-codex"
 
 
-def _keys_by_table_scope(path: Path) -> dict[str, list[str]]:
-    """Map every TOML table scope in the file to the bare keys emitted under it.
+def _scalar_keys_by_table(
+    parsed: dict[str, Any],
+    path: tuple[str, ...] = (),
+) -> dict[str, list[str]]:
+    """Map each table in a parsed config to the scalar keys it holds.
 
-    The document root is the ``""`` scope, and only keys emitted *before* the
-    first ``[header]`` reach it — after a header, TOML scopes every later bare
-    key to that table. Tracking the scope is what makes the D17 distinction
-    expressible: ``base_url`` under ``[model_providers.provider_1]`` is
-    correct, ``default_permissions`` under it is #222.
-
-    Keys are returned in emission order per scope; a table with a header but
-    no keys maps to an empty list, so callers can tell "no table" from "empty
-    table".
+    The document root is the ``""`` scope. Reading the *parsed* document rather
+    than the emitted text is what makes the D17 distinction expressible
+    without pinning line order: ``base_url`` inside
+    ``model_providers.provider_1`` is correct, ``default_permissions`` inside
+    it is #222 — and a table with no scalar keys maps to an empty list, so
+    callers can tell "no table" from "empty table".
     """
-    scopes: dict[str, list[str]] = {"": []}
-    scope = ""
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            scope = line.strip("[]").strip()
-            scopes.setdefault(scope, [])
-            continue
-        if "=" in line:
-            scopes.setdefault(scope, []).append(line.split("=", 1)[0].strip())
-    return scopes
+    scalars = [key for key, value in parsed.items() if not isinstance(value, dict)]
+    tables = {".".join(path): scalars}
+    for key, value in parsed.items():
+        if isinstance(value, dict):
+            tables.update(_scalar_keys_by_table(value, (*path, key)))
+    return tables
 
 
 # ``write_mcp_config``'s pre-W15 line order, reconstructed: provider tables
 # were appended to the single ``lines`` list before ``default_permissions``,
 # so the root key landed inside the last provider table. Used to prove the
-# scope tracker above actually discriminates — the previous helper flagged
-# ``name`` and ``base_url`` here too, which is why its ``== []`` assertion
-# was unsatisfiable for any config whose tables were non-empty.
+# D17 guard below actually discriminates.
 _PRE_W15_EMISSION = """\
 approval_policy = "never"
 experimental_instructions_file = "/run/x/mergecraft-instructions.md"
@@ -465,17 +457,14 @@ extends = ":read-only"
 """
 
 
-def test_root_key_scope_helper_flags_the_pre_w15_emission_order(tmp_path: Path) -> None:
+def test_root_key_scope_helper_flags_the_pre_w15_emission_order() -> None:
     """Evidence the D17 guard below is not vacuous.
 
-    Feeding the scope tracker the pre-W15 emission shape must place
-    ``default_permissions`` under the provider table and *not* at the root,
-    while still attributing the table's own keys to the table.
+    Parsing the pre-W15 emission shape must place ``default_permissions``
+    under the provider table and *not* at the root, while still attributing
+    the table's own keys to the table.
     """
-    path = tmp_path / "pre-w15-config.toml"
-    path.write_text(_PRE_W15_EMISSION, encoding="utf-8")
-
-    scopes = _keys_by_table_scope(path)
+    scopes = _scalar_keys_by_table(tomllib.loads(_PRE_W15_EMISSION))
 
     assert scopes[""] == [
         "approval_policy",
@@ -490,12 +479,6 @@ def test_root_key_scope_helper_flags_the_pre_w15_emission_order(tmp_path: Path) 
         "default_permissions",
     ]
     assert scopes["permissions.mergecraft-review"] == ["extends"]
-    # tomllib agrees the key was captured — that is the #222 symptom itself.
-    parsed = tomllib.loads(_PRE_W15_EMISSION)
-    assert "default_permissions" not in parsed
-    providers = parsed["model_providers"]
-    assert isinstance(providers, dict)
-    assert providers["provider_1"]["default_permissions"] == _PERMISSION_PROFILE
 
 
 @pytest.mark.parametrize(
@@ -577,26 +560,28 @@ def test_default_permissions_survives_a_partial_provider_pair(
     assert "default_permissions" not in providers
 
 
-def test_no_root_key_is_emitted_after_the_first_table(
+def test_no_root_key_lands_inside_a_table(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """D17's general invariant, not just the one key that broke.
 
     A bare key written after a ``[table]`` header silently changes scope, so
-    the guard is "no key the writer means as top-level may appear after the
-    first table". The set of such keys is not hardcoded: a render with no
+    the guard is "no key the writer means as top-level may parse into a
+    table". The set of such keys is not hardcoded: a render with no
     custom-provider env has no table in front of its root keys, so its root
     scope *is* the writer's intended root set — the arm
     ``test_default_permissions_is_already_a_root_key_without_custom_providers``
     pins green. Deriving the set that way means a root key added to
-    ``_append_read_only_mcp_network_lines`` later is covered without anyone
+    ``_add_read_only_mcp_network_profile`` later is covered without anyone
     editing this test.
     """
     baseline_home = tmp_path / "no-providers"
     baseline_home.mkdir()
     assert _permission_profiles_active(baseline_home, model=_CODEX_MODEL)
-    baseline_scopes = _keys_by_table_scope(_write_config(baseline_home, model=_CODEX_MODEL))
+    baseline_scopes = _scalar_keys_by_table(
+        _parse_toml(_write_config(baseline_home, model=_CODEX_MODEL))
+    )
     root_key_names = set(baseline_scopes[""])
     assert "default_permissions" in root_key_names, (
         "oracle render lost the #222 key — the invariant would be vacuous"
@@ -608,7 +593,7 @@ def test_no_root_key_is_emitted_after_the_first_table(
     monkeypatch.setenv(INDEXED_API_KEY_FMT.format(n=1), PROVIDER_1_API_KEY)
     assert _permission_profiles_active(provider_home, model=_CODEX_MODEL)
 
-    scopes = _keys_by_table_scope(_write_config(provider_home, model=_CODEX_MODEL))
+    scopes = _scalar_keys_by_table(_parse_toml(_write_config(provider_home, model=_CODEX_MODEL)))
 
     assert any(scope for scope in scopes), "no table emitted — nothing to be scoped into"
     misscoped = sorted(
