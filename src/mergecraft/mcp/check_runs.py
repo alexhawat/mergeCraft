@@ -13,20 +13,23 @@ if TYPE_CHECKING:
 def list_check_runs_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         ref = str(params["ref"])
-        data = await ctx.scm.list_check_suites_for_ref(ctx.repo.owner, ctx.repo.name, ref)
+        data = await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
         return {
             "ref": ref,
             "total_count": data.get("total_count"),
-            "check_suites": data.get("check_suites") or [],
+            "check_runs": data.get("check_runs") or [],
         }
 
     return tool(
         name="list_check_runs",
         tool_class=ToolClass.REPOSITORY_READ,
         description=(
-            "List GitHub check suites for a commit ref. Returns check suite ids, "
-            "status, and conclusions so you can pick a check_suite_id for "
-            "get_check_suite_logs."
+            "List GitHub check runs for a commit ref. Returns one entry per run with "
+            "its name, status, and conclusion, so you can see which individual job "
+            "failed rather than only the suite rollup. Each run's top-level id is a "
+            "check *run* id; the id of its parent suite is nested at check_suite.id. "
+            "Pass that nested check_suite.id — never the top-level id — as the "
+            "check_suite_id argument to get_check_suite_logs or get_check_suite."
         ),
         input_schema={
             "type": "object",
