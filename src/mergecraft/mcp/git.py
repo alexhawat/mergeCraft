@@ -461,7 +461,6 @@ def delete_branch_tool(ctx: ToolContext):
 
 def commit_changes_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        """Signed commit via GitHub Git Data API (simplified tree commit)."""
         message = str(params["message"])
         cwd = primary_repo_state(ctx.tool_state).dir
         branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()
@@ -469,9 +468,13 @@ def commit_changes_tool(ctx: ToolContext):
         # update (W4.2 — same local-vs-remote split as ``delete_branch``).
         status = _run_git(["status", "--porcelain"], cwd=cwd)
         if not status.strip():
-            return {"success": True, "skipped": True, "reason": "nothing to commit"}
+            return {
+                "success": True,
+                "skipped": True,
+                "pushed": False,
+                "reason": "nothing to commit",
+            }
         _run_git(["add", "-A"], cwd=cwd)
-        # Local commit first so tree is consistent; API signing can replace later.
         _run_git(["-c", "core.hooksPath=/dev/null", "commit", "-m", message], cwd=cwd)
         sha = _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
         try:
@@ -485,15 +488,7 @@ def commit_changes_tool(ctx: ToolContext):
                 "message": message,
                 "pushed": False,
             }
-        # Best-effort: update remote ref via API for Verified commits.
-        try:
-            await ctx.scm.patch(
-                f"/repos/{ctx.repo.owner}/{ctx.repo.name}/git/refs/heads/{branch}",
-                json={"sha": sha, "force": False},
-            )
-        except Exception as err:
-            logger.info("API ref update skipped/failed: {}", err)
-        return {"success": True, "sha": sha, "branch": branch, "message": message}
+        return {"success": True, "sha": sha, "branch": branch, "message": message, "pushed": False}
 
     repo_class = repository_mutation_class_for_push(ctx.payload.push)
     return tool(
@@ -501,7 +496,7 @@ def commit_changes_tool(ctx: ToolContext):
         tool_class=repo_class,
         mutates=True,
         description=(
-            "Commit working-tree changes as a GitHub-signed commit (signed-commits mode)."
+            "Commit working-tree changes as a local commit (no push, no remote ref update)."
         ),
         input_schema={
             "type": "object",

@@ -89,6 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `mcp/git`: `commit_changes` no longer attempts a doomed Git Data API `PATCH /git/refs/heads/{branch}` after a local commit; every return path now includes `pushed: false` so callers do not need a defensive `.get("pushed")` (#259)
+- `mcp/git`: corrected `commit_changes` tool description — it performs a local commit only and does not push to the remote or produce a GitHub-verified commit (#259)
 - Fixed `mergecraft review --format jsonl|sarif` writing empty output files and exiting 0 even with blockers — the CLI now threads a structured-findings sink through to the review so jsonl/sarif writers see real findings (#242 / `mergecraft-finding:v1:3f363546e98dad517048b8b9`)
 - Fixed the empty-diff early return in `run_offline_diff_review` silently reporting `RunOutcome.passed` when `apply_diff_line_budget` fully truncated (or untrusted-path filtering emptied) the diff; the run now applies the scope-reduction downgrade and reports `inconclusive` (D12) (#242 / `mergecraft-finding:v1:2e1cb9c2153087658c3481bd`)
 - Fixed `mergecraft review` default text mode never producing exit codes 10/11 — the CLI now requests structured findings internally so a CI script running `review` can block on the documented exit-code contract (#242 / `mergecraft-finding:v1:7a3cdf5ef1994610113e8e37`)
