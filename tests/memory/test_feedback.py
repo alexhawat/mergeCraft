@@ -98,3 +98,53 @@ def test_feedback_is_keyed_by_fingerprint(tmp_path: Path) -> None:
         fingerprint=sample_fingerprint(body="Unrelated finding body"),
     )
     assert other is None
+
+
+def test_corrupt_feedback_json_degrades_to_empty_store(tmp_path: Path) -> None:
+    """Malformed feedback.json must not crash feedback loading."""
+    from mergecraft.utils.memory import load_feedback_store
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store_path = feedback_store_path(repo)
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store_path.write_text("{not valid json", encoding="utf-8")
+
+    store = load_feedback_store(store_path)
+    assert store.list_entries() == []
+
+
+def test_malformed_feedback_entries_are_skipped(tmp_path: Path) -> None:
+    """Valid feedback entries survive when sibling entries are malformed."""
+    from mergecraft.utils.memory import FeedbackOutcome, load_feedback_store
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store_path = feedback_store_path(repo)
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store_path.write_text(
+        """{
+  "entries": {
+    "good": {
+      "fingerprint": "good-fp",
+      "outcome": "dismissed",
+      "reason": "Still valid",
+      "recorded_at": "2026-08-19T00:00:00+00:00"
+    },
+    "bad-outcome": {
+      "fingerprint": "bad-fp",
+      "outcome": "not-an-outcome",
+      "reason": "Skip me",
+      "recorded_at": "2026-08-19T00:00:00+00:00"
+    },
+    "bad-shape": "not-a-dict"
+  }
+}""",
+        encoding="utf-8",
+    )
+
+    store = load_feedback_store(store_path)
+    assert len(store.list_entries()) == 1
+    record = store.list_entries()[0]
+    assert record.fingerprint == "good-fp"
+    assert record.outcome == FeedbackOutcome.DISMISSED

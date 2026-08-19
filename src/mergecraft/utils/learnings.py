@@ -301,6 +301,40 @@ def split_learnings_by_section(
     return prefix, active_body, staging_body
 
 
+def tail_after_staging_section(text: str) -> str:
+    """Return markdown from the first ``##`` heading after ``## Staging``, if any."""
+    lines = text.splitlines()
+    staging_start: int | None = None
+    staging_depth: int | None = None
+    staging_end = len(lines)
+
+    for idx, line in enumerate(lines):
+        match = _heading_re().match(line)
+        if not match:
+            continue
+        depth = len(match.group(1))
+        title = match.group(2).strip().lower()
+        if title == STAGING_SECTION_HEADING.lower() and staging_start is None:
+            staging_start = idx
+            staging_depth = depth
+
+    if staging_start is None or staging_depth is None:
+        return ""
+
+    for idx in range(staging_start + 1, len(lines)):
+        match = _heading_re().match(lines[idx])
+        if not match:
+            continue
+        if len(match.group(1)) <= staging_depth:
+            staging_end = idx
+            break
+
+    if staging_end >= len(lines):
+        return ""
+    tail = "\n".join(lines[staging_end:]).strip()
+    return f"{tail}\n" if tail else ""
+
+
 def build_provenance_record(tool_state: ToolState) -> LearningProvenance:
     """Build the provenance record for the current run from ``tool_state``.
 
@@ -764,7 +798,17 @@ def apply_repo_memory_to_findings(
         )
         return list(findings)
     feedback_path, memory_path = repo_memory_paths(repo_root)
-    feedback = load_feedback_store(feedback_path)
+    try:
+        feedback = load_feedback_store(feedback_path)
+    except Exception as exc:
+        logger.warning(
+            "Skipping repo feedback suppression — unreadable {}: {}",
+            feedback_path,
+            exc,
+        )
+        from mergecraft.utils.memory import FeedbackStore
+
+        feedback = FeedbackStore()
     surviving: list[Finding] = []
     for finding in findings:
         record = feedback.entries.get(finding.fingerprint)
@@ -870,6 +914,7 @@ __all__ = [
     "seed_xrepo_learnings_file",
     "split_learnings_by_section",
     "split_learnings_for_persist",
+    "tail_after_staging_section",
     "truncate_at_line_boundary",
     "xrepo_learnings_file_path",
 ]

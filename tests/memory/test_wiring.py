@@ -113,3 +113,29 @@ def test_untrusted_tier_skips_repo_memory_suppression(tmp_path: Path) -> None:
 
     assert dismissed in surviving
     assert suppressed in surviving
+
+
+def test_corrupt_feedback_json_does_not_crash_review_memory(tmp_path: Path) -> None:
+    """Corrupt feedback.json degrades to no suppression on trusted reviews."""
+    from mergecraft.utils.learnings import apply_repo_memory_to_findings
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    feedback_path = feedback_store_path(repo)
+    feedback_path.parent.mkdir(parents=True, exist_ok=True)
+    feedback_path.write_text("{not valid json", encoding="utf-8")
+
+    dismissed = make_finding(
+        message="Would be dismissed if store loaded",
+        path="src/app.py",
+        start_line=1,
+        end_line=1,
+    )
+
+    surviving = apply_repo_memory_to_findings(
+        [dismissed],
+        repo_root=repo,
+        trust_tier="trusted",
+    )
+
+    assert dismissed in surviving

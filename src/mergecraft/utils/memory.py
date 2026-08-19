@@ -17,7 +17,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -153,7 +153,10 @@ def _read_json(path: Path) -> dict[str, Any]:
     raw = path.read_text(encoding="utf-8")
     if not raw.strip():
         return {}
-    data = json.loads(raw)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
     return data if isinstance(data, dict) else {}
 
 
@@ -190,15 +193,18 @@ def load_feedback_store(store_path: Path) -> FeedbackStore:
         for key, item in raw_entries.items():
             if not isinstance(item, dict):
                 continue
-            ts_raw = item.get("recorded_at")
-            ts = _parse_dt(str(ts_raw)) if ts_raw else _now()
-            entries[str(key)] = FeedbackRecord(
-                fingerprint=str(item.get("fingerprint", key)),
-                outcome=FeedbackOutcome(str(item["outcome"])),
-                reason=str(item["reason"]),
-                pr_number=item.get("pr_number"),
-                recorded_at=ts,
-            )
+            try:
+                ts_raw = item.get("recorded_at")
+                ts = _parse_dt(str(ts_raw)) if ts_raw else _now()
+                entries[str(key)] = FeedbackRecord(
+                    fingerprint=str(item.get("fingerprint", key)),
+                    outcome=FeedbackOutcome(str(item["outcome"])),
+                    reason=str(item["reason"]),
+                    pr_number=item.get("pr_number"),
+                    recorded_at=ts,
+                )
+            except KeyError, ValueError, ValidationError:
+                continue
     return FeedbackStore(entries=entries)
 
 
@@ -534,6 +540,13 @@ def _has_sectioned_learnings_layout(text: str) -> bool:
     return False
 
 
+def _append_learnings_tail(*, rebuilt: str, tail: str) -> str:
+    """Append post-staging markdown (e.g. Withdrawn findings) to a rebuilt file."""
+    if not tail.strip():
+        return rebuilt
+    return rebuilt.rstrip() + "\n\n" + tail.rstrip() + "\n"
+
+
 def remove_memory_entry_from_learnings(text: str, memory_id: str) -> str:
     """Remove the active-section bullet whose id matches ``memory_id``."""
     from mergecraft.utils.learnings import (
@@ -546,14 +559,17 @@ def remove_memory_entry_from_learnings(text: str, memory_id: str) -> str:
         kept = _remove_bullet_lines(text.splitlines(), memory_id)
         return "\n".join(kept).rstrip() + ("\n" if text.endswith("\n") else "")
 
+    from mergecraft.utils.learnings import tail_after_staging_section
+
     prefix, active_body, staging_body = split_learnings_by_section(text)
     new_active = "\n".join(_remove_bullet_lines(active_body.splitlines(), memory_id)).strip()
     seed = prefix.rstrip() or "# Learnings"
     staging_part = staging_body.strip()
-    return (
+    rebuilt = (
         f"{seed}\n\n## {ACTIVE_SECTION_HEADING}\n\n{new_active}\n\n"
         f"## {STAGING_SECTION_HEADING}\n\n{staging_part}\n"
     )
+    return _append_learnings_tail(rebuilt=rebuilt, tail=tail_after_staging_section(text))
 
 
 def export_memory_bundle(*, repo: Path) -> dict[str, Any]:
@@ -645,15 +661,24 @@ def import_memory_bundle(*, repo: Path, bundle: dict[str, Any]) -> None:
         lines.extend(new_bullets)
         learnings_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
     else:
-        from mergecraft.utils.learnings import ACTIVE_SECTION_HEADING, split_learnings_by_section
+        from mergecraft.utils.learnings import (
+            ACTIVE_SECTION_HEADING,
+            STAGING_SECTION_HEADING,
+            split_learnings_by_section,
+            tail_after_staging_section,
+        )
 
         prefix, active_body, staging_body = split_learnings_by_section(text)
         new_lines = [active_body.rstrip()] if active_body.strip() else []
         new_lines.extend(new_bullets)
         active_block = "\n".join(line for line in new_lines if line).strip()
         seed = prefix.rstrip() or "# Learnings"
+        rebuilt = (
+            f"{seed}\n\n## {ACTIVE_SECTION_HEADING}\n\n{active_block}\n\n"
+            f"## {STAGING_SECTION_HEADING}\n\n{staging_body.strip()}\n"
+        )
         learnings_path.write_text(
-            f"{seed}\n\n## {ACTIVE_SECTION_HEADING}\n\n{active_block}\n\n## Staging\n\n{staging_body.strip()}\n",
+            _append_learnings_tail(rebuilt=rebuilt, tail=tail_after_staging_section(text)),
             encoding="utf-8",
         )
     _import_bundle_sidecars(repo=repo, bundle=bundle)
