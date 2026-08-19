@@ -318,10 +318,68 @@ def _disagreeing_run(
     )
 
 
-def _keys(rows: tuple[dict[str, object], ...]) -> set[tuple[str, str]]:
+def _keys(rows: tuple[dict[str, object], ...]) -> set[tuple[str, str, str]]:
     from mergecraft.agents.ensemble import _finding_key
 
     return {_finding_key(row) for row in rows}
+
+
+_SAME_BODY_LINE_41 = {
+    "path": "pkg/store.go",
+    "body": "unchecked error on write",
+    "severity": "Major",
+    "line": 41,
+}
+_SAME_BODY_LINE_88 = {**_SAME_BODY_LINE_41, "line": 88}
+
+
+def test_two_lines_sharing_a_body_are_distinct_findings() -> None:
+    """The same defect at two call sites is two findings, not one.
+
+    ``_finding_key`` ignored ``line``, so the union collapsed both rows and the
+    reviewer only ever saw the first site — a real finding silently dropped.
+    """
+    from mergecraft.agents.ensemble import _finding_key
+
+    assert _finding_key(_SAME_BODY_LINE_41) != _finding_key(_SAME_BODY_LINE_88)
+
+
+def test_disagreement_union_keeps_both_lines_of_a_repeated_body() -> None:
+    """The dedup must not swallow the second occurrence of a repeated body."""
+    from mergecraft.agents.ensemble import reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(
+        _disagreeing_run((_SAME_BODY_LINE_41,), (_SAME_BODY_LINE_88, _RIGHT_ONLY))
+    )
+
+    anchors = {(row.get("path"), row.get("line")) for row in reconciliation.merged_findings}
+    assert anchors == {
+        ("pkg/store.go", 41),
+        ("pkg/store.go", 88),
+        (_RIGHT_ONLY["path"], _RIGHT_ONLY["line"]),
+    }
+
+
+def test_the_same_body_on_different_lines_is_not_agreement() -> None:
+    """Corroboration means the same site, so a line difference is disagreement."""
+    from mergecraft.agents.ensemble import reconcile_ensemble
+
+    reconciliation = reconcile_ensemble(
+        _disagreeing_run((_SAME_BODY_LINE_41,), (_SAME_BODY_LINE_88,))
+    )
+
+    assert reconciliation.agreement is False
+    assert reconciliation.confidence_boost == 0.0
+
+
+def test_a_missing_line_does_not_collide_with_line_zero() -> None:
+    """An unlocated finding and one at line 0 are different rows."""
+    from mergecraft.agents.ensemble import _finding_key
+
+    unlocated = {"path": "pkg/a.go", "body": "no anchor"}
+    at_zero = {**unlocated, "line": 0}
+
+    assert _finding_key(unlocated) != _finding_key(at_zero)
 
 
 def test_disagreement_keeps_a_right_only_finding(tmp_path: Path) -> None:

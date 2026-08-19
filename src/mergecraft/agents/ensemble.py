@@ -168,10 +168,16 @@ def run_ensemble_dispatch(
     return EnsembleRun(agent_id=binding.agent_id, model_runs=tuple(model_runs))
 
 
-def _finding_key(row: dict[str, object]) -> tuple[str, str]:
-    path = str(row.get("path", ""))
-    body = str(row.get("body", ""))
-    return path, body
+def _finding_key(row: dict[str, object]) -> tuple[str, str, str]:
+    """Identify a finding by its anchor and body.
+
+    ``line`` is part of the identity: the same defect reported at two call
+    sites in one file is two findings, and a key without the line collapses
+    them. A row with no line keys on ``""``, which cannot collide with any
+    line number.
+    """
+    line = row.get("line")
+    return str(row.get("path", "")), str(row.get("body", "")), "" if line is None else str(line)
 
 
 def reconcile_ensemble(run: EnsembleRun) -> EnsembleReconciliation:
@@ -212,7 +218,7 @@ def reconcile_ensemble(run: EnsembleRun) -> EnsembleReconciliation:
     # merge: left's findings in their own order, then right-only ones in theirs.
     # First occurrence wins, so the primary model's copy of a corroborated
     # finding keeps its severity and evidence.
-    unioned: dict[tuple[str, str], dict[str, object]] = {}
+    unioned: dict[tuple[str, str, str], dict[str, object]] = {}
     for row in (*left.findings, *right.findings):
         unioned.setdefault(_finding_key(row), row)
 
