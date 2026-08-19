@@ -24,6 +24,7 @@ those waves land.
 | **W3** | `test_start_installation_ignore_scripts_follows_d10[untrusted-restricted]` | `green after W3: ignore_scripts follows trust` | greened |
 | **W3** | `test_start_installation_ignore_scripts_follows_d10[untrusted-enabled]` | `green after W3: ignore_scripts follows trust` | greened |
 | **W3** | `test_start_installation_untrusted_restricted_does_not_run_postinstall` | `green after W3: ignore_scripts follows trust` | greened |
+| **W6** | `test_untrusted_restricted_sandbox_none_omits_shell` | `green after W6: untrusted + sandbox none does not register shell` | pending |
 
 All cross-wave xfails use `strict=False`. Do not use `strict=True` (pytest.ini
 has `xfail_strict = true`).
@@ -70,3 +71,18 @@ Do not loosen `tests/mcp/test_dependencies_python_skip.py`. That file's
 - No `src/` edits; no D6 paths (`mcp/git.py`, `upload.py`, `labels.py`,
   `check_runs.py`, `verdict.py`, `tracing/*`, `cli/diff_review_cmd.py`,
   `analyzers/trust.py`, `mcp/git_guards.py`)
+
+## Batch L — #287 / D11 (W4 RED)
+
+`detect_sandbox_method` returns `"none"` when `CI != "true"`. `build_common_tools`
+still registers `shell` / `kill_background` for `shell: restricted`. W6 must not
+register those tools when sandbox is `"none"` **and** `trust_tier == "untrusted"`.
+
+Reset `_detected_sandbox` between cases (module global).
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| L287a | `CI` unset / `false` / `0` / empty → `detect_sandbox_method() == "none"` | unit | happy | `tests/mcp/test_shell_sandbox_honesty.py::test_detect_sandbox_method_none_outside_ci` |
+| L287b | Cache reset between cases | unit | edge | `test_detect_sandbox_method_cache_resets_between_env` |
+| L287c | Untrusted + restricted + `"none"` omits `shell` / `kill_background` | integration | happy (bug) | `test_untrusted_restricted_sandbox_none_omits_shell` (xfail W6) |
+| L287d | Trusted + restricted + `"none"` still includes `shell` | integration | control | `test_trusted_restricted_sandbox_none_keeps_shell` |
