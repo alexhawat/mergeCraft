@@ -14,9 +14,10 @@ version: 2
 # major is the case that actually needs a human to read a changelog. Grouping
 # one into a batch would let it ride along behind a green check.
 #
-# `dependabot[bot]` is exempted from the `mergecraft review` and
-# `changelog-preview` gates — see the matching comments in
-# .github/workflows/mergecraft.yml and .github/workflows/changelog-preview.yml.
+# `dependabot[bot]` is exempted from the `mergecraft review` gate — see the
+# comment in .github/workflows/mergecraft.yml. `changelog-preview` is
+# deliberately NOT exempted: it already passes on bot PRs, and skipping a
+# reusable-workflow caller changes the reported check name.
 updates:
   - package-ecosystem: pip
     directory: /

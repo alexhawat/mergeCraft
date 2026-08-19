@@ -48,7 +48,7 @@ you do not edit product code, and you do not touch a PR a human authored.
 | Bot author | `dependabot[bot]` |
 | Required label | `dependencies` |
 | Grouping policy | `.github/dependabot.yml` — patch+minor batched per ecosystem, majors solo |
-| Bot CI exemptions | `mergecraft review` and `changelog-preview / preview` skip bot PRs (see the comments in those workflows). Match on the **check name** as `gh pr checks` prints it — `changelog-preview / preview`, i.e. `<caller job id> / <called job id>` — not on the workflow display name ("Changelog Preview"), which is a separate `workflowName` field and never appears in the rollup name |
+| Bot CI exemptions | `mergecraft review` skips bot PRs (see the comment in that workflow). `changelog-preview / preview` is **not** exempted and still runs — treat a green one as normal. Match on the **check name** as `gh pr checks` prints it (`changelog-preview / preview` = `<caller job id> / <called job id>`), not the workflow display name ("Changelog Preview"), which is a separate `workflowName` field |
 | Report path | `.ignorelocal/waves/dependency-prs/YYYY-MM-DD.md` (append-only) |
 
 ## Risk lanes

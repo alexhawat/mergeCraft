@@ -157,30 +157,51 @@ def test_dependabot_never_groups_major_bumps() -> None:
             )
 
 
-@pytest.mark.parametrize(
-    ("workflow", "jobs"),
-    [
-        ("mergecraft.yml", ("wait-for-ci", "review")),
-        ("changelog-preview.yml", ("changelog-preview",)),
-    ],
-)
-def test_bot_exempt_workflows_skip_dependabot(workflow: str, jobs: tuple[str, ...]) -> None:
-    """The two gates that cannot pass on a version bump skip Dependabot PRs.
+@pytest.mark.parametrize("job_name", ["wait-for-ci", "review"])
+def test_mergecraft_review_skips_dependabot(job_name: str) -> None:
+    """``mergecraft review`` skips Dependabot PRs — it cannot pass on a bump.
 
-    ``mergecraft review`` fails closed when no ``mergecraft-approval`` check-run
-    lands, and a lockfile bump never produces one; ``changelog-preview`` has no
-    prose to preview. Both must skip the *job* (a skipped job still reports a
-    completed check, so a required-check rule stays satisfied) rather than drop
-    the trigger (which would leave the check never reported, blocking the PR
-    permanently).
+    The gate fails closed when no ``mergecraft-approval`` check-run lands on the
+    head SHA, and a lockfile bump never produces one. Skipping the *job* is load
+    bearing: a skipped job still reports a completed check under its own name, so
+    a rule requiring ``mergecraft review`` stays satisfied. Dropping the trigger
+    would leave the check never reported and block the PR permanently.
+
+    Both jobs are plain (``runs-on``) jobs, so the reported check name is the
+    job's own ``name:`` either way — unlike a reusable-workflow caller, see
+    ``test_changelog_preview_does_not_skip_dependabot``.
     """
-    doc = _workflow(workflow)
-    for job_name in jobs:
-        job = doc["jobs"].get(job_name)
-        assert job is not None, f"{workflow}: job {job_name!r} missing"
+    job = _workflow("mergecraft.yml")["jobs"].get(job_name)
+    assert job is not None, f"mergecraft.yml: job {job_name!r} missing"
+    condition = " ".join(str(job.get("if", "")).split())
+    assert _BOT_GUARD in condition, (
+        f"mergecraft.yml:{job_name} does not exempt dependabot — got {condition!r}"
+    )
+
+
+def test_changelog_preview_does_not_skip_dependabot() -> None:
+    """``changelog-preview`` must NOT carry a bot exemption. Deliberate.
+
+    Two reasons, and the second is the one that bites:
+
+    1. It has never needed one — the check passes on Dependabot PRs today
+       (verified across #180/#183/#185/#254/#255/#256).
+    2. The job calls a *reusable workflow*, so its check reports as the two-part
+       ``changelog-preview / preview`` (caller job id / called job id). A skipped
+       caller creates no called jobs, so it reports under the bare caller id
+       ``changelog-preview`` instead. If the two-part name is ever made a
+       required check, a skip leaves that name unreported and blocks the PR
+       permanently — exactly the failure this PR set out to fix.
+
+    Plain jobs do not have this problem, which is why ``mergecraft.yml`` may
+    skip and this may not.
+    """
+    for job_name, job in _workflow("changelog-preview.yml")["jobs"].items():
         condition = " ".join(str(job.get("if", "")).split())
-        assert _BOT_GUARD in condition, (
-            f"{workflow}:{job_name} does not exempt dependabot — got {condition!r}"
+        assert "dependabot" not in condition, (
+            f"changelog-preview.yml:{job_name} skips dependabot; a skipped "
+            f"reusable-workflow caller reports under the bare caller id, not "
+            f"the two-part check name — got {condition!r}"
         )
 
 
