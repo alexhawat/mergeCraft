@@ -280,10 +280,11 @@ class GitHubScmAdapter:
     async def remove_labels(
         self, owner: str, repo: str, issue_number: int, labels: list[str]
     ) -> list[dict[str, Any]]:
-        remaining: list[dict[str, Any]] = []
+        removed: list[dict[str, Any]] = []
         for label in labels:
             await self.delete(f"/repos/{owner}/{repo}/issues/{issue_number}/labels/{label}")
-        return remaining
+            removed.append({"name": label})
+        return removed
 
     async def resolve_review_thread(self, owner: str, repo: str, thread_id: str) -> dict[str, Any]:
         query = """

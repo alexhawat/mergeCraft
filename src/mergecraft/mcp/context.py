@@ -56,6 +56,14 @@ class ResolvedPayload:
 
 @dataclass(slots=True, init=False)
 class ToolContext:
+    """Runtime context for MCP tools and the review harness.
+
+    Production code must use :attr:`scm` (:class:`~mergecraft.scm.protocol.ScmProvider`).
+    The ``github`` attribute is an **interim test/harness seam** only — read via
+    :meth:`__getattr__` and set via :meth:`__setattr__` so tests can assign
+    ``ctx.github = fake_client`` without touching production call sites.
+    """
+
     agent_id: AgentId
     repo: RepoIdentity
     payload: ResolvedPayload
@@ -131,14 +139,14 @@ class ToolContext:
         budget_tracker: BudgetTracker | None = None,
     ) -> None:
         from mergecraft.scm.github import GitHubScmAdapter
-        from mergecraft.utils.github import GitHubClient
 
         if scm is not None:
             resolved_scm = scm
         elif github is not None:
             resolved_scm = GitHubScmAdapter(github)
         else:
-            resolved_scm = GitHubScmAdapter(GitHubClient(token=""))
+            msg = "ToolContext requires scm= or github=; empty GitHub fallback is not allowed"
+            raise ValueError(msg)
 
         self.agent_id = agent_id
         self.repo = repo
@@ -179,6 +187,7 @@ class ToolContext:
         self.budget_tracker = budget_tracker
 
     def __getattr__(self, name: str) -> Any:
+        """Interim test/harness seam — expose ``GitHubClient`` when ``scm`` is GitHub-backed."""
         if name == "github":
             from mergecraft.scm.github import GitHubScmAdapter
 
@@ -191,6 +200,7 @@ class ToolContext:
         raise AttributeError(msg)
 
     def __setattr__(self, name: str, value: Any) -> None:
+        """Interim test/harness seam — ``ctx.github = client`` wraps ``scm`` in ``GitHubScmAdapter``."""
         if name == "github":
             from mergecraft.scm.github import GitHubScmAdapter
 

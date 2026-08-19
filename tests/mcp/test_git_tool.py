@@ -18,6 +18,7 @@ from mergecraft.mcp.context import (
 from mergecraft.mcp.git import git_tool
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
+from mergecraft.utils.github import GitHubClient
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -26,7 +27,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
         payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request")),
-        github=None,  # type: ignore[arg-type]
+        github=GitHubClient(token=""),
         github_installation_token="",
         git_token="",
         api_token="",

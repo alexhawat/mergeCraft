@@ -1,4 +1,9 @@
-"""SCM provider abstraction (DG9 / D10)."""
+"""SCM provider abstraction (DG9 / D10).
+
+Production call sites bind :class:`~mergecraft.scm.protocol.ScmProvider` on
+:class:`~mergecraft.mcp.context.ToolContext.scm`. ``ToolContext.github`` is a
+test/harness-only compatibility shim — not for production use.
+"""
 
 from mergecraft.scm.errors import UnsupportedScmCapability
 from mergecraft.scm.protocol import (
