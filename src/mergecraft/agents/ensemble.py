@@ -207,9 +207,18 @@ def reconcile_ensemble(run: EnsembleRun) -> EnsembleReconciliation:
     brief_parts.append("")
     brief_parts.append("Return confirm / downgrade / drop for each disputed finding.")
 
+    # Union both sides so a finding only the secondary model reported is not
+    # confined to the judge brief (D15). Insertion order gives a deterministic
+    # merge: left's findings in their own order, then right-only ones in theirs.
+    # First occurrence wins, so the primary model's copy of a corroborated
+    # finding keeps its severity and evidence.
+    unioned: dict[tuple[str, str], dict[str, object]] = {}
+    for row in (*left.findings, *right.findings):
+        unioned.setdefault(_finding_key(row), row)
+
     return EnsembleReconciliation(
         agreement=False,
-        merged_findings=tuple(left.findings),
+        merged_findings=tuple(unioned.values()),
         judge_dispatch=JudgeDispatch(brief="\n".join(brief_parts)),
     )
 
