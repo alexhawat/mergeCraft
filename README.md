@@ -192,11 +192,15 @@ approval check to blocking.
 
 ```bash
 mergecraft review                                        # uncommitted + branch changes vs origin/main
+mergecraft review --base origin/main                     # this worktree vs that GitHub branch
+mergecraft review --cwd ../feature-wt --base origin/main # linked worktree vs origin/main
 mergecraft review --repo .                               # explicit local checkout
-mergecraft review --repo owner/repo --head feature       # public GitHub repo at a branch
+mergecraft review --repo owner/repo --head feature --base main   # public GitHub repo at a branch
+mergecraft review --repo owner/repo --head pull/42/head --base main  # open or past GitHub PR
 mergecraft review --repo https://github.com/o/r --token "$GH_TOKEN"  # private repo
 mergecraft review --staged                               # staged changes only
 mergecraft review --diff changes.patch --dry-run         # inspect the prompt, no LLM call
+gh pr diff 42 > /tmp/pr-42.diff && mergecraft review --diff /tmp/pr-42.diff
 mergecraft review --json findings.json                 # machine-readable Finding[] for scoring
 mergecraft review --format sarif --output report.sarif.json
 mergecraft review --format jsonl --output stream.jsonl
