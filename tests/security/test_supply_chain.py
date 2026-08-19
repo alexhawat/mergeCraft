@@ -102,6 +102,106 @@ def test_dependabot_covers_agent_clis() -> None:
     )
 
 
+_BOT_GUARD = "github.event.pull_request.user.login != 'dependabot[bot]'"
+
+
+def _dependabot_updates() -> list[dict[str, Any]]:
+    config = yaml.safe_load(_read(_REPO_ROOT / ".github" / "dependabot.yml"))
+    updates: list[dict[str, Any]] = config.get("updates", [])
+    assert updates, "dependabot.yml declares no updates"
+    return updates
+
+
+def test_dependabot_groups_batch_patch_and_minor() -> None:
+    """Every ecosystem batches patch+minor into one version-update group.
+
+    Ungrouped, a weekly cycle across four ecosystems opened one PR per package
+    (ten at once on 2026-08-18), each dragging a full CI matrix. The grouping is
+    the thing that keeps that queue reviewable, so it is asserted rather than
+    left to drift back on the next edit of this file.
+    """
+    for entry in _dependabot_updates():
+        ecosystem = entry["package-ecosystem"]
+        groups = entry.get("groups", {})
+        assert groups, f"{ecosystem}: no groups — bumps will open one PR per package"
+        version_groups = [
+            group
+            for group in groups.values()
+            if group.get("applies-to", "version-updates") == "version-updates"
+        ]
+        assert version_groups, f"{ecosystem}: no version-update group"
+        batched = {
+            update_type for group in version_groups for update_type in group.get("update-types", [])
+        }
+        assert {"patch", "minor"} <= batched, (
+            f"{ecosystem}: patch+minor not batched (update-types: {sorted(batched)})"
+        )
+
+
+def test_dependabot_never_groups_major_bumps() -> None:
+    """Majors stay ungrouped so each still gets its own PR and a human read.
+
+    A major swept into a patch batch lands behind one green check — the exact
+    review this repo does not want to skip. An empty/absent ``update-types`` is
+    also a failure: Dependabot reads that as "every update type".
+    """
+    for entry in _dependabot_updates():
+        ecosystem = entry["package-ecosystem"]
+        for name, group in entry.get("groups", {}).items():
+            if group.get("applies-to", "version-updates") != "version-updates":
+                continue
+            update_types = group.get("update-types", [])
+            assert update_types, f"{ecosystem}/{name}: no update-types — this groups majors too"
+            assert not [t for t in update_types if "major" in t], (
+                f"{ecosystem}/{name}: groups major bumps ({update_types})"
+            )
+
+
+@pytest.mark.parametrize(
+    ("workflow", "jobs"),
+    [
+        ("mergecraft.yml", ("wait-for-ci", "review")),
+        ("changelog-preview.yml", ("changelog-preview",)),
+    ],
+)
+def test_bot_exempt_workflows_skip_dependabot(workflow: str, jobs: tuple[str, ...]) -> None:
+    """The two gates that cannot pass on a version bump skip Dependabot PRs.
+
+    ``mergecraft review`` fails closed when no ``mergecraft-approval`` check-run
+    lands, and a lockfile bump never produces one; ``changelog-preview`` has no
+    prose to preview. Both must skip the *job* (a skipped job still reports a
+    completed check, so a required-check rule stays satisfied) rather than drop
+    the trigger (which would leave the check never reported, blocking the PR
+    permanently).
+    """
+    doc = _workflow(workflow)
+    for job_name in jobs:
+        job = doc["jobs"].get(job_name)
+        assert job is not None, f"{workflow}: job {job_name!r} missing"
+        condition = " ".join(str(job.get("if", "")).split())
+        assert _BOT_GUARD in condition, (
+            f"{workflow}:{job_name} does not exempt dependabot — got {condition!r}"
+        )
+
+
+@pytest.mark.parametrize("workflow", ["mergecraft.yml", "changelog-preview.yml"])
+def test_bot_exemption_gates_on_pr_author_not_actor(workflow: str) -> None:
+    """The guard reads the PR author, never ``github.actor``.
+
+    A maintainer rebase or ``@dependabot recreate`` makes the human the actor on
+    the resulting ``synchronize`` while ``user.login`` stays the bot, so an
+    actor-based guard silently re-arms the gate mid-PR.
+    """
+    doc = _workflow(workflow)
+    for job_name, job in doc["jobs"].items():
+        condition = " ".join(str(job.get("if", "")).split())
+        if "dependabot" not in condition:
+            continue
+        assert "github.actor" not in condition, (
+            f"{workflow}:{job_name} gates the bot exemption on github.actor: {condition!r}"
+        )
+
+
 def _workflow(name: str) -> dict[str, Any]:
     path = _WORKFLOWS / name
     assert path.is_file(), f"workflow {name} missing"
