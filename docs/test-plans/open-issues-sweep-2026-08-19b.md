@@ -2,12 +2,13 @@
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19b-wave-plan.md`
 Worktree: `../mergecraft-issues-sweep-2026-08-19b` @ `wave/issues-sweep-2026-08-19b`
-Authoring waves: **W1** (Batch G RED) · **W5** (Batch H RED — xpass inventory)
+Authoring waves: **W1** (Batch G RED) · **W5** (Batch H RED — xpass inventory) · **W8** (Batch I RED — typing suppressions)
 
 W1 pins #277 (xdist flake on grandchild reap) and #278 (`MERGECRAFT_LIVE=1` opt-in)
 without changing production code. W5 inventories stale `xfail(strict=False)` xpasses
-(#276) and adds the RED `scripts/check_xpass.py` ratchet. D6-forbidden paths are
-not edited; D6 xpasses are counted then excluded from the W6 cleanup list.
+(#276) and adds the RED `scripts/check_xpass.py` ratchet. W8 inventories `type: ignore`
+/ `cast(` under `src/mergecraft/` (#275) and adds the RED `scripts/check_type_ignores.py`
+ratchet. D6-forbidden paths are not edited; D6 sites are counted then excluded.
 
 ## xfail schedule
 
@@ -15,7 +16,8 @@ not edited; D6 xpasses are counted then excluded from the W6 cleanup list.
 |------|------|---------------|--------|
 | **W3** | `test_setup_script_grandchildren_are_reaped` | `green after W3: #277 wait for pid_file before kill clock` | greened in W3 |
 | **W4** | `test_live_module_skips_when_mergecraft_live_unset` (6 cases) | `green after W4: MERGECRAFT_LIVE skip gate` | greened in W4 |
-| **W7** | `tests/ci/test_xpass_check.py::test_make_xpass_check_is_wired` | `green after W7: make xpass-check ratchet` | pending — Makefile target not wired (W5 RED) |
+| **W7** | `tests/ci/test_xpass_check.py::test_make_xpass_check_is_wired` | `green after W7: make xpass-check ratchet` | greened in W7 |
+| **W9** | `tests/ci/test_type_ignores.py::test_allowed_tree_ignores_and_casts_have_reasons` | `green after W9: #275 justify type: ignore / cast reasons` | pending — 53 allowed-tree sites lack a reason (W8 RED) |
 
 **W6 must not promote** the W7 wiring xfail. That test is still failing (no
 `make xpass-check`); it is an xfail, not an xpass.
@@ -277,3 +279,120 @@ separate tracker.
 - `make lint` + `make typecheck` clean; collection clean
 - No Makefile `xpass-check` target; not wired into `ci-static` / `make test`
 - No D6 path edits; no xfail promotions (W6)
+
+---
+
+## Batch I — typing suppressions (#275 / D10)
+
+Authoring wave: **W8**. Implementation: **W9** (justify or remove on the allowed
+tree; un-xfail W8.1). Do not edit D6 src files. Do not walk `src/` in W8.
+
+### W8.1 inventory (2026-08-19 @ `0d23a67`)
+
+Command: `uv run python scripts/check_type_ignores.py` (script added this wave;
+counts below are the live `src/mergecraft/` scan with D6 excluded from the fail
+condition). Every ignore already has `[code]` (finding 5). None have a `—`
+reason. No `cast(` has a `#` reason on the same or previous line.
+
+| Bucket | Ignores | Casts | Unjustified (fail the reason rule) |
+|--------|---------|-------|-------------------------------------|
+| Total | **41** | **15** | 56 |
+| Allowed-tree (W9 walk) | **39** | **14** | **53** (39 ignores + 14 casts) |
+| D6-excluded (count only; do not edit) | **2** | **1** | 3 |
+
+D6 leftovers (morning plan owns these; checker skips them):
+
+- `src/mergecraft/agents/_stream_consumer.py:321` — `type: ignore[assignment]`
+- `src/mergecraft/mcp/verdict.py:484` — `type: ignore[arg-type]`
+- `src/mergecraft/mcp/verdict.py:255` — `cast(`
+
+Error codes present on the 41 ignores: `arg-type`, `assignment`, `attr-defined`,
+`method-assign`, `misc`, `return-value`. Zero bare `type: ignore` without
+brackets on either tree.
+
+### W8.1 RED ratchet
+
+`scripts/check_type_ignores.py` scans `src/mergecraft/**/*.py`. A `type: ignore`
+must be `type: ignore[<code>]` with a following em-dash (U+2014) reason on the
+same line. A `cast(` call needs a `#` reason on the same line or the previous
+line. Exit 1 when allowed-tree unjustified count > 0; D6 files are counted in
+the summary and ignored. Verified RED on HEAD: exit 1,
+`53 allowed-tree unjustified (41 ignores, 15 casts; 3 D6-excluded violations)`.
+
+`make` is **not** wired (not in W8; W9 un-xfails the live-tree test only).
+No `Makefile` edit in W8. No `src/` edits.
+
+### Contract matrix (#275)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| I275a | Script exists | unit | happy | `tests/ci/test_type_ignores.py::test_script_exists` |
+| I275b | D6 path set covers the plan's src files | unit | happy | `test_d6_paths_cover_plan_src_files` |
+| I275c | Path D6 classification (incl. backslash) | unit | happy / edge | `test_is_d6_src` |
+| I275d | Ignore needs `[code]` **and** `—` reason | unit | happy / edge / error | `test_type_ignore_reason_rule` |
+| I275e | Cast needs `#` reason on same or previous line | unit | happy / edge / error | `test_cast_reason_rule` |
+| I275f | D6 unjustified sites → exit 0 | unit | edge | `test_d6_file_without_reason_is_excluded_from_fail` |
+| I275g | Allowed-tree missing reason → exit 1 | unit | error | `test_allowed_tree_missing_reason_fails` / `test_main_exits_one_on_allowed_unjustified` |
+| I275h | Empty tree → exit 0 | unit | edge | `test_empty_tree_is_zero` |
+| I275i | Missing `src/mergecraft` → exit 2 | unit | error | `test_missing_src_tree_exits_two` |
+| I275j | Justified ignore + cast → exit 0 | unit | happy | `test_main_exits_zero_when_justified` |
+| I275k | Live D6 sites never appear in allowed violations | integration | edge | `test_scan_tree_skips_d6_from_allowed_on_live_src` |
+| I275l | Live allowed tree has a reason on every site | functional | happy after W9 | `test_allowed_tree_ignores_and_casts_have_reasons` (xfail until W9) |
+
+W9 must not promote I275l until every allowed-tree ignore/cast is justified or
+removed. Do not edit D6 files.
+
+### W9 walk list (allowed-tree only)
+
+**Ignores lacking `—` reason (39):**
+
+- `src/mergecraft/action/inputs.py` (1)
+- `src/mergecraft/agents/__init__.py` (1)
+- `src/mergecraft/agents/harness_render.py` (1)
+- `src/mergecraft/agents/verifier.py` (1)
+- `src/mergecraft/analyzers/agentsec/policy.py` (1)
+- `src/mergecraft/analyzers/catalog_docs.py` (2)
+- `src/mergecraft/analyzers/lockfile.py` (1)
+- `src/mergecraft/analyzers/redact.py` (1)
+- `src/mergecraft/analyzers/trust.py` (1)
+- `src/mergecraft/cli/eval_cmd.py` (1)
+- `src/mergecraft/cli/mcp_cmd.py` (1)
+- `src/mergecraft/cli/mcp_serve.py` (2)
+- `src/mergecraft/cli/profiles.py` (1)
+- `src/mergecraft/config/settings.py` (1)
+- `src/mergecraft/evidence/emit.py` (1)
+- `src/mergecraft/evidence/packet.py` (2)
+- `src/mergecraft/main.py` (2)
+- `src/mergecraft/mcp/analyzers.py` (1)
+- `src/mergecraft/mcp/verification.py` (1)
+- `src/mergecraft/offline_review.py` (2)
+- `src/mergecraft/prep/node.py` (2)
+- `src/mergecraft/utils/activity.py` (4)
+- `src/mergecraft/utils/instructions.py` (1)
+- `src/mergecraft/utils/learnings.py` (2)
+- `src/mergecraft/utils/log.py` (1)
+- `src/mergecraft/utils/normalize_env.py` (1)
+- `src/mergecraft/utils/status_checks.py` (3)
+
+**Casts lacking a `#` reason (14):**
+
+- `src/mergecraft/analyzers/impact.py` (1)
+- `src/mergecraft/analyzers/parsers/trivy_json.py` (1)
+- `src/mergecraft/ci/normalize.py` (1)
+- `src/mergecraft/ci/providers/__init__.py` (4)
+- `src/mergecraft/classify/blast_radius.py` (2)
+- `src/mergecraft/context/call_graph.py` (1)
+- `src/mergecraft/context/repo_map.py` (1)
+- `src/mergecraft/context/symbol_index.py` (1)
+- `src/mergecraft/evidence/emit.py` (1)
+- `src/mergecraft/utils/payload.py` (1)
+
+HEAD does **not** already have reasons on the allowed tree — do not skip W9.
+
+### Acceptance (W8)
+
+- Inventory recorded (41 ignores / 15 casts; 39+14 allowed unjustified; 2+1 D6)
+- `scripts/check_type_ignores.py` exits 1 on the current allowed tree
+- Ratchet unit tests pass; live-tree cleanliness test xfail until W9
+- `make lint` + `make typecheck` clean; collection clean
+- No Makefile target; no `src/` edits; no D6 path edits

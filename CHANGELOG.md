@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `scripts/check_type_ignores.py` fails when a `type: ignore` or `cast(` in allowed `src/mergecraft/` lacks a one-line reason (#275)
 - `scripts/check_xpass.py` fails when unexpected pytest xpasses remain on the allowed test tree (#276)
 - `make xpass-check` ratchet target wired into `CI_STEPS` (after `coverage-gate`); `coverage-gate` now captures `-rX` output to `.pytest-xpass.log` so the check is a cheap post-test parse with no second pytest run (#276)
 - `MERGECRAFT_LIVE=1` opt-in gate for live provider tests (#278): live integration modules skip at collection time unless the flag is set; `make test-integration-live` and the CI `integration-live` job export the flag so the suite stays fail-closed when secrets are absent. `CONTRIBUTING.md` documents the split.
