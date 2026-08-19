@@ -25,6 +25,7 @@ those waves land.
 | **W3** | `test_start_installation_ignore_scripts_follows_d10[untrusted-enabled]` | `green after W3: ignore_scripts follows trust` | greened |
 | **W3** | `test_start_installation_untrusted_restricted_does_not_run_postinstall` | `green after W3: ignore_scripts follows trust` | greened |
 | **W6** | `test_untrusted_restricted_sandbox_none_omits_shell` | `green after W6: untrusted + sandbox none does not register shell` | greened |
+| **W8** | `test_harness_mcp_cli_name_fixture_exists` (+ AgentId pins) | `green after W8: harness deny-list CLI name fixtures` | pending |
 
 All cross-wave xfails use `strict=False`. Do not use `strict=True` (pytest.ini
 has `xfail_strict = true`).
@@ -86,3 +87,20 @@ Reset `_detected_sandbox` between cases (module global).
 | L287b | Cache reset between cases | unit | edge | `test_detect_sandbox_method_cache_resets_between_env` |
 | L287c | Untrusted + restricted + `"none"` omits `shell` / `kill_background` | integration | happy (bug) | `test_untrusted_restricted_sandbox_none_omits_shell` |
 | L287d | Trusted + restricted + `"none"` still includes `shell` | integration | control | `test_trusted_restricted_sandbox_none_keeps_shell` |
+
+## Batch M — #285 / D13 (W7 RED)
+
+Per harness, `format_mcp_tool_ref(id, "push_branch")` must appear in the rendered
+deny list **and** equal a checked-in fixture of the CLI name that harness
+documents. Fixture path: `tests/agents/fixtures/harness_mcp_cli_names.json`
+(added in W8). Do not spawn a live provider CLI. `tests/agents/test_verifier.py`
+formatter checks stay.
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| M285a | Fixture exists | unit | missing-file RED | `tests/agents/test_harness_deny_list_pin.py::test_harness_mcp_cli_name_fixture_exists` (xfail W8) |
+| M285b | Each `AgentId` `format_mcp_tool_ref` equals fixture | unit | happy | `test_format_mcp_tool_ref_matches_documented_cli_name` (xfail W8) |
+| M285c | Claude `disallowedTools` contains documented `push_branch` | integration | happy | `test_claude_disallowed_tools_use_documented_push_branch_name` (xfail W8) |
+| M285d | OpenCode `permission: deny` contains documented `push_branch` | integration | happy | `test_opencode_permission_deny_uses_documented_push_branch_name` (xfail W8) |
+| M285e | Gemini `excludeTools` contains documented `push_branch` | integration | happy | `test_gemini_exclude_tools_uses_documented_push_branch_name` (xfail W8) |
+| M285f | Codex subagent instructions contain documented `push_branch` | integration | happy | `test_codex_subagent_instructions_use_documented_push_branch_name` (xfail W8) |
