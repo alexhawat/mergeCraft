@@ -437,13 +437,49 @@ async def test_subcommand_scoping_does_not_widen_the_guards(
     assert recorder.calls == []
 
 
+async def test_an_unrecognised_short_bundle_is_not_called_an_alias_vector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``git log -cx`` is refused for its own reason, with its own message.
+
+    ``-cx`` carries no config assignment, so calling it an alias-execution
+    vector is simply false — it is a short bundle ``log`` does not define. Both
+    refusals stay; only the one that was inaccurate is re-worded.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "log", "args": ["-cx"]})
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+    text = result.content[0]["text"]
+    assert CONFIG_FLAG_MESSAGE not in text
+    assert "does not define" in text
+
+
+async def test_a_glued_config_payload_still_names_the_alias_vector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Counterpart: the assignment-carrying spelling keeps the accurate message."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "log", "args": ["-calias.x=!true"]})
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+
+
 @pytest.mark.parametrize("subcommand", ["diff", "show", "log"])
 @pytest.mark.parametrize(
     "flag",
     [
         "--output=/tmp/mergecraft-escape.txt",
         "--output",
-        # git resolves any unambiguous prefix, so the ban has to cover them too.
+        # Abbreviations git could resolve are named exactly. Shorter forms are
+        # ambiguous with `--output-indicator-*`, so git refuses them itself.
         "--out",
         "--outp",
         "--output=",

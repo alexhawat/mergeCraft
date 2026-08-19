@@ -35,6 +35,7 @@ from mergecraft.findings.agent_adapter import (
 from mergecraft.findings.causality import CausalityValidationError, validate_blocking_finding
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
+from mergecraft.review_taxonomy import FINDING_SEVERITIES
 from mergecraft.utils.learnings import learnings_file_path
 
 if TYPE_CHECKING:
@@ -400,7 +401,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
                             "line": {"type": "number"},
                             "severity": {
                                 "type": "string",
-                                "enum": ["Critical", "Major", "Minor", "Trivial"],
+                                "enum": list(FINDING_SEVERITIES),
                             },
                             "body": {"type": "string"},
                             "fingerprint": {"type": "string"},
@@ -530,7 +531,7 @@ def record_finding_verdict_tool(ctx: ToolContext):
                 },
                 "new_severity": {
                     "type": "string",
-                    "enum": ["Critical", "Major", "Minor", "Trivial"],
+                    "enum": list(FINDING_SEVERITIES),
                     "description": (
                         "The severity a downgrade rewrites the finding to. Mandatory on a "
                         "downgrade verdict — one without it is rejected, not defaulted. "

@@ -78,31 +78,37 @@ _BRANCH_READONLY_FLAGS: frozenset[str] = frozenset(
 _BRANCH_FLAGS_TAKING_VALUE: frozenset[str] = frozenset(
     {"--contains", "--no-contains", "--points-at", "--merged", "--no-merged", "--sort", "--format"}
 )
-# Short letters `git branch` accepts in listing mode. Bundling is real
-# (``branch -av``) and repetition is meaningful (``-vvv``), so the check is per
-# letter; every write letter — ``d``/``D``/``m``/``M``/``c``/``C`` — is absent,
-# which is what keeps the bundled write forms refused.
-_BRANCH_READONLY_SHORTS: frozenset[str] = frozenset("arvi")
-# Short letters each allowlisted subcommand defines for itself. Short flags are
-# subcommand-scoped: ``-c`` is ``--cached`` to ``ls-files`` and the combined-diff
-# selector to ``log``/``show``, while to ``status`` it can only be git's
-# alias-executing config flag. A flat blocklist cannot express that, and reading
-# it as one refused real read-only usage (``ls-files -co``).
+# Short letters each allowlisted subcommand defines for itself, and the single
+# home of that policy. Short flags are subcommand-scoped: ``-c`` is ``--cached``
+# to ``ls-files`` and the combined-diff selector to ``log``/``show``, while to
+# ``status`` it can only be git's alias-executing config flag. A flat blocklist
+# cannot express that, and reading it as one refused real read-only usage
+# (``ls-files -co``).
 _SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
     "ls-files": frozenset("cdikmostuvz"),
     "log": frozenset("cmpuz"),
     "show": frozenset("cmpuz"),
     "diff": frozenset("mpuz"),
-    "branch": _BRANCH_READONLY_SHORTS,
+    # ``branch`` is listing-only here. Bundling is real (``branch -av``) and
+    # repetition is meaningful (``-vvv``), so the check is per letter; every
+    # write letter — ``d``/``D``/``m``/``M``/``c``/``C`` — is absent, which is
+    # what keeps the bundled write forms refused.
+    "branch": frozenset("arvi"),
 }
-# Subcommands that define ``-C`` themselves (find-copies / detect-moves), where
-# it is not git's chdir option and must not be pulled into the global slot.
+# Subcommands that define ``-C`` themselves, where it is not git's chdir option
+# and must not be pulled into the global slot. It means find-copies to ``diff``,
+# ``log`` and ``show``, whitespace-insensitive blame to ``blame``, and
+# copy-force to ``branch`` — a write, which ``_reject_branch_writes`` refuses on
+# its own; what matters here is only that none of them is the chdir option.
 _SUBCOMMAND_OWNS_DASH_C: frozenset[str] = frozenset({"diff", "log", "show", "blame", "branch"})
 # Flags of an allowlisted read-only subcommand that write a file. The subcommand
-# allowlist constrains the verb, not the flags the verb accepts. git resolves any
-# unambiguous prefix, so the whole ``--out``…``--output`` family is named; ``-o``
-# is scoped, because it is ``--others`` to ``ls-files`` and writes nothing.
-_OUTPUT_FLAG_PREFIXES: tuple[str, ...] = ("--out", "--outp", "--outpu", "--output")
+# allowlist constrains the verb, not the flags the verb accepts. Every abbreviation
+# of ``--output`` git actually resolves is named: ``--out``/``--outp``/``--outpu``
+# are ambiguous with the ``--output-indicator-*`` family and git refuses them
+# itself, and so are the shorter ``--o``/``--ou``, which is why matching these
+# four exactly suffices. ``-o`` is scoped, because it is ``--others`` to
+# ``ls-files`` and writes nothing.
+_OUTPUT_FLAG_SPELLINGS: frozenset[str] = frozenset({"--out", "--outp", "--outpu", "--output"})
 _SYMBOLIC_REFS = frozenset({"HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"})
 _BAD_REF_CHARS = re.compile(r"[:+^~?*[\\\s]")
 
@@ -137,42 +143,68 @@ def validate_tag_name(tag: str) -> None:
         raise ValueError(msg)
 
 
-def _is_config_flag(token: str, *, subcommand: str = "") -> bool:
-    """Whether *token* is any spelling of git's ``-c`` / ``--config-env``.
+def _is_config_flag(token: str) -> bool:
+    """Whether *token* is a spelling of git's ``-c`` / ``--config-env`` itself.
 
-    Covers the spaced forms (``-c key=value``), the glued short form
-    (``-ckey=value``) and the inline long form (``--config-env=key=VAR``).
-    ``-C`` is a different flag and stays allowed: the comparison is
-    case-sensitive.
+    Covers the spaced forms (``-c key=value``), the inline long form
+    (``--config-env=key=VAR``) and the glued short form (``-ckey=value``) — the
+    last identified by the ``=`` a config assignment always carries, since
+    ``git -cfoo`` with no value is an error git refuses on its own. ``-C`` is a
+    different flag and stays allowed: the comparison is case-sensitive.
 
-    A ``-c``-shaped token is read against the short flags *subcommand* defines
-    before it is called a config flag, because ``ls-files -co`` and ``log -c``
-    are read-only invocations that mean nothing like ``-c key=value``. A glued
-    config payload never survives that test: its key characters (``.``, ``=``,
-    the key name) are not short-flag letters. With no subcommand in hand — the
-    pre-subcommand global slot — the strict reading applies.
+    This says nothing about whether the token is *acceptable*: a bare ``-c`` is
+    also ``log``'s combined-diff selector, which is what
+    ``_subcommand_declares_shorts`` is for.
     """
-    if token in _CONFIG_FLAGS:
-        return token != "-c" or "c" not in _SUBCOMMAND_SHORT_FLAGS.get(subcommand, frozenset())
-    if token.startswith("--config-env="):
+    if token in _CONFIG_FLAGS or token.startswith("--config-env="):
         return True
-    if not token.startswith("-c") or len(token) <= 2:
-        return False
+    return token.startswith("-c") and len(token) > 2 and "=" in token
+
+
+def _subcommand_declares_shorts(token: str, subcommand: str) -> bool:
+    """Whether *subcommand* defines every short letter bundled in *token*.
+
+    Short flags are subcommand-scoped, so this — not the config-flag test — is
+    what tells ``ls-files -co`` and ``log -c`` (read-only invocations) apart from
+    ``status -c`` (which can only be git's config flag, misplaced). With no
+    subcommand in hand — the pre-subcommand global slot — nothing is declared and
+    the strict reading applies.
+    """
     known = _SUBCOMMAND_SHORT_FLAGS.get(subcommand, frozenset())
-    return not all(char in known for char in token[1:])
+    return all(char in known for char in token[1:])
+
+
+def _config_flag_message(token: str) -> str:
+    return f"Blocked: '{token}' can execute arbitrary code via git alias expansion."
 
 
 def _reject_config_flags(tokens: list[str], *, subcommand: str = "") -> None:
-    """Raise ValueError if any token is a -c / --config-env flag (#257 / D7).
+    """Reject git's config flag, and any ``-c`` bundle *subcommand* cannot own.
 
-    These flags let an agent inject an alias-expansion shell command regardless
-    of payload.shell.  Rejection is unconditional — there is no safe-key
-    allowlist for -c.
+    ``-c`` / ``--config-env`` let an agent inject an alias-expansion shell
+    command regardless of ``payload.shell``, and rejection is unconditional —
+    there is no safe-key allowlist for ``-c``. A ``-c``-shaped token the
+    subcommand does not define is refused too, but for the other reason and
+    with its own message: it is an unrecognised short bundle, not proof of an
+    alias payload.
+
+    Raises:
+        ValueError: on either refusal.
     """
     for tok in tokens:
-        if _is_config_flag(tok, subcommand=subcommand):
-            msg = f"Blocked: '{tok}' can execute arbitrary code via git alias expansion."
-            raise ValueError(msg)
+        if tok.startswith("--"):
+            if _is_config_flag(tok):
+                raise ValueError(_config_flag_message(tok))
+            continue
+        if not tok.startswith("-c") or _subcommand_declares_shorts(tok, subcommand):
+            continue
+        if _is_config_flag(tok):
+            raise ValueError(_config_flag_message(tok))
+        msg = (
+            f"Blocked: '{tok}' bundles short flags {subcommand or 'git'} does not "
+            "define — only each subcommand's own read-only short flags are forwarded."
+        )
+        raise ValueError(msg)
 
 
 def _reject_namespace_flag(tokens: list[str]) -> None:
@@ -226,7 +258,7 @@ def _reject_branch_writes(args: list[str]) -> None:
         if arg.startswith("-") and len(arg) > 1:
             # Short flags bundle (``-av``) and repeat (``-vvv``), so each letter
             # is checked: one write letter in the bundle refuses the whole token.
-            if not all(char in _BRANCH_READONLY_SHORTS for char in arg[1:]):
+            if not _subcommand_declares_shorts(arg, "branch"):
                 msg = (
                     f"Blocked: 'branch {arg}' — only listing flags "
                     "are permitted on the reviewer surface."
@@ -249,14 +281,17 @@ def _reject_file_writing_flags(command: str, args: list[str]) -> None:
     """Reject flags that make a read-only subcommand write a file (H2).
 
     ``git diff --output=<path>`` writes wherever it is pointed, so the read-only
-    allowlist alone does not make the verb read-only, and git honours every
-    unambiguous prefix of it. ``-o`` is judged against the subcommand: it is
-    ``--others`` to ``ls-files`` and writes nothing there.
+    allowlist alone does not make the verb read-only. The four spellings named in
+    ``_OUTPUT_FLAG_SPELLINGS`` are compared exactly, which is enough: git resolves
+    an option abbreviation only when it is unambiguous, and every shorter form
+    (``--o``, ``--ou``) collides with the ``--output-indicator-*`` family, so git
+    refuses those before they can write anything. ``-o`` is judged against the
+    subcommand: it is ``--others`` to ``ls-files`` and writes nothing there.
     """
     writes_dash_o = "o" not in _SUBCOMMAND_SHORT_FLAGS.get(command, frozenset())
     for arg in args:
         name = arg.split("=", 1)[0]
-        if name in _OUTPUT_FLAG_PREFIXES or (writes_dash_o and name == "-o"):
+        if name in _OUTPUT_FLAG_SPELLINGS or (writes_dash_o and name == "-o"):
             msg = f"Blocked: '{command} {arg}' writes a file — the reviewer surface is read-only."
             raise ValueError(msg)
 
@@ -336,9 +371,6 @@ def _git_env(token: str) -> dict[str, str]:
 # unconditionally (alias-execution vector).
 _GLOBAL_OPTS = ("-C", "--git-dir", "--work-tree", "--namespace")
 _GLOBAL_OPT_RE = re.compile(r"^--(?:git-dir|work-tree|namespace)(?:=.*)?$")
-
-# Tokens that take a separate value argument rather than an inline `=value`.
-_GLOBAL_OPT_TAKES_VALUE = ("-C", "--git-dir", "--work-tree", "--namespace")
 
 
 def _extract_global_opts(

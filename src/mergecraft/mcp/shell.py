@@ -157,6 +157,12 @@ _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # A wrapper's own numeric argument — `timeout 5 git …`, `nice -n 10 git …`.
 # No command name is bare-numeric, so skipping these costs nothing.
 _NUMERIC_ARG = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+# A wrapper flag whose separate operand is a name, not a command — `sudo -u ci
+# git status`, `doas -g devs git …`. The user name is neither path-shaped nor
+# numeric, so without this it reads as the command word and ends the segment
+# before the git behind it is inspected. Glued spellings (`--user=ci`) already
+# fall out as flags.
+_WRAPPER_FLAG_TAKES_VALUE = frozenset({"-u", "--user", "-g", "--group"})
 
 
 def _command_word(token: str) -> str:
@@ -187,7 +193,7 @@ def _is_git_command(command: str) -> bool:
     wrapper commands, then the first real command word decides: git under any
     path spelling is refused, anything else ends that segment. That keeps
     ``grep git README`` and ``ls .git`` running while catching ``env git``,
-    ``xargs -n1 git``, ``/usr/bin/git`` and ``$(git …)``.
+    ``xargs -n1 git``, ``/usr/bin/git``, ``sudo -u ci git`` and ``$(git …)``.
 
     Defence in depth, not a shell parser: arbitrarily quoted payloads
     (``sh -c 'g''it'``), variable indirection (``G=git; $G status``) and
@@ -197,8 +203,13 @@ def _is_git_command(command: str) -> bool:
     """
     for segment in _COMMAND_SEGMENT.split(command):
         after_wrapper = False
+        skip_operand = False
         for token in segment.split():
+            if skip_operand:
+                skip_operand = False
+                continue
             if _ENV_ASSIGNMENT.match(token) or _NUMERIC_ARG.match(token) or token.startswith("-"):
+                skip_operand = token in _WRAPPER_FLAG_TAKES_VALUE
                 continue
             if _names_git(token):
                 return True

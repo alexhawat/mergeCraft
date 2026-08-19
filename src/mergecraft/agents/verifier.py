@@ -37,13 +37,14 @@ Exports:
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from mergecraft.analyzers.scope import withdrawn_fingerprints
 from mergecraft.mcp.shared import VERIFIER_ALLOWED_TOOL_CLASSES
+from mergecraft.policy.schema import SeverityLiteral
 from mergecraft.review_taxonomy import (
     FINDING_SEVERITIES,
     WITHDRAWN_FINDINGS_HEADING,
@@ -340,8 +341,13 @@ def plan_agent_verifications(
 # ── verdicts (D11 / D14) ──────────────────────────────────────────────────────
 
 JudgeVerdictName = Literal["confirm", "downgrade", "drop"]
-JudgeSeverity = Literal["Critical", "Major", "Minor", "Trivial"]
-JUDGE_SEVERITIES: tuple[JudgeSeverity, ...] = ("Critical", "Major", "Minor", "Trivial")
+# One vocabulary, two views of it: the policy schema's ``Literal`` for typing and
+# ``FINDING_SEVERITIES`` for the values. Minting a twin here is how the four
+# grades come to disagree.
+JudgeSeverity = SeverityLiteral
+# cast: `FINDING_SEVERITIES` is the same four values typed `tuple[str, ...]`, and
+# narrowing it here is what keeps them one vocabulary instead of two.
+JUDGE_SEVERITIES: tuple[JudgeSeverity, ...] = cast("tuple[JudgeSeverity, ...]", FINDING_SEVERITIES)
 DOWNGRADE_SEVERITY_REQUIRED = (
     "a downgrade verdict must name new_severity — the severity it downgrades to "
     "is the verdict, and defaulting it silently retires findings the approve gate holds"

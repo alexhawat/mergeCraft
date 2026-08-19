@@ -97,6 +97,13 @@ BYPASSES = [
     pytest.param("proot -0 git status", id="proot-wrapper"),
     pytest.param("ssh-agent git push", id="ssh-agent-wrapper"),
     pytest.param("chronic git fetch", id="chronic-wrapper"),
+    # `sudo`'s target user is neither path-shaped nor numeric, so it used to end
+    # the segment and the git behind it was never inspected.
+    pytest.param("sudo -u ci git status", id="sudo-target-user"),
+    pytest.param("sudo --user=ci git status", id="sudo-target-user-glued"),
+    pytest.param("sudo -g devs git status", id="sudo-target-group"),
+    pytest.param("sudo -u ci -g devs git clean -fdx", id="sudo-user-and-group"),
+    pytest.param("doas -u ci git status", id="doas-target-user"),
 ]
 
 # Separator spellings the original class did cover — regression guards, so a
