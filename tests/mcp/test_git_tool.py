@@ -375,8 +375,80 @@ async def test_branch_listing_forms_still_run(
     assert recorder.calls == [["branch", *args]]
 
 
+# R5: short flags are subcommand-scoped, so a flat global blocklist cannot
+# express them. Every entry below is a real read-only invocation the flat
+# blocklist refused — `-o`/`-c` mean `--others`/`--cached` to `ls-files`, `-c`
+# is the combined-diff selector for `log`/`show`, and `-C` after `diff` is
+# find-copies rather than git's chdir option.
+SUBCOMMAND_SCOPED_READONLY = [
+    pytest.param("ls-files", ["-o"], id="ls-files-others"),
+    pytest.param("ls-files", ["-c"], id="ls-files-cached"),
+    pytest.param("ls-files", ["-co"], id="ls-files-bundled"),
+    pytest.param("ls-files", ["--others", "--cached"], id="ls-files-long-forms"),
+    pytest.param("log", ["-c"], id="log-combined-diff"),
+    pytest.param("show", ["-c", "HEAD"], id="show-combined-diff"),
+    pytest.param("diff", ["-C"], id="diff-find-copies"),
+    pytest.param("diff", ["-C", "HEAD"], id="diff-find-copies-with-rev"),
+    pytest.param("branch", ["-av"], id="branch-bundled-all-verbose"),
+    pytest.param("branch", ["-ar"], id="branch-bundled-all-remotes"),
+    pytest.param("branch", ["-vvv"], id="branch-repeated-verbose"),
+    pytest.param("branch", ["--list", "topic/*"], id="branch-list-pattern"),
+]
+
+
+@pytest.mark.parametrize(("subcommand", "args"), SUBCOMMAND_SCOPED_READONLY)
+async def test_subcommand_scoped_read_only_flags_are_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str, args: list[str]
+) -> None:
+    """A read-only invocation must reach git with its flags intact."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand, "args": args})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [[subcommand, *args]], recorder.calls
+
+
+# The same short letters must stay refused on a subcommand that does not define
+# them: scoping the maps is not a licence to widen the config-flag hole.
+SUBCOMMAND_SCOPED_STILL_BLOCKED = [
+    pytest.param("status", ["-c"], id="status-has-no-short-c"),
+    pytest.param("status", ["-co"], id="status-bundled-c"),
+    pytest.param("diff", ["-cuser.name=x"], id="glued-config-on-diff"),
+    pytest.param("ls-files", ["-calias.x=!true"], id="glued-config-on-ls-files"),
+    pytest.param("log", ["-c", "alias.x=!true", "-o", "/tmp/x"], id="log-still-refuses-dash-o"),
+    pytest.param("branch", ["-aD"], id="branch-bundled-with-delete"),
+    pytest.param("branch", ["-vd", "topic"], id="branch-bundled-with-lowercase-delete"),
+    pytest.param("branch", ["topic"], id="branch-bare-creation-without-list"),
+]
+
+
+@pytest.mark.parametrize(("subcommand", "args"), SUBCOMMAND_SCOPED_STILL_BLOCKED)
+async def test_subcommand_scoping_does_not_widen_the_guards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str, args: list[str]
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand, "args": args})
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
 @pytest.mark.parametrize("subcommand", ["diff", "show", "log"])
-@pytest.mark.parametrize("flag", ["--output=/tmp/mergecraft-escape.txt", "--output"])
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "--output=/tmp/mergecraft-escape.txt",
+        "--output",
+        # git resolves any unambiguous prefix, so the ban has to cover them too.
+        "--out",
+        "--outp",
+        "--output=",
+    ],
+)
 async def test_file_writing_flags_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str, flag: str
 ) -> None:
