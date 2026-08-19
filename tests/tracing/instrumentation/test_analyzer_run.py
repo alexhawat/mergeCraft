@@ -84,7 +84,7 @@ def _register_demo_analyzer(*, finding_count: int, exit_code: int = 0) -> Any:
     return manifest.id
 
 
-@pytest.mark.xfail(reason="green after W4: analyzer.run instrumentation", strict=False)
+@pytest.mark.xfail(reason="green after W4: analyzer.run instrumentation (#276)", strict=True)
 def test_analyzer_run_spans_carry_id_exit_code_findings_count_duration(
     captured_sink: Any, tmp_path: Path
 ) -> None:
@@ -115,7 +115,7 @@ def test_analyzer_run_spans_carry_id_exit_code_findings_count_duration(
     assert attrs.get("analyzer.duration_ms") >= 0
 
 
-@pytest.mark.xfail(reason="green after W4: analyzer.run instrumentation", strict=False)
+@pytest.mark.xfail(reason="green after W4: analyzer.run instrumentation (#276)", strict=True)
 def test_analyzer_run_span_records_zero_findings(captured_sink: Any, tmp_path: Path) -> None:
     """W3.3 (edge) — an analyzer that produces no findings still emits a span."""
     _make_repo(tmp_path, files=["src/example.py"])
@@ -138,7 +138,7 @@ def test_analyzer_run_span_records_zero_findings(captured_sink: Any, tmp_path: P
     assert analyzer_runs[0].attrs.get("analyzer.exit_code") == 0
 
 
-@pytest.mark.xfail(reason="green after W4: analyzer.run instrumentation", strict=False)
+@pytest.mark.xfail(reason="green after W4: analyzer.run instrumentation (#276)", strict=True)
 def test_analyzer_run_span_records_non_zero_exit_on_failure(
     captured_sink: Any, tmp_path: Path
 ) -> None:
@@ -165,7 +165,7 @@ def test_analyzer_run_span_records_non_zero_exit_on_failure(
     assert demo_runs[0].attrs.get("analyzer.exit_code") != 0
 
 
-@pytest.mark.xfail(reason="green after W4: analyzer.run instrumentation", strict=False)
+@pytest.mark.xfail(reason="green after W4: analyzer.run instrumentation (#276)", strict=True)
 def test_analyzer_pipeline_parent_span_present(captured_sink: Any, tmp_path: Path) -> None:
     """W3.3 (parent) — ``mergecraft.analyzers.pipeline`` is the parent of ``analyzer.run``."""
     _make_repo(tmp_path, files=["src/example.py"])

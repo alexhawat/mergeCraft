@@ -43,7 +43,7 @@ _EXPECTED_KINDS = (
 )
 
 
-@pytest.mark.xfail(reason="green after W4: span tree instrumentation", strict=False)
+@pytest.mark.xfail(reason="green after W4: span tree instrumentation (#276)", strict=True)
 def test_span_tree_shape(captured_sink: Any) -> None:
     """W3.1 — issue §3: ``mergecraft.run`` is the root; every other kind nests under it.
 

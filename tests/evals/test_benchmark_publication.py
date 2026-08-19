@@ -36,8 +36,8 @@ from mergecraft.modes import compute_prompt_version
 from mergecraft.utils.learnings import LearningProvenance
 
 _SPUN_OUT_W9 = pytest.mark.xfail(
-    reason="spun out: W9 — live precision/recall/F1 in README needs operator eval-replay",
-    strict=False,
+    reason="spun out: W9 — live precision/recall/F1 in README needs operator eval-replay (#276)",
+    strict=True,
 )
 
 _EVAL_HEADING = re.compile(r"eval infrastructure", re.IGNORECASE)

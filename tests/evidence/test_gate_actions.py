@@ -422,8 +422,3 @@ def test_unrecognised_gate_mode_falls_back_to_shadow() -> None:
     assert valid.gate_action == "shadow"
     enforced = RepoSettings.model_validate({"gates": {"gate_action": "enforce"}}).gates
     assert enforced.gate_action == "enforce"
-
-
-# ── module-level xfail markers ────────────────────────────────────────────────
-
-pytestmark = pytest.mark.xfail(reason="green after W9/W10", strict=False)

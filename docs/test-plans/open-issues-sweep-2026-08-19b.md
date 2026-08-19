@@ -209,6 +209,66 @@ not delete tests. Do not touch D6 files.
 - `test_promotion_requires_explicit_approval_by_default`
 - `test_quarantined_entry_never_reaches_reviewer_prompt`
 
+### W6 promotion (2026-08-19)
+
+Removed `xfail(strict=False)` from all **113** allowed-tree xpasses listed
+above. Test bodies kept. D6 file untouched. W7 wiring xfail untouched.
+`test_emit_failure_logs_a_warning` capture was retargeted to stderr
+(`capsys`) so the promotion is a real pass: production emit may reset
+loguru handlers, which made a dedicated ``logger.add`` sink
+order-dependent.
+
+| Bucket | Count |
+|--------|-------|
+| Allowed-tree xfail markers removed | **113** (7 files) |
+| D6 leftovers (still `strict=False` xpass) | **8** — `tests/agents/test_codex_custom_provider.py` |
+| Allowed-tree still-failing xfails → `strict=True` + `(#276)` | **13** |
+| W7 wiring xfail (still `strict=False`) | **1** — `test_make_xpass_check_is_wired` |
+
+W5 recorded 13 still-failing xfails in the unit suite. W6 inspection found
+those 13 plus `test_readme_eval_claim_adjacent_to_dated_metrics_and_corpus_commit`
+(W9 eval-replay, also still failing). All allowed-path leftovers other
+than the W7 wiring test were set `strict=True` with `(#276)` in `reason=`.
+No GitHub issue was created (draft-only).
+
+Leftover **failing** xfails (`strict=True`, `#276`), excluding W7:
+
+- `tests/cli/test_auth_nous_cmd.py::test_auth_nous_fails_closed_when_gh_is_unauthenticated`
+- `tests/evals/test_benchmark_publication.py::test_readme_eval_claim_adjacent_to_dated_metrics_and_corpus_commit`
+- `tests/instructions/test_offline_review_fence.py::test_injected_pr_body_does_not_change_findings`
+- `tests/instructions/test_offline_review_fence.py::test_offline_diff_review_fences_commit_messages_and_patch_headers`
+- `tests/tracing/instrumentation/test_agent_attempt.py::test_one_agent_attempt_span_for_skipped_entry`
+- `tests/tracing/instrumentation/test_analyzer_run.py` (4)
+- `tests/tracing/instrumentation/test_span_tree.py::test_span_tree_shape`
+- `tests/tracing/instrumentation/test_usage_entries.py::test_usage_entries_aggregation_across_multiple_attempts`
+- `tests/tracing/test_trace_id_bridge.py::test_otel_sink_forwards_real_trace_id`
+- `tests/utils/test_fence.py::test_forged_close_does_not_escape_fence`
+
+D6 leftovers (do not promote; morning plan owns these):
+
+- `test_codex_config_toml_writes_both_indexed_providers`
+- `test_codex_config_toml_writes_three_indexed_providers`
+- `test_codex_indexed_wins_singleton_ignored`
+- `test_codex_partial_indexed_coverage_writes_only_present_providers` (4 params)
+- `test_codex_singleton_alone_emits_default_provider_block`
+
+`scripts/check_xpass.py` should now exit 0 on allowed-tree (D6 xpasses
+excluded from the fail condition). `make xpass-check` still unwired (W7).
+
+### Draft follow-up issue (not filed)
+
+**Title:** Remaining strict xfails after #276 xpass promotion
+
+**Body:** After W6 promoted 113 allowed-tree xpasses, 13 allowed-path tests
+still fail and are now `xfail(strict=True)` with `(#276)` in `reason=`. They
+are leftovers from other programs (tracing W4 instrumentation, fence
+B-Final stub/`nonce` contradiction, eval W9 README metrics, auth_nous
+CliRunner `SystemExit`). D6 `test_codex_custom_provider.py` xpasses stay
+for the morning plan. Do not `gh issue create` until an owner wants a
+separate tracker.
+
+### Acceptance (W5)
+
 ### Acceptance (W5)
 
 - Inventory recorded (121 total / 113 allowed / 8 D6)

@@ -130,10 +130,9 @@ def test_auth_nous_prompts_with_getpass_and_writes_secret(
     reason=(
         "structural assertion incompatible with click.testing.CliRunner — SystemExit "
         "is captured into result.exception rather than propagating; the subcommand "
-        "does fail closed, but the W1 test uses pytest.raises(SystemExit). Tracked "
-        "as a W1-design bug; W2 ships the subcommand + the negative validator path."
+        "does fail closed, but the W1 test uses pytest.raises(SystemExit) (#276)"
     ),
-    strict=False,
+    strict=True,
 )
 def test_auth_nous_fails_closed_when_gh_is_unauthenticated(
     monkeypatch: MonkeyPatch,

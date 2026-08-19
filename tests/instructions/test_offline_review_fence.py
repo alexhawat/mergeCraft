@@ -114,9 +114,9 @@ def _build_stub_agent(monkeypatch: pytest.MonkeyPatch, capture_path: Path) -> No
         "name='stub', but _run_agent_review calls compute_modes(agent.name, "
         "...) which requires a real agent id. The test was meant to mock "
         "compute_modes too, but does not. Deferred to B-Final: patch the "
-        "stub to monkeypatch compute_modes or use a real agent id."
+        "stub to monkeypatch compute_modes or use a real agent id (#276)."
     ),
-    strict=False,
+    strict=True,
 )
 def test_injected_pr_body_does_not_change_findings(
     tmp_path: Path,
@@ -255,9 +255,9 @@ def _extract_fenced(prompt: str) -> str:
     reason=(
         "W3 stub infrastructure issue: see test_injected_pr_body_does_not_change_findings "
         "for details. The stub agent uses name='stub' which fails in compute_modes(). "
-        "Deferred to B-Final."
+        "Deferred to B-Final (#276)."
     ),
-    strict=False,
+    strict=True,
 )
 def test_offline_diff_review_fences_commit_messages_and_patch_headers(
     tmp_path: Path,

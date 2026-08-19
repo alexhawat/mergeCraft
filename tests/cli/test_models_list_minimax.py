@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -55,14 +54,6 @@ def _clear_provider_env(monkeypatch: MonkeyPatch) -> None:
 # ── W5.4 — model list renders the minimax row with credentials column ──────
 
 
-@pytest.mark.xfail(
-    reason=(
-        "green after W6: the minimax/MiniMax-M3 catalog entry must be enumerated "
-        "by ``mergecraft models list`` even when no MERGECRAFT_CUSTOM_PROVIDER_* "
-        "env var is set (D10 / option ii — MiniMax routed via the W3 helper)"
-    ),
-    strict=False,
-)
 def test_mergecraft_models_list_renders_minimax_row_without_credentials(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -82,14 +73,6 @@ def test_mergecraft_models_list_renders_minimax_row_without_credentials(
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "green after W6: the minimax/MiniMax-M3 catalog entry must be enumerated "
-        "by ``mergecraft models list`` (D10 / option ii — MiniMax routed via the "
-        "W3 custom-provider helper)"
-    ),
-    strict=False,
-)
 def test_mergecraft_models_list_renders_minimax_row_with_credentials(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -123,13 +106,6 @@ def test_mergecraft_models_list_renders_minimax_row_with_credentials(
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "green after W6: even when the credentials column flips to ``yes``, the "
-        "rendered table must not leak the api key value into stdout (convention 7)"
-    ),
-    strict=False,
-)
 def test_mergecraft_models_list_minimax_row_does_not_leak_api_key(
     monkeypatch: MonkeyPatch,
 ) -> None:
