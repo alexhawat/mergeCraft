@@ -36,10 +36,6 @@ from mergecraft.prep.types import PrepOptions, PrepResult
 from mergecraft.utils.github import GitHubClient
 
 _SENTINEL_NAME = "SENTINEL"
-_XFAIL_TRUST = pytest.mark.xfail(
-    reason="green after W3: ignore_scripts follows trust",
-    strict=False,
-)
 
 Shell = Literal["disabled", "restricted", "enabled"]
 TrustTier = Literal["trusted", "untrusted"]
@@ -122,20 +118,8 @@ async def _await_installation(ctx: ToolContext) -> None:
 @pytest.mark.parametrize(
     ("trust_tier", "shell", "expect_ignore"),
     [
-        pytest.param(
-            "untrusted",
-            "restricted",
-            True,
-            id="untrusted-restricted",
-            marks=_XFAIL_TRUST,
-        ),
-        pytest.param(
-            "untrusted",
-            "enabled",
-            True,
-            id="untrusted-enabled",
-            marks=_XFAIL_TRUST,
-        ),
+        pytest.param("untrusted", "restricted", True, id="untrusted-restricted"),
+        pytest.param("untrusted", "enabled", True, id="untrusted-enabled"),
         pytest.param("untrusted", "disabled", True, id="untrusted-disabled"),
         pytest.param("trusted", "disabled", True, id="trusted-disabled"),
         pytest.param("trusted", "restricted", False, id="trusted-restricted"),
@@ -167,7 +151,6 @@ async def test_start_installation_ignore_scripts_follows_d10(
 
 
 @pytest.mark.asyncio
-@_XFAIL_TRUST
 async def test_start_installation_untrusted_restricted_does_not_run_postinstall(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

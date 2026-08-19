@@ -42,7 +42,9 @@ def _format_prep_results(results: list[PrepResult]) -> str:
 def start_installation(ctx: ToolContext) -> None:
     if ctx.tool_state.dependency_installation is not None:
         return
-    options = PrepOptions(ignore_scripts=ctx.payload.shell == "disabled")
+    options = PrepOptions(
+        ignore_scripts=ctx.trust_tier == "untrusted" or ctx.payload.shell == "disabled"
+    )
     promise = asyncio.ensure_future(run_prep_phase(options))
     ctx.tool_state.dependency_installation = DependencyInstallationState(
         status="in_progress",

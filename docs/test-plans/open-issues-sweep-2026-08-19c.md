@@ -21,9 +21,9 @@ those waves land.
 
 | Wave | Test | Marker reason | Status |
 |------|------|---------------|--------|
-| **W3** | `test_start_installation_ignore_scripts_follows_d10[untrusted-restricted]` | `green after W3: ignore_scripts follows trust` | pending |
-| **W3** | `test_start_installation_ignore_scripts_follows_d10[untrusted-enabled]` | `green after W3: ignore_scripts follows trust` | pending |
-| **W3** | `test_start_installation_untrusted_restricted_does_not_run_postinstall` | `green after W3: ignore_scripts follows trust` | pending |
+| **W3** | `test_start_installation_ignore_scripts_follows_d10[untrusted-restricted]` | `green after W3: ignore_scripts follows trust` | greened |
+| **W3** | `test_start_installation_ignore_scripts_follows_d10[untrusted-enabled]` | `green after W3: ignore_scripts follows trust` | greened |
+| **W3** | `test_start_installation_untrusted_restricted_does_not_run_postinstall` | `green after W3: ignore_scripts follows trust` | greened |
 
 All cross-wave xfails use `strict=False`. Do not use `strict=True` (pytest.ini
 has `xfail_strict = true`).
@@ -42,13 +42,13 @@ the stub writes `SENTINEL` unless `--ignore-scripts` is in the npm args.
 
 | # | Contract | Layer | Scenario | Primary test |
 |---|----------|-------|----------|--------------|
-| K284a | Untrusted + `restricted` → `PrepOptions.ignore_scripts is True` | unit | happy (bug) | `tests/mcp/test_dependencies_ignore_scripts_trust.py::test_start_installation_ignore_scripts_follows_d10[untrusted-restricted]` (xfail W3) |
-| K284b | Untrusted + `enabled` → `ignore_scripts is True` | unit | edge (D10 is trust **or** disabled) | `…[untrusted-enabled]` (xfail W3) |
+| K284a | Untrusted + `restricted` → `PrepOptions.ignore_scripts is True` | unit | happy (bug) | `tests/mcp/test_dependencies_ignore_scripts_trust.py::test_start_installation_ignore_scripts_follows_d10[untrusted-restricted]` |
+| K284b | Untrusted + `enabled` → `ignore_scripts is True` | unit | edge (D10 is trust **or** disabled) | `…[untrusted-enabled]` |
 | K284c | Untrusted + `disabled` → `ignore_scripts is True` | unit | happy (already true today) | `…[untrusted-disabled]` |
 | K284d | Trusted + `disabled` → `ignore_scripts is True` | unit | happy (any `shell == disabled`) | `…[trusted-disabled]` |
 | K284e | Trusted + `restricted` → `ignore_scripts is False` | unit | control (maintainer tree) | `…[trusted-restricted]` |
 | K284f | Trusted + `enabled` → `ignore_scripts is False` | unit | edge | `…[trusted-enabled]` |
-| K284g | Untrusted + `restricted` does not create `SENTINEL` via `start_installation` → `run_prep_phase` | functional | happy (bug) | `test_start_installation_untrusted_restricted_does_not_run_postinstall` (xfail W3) |
+| K284g | Untrusted + `restricted` does not create `SENTINEL` via `start_installation` → `run_prep_phase` | functional | happy (bug) | `test_start_installation_untrusted_restricted_does_not_run_postinstall` |
 | K284h | Trusted + `restricted` **may** run `postinstall` (`SENTINEL` created) | functional | control | `test_start_installation_trusted_restricted_may_run_postinstall` |
 | K284i | `shell == disabled` skips `postinstall` for both trust tiers | functional | happy + edge | `test_start_installation_shell_disabled_skips_postinstall` |
 | K284j | `run_prep_phase(PrepOptions(ignore_scripts=True))` does not create `SENTINEL` | functional | adapter control | `test_run_prep_phase_ignore_scripts_skips_postinstall` |
@@ -66,7 +66,7 @@ Do not loosen `tests/mcp/test_dependencies_python_skip.py`. That file's
 
 - New tests collect with zero import errors
 - `make lint` + `make typecheck` clean
-- K284c–f, K284h–k pass today; K284a, K284b, K284g xfail until W3
+- K284c–f, K284h–k pass today; K284a, K284b, K284g greened in W3
 - No `src/` edits; no D6 paths (`mcp/git.py`, `upload.py`, `labels.py`,
   `check_runs.py`, `verdict.py`, `tracing/*`, `cli/diff_review_cmd.py`,
   `analyzers/trust.py`, `mcp/git_guards.py`)
