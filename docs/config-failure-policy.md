@@ -130,6 +130,17 @@ and enforces fail-closed restrictions regardless of ``payload.shell``:
 
 The `:183-186` shell-disabled guard (`_NOSHELL_BLOCKED` / `_NOSHELL_BLOCKED_ARGS`) was deleted in W2 because every item it covered is now redundant: the three blocked subcommands (`clean`, `filter-branch`, `filter-repo`) are rejected by the allowlist, and `-c`/`--config-env` are rejected unconditionally above.
 
+## MCP upload tool — orchestrator-surface enforcement (#258 / D8)
+
+The `upload_file` MCP tool (`ToolClass.GITHUB_MUTATION`) is on the orchestrator surface.  It enforces fail-closed path confinement before reading any bytes:
+
+| Guard | What it rejects | Rationale |
+|-------|-----------------|-----------|
+| Symlink rejection | Any path where `Path.is_symlink()` is true | Symlinks can escape the repo tree even when the link itself is inside the root |
+| Root confinement | Any path whose `resolve()` is not within the primary repo root and is not within `ctx.tmpdir` | Prevents prompt-injectable arbitrary read / exfiltration of files outside the review workspace |
+
+Both checks fail closed: no `file://` URI is emitted and no bytes are read from a rejected path.  The guards fire before the `path.is_file()` existence check so a non-existent out-of-root path is rejected with a confinement error, not a misleading "file not found".
+
 ## Operator checklist
 
 1. Unknown key on a security/runtime model → fix the typo; the Action will

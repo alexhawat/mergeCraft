@@ -12,14 +12,35 @@ import httpx
 from loguru import logger
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
 
+def _check_upload_path(path: Path, resolved_repo_root: str, resolved_tmpdir: str) -> None:
+    """Raise ValueError when *path* is a symlink or escapes both allowed roots (#258 / D8).
+
+    A path must be a regular file (not a symlink) and must resolve to within the
+    primary repo root or, when non-empty, the session tmpdir.  No file:// URI is
+    emitted for a rejected path — the caller raises before reaching URI creation.
+    """
+    if path.is_symlink():
+        msg = f"Blocked: '{path}' is a symlink — symlink escapes are not permitted."
+        raise ValueError(msg)
+    resolved = str(path.resolve())
+    allowed = [r for r in (resolved_repo_root, resolved_tmpdir) if r]
+    if not any(resolved == r or resolved.startswith(r + os.sep) for r in allowed):
+        msg = f"Blocked: '{path}' resolves outside the allowed upload roots."
+        raise ValueError(msg)
+
+
 def upload_file_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         path = Path(str(params["path"]))
+        resolved_repo_root = str(Path(primary_repo_state(ctx.tool_state).dir).resolve())
+        resolved_tmpdir = str(Path(ctx.tmpdir).resolve()) if ctx.tmpdir else ""
+        _check_upload_path(path, resolved_repo_root, resolved_tmpdir)
         if not path.is_file():
             msg = f"file not found: {path}"
             raise FileNotFoundError(msg)
