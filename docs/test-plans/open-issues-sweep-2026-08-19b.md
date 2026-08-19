@@ -2,13 +2,15 @@
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19b-wave-plan.md`
 Worktree: `../mergecraft-issues-sweep-2026-08-19b` @ `wave/issues-sweep-2026-08-19b`
-Authoring waves: **W1** (Batch G RED) · **W5** (Batch H RED — xpass inventory) · **W8** (Batch I RED — typing suppressions)
+Authoring waves: **W1** (Batch G RED) · **W5** (Batch H RED — xpass inventory) · **W8** (Batch I RED — typing suppressions) · **W10** (Batch J RED — GitLab error string)
 
 W1 pins #277 (xdist flake on grandchild reap) and #278 (`MERGECRAFT_LIVE=1` opt-in)
 without changing production code. W5 inventories stale `xfail(strict=False)` xpasses
 (#276) and adds the RED `scripts/check_xpass.py` ratchet. W8 inventories `type: ignore`
 / `cast(` under `src/mergecraft/` (#275) and adds the RED `scripts/check_type_ignores.py`
-ratchet. D6-forbidden paths are not edited; D6 sites are counted then excluded.
+ratchet. W10 pins #279: a GitLab `UnsupportedScmCapability` message must contain
+`not available in this release` (xfail until W12). D6-forbidden paths are not
+edited; D6 sites are counted then excluded.
 
 ## xfail schedule
 
@@ -17,7 +19,8 @@ ratchet. D6-forbidden paths are not edited; D6 sites are counted then excluded.
 | **W3** | `test_setup_script_grandchildren_are_reaped` | `green after W3: #277 wait for pid_file before kill clock` | greened in W3 |
 | **W4** | `test_live_module_skips_when_mergecraft_live_unset` (6 cases) | `green after W4: MERGECRAFT_LIVE skip gate` | greened in W4 |
 | **W7** | `tests/ci/test_xpass_check.py::test_make_xpass_check_is_wired` | `green after W7: make xpass-check ratchet` | greened in W7 |
-| **W9** | `tests/ci/test_type_ignores.py::test_allowed_tree_ignores_and_casts_have_reasons` | `green after W9: #275 justify type: ignore / cast reasons` | pending — 53 allowed-tree sites lack a reason (W8 RED) |
+| **W9** | `tests/ci/test_type_ignores.py::test_allowed_tree_ignores_and_casts_have_reasons` | `green after W9: #275 justify type: ignore / cast reasons` | greened in W9 |
+| **W12** | `tests/scm/test_errors.py::test_gitlab_unsupported_capability_names_this_release` | `green after W12: GitLab not available in this release` | pending — today's wording is the capability token (W10 RED) |
 
 **W6 must not promote** the W7 wiring xfail. That test is still failing (no
 `make xpass-check`); it is an xfail, not an xpass.
@@ -396,3 +399,55 @@ HEAD does **not** already have reasons on the allowed tree — do not skip W9.
 - Ratchet unit tests pass; live-tree cleanliness test xfail until W9
 - `make lint` + `make typecheck` clean; collection clean
 - No Makefile target; no `src/` edits; no D6 path edits
+
+---
+
+## Batch J — release docs (#279 / D11, #280 / D7)
+
+Authoring wave: **W10**. Implementation: **W11** (GitHub-only README + distribution),
+**W12** (GitLab error wording + draft follow-up), **W13** (SHA-pin verify + Marketplace
+gate). Do not edit D6 files. Do not edit README generated sentinel regions. Do not
+change `src/mergecraft/scm/errors.py` in W10.
+
+W10 pins the #279 error-string contract. Today's
+`UnsupportedScmCapability("get_pr", provider="GitLabScmAdapter")` message is the
+capability-token form:
+
+`GitLabScmAdapter does not support capability 'get_pr'; operation was not emulated`
+
+W12 rewrites it so a GitLab call says GitLab support is not available in this
+release (D11). The RED test uses `xfail(strict=False)` tagged `green after W12` so
+`make ci` on this branch stays green if re-run before W12.
+
+W11 / W13 docs contracts are stubbed here; those waves own the README /
+`docs/distribution.md` copy.
+
+### Contract matrix (#279 error string — W10)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| J279a | GitLab `UnsupportedScmCapability` names this release | unit | error — RED until W12 | `tests/scm/test_errors.py::test_gitlab_unsupported_capability_names_this_release` |
+
+Message must contain `not available in this release` (or the exact W12 / D11
+string: `GitLab support is not available in this release`). Not a raw
+`NotImplementedError`. Not only a capability token.
+
+### Contract matrix (#279 docs — W11 stub)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| J279b | README features + requirements: 0.1.0 is GitHub-only | docs | happy after W11 | *(W11 — outside generated sentinels)* |
+| J279c | `docs/distribution.md` Marketplace copy: same GitHub-only sentence | docs | happy after W11 | *(W11)* |
+
+### Contract matrix (#280 docs — W13 stub)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| J280a | README SHA-pin advice links `CONTRIBUTING.md` verify one-liners | docs | happy after W13 | *(W13 — no `slsa-github-generator`, D7)* |
+| J280b | `docs/distribution.md` Marketplace checklist gated on existing attestations | docs | happy after W13 | *(W13 — point at `sign-attest`)* |
+
+### Acceptance (W10)
+
+- J279a collects with zero import errors; xfail until W12 (fails on today's wording)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; no README / `docs/distribution.md` edits; no D6 path edits
