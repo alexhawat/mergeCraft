@@ -146,16 +146,38 @@ def test_main_from_log_missing_file_exits_two(tmp_path: Path) -> None:
     assert module.main(["--from-log", str(missing)]) == 2
 
 
-def test_make_xpass_check_is_wired() -> None:
-    """W7 wires ``make xpass-check`` into ``ci-static`` or ``make test``."""
-    makefile = read_text("Makefile")
-    assert re.search(r"^xpass-check:", makefile, re.MULTILINE), (
-        "xpass-check target missing from Makefile"
+def test_xpass_hook_wired_in_conftest() -> None:
+    """CQ-1: xpass ratchet runs as a pytest session hook in ``tests/conftest.py``."""
+    conftest = read_text("tests/conftest.py")
+    assert "pytest_sessionfinish" in conftest, (
+        "pytest_sessionfinish hook missing from tests/conftest.py — "
+        "the xpass ratchet must run inside the pytest session, not as a standalone script"
     )
-    ci_static = re.search(r"^ci-static:.*$", makefile, re.MULTILINE)
-    test_target = re.search(r"^test:.*$", makefile, re.MULTILINE)
-    ci_steps = re.search(r"^CI_STEPS\s*:?=.*$", makefile, re.MULTILINE)
-    blob = " ".join(part.group(0) for part in (ci_static, test_target, ci_steps) if part)
-    assert "xpass-check" in blob, (
-        "xpass-check is not in the make ci-static / make test / CI_STEPS graph"
+    assert (
+        "is_d6_nodeid" in conftest or "D6_TEST_PATHS" in conftest or "_load_check_xpass" in conftest
+    ), "D6 exclusion must be imported from scripts/check_xpass.py in the conftest hook"
+
+
+def test_coverage_gate_streams_live() -> None:
+    """CQ-1: ``make coverage-gate`` must not redirect pytest output to a log file."""
+    makefile = read_text("Makefile")
+    gate = re.search(r"^coverage-gate:.*?(?=^\S)", makefile, re.MULTILINE | re.DOTALL)
+    assert gate, "coverage-gate target not found in Makefile"
+    body = gate.group(0)
+    assert "PYTEST_XPASS_LOG" not in body, (
+        "coverage-gate still redirects to PYTEST_XPASS_LOG — restore streaming"
+    )
+    assert "> " not in body.replace("--cov-report=", ""), (
+        "coverage-gate still redirects pytest stdout — restore live streaming"
+    )
+
+
+def test_ci_recipe_runs_xpass_policy() -> None:
+    """CQ-1: ``make ci`` must exercise the xpass policy (hook in coverage-gate run)."""
+    makefile = read_text("Makefile")
+    # The hook runs inside coverage-gate's pytest invocation, so make ci must call coverage-gate.
+    ci_line = re.search(r"^ci:.*$", makefile, re.MULTILINE)
+    assert ci_line, "ci: target missing"
+    assert "coverage-gate" in ci_line.group(0), (
+        "make ci must call coverage-gate (which runs the xpass conftest hook)"
     )

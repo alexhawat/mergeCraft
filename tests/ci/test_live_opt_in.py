@@ -1,8 +1,8 @@
 """#278 / D8 — live modules skip unless ``MERGECRAFT_LIVE=1``; CI stays fail-closed.
 
-Unmarked ``pytest tests/integration/test_live_providers.py`` (and the GitHub
-live module) must skip when the flag is unset, not ``pytest.fail`` on missing
-creds. ``MERGECRAFT_LIVE=1`` with credentials stripped must still fail (D8 / D9).
+``MERGECRAFT_LIVE=1`` with credentials stripped must still fail (D8 / D9).
+The skip policy lives in ``tests/conftest.py::pytest_collection_modifyitems``
+(CQ-2 / #278) — not as duplicated module-level ``pytest.skip`` calls.
 
 These tests are **not** ``integration``/``live`` — they spawn a child pytest on
 the live modules and must run under ``make test``.
@@ -145,4 +145,31 @@ def test_live_module_fails_when_flag_set_without_credentials(
     assert counts["failed"] > 0, (
         f"{relpath} must pytest.fail on missing creds when the live flag is set; "
         f"got {counts}:\n{output}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Policy assertions — centralized skip must be in conftest, not each module
+# ---------------------------------------------------------------------------
+
+
+def test_live_skip_policy_is_in_conftest() -> None:
+    """CQ-2: ``pytest_collection_modifyitems`` hook must be in ``tests/conftest.py``.
+
+    The skip is declared once, not duplicated in every live module.
+    """
+    conftest = (REPO_ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
+    assert "pytest_collection_modifyitems" in conftest, (
+        "tests/conftest.py must have pytest_collection_modifyitems to centralize live skip"
+    )
+    assert "MERGECRAFT_LIVE" in conftest, "tests/conftest.py hook must reference MERGECRAFT_LIVE"
+
+
+@pytest.mark.parametrize("relpath", _LIVE_MODULES)
+def test_live_module_has_no_inline_module_level_skip(relpath: str) -> None:
+    """CQ-2: skip must come from the conftest hook, not a module-level ``pytest.skip`` call."""
+    source = (REPO_ROOT / relpath).read_text(encoding="utf-8")
+    assert "pytest.skip(" not in source or "allow_module_level" not in source, (
+        f"{relpath} still has a module-level pytest.skip — remove it; "
+        "the conftest hook centralizes the live-skip policy"
     )

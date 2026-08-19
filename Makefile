@@ -44,13 +44,14 @@ install: ## Sync dev environment after dependency changes
 lockcheck: ## Fail if uv.lock is out of date
 	$(UV) lock --check
 
-lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-check + privilege-drop chown
+lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-check + privilege-drop chown + type-ignore reasons
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
 	$(MAKE) action-yml-hygiene-check
 	$(MAKE) hook-pins-check
 	$(UV) run python scripts/check_privilege_drop_chown.py
+	$(UV) run python scripts/check_type_ignores.py
 
 action-yml-hygiene-check: ## Fail when an action.yml description embeds a literal ${{ }} expression
 	$(UV) run python scripts/check_action_yml_hygiene.py
@@ -78,8 +79,6 @@ agents-check: ## Agent registry model/prompt/tool validation gate (AP1)
 	$(UV) run python -m mergecraft.agents.catalog_docs
 
 PYTEST_SPLIT := $(if $(MERGECRAFT_TEST_SPLITS),--splits $(MERGECRAFT_TEST_SPLITS) --group $(MERGECRAFT_TEST_GROUP) --splitting-algorithm least_duration,)
-PYTEST_XPASS_LOG ?= .pytest-xpass.log
-
 test: ## Unit tests
 	$(PYTEST) tests -v --tb=short --strict-markers -m "not integration" $(PYTEST_XDIST) $(PYTEST_SPLIT) \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
@@ -101,20 +100,13 @@ test-integration-live: ## Live-provider integration (scheduled / release precond
 test-otlp-collector: ## OTLP collector integration — spans must leave the process (#143)
 	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py
 
-coverage-gate: ## Unit tests + coverage floors (global + critical paths)
+coverage-gate: ## Unit tests + coverage floors (global + critical paths; xpass ratchet runs via conftest hook)
 	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
 		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} \
-		-rX > $(PYTEST_XPASS_LOG) 2>&1; rc=$$?; cat $(PYTEST_XPASS_LOG); exit $$rc
+		-rX
 	$(UV) run python scripts/check_coverage_ratchet.py coverage.json
 	$(UV) run python scripts/check_coverage_floors.py coverage.json
-
-xpass-check: ## Ratchet: fail if allowed-tree xfails unexpectedly pass (#276)
-	@if [ -f $(PYTEST_XPASS_LOG) ]; then \
-	  $(UV) run python scripts/check_xpass.py --from-log $(PYTEST_XPASS_LOG); \
-	else \
-	  $(UV) run python scripts/check_xpass.py; \
-	fi
 
 npm-audit: ## npm audit over docker/agent-clis lockfile (W12.3 / #27)
 	@command -v npm >/dev/null 2>&1 || { echo "npm not found on PATH" >&2; exit 2; }
@@ -157,7 +149,7 @@ ci-static: lockcheck lint typecheck pyright catalog-check agents-check build exa
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check reference-docs-check security coverage-gate xpass-check
+CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check reference-docs-check security coverage-gate
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)
@@ -199,3 +191,4 @@ docker-build: ## Build action Docker image
 
 clean: ## Remove caches and build artifacts
 	rm -rf .venv dist build .mypy_cache .ruff_cache .pytest_cache htmlcov coverage.xml .cache
+	rm -f .pytest-xpass.log

@@ -14,7 +14,14 @@ _PROVIDER = "GitLabScmAdapter"
 
 
 def _unsupported(capability: str) -> NoReturn:
-    raise UnsupportedScmCapability(capability, provider=_PROVIDER)
+    raise UnsupportedScmCapability(
+        capability,
+        provider=_PROVIDER,
+        message=(
+            f"GitLab support is not available in this release"
+            f" (capability {capability!r} was requested)"
+        ),
+    )
 
 
 def _unsupported_method(name: str) -> Any:

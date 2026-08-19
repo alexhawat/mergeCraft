@@ -25,9 +25,6 @@ pytestmark = [
     pytest.mark.live,
 ]
 
-if os.environ.get("MERGECRAFT_LIVE") != "1":
-    pytest.skip("MERGECRAFT_LIVE=1 required to run live provider tests", allow_module_level=True)
-
 _MAX_OUTPUT_TOKENS = 16
 _TOKEN_BOUND = 64
 _TIMEOUT = 45.0

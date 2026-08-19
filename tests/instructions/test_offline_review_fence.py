@@ -7,10 +7,9 @@ twice — once with a benign operator-supplied "PR body" via
 are identical. The agent is stubbed in-process so the test proves the
 *prompt* is fenced, not that a live model resists.
 
-All tests are `@pytest.mark.xfail(strict=False)` for the same reason
-as the rest of the W3 suite — W4 will land the fence; these tests
-un-xfail when the fence is in place. They pin the public outcome,
-not the impl signature.
+Pending tests are `@pytest.mark.xfail(strict=True)` — W4 will land the
+fence; these tests fail-strict until the implementation arrives. They pin
+the public outcome, not the impl signature.
 """
 
 from __future__ import annotations

@@ -3,8 +3,8 @@
 Ported from `.claude/skills/github-issue-triage/scripts/envelope.py` per
 D7 of `.ignorelocal/waves/issues-security-trust-boundary-wave-plan.md`.
 W4 will land `src/mergecraft/utils/fence.py`; this file pins the public
-contract W4 must satisfy. Every test is `@pytest.mark.xfail(strict=False)`
-because the impl wave (W4) is the green half of the test-first pair.
+contract W4 must satisfy. Pending tests are `@pytest.mark.xfail(strict=True)`
+until the impl wave (W4) lands.
 
 Contract surface (must hold after W4):
 
