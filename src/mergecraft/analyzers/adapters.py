@@ -143,7 +143,7 @@ def _run_ruff_format_check(
             manifest=manifest,
             path=scoped_files[0],
             line=1,
-            message="File would be reformatted by ruff format",
+            message="ruff format check failed: analyzer produced no parseable output",
         )
     ]
 
