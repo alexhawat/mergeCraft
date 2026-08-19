@@ -18,7 +18,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 	examples example-workflows-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
 	bench-detect \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory hook-pins-check
+	lint-ruff-advisory hook-pins-check xpass-check
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -78,6 +78,7 @@ agents-check: ## Agent registry model/prompt/tool validation gate (AP1)
 	$(UV) run python -m mergecraft.agents.catalog_docs
 
 PYTEST_SPLIT := $(if $(MERGECRAFT_TEST_SPLITS),--splits $(MERGECRAFT_TEST_SPLITS) --group $(MERGECRAFT_TEST_GROUP) --splitting-algorithm least_duration,)
+PYTEST_XPASS_LOG ?= .pytest-xpass.log
 
 test: ## Unit tests
 	$(PYTEST) tests -v --tb=short --strict-markers -m "not integration" $(PYTEST_XDIST) $(PYTEST_SPLIT) \
@@ -103,9 +104,17 @@ test-otlp-collector: ## OTLP collector integration — spans must leave the proc
 coverage-gate: ## Unit tests + coverage floors (global + critical paths)
 	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
 		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
-		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} \
+		-rX > $(PYTEST_XPASS_LOG) 2>&1; rc=$$?; cat $(PYTEST_XPASS_LOG); exit $$rc
 	$(UV) run python scripts/check_coverage_ratchet.py coverage.json
 	$(UV) run python scripts/check_coverage_floors.py coverage.json
+
+xpass-check: ## Ratchet: fail if allowed-tree xfails unexpectedly pass (#276)
+	@if [ -f $(PYTEST_XPASS_LOG) ]; then \
+	  $(UV) run python scripts/check_xpass.py --from-log $(PYTEST_XPASS_LOG); \
+	else \
+	  $(UV) run python scripts/check_xpass.py; \
+	fi
 
 npm-audit: ## npm audit over docker/agent-clis lockfile (W12.3 / #27)
 	@command -v npm >/dev/null 2>&1 || { echo "npm not found on PATH" >&2; exit 2; }
@@ -148,7 +157,7 @@ ci-static: lockcheck lint typecheck pyright catalog-check agents-check build exa
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check reference-docs-check security coverage-gate
+CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check reference-docs-check security coverage-gate xpass-check
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)

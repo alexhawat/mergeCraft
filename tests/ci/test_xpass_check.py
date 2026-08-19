@@ -146,7 +146,6 @@ def test_main_from_log_missing_file_exits_two(tmp_path: Path) -> None:
     assert module.main(["--from-log", str(missing)]) == 2
 
 
-@pytest.mark.xfail(strict=False, reason="green after W7: make xpass-check ratchet")
 def test_make_xpass_check_is_wired() -> None:
     """W7 wires ``make xpass-check`` into ``ci-static`` or ``make test``."""
     makefile = read_text("Makefile")
