@@ -601,7 +601,7 @@ secondary-only findings), #273 (`to_usage()` double-counts OpenAI cached tokens)
 | `tests/agents/test_stream_usage_cache.py` | **new** | #273 |
 | `tests/review/test_terminal_verdict_policy.py` | extended (validator + live tool + finalize) | #263 |
 | `tests/mcp/test_submit_review_verdict.py` | extended (tool surface) | #263 |
-| `tests/agents/test_opencode_session_usage.py` | **new at DF** — second #273 ingress, RED for W18b | #273 |
+| `tests/agents/test_opencode_session_usage.py` | **new at DF** — second #273 ingress; reconciled after W18b (markers stripped, precedence pinned) | #273 |
 
 ### Contract → test map
 
@@ -636,13 +636,14 @@ secondary-only findings), #273 (`to_usage()` double-counts OpenAI cached tokens)
 | `cache_read_tokens` still reports the cached count | `test_openai_cached_tokens_are_still_reported` (2 shapes) | Unit, guard | green |
 | Anthropic `cache_read_input_tokens` stays additive | `test_anthropic_cache_read_stays_additive` (`replace`/`absorb`) | Unit, the asymmetry | green |
 | Anthropic reads **and** writes both add | `test_anthropic_full_shape_sums_both_cache_buckets` | Unit, boundary | green |
-| A native Anthropic field wins over an OpenAI details block | `test_anthropic_native_field_wins_over_an_openai_details_block` | Unit, provenance | green |
+| A native Anthropic field wins over an OpenAI details block | `test_anthropic_native_field_wins_over_an_openai_details_block` | Unit, provenance | green — **cross-locked to the session path at W18b DF** |
 | No cache fields ⇒ `input_tokens` untouched, `cache_*` `None` | `test_no_cache_fields_leaves_input_tokens_untouched` | Unit, edge | green |
 | T2's extractor is the provenance signal and must not be deleted | `test_openai_extractor_still_recognises_both_shapes` | Unit, guard | green |
 | **Consumer:** Claude `message_start` + `result` keeps Anthropic accounting | `test_claude_result_event_keeps_anthropic_accounting` | Integration, seam | green |
 | An empty stream reports no usage | `test_empty_stream_still_reports_no_usage` | Integration, edge | green |
-| **Second ingress:** the opencode HTTP session path does not add inclusive cached tokens | `test_openai_cached_tokens_are_not_added_to_session_input_tokens` (2 shapes × `info`/`usage`) | Unit, the bug | **xfail W18b** (added at DF) |
-| …including under the short `input` / `output` aliases that path accepts | `test_openai_cached_tokens_under_the_short_input_alias` (2 shapes) | Unit, alias | **xfail W18b** (added at DF) |
+| **Second ingress:** the opencode HTTP session path does not add inclusive cached tokens | `test_openai_cached_tokens_are_not_added_to_session_input_tokens` (2 shapes × `info`/`usage`) | Unit, the bug | green (**marker stripped at W18b DF**) |
+| …including under the short `input` / `output` aliases that path accepts | `test_openai_cached_tokens_under_the_short_input_alias` (2 shapes) | Unit, alias | green (**marker stripped at W18b DF**) |
+| **Both cache shapes present** resolve **native-first and additive** on the session path — the precedence W18b chose, pinned as a decision | `test_both_cache_shapes_resolve_native_first_by_deliberate_choice` (2 details keys × `info`/`usage`) | Unit, precedence | green (added at W18b DF) |
 | The session path's Anthropic-native arm stays additive | `test_anthropic_native_cache_read_stays_additive` (`info`/`usage`) | Unit, the asymmetry | green (added at DF) |
 | The session path still records `cache_read_tokens` | `test_openai_cached_tokens_are_still_reported` (2 shapes) | Unit, guard | green (added at DF) |
 | No cache fields / no usage on the session path | `test_no_cache_fields_leaves_session_input_tokens_untouched`, `test_session_without_usage_reports_no_usage` | Unit, edge | green (added at DF) |
@@ -842,12 +843,54 @@ directly, so the discriminating behaviour is pinned at the helper level and not 
     `_resolve_cache_read` consults the native fields first, so a fix that reuses the shared helper
     also flips which field wins on a payload carrying both. `test_anthropic_native_cache_read_stays_additive`
     pins the native-only arm green (it is correct today) so the OpenAI arms cannot be bought by
-    deleting the disjoint addition. The ambiguous **both-present** payload is deliberately left
+    deleting the disjoint addition. The ambiguous **both-present** payload was deliberately left
     unpinned — the same call W14 made for the mixed-stream case; pinning it would force W18b to
-    choose a resolution rule for a shape no provider emits.
+    choose a resolution rule for a shape no provider emits. **W18b did choose one** — see the
+    reconciliation section below, which pins it.
   - **The short `input` / `output` aliases** are accepted here and not by the accumulator, so a fix
     scoped to the long field names would leave the alias inflated; that arm is pinned separately.
   - Both usage container keys (`data["info"]` and `data["usage"]`) are exercised.
+
+### W18b reconciliation — markers stripped, the chosen precedence pinned (DF)
+
+W18b (`99d54f4`) made `_prompt_session_http` **import and reuse** `_resolve_cache_read` from
+`agents/_stream_consumer.py` instead of re-deriving the details-block scan inline, so the session
+path now computes `input_tokens = inp + (0 if cache_read_is_inclusive else cache_read)`.
+
+- **All 6 W18b reds XPASS; all 6 green guards hold.** The 6
+  `green after W18b: opencode HTTP session cache accounting` markers are **stripped**. Nothing failed
+  once unmarked, and no assertion was weakened.
+- **W18b flipped a precedence this suite had pinned only indirectly.** The pre-W18b inline scan was
+  details-first; `_resolve_cache_read` is native-first. Batch D pinned that ordering only *indirectly*
+  — via the native-only arm green in both usage containers — and deliberately left the
+  **both-present** payload unpinned, so the flip broke no arm and was invisible to the suite. That is
+  the gap this reconciliation closes.
+- **The chosen rule is now pinned in both directions.**
+  `test_both_cache_shapes_resolve_native_first_by_deliberate_choice` asserts the both-present payload
+  resolves native-first and **additive** (disjoint) on the session path, across both details keys and
+  both usage containers, with the two counts given different values so the assertion identifies
+  *which* field won rather than merely that a cached count survived. Its docstring records W18b's
+  argument verbatim — reuse over a duplicated rule (the duplicate is what let #273 survive W18 here),
+  a delta confined to a shape no real provider emits (the two fields come from mutually exclusive
+  APIs), and native-first as the conservative direction for budget accounting, since calling a
+  genuinely disjoint count inclusive would under-report prompt size and let a run overrun its bounds.
+  The docstring opens with **do not "tidy" this to details-first** so a future reader cannot mistake
+  the ordering for an accident.
+- **`_stream_consumer` was already pinned** — `test_anthropic_native_field_wins_over_an_openai_details_block`
+  has asserted the same native-first/additive contract since W14, so no new test was needed there.
+  Both docstrings now cross-reference each other, because the two paths holding *divergent* copies of
+  this rule is exactly the bug class that produced W18b.
+- **The separation W18b depends on stays pinned.** The native-only and details-only arms are green in
+  both usage containers, and the short `input` / `output` alias arms still hold — `_resolve_cache_read`
+  never reads the token-count fields, and the alias arms are what keep that true.
+- **Out of scope, tracked separately:** `run_bounds.record_agent_usage` adds `cache_read` / `cache_write`
+  on top of an `input_tokens` that already contains them, for every provider. Confirmed, distinct from
+  #273, and owned by its own wave — no test authored here.
+
+`tests/agents`: **237 passed / 1 skipped / 93 xpassed / 0 failed / 0 xfailed**. `make lint` and
+`make typecheck` clean. The 93 XPASS remain the pre-existing `green after W3` / `green after W6`
+earlier-program markers, outside Batch D's remit. **No `green after W15`–`W19` or `green after W18b`
+marker remains anywhere in `tests/`.**
 
 ### Escalation log
 
@@ -856,3 +899,4 @@ directly, so the discriminating behaviour is pinned at the helper level and not 
 | 1 | W15 → DF | `tests/agents/test_codex_custom_provider.py::test_no_root_key_is_emitted_after_the_first_table` | The test, not the fix, was wrong: `_root_keys_after_first_table` ignored table scope, so `== []` was unsatisfiable for any non-empty config and the strongest D17 guard was vacuous | Helper rewritten as `_keys_by_table_scope` with a derived root-key oracle; verified failing against `18311c3` and passing against `3faca32`. A second test pins the helper's attribution against a reconstructed pre-W15 fixture |
 | 2 | W16 → DF | `tests/agents/test_structured_handoff.py` | The non-ASCII case W16 hand-verified had no test, so a refactor to `casefold().find()` could regress silently | Two arms added with length-expanding prose before the marker; verified that a `casefold().find()` split fails them |
 | 3 | W18 → DF | `tests/agents/test_opencode_session_usage.py` (new) | `agents/opencode.py:401-427` carries the identical #273 double-count on the HTTP session path, outside W18's anchor, so #273's criterion was only half met | 6 RED authored for **W18b** (operator-inserted wave) + 6 green guards; the inverted precedence and the `input`/`output` aliases are pinned so a fix cannot regress the Anthropic arm |
+| 4 | W18b → DF | `tests/agents/test_opencode_session_usage.py`, `tests/agents/test_stream_usage_cache.py` | **W18b changed a precedence the suite had pinned only indirectly.** Reusing `_resolve_cache_read` flipped the session path from details-first to native-first. Batch D pinned that ordering only via the native-only arm and left the both-present payload unpinned, so the flip broke no arm — the contract was unpinned in *both* directions and nothing recorded it as a decision | Marker-strip pass plus `test_both_cache_shapes_resolve_native_first_by_deliberate_choice` (2 details keys × `info`/`usage`), whose docstring records W18b's argument and warns against "tidying" it back. `_stream_consumer`'s equivalent pin already existed; both docstrings now cross-reference so the two paths cannot silently diverge again |

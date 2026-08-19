@@ -7,26 +7,28 @@ Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-19-wave-plan.md``
 W18 fixed ``StreamSpanAccumulator.to_usage()``
 (``agents/_stream_consumer.py``), which serves the CLI streaming drivers.
 ``_prompt_session_http`` — the HTTP session path that serves the Nous /
-MiniMax passthrough — **re-implements the same details-block scan inline**
-and still does ``input_tokens = inp + cache_read``. OpenAI-style
+MiniMax passthrough — **re-implemented the same details-block scan inline**
+and still did ``input_tokens = inp + cache_read``. OpenAI-style
 ``*_tokens_details.cached_tokens`` are already inside the reported input
-count, so that path keeps over-reporting prompt size by the whole cached
-count. #273's success criterion is only half met while it stands.
+count, so that path kept over-reporting prompt size by the whole cached
+count. W18b closed it by importing and reusing ``_resolve_cache_read``
+instead of re-deriving the scan, which is why the duplicated-rule bug class
+that let #273 survive W18 here cannot recur.
 
-Two things make this path a different shape from ``_resolve_cache_read``,
-not a copy of it:
+Reusing the helper **changed one thing beyond the fix**: the inline scan
+checked the details block *first* and consulted the Anthropic-native
+``cache_read_input_tokens`` / ``cacheReadTokens`` fields only as a fallback,
+whereas ``_resolve_cache_read`` reads the native fields first. That flips
+which field wins on a payload carrying both shapes. W18b took native-first
+deliberately (see
+``test_both_cache_shapes_resolve_native_first_by_deliberate_choice``); this
+suite pins the resulting contract in both directions so it stays a decision
+rather than drifting back by accident.
 
-- **Precedence is inverted.** The inline scan checks the details block
-  *first* and falls back to the Anthropic-native ``cache_read_input_tokens``
-  / ``cacheReadTokens`` fields only when no details block matched;
-  ``_resolve_cache_read`` consults the native fields first. A fix that
-  reuses the shared helper therefore also flips which field wins on a
-  payload carrying both. No arm below pins that ambiguous payload — the
-  same call W14 made for the mixed-stream case — but the native-only arm
-  **is** pinned green so a fix cannot buy the OpenAI arms by dropping the
-  disjoint Anthropic addition.
-- ``input_tokens``/``output_tokens`` also accept the short ``input`` /
-  ``output`` aliases here, which the accumulator does not.
+``input_tokens``/``output_tokens`` also accept the short ``input`` /
+``output`` aliases here, which the accumulator does not — the alias arms
+stay pinned because the fix depends on ``_resolve_cache_read`` never
+reading the token-count fields at all.
 """
 
 from __future__ import annotations
@@ -125,10 +127,6 @@ async def _usage_for(session_response: Any, info: dict[str, Any], *, usage_key: 
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W18b: opencode HTTP session cache accounting",
-    strict=False,
-)
 @pytest.mark.parametrize("info", _OPENAI_SHAPES)
 @pytest.mark.parametrize("usage_key", _USAGE_KEYS)
 async def test_openai_cached_tokens_are_not_added_to_session_input_tokens(
@@ -144,10 +142,6 @@ async def test_openai_cached_tokens_are_not_added_to_session_input_tokens(
     assert usage.cache_read_tokens == _CACHED
 
 
-@pytest.mark.xfail(
-    reason="green after W18b: opencode HTTP session cache accounting",
-    strict=False,
-)
 @pytest.mark.parametrize("info", _OPENAI_SHAPES)
 async def test_openai_cached_tokens_under_the_short_input_alias(
     session_response: Any,
@@ -211,6 +205,57 @@ async def test_openai_cached_tokens_are_still_reported(
     assert usage is not None
     assert usage.cache_read_tokens == _CACHED
     assert usage.output_tokens == _OUTPUT
+
+
+# ---------------------------------------------------------------------------
+# The precedence W18b chose — deliberate, not incidental
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("details_key", ["prompt_tokens_details", "input_tokens_details"])
+@pytest.mark.parametrize("usage_key", _USAGE_KEYS)
+async def test_both_cache_shapes_resolve_native_first_by_deliberate_choice(
+    session_response: Any,
+    details_key: str,
+    usage_key: str,
+) -> None:
+    """A payload carrying BOTH cache shapes resolves native-first and additive.
+
+    **Do not "tidy" this to details-first.** Before W18b this path scanned the
+    details block first and treated the native fields as a fallback, so a
+    both-present payload was read as inclusive. W18b flipped it to native-first
+    by reusing ``_resolve_cache_read`` from ``agents/_stream_consumer.py``, and
+    that was an argued trade, not an oversight:
+
+    - Keeping details-first would have needed either a second implementation of
+      the rule or a precedence flag on a helper with exactly one such caller. A
+      duplicated rule is precisely what let #273 survive W18 on this path, so
+      reuse was the deliverable and the ordering change was its price.
+    - The delta is confined to this both-present payload. No real provider emits
+      both fields — they come from mutually exclusive APIs.
+    - Native-first is the conservative direction for budget accounting: treating
+      a genuinely disjoint count as inclusive would under-report prompt size and
+      let a run overrun its bounds. Over-reporting merely ends a run early.
+
+    ``_stream_consumer`` pins the same rule in
+    ``tests/agents/test_stream_usage_cache.py::test_anthropic_native_field_wins_over_an_openai_details_block``.
+    The two paths must stay locked to the *same* precedence — the wave that
+    produced this test exists because they had diverged.
+    """
+    info = {
+        "input_tokens": _INPUT,
+        "output_tokens": _OUTPUT,
+        "cache_read_input_tokens": _CACHED,
+        # Deliberately a different value so the assertions below identify which
+        # field won, not merely that some cached count survived.
+        details_key: {"cached_tokens": 999},
+    }
+
+    usage = await _usage_for(session_response, info, usage_key=usage_key)
+
+    assert usage is not None
+    assert usage.cache_read_tokens == _CACHED
+    assert usage.input_tokens == _INPUT + _CACHED
 
 
 async def test_no_cache_fields_leaves_session_input_tokens_untouched(

@@ -165,6 +165,13 @@ def test_anthropic_native_field_wins_over_an_openai_details_block() -> None:
     ``_extract_openai_cached_tokens``, so a payload carrying both is
     unambiguously Anthropic-native — which is what lets W18 tell the two
     provenances apart with a single flag.
+
+    W18b made ``_prompt_session_http`` reuse ``_resolve_cache_read``, so this
+    rule now governs the opencode HTTP session path too; the same contract is
+    pinned there by ``tests/agents/test_opencode_session_usage.py::
+    test_both_cache_shapes_resolve_native_first_by_deliberate_choice``. The two
+    must not diverge — a divergent copy of this rule is the bug class that let
+    #273 survive on the session path after W18 fixed the accumulator.
     """
     usage = {
         "input_tokens": _INPUT,
