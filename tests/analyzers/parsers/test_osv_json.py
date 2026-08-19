@@ -1,20 +1,19 @@
-"""#270 — the OSV fixed-version guard has an unescaped middle dot.
+"""#270 — the OSV fixed-version guard admits only literal ``N.N.N``.
 
 ``_fixed_version`` (``analyzers/parsers/osv_json.py:82``) gates the
-``Upgrade to <version> or later`` remediation on
-``re.fullmatch(r"\\d+\\.\\d+.\\d+", fixed)``. The third separator is a bare
-``.`` — a regex wildcard — so the guard admits two families the issue's single
-example does not name:
+``Upgrade to <version> or later`` remediation on a fullmatch of three
+dot-separated digit groups. Every separator must be a **literal** dot. An
+unescaped middle dot — a regex wildcard — admitted two families the issue's
+single example does not name:
 
-* **single-character substitution** — ``1.2x3``, ``1.2-3``, ``1.2 3`` all pass,
-  because the wildcard matches any one non-newline character; and
-* **an adjacent digit** — the wildcard also matches a *digit*, so any
-  two-component version with three or more digits after the dot (``1.234``,
-  ``1.2345``) is read as a three-component version. ``1.23`` is the boundary:
-  it still fails, because nothing is left for the trailing ``\\d+``.
+* **single-character substitution** — ``1.2x3``, ``1.2-3``, ``1.2 3``, because a
+  wildcard matches any one non-newline character; and
+* **an adjacent digit** — a wildcard matches a *digit* too, so any two-component
+  version with three or more digits after the dot (``1.234``, ``1.2345``) reads
+  as a three-component version. ``1.23`` is the boundary: it fails either way,
+  because nothing is left for the trailing digit group.
 
-Either way the reviewer is handed a fix version that does not exist. W11
-escapes the dot; cross-wave reds are non-strict xfails.
+Either way the reviewer would be handed a fix version that does not exist.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ from tests.analyzers.support import import_module
 # Real ``N.N.N`` versions — accepted today and after W11.
 VALID_FIXED_VERSIONS: tuple[str, ...] = ("1.2.3", "0.0.1", "10.20.30", "2024.1.0")
 
-# Admitted today only because the middle dot is a wildcard. W11 must reject these.
+# Admitted only while the middle dot is a wildcard — these must be rejected.
 WILDCARD_ADMITTED: tuple[str, ...] = (
     # one arbitrary character where the separator belongs
     "1.2x3",
@@ -46,7 +45,7 @@ WILDCARD_ADMITTED: tuple[str, ...] = (
     "1.2x34",
 )
 
-# Rejected both before and after W11 — regression guards on the boundary.
+# Regression guards on the boundary — rejected with or without the escape.
 ALREADY_REJECTED: tuple[str, ...] = (
     "",
     "1",
@@ -128,15 +127,11 @@ def _remediation(fixed: str) -> str | None:
 
 @pytest.mark.parametrize("fixed", VALID_FIXED_VERSIONS)
 def test_real_three_component_version_is_accepted(fixed: str) -> None:
-    """W11 must not narrow the guard past the versions it exists to admit."""
+    """The guard must not narrow past the versions it exists to admit."""
     assert _fixed_version(fixed) == fixed
 
 
 @pytest.mark.parametrize("fixed", WILDCARD_ADMITTED)
-@pytest.mark.xfail(
-    reason="green after W11: unescaped middle dot in the fixed-version regex (#270)",
-    strict=False,
-)
 def test_wildcard_separator_is_rejected(fixed: str) -> None:
     """Anything that is not ``digits.digits.digits`` must yield no fix version."""
     assert _fixed_version(fixed) is None
@@ -144,7 +139,7 @@ def test_wildcard_separator_is_rejected(fixed: str) -> None:
 
 @pytest.mark.parametrize("fixed", ALREADY_REJECTED)
 def test_malformed_version_stays_rejected(fixed: str) -> None:
-    """Boundary guard: W11's escape must not start admitting these."""
+    """Boundary guard: the escaped dot must not start admitting these."""
     assert _fixed_version(fixed) is None
 
 
@@ -177,10 +172,6 @@ def test_remediation_names_a_real_fix_version(fixed: str) -> None:
 
 
 @pytest.mark.parametrize("fixed", ["1.2x3", "1.234"])
-@pytest.mark.xfail(
-    reason="green after W11: unescaped middle dot fabricates a fix version (#270)",
-    strict=False,
-)
 def test_remediation_is_omitted_for_a_malformed_fix_version(fixed: str) -> None:
     """A fabricated `Upgrade to 1.2x3 or later` is worse than no remediation."""
     assert _remediation(fixed) is None

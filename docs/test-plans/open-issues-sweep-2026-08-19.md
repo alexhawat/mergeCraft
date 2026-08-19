@@ -13,7 +13,7 @@ The program has **six RED waves**, one per logical batch. Each RED wave appends 
 |---|---|---|---|
 | A — MCP security (#257, #258, #260, #259) | W1 | [Batch A](#batch-a--mcp-security-w1) | **reconciled — all green** |
 | B — Action / workflow contract (#264, #265, #272, #271) | W6 | [Batch B](#batch-b--action--workflow-contract-w6) | **authored — 17 RED (W7/W8/W9)** |
-| C — Analyzer correctness (#270, #269, #268) | W10 | [Batch C](#batch-c--analyzer-correctness-w10) | **authored — 22 RED (W11/W12/W13)** |
+| C — Analyzer correctness (#270, #269, #268) | W10 | [Batch C](#batch-c--analyzer-correctness-w10) | **reconciled — all green** |
 | D — Agents + approve gate (#222, #261, #262, #273, #263) | W14 | _append below_ | pending |
 | E — MCP contract (#266, #267) | W20 | _append below_ | pending |
 | F — Auth DX + #220 close (#221, #220) | W23 | _append below_ | pending |
@@ -474,9 +474,96 @@ the fix.
 - **The stub sets `output_path=None`.** If W13 prefers the persisted output file over
   `outcome.output`, it must tolerate a missing path — or these tests need a one-line amendment
   (escalate rather than edit them in an implementation wave).
-- **Deliberately not pinned:** what should happen when `ruff format --check` exits non-zero with no
-  `Would reformat:` line at all (a ruff-side parse error). The correct answer differs between the
-  two strategies, so pinning it would pick the implementation for W13. Worth a decision in W13.
+- **Deliberately not pinned (resolved — see below):** what should happen when `ruff format --check`
+  exits non-zero with no `Would reformat:` line at all (a ruff-side parse error). The correct answer
+  differed between the two strategies, so pinning it would have picked the implementation for W13.
+  W13 decided; the decision is now covered by `TestRuffFailureFallback`-equivalent cases in
+  `tests/analyzers/test_adapters_ruff_format.py`.
+
+### Reconciled assertions (were 22 xfailed → now 22 real passes)
+
+All three implementation waves landed (`dde1e94` W11, `4695e6e` W12, `eddd8f7` W13) without touching
+`tests/`. Every marker was xpassing before the strip, so reconciliation removed markers only — no
+assertion was weakened, and nothing escalated.
+
+| Target wave | Count | Reconciled |
+|---|---|---|
+| **W11** (`dde1e94`, `#270`) | 12 | `test_wildcard_separator_is_rejected` (10 params) + `test_remediation_is_omitted_for_a_malformed_fix_version` (2 params) |
+| **W12** (`4695e6e`, `#269`) | 4 | both `base_comparison_available` unit cases + both pipeline-consumer seam cases |
+| **W13** (`eddd8f7`, `#268`) | 6 | the three attribution tests × the absolute/relative parametrization |
+
+Present-tense defect narration was rewritten to state the contract: the `test_osv_json.py` module
+docstring and both case-table comments, the `#269` section comment in `test_scope.py`, the
+`test_adapters_ruff_format.py` module docstring, and four docstrings that named a wave number
+(`W11 must not narrow…`, `W13 must not lose it`, `W13 changes attribution only`, `untouched by W12`).
+The stale `adapters.py:85-119` anchor in the module docstring is now `:85-148`.
+
+**Per-file counts after reconciliation — 69 passed, 0 xfail, 0 xpass:**
+`test_osv_json.py` 33, `test_scope.py` 19, `test_adapters_ruff_format.py` 17 (11 pre-existing + 6
+new fallback cases). Full `tests/analyzers` + `tests/review`: **664 passed**, no xfail, no xpass.
+
+### W13's tool-failure fallback — the decision, now covered
+
+**The decision.** A non-zero exit carrying no parseable `Would reformat:` line means ruff itself
+failed (bad config, syntax error, unexpected output shape), not that a file is unformatted. W13
+emits **one finding at `scoped_files[0]`** rather than returning nothing, so a broken analyzer
+cannot read as a clean bill of health (`adapters.py:138-148`).
+
+**Why this needed pinning beyond "it works".** `scoped_files[0]` is the exact misattribution #268
+exists to fix. Left untested, a future refactor could route parseable output back through this arm —
+restoring the bug — and every #268 attribution test could still be satisfied by an implementation
+that happened to order `pkg/a.py` first. The reachability guard closes that door.
+
+| Contract | Test | Layer / class |
+|---|---|---|
+| Tool failure with unparseable output cites `scoped_files[0]` | `test_tool_failure_without_parseable_output_reports_the_first_scoped_file` (3 params: invocation error, empty output, summary line only) | Integration, error |
+| **The fallback is unreachable while a `Would reformat:` line parses** — failure text naming `pkg/a.py`, exit 2, and one parseable line naming `pkg/b.py` ⇒ the finding cites `pkg/b.py` | `test_fallback_is_unreachable_while_would_reformat_lines_parse` | Integration, #268 regression guard |
+| No scoped files ⇒ no finding (the arm must not index into an empty list) | `test_tool_failure_with_no_scoped_files_reports_nothing` | Integration, edge |
+| One failure signal, not one per scoped file | `test_tool_failure_fallback_reports_exactly_one_finding` | Integration, edge |
+
+**Verdict on the contract: the fail-loud direction is right, the message is not.** Emitting rather
+than silencing is the correct call — an analyzer that fails open on its own crash is worse than a
+false positive, and the reviewer surface has no other channel for "this tool broke". But the
+fallback reuses `_format_finding(..., message="File would be reformatted by ruff format")`, so a
+ruff *crash* is reported to the reviewer as a *formatting violation* in a file that may be perfectly
+formatted — a factually false claim, and the same class of misattribution #268 is about, one level
+up. A message naming the real condition (`ruff format --check failed; output could not be parsed`)
+would keep the fail-loud property while telling the truth. **This is a message-text change in
+`src/`, out of scope for a test-author wave, and it is not encoded as a failing test** — the four
+cases above pin W13's behaviour as shipped. Flagged for Batch C Final or a follow-up issue.
+
+### Post-reconciliation contract audit (Batch C)
+
+- **The absolute/relative parametrization still holds and now proves more.** All three attribution
+  tests remain `@pytest.mark.parametrize("emit_absolute", [False, True])`, driving the stub to emit
+  `Would reformat: /abs/path/pkg/b.py` and `Would reformat: pkg/b.py` against the same adapter.
+  During reconciliation the assertion helper `_paths()` was **tightened**: it previously ran each
+  finding's path back through the adapter's own `resolve_repo_relative_path` before comparing, which
+  meant an implementation that leaked absolute paths into findings would still have passed. It now
+  asserts `f.path` **raw**, so the absolute arm genuinely proves the adapter relativizes. Both arms
+  pass, confirming W13's relativization handles the form ruff actually emits (absolute, since
+  `expand_analyzer_argv` joins onto `repo_root`) *and* the repo-relative form.
+- **Nothing names `resolve_repo_relative_path`.** That tightening also removed the suite's only
+  import of it; `rg resolve_repo_relative_path tests/` returns nothing. Attribution is asserted as
+  observed finding paths, so replacing the helper, inlining it, or switching to `Path.relative_to`
+  keeps the file green as long as findings stay repo-relative.
+- **Nothing names the parse strategy either.** No assertion mentions `Would reformat` as an
+  implementation detail of the adapter — the string appears only in *stub output*, i.e. in what ruff
+  is simulated as printing. An implementation that switched to per-file `ruff format --check` runs,
+  or to `--output-format json`, still satisfies every attribution case, because the stub answers
+  from the paths in `plan.argv`. The one exception is deliberate:
+  `test_fallback_is_unreachable_while_would_reformat_lines_parse` necessarily distinguishes
+  parseable from unparseable output, which is the contract it exists to pin.
+- **The `output_path=None` caveat is now closed.** The W10 note warned that if W13 preferred the
+  persisted output file over `outcome.output`, the stubs would need amending. W13 read
+  `outcome.output` (`adapters.py:123`), so no amendment was needed and no escalation occurred.
+- **`_fixed_version` is exercised directly and through `parse_osv_json`.** The unit table and the
+  remediation-string integration cases would both have to be edited to re-admit a fabricated
+  version, so a regression cannot hide behind either layer alone.
+- **#269's seam guard survives the fix.** `test_online_full_comparison_reaches_the_annotator_as_performed`
+  still drives the real `run_analyzer_pipeline` and records what `annotate_introduced_by_pr` is
+  handed; the annotation *output* remains unobservable (`is_new_in_base` defaults to `False`), which
+  is why the argument-level assertion is the only thing that can catch a re-inversion one layer up.
 
 ### Escalation log
 

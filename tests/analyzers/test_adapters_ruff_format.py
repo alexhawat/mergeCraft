@@ -1,17 +1,21 @@
 """#268 — the ruff-format finding must cite the file that would reformat.
 
-``_run_ruff_format_check`` (``analyzers/adapters.py:85-119``) runs
-``ruff format --check`` over every scoped file in one invocation, then, on a
-non-zero exit, emits a single finding hard-coded to ``scoped_files[0]``. With
-two scoped files where only the second is unformatted, the reviewer is pointed
-at a file that is already clean.
+``_run_ruff_format_check`` (``analyzers/adapters.py:85-148``) runs
+``ruff format --check`` over every scoped file in one invocation. Attribution
+must follow the files ruff actually names: emitting a single finding hard-coded
+to ``scoped_files[0]`` points the reviewer at a file that is already clean
+whenever the unformatted file is not the first one.
 
 These cases pin the **attribution contract**, not an implementation strategy.
 The stub below decides its verdict from the file paths in ``plan.argv``, so it
-answers correctly whether W13 parses the ``Would reformat:`` lines of the single
-combined invocation or falls back to one ``ruff format --check`` run per file.
-It emits paths in both absolute and repo-relative form (real ruff does both,
-depending on how the path was passed) so neither W13 strategy may assume one.
+answers correctly whether the adapter parses the ``Would reformat:`` lines of a
+single combined invocation or runs ``ruff format --check`` once per file. It
+emits paths in both absolute and repo-relative form (real ruff does both,
+depending on how the path was passed) so neither strategy may assume one.
+
+The final section pins the *other* exit: a non-zero exit carrying no parseable
+``Would reformat:`` line at all — a genuine tool failure — where the adapter
+falls back to ``scoped_files[0]``.
 """
 
 from __future__ import annotations
@@ -22,7 +26,6 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from mergecraft.analyzers import adapters
-from mergecraft.analyzers.parsers._common import resolve_repo_relative_path
 from mergecraft.analyzers.registry import get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan
 from mergecraft.analyzers.run import AnalyzerOutcome
@@ -104,9 +107,13 @@ def _format_findings(
     return findings
 
 
-def _paths(findings: list[Finding], *, repo_root: Path) -> list[str]:
-    """Findings are repo-relative by the time they leave the adapter."""
-    return sorted(resolve_repo_relative_path(f.path, repo_root=repo_root) for f in findings)
+def _paths(findings: list[Finding]) -> list[str]:
+    """Findings are repo-relative by the time they leave the adapter.
+
+    Asserted raw rather than re-normalised through the adapter's own helper, so
+    an implementation that leaked absolute paths would fail here.
+    """
+    return sorted(f.path for f in findings)
 
 
 # --------------------------------------------------------------------------- #
@@ -115,10 +122,6 @@ def _paths(findings: list[Finding], *, repo_root: Path) -> list[str]:
 
 
 @pytest.mark.parametrize("emit_absolute", [False, True])
-@pytest.mark.xfail(
-    reason="green after W13: ruff-format finding is hard-coded to scoped_files[0] (#268)",
-    strict=False,
-)
 def test_only_the_second_file_reformatting_cites_the_second_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, emit_absolute: bool
 ) -> None:
@@ -130,14 +133,10 @@ def test_only_the_second_file_reformatting_cites_the_second_file(
         would_reformat=[SECOND],
         emit_absolute=emit_absolute,
     )
-    assert _paths(findings, repo_root=repo_root) == [SECOND]
+    assert _paths(findings) == [SECOND]
 
 
 @pytest.mark.parametrize("emit_absolute", [False, True])
-@pytest.mark.xfail(
-    reason="green after W13: one finding per reformatting file (#268, W13.1)",
-    strict=False,
-)
 def test_both_files_reformatting_yield_one_finding_each(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, emit_absolute: bool
 ) -> None:
@@ -149,14 +148,10 @@ def test_both_files_reformatting_yield_one_finding_each(
         would_reformat=[FIRST, SECOND],
         emit_absolute=emit_absolute,
     )
-    assert _paths(findings, repo_root=repo_root) == [FIRST, SECOND]
+    assert _paths(findings) == [FIRST, SECOND]
 
 
 @pytest.mark.parametrize("emit_absolute", [False, True])
-@pytest.mark.xfail(
-    reason="green after W13: a clean middle file must not absorb the finding (#268)",
-    strict=False,
-)
 def test_third_file_reformatting_is_not_attributed_to_the_first(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, emit_absolute: bool
 ) -> None:
@@ -169,7 +164,7 @@ def test_third_file_reformatting_is_not_attributed_to_the_first(
         would_reformat=[third],
         emit_absolute=emit_absolute,
     )
-    assert _paths(findings, repo_root=repo_root) == [third]
+    assert _paths(findings) == [third]
 
 
 # --------------------------------------------------------------------------- #
@@ -180,7 +175,7 @@ def test_third_file_reformatting_is_not_attributed_to_the_first(
 def test_first_of_two_files_reformatting_cites_the_first(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The one multi-file case today gets right — W13 must not lose it."""
+    """The one multi-file case the hard-coded index got right by luck."""
     repo_root = _repo(tmp_path, FIRST, SECOND)
     findings = _format_findings(
         monkeypatch,
@@ -188,7 +183,7 @@ def test_first_of_two_files_reformatting_cites_the_first(
         scoped_files=[FIRST, SECOND],
         would_reformat=[FIRST],
     )
-    assert _paths(findings, repo_root=repo_root) == [FIRST]
+    assert _paths(findings) == [FIRST]
 
 
 def test_single_file_run_still_reports_that_file(
@@ -201,7 +196,7 @@ def test_single_file_run_still_reports_that_file(
         scoped_files=[SECOND],
         would_reformat=[SECOND],
     )
-    assert _paths(findings, repo_root=repo_root) == [SECOND]
+    assert _paths(findings) == [SECOND]
 
 
 def test_clean_run_reports_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -228,7 +223,7 @@ def test_no_scoped_files_reports_nothing(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 
 def test_format_finding_metadata_is_stable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """W13 changes attribution only — the catalog-facing shape stays put (D19)."""
+    """Attribution moved; the catalog-facing shape stays put (D19)."""
     repo_root = _repo(tmp_path, SECOND)
     findings = _format_findings(
         monkeypatch,
@@ -243,3 +238,131 @@ def test_format_finding_metadata_is_stable(monkeypatch: pytest.MonkeyPatch, tmp_
     assert finding.start_line == 1
     assert finding.end_line == 1
     assert "ruff format" in finding.message
+
+
+# --------------------------------------------------------------------------- #
+# Tool failure — the unparseable-output fallback
+#
+# A non-zero exit carrying no ``Would reformat:`` line at all means ruff itself
+# failed (bad config, syntax error, unexpected output format), not that a file
+# is unformatted. The adapter reports one finding at ``scoped_files[0]`` rather
+# than returning nothing, so a broken analyzer cannot read as a clean bill of
+# health.
+#
+# ``scoped_files[0]`` is the exact misattribution #268 exists to fix, so the
+# reachability guard below is load-bearing: this arm may be entered **only**
+# when no ``Would reformat:`` line parses. A refactor that regressed #268 by
+# routing parseable output back through the fallback fails
+# ``test_fallback_is_unreachable_while_would_reformat_lines_parse``.
+# --------------------------------------------------------------------------- #
+
+RUFF_INVOCATION_ERROR = (
+    f"error: Failed to parse {FIRST}:1:1: Expected an expression\nerror: Failed to format 1 file\n"
+)
+
+
+def _stub_failing_run_plan(output: str) -> Any:
+    """Answer every invocation with a non-zero exit and fixed output."""
+
+    def _run_plan(plan: AnalyzerPlan, *, sandbox_context: object = None) -> AnalyzerOutcome:
+        _ = sandbox_context
+        return AnalyzerOutcome(
+            name=plan.manifest_id,
+            command="ruff format --check",
+            status="failed",
+            output=output,
+            exit_code=2,
+        )
+
+    return _run_plan
+
+
+def _failing_findings(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    repo_root: Path,
+    scoped_files: list[str],
+    output: str,
+) -> list[Finding]:
+    monkeypatch.setattr(adapters, "run_plan", _stub_failing_run_plan(output))
+    plan = AnalyzerPlan(manifest_id="ruff", mode="repo-native", argv=("ruff", "check"))
+    findings: list[Finding] = adapters._run_ruff_format_check(
+        plan,
+        manifest=get_manifest("ruff"),
+        repo_root=repo_root,
+        scoped_files=scoped_files,
+        tier="trusted",
+        sandbox_context=None,
+    )
+    return findings
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        pytest.param(RUFF_INVOCATION_ERROR, id="invocation-error"),
+        pytest.param("", id="no-output"),
+        pytest.param("2 files would be reformatted\n", id="summary-line-only"),
+    ],
+)
+def test_tool_failure_without_parseable_output_reports_the_first_scoped_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, output: str
+) -> None:
+    """False positive beats false silence when ruff itself fails."""
+    repo_root = _repo(tmp_path, FIRST, SECOND)
+    findings = _failing_findings(
+        monkeypatch,
+        repo_root=repo_root,
+        scoped_files=[FIRST, SECOND],
+        output=output,
+    )
+    assert _paths(findings) == [FIRST]
+
+
+def test_fallback_is_unreachable_while_would_reformat_lines_parse(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Tool-failure noise around a parseable line must not reach the fallback.
+
+    The failure output names ``pkg/a.py`` in its error text and exits 2, yet a
+    single ``Would reformat:`` line names ``pkg/b.py``. Attribution follows the
+    parsed line, so #268 cannot regress through the fallback arm.
+    """
+    repo_root = _repo(tmp_path, FIRST, SECOND)
+    findings = _failing_findings(
+        monkeypatch,
+        repo_root=repo_root,
+        scoped_files=[FIRST, SECOND],
+        output=f"{RUFF_INVOCATION_ERROR}Would reformat: {SECOND}\n",
+    )
+    assert _paths(findings) == [SECOND]
+
+
+def test_tool_failure_with_no_scoped_files_reports_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """There is no first file to fall back to — the arm must not index into it."""
+    repo_root = _repo(tmp_path)
+    repo_root.mkdir(parents=True, exist_ok=True)
+    findings = _failing_findings(
+        monkeypatch,
+        repo_root=repo_root,
+        scoped_files=[],
+        output=RUFF_INVOCATION_ERROR,
+    )
+    assert findings == []
+
+
+def test_tool_failure_fallback_reports_exactly_one_finding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """One failure signal, not one per scoped file — three files, one finding."""
+    third = "pkg/c.py"
+    repo_root = _repo(tmp_path, FIRST, SECOND, third)
+    findings = _failing_findings(
+        monkeypatch,
+        repo_root=repo_root,
+        scoped_files=[FIRST, SECOND, third],
+        output=RUFF_INVOCATION_ERROR,
+    )
+    assert len(findings) == 1

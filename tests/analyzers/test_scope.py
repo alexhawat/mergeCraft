@@ -162,32 +162,24 @@ index 3333333..4444444 100644
 
 
 # --------------------------------------------------------------------------- #
-# #269 — ``base_comparison_available`` returns ``offline`` instead of
-# ``not offline``.
+# #269 — ``base_comparison_available`` must return ``not offline``, never
+# ``offline``.
 #
 # This is not a cosmetic inversion. ``pipeline.py:361`` feeds the result into
 # ``_apply_baseline_suppression(..., base_run_performed=base_run)``, which hands
-# it to ``annotate_introduced_by_pr``. Today an **online** ``baseComparison:
+# it to ``annotate_introduced_by_pr``. Inverted, an **online** ``baseComparison:
 # full`` run annotates as if no base comparison happened, and an **offline** run
 # claims one did. The consumer cases below exist so a future refactor cannot
 # reintroduce the wrong attribution one layer up while the pure function stays
-# correct. W12 fixes it.
+# correct.
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(
-    reason="green after W12: base_comparison_available returns `offline` (#269)",
-    strict=False,
-)
 def test_base_comparison_available_is_true_when_online_and_full() -> None:
     scope = import_module("mergecraft.analyzers.scope")
     assert scope.base_comparison_available(base_comparison="full", offline=False) is True
 
 
-@pytest.mark.xfail(
-    reason="green after W12: base_comparison_available returns `offline` (#269)",
-    strict=False,
-)
 def test_base_comparison_available_is_false_when_offline_and_full() -> None:
     scope = import_module("mergecraft.analyzers.scope")
     assert scope.base_comparison_available(base_comparison="full", offline=True) is False
@@ -198,7 +190,7 @@ def test_base_comparison_available_is_false_when_offline_and_full() -> None:
 def test_base_comparison_available_is_false_unless_comparison_is_full(
     base_comparison: str, offline: bool
 ) -> None:
-    """The ``!= "full"`` short-circuit is untouched by W12 — guard it."""
+    """The ``!= "full"`` short-circuit is independent of ``offline`` — guard it."""
     scope = import_module("mergecraft.analyzers.scope")
     assert (
         scope.base_comparison_available(base_comparison=base_comparison, offline=offline) is False
@@ -257,22 +249,14 @@ def _run_full_comparison_pipeline(
     return recorded
 
 
-@pytest.mark.xfail(
-    reason="green after W12: online full comparison reaches the annotator as False (#269)",
-    strict=False,
-)
 def test_online_full_comparison_reaches_the_annotator_as_performed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The live bug: an online ``full`` run must claim the base comparison ran."""
+    """An online ``full`` run must claim the base comparison ran."""
     recorded = _run_full_comparison_pipeline(monkeypatch, tmp_path, offline=False)
     assert recorded == [True]
 
 
-@pytest.mark.xfail(
-    reason="green after W12: offline full comparison reaches the annotator as True (#269)",
-    strict=False,
-)
 def test_offline_full_comparison_never_claims_a_base_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
