@@ -310,13 +310,48 @@ unused ignores).
   `tests/evidence/test_verdict_shadow.py`) and read the span-attrs dict instead; a later refactor
   that widens the return, or threads a `VerdictDiagnostic` object, keeps this batch green as long
   as the output is written on both `_finalize` return paths.
-- **Known coverage gap (producer side, not a Batch B contract).** No test asserts that
-  `main._finalize` populates `MainResult.verdict_diagnostic` from
-  `diagnostic_attrs["verdict.diagnostic"]` (`main.py:1353`, `:1399`, `:1409`). The batch pins the
-  consumer half — given a populated `MainResult`, the output is written correctly — so a regression
-  that stopped *computing* the code would leave every Batch B test green while the output silently
-  went empty. W6.2's contract is scoped to the write path, so this is recorded rather than fixed
-  here; it belongs to a `main._finalize` suite.
+- **Producer side — closed.** The gap first recorded here (nothing proved `_finalize` actually
+  populates `MainResult.verdict_diagnostic`, so a regression that stopped *computing* the code
+  would leave the write-path tests green while the output silently went empty) is now covered by
+  `tests/test_main_phases.py::TestFinalizeCarriesTheVerdictDiagnostic` — see below. `#265` is
+  covered end to end: producer → `MainResult` → `$GITHUB_OUTPUT`.
+
+### Producer-half coverage for `#265` (`TestFinalizeCarriesTheVerdictDiagnostic`)
+
+Added to `tests/test_main_phases.py`, the existing `_finalize` phase suite, so it uses the same
+`tests/support/run_main_harness.py` vehicle as `test_main_result_is_unchanged_for_each_run_outcome`
+— a real `main()` run against scripted collaborators, no new pattern. **10 tests, all green**: W8's
+producer half was correctly implemented, nothing was red, and no `xfail` was needed.
+
+| Contract | Test | Layer / class |
+|---|---|---|
+| The `passed` return carries the computed code | `test_success_path_carries_the_computed_code` | Functional, happy |
+| The non-`passed` return is a separate `return` and must not drop it | `test_failure_path_carries_the_computed_code` | Functional, happy |
+| Two different failures on the same branch keep *different* codes | `test_policy_rejection_is_distinguishable_from_provider_failure` | Functional, edge |
+| `enforce` and `shadow` deposit the same code | `test_enforce_and_shadow_deposit_the_same_code` (3 params) | Functional, seam |
+| Every completed run deposits a closed-vocabulary code | `test_every_completed_run_deposits_a_closed_code` | Functional, table |
+| A run that never classified carries a falsy value, never a fabricated code | `test_runs_that_never_classified_carry_no_code` (3 params) | Functional, D10 empty arm |
+
+Notes on what these pin and what they deliberately do not:
+
+- **The enforce/shadow seam agrees.** `_verdict_protocol_publish` returns `prediction` only when
+  `terminal_verdict == "shadow"`, which is why W8 read the always-populated carrier instead. The
+  parity test runs each of `passed` / `failed` / `inconclusive` under both modes and asserts the
+  same code lands, so an implementation that reached the diagnostic through the shadow-only carrier
+  fails under the (default) `enforce` mode rather than passing by luck.
+- **D10's empty arm, producer end.** `timed_out` / `configuration_error` / `infra_error` leave
+  through `main()`'s outer handler and never reach the verdict classification — the same asymmetry
+  `test_main_result_is_unchanged_for_each_run_outcome` already pins for the evidence packet. Those
+  three assert the value is *falsy* (`None` or `""` both satisfy the consumer, which writes a
+  present-but-empty key either way), never a fabricated code.
+- **No plumbing is named.** No assertion mentions `diagnostic_attrs`, `verdict.diagnostic`, or
+  `_verdict_protocol_publish`; everything goes through `main()` and `MainResult`. Threading the
+  diagnostic on the prediction object, a widened publish helper, or a third carrier keeps these
+  green.
+- **Codes are asserted as literals** (`approved`, `provider_failure`, `policy_rejection`) rather
+  than recomputed from the predictor, so a change to the classification policy has to be a
+  deliberate test edit rather than a silently-tracking tautology. Membership in the closed
+  `VerdictDiagnostic` vocabulary is checked separately.
 
 ### Escalation log
 
