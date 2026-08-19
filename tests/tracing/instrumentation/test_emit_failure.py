@@ -23,11 +23,12 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from tests.tracing.instrumentation.conftest import (
     make_agent_result,
     make_agent_usage,
 )
+
+from mergecraft.utils.log import logger
 
 
 class _RaisingSink:
@@ -86,7 +87,6 @@ def _drive_chain_with_raising_sink(results: list[Any]) -> tuple[Any, Any]:
     return outcome, raising_sink
 
 
-@pytest.mark.xfail(reason="green after W4: best-effort emit failure handling", strict=True)
 def test_emit_failure_never_fails_the_run() -> None:
     """W3.8 — a sink that raises on every write is swallowed.
 
@@ -107,18 +107,26 @@ def test_emit_failure_never_fails_the_run() -> None:
     assert raising_sink.write_calls >= 1, "raising sink was never invoked — emit path not exercised"
 
 
-@pytest.mark.xfail(reason="green after W4: best-effort emit failure handling", strict=True)
-def test_emit_failure_logs_a_warning(capsys: Any) -> None:
+def test_emit_failure_logs_a_warning() -> None:
     """W3.8 (error logging) — sink failures are logged at ``logger.warning``.
 
-    Captures stderr during the run and asserts at least one line carries
-    the failure signature. Production emit may reset loguru handlers, so
-    a dedicated ``logger.add`` sink is not a stable capture.
+    A dedicated ``logger.add`` sink is used because loguru binds ``sys.stderr``
+    at configure time; ``capsys`` misses warnings after an earlier test has
+    already configured logging.
     """
     results = [make_agent_result(success=True, usage=make_agent_usage())]
-    _drive_chain_with_raising_sink(results)
-    err = capsys.readouterr().err
-    assert "trace sink" in err, f"expected a warning naming the trace sink; got: {err!r}"
+    messages: list[str] = []
+    sink_id = logger.add(
+        lambda record: messages.append(record.record["message"]),
+        level="WARNING",
+    )
+    try:
+        _drive_chain_with_raising_sink(results)
+    finally:
+        logger.remove(sink_id)
+    assert any("trace sink" in message for message in messages), (
+        f"expected a warning naming the trace sink; got: {messages!r}"
+    )
 
 
 __all__ = [
