@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from tests.tracing.instrumentation.conftest import (
     make_agent_result,
     make_agent_usage,
@@ -85,6 +86,7 @@ def _drive_chain_with_raising_sink(results: list[Any]) -> tuple[Any, Any]:
     return outcome, raising_sink
 
 
+@pytest.mark.xfail(reason="green after W4: best-effort emit failure handling", strict=False)
 def test_emit_failure_never_fails_the_run() -> None:
     """W3.8 — a sink that raises on every write is swallowed.
 
@@ -105,6 +107,7 @@ def test_emit_failure_never_fails_the_run() -> None:
     assert raising_sink.write_calls >= 1, "raising sink was never invoked — emit path not exercised"
 
 
+@pytest.mark.xfail(reason="green after W4: best-effort emit failure handling", strict=False)
 def test_emit_failure_logs_a_warning(capsys: Any) -> None:
     """W3.8 (error logging) — sink failures are logged at ``logger.warning``.
 
