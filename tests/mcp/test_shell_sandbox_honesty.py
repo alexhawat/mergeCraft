@@ -33,11 +33,6 @@ from mergecraft.utils.github import GitHubClient
 
 TrustTier = Literal["trusted", "untrusted"]
 
-_XFAIL_SANDBOX = pytest.mark.xfail(
-    reason="green after W6: untrusted + sandbox none does not register shell",
-    strict=False,
-)
-
 
 @pytest.fixture(autouse=True)
 def _reset_sandbox_cache(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,7 +91,6 @@ def test_detect_sandbox_method_cache_resets_between_env(
     assert detect_sandbox_method() == "none"
 
 
-@_XFAIL_SANDBOX
 def test_untrusted_restricted_sandbox_none_omits_shell(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

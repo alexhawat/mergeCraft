@@ -71,7 +71,7 @@ from mergecraft.mcp.shared import (
     ToolSpec,
     admits_readonly_role,
 )
-from mergecraft.mcp.shell import kill_background_tool, shell_tool
+from mergecraft.mcp.shell import detect_sandbox_method, kill_background_tool, shell_tool
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.upload import upload_file_tool
 from mergecraft.mcp.verdict import submit_review_verdict_tool
@@ -148,7 +148,9 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
     is_standalone = ctx.payload.event.trigger == "unknown"
     if is_standalone or output_schema is not None:
         tools.append(set_output_tool(ctx, output_schema))
-    if ctx.payload.shell == "restricted":
+    if ctx.payload.shell == "restricted" and not (
+        ctx.trust_tier == "untrusted" and detect_sandbox_method() == "none"
+    ):
         tools.extend([shell_tool(ctx), kill_background_tool(ctx)])
     return tools
 

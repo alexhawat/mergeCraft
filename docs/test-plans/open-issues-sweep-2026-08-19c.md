@@ -24,7 +24,7 @@ those waves land.
 | **W3** | `test_start_installation_ignore_scripts_follows_d10[untrusted-restricted]` | `green after W3: ignore_scripts follows trust` | greened |
 | **W3** | `test_start_installation_ignore_scripts_follows_d10[untrusted-enabled]` | `green after W3: ignore_scripts follows trust` | greened |
 | **W3** | `test_start_installation_untrusted_restricted_does_not_run_postinstall` | `green after W3: ignore_scripts follows trust` | greened |
-| **W6** | `test_untrusted_restricted_sandbox_none_omits_shell` | `green after W6: untrusted + sandbox none does not register shell` | pending |
+| **W6** | `test_untrusted_restricted_sandbox_none_omits_shell` | `green after W6: untrusted + sandbox none does not register shell` | greened |
 
 All cross-wave xfails use `strict=False`. Do not use `strict=True` (pytest.ini
 has `xfail_strict = true`).
@@ -84,5 +84,5 @@ Reset `_detected_sandbox` between cases (module global).
 |---|----------|-------|----------|--------------|
 | L287a | `CI` unset / `false` / `0` / empty → `detect_sandbox_method() == "none"` | unit | happy | `tests/mcp/test_shell_sandbox_honesty.py::test_detect_sandbox_method_none_outside_ci` |
 | L287b | Cache reset between cases | unit | edge | `test_detect_sandbox_method_cache_resets_between_env` |
-| L287c | Untrusted + restricted + `"none"` omits `shell` / `kill_background` | integration | happy (bug) | `test_untrusted_restricted_sandbox_none_omits_shell` (xfail W6) |
+| L287c | Untrusted + restricted + `"none"` omits `shell` / `kill_background` | integration | happy (bug) | `test_untrusted_restricted_sandbox_none_omits_shell` |
 | L287d | Trusted + restricted + `"none"` still includes `shell` | integration | control | `test_trusted_restricted_sandbox_none_keeps_shell` |

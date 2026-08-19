@@ -174,6 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Untrusted PR trees no longer receive a `shell` tool when PID-namespace isolation is unavailable (#287)
 - Untrusted PR trees no longer run package install lifecycle scripts in the Action process when `shell` is the default `restricted` (#284)
 - `mcp/git`: replaced permissive `_SUBCOMMAND_RE` with an explicit read-only allowlist (`status`, `log`, `diff`, `show`, `rev-parse`, `describe`, `ls-files`, `blame`, `cat-file`, `rev-list`, read-only `branch`); `git reset`, `git clean`, `git stash`, and all other mutating subcommands now raise `ValueError` unconditionally (#257)
 - `mcp/git`: `-c` / `--config-env` are now rejected unconditionally regardless of `payload.shell`, closing the `git -c alias.x='!cmd'` arbitrary-shell-execution vector that bypassed the former `shell: disabled` guard (#257)
