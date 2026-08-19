@@ -207,6 +207,97 @@ async def test_global_opt_in_command_string_outside_repo_root_rejected(
     assert recorder.calls == []
 
 
+def _repo_and_evil_sibling(tmp_path: Path) -> tuple[Path, Path]:
+    """A real repo root plus a real sibling whose name is a string prefix match.
+
+    ``<root>-evil`` is not inside ``<root>``, but a bare textual prefix test on
+    the resolved paths would accept it. Both directories are created on disk so
+    ``Path.resolve()`` cannot collapse the distinction away.
+    """
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    evil = (tmp_path / "repo-evil").resolve()
+    (evil / "secrets").mkdir(parents=True)
+    return root, evil
+
+
+@pytest.mark.parametrize(
+    "build_args",
+    [
+        pytest.param(lambda p: ["-C", p], id="dash-C"),
+        pytest.param(lambda p: ["--git-dir", f"{p}/.git"], id="git-dir-separate"),
+        pytest.param(lambda p: [f"--git-dir={p}/.git"], id="git-dir-equals"),
+        pytest.param(lambda p: ["--work-tree", p], id="work-tree-separate"),
+        pytest.param(lambda p: [f"--work-tree={p}"], id="work-tree-equals"),
+    ],
+)
+async def test_sibling_prefix_directory_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    build_args: Any,
+) -> None:
+    """A sibling whose path merely starts with the repo root must not be accepted."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    root, evil = _repo_and_evil_sibling(tmp_path)
+    target = str(evil / "secrets")
+    result = await git_tool(_ctx(root)).execute({"command": "status", "args": build_args(target)})
+    assert result.is_error is True, result.content[0]["text"]
+    assert target in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_sibling_prefix_without_separator_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``<root>evil`` — a prefix match with no separator at all — is still outside."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    adjacent = (tmp_path / "repoevil").resolve()
+    adjacent.mkdir()
+
+    result = await git_tool(_ctx(root)).execute(
+        {"command": "status", "args": ["-C", str(adjacent)]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert str(adjacent) in result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("suffix", ["", "/", "/."], ids=["bare", "trailing-slash", "dot"])
+async def test_repo_root_itself_still_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str
+) -> None:
+    """Hardening containment must not turn into a blanket refusal of the root."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    root, _evil = _repo_and_evil_sibling(tmp_path)
+    given = f"{root}{suffix}"
+    result = await git_tool(_ctx(root)).execute({"command": "status", "args": ["-C", given]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-C", given, "status"]]
+
+
+async def test_nested_path_inside_repo_root_still_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    root, _evil = _repo_and_evil_sibling(tmp_path)
+    nested = root / "src" / "pkg"
+    nested.mkdir(parents=True)
+
+    result = await git_tool(_ctx(root)).execute({"command": "status", "args": ["-C", str(nested)]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["-C", str(nested), "status"]]
+
+
 @pytest.mark.parametrize("subcommand", ["reset", "clean", "stash", "update-ref"])
 async def test_mutating_subcommands_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str

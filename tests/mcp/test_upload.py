@@ -125,3 +125,69 @@ async def test_tmpdir_file_still_uploads_in_byok_mode(
     payload = json.loads(result.content[0]["text"])
     assert payload["success"] is True
     assert payload["filename"] == "artifact.txt"
+
+
+@pytest.fixture
+def sibling_prefix_files(tmp_path: Path, repo_root: Path, scratch: Path) -> dict[str, Path]:
+    """Real sibling directories whose names are string prefixes of the allowed roots.
+
+    ``<root>-evil`` sits next to ``<root>``, not inside it, so a bare textual
+    prefix test on the resolved paths would wrongly accept these files. Both the
+    repo-root arm and the tmpdir arm of the containment check are covered.
+    """
+    sibling_files: dict[str, Path] = {}
+    for key, allowed in (("repo", repo_root), ("tmpdir", scratch)):
+        evil = (tmp_path / f"{allowed.name}-evil").resolve()
+        evil.mkdir()
+        secret = evil / "secret.txt"
+        secret.write_text(f"{SECRET_MARKER}\n", encoding="utf-8")
+        sibling_files[key] = secret
+    return sibling_files
+
+
+@pytest.mark.parametrize("arm", ["repo", "tmpdir"])
+async def test_sibling_prefix_directory_rejected(
+    ctx: ToolContext, sibling_prefix_files: dict[str, Path], arm: str
+) -> None:
+    target = sibling_prefix_files[arm]
+    result = await upload_file_tool(ctx).execute({"path": str(target)})
+    assert result.is_error is True, result.content[0]["text"]
+    text = result.content[0]["text"]
+    assert "file://" not in text
+    assert SECRET_MARKER not in text
+
+
+async def test_sibling_prefix_without_separator_rejected(ctx: ToolContext, tmp_path: Path) -> None:
+    """``<root>evil`` — a prefix match with no separator at all — is still outside."""
+    adjacent = (tmp_path / "repoevil").resolve()
+    adjacent.mkdir()
+    secret = adjacent / "secret.txt"
+    secret.write_text(f"{SECRET_MARKER}\n", encoding="utf-8")
+
+    result = await upload_file_tool(ctx).execute({"path": str(secret)})
+    assert result.is_error is True, result.content[0]["text"]
+    assert SECRET_MARKER not in result.content[0]["text"]
+
+
+async def test_deeply_nested_in_repo_file_still_uploads(ctx: ToolContext, repo_root: Path) -> None:
+    """Containment must keep accepting ordinary nested paths under an allowed root."""
+    nested = repo_root / "reports" / "2026" / "evidence.txt"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("nested evidence\n", encoding="utf-8")
+
+    result = await upload_file_tool(ctx).execute({"path": str(nested)})
+    assert result.is_error is False, result.content[0]["text"]
+    payload = json.loads(result.content[0]["text"])
+    assert payload["success"] is True
+    assert payload["filename"] == "evidence.txt"
+
+
+async def test_in_repo_file_reached_via_trailing_separator_still_uploads(
+    ctx: ToolContext, in_repo_file: Path
+) -> None:
+    """A redundant ``/./`` segment inside the root resolves back in and is accepted."""
+    given = str(in_repo_file.parent / "." / in_repo_file.name)
+    result = await upload_file_tool(ctx).execute({"path": given})
+    assert result.is_error is False, result.content[0]["text"]
+    payload = json.loads(result.content[0]["text"])
+    assert payload["success"] is True
