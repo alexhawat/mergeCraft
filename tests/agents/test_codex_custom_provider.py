@@ -1,7 +1,7 @@
-"""RED tests for the Codex custom OpenAI-compatible provider passthrough (#71 / W3).
+"""Codex custom OpenAI-compatible provider passthrough (#71 / W3).
 
 These tests pin the contract ``src/mergecraft/agents/codex.py::write_mcp_config``
-must satisfy once W3 lands:
+satisfies:
 
 - multiple ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`` env-var
   pairs (operator-locked convention, N >= 1) each emit a Codex
@@ -22,9 +22,7 @@ rather than relying on string matches; that way the schema W3 lands is the
 schema the test pins, not a side-effect of one writer's formatting.
 
 Wave plan: ``.ignorelocal/waves/issues-provider-routing-wave-plan.md`` (Batch B
-/ W1). Cross-wave xfail markers use ``strict=False`` so an early-passing xfail
-becomes XPASS (an upgrade, not a hard failure) — see the test-creator agent
-contract.
+/ W1). W3 landed the behaviour, so these run green with no xfail markers.
 """
 
 from __future__ import annotations
@@ -131,10 +129,6 @@ def test_codex_config_toml_has_no_provider_block_without_env(tmp_path: Path) -> 
 # -- W1.3 (extended): partial / parametrized coverage -----------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W3: indexed env-var pairs populate model_providers; partial pairs dropped",
-    strict=False,
-)
 @pytest.mark.parametrize(
     ("set_indexed", "expected_present", "expected_absent"),
     [
@@ -192,10 +186,6 @@ def test_codex_partial_indexed_coverage_writes_only_present_providers(
         assert "model_providers" not in parsed
 
 
-@pytest.mark.xfail(
-    reason="green after W3: singleton alone emits a 'default' provider block",
-    strict=False,
-)
 def test_codex_singleton_alone_emits_default_provider_block(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -219,10 +209,6 @@ def test_codex_singleton_alone_emits_default_provider_block(
     assert base_url == SINGLETON_BASE_URL
 
 
-@pytest.mark.xfail(
-    reason="green after W3: when any indexed pair is set, the singleton is ignored",
-    strict=False,
-)
 def test_codex_indexed_wins_singleton_ignored(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -247,10 +233,6 @@ def test_codex_indexed_wins_singleton_ignored(
 # -- W1.2 (extended): two indexed pairs both emit ---------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W3: write_mcp_config() emits model_providers.<id> for each indexed pair",
-    strict=False,
-)
 def test_codex_config_toml_writes_both_indexed_providers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -285,10 +267,6 @@ def test_codex_config_toml_writes_both_indexed_providers(
     assert url_2 == PROVIDER_2_BASE_URL
 
 
-@pytest.mark.xfail(
-    reason="green after W3: N=3 indexed pairs emit three provider blocks",
-    strict=False,
-)
 def test_codex_config_toml_writes_three_indexed_providers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
