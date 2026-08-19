@@ -85,6 +85,7 @@ class StreamSpanAccumulator:
     tokens_out: int = 0
     cache_read: int = 0
     cache_write: int = 0
+    cache_read_is_inclusive: bool = False
     cost_usd: float | None = None
     final_output: str | None = None
     parsed_event_count: int = 0
@@ -100,12 +101,17 @@ class StreamSpanAccumulator:
         self.tokens_out += int(
             usage_payload.get("output_tokens") or usage_payload.get("outputTokens") or 0
         )
-        self.cache_read += int(
-            usage_payload.get("cache_read_input_tokens")
-            or usage_payload.get("cacheReadTokens")
-            or _extract_openai_cached_tokens(usage_payload)
-            or 0
-        )
+        cache_read, cache_read_is_inclusive = _resolve_cache_read(usage_payload)
+        if cache_read:
+            # Only a contributing event may set the provenance flag: an event
+            # with no cache fields at all resolves to ``0`` through the
+            # OpenAI branch and would otherwise relabel an Anthropic total.
+            # A stream that mixed both provenances would carry one flag for
+            # two counts; the last contributing event wins. No driver emits
+            # that shape — ``absorb_usage`` is called only from the
+            # Anthropic-native claude handler (#273).
+            self.cache_read += cache_read
+            self.cache_read_is_inclusive = cache_read_is_inclusive
         self.cache_write += int(
             usage_payload.get("cache_creation_input_tokens")
             or usage_payload.get("cacheWriteTokens")
@@ -131,8 +137,9 @@ class StreamSpanAccumulator:
         ``input_tokens_details.cached_tokens`` recognition so the Nous /
         MiniMax / opencode Responses / Chat Completions paths populate
         ``cache_read`` alongside the Anthropic-native
-        ``cache_read_input_tokens`` field. The fold is additive: any native
-        Anthropic value still wins.
+        ``cache_read_input_tokens`` field. Any native Anthropic value still
+        wins, and the branch that resolved the count is recorded on
+        ``cache_read_is_inclusive`` for ``to_usage``.
         """
         if not isinstance(usage_payload, dict):
             return
@@ -142,12 +149,7 @@ class StreamSpanAccumulator:
         self.tokens_out = int(
             usage_payload.get("output_tokens") or usage_payload.get("outputTokens") or 0
         )
-        self.cache_read = int(
-            usage_payload.get("cache_read_input_tokens")
-            or usage_payload.get("cacheReadTokens")
-            or _extract_openai_cached_tokens(usage_payload)
-            or 0
-        )
+        self.cache_read, self.cache_read_is_inclusive = _resolve_cache_read(usage_payload)
         self.cache_write = int(
             usage_payload.get("cache_creation_input_tokens")
             or usage_payload.get("cacheWriteTokens")
@@ -165,7 +167,14 @@ class StreamSpanAccumulator:
             self.final_output = output
 
     def to_usage(self) -> AgentUsage | None:
-        """Render the accumulator as an ``AgentUsage`` if any field was set."""
+        """Render the accumulator as an ``AgentUsage`` if any field was set.
+
+        ``input_tokens`` adds ``cache_read`` only when the count is disjoint
+        from the reported input total (the Anthropic-native counters).
+        OpenAI-style ``cached_tokens`` are already inside the reported input
+        count, so adding them again inflates the reported prompt size (#273,
+        D16). ``cache_read_tokens`` reports the cached count either way.
+        """
         from mergecraft.agents.shared import AgentUsage
 
         if (
@@ -178,7 +187,9 @@ class StreamSpanAccumulator:
             return None
         return AgentUsage(
             agent=self.agent_name,
-            input_tokens=self.tokens_in + self.cache_read + self.cache_write,
+            input_tokens=self.tokens_in
+            + (0 if self.cache_read_is_inclusive else self.cache_read)
+            + self.cache_write,
             output_tokens=self.tokens_out,
             cache_read_tokens=self.cache_read or None,
             cache_write_tokens=self.cache_write or None,
@@ -219,6 +230,27 @@ def _extract_openai_cached_tokens(usage_payload: Mapping[str, Any]) -> int:
             if isinstance(cached, (int, float)):
                 return int(cached)
     return 0
+
+
+def _resolve_cache_read(usage_payload: Mapping[str, Any]) -> tuple[int, bool]:
+    """Return the cached-input token count and whether it is inclusive of the input count.
+
+    Anthropic-native ``cache_read_input_tokens`` / ``cacheReadTokens`` are
+    **disjoint** from the reported ``input_tokens``; OpenAI-style
+    ``*_tokens_details.cached_tokens`` are a **subset** of it. The native
+    fields are consulted first, so the branch that produced a non-zero count
+    also identifies its provenance (#273, D16).
+
+    Returns:
+        ``(count, is_inclusive)``. ``is_inclusive`` is meaningless when
+        ``count`` is ``0`` — no caller adds a zero either way.
+    """
+    native = int(
+        usage_payload.get("cache_read_input_tokens") or usage_payload.get("cacheReadTokens") or 0
+    )
+    if native:
+        return native, False
+    return _extract_openai_cached_tokens(usage_payload), True
 
 
 def _resolve_active_span_for_otel_bridge() -> Span | None:
