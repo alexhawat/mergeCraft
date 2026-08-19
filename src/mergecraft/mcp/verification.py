@@ -139,6 +139,27 @@ def _apply_non_blocking_downgrade(
     ``analyzer_run`` row keeps its Critical/Major severity, so the approve gate
     sees it again as an unverified blocker and the downgrade leaves the run worse
     off than doing nothing. The stored severity is rewritten instead.
+
+    Severity is stored in four collections, so this write is four writes with no
+    transaction, any future store that caches severity desyncs silently, and no
+    row records whether its severity is the original or a rewrite.
+
+    The structural fix, deliberately not attempted here because it reaches every
+    reader of ``ToolState``:
+
+    - Add ``ToolState.verdicts: dict[str, FindingVerdict]`` where
+      ``FindingVerdict`` is a frozen dataclass of ``verdict`` (confirm /
+      downgrade / drop), ``severity`` (the downgraded value, or ``None``) and
+      ``reason``. This helper then becomes one write: ``verdicts[fingerprint] =
+      FindingVerdict(...)``, and no stored ``severity`` is ever mutated.
+    - Add ``effective_severity(row, verdicts)`` and route every severity read
+      through it — the approve gate (``build_validation_state`` in
+      ``mcp/verdict.py``), publication, and the packet writers. A row keeps the
+      severity the analyzer reported; the overlay says what it counts as now,
+      which is also the provenance that is currently unrecorded.
+    - Retire ``verified_ids`` on both ``ToolState`` and ``AnalyzerRunState`` in
+      favour of ``verdicts``: "verified" becomes "has a verdict", which removes
+      the second place the set is maintained and the discard pair above.
     """
     ctx.tool_state.verified_ids.discard(fingerprint)
     if ctx.tool_state.analyzer_run is not None:
@@ -412,7 +433,7 @@ def record_finding_verdict_tool(ctx: ToolContext):
             reason=str(params.get("reason") or ""),
             pin=pin,
             deterministic_checks=completed,
-            new_severity=(str(params["new_severity"]) if params.get("new_severity") else None),
+            new_severity=JudgeVerdict.parse_severity(params.get("new_severity")),
             lane=_run_lane(ctx),
         )
         path = ctx.tool_state.learnings_file_path or learnings_file_path(ctx.tmpdir)
@@ -447,25 +468,24 @@ def record_finding_verdict_tool(ctx: ToolContext):
             )
             _persist_confirmed_fingerprint(ctx, outcome.fingerprint)
         elif outcome.verdict == "downgrade" and outcome.publishable:
-            new_severity = verdict.new_severity
+            new_severity = verdict.downgrade_severity
+            # Symmetric with the confirm branch: the row has to exist, and a
+            # downgrade that lands on a still-blocking severity needs the same
+            # structured causality a confirm does.
+            _validate_publication_finding(
+                ctx,
+                outcome.fingerprint,
+                causality=verdict.reason,
+                severity=new_severity,
+            )
             if new_severity in BLOCKING_SEVERITIES:
-                _validate_publication_finding(
-                    ctx,
-                    outcome.fingerprint,
-                    causality=verdict.reason,
-                    severity=new_severity,
-                )
                 _persist_confirmed_fingerprint(
                     ctx,
                     outcome.fingerprint,
                     severity=new_severity,
                 )
             else:
-                _apply_non_blocking_downgrade(
-                    ctx,
-                    outcome.fingerprint,
-                    severity=new_severity or "Minor",
-                )
+                _apply_non_blocking_downgrade(ctx, outcome.fingerprint, severity=new_severity)
         return {
             "recorded": True,
             "fingerprint": outcome.fingerprint,
@@ -511,7 +531,11 @@ def record_finding_verdict_tool(ctx: ToolContext):
                 "new_severity": {
                     "type": "string",
                     "enum": ["Critical", "Major", "Minor", "Trivial"],
-                    "description": "Required on a downgrade verdict.",
+                    "description": (
+                        "The severity a downgrade rewrites the finding to. Mandatory on a "
+                        "downgrade verdict — one without it is rejected, not defaulted. "
+                        "Ignored on confirm and drop."
+                    ),
                 },
             },
             "required": ["fingerprint", "verdict", "reason"],

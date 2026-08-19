@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import inspect
 import json
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -156,18 +155,24 @@ def _validation_state(
 ) -> Any:
     """Consultation inputs the validator reads (D5 / required-gate rows).
 
-    ``state`` duck-types ``ToolState`` fields plus the VP2.2 surfaces the
-    validator consults: verifier-confirmed findings, ``run_static_checks``
-    status rows, and withdrawn fingerprints.
+    Built through the real ``build_validation_state`` grader, so the population
+    split the gate reads is the product's, not the test's: verifier-confirmed
+    findings, ``run_static_checks`` status rows, and withdrawn fingerprints.
     """
-    return SimpleNamespace(
+    from mergecraft.mcp.verdict import build_validation_state
+
+    run = tool_state.analyzer_run
+    verified: set[str] = set(tool_state.verified_ids)
+    if run is not None:
+        verified |= set(run.verified_ids)
+    return build_validation_state(
         terminal_submission=tool_state.terminal_submission,
         terminal_submission_conflict=tool_state.terminal_submission_conflict,
-        confirmed_findings=list(confirmed_findings or []),
+        asserted_findings=list(confirmed_findings or []),
+        analyzer_findings=list(run.findings) if run is not None else [],
+        verified_fingerprints=verified,
         static_checks=list(static_checks or []),
         withdrawn_fingerprints=set(withdrawn_fingerprints or []),
-        tool_state=tool_state,
-        analyzer_run=tool_state.analyzer_run,
     )
 
 
@@ -289,9 +294,10 @@ def test_valid_approve_and_clear_gates_succeeds(tmp_path: Path) -> None:
 
     ctx = _ctx(tmp_path)
     derived = validation_state_from_tool_context(ctx)
-    assert derived.tool_state is ctx.tool_state
-    assert derived.analyzer_run is ctx.tool_state.analyzer_run
     assert derived.terminal_submission is ctx.tool_state.terminal_submission
+    assert derived.confirmed_findings == ()
+    assert derived.unverified_findings == ()
+    assert derived.ungradable_fingerprints == ()
     state = _validation_state(ctx.tool_state, static_checks=[{"name": "lint", "status": "passed"}])
     validation = _validate(_approve_payload(), state=state)
     assert isinstance(validation, _validation_type())
@@ -1102,25 +1108,17 @@ def _state_with_analyzer_findings(
 ) -> Any:
     """Seed ``AnalyzerRunState`` and derive the validator's consultation object.
 
-    ``confirmed_findings`` is deliberately left to the derivation in
-    ``_confirmed_findings_from_state`` rather than injected, so an unverified
-    finding really is absent from the confirmed set — injecting it would test
-    the wrong seam.
+    ``confirmed_findings`` is deliberately left to the grader in
+    ``build_validation_state`` rather than injected, so an unverified finding
+    really is absent from the confirmed set — injecting it would test the wrong
+    seam.
     """
     tool_state.analyzer_run = AnalyzerRunState(
         ran=True,
         findings=[finding.model_dump() for finding in findings],
         verified_ids=set(verified or set()),
     )
-    state = _validation_state(tool_state, withdrawn_fingerprints=withdrawn)
-    state.confirmed_findings = _confirmed_findings(state)
-    return state
-
-
-def _confirmed_findings(state: Any) -> list[Any]:
-    from mergecraft.mcp.verdict import _confirmed_findings_from_state
-
-    return _confirmed_findings_from_state(state)
+    return _validation_state(tool_state, withdrawn_fingerprints=withdrawn)
 
 
 @pytest.mark.parametrize("severity", ["Critical", "Major"])
@@ -1139,7 +1137,7 @@ def test_approve_is_rejected_for_an_unverified_blocking_analyzer_finding(
     state = _state_with_analyzer_findings(ctx.tool_state, [blocker])
     # Precondition: the finding is genuinely *not* in the confirmed set, so
     # the rejection cannot come from the pre-existing verified-blocker path.
-    assert state.confirmed_findings == []
+    assert state.confirmed_findings == ()
 
     validation = _validate(_approve_payload(), state=state)
     _assert_typed_rejection(validation, _REASON_APPROVE_CONFIRMED_BLOCKER)
@@ -1170,7 +1168,7 @@ async def test_live_submit_approve_is_rejected_for_an_unverified_blocker(
         verified_ids=set(),
     )
     derived = validation_state_from_tool_context(ctx)
-    assert derived.confirmed_findings == []
+    assert derived.confirmed_findings == ()
 
     _assert_typed_rejection(
         _validate(_approve_payload(), state=derived),
@@ -1312,11 +1310,13 @@ def test_a_pre_existing_blocker_is_downgraded_before_the_gate(tmp_path: Path) ->
 # Under the default ``base_comparison: "diff"`` no base run happens, so
 # ``annotate_introduced_by_pr`` leaves every diff-scoped finding
 # ``introduced_by_pr: "unknown"`` and ``apply_causality_policy`` (which only
-# downgrades ``"false"``) leaves the severity alone. A single ruff ``error`` maps
-# to Major, so the #263 unverified-blocker walk rejected every approve for the
-# rest of the run. Two things must hold: an unattributed finding cannot block
-# approve, and each release valve (drop, downgrade) actually clears a finding
-# that *is* attributed.
+# downgrades ``"false"``) leaves the severity alone.
+#
+# The first repair exempted every ``"unknown"`` row from the gate, which under
+# default config is *every* ruff / mypy / bandit / semgrep row — a near-no-op
+# gate. Approve is reachable without that relaxation: the release valves are
+# ``drop`` and ``downgrade``, and both must clear a blocker while an untouched
+# one keeps rejecting.
 
 
 def _default_config_ruff_major() -> Finding:
@@ -1346,15 +1346,18 @@ def test_the_default_config_ruff_major_has_unknown_provenance() -> None:
 
 
 @pytest.mark.parametrize("severity", ["Critical", "Major"])
-def test_approve_survives_a_blocker_not_attributed_to_the_pr(
+def test_approve_is_rejected_for_an_unattributed_blocker(
     tmp_path: Path,
     severity: str,
 ) -> None:
-    """An unverified blocker with unknown provenance must not reject approve.
+    """R1: unknown provenance must not exempt a blocker from the gate.
 
-    #263's intent is that a finding this PR introduced cannot be approved away
-    unexamined. A finding nobody attributed to the PR is not that, and under
-    default config every diff-scoped finding is in that state.
+    Exempting ``introduced_by_pr != "true"`` reduces the gate to the four
+    parsers that hard-code ``"true"`` at construction, because the default
+    ``base_comparison: "diff"`` stamps everything else ``"unknown"``. Where a
+    base run *did* run, a pre-existing finding is ``"false"`` and
+    ``apply_causality_policy`` already downgrades it — so attribution never
+    needed a second condition here.
     """
     unattributed = make_finding(
         tool="bandit",
@@ -1373,27 +1376,86 @@ def test_approve_survives_a_blocker_not_attributed_to_the_pr(
 
     ctx = _ctx(tmp_path)
     state = _state_with_analyzer_findings(ctx.tool_state, [unattributed])
-    validation = _validate(_approve_payload(), state=state)
 
-    assert validation.accepted is True
-    assert validation.rejection_reason is None
+    _assert_typed_rejection(
+        _validate(_approve_payload(), state=state),
+        _REASON_APPROVE_CONFIRMED_BLOCKER,
+    )
 
 
 @pytest.mark.asyncio
-async def test_a_single_ruff_major_does_not_lock_out_approve(tmp_path: Path) -> None:
-    """The reported symptom, end to end at the tool surface."""
+async def test_an_unverified_ruff_critical_with_unknown_provenance_blocks_approve(
+    tmp_path: Path,
+) -> None:
+    """R1 at the tool surface, on the exact row the default config produces.
+
+    A ruff ``Critical`` nobody verified, with ``introduced_by_pr: "unknown"``
+    because no base run happened, must not be approvable.
+    """
     from mergecraft.mcp.verdict import submit_review_verdict_tool
+
+    critical = make_finding(
+        tool="ruff",
+        rule_id="S105",
+        category="Security & Privacy",
+        severity="Critical",
+        confidence="certain",
+        message="Possible hardcoded password.",
+        path="src/app.py",
+        start_line=14,
+        end_line=14,
+        source="analyzer",
+        fingerprint="r1-ruff-critical-unknown",
+    )
+    assert critical.introduced_by_pr == "unknown"
 
     ctx = _ctx(tmp_path)
     ctx.tool_state.analyzer_run = AnalyzerRunState(
         ran=True,
-        findings=[_default_config_ruff_major().model_dump()],
+        findings=[critical.model_dump()],
         verified_ids=set(),
     )
 
     verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
 
-    assert verdict.is_error is False, verdict.content[0]["text"]
+    assert verdict.is_error is True, verdict.content[0]["text"]
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in verdict.content[0]["text"]
+    assert ctx.tool_state.terminal_submission is None
+
+
+@pytest.mark.asyncio
+async def test_a_single_ruff_major_blocks_until_a_valve_is_used(tmp_path: Path) -> None:
+    """The default-config ruff Major blocks, and one ``drop`` releases approve.
+
+    The reported C1 symptom was "approve is unreachable". It is reachable — but
+    through a valve the agent has to actually use, not by exempting the row.
+    """
+    from mergecraft.mcp.verdict import submit_review_verdict_tool
+    from mergecraft.mcp.verification import record_finding_verdict_tool
+
+    ruff_major = _default_config_ruff_major()
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[ruff_major.model_dump()],
+        verified_ids=set(),
+    )
+
+    blocked = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert blocked.is_error is True
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in blocked.content[0]["text"]
+
+    dropped = await record_finding_verdict_tool(ctx).execute(
+        {
+            "fingerprint": ruff_major.fingerprint,
+            "verdict": "drop",
+            "reason": "The name is a loop variable, not an undefined reference.",
+        }
+    )
+    assert dropped.is_error is False, dropped.content[0]["text"]
+
+    released = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert released.is_error is False, released.content[0]["text"]
     assert ctx.tool_state.terminal_submission is not None
 
 
@@ -1501,6 +1563,43 @@ async def test_a_downgraded_blocker_releases_approve(tmp_path: Path) -> None:
 
     verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
     assert verdict.is_error is False, verdict.content[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_a_downgrade_without_a_new_severity_is_refused(tmp_path: Path) -> None:
+    """R2: a bare ``downgrade`` must not silently rewrite any severity to Minor.
+
+    One ``record_finding_verdict(fingerprint, "downgrade", reason=…)`` call used
+    to retire a Critical the approve gate was holding, because the call site
+    defaulted the missing severity. The verdict is refused instead, and the row
+    keeps the severity nobody argued down.
+    """
+    from mergecraft.mcp.verdict import submit_review_verdict_tool
+    from mergecraft.mcp.verification import record_finding_verdict_tool
+
+    ctx = _ctx(tmp_path)
+    blocker = _unverified_blocker("Critical")
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[blocker.model_dump()],
+        verified_ids=set(),
+    )
+
+    result = await record_finding_verdict_tool(ctx).execute(
+        {
+            "fingerprint": blocker.fingerprint,
+            "verdict": "downgrade",
+            "reason": "Feels less serious than it looks.",
+        }
+    )
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert "new_severity" in result.content[0]["text"]
+    assert [row.get("severity") for row in ctx.tool_state.analyzer_run.findings] == ["Critical"]
+
+    verdict = await submit_review_verdict_tool(ctx).execute(_approve_payload())
+    assert verdict.is_error is True
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in verdict.content[0]["text"]
 
 
 @pytest.mark.asyncio
