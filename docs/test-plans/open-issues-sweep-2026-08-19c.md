@@ -26,6 +26,8 @@ those waves land.
 | **W3** | `test_start_installation_untrusted_restricted_does_not_run_postinstall` | `green after W3: ignore_scripts follows trust` | greened |
 | **W6** | `test_untrusted_restricted_sandbox_none_omits_shell` | `green after W6: untrusted + sandbox none does not register shell` | greened |
 | **W8** | `test_harness_mcp_cli_name_fixture_exists` (+ AgentId pins) | `green after W8: harness deny-list CLI name fixtures` | pending |
+| **W10** | `test_security_md_does_not_claim_stripping_for_any_mcp_tool` | `green after W10: SECURITY.md residual` | pending |
+| **W10** | `test_security_md_limits_stripping_to_agent_env_and_shell` | `green after W10: SECURITY.md residual` | pending |
 
 All cross-wave xfails use `strict=False`. Do not use `strict=True` (pytest.ini
 has `xfail_strict = true`).
@@ -104,3 +106,27 @@ formatter checks stay.
 | M285d | OpenCode `permission: deny` contains documented `push_branch` | integration | happy | `test_opencode_permission_deny_uses_documented_push_branch_name` (xfail W8) |
 | M285e | Gemini `excludeTools` contains documented `push_branch` | integration | happy | `test_gemini_exclude_tools_uses_documented_push_branch_name` (xfail W8) |
 | M285f | Codex subagent instructions contain documented `push_branch` | integration | happy | `test_codex_subagent_instructions_use_documented_push_branch_name` (xfail W8) |
+
+## Batch N — #286 / D12 (W9 RED)
+
+`SECURITY.md` (historically lines 24–26) claims `utils/secrets.py` filters
+sensitive env vars before they reach **any** shell/MCP tool. D12 restore
+path is **off**: `mcp/git.py` `_run_git` still defaults to
+`os.environ.copy()`, so the broad sentence is false. W10 rewrites it to
+the agent subprocess (`build_agent_env` / `filter_env`) and the sandboxed
+`shell` tool (`resolve_env`). Do not claim `git`. Do not edit `mcp/git.py`
+(D6).
+
+Sibling of `tests/test_security_parity.py` (that file is runtime permission
+parity, not docs wording).
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| N286a | Broad “any shell/MCP tool” / “any MCP tool” / “every MCP tool” / “all MCP tools” is gone (whitespace-normalised) | unit (docs) | happy (bug) | `tests/test_security_md_residual.py::test_security_md_does_not_claim_stripping_for_any_mcp_tool` (xfail W10) |
+| N286b | `reach any (shell/)?MCP tool` regex is absent | unit (docs) | edge (line-wrap / slash spacing) | same test |
+| N286c | Names `build_agent_env`, `filter_env`, and `resolve_env` | unit (docs) | happy (narrowed replacement) | `test_security_md_limits_stripping_to_agent_env_and_shell` (xfail W10) |
+| N286d | Missing `SECURITY.md` fails with a clear assertion | unit (docs) | error | helper `_security_text` inside the xfail tests |
+| N286e | `_run_git` source still contains `os.environ.copy()` | unit | control (D12 off; passes today) | `test_run_git_still_defaults_to_os_environ_copy` |
+
+N286e passes against current `src/` — W10 must not restore the broad sentence
+and must not edit `git.py`.
