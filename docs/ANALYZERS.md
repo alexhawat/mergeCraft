@@ -28,7 +28,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `dotenv-linter` | lint | — | disabled | managed | trusted | — | Values never printed in findings (D8). |
 | `ember-template-lint` | lint | ember | disabled | repo-native | trusted | — | — |
 | `eslint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
-| `flake8` | lint | python | disabled | repo-native | trusted | python-lint | — |
+| `flake8` | lint | python | disabled | repo-native | trusted | python-lint | Legacy opt-in — disabled by default; enable via config override. |
 | `fortitude` | lint | fortran | disabled | managed | trusted | — | manifest-only — Fortitude not bundled on Linux runners (C6 out of scope) |
 | `golangci-lint` | lint | go | auto | managed | trusted | go-lint | — |
 | `govulncheck` | vuln | go | auto | repo-native | trusted | — | — |
@@ -52,7 +52,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `presidio` | security | — | disabled | container | trusted | — | Container-only; high-confidence entity types only. |
 | `prisma-lint` | lint | prisma | disabled | repo-native | trusted | — | — |
 | `psscriptanalyzer` | lint | powershell | disabled | managed | trusted | — | requires non-Linux runner — Windows/macOS only (C6 out of scope) |
-| `pylint` | lint | python | disabled | managed | trusted | python-lint | — |
+| `pylint` | lint | python | disabled | managed | trusted | python-lint | Legacy opt-in — disabled by default; enable via config override. |
 | `pyright` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `regal` | lint | rego | disabled | managed | trusted | — | — |
 | `rubocop` | lint | ruby | auto | repo-native | trusted | ruby-lint | — |

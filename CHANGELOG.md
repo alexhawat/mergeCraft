@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mypy` is now the default type checker for Python repos with no explicit type-checker config: auto-enabled when neither `pyrightconfig.json` nor `[tool.pyright]`/`[tool.basedpyright]` is present (D16, #309)
+- `osv-scanner` detect globs now include `uv.lock`, so repos using uv's lock file trigger vulnerability scanning without pip-audit (#309)
+- docs: `flake8` and `pylint` catalog entries note they are legacy opt-in; enabled via config override only (#309)
+
 - Catalog manifests for `knip` (JS/TS unused exports/dependencies, `scope: repo`, `category: quality`) and `vulture` (Python dead code, `scope: repo`, `category: quality`) (#337)
 
 - Catalog manifests for `govulncheck` (Go vulnerability scan, `scope: repo`, network allowlist `vuln.go.dev`), `cargo-audit` (Rust advisory vulnerability scan, `category: vuln`), `cargo-deny` (Rust license/advisory check, `category: license`), and `typos` (universal typo checker, `scope: repo`, `supports_fix: true`) (#337)

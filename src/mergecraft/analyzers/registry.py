@@ -100,7 +100,11 @@ def _auto_manifest_enabled(manifest: AnalyzerManifest, repo_root: Path) -> bool:
     if manifest.id == "ruff":
         return has_ruff_config(repo_root)
     if manifest.id == "mypy":
-        return has_mypy_config(repo_root)
+        # mypy is the default type checker (D16): auto-enabled when it has its own
+        # config, or when no explicit pyright/basedpyright config is present.
+        return has_mypy_config(repo_root) or not (
+            has_pyright_config(repo_root) or has_basedpyright_config(repo_root)
+        )
     if manifest.id == "pyright":
         return has_pyright_config(repo_root)
     if manifest.id == "basedpyright":
