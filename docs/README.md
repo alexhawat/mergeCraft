@@ -6,38 +6,38 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 
 | Page | Audience | Purpose |
 |------|----------|---------|
-| [AGENTS](AGENTS.md) | consumer | Cross-vendor agent guidance — consumer setup and mergeCraft development rules. |
-| [CONTRIBUTING](CONTRIBUTING.md) | contributor | Contributor setup, make targets, and PR expectations for mergeCraft itself. |
-| [Landing README](README.md) | consumer | Product landing page — install, features, and pointers to generated reference pages. |
-| [REVIEW-CHECKS](REVIEW-CHECKS.md) | contributor | Enumerated review checks mergeCraft applies on pull requests. |
-| [brand README](assets/brand/README.md) | satellite | Brand SVG inventory and regeneration commands for logo assets. |
-| [diagrams README](assets/diagrams/README.md) | satellite | Architecture diagram SVG inventory and D2 regeneration commands. |
-| [ANALYZERS](docs/ANALYZERS.md) | consumer | Shipped analyzer catalog — rows generated from manifests via make catalog-check. |
-| [CONTRIBUTING-ANALYZERS](docs/CONTRIBUTING-ANALYZERS.md) | contributor | How to add or change a catalog analyzer and keep make catalog-check green. |
-| [EXIT-CODES](docs/EXIT-CODES.md) | consumer | Named CLI exit codes and when mergecraft returns each status. |
-| [docs README](docs/README.md) | contributor | Generated map of every manifest row with audience and purpose. |
-| [REVIEW-DOCTRINE](docs/REVIEW-DOCTRINE.md) | contributor | Review philosophy, lenses, grading, and verifier doctrine for maintainers. |
-| [TRACING](docs/TRACING.md) | contributor | Tracing sinks, retention, and Logfire/OTLP wiring for operators. |
-| [action-reference](docs/action-reference.md) | consumer | Complete action.yml input and output reference for the GitHub Action. |
-| [assets README](docs/assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
-| [authentication](docs/authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
-| [blast-radius](docs/blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
-| [cli](docs/cli.md) | consumer | Full mergecraft CLI command reference derived from the live Typer app. |
-| [compatibility-matrix](docs/compatibility-matrix.md) | contributor | Harness and provider compatibility notes for maintainers. |
-| [config-failure-policy](docs/config-failure-policy.md) | contributor | setup_failure_policy and setup_timeout runtime behaviour (S1 / D10). |
-| [provider-harness](docs/dev/provider-harness.md) | contributor | Provider harness notes for OpenCode, Codex, and OpenAI-compatible gateways. |
-| [python-version-floor](docs/dev/python-version-floor.md) | contributor | ADR for the Python 3.11 install floor and PEP 758 parenthesize-now strategy. |
-| [distribution](docs/distribution.md) | consumer | How mergeCraft is packaged — PyPI, Docker, and git install paths. |
-| [eval-bank](docs/eval-bank.md) | contributor | Eval bank layout, promotion, and CI gate semantics. |
-| [evidence-packet](docs/evidence-packet.md) | contributor | Merge evidence packet schema emitted as the evidence_packet action output. |
-| [findings-carryover](docs/findings-carryover.md) | contributor | Findings carryover and export CLI behaviour for unresolved review items. |
-| [install](docs/install.md) | consumer | Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback. |
-| [supply-chain](docs/supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
-| [workflows](docs/workflows.md) | consumer | Workflow examples 2–6, trust tiers, and pull_request_target placement gotchas. |
-| [evals README](evals/README.md) | satellite | Eval bank vs ReviewBench — what each mechanism measures and how to run gates. |
-| [llms-full.txt](llms-full.txt) | consumer | Concatenated LLM bundle of core consumer and contributor docs (generated). |
-| [llms.txt](llms.txt) | consumer | Curated documentation map for LLM agents (llms.txt convention). |
-| [SKILL](skills/mergecraft/SKILL.md) | consumer | Agent-Skills consumer skill — install checklist, CLI reference, troubleshooting. |
+| [AGENTS](../AGENTS.md) | consumer | Cross-vendor agent guidance — consumer setup and mergeCraft development rules. |
+| [CONTRIBUTING](../CONTRIBUTING.md) | contributor | Contributor setup, make targets, and PR expectations for mergeCraft itself. |
+| [Landing README](../README.md) | consumer | Product landing page — install, features, and pointers to generated reference pages. |
+| [REVIEW-CHECKS](../REVIEW-CHECKS.md) | contributor | Enumerated review checks mergeCraft applies on pull requests. |
+| [brand README](../assets/brand/README.md) | satellite | Brand SVG inventory and regeneration commands for logo assets. |
+| [diagrams README](../assets/diagrams/README.md) | satellite | Architecture diagram SVG inventory and D2 regeneration commands. |
+| [ANALYZERS](ANALYZERS.md) | consumer | Shipped analyzer catalog — rows generated from manifests via make catalog-check. |
+| [CONTRIBUTING-ANALYZERS](CONTRIBUTING-ANALYZERS.md) | contributor | How to add or change a catalog analyzer and keep make catalog-check green. |
+| [EXIT-CODES](EXIT-CODES.md) | consumer | Named CLI exit codes and when mergecraft returns each status. |
+| [docs README](README.md) | contributor | Generated map of every manifest row with audience and purpose. |
+| [REVIEW-DOCTRINE](REVIEW-DOCTRINE.md) | contributor | Review philosophy, lenses, grading, and verifier doctrine for maintainers. |
+| [TRACING](TRACING.md) | contributor | Tracing sinks, retention, and Logfire/OTLP wiring for operators. |
+| [action-reference](action-reference.md) | consumer | Complete action.yml input and output reference for the GitHub Action. |
+| [assets README](assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
+| [authentication](authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
+| [blast-radius](blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
+| [cli](cli.md) | consumer | Full mergecraft CLI command reference derived from the live Typer app. |
+| [compatibility-matrix](compatibility-matrix.md) | contributor | Harness and provider compatibility notes for maintainers. |
+| [config-failure-policy](config-failure-policy.md) | contributor | setup_failure_policy and setup_timeout runtime behaviour (S1 / D10). |
+| [provider-harness](dev/provider-harness.md) | contributor | Provider harness notes for OpenCode, Codex, and OpenAI-compatible gateways. |
+| [python-version-floor](dev/python-version-floor.md) | contributor | ADR for the Python 3.11 install floor and PEP 758 parenthesize-now strategy. |
+| [distribution](distribution.md) | consumer | How mergeCraft is packaged — PyPI, Docker, and git install paths. |
+| [eval-bank](eval-bank.md) | contributor | Eval bank layout, promotion, and CI gate semantics. |
+| [evidence-packet](evidence-packet.md) | contributor | Merge evidence packet schema emitted as the evidence_packet action output. |
+| [findings-carryover](findings-carryover.md) | contributor | Findings carryover and export CLI behaviour for unresolved review items. |
+| [install](install.md) | consumer | Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback. |
+| [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
+| [workflows](workflows.md) | consumer | Workflow examples 2–6, trust tiers, and pull_request_target placement gotchas. |
+| [evals README](../evals/README.md) | satellite | Eval bank vs ReviewBench — what each mechanism measures and how to run gates. |
+| [llms-full.txt](../llms-full.txt) | consumer | Concatenated LLM bundle of core consumer and contributor docs (generated). |
+| [llms.txt](../llms.txt) | consumer | Curated documentation map for LLM agents (llms.txt convention). |
+| [SKILL](../skills/mergecraft/SKILL.md) | consumer | Agent-Skills consumer skill — install checklist, CLI reference, troubleshooting. |
 
 ## See also
 

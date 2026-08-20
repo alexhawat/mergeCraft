@@ -37,7 +37,7 @@ comment body. Under `pull_request_target`, comment triggers also require
 ### Example 2 — hardened, review as a required check
 
 When the review gates merges, use `pull_request_target` with trust-aware
-restrictions — [`examples/workflows/mergecraft-hardened.yml`](examples/workflows/mergecraft-hardened.yml)
+restrictions — [`examples/workflows/mergecraft-hardened.yml`](../examples/workflows/mergecraft-hardened.yml)
 ships wait-for-CI, same-repo guards, and an enforce step that flips a `neutral`
 approval check to blocking.
 
@@ -69,7 +69,7 @@ selects JSON output when `--output-format` is omitted (same pattern as `findings
 
 Process exit codes: `0` clean pass; `10` non-blocking findings; `11` blocking severities;
 `12` review failed (no findings); `20` inconclusive; `30` configuration error; `40` infra error;
-`50` timed out; `2` usage / invalid CLI input. Full table: [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md).
+`50` timed out; `2` usage / invalid CLI input. Full table: [`docs/EXIT-CODES.md`](EXIT-CODES.md).
 
 `diff-review` remains a hidden deprecated alias of `review` (one stderr warning per invocation).
 
@@ -121,9 +121,9 @@ jobs:
 
 Only findings admitted by the run's trust tier, `shell:` policy and
 `analyzers:` mode are uploaded, after secret redaction — agent narrative is
-never uploaded. Details: [docs/ANALYZERS.md](docs/ANALYZERS.md).
+never uploaded. Details: [docs/ANALYZERS.md](ANALYZERS.md).
 
-Full config reference: [`examples/config.yaml`](examples/config.yaml).
+Full config reference: [`examples/config.yaml`](../examples/config.yaml).
 
 ### Example 6 — Tracing with Logfire (opt-in)
 
@@ -155,7 +155,7 @@ mergecraft.run
 `gen_ai.*` attrs on `llm.call` / `provider.call` follow the GenAI
 semantic-convention keys, so Logfire's built-in AI panels group and render
 them without extra config. Full config schema, the redaction guarantee, and
-the payload/span-count caps: [docs/TRACING.md](docs/TRACING.md).
+the payload/span-count caps: [docs/TRACING.md](TRACING.md).
 
 <!-- Asset pending: a screenshot of this trace tree for a real review,
 committed under assets/ and linked here — operator-captured, see the
@@ -172,7 +172,7 @@ issues-showcase-readiness wave plan (PR G5 / D7). -->
 | Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → `TOKENHUB_API_KEY` (`tokenhub/hy3` + any TokenHub model) |
 | MiniMax | — (API key) | `mergecraft auth minimax` → `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` (`minimax/MiniMax-M3`; OpenAI-compatible, default `https://api.minimax.io/v1`) |
 | Cursor Cloud | `mergecraft auth cursor` → `CURSOR_API_KEY` | `CURSOR_API_KEY` |
-| Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](docs/TRACING.md) |
+| Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](TRACING.md) |
 
 Subscription auth runs the official `claude` / `codex` / `gemini` CLIs as *you*
 — the same credential your local coding agent uses. Only set env vars for
@@ -230,7 +230,7 @@ inlined into the workflow file and never logged (convention 7). For
 multi-provider setups, fall back to the indexed env-var form below —
 `with:` cannot enumerate multiple providers.
 
-See [docs/action-reference.md](docs/action-reference.md) for the full input list
+See [docs/action-reference.md](action-reference.md) for the full input list
 (every `with:` key, literal defaults, and descriptions).
 
 Behavioural note: `setup_failure_policy`'s and `setup_timeout`'s literal
@@ -252,7 +252,7 @@ described below); the *effective* runtime default when left unset is
 
 #### Action outputs
 
-See [docs/action-reference.md](docs/action-reference.md#action-outputs) for the
+See [docs/action-reference.md](action-reference.md#action-outputs) for the
 full output list.
 
 #### Worked example — Nous-hosted DeepSeek V4 Flash
@@ -408,9 +408,9 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
 
 ## 🧰 CLI
 
-See [docs/cli.md](docs/cli.md) for the full command list (one row per real leaf
+See [docs/cli.md](cli.md) for the full command list (one row per real leaf
 command — pass `--help` to any invocation for its full flag set). Action
-inputs and outputs live in [docs/action-reference.md](docs/action-reference.md).
+inputs and outputs live in [docs/action-reference.md](action-reference.md).
 
 The bare `gha` group invocation (no subcommand) is the Docker action's
 runtime entry point — it is a Typer group callback, not a
@@ -463,8 +463,8 @@ under that group.
   remains the binding control. Trusted-tier shell does not force ``--net`` so
   provider CLIs can still reach their APIs.
 
-Report vulnerabilities via [SECURITY.md](SECURITY.md). What a review does and
-never does: [REVIEW-CHECKS.md](REVIEW-CHECKS.md).
+Report vulnerabilities via [SECURITY.md](../SECURITY.md). What a review does and
+never does: [REVIEW-CHECKS.md](../REVIEW-CHECKS.md).
 
 ## ⚙️ Workflow-placement gotchas (`pull_request_target`)
 
@@ -515,4 +515,4 @@ they check out the default branch with no `ref:` and reach PR content through
 scope.
 
 Full rationale in the collapsible sections of
-[docs](docs/).
+[documentation index](README.md).

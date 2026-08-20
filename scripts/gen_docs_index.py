@@ -64,6 +64,13 @@ def _page_label(path: str) -> str:
     return name.removesuffix(".md")
 
 
+def _index_href(manifest_path: str) -> str:
+    """Link target relative to ``docs/README.md`` (the index lives under ``docs/``)."""
+    if manifest_path.startswith("docs/"):
+        return manifest_path.removeprefix("docs/")
+    return f"../{manifest_path}"
+
+
 def _render_index(pages: list[dict[str, Any]]) -> str:
     lines = [
         _GENERATED_HEADER,
@@ -82,7 +89,7 @@ def _render_index(pages: list[dict[str, Any]]) -> str:
         audience = str(row.get("audience", ""))
         purpose = str(row.get("purpose", "")).replace("|", "\\|")
         label = _page_label(path)
-        lines.append(f"| [{label}]({path}) | {audience} | {purpose} |")
+        lines.append(f"| [{label}]({_index_href(path)}) | {audience} | {purpose} |")
     lines.extend(
         [
             "",

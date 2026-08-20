@@ -54,10 +54,19 @@ def _first_paragraph(text: str) -> str:
     return " ".join(paragraph.split())
 
 
+_DOC_ROOT_PREFIX = re.compile(r"(?<![A-Za-z0-9_/])docs/(?=[A-Za-z0-9_./-]+\.md(?:[#)`|\s]|$))")
+
+
+def _rewrite_doc_paths_for_docs_dir(text: str) -> str:
+    """Rewrite repo-root ``docs/…`` paths when the page itself lives under ``docs/``."""
+    return _DOC_ROOT_PREFIX.sub("", text)
+
+
 def _md_cell(text: str) -> str:
     """Make ``text`` safe as one markdown table cell: single backticks, no bare pipes."""
     collapsed = _first_paragraph(text).replace("``", "`")
-    return collapsed.replace("|", "\\|")
+    sanitized = collapsed.replace("|", "\\|")
+    return _rewrite_doc_paths_for_docs_dir(sanitized)
 
 
 # ---------------------------------------------------------------------------

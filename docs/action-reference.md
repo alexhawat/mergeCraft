@@ -29,7 +29,7 @@ The full input list:
 | `push` | _(unset)_ | Git push permission: disabled, restricted, or enabled. Default: restricted |
 | `sarif_upload` | `disabled` | Upload catalog-analyzer findings to GitHub code scanning as SARIF 2.1.0: disabled (default) or enabled. Complementary evidence for when the review narrative is thin or findings overflow the inline comment budget — never a gate: an upload failure is logged and the run still completes. Requires `security-events: write` on the job, and code scanning to be available on the repository. Only findings from catalog analyzers that this run's trust tier, shell policy and `analyzers:` mode actually admitted are uploaded, after secret redaction. CI-sourced and agent-sourced findings are never uploaded. An unrecognised value resolves to disabled, with a warning. When unset, `.mergecraft/config.yaml`'s `analyzers.sarifUpload` decides (default false). See issue #39. |
 | `setup_failure_policy` | _(empty)_ | S1 / D10 — what happens when a trusted-tier `setupScript` fails (non-zero exit) or times out. `inconclusive` (default) maps the run to `RunOutcome.inconclusive` (a `neutral` check conclusion) — the run is treated as no-verdict, never a passing review of an under-provisioned tree. `fail` aborts the run as `RunOutcome.configuration_error` (the consumer has declared the failure is unrecoverable). `warn` reproduces the legacy continue-on-failure behaviour; the prompt still carries the failure text so the reviewing agent knows its tree may be partially provisioned. Unknown values fail closed as `configuration_error` (this is a security/runtime surface — `extra="forbid"` semantics). |
-| `setup_timeout` | _(empty)_ | S1 / F6 — maximum wall-clock duration for `setupScript` (e.g. `5m`, `30s`, `1h`). A hanging install stalls the run otherwise. The setup runs as a session leader so its whole process tree is TERM→KILLed on timeout. Reusing `resolve_timeout_ms` — the same parser the `timeout` input uses. Default `10m` applies even when `timeout` is unset or `--notimeout`; setup never consumes the whole run budget. Note: `setupTimeout` must be strictly less than `timeout` (or the run aborts as `configuration_error`). Equal / larger budgets would let the setup script eat the whole run deadline; the agent is then given ≈1 ms and a setup timeout surfaces as `timed_out` instead of the `inconclusive` / `configuration_error` the setup policy was supposed to produce. Lower `setupTimeout` or raise `timeout` to satisfy the guard — see `docs/config-failure-policy.md` for the runtime reason text. |
+| `setup_timeout` | _(empty)_ | S1 / F6 — maximum wall-clock duration for `setupScript` (e.g. `5m`, `30s`, `1h`). A hanging install stalls the run otherwise. The setup runs as a session leader so its whole process tree is TERM→KILLed on timeout. Reusing `resolve_timeout_ms` — the same parser the `timeout` input uses. Default `10m` applies even when `timeout` is unset or `--notimeout`; setup never consumes the whole run budget. Note: `setupTimeout` must be strictly less than `timeout` (or the run aborts as `configuration_error`). Equal / larger budgets would let the setup script eat the whole run deadline; the agent is then given ≈1 ms and a setup timeout surfaces as `timed_out` instead of the `inconclusive` / `configuration_error` the setup policy was supposed to produce. Lower `setupTimeout` or raise `timeout` to satisfy the guard — see `config-failure-policy.md` for the runtime reason text. |
 | `shell` | _(unset)_ | Shell permission: disabled, restricted, or enabled. |
 | `status_checks` | _(unset)_ | Post mergecraft and mergecraft-approval commit-status checks: disabled (default) or enabled. |
 | `suggest_eval_add` | `disabled` | Opt-in (W12.4 / #44): when enabled, log a logger.info suggestion to add the run to the eval bank when the run produced no positive findings, the trust tier is trusted, and the trigger is a re-review (not a fresh PR). Accepts disabled\|enabled (also true/false aliases). Default: disabled; mergeCraft never auto-adds. |
@@ -41,7 +41,7 @@ The full input list:
 
 Behavioural note: `setup_failure_policy`'s and `setup_timeout`'s literal
 `action.yml` default is an empty string (unset defers to the S1/D10 policy
-described in [config failure policy](docs/config-failure-policy.md)); the
+described in [config failure policy](config-failure-policy.md)); the
 *effective* runtime default when left unset is `inconclusive` and `10m`
 respectively.
 
@@ -50,13 +50,13 @@ respectively.
 <!-- BEGIN:action-outputs -->
 | Output | Description |
 |--------|-------------|
-| `evidence_packet` | JSON body of this run's Merge Evidence Packet (#47) — the versioned, structured record of the findings, deterministic checks, blast-radius lane, self-assessment, and decision behind the review. Emitted via `$GITHUB_OUTPUT` as multiline JSON (not a filesystem path). Empty when the run had no pull request to attest to. To upload as an artifact, write the output to a file in a later step. Schema: `docs/evidence-packet.md`. |
+| `evidence_packet` | JSON body of this run's Merge Evidence Packet (#47) — the versioned, structured record of the findings, deterministic checks, blast-radius lane, self-assessment, and decision behind the review. Emitted via `$GITHUB_OUTPUT` as multiline JSON (not a filesystem path). Empty when the run had no pull request to attest to. To upload as an artifact, write the output to a file in a later step. Schema: `evidence-packet.md`. |
 | `result` | Set when the prompt requests it; required when output_schema is provided. |
 | `verdict_diagnostic` | Closed VerdictDiagnostic code from the terminal-verdict policy path for this run. Empty when the run did not evaluate terminal protocol policy. |
 <!-- END:action-outputs -->
 
 ## See also
 
-- [CLI reference](docs/cli.md)
-- [Authentication](../README.md#-authentication)
-- [Config failure policy](docs/config-failure-policy.md)
+- [CLI reference](cli.md)
+- [Authentication](authentication.md)
+- [Config failure policy](config-failure-policy.md)

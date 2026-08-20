@@ -10,7 +10,7 @@
 | Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → `TOKENHUB_API_KEY` (`tokenhub/hy3` + any TokenHub model) |
 | MiniMax | — (API key) | `mergecraft auth minimax` → `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` (`minimax/MiniMax-M3`; OpenAI-compatible, default `https://api.minimax.io/v1`) |
 | Cursor Cloud | `mergecraft auth cursor` → `CURSOR_API_KEY` | `CURSOR_API_KEY` |
-| Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](docs/TRACING.md) |
+| Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](TRACING.md) |
 
 Subscription auth runs the official `claude` / `codex` / `gemini` CLIs as *you*
 — the same credential your local coding agent uses. Only set env vars for
@@ -68,7 +68,7 @@ inlined into the workflow file and never logged (convention 7). For
 multi-provider setups, fall back to the indexed env-var form below —
 `with:` cannot enumerate multiple providers.
 
-See [docs/action-reference.md](docs/action-reference.md) for the full input list
+See [docs/action-reference.md](action-reference.md) for the full input list
 (every `with:` key, literal defaults, and descriptions).
 
 Behavioural note: `setup_failure_policy`'s and `setup_timeout`'s literal
@@ -90,7 +90,7 @@ described below); the *effective* runtime default when left unset is
 
 #### Action outputs
 
-See [docs/action-reference.md](docs/action-reference.md#action-outputs) for the
+See [docs/action-reference.md](action-reference.md#action-outputs) for the
 full output list.
 
 #### Worked example — Nous-hosted DeepSeek V4 Flash

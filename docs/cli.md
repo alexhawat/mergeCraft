@@ -15,7 +15,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft agents set <role>` | Write a single agent binding override into `.mergecraft/config.yaml`. |
 | `mergecraft agents show <role>` | Show resolved prompt text and MCP tool names for one role. |
 | `mergecraft analyzers detect` | Show analyzers that would run for changed paths in this repo. |
-| `mergecraft analyzers docs` | Regenerate `docs/ANALYZERS.md` from manifests. |
+| `mergecraft analyzers docs` | Regenerate `ANALYZERS.md` from manifests. |
 | `mergecraft analyzers explain <analyzer-id>` | Print manifest fields and notes for one analyzer. |
 | `mergecraft analyzers export <analyzer-id>` | Run one analyzer and export findings as SARIF. |
 | `mergecraft analyzers list` | List catalog analyzers and whether they would enable here. |
@@ -91,6 +91,6 @@ itself, so it is described here in prose rather than as its own table row;
 
 ## See also
 
-- [Action reference](docs/action-reference.md)
-- [Exit codes](docs/EXIT-CODES.md)
+- [Action reference](action-reference.md)
+- [Exit codes](EXIT-CODES.md)
 - [Landing README](../README.md)

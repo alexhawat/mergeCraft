@@ -80,13 +80,28 @@ def test_manifest_lists_required_pages() -> None:
     )
 
 
+def _index_href_to_manifest_path(href: str) -> str | None:
+    """Map a ``docs/README.md`` link target back to a manifest ``path`` value."""
+    if href == "manifest.yaml":
+        return None
+    if href.startswith("../"):
+        return href.removeprefix("../")
+    return f"docs/{href}"
+
+
+def _manifest_paths_linked_from_index(index_text: str) -> set[str]:
+    linked = _markdown_links(index_text)
+    resolved = {_index_href_to_manifest_path(href) for href in linked}
+    return {path for path in resolved if path is not None}
+
+
 def test_generated_docs_index_lists_every_manifest_row() -> None:
     manifest = _load_manifest()
     paths = _manifest_paths(manifest)
     assert _DOCS_INDEX.is_file(), f"missing {_DOCS_INDEX.relative_to(REPO_ROOT)} (RD1.2)"
     index_text = _DOCS_INDEX.read_text(encoding="utf-8")
-    linked = _markdown_links(index_text)
-    missing_links = sorted(path for path in paths if path not in linked)
+    linked_paths = _manifest_paths_linked_from_index(index_text)
+    missing_links = sorted(path for path in paths if path not in linked_paths)
     assert not missing_links, (
         f"docs/README.md must link every manifest row; missing links for: {missing_links}"
     )
