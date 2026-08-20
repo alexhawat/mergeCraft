@@ -381,19 +381,10 @@ def run_adapter(
         reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
-    if outcome.output_path is None and tool_id == "jscpd":
+    if tool_id == "jscpd":
         report = scratch_dir / "jscpd-report.json"
         if report.is_file():
-            findings = parse_output(
-                report.read_text(encoding="utf-8"),
-                manifest=manifest,
-                repo_root=repo_root,
-            )
-            return AdapterRunResult(
-                findings=_normalize_paths(findings, repo_root=repo_root),
-                version_note=plan.version_note,
-                config_note=config_note,
-            )
+            outcome = replace(outcome, output_path=str(report))
 
     if outcome.output_path is None:
         reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
@@ -412,14 +403,6 @@ def run_adapter(
         )
         if not findings and outcome.output.strip():
             findings = parse_output(outcome.output, manifest=manifest, repo_root=repo_root)
-        if tool_id == "jscpd" and not findings:
-            report = scratch_dir / "jscpd-report.json"
-            if report.is_file():
-                findings = parse_output(
-                    report.read_text(encoding="utf-8"),
-                    manifest=manifest,
-                    repo_root=repo_root,
-                )
     except (ValueError, KeyError) as exc:
         # Classify the failure: empty output means the analyzer never produced
         # anything (sandbox unavailable outside CI), not that it emitted garbage

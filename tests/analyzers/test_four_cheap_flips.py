@@ -192,6 +192,23 @@ def test_phpstan_without_neon_runs_at_level_zero(tmp_path: Path) -> None:
     assert _argv_has_level_zero(argv), f"D12: no neon must pass --level=0; got {argv!r}"
 
 
+def test_phpstan_without_neon_managed_plan_runs_at_level_zero(tmp_path: Path) -> None:
+    resolve = import_module("mergecraft.analyzers.resolve")
+    (tmp_path / "composer.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "hello.php").write_text("<?php\n", encoding="utf-8")
+    manifest = _registry().get_manifest("phpstan")
+    plan = resolve.resolve_analyzer(
+        manifest=manifest,
+        repo_root=tmp_path,
+        repo_has_tool=False,
+        managed_available=True,
+        container_available=False,
+    )
+    assert plan.mode == "managed"
+    argv = resolve.expand_analyzer_argv(plan.argv, repo_root=tmp_path, changed_files=["hello.php"])
+    assert _argv_has_level_zero(argv), f"D12: managed no-neon must pass --level=0; got {argv!r}"
+
+
 def test_phpstan_with_neon_does_not_force_level_zero() -> None:
     resolve = import_module("mergecraft.analyzers.resolve")
     repo = BATCH_W_FIXTURES / "php"

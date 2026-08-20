@@ -128,3 +128,76 @@ def test_nonempty_invalid_json_yields_parse_failure_reason(
     reason = result.skip_reason or ""
     assert "failed to parse analyzer output" in reason, reason
     assert "did not run" not in reason, reason
+
+
+def test_jscpd_parses_scratch_report_when_stdout_has_no_output_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """jscpd writes ``jscpd-report.json``; adapters rewrite output_path onto it."""
+    from mergecraft.analyzers import adapters as adapters_mod
+
+    tool_id = "jscpd"
+    report_json = Path(__file__).resolve().parent / "fixtures" / "native" / "jscpd-minimal.json"
+    captured: list[AnalyzerPlan] = []
+
+    plan = AnalyzerPlan(
+        manifest_id=tool_id,
+        mode="repo-native",
+        argv=("jscpd", "--reporters", "json", "--silent", "."),
+    )
+
+    def _filter_changed(_manifest, changed_files):
+        return list(changed_files)
+
+    def _resolve_analyzer(**_kwargs):
+        return plan
+
+    def _provision_managed_argv(_plan, **_kwargs):
+        return plan
+
+    def _plan_sandbox(**_kwargs):
+        return type(
+            "D",
+            (),
+            {"can_run": True, "skip_reason": None, "context": None},
+        )()
+
+    def _finalize_plan(_plan, **_kwargs):
+        return _plan
+
+    def _run_plan(received: AnalyzerPlan, **_kwargs):
+        captured.append(received)
+        report = tmp_path / ".mergecraft" / "analyzer-scratch" / tool_id / "jscpd-report.json"
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(report_json.read_text(encoding="utf-8"), encoding="utf-8")
+        return AnalyzerOutcome(
+            name=tool_id,
+            command="jscpd",
+            status="passed",
+            output="",
+            exit_code=0,
+            output_path=None,
+        )
+
+    monkeypatch.setattr(
+        "mergecraft.analyzers.registry.filter_changed_files_for_manifest", _filter_changed
+    )
+    monkeypatch.setattr(adapters_mod, "resolve_analyzer", _resolve_analyzer)
+    monkeypatch.setattr(adapters_mod, "provision_managed_argv", _provision_managed_argv)
+    monkeypatch.setattr(adapters_mod, "plan_sandbox", _plan_sandbox)
+    monkeypatch.setattr(adapters_mod, "finalize_plan", _finalize_plan)
+    monkeypatch.setattr(adapters_mod, "run_plan", _run_plan)
+
+    result = run_adapter(
+        tool_id=tool_id,
+        repo_root=tmp_path,
+        changed_files=["src/clone-a.js"],
+        tier="trusted",
+    )
+    assert captured, "run_plan must receive the jscpd argv patch"
+    argv = captured[0].argv
+    assert "--output" in argv
+    assert str(tmp_path / ".mergecraft" / "analyzer-scratch" / tool_id) in argv
+    assert result.skipped is False, result.skip_reason
+    assert result.findings, "jscpd-report.json must parse through the generic output_path path"
+    assert result.findings[0].rule_id == "clone"

@@ -360,3 +360,27 @@ def test_prisma_lint_without_rules_uses_conservative_fallback(tmp_path: Path) ->
     ), (
         f"#336: no-rules prisma-lint must use a conservative fallback; got {argv!r} {plan.config_note!r}"
     )
+
+
+def test_prisma_lint_without_rules_managed_plan_uses_conservative_fallback(tmp_path: Path) -> None:
+    resolve = import_module("mergecraft.analyzers.resolve")
+    (tmp_path / "schema.prisma").write_text("model User { id Int }\n", encoding="utf-8")
+    manifest = _registry().get_manifest("prisma-lint")
+    plan = resolve.resolve_analyzer(
+        manifest=manifest,
+        repo_root=tmp_path,
+        repo_has_tool=False,
+        managed_available=True,
+        container_available=False,
+    )
+    assert plan.mode == "managed"
+    argv = resolve.expand_analyzer_argv(
+        plan.argv, repo_root=tmp_path, changed_files=["schema.prisma"]
+    )
+    blob = " ".join(argv).casefold() + " " + (plan.config_note or "").casefold()
+    assert any(
+        token in blob for token in ("fallback", "default", "@catalog:", "prisma-lint-default")
+    ), (
+        f"#336: managed no-rules prisma-lint must use a conservative fallback; "
+        f"got {argv!r} {plan.config_note!r}"
+    )
