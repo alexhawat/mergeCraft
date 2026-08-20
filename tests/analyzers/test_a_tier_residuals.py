@@ -116,10 +116,6 @@ def test_python_type_checkers_never_all_three_on_plain_py() -> None:
     assert len(winners) <= 1
 
 
-@pytest.mark.xfail(
-    reason="green after W8: no type-checker config defaults to mypy (D16)",
-    strict=False,
-)
 def test_no_typechecker_config_defaults_to_mypy() -> None:
     repo = BATCH_Y_FIXTURES / "python-noconfig"
     winners = _typecheck_ids(_enabled_ids(repo, ["hello.py"]))
@@ -160,10 +156,6 @@ def test_osv_scanner_covers_requirements_txt() -> None:
     assert matched == ["requirements.txt"]
 
 
-@pytest.mark.xfail(
-    reason="green after W8: osv-scanner detect covers uv.lock (#309)",
-    strict=False,
-)
 def test_osv_scanner_covers_uv_lock() -> None:
     registry = _registry()
     manifest = registry.get_manifest("osv-scanner")
@@ -171,10 +163,6 @@ def test_osv_scanner_covers_uv_lock() -> None:
     assert matched == ["uv.lock"]
 
 
-@pytest.mark.xfail(
-    reason="green after W8: osv-scanner auto-enables on uv.lock (#309)",
-    strict=False,
-)
 def test_osv_scanner_auto_enables_on_uv_lock_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "python-uv"
     assert "osv-scanner" in _enabled_ids(repo, ["uv.lock", "hello.py"])

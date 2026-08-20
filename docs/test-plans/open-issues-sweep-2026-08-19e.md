@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19e-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19e` @ `wave/open-issues-sweep-2026-08-19e`
 Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337) · **W7** (Batch Y RED — #309-#327 leftovers)
-Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone)
+Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl)
 
 W7 pins leftover A-tier acceptances for #309-#327. Do **not** re-add tsc/bandit/jscpd/govulncheck/cargo-audit/cargo-deny/typos/knip/vulture (D10). Do **not** re-flip golangci-lint/clippy/rubocop/phpstan (D7). File: `tests/analyzers/test_a_tier_residuals.py` + `tests/analyzers/fixtures/batch-y/`. All cross-wave markers are `strict=False`.
 
@@ -219,11 +219,11 @@ Deferred (must **not** appear — D9 / #337 second tier): `roslyn`, `roslyn-anal
 
 ## Batch Y xfail schedule (W7 — RED until W8-W17)
 
-File: `tests/analyzers/test_a_tier_residuals.py`. **37** `strict=False` xfails. **69** already-green pins (no xfail). **0** XPASS.
+File: `tests/analyzers/test_a_tier_residuals.py`. **34** remaining `strict=False` xfails after W8 recon (was 37). **0** XPASS for W8.
 
 | Wave | xfail count | Marker reason prefix |
 |------|-------------|----------------------|
-| **W8** | 3 | `green after W8:` D16 no-config mypy; osv-scanner `uv.lock` |
+| **W8** | 0 | `green after W8:` D16 no-config mypy; osv-scanner `uv.lock` — **green** after W8 recon |
 | **W9** | 3 | `green after W9:` D17 biome over eslint+scripts; biome/eslint `supports_fix` |
 | **W10** | 7 | `green after W10:` brakeman auto+Rails; bundler-audit catalog |
 | **W11** | 0 | phpcs/phpmd remain false (already green; phpstan is enough) |
@@ -238,11 +238,11 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **37** `strict=False` xfails. 
 
 1. **D16 exclusive_group** already exists (`python-typecheck` on mypy/pyright/basedpyright). Do not invent a second group. **green**.
 2. **Config-file winner (already green):** `mypy.ini` → mypy; `pyrightconfig.json` → pyright *or* basedpyright (not mypy); `[tool.basedpyright]` → basedpyright. Never all three.
-3. **No type-checker config → mypy still wins** (`test_no_typechecker_config_defaults_to_mypy`). Today none of the three auto-enable without config. **RED**.
+3. **No type-checker config → mypy still wins** (`test_no_typechecker_config_defaults_to_mypy`). **green** after W8 recon.
 4. **flake8 / pylint** stay catalog rows, `default_enabled: false`, `exclusive_group: python-lint`. Document as legacy opt-in in `docs/ANALYZERS.md`. Do not delete. **green** (docs prose is W8.1 CHANGELOG/docs).
 5. **bandit / vulture** already `auto` from X. Do not re-add. **green**.
 6. **osv-scanner** already matches `requirements.txt`. **green**.
-7. **osv-scanner must match `uv.lock`** (and auto-enable on that fixture). Do **not** add `pip-audit`. **RED**.
+7. **osv-scanner must match `uv.lock`** (and auto-enable on that fixture). Do **not** add `pip-audit`. **green** after W8 recon.
 
 ### W9 #310 JS/TS
 
@@ -281,8 +281,8 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **37** `strict=False` xfails. 
 
 | # | Contract | Layer | Scenario | Primary test | After W7 |
 |---|----------|-------|----------|--------------|----------|
-| Y8a | D16 no-config → mypy | integration | happy | `test_no_typechecker_config_defaults_to_mypy` | xfail W8 |
-| Y8b | osv-scanner `uv.lock` | unit | happy | `test_osv_scanner_covers_uv_lock` | xfail W8 |
+| Y8a | D16 no-config → mypy | integration | happy | `test_no_typechecker_config_defaults_to_mypy` | **green** after W8 recon |
+| Y8b | osv-scanner `uv.lock` | unit | happy | `test_osv_scanner_covers_uv_lock` | **green** after W8 recon |
 | Y8c | type-checker exclusive_group + config winners | integration | happy | `test_python_type_checkers_share_exclusive_group`, `test_mypy_ini_selects_mypy_not_pyright` | **green** |
 | Y8d | flake8/pylint legacy opt-in | unit | happy | `test_flake8_pylint_remain_legacy_opt_in` | **green** |
 | Y9a | D17 biome beats eslint+scripts | integration | happy | `test_biome_json_beats_eslint_even_with_eslint_script_signals` | xfail W9 |
@@ -306,3 +306,11 @@ Batch Y fixture trees: `tests/analyzers/fixtures/batch-y/` (`python-noconfig`, `
 - `make lint` + `make typecheck` pass
 - No product/source edits (`src/` untouched)
 - No `strict=True` on Batch Y markers
+
+## Acceptance (W8 recon)
+
+- Removed 3 `green after W8:` xfails from `tests/analyzers/test_a_tier_residuals.py`
+- W8 assertions are real passes: `test_no_typechecker_config_defaults_to_mypy`, `test_osv_scanner_covers_uv_lock`, `test_osv_scanner_auto_enables_on_uv_lock_fixture`
+- W9–W17 xfails remain (`strict=False`); 0 XPASS for W8
+- `make lint` + `make typecheck` pass
+- No product/source edits (`src/` untouched)
