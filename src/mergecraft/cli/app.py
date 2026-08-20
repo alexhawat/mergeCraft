@@ -42,12 +42,19 @@ from mergecraft.cli import (
     tracing_logfire_cmd,
     watch_cmd,
 )
+from mergecraft.cli.global_surface import (
+    ColorMode,
+    OutputFormat,
+    apply_global_cli_options,
+)
+from mergecraft.cli.typer_group import MergecraftTyperGroup
 
 app = typer.Typer(
     name="mergecraft",
     help="Standalone BYOK GitHub Action runtime for coding agents (mergeCraft).",
     no_args_is_help=True,
     rich_markup_mode="rich",
+    cls=MergecraftTyperGroup,
 )
 
 app.add_typer(agents_cmd.app, name="agents")
@@ -91,7 +98,43 @@ def _root(
         help="Show version and exit.",
         is_eager=True,
     ),
+    output_format: OutputFormat = typer.Option(
+        "table",
+        "--format",
+        help="Default output format for machine-readable subcommands.",
+        case_sensitive=False,
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress informational Loguru records.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Enable DEBUG Loguru records.",
+    ),
+    log_level: str | None = typer.Option(
+        None,
+        "--log-level",
+        help="Explicit Loguru level (TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL).",
+    ),
+    color: ColorMode = typer.Option(
+        "auto",
+        "--color",
+        help="Colour policy for Rich/Typer chrome: auto, always, or never.",
+        case_sensitive=False,
+    ),
 ) -> None:
+    apply_global_cli_options(
+        ctx,
+        output_format=output_format,
+        quiet=quiet,
+        verbose=verbose,
+        log_level=log_level,
+        color=color,
+    )
     if version:
         typer.echo(__version__)
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)

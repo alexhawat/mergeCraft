@@ -33,6 +33,7 @@ from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
     CLI_USAGE_EXIT_CODE,
 )
+from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.config import load_repo_settings
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
@@ -879,6 +880,7 @@ def gate(
 
 @app.command("score")
 def score(
+    ctx: typer.Context,
     actual: Path = typer.Argument(..., help="JSON findings a review run produced."),
     expected: Path = typer.Argument(..., help="JSON baseline issues to score against."),
     min_recall: float = typer.Option(
@@ -921,22 +923,18 @@ def score(
     findings = load_reported_findings(actual_payload)
     report = score_findings(issues, findings, slack=slack)
 
-    if json_output:
-        typer.echo(
-            json.dumps(
-                {
-                    "total_issues": report.total_issues,
-                    "total_reported": report.total_reported,
-                    "found": report.found,
-                    "recall": report.recall,
-                    "precision": report.precision,
-                    "severity_agreement": report.severity_agreement,
-                    "missed_issue_ids": report.missed_issue_ids,
-                    "matches": [m.model_dump() for m in report.matches],
-                },
-                indent=2,
-                sort_keys=True,
-            )
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(
+            {
+                "total_issues": report.total_issues,
+                "total_reported": report.total_reported,
+                "found": report.found,
+                "recall": report.recall,
+                "precision": report.precision,
+                "severity_agreement": report.severity_agreement,
+                "missed_issue_ids": report.missed_issue_ids,
+                "matches": [m.model_dump() for m in report.matches],
+            }
         )
     else:
         console.print(format_report(report, corpus=expected))

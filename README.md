@@ -216,7 +216,7 @@ Process exit codes: `0` clean pass; `10` non-blocking findings; `11` blocking se
 `12` review failed (no findings); `20` inconclusive; `30` configuration error; `40` infra error;
 `50` timed out; `2` usage / invalid CLI input. Full table: [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md).
 
-`diff-review` is a hidden alias of `review` (Harbor and existing scripts keep working).
+`diff-review` remains a hidden deprecated alias of `review` (one stderr warning per invocation).
 
 **Auth precedence for private clones:** `--token` → `GH_TOKEN` / `GITHUB_TOKEN` →
 `gh auth token` → anonymous (public repos only). Cloned third-party repositories
@@ -618,7 +618,6 @@ of them for its full flag set):
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
 | `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
 | `mergecraft context inspect` | Report sources, scope, provenance citations, and token totals. |
-| `mergecraft diff-review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |

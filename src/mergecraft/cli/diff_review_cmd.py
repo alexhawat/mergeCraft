@@ -153,7 +153,13 @@ def _emit_agent_protocol(
     stream.run_finished(exit_code)
 
 
+_DIFF_REVIEW_DEPRECATION = (
+    "warning: `mergecraft diff-review` is deprecated; use `mergecraft review` instead."
+)
+
+
 def run(
+    ctx: typer.Context,
     base: str | None = typer.Option(
         None,
         "--base",
@@ -337,6 +343,8 @@ def run(
         rich_help_panel=_PANEL_TRUST,
     ),
 ) -> None:
+    if ctx.info_name == "diff-review":
+        console.print(_DIFF_REVIEW_DEPRECATION)
     configure_logging()
     invocation_root = Path.cwd().resolve()
     root = cwd.resolve()

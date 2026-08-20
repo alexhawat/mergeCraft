@@ -135,6 +135,8 @@ def _walk_typer_commands(
     """
     commands: list[tuple[CommandPath, Any]] = []
     for command in app.registered_commands:
+        if command.hidden:
+            continue
         name = command.name
         if name is None and command.callback is not None:
             name = command.callback.__name__.replace("_", "-")

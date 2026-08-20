@@ -26,10 +26,6 @@ from mergecraft.cli.app import app
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_XFAIL_W11 = pytest.mark.xfail(
-    reason="green after W11: global CLI surface",
-    strict=False,
-)
 
 _CHROME_ENV = {"TERM": "xterm-256color"}
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
@@ -78,7 +74,6 @@ def _review_dry_run_argv(tmp_path: Path, *, command: str = "review") -> list[str
     return [command, "--diff", str(patch), "--dry-run"]
 
 
-@_XFAIL_W11
 def test_root_help_lists_global_format_flag() -> None:
     """D12 — root callback exposes ``--format {table,json}``."""
     result = runner.invoke(app, ["--help"], env=_DUMB_ENV)
@@ -89,7 +84,6 @@ def test_root_help_lists_global_format_flag() -> None:
     assert "json" in help_text
 
 
-@_XFAIL_W11
 @pytest.mark.parametrize("flag", ["--quiet", "--verbose", "--log-level", "--color"])
 def test_root_help_lists_global_verbosity_and_color_flags(flag: str) -> None:
     """Root callback documents global verbosity, log-level, and color switches."""
@@ -107,7 +101,6 @@ def test_root_help_does_not_use_output_as_global_format_switch() -> None:
     assert "--output" not in help_text
 
 
-@_XFAIL_W11
 def test_global_format_json_inherited_by_eval_score(tmp_path: Path) -> None:
     """Root ``--format json`` applies to subcommands without repeating per-command flags."""
     result = runner.invoke(
@@ -121,7 +114,6 @@ def test_global_format_json_inherited_by_eval_score(tmp_path: Path) -> None:
     assert payload["recall"] == 1.0
 
 
-@_XFAIL_W11
 @pytest.mark.parametrize(
     ("use_global_format", "use_legacy_json_flag"),
     [
@@ -149,7 +141,6 @@ def test_json_payload_includes_schema_version(
     assert schema_version.strip()
 
 
-@_XFAIL_W11
 @pytest.mark.parametrize(
     ("env", "extra"),
     [
@@ -166,7 +157,6 @@ def test_color_contract_suppresses_ansi_in_help(env: dict[str, str], extra: list
     assert not _has_ansi(combined)
 
 
-@_XFAIL_W11
 def test_non_tty_emits_zero_ansi_in_help() -> None:
     """Non-interactive stdout/stderr must not carry Rich ANSI even with a colour TERM."""
     result = runner.invoke(app, ["--help"], env=_CHROME_ENV)
@@ -175,7 +165,6 @@ def test_non_tty_emits_zero_ansi_in_help() -> None:
     assert not _has_ansi(combined)
 
 
-@_XFAIL_W11
 def test_force_color_enables_ansi_on_dumb_tty() -> None:
     """``FORCE_COLOR`` (any non-empty) re-enables ANSI when the sink is otherwise dumb."""
     result = runner.invoke(
@@ -188,7 +177,6 @@ def test_force_color_enables_ansi_on_dumb_tty() -> None:
     assert _has_ansi(combined)
 
 
-@_XFAIL_W11
 def test_log_level_debug_shows_init_debug_message() -> None:
     """``--log-level DEBUG`` reconfigures Loguru before subcommands run."""
     with runner.isolated_filesystem():
@@ -202,7 +190,6 @@ def test_log_level_debug_shows_init_debug_message() -> None:
         assert "init complete at" in stderr
 
 
-@_XFAIL_W11
 def test_quiet_suppresses_loguru_info_on_review_dry_run(tmp_path: Path) -> None:
     """``--quiet`` lowers Loguru verbosity for subcommand log lines."""
     result = runner.invoke(
@@ -215,7 +202,6 @@ def test_quiet_suppresses_loguru_info_on_review_dry_run(tmp_path: Path) -> None:
     assert "» diff path:" not in stderr
 
 
-@_XFAIL_W11
 def test_verbose_shows_loguru_debug_on_init() -> None:
     """``--verbose`` enables DEBUG Loguru records for subcommands."""
     with runner.isolated_filesystem():
@@ -229,7 +215,6 @@ def test_verbose_shows_loguru_debug_on_init() -> None:
         assert "init complete at" in stderr
 
 
-@_XFAIL_W11
 def test_mergecraft_log_level_env_overrides_default_quietness() -> None:
     """``MERGECRAFT_LOG_LEVEL`` is honoured by the root callback."""
     with runner.isolated_filesystem():
@@ -243,7 +228,6 @@ def test_mergecraft_log_level_env_overrides_default_quietness() -> None:
         assert "init complete at" in stderr
 
 
-@_XFAIL_W11
 def test_diff_review_hidden_alias_emits_one_stderr_deprecation_line(
     tmp_path: Path,
 ) -> None:
