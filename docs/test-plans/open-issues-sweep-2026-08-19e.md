@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19e-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19e` @ `wave/open-issues-sweep-2026-08-19e`
 Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337) · **W7** (Batch Y RED — #309-#327 leftovers)
-Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl)
+Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl); **W10 recon** un-xfail brakeman auto+Rails + bundler-audit catalog (`b5165e9` impl)
 
 W7 pins leftover A-tier acceptances for #309-#327. Do **not** re-add tsc/bandit/jscpd/govulncheck/cargo-audit/cargo-deny/typos/knip/vulture (D10). Do **not** re-flip golangci-lint/clippy/rubocop/phpstan (D7). File: `tests/analyzers/test_a_tier_residuals.py` + `tests/analyzers/fixtures/batch-y/`. All cross-wave markers are `strict=False`.
 
@@ -219,13 +219,13 @@ Deferred (must **not** appear — D9 / #337 second tier): `roslyn`, `roslyn-anal
 
 ## Batch Y xfail schedule (W7 — RED until W8-W17)
 
-File: `tests/analyzers/test_a_tier_residuals.py`. **31** remaining `strict=False` xfails after W9 recon (was 34). **0** XPASS for W9.
+File: `tests/analyzers/test_a_tier_residuals.py`. **24** remaining `strict=False` xfails after W10 recon (was 31). **0** XPASS for W10. W11 still has **0** xfails (phpcs/phpmd stay false).
 
 | Wave | xfail count | Marker reason prefix |
 |------|-------------|----------------------|
 | **W8** | 0 | `green after W8:` D16 no-config mypy; osv-scanner `uv.lock` — **green** after W8 recon |
 | **W9** | 0 | `green after W9:` D17 biome over eslint+scripts; biome/eslint `supports_fix` — **green** after W9 recon |
-| **W10** | 7 | `green after W10:` brakeman auto+Rails; bundler-audit catalog |
+| **W10** | 0 | `green after W10:` brakeman auto+Rails; bundler-audit catalog — **green** after W10 recon |
 | **W11** | 0 | phpcs/phpmd remain false (already green; phpstan is enough) |
 | **W12** | 2 | `green after W12:` cppcheck auto (SAST path; not Semgrep `languages:`) |
 | **W13** | 4 | `green after W13:` detekt + swiftlint auto |
@@ -256,8 +256,8 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **31** remaining `strict=False
 - Go: golangci-lint + govulncheck already auto; detect `go.mod` / `*.go`. **green**. Do not re-flip.
 - Rust: clippy + cargo-audit + cargo-deny already auto. **green**. Do not re-flip clippy.
 - Ruby: rubocop already auto. **green**.
-- **RED:** brakeman `default_enabled: auto` and auto-enable on Rails markers (`config/application.rb` / `gem "rails"`). Plain Ruby must stay off (already green).
-- **RED:** add `bundler-audit` catalog YAML (`auto`, detect `Gemfile.lock`, SARIF fixture at `tests/analyzers/fixtures/sarif/bundler-audit-minimal.sarif.json`). osv-scanner already covers `Gemfile.lock` (**green**).
+- **green after W10 recon:** brakeman `default_enabled: auto` and auto-enable on Rails markers (`config/application.rb` / `gem "rails"`). Plain Ruby must stay off (already green).
+- **green after W10 recon:** `bundler-audit` catalog YAML (`auto`, detect `Gemfile.lock`, SARIF fixture at `tests/analyzers/fixtures/sarif/bundler-audit-minimal.sarif.json`). osv-scanner already covers `Gemfile.lock` (**green**).
 
 ### W11 #316 PHP (decision pinned)
 
@@ -288,8 +288,8 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **31** remaining `strict=False
 | Y9a | D17 biome beats eslint+scripts | integration | happy | `test_biome_json_beats_eslint_even_with_eslint_script_signals` | **green** after W9 recon |
 | Y9b | biome/eslint `supports_fix` | unit | happy | `test_biome_and_eslint_declare_supports_fix` | **green** after W9 recon |
 | Y9c | js-lint exclusive_group config-only order | integration | happy | `test_biome_config_wins_js_lint_group` | **green** |
-| Y10a | brakeman auto + Rails gate | integration | happy/edge | `test_brakeman_default_enabled_auto`, `test_brakeman_auto_enables_on_rails_markers`, `test_brakeman_does_not_auto_enable_on_plain_ruby` | xfail / **green** (plain ruby) |
-| Y10b | bundler-audit new manifest | unit | happy | `test_bundler_audit_*` | xfail W10 |
+| Y10a | brakeman auto + Rails gate | integration | happy/edge | `test_brakeman_default_enabled_auto`, `test_brakeman_auto_enables_on_rails_markers`, `test_brakeman_does_not_auto_enable_on_plain_ruby` | **green** after W10 recon |
+| Y10b | bundler-audit new manifest | unit | happy | `test_bundler_audit_*` | **green** after W10 recon |
 | Y11 | phpcs/phpmd stay false; phpstan signal | integration | happy | `test_phpcs_remains_false_even_with_phpcs_xml`, `test_phpmd_remains_false`, `test_phpstan_is_enough_default_php_signal` | **green** |
 | Y12 | cppcheck auto; clang-tidy opt-in | integration | happy | `test_cppcheck_default_enabled_auto`, `test_clang_tidy_stays_opt_in` | xfail / **green** |
 | Y13 | detekt + swiftlint auto | integration | happy | `test_detekt_*`, `test_swiftlint_*` | xfail W13 |
@@ -320,5 +320,13 @@ Batch Y fixture trees: `tests/analyzers/fixtures/batch-y/` (`python-noconfig`, `
 - Removed 3 `green after W9:` xfails from `tests/analyzers/test_a_tier_residuals.py` (1 biome-over-eslint + 2 parametrized biome/eslint `supports_fix`)
 - W9 assertions are real passes: `test_biome_json_beats_eslint_even_with_eslint_script_signals`, `test_biome_and_eslint_declare_supports_fix` (`biome`, `eslint`)
 - W10–W17 xfails remain (`strict=False`); 0 XPASS for W9
+- `make lint` + `make typecheck` pass
+- No product/source edits (`src/` untouched)
+
+## Acceptance (W10 recon)
+
+- Removed 7 `green after W10:` xfails from `tests/analyzers/test_a_tier_residuals.py` (2 brakeman auto+Rails + 5 bundler-audit catalog)
+- W10 assertions are real passes: `test_brakeman_default_enabled_auto`, `test_brakeman_auto_enables_on_rails_markers`, `test_bundler_audit_catalog_yaml_exists`, `test_bundler_audit_is_importable_and_auto`, `test_bundler_audit_detects_gemfile_lock`, `test_bundler_audit_auto_enables_on_lockfile`, `test_bundler_audit_has_catalog_check_parser_fixture`
+- W11 has 0 xfails (phpcs/phpmd stay false; phpstan is enough). W12–W17 xfails remain (`strict=False`); 0 XPASS for W10
 - `make lint` + `make typecheck` pass
 - No product/source edits (`src/` untouched)

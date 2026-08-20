@@ -231,19 +231,11 @@ def test_go_detect_still_matches_go_mod_and_go_files() -> None:
         assert registry.filter_changed_files_for_manifest(manifest, ["hello.go"]) == ["hello.go"]
 
 
-@pytest.mark.xfail(
-    reason="green after W10: brakeman default_enabled auto (#313)",
-    strict=False,
-)
 def test_brakeman_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("brakeman")
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W10: brakeman auto on Rails markers (#313)",
-    strict=False,
-)
 def test_brakeman_auto_enables_on_rails_markers() -> None:
     repo = BATCH_Y_FIXTURES / "rails"
     assert "brakeman" in _enabled_ids(repo, ["hello.rb", "Gemfile", "config/application.rb"])
@@ -254,29 +246,17 @@ def test_brakeman_does_not_auto_enable_on_plain_ruby() -> None:
     assert "brakeman" not in _enabled_ids(repo, ["hello.rb", "Gemfile"])
 
 
-@pytest.mark.xfail(
-    reason="green after W10: bundler-audit catalog YAML (#313)",
-    strict=False,
-)
 def test_bundler_audit_catalog_yaml_exists() -> None:
     path = _CATALOG_DIR / "bundler-audit.yaml"
     assert path.is_file()
 
 
-@pytest.mark.xfail(
-    reason="green after W10: bundler-audit importable auto (#313)",
-    strict=False,
-)
 def test_bundler_audit_is_importable_and_auto() -> None:
     manifest = _registry().get_manifest("bundler-audit")
     assert manifest.id == "bundler-audit"
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W10: bundler-audit detects Gemfile.lock (#313)",
-    strict=False,
-)
 def test_bundler_audit_detects_gemfile_lock() -> None:
     registry = _registry()
     manifest = registry.get_manifest("bundler-audit")
@@ -284,19 +264,11 @@ def test_bundler_audit_detects_gemfile_lock() -> None:
     assert matched == ["Gemfile.lock"]
 
 
-@pytest.mark.xfail(
-    reason="green after W10: bundler-audit auto on Gemfile.lock (#313)",
-    strict=False,
-)
 def test_bundler_audit_auto_enables_on_lockfile() -> None:
     repo = BATCH_Y_FIXTURES / "bundler-audit"
     assert "bundler-audit" in _enabled_ids(repo, ["Gemfile.lock", "Gemfile"])
 
 
-@pytest.mark.xfail(
-    reason="green after W10: bundler-audit catalog-check fixture (#313)",
-    strict=False,
-)
 def test_bundler_audit_has_catalog_check_parser_fixture() -> None:
     docs = import_module("mergecraft.analyzers.catalog_docs")
     manifest = _registry().get_manifest("bundler-audit")
