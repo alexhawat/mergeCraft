@@ -72,7 +72,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `tsc` | lint | typescript | auto | repo-native | trusted | — | — |
 | `typos` | lint | python, javascript, typescript, rust, go, markdown | auto | repo-native | trusted | — | — |
 | `vulture` | quality | python | auto | repo-native | trusted | — | — |
-| `yamllint` | lint | yaml | disabled | managed | untrusted | — | — |
+| `yamllint` | lint | yaml | auto | managed | untrusted | — | — |
 | `zizmor` | ci | — | auto | managed | untrusted | — | — |
 
 ## Runtime x shell x trust x mode
