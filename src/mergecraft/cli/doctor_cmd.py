@@ -16,7 +16,7 @@ from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
-from mergecraft.mcp.server import MCP_PORT_START, _port_available
+from mergecraft.mcp.server import _port_available
 from mergecraft.models import MODEL_ALIASES
 from mergecraft.utils.agent_resolve import has_credentials_for_slug
 
@@ -127,11 +127,18 @@ def _config_probe(cwd: Path) -> ProbeResult:
 
 
 def _mcp_probe() -> ProbeResult:
-    if _port_available(MCP_PORT_START):
-        return ProbeResult(
-            "mcp", "ok", "ephemeral port (bind(0)); MCP_PORT_START available as override"
-        )
-    return ProbeResult("mcp", "warn", "ephemeral port (bind(0)); MCP_PORT_START in use")
+    env_port_raw = os.environ.get("MERGECRAFT_MCP_PORT")
+    if env_port_raw:
+        try:
+            port = int(env_port_raw)
+        except ValueError:
+            return ProbeResult(
+                "mcp", "warn", f"MERGECRAFT_MCP_PORT={env_port_raw!r} is not a valid integer"
+            )
+        if _port_available(port):
+            return ProbeResult("mcp", "ok", f"MERGECRAFT_MCP_PORT={port} is available")
+        return ProbeResult("mcp", "warn", f"MERGECRAFT_MCP_PORT={port} is already in use")
+    return ProbeResult("mcp", "ok", "ephemeral port allocation (bind(0))")
 
 
 def run_doctor_probes(cwd: Path) -> list[ProbeResult]:

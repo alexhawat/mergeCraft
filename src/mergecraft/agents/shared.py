@@ -193,6 +193,17 @@ class AgentRunContext:
     on_tool_use: Callable[[AgentToolUseEvent], None] | None = None
 
 
+def mcp_auth_headers(ctx: AgentRunContext) -> dict[str, str]:
+    """Return ``Authorization: Bearer`` header dict for MCP calls.
+
+    Returns an empty dict when no per-run token was issued (dev/test
+    runs that start the server without ``start_mcp_http_server``).
+    """
+    if ctx.mcp_auth_token:
+        return {"Authorization": f"Bearer {ctx.mcp_auth_token}"}
+    return {}
+
+
 def payload_shell_mode(ctx: AgentRunContext) -> str:
     """Read ``shell`` from dict or dataclass payloads (Action uses a dict)."""
     payload = ctx.payload

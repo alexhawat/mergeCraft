@@ -116,11 +116,15 @@ def admits_readonly_role(
     """True when ``spec`` may appear on a class-filtered read-only surface.
 
     Class membership is necessary but not sufficient: ``mutates=True`` tools
-    stay off reviewer/verifier unless they are in ``mutating_allowlist``.
-    Callers pass ``PRIMARY_MUTATING_ALLOWLIST`` (which also admits
-    ``create_pull_request_review``) for the primary reviewer surface (D9).
-    Subagent deny-list derivation uses the default ``READONLY_MUTATING_ALLOWLIST``
-    and ``REVIEWER_ALLOWED_TOOL_CLASSES`` so subagents cannot publish reviews.
+    stay off reviewer/verifier unless their name is in ``mutating_allowlist``.
+
+    D9: publication is gated by name, not class.  ``REVIEW_WRITE`` is shared
+    by several tools (``create_pull_request_review``, ``record_finding_verdict``,
+    ``report_progress``, ``resolve_review_thread``); class membership alone
+    would leak all of them to the reviewer.  The primary reviewer passes
+    ``PRIMARY_MUTATING_ALLOWLIST`` which adds ``create_pull_request_review``
+    by name; subagents keep ``READONLY_MUTATING_ALLOWLIST`` (checkout_pr only)
+    so they remain denied publication regardless of their class set.
     """
     if spec.tool_class not in allowed:
         return False

@@ -35,6 +35,15 @@ from mergecraft.mcp.dependencies import (
     await_dependency_installation_tool,
     start_dependency_installation_tool,
 )
+from mergecraft.mcp.endpoints import (
+    MCP_ENDPOINT as MCP_ENDPOINT,
+)
+from mergecraft.mcp.endpoints import (
+    MCP_REVIEWER_ENDPOINT as MCP_REVIEWER_ENDPOINT,
+)
+from mergecraft.mcp.endpoints import (
+    MCP_VERIFIER_ENDPOINT as MCP_VERIFIER_ENDPOINT,
+)
 from mergecraft.mcp.git import (
     commit_changes_tool,
     delete_branch_tool,
@@ -100,9 +109,6 @@ if TYPE_CHECKING:
 MCP_PORT_START = 3764
 MCP_PORT_ATTEMPTS = 100
 MCP_HOST = "127.0.0.1"
-MCP_ENDPOINT = "/mcp"
-MCP_REVIEWER_ENDPOINT = "/mcp/reviewer"
-MCP_VERIFIER_ENDPOINT = "/mcp/verifier"
 
 
 def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None) -> list[ToolSpec]:
@@ -174,7 +180,15 @@ def build_reviewer_tools(
     ctx: ToolContext,
     output_schema: JsonSchema | None = None,
 ) -> list[ToolSpec]:
-    """Primary reviewer surface — includes REVIEW_WRITE for publication (D9)."""
+    """Primary reviewer surface — class-filtered with publication admission (D9).
+
+    ``PRIMARY_MUTATING_ALLOWLIST`` explicitly names ``create_pull_request_review``
+    (and ``checkout_pr``).  REVIEW_WRITE class is shared by several tools so
+    class membership alone would leak review-write tools to the reviewer; the
+    named allowlist stays the sole gate for D9 publication.  Subagents call
+    ``_filter_tools_by_class`` with the default ``READONLY_MUTATING_ALLOWLIST``
+    so they remain denied publication regardless of class.
+    """
     return _filter_tools_by_class(
         build_orchestrator_tools(ctx, output_schema),
         PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES,
@@ -549,6 +563,16 @@ def _register_mcp_route(
         return _rpc_error(req_id, RpcError(-32601, f"Method not found: {method}"))
 
     async def mcp_endpoint(request: Request) -> Response:
+        # D15 — auth at request edge: every tools/list and tools/call (including
+        # GET probes) requires Bearer token when one was issued at startup.
+        # /health stays unauthenticated; x-mergecraft-agent-id is tracing-only.
+        if auth_token:
+            raw_auth = request.headers.get("Authorization") or ""
+            if raw_auth != f"Bearer {auth_token}":
+                return JSONResponse(
+                    {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Unauthorized"}},
+                    status_code=401,
+                )
         if request.method == "GET":
             # Streamable HTTP / SSE clients may probe with GET — reply with tool list.
             return JSONResponse(
@@ -569,23 +593,6 @@ def _register_mcp_route(
                 status_code=400,
             )
         items = body if isinstance(body, list) else [body]
-        # D15 — per-run bearer token: tools/list and tools/call require
-        # Authorization: Bearer <token> when a token was issued at startup.
-        # /health stays unauthenticated; x-mergecraft-agent-id is tracing-only.
-        if auth_token:
-            _GUARDED_METHODS = frozenset({"tools/list", "tools/call"})
-            needs_auth = any(
-                item.get("method") in _GUARDED_METHODS
-                for item in items
-                if isinstance(item, dict) and "id" in item
-            )
-            if needs_auth:
-                raw_auth = request.headers.get("Authorization") or ""
-                if raw_auth != f"Bearer {auth_token}":
-                    return JSONResponse(
-                        {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Unauthorized"}},
-                        status_code=401,
-                    )
         # D10 (OB4) — the dispatch-issued agent id, forwarded by the agent
         # CLI's MCP client config as a header on every call.
         calling_agent_id = request.headers.get("x-mergecraft-agent-id") or None
@@ -649,6 +656,42 @@ async def _kill_background_processes(ctx: ToolContext) -> None:
     procs.clear()
 
 
+def _serve_in_thread(
+    config: uvicorn.Config,
+    *,
+    thread_name: str,
+    suppress_oserror: bool = False,
+) -> tuple[uvicorn.Server, Any, asyncio.AbstractEventLoop]:
+    """Start a uvicorn server on a new event loop in a daemon thread.
+
+    Returns ``(server, thread, loop)`` so callers can stop the server
+    (``server.should_exit = True``), join the thread, and schedule
+    cleanup on the loop.  When ``suppress_oserror`` is True any
+    ``OSError`` raised during ``serve()`` is swallowed and logged at
+    DEBUG (used for UDS paths that may be too long or unavailable).
+    """
+    import threading as _threading
+
+    server = uvicorn.Server(config)
+    loop = asyncio.new_event_loop()
+
+    def _run() -> None:
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(server.serve())
+        except OSError as exc:
+            if suppress_oserror:
+                logger.debug(
+                    "unix socket MCP listener failed (path too long or unavailable): {}", exc
+                )
+            else:
+                raise
+
+    thread = _threading.Thread(target=_run, name=thread_name, daemon=True)
+    thread.start()
+    return server, thread, loop
+
+
 def start_mcp_http_server(
     ctx: ToolContext,
     *,
@@ -658,8 +701,9 @@ def start_mcp_http_server(
 
     Returns ``(url, stop)`` where ``stop`` is an idempotent disposer.
     """
-    import threading
     import time
+
+    from mergecraft.mcp.endpoints import MCP_UDS_NAME
 
     # D15 — issue a per-run secret at startup; every request to tools/list
     # or tools/call must present it as ``Authorization: Bearer <token>``.
@@ -676,22 +720,14 @@ def start_mcp_http_server(
         auth_token=run_token,
     )
     port = _select_port()
-    config = uvicorn.Config(
+    http_config = uvicorn.Config(
         app,
         host=MCP_HOST,
         port=port,
         log_level="warning",
         access_log=False,
     )
-    server = uvicorn.Server(config)
-    loop = asyncio.new_event_loop()
-
-    def _run() -> None:
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(server.serve())
-
-    thread = threading.Thread(target=_run, name="mergecraft-mcp", daemon=True)
-    thread.start()
+    server, thread, loop = _serve_in_thread(http_config, thread_name="mergecraft-mcp")
 
     # Wait briefly for bind
     for _ in range(50):
@@ -711,9 +747,9 @@ def start_mcp_http_server(
     # send HTTP headers). The socket is 0600, so only the creating process
     # (and processes running as the same user) can connect — that is the
     # peer-credential equivalent of the bearer token.
-    uds_path = os.path.join(ctx.tmpdir, "mergecraft-mcp.sock") if ctx.tmpdir else ""
+    uds_path = os.path.join(ctx.tmpdir, MCP_UDS_NAME) if ctx.tmpdir else ""
     uds_server: uvicorn.Server | None = None
-    uds_thread: threading.Thread | None = None
+    uds_thread: Any | None = None
     if uds_path:
         uds_config = uvicorn.Config(
             app,
@@ -721,20 +757,11 @@ def start_mcp_http_server(
             log_level="warning",
             access_log=False,
         )
-        uds_server = uvicorn.Server(uds_config)
-        uds_loop = asyncio.new_event_loop()
-
-        def _run_uds() -> None:
-            asyncio.set_event_loop(uds_loop)
-            try:
-                uds_loop.run_until_complete(uds_server.serve())
-            except OSError as exc:
-                logger.debug(
-                    "unix socket MCP listener failed (path too long or unavailable): {}", exc
-                )
-
-        uds_thread = threading.Thread(target=_run_uds, name="mergecraft-mcp-uds", daemon=True)
-        uds_thread.start()
+        uds_server, uds_thread, _ = _serve_in_thread(
+            uds_config,
+            thread_name="mergecraft-mcp-uds",
+            suppress_oserror=True,
+        )
         # Brief wait for the unix socket to appear
         for _ in range(20):
             if os.path.exists(uds_path):

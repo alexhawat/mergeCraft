@@ -471,7 +471,9 @@ def _add_mcp_server_table(config: TomlTable, ctx: AgentRunContext) -> None:
     # endpoint (for other agents) remains the canonical ``mcp_server_url``.
     from pathlib import Path
 
-    socket_path = str(Path(ctx.tmpdir) / "mergecraft-mcp.sock")
+    from mergecraft.mcp.endpoints import MCP_UDS_NAME
+
+    socket_path = str(Path(ctx.tmpdir) / MCP_UDS_NAME)
     config["mcp_servers"] = {
         MERGECRAFT_MCP_NAME: {
             "socket_path": socket_path,

@@ -28,6 +28,7 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    mcp_auth_headers,
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import (
@@ -36,7 +37,7 @@ from mergecraft.agents.verifier import (
     VERIFIER_SYSTEM_PROMPT,
     pinned_judge_model,
 )
-from mergecraft.mcp.server import MCP_ENDPOINT, MCP_REVIEWER_ENDPOINT, MCP_VERIFIER_ENDPOINT
+from mergecraft.mcp.endpoints import mcp_role_url as _mcp_role_url
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -69,11 +70,9 @@ if TYPE_CHECKING:
     from mergecraft.tracing.tracer import Tracer
 
 CLAUDE_EXEC_TOOLS = ("Bash", "Monitor", "REPL", "Workflow")
-CLAUDE_EXEC_TOOL_DENY_RULES = [
-    *CLAUDE_EXEC_TOOLS,
-    *[f"Agent({t})" for t in CLAUDE_EXEC_TOOLS],
-]
-CLAUDE_DISALLOWED_TOOLS = ",".join(CLAUDE_EXEC_TOOL_DENY_RULES)
+CLAUDE_DISALLOWED_TOOLS = ",".join(
+    [*CLAUDE_EXEC_TOOLS, *[f"Agent({t})" for t in CLAUDE_EXEC_TOOLS]]
+)
 # O4 (OB3) — the effort level passed as ``--effort`` is the one request
 # parameter the claude harness exposes; the constant keeps the CLI flag and
 # the span attribute (``mergecraft.reasoning_effort``) from drifting apart.
@@ -83,23 +82,6 @@ _CLAUDE_EFFORT = "high"
 def _strip_provider_prefix(specifier: str) -> str:
     slash = specifier.find("/")
     return specifier[slash + 1 :] if slash > 0 else specifier
-
-
-def _mcp_role_url(base: str, agent_id: str | None) -> str:
-    """Derive the role-specific MCP URL from the base URL and the current agent id.
-
-    Strips any existing role suffix first so this is idempotent when the
-    caller already holds a role URL.
-    """
-    for suffix in (MCP_REVIEWER_ENDPOINT, MCP_VERIFIER_ENDPOINT, MCP_ENDPOINT):
-        if base.endswith(suffix):
-            host = base[: -len(suffix)]
-            break
-    else:
-        host = base
-    if agent_id == VERIFIER_AGENT_NAME:
-        return host + MCP_VERIFIER_ENDPOINT
-    return host + MCP_REVIEWER_ENDPOINT
 
 
 def write_mcp_config(ctx: AgentRunContext) -> str:
@@ -115,11 +97,9 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
         "type": "http",
         "url": _mcp_role_url(ctx.mcp_server_url, agent_id),
     }
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = {**mcp_auth_headers(ctx)}
     if agent_id:
         headers["X-MergeCraft-Agent-Id"] = agent_id
-    if ctx.mcp_auth_token:
-        headers["Authorization"] = f"Bearer {ctx.mcp_auth_token}"
     if headers:
         server_entry["headers"] = headers
     config_path.write_text(
