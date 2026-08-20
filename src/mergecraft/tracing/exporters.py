@@ -255,6 +255,27 @@ def _provider_span_processors(provider: Any) -> tuple[Any, ...]:
     return tuple(getattr(composite, "_span_processors", ()))
 
 
+def _otlp_exporter_headers(exporter: Any) -> dict[str, str]:
+    """Return normalized OTLP exporter headers when the SDK exposes them."""
+    raw = getattr(exporter, "_headers", None)
+    if raw is None:
+        raw = getattr(exporter, "headers", None)
+    if isinstance(raw, dict):
+        return {str(key): str(value) for key, value in raw.items()}
+    return {}
+
+
+def _otlp_exporter_matches(exporter: Any, *, endpoint: str, headers: dict[str, str]) -> bool:
+    """Return whether *exporter* already targets the same endpoint and headers."""
+    if exporter is None:
+        return False
+    if type(exporter).__name__ != "OTLPSpanExporter":
+        return False
+    if getattr(exporter, "_endpoint", None) != endpoint:
+        return False
+    return _otlp_exporter_headers(exporter) == headers
+
+
 def _setup_tracer_provider(
     endpoint: str,
     headers: dict[str, str],
@@ -320,9 +341,6 @@ def _setup_tracer_provider(
     # Reset the active providers list so ``has_active_tracer_provider``
     # reflects only this ``OTLPSink``'s provider.
     _ACTIVE_TRACER_PROVIDERS = []
-    from mergecraft.tracing.tracer import reset_process_tracer_cache
-
-    reset_process_tracer_cache()
 
     try:
         from opentelemetry.sdk.trace.sampling import ALWAYS_ON
@@ -350,8 +368,11 @@ def _setup_tracer_provider(
 
         has_otlp = any(
             isinstance(p, BatchSpanProcessor)
-            and isinstance(getattr(p, "span_exporter", None), OTLPSpanExporter)
-            and getattr(getattr(p, "span_exporter", None), "_endpoint", None) == endpoint
+            and _otlp_exporter_matches(
+                getattr(p, "span_exporter", None),
+                endpoint=endpoint,
+                headers=headers,
+            )
             for p in existing_processors
         )
         if not has_otlp:

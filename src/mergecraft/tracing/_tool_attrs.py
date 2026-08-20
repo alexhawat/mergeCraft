@@ -181,6 +181,7 @@ def enrich_tool_response(
         _output_is_error = bool(getattr(output, "is_error", False))
     if _output_is_error:
         span.set_attribute("tool.exit_code", "error")
+        span.set_attribute("tool.error_class", "ToolResult")
         span.set_status("error", "ToolResult.is_error=True")
         if output is not None:
             span.set_attribute("gen_ai.tool.output", redact_tool_payload(output))
