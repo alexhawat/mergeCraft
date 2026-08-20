@@ -64,10 +64,10 @@ def test_setup_tracer_provider_stacks_at_most_one_batch_processor(
     """N ``_setup_tracer_provider`` calls with the same endpoint attach one BatchSpanProcessor."""
     pytest.importorskip("opentelemetry")
 
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
     import mergecraft.tracing.exporters as exporters
+    from mergecraft.tracing.exporters import _otlp_exporter_matches
 
     exporters._reset_test_seam()
     _ensure_real_tracer_provider()
@@ -89,8 +89,11 @@ def test_setup_tracer_provider_stacks_at_most_one_batch_processor(
         processor
         for processor in processors
         if isinstance(processor, BatchSpanProcessor)
-        and isinstance(getattr(processor, "span_exporter", None), OTLPSpanExporter)
-        and getattr(getattr(processor, "span_exporter", None), "_endpoint", None) == endpoint
+        and _otlp_exporter_matches(
+            getattr(processor, "span_exporter", None),
+            endpoint=endpoint,
+            headers=headers,
+        )
     ]
     recording_processors = [
         processor
