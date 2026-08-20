@@ -67,16 +67,18 @@ def _auth_headers() -> dict[str, str]:
 
 def test_serves_the_toolset_for_a_named_role(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``mcp serve`` exposes the registry-resolved tool surface for a named role."""
-    from mergecraft.cli.mcp_serve import build_mcp_app_for_role
+    from mergecraft.cli.mcp_serve import build_mcp_app_from_ctx, build_mcp_tool_context
 
     _init_git_repo(tmp_path)
     _write_config(tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MERGECRAFT_MCP_TOKEN", _SERVE_AUTH_TOKEN)
 
-    client = TestClient(build_mcp_app_for_role(cwd=tmp_path, role="reviewer"))
+    ctx = build_mcp_tool_context(cwd=tmp_path)
+    client = TestClient(build_mcp_app_from_ctx("reviewer", ctx))
     response = client.post(
         MCP_REVIEWER_ENDPOINT,
+        headers={"Authorization": f"Bearer {ctx.mcp_auth_token}"},
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
         headers=_auth_headers(),
     )
@@ -88,16 +90,19 @@ def test_serves_the_toolset_for_a_named_role(tmp_path: Path, monkeypatch: Monkey
 
 def test_served_toolset_honours_tool_classes(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """A read-only served role still cannot call mutating tools (HA4 / D13)."""
-    from mergecraft.cli.mcp_serve import build_mcp_app_for_role
+    from mergecraft.cli.mcp_serve import build_mcp_app_from_ctx, build_mcp_tool_context
 
     _init_git_repo(tmp_path)
     _write_config(tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MERGECRAFT_MCP_TOKEN", _SERVE_AUTH_TOKEN)
 
-    client = TestClient(build_mcp_app_for_role(cwd=tmp_path, role="reviewer"))
+    ctx = build_mcp_tool_context(cwd=tmp_path)
+    client = TestClient(build_mcp_app_from_ctx("reviewer", ctx))
+    auth = {"Authorization": f"Bearer {ctx.mcp_auth_token}"}
     listed = client.post(
         MCP_REVIEWER_ENDPOINT,
+        headers=auth,
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
         headers=_auth_headers(),
     ).json()["result"]["tools"]
@@ -107,6 +112,7 @@ def test_served_toolset_honours_tool_classes(tmp_path: Path, monkeypatch: Monkey
 
     rejected = client.post(
         MCP_REVIEWER_ENDPOINT,
+        headers=auth,
         json={
             "jsonrpc": "2.0",
             "id": 2,
