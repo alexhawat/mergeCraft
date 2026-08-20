@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Catalog manifests for `govulncheck` (Go vulnerability scan, `scope: repo`, network allowlist `vuln.go.dev`), `cargo-audit` (Rust advisory vulnerability scan, `category: vuln`), `cargo-deny` (Rust license/advisory check, `category: license`), and `typos` (universal typo checker, `scope: repo`, `supports_fix: true`) (#337)
+
 - Catalog manifests for `tsc` (TypeScript whole-program lint, `scope: repo`, `--noEmit`), `bandit` (Python security, version pinned to `make security` pin `1.9.4`), and `jscpd` (copy-paste detection, `scope: repo`, diff-line attribution via existing `filter_to_diff` pipeline — pre-existing clones off the diff are dropped) (#337)
 
 - Flip `golangci-lint`, `clippy`, `rubocop`, `phpstan` to `default_enabled: auto`; adds `go.mod`, `Gemfile`, `composer.json` to their detect globs; RuboCop gates on config presence (D11 — silent without `.rubocop.yml`/`Gemfile gem`); PHPStan injects `--level=0` when no `phpstan.neon` is found (D12) (#338)

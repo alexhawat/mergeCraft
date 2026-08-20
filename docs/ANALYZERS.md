@@ -16,6 +16,8 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `blinter` | lint | batch | disabled | managed | trusted | — | requires non-Linux runner — Windows batch lint not supported on Linux (C6) |
 | `brakeman` | security | ruby | disabled | repo-native | trusted | — | — |
 | `buf` | contract | — | auto | managed | untrusted | — | — |
+| `cargo-audit` | vuln | rust | auto | repo-native | trusted | — | — |
+| `cargo-deny` | license | rust | auto | repo-native | trusted | — | — |
 | `checkmake` | lint | make | disabled | managed | trusted | — | — |
 | `checkov` | security | terraform, cloudformation | disabled | managed | untrusted | iac-scanner | — |
 | `circleci` | lint | yaml | disabled | managed | untrusted | — | — |
@@ -29,6 +31,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `flake8` | lint | python | disabled | repo-native | trusted | python-lint | — |
 | `fortitude` | lint | fortran | disabled | managed | trusted | — | manifest-only — Fortitude not bundled on Linux runners (C6 out of scope) |
 | `golangci-lint` | lint | go | auto | managed | trusted | go-lint | — |
+| `govulncheck` | vuln | go | auto | repo-native | trusted | — | — |
 | `hadolint` | lint | docker | auto | managed | untrusted | — | — |
 | `htmlhint` | lint | html | disabled | repo-native | trusted | — | — |
 | `infer` | security | java, c, cpp | disabled | container | trusted | — | requires compilation database and build — container-only heavyweight (C4) |
@@ -65,6 +68,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `trivy` | vuln | — | auto | managed | untrusted | dependency-vuln | — |
 | `trufflehog` | secrets | — | auto | managed | untrusted | — | verify off by default; impossible on fork PRs (C2). |
 | `tsc` | lint | typescript | auto | repo-native | trusted | — | — |
+| `typos` | lint | python, javascript, typescript, rust, go, markdown | auto | repo-native | trusted | — | — |
 | `yamllint` | lint | yaml | disabled | managed | untrusted | — | — |
 | `zizmor` | ci | — | auto | managed | untrusted | — | — |
 
@@ -90,7 +94,7 @@ to run the *repo's* tool against the *repo's* config.
 
 | runtime | trust | `shell: disabled` | `shell: restricted` / `enabled` |
 |---------|-------|-------------------|----------------------------------|
-| `repo-native` (26) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
+| `repo-native` (30) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
 | `repo-native` (1) | `untrusted` | withheld — `runtime` needs repo-provided tooling | runs |
 | `managed` (12) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
 | `managed` (17) | `untrusted` | **runs** (pinned binary only) | runs |
@@ -116,15 +120,15 @@ with a warning, rather than silently widening to `auto`.
 `full` requests more provisioning; it is never a trust override, and cannot
 re-admit a manifest the tier axis skipped.
 
-Counts below are analyzers passing selection, out of 60 shipped, with
+Counts below are analyzers passing selection, out of 64 shipped, with
 `shell: restricted` (the shell axis inert) so the mode axis is isolated.
 
 | mode | trusted event | untrusted event (`pull_request_target`, fork) |
 |------|---------------|-----------------------------------------------|
 | **`off`** | surface not registered | surface not registered |
-| **`auto`** | 60 of 60 | 18 of 60 — `auto` ⇒ `untrusted-only` |
-| **`full`** | 60 of 60 | 18 of 60 |
-| **`untrusted-only`** | 18 of 60 | 18 of 60 |
+| **`auto`** | 64 of 64 | 18 of 64 — `auto` ⇒ `untrusted-only` |
+| **`full`** | 64 of 64 | 18 of 64 |
+| **`untrusted-only`** | 18 of 64 | 18 of 64 |
 
 Passing these axes is necessary, not sufficient: a `container` manifest
 is eligible but still reports `unavailable` wherever no container runtime is
