@@ -96,16 +96,21 @@ def _listed_names(client: TestClient) -> set[str]:
 
 
 def test_reviewer_tools_list_includes_create_pull_request_review(tmp_path: Path) -> None:
-    """W11.2 / W13: ``/mcp/reviewer`` ``tools/list`` admits primary publication (D9).
+    """W11.2 / W13 / C6: ``/mcp/reviewer`` ``tools/list`` admits primary publication and C6 tools.
 
-    Also asserts that the session tools the primary must call are admitted:
-    ``set_output``, ``select_mode``, ``report_progress``.
+    Session tools ``set_output``, ``select_mode``, ``report_progress`` are admitted
+    on the primary reviewer via ``PRIMARY_MUTATING_ALLOWLIST``. C6 tools
+    ``submit_review_verdict`` (TERMINAL_PROTOCOL), ``verify_agent_findings``
+    (VERIFICATION), and ``record_finding_verdict`` (REVIEW_WRITE + mutates, in
+    ``PRIMARY_MUTATING_ALLOWLIST``) are also admitted on the primary reviewer only.
     """
     names = _listed_names(_reviewer_client(tmp_path))
     assert "create_pull_request_review" in names
     assert "checkout_pr" in names
     for session_tool in ("set_output", "select_mode", "report_progress"):
         assert session_tool in names, f"{session_tool!r} must be on primary /mcp/reviewer"
+    for c6_tool in ("submit_review_verdict", "verify_agent_findings", "record_finding_verdict"):
+        assert c6_tool in names, f"{c6_tool!r} must be on primary /mcp/reviewer (C6)"
 
 
 def test_reviewer_tools_list_keeps_git_and_excludes_repo_mutations(tmp_path: Path) -> None:

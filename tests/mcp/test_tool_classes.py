@@ -128,12 +128,15 @@ def test_every_registered_tool_declares_a_class(tool_ctx: ToolContext) -> None:
 
 
 def test_reviewer_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
-    """H4 / D9 — reviewer toolset is class-filtered; named mutations are the exception.
+    """H4 / D9 / C6 — reviewer toolset is class-filtered; named mutations are the exception.
 
-    ``create_pull_request_review`` (D9 publication) and ``report_progress``
-    (no-action path, REVIEW_WRITE) are the only review-write tools admitted on
-    the primary reviewer via ``PRIMARY_MUTATING_ALLOWLIST``; all other mutation
-    classes stay off.
+    ``create_pull_request_review`` (D9 publication), ``report_progress``
+    (no-action path, REVIEW_WRITE), and ``record_finding_verdict`` (C6 verdict
+    persistence, REVIEW_WRITE + mutates=True) are admitted on the primary
+    reviewer via ``PRIMARY_MUTATING_ALLOWLIST``; all other mutation classes stay
+    off. ``submit_review_verdict`` (TERMINAL_PROTOCOL, mutates=False) is
+    admitted via class; it is deliberately orchestrator-only from the subagent
+    perspective but the primary reviewer IS the orchestrator on /mcp/reviewer.
     """
     _assert_real_toolspecs(build_orchestrator_tools(tool_ctx))
 
@@ -142,15 +145,18 @@ def test_reviewer_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
     reviewer = build_reviewer_tools(tool_ctx)
     _assert_real_toolspecs(reviewer)
     leaked = [spec.name for spec in reviewer if _class_value(spec) in MUTATION_CLASSES]
-    assert set(leaked) <= {"create_pull_request_review", "report_progress"}, (
-        f"reviewer received unexpected mutation tools: {leaked}"
-    )
+    assert set(leaked) <= {
+        "create_pull_request_review",
+        "report_progress",
+        "record_finding_verdict",
+        "submit_review_verdict",
+    }, f"reviewer received unexpected mutation tools: {leaked}"
+    # Allowed non-base classes on the primary reviewer (deliberate C6 / D9 admissions).
+    PRIMARY_EXTRA_ALLOWED_CLASSES = frozenset({"review-write", "terminal-protocol", "verification"})
     for spec in reviewer:
-        if spec.name in {"create_pull_request_review", "report_progress"}:
-            assert _class_value(spec) == "review-write"
-            continue
-        assert _class_value(spec) in REVIEWER_ALLOWED_CLASSES, (
-            f"reviewer received {spec.name!r} with class {_class_value(spec)!r}"
+        allowed = REVIEWER_ALLOWED_CLASSES | PRIMARY_EXTRA_ALLOWED_CLASSES
+        assert _class_value(spec) in allowed, (
+            f"reviewer received {spec.name!r} with unexpected class {_class_value(spec)!r}"
         )
 
 
@@ -191,7 +197,11 @@ def test_reviewer_and_verifier_toolsets_differ(tool_ctx: ToolContext) -> None:
     assert "scope" in reviewer_classes
     assert "scope" not in verifier_classes
     assert "verification" in verifier_classes
-    assert "verification" not in reviewer_classes
+    # Primary reviewer now includes VERIFICATION (verify_agent_findings, C6) and
+    # TERMINAL_PROTOCOL (submit_review_verdict, playbook step 10).
+    assert "verification" in reviewer_classes
+    assert "terminal-protocol" in reviewer_classes
+    assert "terminal-protocol" not in verifier_classes
 
 
 def _read_only_toolsets(ctx: ToolContext) -> tuple[list[ToolSpec], list[ToolSpec]]:
@@ -204,18 +214,22 @@ def _read_only_toolsets(ctx: ToolContext) -> tuple[list[ToolSpec], list[ToolSpec
     return reviewer, verifier
 
 
-def test_no_read_only_role_receives_terminal_protocol(tool_ctx: ToolContext) -> None:
-    """H5 — ``terminal-protocol`` (e.g. ``submit_review_verdict``) is orchestrator-only.
+def test_verifier_does_not_receive_terminal_protocol(tool_ctx: ToolContext) -> None:
+    """H5 — ``terminal-protocol`` (``submit_review_verdict``) stays off the verifier.
 
-    VP1 may not be merged: if no tool of that class is registered, the
-    intersection is empty and the assertion still holds.
+    The primary reviewer IS allowed ``submit_review_verdict`` on /mcp/reviewer
+    (playbook step 10, C6); that is intentional and tested in
+    ``test_reviewer_receives_no_mutation_tool``. The verifier must still be
+    denied it so the judge cannot self-submit a review.
     """
     _assert_real_toolspecs(build_orchestrator_tools(tool_ctx))
     reviewer, verifier = _read_only_toolsets(tool_ctx)
-    for role, tools in (("reviewer", reviewer), ("verifier", verifier)):
-        leaked = [spec.name for spec in tools if _class_value(spec) == "terminal-protocol"]
-        assert not leaked, f"{role} received terminal-protocol: {leaked}"
-        assert "submit_review_verdict" not in {spec.name for spec in tools}
+    # Verifier must not have any terminal-protocol tools.
+    leaked = [spec.name for spec in verifier if _class_value(spec) == "terminal-protocol"]
+    assert not leaked, f"verifier received terminal-protocol: {leaked}"
+    assert "submit_review_verdict" not in {spec.name for spec in verifier}
+    # Primary reviewer DOES have submit_review_verdict (deliberate C6 admission).
+    assert "submit_review_verdict" in {spec.name for spec in reviewer}
 
 
 def test_no_read_only_role_receives_github_mutation(tool_ctx: ToolContext) -> None:
@@ -365,6 +379,8 @@ def test_read_only_roles_exclude_mutating_tools_except_checkout_pr(tool_ctx: Too
         "set_output",
         "select_mode",
         "report_progress",
+        # C6: verdict persistence — REVIEW_WRITE + mutates=True, primary only.
+        "record_finding_verdict",
     }
     assert not [spec.name for spec in verifier if spec.mutates]
 
@@ -432,12 +448,14 @@ def test_live_verifier_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
 
 
 def test_live_reviewer_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> None:
-    """Runtime ``tools/list`` on the live reviewer endpoint is class-filtered (H4).
+    """Runtime ``tools/list`` on the live reviewer endpoint is class-filtered (H4 / C6).
 
     Session tools ``set_output``, ``select_mode``, and ``report_progress`` are
     admitted on the primary reviewer via ``PRIMARY_MUTATING_ALLOWLIST``.
-    ``record_finding_verdict`` stays off (REVIEW_WRITE + mutates but not in the
-    allowlist). ``push_branch`` and other repo mutations stay off (D9).
+    C6 tools ``submit_review_verdict`` (TERMINAL_PROTOCOL), ``verify_agent_findings``
+    (VERIFICATION), and ``record_finding_verdict`` (REVIEW_WRITE + mutates, in
+    PRIMARY_MUTATING_ALLOWLIST) are now also admitted on the primary reviewer.
+    ``push_branch`` and other repo mutations stay off (D9).
     """
     import json
     from urllib.request import Request, urlopen
@@ -460,29 +478,20 @@ def test_live_reviewer_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
         names = {entry["name"] for entry in listed["result"]["tools"]}
         assert "checkout_pr" in names
         assert "git" in names
-        for present in ("set_output", "select_mode", "report_progress"):
+        for present in (
+            "set_output",
+            "select_mode",
+            "report_progress",
+            # C6 tools admitted on primary reviewer (not subagents, not verifier).
+            "submit_review_verdict",
+            "verify_agent_findings",
+            "record_finding_verdict",
+        ):
             assert present in names, f"{present!r} must be on primary /mcp/reviewer"
         for denied in (
             "start_dependency_installation",
-            "record_finding_verdict",
             "push_branch",
         ):
             assert denied not in names
-
-        call_body = json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": "record_finding_verdict", "arguments": {}},
-            }
-        ).encode()
-        with urlopen(
-            Request(reviewer_url, data=call_body, headers=headers, method="POST"),
-            timeout=5,
-        ) as resp:
-            called = json.loads(resp.read().decode())
-        assert called["error"]["code"] == -32601
-        assert "record_finding_verdict" in called["error"]["message"]
     finally:
         stop()

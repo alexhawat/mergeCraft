@@ -39,11 +39,24 @@ REVIEWER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
         ToolClass.REVIEW_READ,
     }
 )
-# Primary reviewer adds REVIEW_WRITE so ``create_pull_request_review`` can be
-# admitted on /mcp/reviewer (D9). Subagents use REVIEWER_ALLOWED_TOOL_CLASSES
-# (without REVIEW_WRITE) so they remain denied publication.
+# Primary reviewer adds:
+#   - REVIEW_WRITE   so ``create_pull_request_review`` / ``report_progress`` /
+#                    ``record_finding_verdict`` can be admitted on /mcp/reviewer (D9 / C6).
+#   - TERMINAL_PROTOCOL so ``submit_review_verdict`` (playbook step 10, C6) is
+#                    admitted. mutates=False so no mutating-allowlist entry is needed.
+#   - VERIFICATION   so ``verify_agent_findings`` (playbook step 8, C6) is admitted.
+#                    mutates=False so no mutating-allowlist entry is needed.
+# Subagents use REVIEWER_ALLOWED_TOOL_CLASSES (without these additions) so they
+# remain denied publication and cannot call orchestrator-only tools.
 PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = (
-    REVIEWER_ALLOWED_TOOL_CLASSES | frozenset({ToolClass.REVIEW_WRITE})
+    REVIEWER_ALLOWED_TOOL_CLASSES
+    | frozenset(
+        {
+            ToolClass.REVIEW_WRITE,
+            ToolClass.TERMINAL_PROTOCOL,
+            ToolClass.VERIFICATION,
+        }
+    )
 )
 VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
     {
@@ -69,6 +82,9 @@ PRIMARY_MUTATING_ALLOWLIST: Final[frozenset[str]] = READONLY_MUTATING_ALLOWLIST 
         "set_output",
         "select_mode",
         "report_progress",
+        # C6: primary must be able to persist verifier verdicts (REVIEW_WRITE + mutates=True).
+        # Subagents keep READONLY_MUTATING_ALLOWLIST so they remain denied this write.
+        "record_finding_verdict",
     }
 )
 

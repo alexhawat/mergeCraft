@@ -56,7 +56,7 @@ from mergecraft.tracing.tracer import (
     _close_provider_llm_pair,
     _open_provider_llm_pair,
 )
-from mergecraft.types import MERGECRAFT_MCP_NAME, format_mcp_tool_ref
+from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.privilege import prepare_workspace_for_agent, wrap_agent_command
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
@@ -83,20 +83,25 @@ def _strip_provider_prefix(specifier: str) -> str:
 
 
 def write_mcp_config(ctx: AgentRunContext) -> str:
-    from mergecraft.tracing.signals import current_agent_id
-
     config_dir = Path(ctx.tmpdir) / ".claude"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "mcp.json"
-    # D10 (OB4) — forward the dispatch-issued agent id as a header on every
-    # MCP call so the server can attribute this agent's tool.call spans.
-    agent_id = current_agent_id()
-    server_entry = mcp_http_server_entry(ctx, agent_id)
+    # Always write both role URLs at startup. This function runs once in the
+    # orchestrator (agent_id="claude"), not inside a verifier span.
+    # - MERGECRAFT_MCP_NAME       → /mcp/reviewer  (primary reviewer surface)
+    # - MERGECRAFT_VERIFIER_MCP_NAME → /mcp/verifier  (verifier subagent surface)
+    # Verifier subagents inherit the full mcp.json and call the verifier
+    # server; their disallowedTools list gates the reviewer-surface entries.
+    # D10 (OB4): forward the orchestrator agent id on the reviewer entry so
+    # the server can attribute the primary reviewer's tool.call spans.
+    reviewer_entry = mcp_http_server_entry(ctx, "claude")
+    verifier_entry = mcp_http_server_entry(ctx, VERIFIER_AGENT_NAME)
     config_path.write_text(
         json.dumps(
             {
                 "mcpServers": {
-                    MERGECRAFT_MCP_NAME: server_entry,
+                    MERGECRAFT_MCP_NAME: reviewer_entry,
+                    MERGECRAFT_VERIFIER_MCP_NAME: verifier_entry,
                 }
             }
         ),

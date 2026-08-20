@@ -166,7 +166,11 @@ def test_reviewer_and_verifier_have_different_toolsets(tmp_path: Path) -> None:
     assert "checkout_pr" in reviewer_names
     assert "checkout_pr" not in verifier_names
     assert "verify_agent_findings" in verifier_names
-    assert "verify_agent_findings" not in reviewer_names
+    # C6: primary reviewer also admits verify_agent_findings (VERIFICATION class).
+    assert "verify_agent_findings" in reviewer_names
+    # submit_review_verdict (TERMINAL_PROTOCOL) is on the primary reviewer but not verifier.
+    assert "submit_review_verdict" in reviewer_names
+    assert "submit_review_verdict" not in verifier_names
 
 
 def test_per_agent_model_chain_falls_back(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -305,19 +309,31 @@ def test_toolset_derives_from_tool_classes(tmp_path: Path) -> None:
     declared_classes = frozenset(str(cls) for cls in reviewer.tool_classes)
     assert declared_classes == expected_classes
     assert ToolClass.SCOPE in reviewer.tool_classes
-    assert ToolClass.VERIFICATION not in reviewer.tool_classes
+    # C6: primary reviewer now includes VERIFICATION (verify_agent_findings) and
+    # TERMINAL_PROTOCOL (submit_review_verdict).
+    assert ToolClass.VERIFICATION in reviewer.tool_classes
+    assert ToolClass.TERMINAL_PROTOCOL in reviewer.tool_classes
 
 
-def test_no_read_only_agent_gets_a_terminal_protocol_tool(tmp_path: Path) -> None:
-    """Read-only roles must never receive ``terminal-protocol`` tools."""
+def test_verifier_and_classifier_do_not_receive_terminal_protocol_tool(tmp_path: Path) -> None:
+    """Verifier and classifier must never receive ``terminal-protocol`` tools.
+
+    The primary reviewer IS permitted ``submit_review_verdict`` on /mcp/reviewer
+    (playbook step 10, C6). Verifier and classifier must still be denied it.
+    """
     _write_config(tmp_path, _DEFAULT_MODELS_YAML)
     registry = _load_registry(tmp_path)
     ctx = _tool_ctx(tmp_path)
 
-    for role in ("reviewer", "verifier", "classifier"):
+    for role in ("verifier", "classifier"):
         binding = _resolve_role(registry, role)
         names = _tool_names(registry, binding, ctx)
         assert _TERMINAL_PROTOCOL_TOOL not in names, f"{role} received terminal protocol tool"
+
+    # Reviewer DOES have it (deliberate C6 admission — pin the allowance).
+    reviewer_binding = _resolve_role(registry, "reviewer")
+    reviewer_names = _tool_names(registry, reviewer_binding, ctx)
+    assert _TERMINAL_PROTOCOL_TOOL in reviewer_names
 
 
 def test_per_agent_budget_and_timeout_apply(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

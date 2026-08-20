@@ -24,7 +24,6 @@ from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
 from mergecraft.agents.shared import AgentResult
 from mergecraft.mcp.server import MCP_ENDPOINT, MCP_REVIEWER_ENDPOINT, MCP_VERIFIER_ENDPOINT
-from mergecraft.types import VERIFIER_AGENT_NAME
 
 if TYPE_CHECKING:
     import pytest
@@ -66,26 +65,32 @@ async def test_primary_reviewer_dispatch_url_ends_with_reviewer_endpoint(
     assert not url.endswith("/mcp")
 
 
-def test_verifier_dispatch_url_ends_with_verifier_endpoint(tmp_path: Path) -> None:
-    """W11.1: verifier harness MCP config is ``/mcp/verifier``, not orchestrator ``/mcp``.
+def test_verifier_mcp_entry_ends_with_verifier_endpoint(tmp_path: Path) -> None:
+    """W11.1 / W12: ``write_mcp_config`` always writes a /mcp/verifier entry for subagents.
 
-    Codex/Claude ``write_mcp_config`` currently copies ``ctx.mcp_server_url``
-    verbatim. W12 must hand the verifier the role path (rewrite inside
-    ``write_mcp_config`` from the bound agent id, or a role map on the
-    run context). ``x-mergecraft-agent-id`` is not the routing credential.
+    ``write_mcp_config`` runs once in the orchestrator (agent_id="claude", not in a
+    verifier span). It always writes both server entries so verifier subagents
+    inherit the correct /mcp/verifier URL without a second config write:
+      - ``MERGECRAFT_MCP_NAME``         → /mcp/reviewer  (primary reviewer surface)
+      - ``MERGECRAFT_VERIFIER_MCP_NAME`` → /mcp/verifier  (verifier subagent surface)
+    No ``agent_run_span`` fake is needed — this tests the production call path.
     """
     from mergecraft.agents.claude import write_mcp_config
-    from mergecraft.tracing.signals import agent_run_span
-    from mergecraft.types import MERGECRAFT_MCP_NAME
+    from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 
     ctx = make_agent_run_context(tmp_path, resolved_model="anthropic/claude-sonnet")
     ctx.mcp_server_url = "http://127.0.0.1:3764/mcp"
 
-    with agent_run_span(None, agent_id=VERIFIER_AGENT_NAME, role="verifier"):
-        config_path = Path(write_mcp_config(ctx))
+    config_path = Path(write_mcp_config(ctx))  # no fake span — production path
 
     payload = json.loads(config_path.read_text(encoding="utf-8"))
-    url = payload["mcpServers"][MERGECRAFT_MCP_NAME]["url"]
-    _assert_role_path(str(url), MCP_VERIFIER_ENDPOINT)
-    assert str(url).endswith("/mcp/verifier")
-    assert not str(url).endswith("/mcp")
+    # Primary reviewer entry always points to /mcp/reviewer.
+    reviewer_url = payload["mcpServers"][MERGECRAFT_MCP_NAME]["url"]
+    _assert_role_path(str(reviewer_url), MCP_REVIEWER_ENDPOINT)
+    assert str(reviewer_url).endswith("/mcp/reviewer")
+    assert not str(reviewer_url).endswith("/mcp")
+    # Verifier subagent entry always points to /mcp/verifier.
+    verifier_url = payload["mcpServers"][MERGECRAFT_VERIFIER_MCP_NAME]["url"]
+    _assert_role_path(str(verifier_url), MCP_VERIFIER_ENDPOINT)
+    assert str(verifier_url).endswith("/mcp/verifier")
+    assert not str(verifier_url).endswith("/mcp")
