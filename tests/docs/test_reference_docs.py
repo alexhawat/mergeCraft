@@ -1,19 +1,9 @@
-"""G2 — README action/CLI reference tables vs. live ``action.yml``/CLI app (RED, G2.1).
+"""G2 + RD1.1 — generated CLI/Action reference docs vs. live ``action.yml``/CLI app.
 
-Three separate audits found README/action.yml/CLI drift (issues-showcase-readiness
-wave plan, PR G2): the README's "full input list" table documents 9 of 24 real
-``action.yml`` inputs, neither declared output is documented anywhere, the CLI
-table documents ``mergecraft traces <run-id>`` when the real registered command is
-``mergecraft traces show <run-id>``, and whole CLI groups (``analyzers``, ``eval``,
-``findings``, ``version``, ``gha token``, ``tracing logfire enable/disable``) are
-undocumented. G2.2 (a later wave) adds ``scripts/gen_reference_docs.py`` to
-regenerate both tables from the live sources between HTML sentinel comments and
-wires a ``--check`` gate into ``make ci-static``; this suite is the RED contract
-that wave implements against.
-
-Every assertion here reads the *live* ``action.yml`` / live Typer ``app`` object
-rather than hard-coding today's counts, so the suite stays correct as the code
-evolves instead of re-encoding today's drift as magic numbers.
+G2 pinned README sentinel tables; RD1.1 retargets the contract to
+``docs/action-reference.md`` and ``docs/cli.md`` and asserts the landing README
+no longer owns the full generated tables. RD1.2 implements the generator move;
+this suite stays RED (xfail) until then.
 """
 
 from __future__ import annotations
@@ -35,6 +25,10 @@ if TYPE_CHECKING:
 
 ACTION_YML = REPO_ROOT / "action.yml"
 README = REPO_ROOT / "README.md"
+ACTION_REFERENCE_DOC = REPO_ROOT / "docs" / "action-reference.md"
+CLI_DOC = REPO_ROOT / "docs" / "cli.md"
+
+_RD1_XFAIL = pytest.mark.xfail(reason="green after RD1.2", strict=False)
 
 # ---------------------------------------------------------------------------
 # action.yml helpers
@@ -55,16 +49,19 @@ def _action_outputs() -> dict[str, dict[str, Any]]:
     return dict(_load_action_yml().get("outputs") or {})
 
 
-def _readme_action_input_table() -> dict[str, str]:
-    """Parse README's ``| Input | Default | Description |`` table.
+def _action_reference_input_table() -> dict[str, str]:
+    """Parse ``docs/action-reference.md`` action-input table.
 
-    Returns ``{input_name: raw_default_cell_text}`` (the ``Default`` column,
-    backticks and placeholder prose like ``_(empty)_`` left un-normalised —
-    callers normalise per their own needs).
+    Returns ``{input_name: raw_default_cell_text}``.
     """
-    text = README.read_text(encoding="utf-8")
+    assert ACTION_REFERENCE_DOC.is_file(), (
+        f"missing {ACTION_REFERENCE_DOC.relative_to(REPO_ROOT)} (RD1.2)"
+    )
+    text = ACTION_REFERENCE_DOC.read_text(encoding="utf-8")
     match = re.search(r"The full input list:\n\n(\|.*\n(?:\|.*\n)+)", text)
-    assert match, "README.md: could not locate 'The full input list:' action-input table"
+    assert match, (
+        f"{ACTION_REFERENCE_DOC.name}: could not locate 'The full input list:' action-input table"
+    )
     rows = match.group(1).splitlines()[2:]  # drop header + separator rows
     documented: dict[str, str] = {}
     for row in rows:
@@ -82,12 +79,7 @@ def _readme_action_input_table() -> dict[str, str]:
 
 
 def _walk_typer_commands(app: typer.Typer, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
-    """Recursively collect every leaf command's full path from a Typer app.
-
-    Walks ``registered_commands`` (leaves) and ``registered_groups``
-    (``add_typer`` sub-apps, nested arbitrarily deep — e.g. ``tracing`` ->
-    ``logfire`` -> ``enable``/``disable`` is 3 levels).
-    """
+    """Recursively collect every leaf command's full path from a Typer app."""
     paths: set[tuple[str, ...]] = set()
     for command in app.registered_commands:
         if command.hidden:
@@ -107,23 +99,11 @@ def _walk_typer_commands(app: typer.Typer, prefix: tuple[str, ...] = ()) -> set[
 _PLACEHOLDER = re.compile(r"^<[^>]+>$")
 _BRACKET = re.compile(r"^\[[^\]]+\]$")
 _INVOCATION = re.compile(r"`(mergecraft [^`]+)`")
-_CLI_HEADING = "## \U0001f9f0 CLI"
+_CLI_SENTINEL_BEGIN = "<!-- BEGIN:cli-commands -->"
 
 
 def _parse_cli_invocation(invocation: str) -> list[tuple[str, ...]]:
-    """Parse one backtick-quoted ``mergecraft ...`` string into command-path tuples.
-
-    Honours the README's `` / `` shorthand for sibling subcommands (e.g.
-    ``models list / set / show`` -> ``("models","list")``, ``("models","set")``,
-    ``("models","show")``) and strips a single trailing positional-argument or
-    option-flag token (``<placeholder>``, ``[placeholder]``, a bare upper-case
-    value placeholder like ``N``, or a ``--flag``). This is a literal parse of
-    what the row actually says — it does not infer a "corrected" form, which is
-    exactly why ``mergecraft traces <run-id>`` parses to ``("traces",)`` (not a
-    real leaf command; the real leaf is ``("traces","show")``) while
-    ``mergecraft auth <provider>`` parses to ``("auth",)`` — also not a leaf,
-    since ``auth`` only has named-provider children.
-    """
+    """Parse one backtick-quoted ``mergecraft ...`` string into command-path tuples."""
     text = invocation.strip()
     if not text.startswith("mergecraft"):
         return []
@@ -149,17 +129,20 @@ def _parse_cli_invocation(invocation: str) -> list[tuple[str, ...]]:
     return paths
 
 
-def _readme_cli_section() -> str:
-    text = README.read_text(encoding="utf-8")
-    start = text.index(_CLI_HEADING)
-    rest = text[start + len(_CLI_HEADING) :]
-    end_match = re.search(r"\n## ", rest)
-    return rest[: end_match.start()] if end_match else rest
+def _cli_doc_text() -> str:
+    assert CLI_DOC.is_file(), f"missing {CLI_DOC.relative_to(REPO_ROOT)} (RD1.2)"
+    text = CLI_DOC.read_text(encoding="utf-8")
+    begin = text.find(_CLI_SENTINEL_BEGIN)
+    if begin == -1:
+        return text
+    rest = text[begin + len(_CLI_SENTINEL_BEGIN) :]
+    end = rest.find("<!-- END:cli-commands -->")
+    return rest[:end] if end != -1 else rest
 
 
-def _readme_documented_cli_paths() -> set[tuple[str, ...]]:
+def _cli_doc_documented_cli_paths() -> set[tuple[str, ...]]:
     documented: set[tuple[str, ...]] = set()
-    for match in _INVOCATION.finditer(_readme_cli_section()):
+    for match in _INVOCATION.finditer(_cli_doc_text()):
         documented.update(_parse_cli_invocation(match.group(1)))
     return documented
 
@@ -172,40 +155,29 @@ def _auth_registry_providers() -> set[str]:
     return providers
 
 
-def _readme_auth_providers() -> set[str]:
-    """Return the provider names README documents for ``mergecraft auth``.
-
-    Handles today's shorthand row (``mergecraft auth <provider>`` followed by a
-    parenthetical comma list) and, as a fallback, a future table shape where the
-    reference-doc generator expands each provider into its own
-    ``mergecraft auth <name>`` row instead of the shorthand.
-    """
-    text = README.read_text(encoding="utf-8")
+def _cli_doc_auth_providers() -> set[str]:
+    """Return provider names documented for ``mergecraft auth`` in ``docs/cli.md``."""
+    text = _cli_doc_text()
     row_match = re.search(r"^\|\s*`mergecraft auth <provider>`.*$", text, re.MULTILINE)
     if row_match:
         paren_match = re.search(r"\(([^)]*)\)", row_match.group(0))
         assert paren_match, (
-            f"README auth row has no parenthetical provider list: {row_match.group(0)!r}"
+            f"CLI doc auth row has no parenthetical provider list: {row_match.group(0)!r}"
         )
         return {name.strip().strip("`") for name in paren_match.group(1).split(",") if name.strip()}
-    documented_paths = _readme_documented_cli_paths()
+    documented_paths = _cli_doc_documented_cli_paths()
     return {path[1] for path in documented_paths if len(path) >= 2 and path[0] == "auth"}
 
 
 # ---------------------------------------------------------------------------
-# generator-script loader (scripts/gen_reference_docs.py does not exist until G2.2)
+# generator-script loader
 # ---------------------------------------------------------------------------
 
 
 def _load_gen_reference_docs() -> Any:
-    """Load ``scripts/gen_reference_docs.py`` per-test (never at module import time).
-
-    A missing script must fail exactly the tests that need it, not blow up
-    collection for the whole file — mirrors ``tests/ci/test_hook_pins.py`` and
-    ``tests/ci/test_action_yml_hygiene.py``.
-    """
+    """Load ``scripts/gen_reference_docs.py`` per-test (never at module import time)."""
     path = REPO_ROOT / "scripts" / "gen_reference_docs.py"
-    assert path.is_file(), "scripts/gen_reference_docs.py missing (lands in G2.2)"
+    assert path.is_file(), "scripts/gen_reference_docs.py missing"
     spec = importlib.util.spec_from_file_location("gen_reference_docs", path)
     assert spec is not None
     assert spec.loader is not None
@@ -214,9 +186,17 @@ def _load_gen_reference_docs() -> Any:
     return module
 
 
-# Design note: no pre-existing sentinel convention exists anywhere in this repo
-# (confirmed via grep) — these markers are this generator's own contract, first
-# defined here; G2.2 must match them exactly.
+def _patch_module_doc_paths(module: Any, *, cli_doc: Path, action_doc: Path) -> None:
+    module.CLI_DOC_PATH = cli_doc
+    module.ACTION_DOC_PATH = action_doc
+
+
+def _generator_splices_doc_paths() -> bool:
+    """True once RD1.2 retargets the generator off ``README.md`` sentinels."""
+    source = (REPO_ROOT / "scripts" / "gen_reference_docs.py").read_text(encoding="utf-8")
+    return "CLI_DOC_PATH" in source and "ACTION_DOC_PATH" in source
+
+
 _SCRATCH_ACTION_YML = """\
 inputs:
   prompt:
@@ -235,10 +215,18 @@ outputs:
 _SCRATCH_README = """\
 # Scratch
 
-## \U0001f9f0 CLI
+See [CLI reference](docs/cli.md) and [Action reference](docs/action-reference.md).
+"""
+
+_SCRATCH_CLI_DOC = """\
+# CLI reference
 
 <!-- BEGIN:cli-commands -->
 <!-- END:cli-commands -->
+"""
+
+_SCRATCH_ACTION_REF = """\
+# Action reference
 
 #### Action inputs (`with:`)
 
@@ -252,66 +240,182 @@ _SCRATCH_README = """\
 """
 
 
-def _write_scratch_repo(tmp_path: Path, module: Any) -> tuple[Path, Path]:
-    """Point the loaded module's path-level constants at a scratch copy.
-
-    Only ``action.yml``/``README.md`` are scratch files — the CLI table half
-    of the generator imports the real ``mergecraft.cli.app`` object (there is
-    no file to substitute for a live Python object; the generator will import
-    the real app in production too).
-    """
+def _write_scratch_repo(tmp_path: Path, module: Any) -> dict[str, Path]:
+    """Point the loaded module's path constants at scratch copies."""
     action_yml = tmp_path / "action.yml"
     readme = tmp_path / "README.md"
+    cli_doc = tmp_path / "docs" / "cli.md"
+    action_doc = tmp_path / "docs" / "action-reference.md"
+    cli_doc.parent.mkdir(parents=True, exist_ok=True)
+
     action_yml.write_text(_SCRATCH_ACTION_YML, encoding="utf-8")
     readme.write_text(_SCRATCH_README, encoding="utf-8")
+    cli_doc.write_text(_SCRATCH_CLI_DOC, encoding="utf-8")
+    action_doc.write_text(_SCRATCH_ACTION_REF, encoding="utf-8")
+
     module.ACTION_YML_PATH = action_yml
     module.README_PATH = readme
-    return action_yml, readme
+    _patch_module_doc_paths(module, cli_doc=cli_doc, action_doc=action_doc)
+    return {
+        "action_yml": action_yml,
+        "readme": readme,
+        "cli_doc": cli_doc,
+        "action_doc": action_doc,
+    }
 
 
 # ---------------------------------------------------------------------------
-# 1. action inputs
+# RD1.1 — generated reference pages live off the landing README
 # ---------------------------------------------------------------------------
 
 
-def test_every_action_input_is_documented() -> None:
+@_RD1_XFAIL
+def test_action_inputs_table_lives_in_action_reference_doc() -> None:
     real = set(_action_inputs())
-    documented = set(_readme_action_input_table())
+    documented = set(_action_reference_input_table())
     assert documented == real, (
-        f"README action-input table drift — missing: {sorted(real - documented)}, "
-        f"stale/extra: {sorted(documented - real)}"
+        f"{ACTION_REFERENCE_DOC.name} action-input table drift — missing: "
+        f"{sorted(real - documented)}, stale/extra: {sorted(documented - real)}"
+    )
+    readme_text = README.read_text(encoding="utf-8")
+    assert "The full input list:" not in readme_text, (
+        "README.md must not host the full action-input table after RD1.2"
+    )
+
+
+@_RD1_XFAIL
+def test_action_outputs_table_lives_in_action_reference_doc() -> None:
+    outputs = set(_action_outputs())
+    assert outputs, "action.yml declares no outputs — nothing to check against"
+    assert ACTION_REFERENCE_DOC.is_file(), (
+        f"missing {ACTION_REFERENCE_DOC.relative_to(REPO_ROOT)} (RD1.2)"
+    )
+    action_text = ACTION_REFERENCE_DOC.read_text(encoding="utf-8")
+    missing = sorted(name for name in outputs if f"`{name}`" not in action_text)
+    assert not missing, f"action.yml outputs undocumented in {ACTION_REFERENCE_DOC.name}: {missing}"
+    readme_text = README.read_text(encoding="utf-8")
+    assert "<!-- BEGIN:action-outputs -->" not in readme_text, (
+        "README.md must not host generated action-output sentinels after RD1.2"
+    )
+
+
+@_RD1_XFAIL
+def test_cli_table_lives_in_cli_doc() -> None:
+    real = _walk_typer_commands(root_app)
+    documented = _cli_doc_documented_cli_paths()
+    missing = sorted(real - documented)
+    assert not missing, f"CLI commands missing from {CLI_DOC.name}: {missing}"
+    readme_text = README.read_text(encoding="utf-8")
+    assert _CLI_SENTINEL_BEGIN not in readme_text, (
+        "README.md must not contain BEGIN:cli-commands after RD1.2"
+    )
+
+
+@_RD1_XFAIL
+def test_generator_check_fails_on_cli_doc_drift(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _load_gen_reference_docs()
+    paths = _write_scratch_repo(tmp_path, module)
+    assert module.main([]) == 0
+
+    cli_doc = paths["cli_doc"]
+    generated = cli_doc.read_text(encoding="utf-8")
+    mutated = generated.replace(
+        "<!-- END:cli-commands -->",
+        "| `mergecraft bogus` | drift injected by test_generator_check_fails_on_cli_doc_drift |\n"
+        "<!-- END:cli-commands -->",
+    )
+    assert mutated != generated, "fixture CLI sentinel marker not found; cannot inject drift"
+    cli_doc.write_text(mutated, encoding="utf-8")
+
+    capsys.readouterr()
+    check_exit = module.main(["--check"])
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+
+    assert check_exit != 0, "--check must exit non-zero when docs/cli.md drifts"
+    diff_lines = [line for line in output.splitlines() if line.startswith(("---", "+++", "@@"))]
+    assert diff_lines, "--check must emit a unified diff on CLI doc drift; got:\n" + output
+
+
+@_RD1_XFAIL
+def test_generator_check_fails_on_action_doc_drift(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _load_gen_reference_docs()
+    paths = _write_scratch_repo(tmp_path, module)
+    assert module.main([]) == 0
+
+    action_doc = paths["action_doc"]
+    generated = action_doc.read_text(encoding="utf-8")
+    mutated = generated.replace(
+        "<!-- END:action-inputs -->",
+        "| `bogus_input` | `nope` | drift injected by test_generator_check_fails_on_action_doc_drift |\n"
+        "<!-- END:action-inputs -->",
+    )
+    assert mutated != generated, (
+        "fixture action-input sentinel marker not found; cannot inject drift"
+    )
+    action_doc.write_text(mutated, encoding="utf-8")
+
+    capsys.readouterr()
+    check_exit = module.main(["--check"])
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+
+    assert check_exit != 0, "--check must exit non-zero when docs/action-reference.md drifts"
+    diff_lines = [line for line in output.splitlines() if line.startswith(("---", "+++", "@@"))]
+    assert diff_lines, (
+        "--check must emit a unified diff on action-reference doc drift; got:\n" + output
+    )
+
+
+@_RD1_XFAIL
+def test_readme_links_to_generated_reference_pages() -> None:
+    readme_text = README.read_text(encoding="utf-8")
+    assert "docs/cli.md" in readme_text, "README.md must link to docs/cli.md"
+    assert "docs/action-reference.md" in readme_text, (
+        "README.md must link to docs/action-reference.md"
     )
 
 
 # ---------------------------------------------------------------------------
-# 2. action outputs
+# G2 carry-over — same contracts, retargeted off README (RED until RD1.2)
 # ---------------------------------------------------------------------------
 
 
+@_RD1_XFAIL
+def test_every_action_input_is_documented() -> None:
+    real = set(_action_inputs())
+    documented = set(_action_reference_input_table())
+    assert documented == real, (
+        f"action-reference action-input table drift — missing: {sorted(real - documented)}, "
+        f"stale/extra: {sorted(documented - real)}"
+    )
+
+
+@_RD1_XFAIL
 def test_both_action_outputs_are_documented() -> None:
     outputs = set(_action_outputs())
     assert outputs, "action.yml declares no outputs — nothing to check against"
-    text = README.read_text(encoding="utf-8")
+    assert ACTION_REFERENCE_DOC.is_file(), (
+        f"missing {ACTION_REFERENCE_DOC.relative_to(REPO_ROOT)} (RD1.2)"
+    )
+    text = ACTION_REFERENCE_DOC.read_text(encoding="utf-8")
     missing = sorted(name for name in outputs if f"`{name}`" not in text)
-    assert not missing, f"action.yml outputs undocumented anywhere in README.md: {missing}"
+    assert not missing, f"action.yml outputs undocumented in {ACTION_REFERENCE_DOC.name}: {missing}"
 
 
-# ---------------------------------------------------------------------------
-# 3. action input defaults
-# ---------------------------------------------------------------------------
-
-
+@_RD1_XFAIL
 def test_action_input_defaults_match_yaml() -> None:
     inputs = _action_inputs()
-    documented = _readme_action_input_table()
+    documented = _action_reference_input_table()
     mismatches: list[str] = []
     for name, spec in inputs.items():
         if "default" not in spec:
-            # No default key at all in action.yml — distinct from an explicit
-            # empty-string default; nothing to compare here.
             continue
         if name not in documented:
-            # Presence is test_every_action_input_is_documented's job.
             continue
         real_default = str(spec["default"])
         doc_cell = documented[name]
@@ -319,54 +423,45 @@ def test_action_input_defaults_match_yaml() -> None:
         if normalized in {"_(empty)_", "_(unset)_"}:
             normalized = ""
         if real_default != normalized:
-            mismatches.append(
-                f"{name}: action.yml default={real_default!r}, README says {doc_cell!r}"
-            )
+            mismatches.append(f"{name}: action.yml default={real_default!r}, doc says {doc_cell!r}")
     assert not mismatches, "\n".join(mismatches)
 
 
-# ---------------------------------------------------------------------------
-# 4/5. CLI commands vs. README's CLI table (both directions)
-# ---------------------------------------------------------------------------
-
-
+@_RD1_XFAIL
 def test_every_cli_command_is_documented() -> None:
     real = _walk_typer_commands(root_app)
-    documented = _readme_documented_cli_paths()
+    documented = _cli_doc_documented_cli_paths()
     missing = sorted(real - documented)
-    assert not missing, f"CLI commands missing from README's CLI table: {missing}"
+    assert not missing, f"CLI commands missing from {CLI_DOC.name}: {missing}"
 
 
+@_RD1_XFAIL
 def test_documented_cli_commands_all_exist() -> None:
     real = _walk_typer_commands(root_app)
-    documented = _readme_documented_cli_paths()
+    documented = _cli_doc_documented_cli_paths()
     bogus = sorted(documented - real)
     assert not bogus, (
-        f"README documents CLI invocations that don't resolve to a real registered "
-        f"command: {bogus} (e.g. `mergecraft traces <run-id>` parses to ('traces',), "
-        f"but the real leaf command is ('traces','show'))"
+        f"{CLI_DOC.name} documents CLI invocations that don't resolve to a real registered "
+        f"command: {bogus}"
     )
 
 
-# ---------------------------------------------------------------------------
-# 6. auth provider list
-# ---------------------------------------------------------------------------
-
-
+@_RD1_XFAIL
 def test_auth_provider_list_matches_registry() -> None:
     real = _auth_registry_providers()
-    documented = _readme_auth_providers()
+    documented = _cli_doc_auth_providers()
     assert documented == real, (
-        f"README auth provider list drift — missing: {sorted(real - documented)}, "
+        f"CLI doc auth provider list drift — missing: {sorted(real - documented)}, "
         f"stale: {sorted(documented - real)}"
     )
 
 
 # ---------------------------------------------------------------------------
-# 7/8. scripts/gen_reference_docs.py --check behaviour (RED until G2.2)
+# G2 generator --check behaviour (retargeted scratch docs; RED until RD1.2)
 # ---------------------------------------------------------------------------
 
 
+@_RD1_XFAIL
 def test_generator_check_mode_is_idempotent(tmp_path: Path) -> None:
     module = _load_gen_reference_docs()
     _write_scratch_repo(tmp_path, module)
@@ -378,53 +473,52 @@ def test_generator_check_mode_is_idempotent(tmp_path: Path) -> None:
     assert check_exit == 0, "--check must exit 0 immediately after a write pass (idempotent)"
 
 
+@_RD1_XFAIL
 def test_generator_check_mode_detects_drift(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     module = _load_gen_reference_docs()
-    _, readme = _write_scratch_repo(tmp_path, module)
+    paths = _write_scratch_repo(tmp_path, module)
     assert module.main([]) == 0
 
-    generated = readme.read_text(encoding="utf-8")
+    action_doc = paths["action_doc"]
+    generated = action_doc.read_text(encoding="utf-8")
     mutated = generated.replace(
         "<!-- END:action-inputs -->",
         "| `bogus_input` | `nope` | drift injected by test_generator_check_mode_detects_drift |\n"
         "<!-- END:action-inputs -->",
     )
-    assert mutated != generated, "fixture sentinel marker not found; cannot inject drift"
-    readme.write_text(mutated, encoding="utf-8")
+    assert mutated != generated, (
+        "fixture action-input sentinel marker not found; cannot inject drift"
+    )
+    action_doc.write_text(mutated, encoding="utf-8")
 
-    capsys.readouterr()  # drain any output from the write pass above
+    capsys.readouterr()
     check_exit = module.main(["--check"])
     captured = capsys.readouterr()
     output = captured.out + captured.err
 
-    assert check_exit != 0, "--check must exit non-zero when README drifts from action.yml"
+    assert check_exit != 0, "--check must exit non-zero when generated docs drift"
     diff_lines = [line for line in output.splitlines() if line.startswith(("---", "+++", "@@"))]
     assert diff_lines, (
-        "--check must emit a unified diff (lines starting with ---/+++/@@) on drift, "
-        f"not just a terse message; got:\n{output}"
+        "--check must emit a unified diff on drift, not just a terse message; got:\n" + output
     )
 
 
+@_RD1_XFAIL
 def test_generator_fails_when_a_sentinel_pair_is_removed(tmp_path: Path) -> None:
-    """A removed sentinel pair must fail loudly, not silently orphan that table.
-
-    If a sentinel pair is deleted (e.g. by a careless hand-edit) but the table
-    content it used to wrap is left behind, that table still contains the
-    right substrings — so a content-presence check alone would stay green
-    while the table quietly stops being regenerated or verified. Every
-    sentinel pair must therefore be mandatory: removing one must raise, in
-    both write and ``--check`` mode.
-    """
+    assert _generator_splices_doc_paths(), (
+        "gen_reference_docs.py must splice docs/action-reference.md (RD1.2)"
+    )
     module = _load_gen_reference_docs()
-    _, readme = _write_scratch_repo(tmp_path, module)
+    paths = _write_scratch_repo(tmp_path, module)
+    action_doc = paths["action_doc"]
 
-    text = readme.read_text(encoding="utf-8")
+    text = action_doc.read_text(encoding="utf-8")
     assert "<!-- BEGIN:action-outputs -->" in text
     stripped = text.replace("<!-- BEGIN:action-outputs -->\n<!-- END:action-outputs -->\n", "", 1)
-    assert stripped != text, "fixture sentinel pair not found; cannot remove it"
-    readme.write_text(stripped, encoding="utf-8")
+    assert stripped != text, "fixture action-output sentinel pair not found; cannot remove it"
+    action_doc.write_text(stripped, encoding="utf-8")
 
     with pytest.raises(SystemExit):
         module.main([])
