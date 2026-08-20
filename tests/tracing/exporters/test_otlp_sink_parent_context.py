@@ -108,10 +108,6 @@ def _export_events_via_otlp_sink(events: list[Any]) -> list[dict[str, Any]]:
     return spans
 
 
-@pytest.mark.xfail(
-    reason="green after W6: #374 OTel parent context + span_id override",
-    strict=False,
-)
 def test_child_export_carries_otel_parent_and_mergecraft_span_id(
     trace_event_payload: dict[str, Any],
 ) -> None:

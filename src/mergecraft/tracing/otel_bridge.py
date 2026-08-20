@@ -67,44 +67,41 @@ def attach_trace_context(span: Span) -> Iterator[None]:
         yield
         return
 
-    try:
-        otel_trace_id = int(span.trace_id[:32], 16) if span.trace_id else None
-    except (TypeError, ValueError):  # fmt: skip
-        # Malformed trace_id (e.g. not hex) — degrade to a no-op rather
-        # than fail the caller's review (convention 6).
-        yield
-        return
+    from mergecraft.tracing.exporters import (
+        _build_otel_parent_context,
+        _parse_mergecraft_otel_span_id,
+        _parse_mergecraft_otel_trace_id,
+    )
 
+    otel_trace_id = _parse_mergecraft_otel_trace_id(span.trace_id) if span.trace_id else None
     if not otel_trace_id:
         yield
         return
 
-    # The OTel global tracer provider may be the ProxyTracerProvider when
-    # no real exporter has been configured. We still need a real SDK span
-    # so ``end()`` is meaningful; falling back to the proxy's tracer
-    # returns a ``NonRecordingSpan`` whose context we can still wrap.
-    provider = otel_trace.get_tracer_provider()
-    tracer = provider.get_tracer("mergecraft.tracing.otel_bridge")
+    otel_span_id = _parse_mergecraft_otel_span_id(span.span_id) if span.span_id else None
+    if otel_span_id is None:
+        yield
+        return
 
-    otel_span = tracer.start_span(
-        span.kind,
-        attributes={
-            "mergecraft.span_id": span.span_id,
-            "mergecraft.trace_id": span.trace_id,
-            "mergecraft.session_id": span.session_id,
-        },
-    )
+    parent_context = _build_otel_parent_context(otel_trace_id, span.parent_span_id)
+    base_context = parent_context
+    if base_context is None and not span.parent_span_id:
+        from mergecraft.tracing.exporters import _root_otel_context
 
-    span_ctx = otel_span.get_span_context()
+        base_context = _root_otel_context()
+
+    # Build the bridged context directly — do not ``start_span`` on the
+    # ProxyTracerProvider placeholder (``get_current_span()`` returns that
+    # same object; ``_override_span_context`` would leak valid ids).
     bridged_ctx = SpanContext(
         trace_id=otel_trace_id,
-        span_id=span_ctx.span_id,
+        span_id=otel_span_id,
         is_remote=False,
         trace_flags=TraceFlags(TraceFlags.SAMPLED),
         trace_state=TraceState(),
     )
     bridged_span = NonRecordingSpan(bridged_ctx)
-    bridged_otel_ctx = otel_trace.set_span_in_context(bridged_span)
+    bridged_otel_ctx = otel_trace.set_span_in_context(bridged_span, base_context)
     token = otel_context.attach(bridged_otel_ctx)
     try:
         yield
@@ -112,8 +109,6 @@ def attach_trace_context(span: Span) -> Iterator[None]:
         with contextlib.suppress(Exception):
             # Defensive: a stale token is harmless, never fail the caller.
             otel_context.detach(token)
-        with contextlib.suppress(Exception):
-            otel_span.end()
 
 
 __all__ = ["attach_trace_context"]
