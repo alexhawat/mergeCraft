@@ -408,6 +408,10 @@ def test_live_verifier_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
         token = getattr(tool_ctx, "mcp_auth_token", None)
         if isinstance(token, str) and token:
             headers["Authorization"] = f"Bearer {token}"
+        orchestrator_token = getattr(tool_ctx, "mcp_orchestrator_auth_token", None)
+        orchestrator_headers = {"Content-Type": "application/json"}
+        if isinstance(orchestrator_token, str) and orchestrator_token:
+            orchestrator_headers["Authorization"] = f"Bearer {orchestrator_token}"
         with urlopen(
             Request(verifier_url, data=list_body, headers=headers, method="POST"),
             timeout=5,
@@ -420,7 +424,7 @@ def test_live_verifier_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
         assert "checkout_pr" not in names
 
         with urlopen(
-            Request(url, data=list_body, headers=headers, method="POST"),
+            Request(url, data=list_body, headers=orchestrator_headers, method="POST"),
             timeout=5,
         ) as resp:
             orchestrator = json.loads(resp.read().decode())

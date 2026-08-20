@@ -31,6 +31,7 @@ from mergecraft.mcp.ports import select_port
 from mergecraft.mcp.server import (
     MCP_ENDPOINT,
     MCP_HOST,
+    MCP_REVIEWER_ENDPOINT,
     start_mcp_http_server,
 )
 from mergecraft.mcp.tool_state import init_tool_state
@@ -74,6 +75,17 @@ def _per_run_token(ctx: ToolContext) -> str:
     if isinstance(token, str) and token:
         return token
     pytest.fail("per-run MCP token was not issued at server startup (D15)")
+
+
+def _orchestrator_token(ctx: ToolContext) -> str:
+    token = getattr(ctx, "mcp_orchestrator_auth_token", None)
+    if isinstance(token, str) and token:
+        return token
+    pytest.fail("orchestrator MCP token was not issued at server startup")
+
+
+def _role_url(base_url: str, role_suffix: str) -> str:
+    return base_url[: -len(MCP_ENDPOINT)] + role_suffix
 
 
 def _rpc_post(
@@ -141,7 +153,7 @@ def test_tools_list_and_call_require_per_run_token(tmp_path: Path) -> None:
             "x-mergecraft-agent-id is tracing-only and must not authenticate tools/list"
         )
 
-        token = _per_run_token(ctx)
+        token = _orchestrator_token(ctx)
         auth = {"Authorization": f"Bearer {token}"}
         status, body = _rpc_post(url, _LIST_PAYLOAD, headers=auth)
         assert _is_tools_list_ok(status, body), (
@@ -271,7 +283,7 @@ def test_authenticated_mixed_batch_skips_notification_shaped_tools_call(
     ctx = _tool_ctx(tmp_path)
     url, stop = start_mcp_http_server(ctx)
     try:
-        token = _per_run_token(ctx)
+        token = _orchestrator_token(ctx)
         batch = [
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
             {
@@ -288,5 +300,37 @@ def test_authenticated_mixed_batch_skips_notification_shaped_tools_call(
             f"notification-shaped tools/call must be skipped (no response produced); "
             f"got response ids={response_ids}"
         )
+    finally:
+        stop()
+
+
+def test_orchestrator_and_role_routes_use_distinct_bearer_tokens(tmp_path: Path) -> None:
+    """Harness token authenticates reviewer/verifier; orchestrator token secures /mcp."""
+    ctx = _tool_ctx(tmp_path)
+    url, stop = start_mcp_http_server(ctx)
+    try:
+        agent_token = _per_run_token(ctx)
+        orchestrator_token = _orchestrator_token(ctx)
+        assert agent_token != orchestrator_token
+
+        reviewer_url = _role_url(url, MCP_REVIEWER_ENDPOINT)
+        agent_auth = {"Authorization": f"Bearer {agent_token}"}
+        orchestrator_auth = {"Authorization": f"Bearer {orchestrator_token}"}
+
+        status, body = _rpc_post(url, _LIST_PAYLOAD, headers=agent_auth)
+        assert _is_auth_rejection(status, body), (
+            "harness token must not authenticate orchestrator /mcp"
+        )
+
+        status, body = _rpc_post(reviewer_url, _LIST_PAYLOAD, headers=orchestrator_auth)
+        assert _is_auth_rejection(status, body), (
+            "orchestrator token must not authenticate /mcp/reviewer"
+        )
+
+        status, body = _rpc_post(url, _LIST_PAYLOAD, headers=orchestrator_auth)
+        assert _is_tools_list_ok(status, body)
+
+        status, body = _rpc_post(reviewer_url, _LIST_PAYLOAD, headers=agent_auth)
+        assert _is_tools_list_ok(status, body)
     finally:
         stop()

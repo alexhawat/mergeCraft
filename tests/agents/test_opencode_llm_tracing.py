@@ -17,7 +17,11 @@ import httpx
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
-from mergecraft.agents.opencode import _prompt_session, build_security_config
+from mergecraft.agents.opencode import (
+    _prompt_session,
+    build_security_config,
+    opencode_applied_model_params,
+)
 from mergecraft.tracing.content import ContentCapture
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -45,6 +49,7 @@ class _StubResponse:
 
 class _StubClient:
     body: ClassVar[dict[str, Any]] = {}
+    last_payload: ClassVar[dict[str, Any] | None] = None
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         pass
@@ -56,6 +61,9 @@ class _StubClient:
         return None
 
     async def post(self, *args: object, **kwargs: object) -> _StubResponse:
+        payload = kwargs.get("json")
+        if isinstance(payload, dict):
+            type(self).last_payload = payload
         return _StubResponse(type(self).body)
 
 
@@ -101,11 +109,14 @@ async def test_opencode_llm_call_stamps_max_tokens_at_metadata_capture(
     session_response: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#295 — request knobs ship even when content capture is capped at metadata."""
+    """#295 — traced request knobs match the OpenCode config path."""
     session_response({"result": "reviewed"})
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://inference.example/v1")
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "test-key")
-    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS", '{"max_tokens": 4096}')
+    monkeypatch.setenv(
+        "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS",
+        '{"max_tokens": 4096, "context_limit": 128000}',
+    )
 
     await _prompt_session(
         base_url="http://127.0.0.1:9999",
@@ -121,10 +132,59 @@ async def test_opencode_llm_call_stamps_max_tokens_at_metadata_capture(
     assert attrs.get("gen_ai.request.max_tokens") == 4096
 
 
+async def test_opencode_llm_call_omits_unapplied_max_tokens_without_context_limit(
+    opencode_tracer: Any,
+    session_response: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """O4 — max_tokens is not traced when OpenCode limit.output cannot be emitted."""
+    session_response({"result": "reviewed"})
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://inference.example/v1")
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "test-key")
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS", '{"max_tokens": 4096}')
+
+    await _prompt_session(
+        base_url="http://127.0.0.1:9999",
+        session_id="sess-1",
+        text="review this",
+        model={"providerID": "nous", "modelID": "deepseek-v4-flash"},
+        resolved_model="nous/deepseek-v4-flash",
+        capture_policy=ContentCapture.METADATA,
+    )
+
+    attrs = _llm_call_attrs(opencode_tracer)
+    assert "gen_ai.request.max_tokens" not in attrs
+
+
+def test_opencode_provider_config_applies_generation_options_on_model_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#295 — gateway generation knobs land on model/agent config, not provider.options."""
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://inference.example/v1")
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS",
+        '{"max_tokens": 4096, "temperature": 0.2, "top_p": 0.9, "context_limit": 128000}',
+    )
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="nous/deepseek-v4-flash")
+    config = json.loads(build_security_config(ctx, "nous/deepseek-v4-flash"))
+    provider = config["provider"]["nous"]
+    model_entry = provider["models"]["deepseek-v4-flash"]
+    assert provider["options"] == {
+        "baseURL": "https://inference.example/v1",
+        "apiKey": "test-key",
+    }
+    assert model_entry["limit"] == {"context": 128_000, "output": 4096}
+    assert model_entry["options"] == {"temperature": 0.2, "top_p": 0.9}
+    assert config["agent"]["build"]["temperature"] == 0.2
+    assert config["agent"]["build"]["top_p"] == 0.9
+
+
 def test_opencode_provider_config_forwards_extra_options(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#295 — gateway ``extra_options`` reach the OpenCode provider config, not just spans."""
+    """#295 — max_tokens alone stays out of provider.options until limit is known."""
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://inference.example/v1")
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "test-key")
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS", '{"max_tokens": 4096}')
@@ -132,8 +192,12 @@ def test_opencode_provider_config_forwards_extra_options(
     ctx = make_agent_run_context(tmp_path, resolved_model="nous/deepseek-v4-flash")
     config = json.loads(build_security_config(ctx, "nous/deepseek-v4-flash"))
     provider = config["provider"]["nous"]
-    assert provider["options"]["max_tokens"] == 4096
+    assert provider["options"] == {
+        "baseURL": "https://inference.example/v1",
+        "apiKey": "test-key",
+    }
     assert "limit" not in provider["models"]["deepseek-v4-flash"]
+    assert "options" not in provider["models"]["deepseek-v4-flash"]
 
 
 def test_opencode_model_limit_requires_context_and_output(
@@ -182,17 +246,18 @@ def test_opencode_security_config_validates_against_pinned_cli(
 def test_resolve_model_params_from_singleton_extra_options_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#295 — un-mocked resolver reads singleton ``extra_options`` env."""
+    """#295 — applied-params helper reads singleton extra_options env."""
     monkeypatch.delenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", raising=False)
     monkeypatch.delenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", raising=False)
     monkeypatch.delenv("MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS", raising=False)
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://inference.example/v1")
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "test-key")
-    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS", '{"max_tokens": 4096}')
+    monkeypatch.setenv(
+        "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS",
+        '{"max_tokens": 4096, "context_limit": 128000}',
+    )
 
-    from mergecraft.agents.openai_compatible_gateways import resolve_model_params_for_model
-
-    params = resolve_model_params_for_model("nous/deepseek-v4-flash")
+    params = opencode_applied_model_params("nous/deepseek-v4-flash")
     assert params is not None
     assert params.max_tokens == 4096
 
@@ -200,7 +265,7 @@ def test_resolve_model_params_from_singleton_extra_options_env(
 def test_resolve_model_params_from_nous_preset_provider_map(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#295 — named preset path resolves ``MERGECRAFT_PROVIDER_EXTRA_OPTIONS``."""
+    """#295 — named preset path resolves applied ModelParams."""
     for key in (
         "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL",
         "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
@@ -211,12 +276,10 @@ def test_resolve_model_params_from_nous_preset_provider_map(
     monkeypatch.setenv("NOUS_API_KEY", "test-nous-key")
     monkeypatch.setenv(
         "MERGECRAFT_PROVIDER_EXTRA_OPTIONS",
-        '{"nous": {"max_tokens": 8192, "temperature": 0.2}}',
+        '{"nous": {"max_tokens": 8192, "temperature": 0.2, "context_limit": 64000}}',
     )
 
-    from mergecraft.agents.openai_compatible_gateways import resolve_model_params_for_model
-
-    params = resolve_model_params_for_model("nous/deepseek-v4-flash")
+    params = opencode_applied_model_params("nous/deepseek-v4-flash")
     assert params is not None
     assert params.max_tokens == 8192
     assert params.temperature == 0.2

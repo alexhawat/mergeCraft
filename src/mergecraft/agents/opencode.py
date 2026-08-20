@@ -25,7 +25,6 @@ from mergecraft.agents.openai_compatible_gateways import (
     _provider_config_for_model,
     resolve_gateway_endpoint,
     resolve_gateway_endpoints,
-    resolve_model_params_for_model,
 )
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.shared import (
@@ -40,7 +39,9 @@ from mergecraft.agents.shared import (
 )
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.genai import (
+    ModelParams,
     input_messages_attrs,
+    model_params_from_mapping,
     output_messages_attrs,
     request_attrs,
     resolve_capture_policy,
@@ -64,6 +65,19 @@ if TYPE_CHECKING:
 
 # Re-exported for tests / callers that import these names from opencode.
 __all_gateway_envs__ = (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV)
+
+# OpenCode provider.options accepts transport keys only — generation knobs belong
+# on model entries (``limit`` / ``options``) or the primary ``build`` agent.
+_OPENCODE_PROVIDER_OPTION_KEYS: frozenset[str] = frozenset(
+    {
+        "timeout",
+        "headerTimeout",
+        "chunkTimeout",
+        "setCacheKey",
+        "enterpriseUrl",
+    }
+)
+_OPENCODE_LIMIT_SOURCE_KEYS: frozenset[str] = frozenset({"context_limit", "context", "max_tokens"})
 
 
 class ProviderTimeoutError(RuntimeError):
@@ -94,14 +108,60 @@ def _positive_int(value: object) -> int | None:
 
 
 def _opencode_provider_options(config: ProviderConfig) -> dict[str, object]:
-    """Build OpenCode provider ``options`` including gateway ``extra_options`` (#295)."""
+    """Build OpenCode provider ``options`` (transport only — no generation knobs)."""
     options: dict[str, object] = {
         "baseURL": config.base_url,
         "apiKey": _api_key_from_env(config.api_key_env),
     }
-    if config.extra_options:
-        options.update(config.extra_options)
+    for key in _OPENCODE_PROVIDER_OPTION_KEYS:
+        value = config.extra_options.get(key)
+        if value is not None:
+            options[key] = value
     return options
+
+
+def _opencode_generation_options(extra_options: dict[str, object]) -> dict[str, object]:
+    """Return gateway generation knobs for OpenCode model/agent config."""
+    reserved = _OPENCODE_PROVIDER_OPTION_KEYS | _OPENCODE_LIMIT_SOURCE_KEYS
+    return {
+        key: value
+        for key, value in extra_options.items()
+        if key not in reserved and value is not None
+    }
+
+
+def _opencode_applied_model_params_from_config(
+    config: ProviderConfig | None,
+) -> ModelParams | None:
+    """Resolve ModelParams that the OpenCode config path actually applies (O4)."""
+    if config is None or not config.extra_options:
+        return None
+    applied_raw: dict[str, object] = dict(_opencode_generation_options(config.extra_options))
+    max_tokens = _positive_int(config.extra_options.get("max_tokens"))
+    context = _opencode_model_context_limit(config)
+    if max_tokens is not None and context is not None:
+        applied_raw["max_tokens"] = max_tokens
+    params = model_params_from_mapping(applied_raw)
+    return None if params == ModelParams() else params
+
+
+def opencode_applied_model_params(model: str | None) -> ModelParams | None:
+    """Resolve applied ModelParams for a model slug."""
+    config = _provider_config_for_model(model) if model else None
+    return _opencode_applied_model_params_from_config(config)
+
+
+def _opencode_build_agent_overrides(config: ProviderConfig | None) -> dict[str, object]:
+    """Primary-agent overrides OpenCode reads for temperature/top_p on serve runs."""
+    params = _opencode_applied_model_params_from_config(config)
+    if params is None:
+        return {}
+    overrides: dict[str, object] = {}
+    if params.temperature is not None:
+        overrides["temperature"] = params.temperature
+    if params.top_p is not None:
+        overrides["top_p"] = params.top_p
+    return overrides
 
 
 def _opencode_model_context_limit(config: ProviderConfig) -> int | None:
@@ -126,6 +186,9 @@ def _opencode_model_entry(model_id: str, config: ProviderConfig) -> dict[str, ob
     context = _opencode_model_context_limit(config)
     if max_tokens is not None and context is not None:
         entry["limit"] = {"context": context, "output": max_tokens}
+    generation_options = _opencode_generation_options(config.extra_options)
+    if generation_options:
+        entry["options"] = generation_options
     return entry
 
 
@@ -262,6 +325,16 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
             slash = model.find("/")
             if slash > 0:
                 config["enabled_providers"] = [model[:slash].lower()]
+        provider_config = _provider_config_for_model(model)
+        build_overrides = _opencode_build_agent_overrides(provider_config)
+        if build_overrides and isinstance(agent_block, dict):
+            agents = dict(agent_block)
+            existing_build = agents.get("build")
+            if isinstance(existing_build, dict):
+                agents["build"] = {**existing_build, **build_overrides}
+            else:
+                agents["build"] = build_overrides
+            config["agent"] = agents
     provider = build_custom_provider(model)
     if provider is not None:
         config["provider"] = provider
@@ -380,7 +453,7 @@ async def _prompt_session(
     model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
     with tracer.start_span("llm.call") as span:
         try:
-            model_params = resolve_model_params_for_model(resolved_model or model_slug)
+            model_params = opencode_applied_model_params(resolved_model or model_slug)
             for key, value in request_attrs(model=model_slug, params=model_params).items():
                 span.set_attribute(key, value)
             if capture_policy is not None:

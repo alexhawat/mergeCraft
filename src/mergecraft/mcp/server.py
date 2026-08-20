@@ -600,6 +600,7 @@ def create_mcp_app(
     *,
     role_tools: dict[str, list[ToolSpec]] | None = None,
     auth_token: str | None = None,
+    orchestrator_auth_token: str | None = None,
 ) -> FastAPI:
     """Build the MCP app.
 
@@ -611,6 +612,10 @@ def create_mcp_app(
     (the reviewer lives at ``MCP_REVIEWER_ENDPOINT``, the verifier at
     ``MCP_VERIFIER_ENDPOINT``). The primary endpoint stays the orchestrator set.
 
+    ``auth_token`` secures reviewer/verifier role routes (and any caller that
+    passes only one token). ``orchestrator_auth_token``, when supplied, secures
+    the primary ``/mcp`` orchestrator surface separately from the harness token.
+
     When ``tools`` is empty or ``None``, the ``/mcp`` primary endpoint is omitted
     and only ``/health`` and any ``role_tools`` routes are registered.
     """
@@ -620,8 +625,9 @@ def create_mcp_app(
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    primary_token = orchestrator_auth_token if orchestrator_auth_token is not None else auth_token
     if tools:
-        _register_mcp_route(app, MCP_ENDPOINT, tools, ctx, auth_token)
+        _register_mcp_route(app, MCP_ENDPOINT, tools, ctx, primary_token)
     for role, role_tool_list in (role_tools or {}).items():
         _register_mcp_route(app, f"{MCP_ENDPOINT}/{role}", role_tool_list, ctx, auth_token)
     return app
@@ -671,10 +677,14 @@ def start_mcp_http_server(
     """
     import time
 
-    # D15 — issue a per-run secret at startup; every request to tools/list
-    # or tools/call must present it as ``Authorization: Bearer <token>``.
-    run_token = secrets.token_hex(32)
-    ctx.mcp_auth_token = run_token
+    # D15 — issue per-run secrets at startup. Agent harnesses receive
+    # ``mcp_auth_token`` for reviewer/verifier role routes; the orchestrator
+    # ``/mcp`` surface gets its own bearer so a leaked harness token cannot
+    # call orchestrator-only tools after dispatch.
+    agent_token = secrets.token_hex(32)
+    orchestrator_token = secrets.token_hex(32)
+    ctx.mcp_auth_token = agent_token
+    ctx.mcp_orchestrator_auth_token = orchestrator_token
 
     tools = build_orchestrator_tools(ctx, output_schema)
     reviewer_tools = build_reviewer_tools(ctx, output_schema)
@@ -683,7 +693,8 @@ def start_mcp_http_server(
         tools,
         ctx,
         role_tools={"reviewer": reviewer_tools, "verifier": verifier_tools},
-        auth_token=run_token,
+        auth_token=agent_token,
+        orchestrator_auth_token=orchestrator_token,
     )
     port = select_port()
     http_config = uvicorn.Config(
