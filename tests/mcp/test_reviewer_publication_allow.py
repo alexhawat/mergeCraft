@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from fastapi.testclient import TestClient
 
 from mergecraft.agents.gates import subagent_denied_tool_names
@@ -38,11 +37,6 @@ from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_XFAIL_W13 = pytest.mark.xfail(
-    reason="green after W13: primary reviewer publication allow",
-    strict=False,
-)
 
 _REVIEWER_EXCLUDED = frozenset(
     {
@@ -101,9 +95,8 @@ def _listed_names(client: TestClient) -> set[str]:
     return {entry["name"] for entry in body["result"]["tools"]}
 
 
-@_XFAIL_W13
 def test_reviewer_tools_list_includes_create_pull_request_review(tmp_path: Path) -> None:
-    """W11.2: ``/mcp/reviewer`` ``tools/list`` admits primary publication (D9)."""
+    """W11.2 / W13: ``/mcp/reviewer`` ``tools/list`` admits primary publication (D9)."""
     names = _listed_names(_reviewer_client(tmp_path))
     assert "create_pull_request_review" in names
     assert "checkout_pr" in names

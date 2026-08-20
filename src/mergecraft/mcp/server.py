@@ -63,7 +63,8 @@ from mergecraft.mcp.review_comments import (
 )
 from mergecraft.mcp.select_mode import select_mode_tool
 from mergecraft.mcp.shared import (
-    REVIEWER_ALLOWED_TOOL_CLASSES,
+    PRIMARY_MUTATING_ALLOWLIST,
+    PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES,
     VERIFIER_ALLOWED_TOOL_CLASSES,
     JsonSchema,
     ToolClass,
@@ -158,8 +159,11 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
 def _filter_tools_by_class(
     tools: list[ToolSpec],
     allowed: frozenset[ToolClass],
+    *,
+    mutating_allowlist: frozenset[str] | None = None,
 ) -> list[ToolSpec]:
-    filtered = [spec for spec in tools if admits_readonly_role(spec, allowed)]
+    kwargs = {} if mutating_allowlist is None else {"mutating_allowlist": mutating_allowlist}
+    filtered = [spec for spec in tools if admits_readonly_role(spec, allowed, **kwargs)]
     if not filtered:
         msg = "class filter yielded an empty toolset"
         raise RuntimeError(msg)
@@ -170,10 +174,11 @@ def build_reviewer_tools(
     ctx: ToolContext,
     output_schema: JsonSchema | None = None,
 ) -> list[ToolSpec]:
-    """Read-only reviewer surface — class-filtered, distinct from verifier (H4)."""
+    """Primary reviewer surface — includes REVIEW_WRITE for publication (D9)."""
     return _filter_tools_by_class(
         build_orchestrator_tools(ctx, output_schema),
-        REVIEWER_ALLOWED_TOOL_CLASSES,
+        PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES,
+        mutating_allowlist=PRIMARY_MUTATING_ALLOWLIST,
     )
 
 

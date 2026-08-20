@@ -199,6 +199,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finding-verdict persistence stays orchestrator-only
 - `AgentRunContext.mcp_server_url` now carries the role endpoint for the primary reviewer (`/mcp/reviewer`); `write_mcp_config` maps the current agent span to the role URL so the Claude verifier connects to `/mcp/verifier`, not the orchestrator surface (#282)
 - `build_mcp_app_for_role` with `role="reviewer"` or `role="verifier"` no longer mounts the orchestrator toolset at `/mcp`; only the role-specific path is active (#282)
+- Primary reviewer surface (`/mcp/reviewer`) now includes `create_pull_request_review` (`ToolClass.REVIEW_WRITE`) via `PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES` and `PRIMARY_MUTATING_ALLOWLIST`; subagents retain the narrower `REVIEWER_ALLOWED_TOOL_CLASSES` complement so they remain denied review publication (D9, #282)
 
 ### Removed
 

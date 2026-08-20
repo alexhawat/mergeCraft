@@ -39,6 +39,12 @@ REVIEWER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
         ToolClass.REVIEW_READ,
     }
 )
+# Primary reviewer adds REVIEW_WRITE so ``create_pull_request_review`` can be
+# admitted on /mcp/reviewer (D9). Subagents use REVIEWER_ALLOWED_TOOL_CLASSES
+# (without REVIEW_WRITE) so they remain denied publication.
+PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = (
+    REVIEWER_ALLOWED_TOOL_CLASSES | frozenset({ToolClass.REVIEW_WRITE})
+)
 VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
     {
         ToolClass.REPOSITORY_READ,
@@ -50,6 +56,11 @@ VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
 # (HA4.2 / D14). Every other mutating tool is orchestrator-only even when its
 # class is otherwise allowed on a read-only role.
 READONLY_MUTATING_ALLOWLIST: Final[frozenset[str]] = frozenset({"checkout_pr"})
+# Primary reviewer additionally allows review publication (D9). Subagents still
+# use READONLY_MUTATING_ALLOWLIST so they cannot publish reviews.
+PRIMARY_MUTATING_ALLOWLIST: Final[frozenset[str]] = READONLY_MUTATING_ALLOWLIST | frozenset(
+    {"create_pull_request_review"}
+)
 
 
 def repository_mutation_class_for_push(
@@ -96,16 +107,24 @@ class ToolSpec:
         return entry
 
 
-def admits_readonly_role(spec: ToolSpec, allowed: frozenset[ToolClass]) -> bool:
+def admits_readonly_role(
+    spec: ToolSpec,
+    allowed: frozenset[ToolClass],
+    *,
+    mutating_allowlist: frozenset[str] = READONLY_MUTATING_ALLOWLIST,
+) -> bool:
     """True when ``spec`` may appear on a class-filtered read-only surface.
 
     Class membership is necessary but not sufficient: ``mutates=True`` tools
-    stay off reviewer/verifier unless they are on
-    ``READONLY_MUTATING_ALLOWLIST`` (today: ``checkout_pr``, HA4.2 / D14).
+    stay off reviewer/verifier unless they are in ``mutating_allowlist``.
+    Callers pass ``PRIMARY_MUTATING_ALLOWLIST`` (which also admits
+    ``create_pull_request_review``) for the primary reviewer surface (D9).
+    Subagent deny-list derivation uses the default ``READONLY_MUTATING_ALLOWLIST``
+    and ``REVIEWER_ALLOWED_TOOL_CLASSES`` so subagents cannot publish reviews.
     """
     if spec.tool_class not in allowed:
         return False
-    return not spec.mutates or spec.name in READONLY_MUTATING_ALLOWLIST
+    return not spec.mutates or spec.name in mutating_allowlist
 
 
 def tool(
