@@ -70,6 +70,12 @@ OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 type TomlTable = dict[str, "str | bool | TomlTable"]
 _BARE_TOML_KEY = re.compile(r"[A-Za-z0-9_-]+")
 CODEX_REVIEW_PERMISSION_PROFILE = "mergecraft-review"
+# D16 — env var name that carries the per-run MCP bearer token into the Codex
+# subprocess. Codex reads this via ``bearer_token_env_var`` in config.toml and
+# sends it as ``Authorization: Bearer`` on every MCP request. Using a documented
+# Codex transport key avoids ``socket_path`` (undocumented) and ``http_headers``
+# (unverified — an unknown key can break Codex's TOML parse).
+_CODEX_MCP_TOKEN_ENV: str = "MERGECRAFT_MCP_TOKEN"
 # O4 — the reasoning effort written into ``config.toml`` is the one request
 # parameter the codex harness exposes to mergeCraft; the constant keeps the
 # TOML value and the span attribute (``mergecraft.reasoning_effort``) from
@@ -462,21 +468,21 @@ def _add_custom_provider_tables(config: TomlTable) -> None:
 
 
 def _add_mcp_server_table(config: TomlTable, ctx: AgentRunContext) -> None:
-    # D16 — Codex does not support an ``http_headers`` config key (unverified
-    # and an unrecognised key could fail codex's TOML parse and break the
-    # review). Instead of inventing HTTP headers, expose the MCP server over a
-    # Unix-domain socket. The socket is 0600 so only the creating process and
-    # processes running as the same OS user can connect — that peer-credential
-    # boundary replaces the bearer token for this driver. The HTTP loopback
-    # endpoint (for other agents) remains the canonical ``mcp_server_url``.
-    from pathlib import Path
+    # D16 — Use documented Codex MCP transport: HTTP ``url`` + ``bearer_token_env_var``.
+    # ``socket_path`` is not a documented Codex config key. ``http_headers`` was
+    # explicitly ruled out (unverified — unknown keys can break Codex's TOML parse).
+    # The UDS listener still starts (see ``start_mcp_http_server``) but it requires
+    # HTTP Authorization that Codex cannot send; the documented HTTP transport with
+    # an env-var-carried bearer token is the only path that lets Codex authenticate.
+    # The per-run token is written into ``_CODEX_MCP_TOKEN_ENV`` by ``_build_env``
+    # so it travels to the subprocess without appearing in config.toml.
+    from mergecraft.mcp.endpoints import mcp_role_url
 
-    from mergecraft.mcp.endpoints import MCP_UDS_NAME
-
-    socket_path = str(Path(ctx.tmpdir) / MCP_UDS_NAME)
+    reviewer_url = mcp_role_url(ctx.mcp_server_url, None)
     config["mcp_servers"] = {
         MERGECRAFT_MCP_NAME: {
-            "socket_path": socket_path,
+            "url": reviewer_url,
+            "bearer_token_env_var": _CODEX_MCP_TOKEN_ENV,
             # Without this, every tool call is auto-cancelled in CI. Codex
             # auto-approves an MCP call only when the permission profile grants
             # full disk write access (codex_mcp::mcp_permission_prompt_is_auto_approved),
@@ -577,7 +583,13 @@ def ctx_tmpdir_fallback() -> str:
 
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     codex_home = _codex_home(ctx)
-    env = build_agent_env("codex", {"CODEX_HOME": str(codex_home)})
+    # D16 — inject the per-run MCP bearer token so Codex can authenticate via
+    # ``bearer_token_env_var`` in config.toml. Only inject when a token was
+    # issued (dev/test runs without a live MCP server leave this empty).
+    extra: dict[str, str] = {"CODEX_HOME": str(codex_home)}
+    if ctx.mcp_auth_token:
+        extra[_CODEX_MCP_TOKEN_ENV] = ctx.mcp_auth_token
+    env = build_agent_env("codex", extra)
     _setup_codex_auth(ctx, codex_home=codex_home)
     # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
     # (config.toml, mergecraft-instructions.md, auth.json) while this process

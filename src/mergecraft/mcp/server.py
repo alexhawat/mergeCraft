@@ -604,8 +604,15 @@ def _register_mcp_route(
         if all(_is_notification(item) for item in items):
             return Response(status_code=202)
         if isinstance(body, list):
+            # Notifications (no ``id``) must not produce a response and must not
+            # be dispatched to handle_rpc — a notification-shaped tools/call in a
+            # mixed batch would otherwise execute the tool and return id=null.
             return JSONResponse(
-                [await handle_rpc(item, agent_id=calling_agent_id) for item in items]
+                [
+                    await handle_rpc(item, agent_id=calling_agent_id)
+                    for item in items
+                    if not _is_notification(item)
+                ]
             )
         return JSONResponse(await handle_rpc(body, agent_id=calling_agent_id))
 

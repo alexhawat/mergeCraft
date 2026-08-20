@@ -230,3 +230,66 @@ def test_mcp_endpoint_constant_is_still_slash_mcp() -> None:
     """D14 / D17: role paths hang off ``MCP_ENDPOINT``; do not rename it for auth."""
     assert MCP_ENDPOINT == "/mcp"
     assert MCP_PORT_START == 3764
+
+
+def test_unauthenticated_mixed_batch_with_notification_shaped_tools_call_returns_401(
+    tmp_path: Path,
+) -> None:
+    """D15 / batch regression: bearer check fires at request edge regardless of ``id``.
+
+    A batch that mixes a notification-shaped ``tools/call`` (no ``id``) with a
+    normal request must still return 401 when the bearer token is absent — the
+    auth check must not require ``id`` to be present.
+    """
+    ctx = _tool_ctx(tmp_path)
+    url, stop = start_mcp_http_server(ctx)
+    try:
+        batch = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            # notification-shaped tools/call (no ``id``) — must not bypass auth
+            {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "git", "arguments": {"command": "status"}},
+            },
+        ]
+        status, body = _rpc_post(url, batch)
+        assert _is_auth_rejection(status, body), (
+            f"unauthenticated batch with notification-shaped tools/call must be 401; "
+            f"got status={status} body={body!r}"
+        )
+    finally:
+        stop()
+
+
+def test_authenticated_mixed_batch_skips_notification_shaped_tools_call(
+    tmp_path: Path,
+) -> None:
+    """D15 / batch regression: even with a valid token, notification-shaped tools/call is skipped.
+
+    A notification carries no ``id`` and must not produce a response and must not
+    be executed, even in an authenticated batch. Only the request (with ``id``)
+    receives a response.
+    """
+    ctx = _tool_ctx(tmp_path)
+    url, stop = start_mcp_http_server(ctx)
+    try:
+        token = _per_run_token(ctx)
+        batch = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "git", "arguments": {"command": "status"}},
+            },
+        ]
+        status, body = _rpc_post(url, batch, headers={"Authorization": f"Bearer {token}"})
+        assert status == 200
+        assert isinstance(body, list), f"batch response must be a list; got {body!r}"
+        response_ids = [entry.get("id") for entry in body]
+        assert response_ids == [1], (
+            f"notification-shaped tools/call must be skipped (no response produced); "
+            f"got response ids={response_ids}"
+        )
+    finally:
+        stop()

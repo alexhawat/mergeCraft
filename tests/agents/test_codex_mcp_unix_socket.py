@@ -1,10 +1,10 @@
-"""#283 / D16: Codex MCP auth is a Unix-domain socket, not invented ``http_headers``.
+"""#283 / D16: Codex MCP config uses documented ``url`` + ``bearer_token_env_var``.
 
-W0.6 recorded **unix-socket**: ``agents/codex.py`` documents that
-``http_headers`` is not a verified Codex MCP config key and an unverified
-key could break the review. Batch O must not invent ``http_headers``.
-Codex presents the per-run token (or peercred) over a Unix-domain socket
-or a Codex-documented equivalent.
+W0.6 recorded that ``http_headers`` is not a verified Codex MCP config key and
+that ``socket_path`` is also undocumented. The documented Codex transports are
+stdio ``command`` and HTTP ``url`` with optional ``bearer_token_env_var``. The
+per-run MCP bearer token is injected via ``MERGECRAFT_MCP_TOKEN`` so Codex can
+authenticate without inventing unverified config keys.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def _mergecraft_server_block(text: str) -> str:
 
 
 def test_codex_mcp_config_does_not_invent_http_headers(tmp_path: Path) -> None:
-    """D16 control: Codex MCP table must not grow an unverified ``http_headers`` key."""
+    """D16 control: Codex MCP table must not use the unverified ``http_headers`` key."""
     codex_module = _load_codex_module()
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
     ctx.payload.shell = "disabled"
@@ -43,8 +43,13 @@ def test_codex_mcp_config_does_not_invent_http_headers(tmp_path: Path) -> None:
     assert "Authorization" not in server_block
 
 
-def test_codex_mcp_config_uses_unix_domain_socket(tmp_path: Path) -> None:
-    """W11.4 Codex case: Unix-domain socket (or Codex-documented equivalent), plus token/peercred."""
+def test_codex_mcp_config_uses_documented_http_transport(tmp_path: Path) -> None:
+    """D16: Codex MCP config uses the documented ``url`` + ``bearer_token_env_var`` transport.
+
+    ``socket_path`` is not a documented Codex config key. The authenticated HTTP
+    transport with ``bearer_token_env_var`` lets Codex present the per-run token
+    via the ``MERGECRAFT_MCP_TOKEN`` env var without inventing unverified keys.
+    """
     codex_module = _load_codex_module()
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
     ctx.payload.shell = "disabled"
@@ -55,18 +60,8 @@ def test_codex_mcp_config_uses_unix_domain_socket(tmp_path: Path) -> None:
     server_block = _mergecraft_server_block(text)
 
     assert "http_headers" not in server_block
-    uses_unix = (
-        "unix://" in server_block
-        or "unix:" in server_block
-        or ".sock" in server_block
-        or "unix_socket" in server_block
-        or "uds" in server_block
-        or "socket_path" in server_block
-    )
-    assert uses_unix, (
-        "Codex MCP auth must use a Unix-domain socket (D16), not HTTP headers; "
-        f"server block was:\n{server_block}"
-    )
-    # Loopback HTTP URL is the pre-W14 transport and is not Codex-legal for the token.
-    assert "http://127.0.0.1" not in server_block
-    assert "http://localhost" not in server_block
+    assert "socket_path" not in server_block
+    # Documented HTTP transport with env-var-carried bearer token.
+    assert "url" in server_block
+    assert "bearer_token_env_var" in server_block
+    assert "MERGECRAFT_MCP_TOKEN" in server_block
