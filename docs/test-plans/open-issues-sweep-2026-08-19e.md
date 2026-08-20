@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19e-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19e` @ `wave/open-issues-sweep-2026-08-19e`
 Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337) · **W7** (Batch Y RED — #309-#327 leftovers)
-Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl); **W10 recon** un-xfail brakeman auto+Rails + bundler-audit catalog (`b5165e9` impl); **W12 recon** un-xfail cppcheck auto (`ce31bee6` impl); **W13 recon** un-xfail detekt + swiftlint auto (`88b348ca` impl); **W14 recon** un-xfail pmd auto (`5174cedd` impl); **W15 recon** un-xfail sqlfluff + stylelint + htmlhint auto (`6847b055` impl)
+Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl); **W10 recon** un-xfail brakeman auto+Rails + bundler-audit catalog (`b5165e9` impl); **W12 recon** un-xfail cppcheck auto (`ce31bee6` impl); **W13 recon** un-xfail detekt + swiftlint auto (`88b348ca` impl); **W14 recon** un-xfail pmd auto (`5174cedd` impl); **W15 recon** un-xfail sqlfluff + stylelint + htmlhint auto (`6847b055` impl); **W16 recon** un-xfail yamllint auto (`dfb2b97a` impl)
 
 W7 pins leftover A-tier acceptances for #309-#327. Do **not** re-add tsc/bandit/jscpd/govulncheck/cargo-audit/cargo-deny/typos/knip/vulture (D10). Do **not** re-flip golangci-lint/clippy/rubocop/phpstan (D7). File: `tests/analyzers/test_a_tier_residuals.py` + `tests/analyzers/fixtures/batch-y/`. All cross-wave markers are `strict=False`.
 
@@ -219,7 +219,7 @@ Deferred (must **not** appear — D9 / #337 second tier): `roslyn`, `roslyn-anal
 
 ## Batch Y xfail schedule (W7 — RED until W8-W17)
 
-File: `tests/analyzers/test_a_tier_residuals.py`. **10** remaining `strict=False` xfails after W15 recon (was 16). **0** XPASS for W15. W11 has **0** xfails (phpcs/phpmd stay false).
+File: `tests/analyzers/test_a_tier_residuals.py`. **8** remaining `strict=False` xfails after W16 recon (was 10). **0** XPASS for W16. W11 has **0** xfails (phpcs/phpmd stay false).
 
 | Wave | xfail count | Marker reason prefix |
 |------|-------------|----------------------|
@@ -231,7 +231,7 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **10** remaining `strict=False
 | **W13** | 0 | `green after W13:` detekt + swiftlint auto — **green** after W13 recon |
 | **W14** | 0 | `green after W14:` pmd auto — **green** after W14 recon |
 | **W15** | 0 | `green after W15:` sqlfluff + stylelint + htmlhint auto — **green** after W15 recon |
-| **W16** | 2 | `green after W16:` yamllint auto |
+| **W16** | 0 | `green after W16:` yamllint auto — **green** after W16 recon |
 | **W17** | 8 | `green after W17:` checkmake + markdownlint + tflint + checkov auto |
 
 ### W8 #309 Python — exact contracts for wave-plan-executor
@@ -274,7 +274,7 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **10** remaining `strict=False
 | W13 | — | **green** after W13 recon: detekt auto + `*.kt`; swiftlint auto + `*.swift` |
 | W14 | — | **green** after W14 recon: pmd auto + `*.java`; **D13** infer stays `false`; Java SAST via Semgrep `languages: java` |
 | W15 | — | **green** after W15 recon: sqlfluff auto + `*.sql`; stylelint auto + `*.css`; htmlhint auto + `*.html`; HTML a11y gap: no axe/pa11y/html-validate catalog row (document, do not add) |
-| W16 | yamllint auto | shellcheck auto; hadolint auto; do not add shfmt/dockle (D9 / catalog-rows-only) |
+| W16 | — | **green** after W16 recon: yamllint auto + `*.yaml`; shellcheck auto; hadolint auto; do not add shfmt/dockle (D9 / catalog-rows-only) |
 | W17 | checkmake / markdownlint / tflint / checkov auto | languagetool stays false; tflint+checkov already detect `*.tf`. `iac-scanner` exclusive_group currently collapses both; W17 must split it or both-enable (finding-level dedup) so both auto tests pass |
 
 ## Batch Y contract matrix
@@ -295,7 +295,7 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **10** remaining `strict=False
 | Y13 | detekt + swiftlint auto | integration | happy | `test_detekt_*`, `test_swiftlint_*` | **green** after W13 recon |
 | Y14 | pmd auto; infer false (D13) | unit | happy | `test_pmd_default_enabled_auto`, `test_infer_stays_false` | **green** after W14 recon |
 | Y15 | sqlfluff/stylelint/htmlhint auto; a11y gap | unit | happy | `test_sqlfluff_*`, `test_html_a11y_catalog_gap_no_axe_or_pa11y` | **green** after W15 recon |
-| Y16 | yamllint auto; shell/docker already on | unit | happy | `test_yamllint_*`, `test_shellcheck_already_auto` | xfail / **green** |
+| Y16 | yamllint auto; shell/docker already on | unit | happy | `test_yamllint_*`, `test_shellcheck_already_auto` | **green** after W16 recon |
 | Y17 | checkmake/markdownlint/tflint/checkov auto | integration | happy | `test_checkmake_*`, `test_tflint_*`, `test_checkov_*` | xfail W17 |
 
 Batch Y fixture trees: `tests/analyzers/fixtures/batch-y/` (`python-noconfig`, `python-mypy`, `python-pyright`, `python-basedpyright`, `python-uv`, `js-biome`, `js-eslint`, `js-oxlint`, `js-biome-over-eslint`, `rails`, `ruby-plain`, `bundler-audit`, `cpp`, `kotlin`, `swift`, `java`, `sql`, `css`, `html`, `yaml`, `make`, `markdown`, `terraform`, `php-phpcs`, `php-plain`).
@@ -362,3 +362,23 @@ Batch Y fixture trees: `tests/analyzers/fixtures/batch-y/` (`python-noconfig`, `
 - W16–W17 xfails remain (`strict=False`); 0 XPASS for W15. W16 reminder: 2 xfails — yamllint `auto` (shellcheck/hadolint already auto; do not add shfmt/dockle)
 - `make lint` + `make typecheck` pass
 - No product/source edits (`src/` untouched)
+
+## Acceptance (W16 recon)
+
+- Removed 2 `green after W16:` xfails from `tests/analyzers/test_a_tier_residuals.py`
+- W16 assertions are real passes: `test_yamllint_default_enabled_auto`, `test_yamllint_auto_enables_on_yaml_fixture`
+- W17 xfails remain (`strict=False`); 0 XPASS for W16. W17 reminder: 8 xfails — checkmake / markdownlint / tflint / checkov `auto`. W7 note: tflint/checkov already detect `*.tf`; exclusive_group `iac-scanner` will collapse both unless W17 splits it (see W17 exact contracts below)
+- `make lint` + `make typecheck` pass
+- No product/source edits (`src/` untouched)
+
+### W17 #325/#326/#327 — exact contracts for wave-plan-executor
+
+Keep all 8 `green after W17:` markers until W17 lands. Do **not** add `lychee`. `languagetool` stays `false` (`test_languagetool_stays_opt_in`).
+
+1. **checkmake (#325)** — `test_checkmake_default_enabled_auto`: `get_manifest("checkmake").default_enabled == "auto"`. `test_checkmake_auto_enables_on_makefile`: `"checkmake" in detect_enabled(repo=batch-y/make, changed_files=["Makefile"])`.
+2. **markdownlint (#326)** — `test_markdownlint_default_enabled_auto`: `get_manifest("markdownlint").default_enabled == "auto"`. `test_markdownlint_auto_enables_on_markdown_fixture`: `"markdownlint" in detect_enabled(repo=batch-y/markdown, changed_files=["README.md"])`.
+3. **tflint + checkov already detect `*.tf` (green; do not xfail)** — `test_tflint_and_checkov_already_detect_tf`: `filter_changed_files_for_manifest(tflint, ["main.tf"]) == ["main.tf"]` and same for checkov.
+4. **tflint `auto` (#327)** — `test_tflint_default_enabled_auto`: `get_manifest("tflint").default_enabled == "auto"`. `test_tflint_auto_enables_on_terraform_fixture`: `"tflint" in detect_enabled(repo=batch-y/terraform, changed_files=["main.tf"])`. Docstring: both IaC tools must auto-enable; split `iac-scanner` if it collapses them.
+5. **checkov `auto` (#327)** — `test_checkov_default_enabled_auto`: `get_manifest("checkov").default_enabled == "auto"`. `test_checkov_auto_enables_on_terraform_fixture`: `"checkov" in detect_enabled(repo=batch-y/terraform, changed_files=["main.tf"])`.
+
+**`iac-scanner` trap:** `tflint.yaml` and `checkov.yaml` both set `exclusive_group: iac-scanner`. `detect_enabled` keeps one winner per group (`_exclusive_group_winner`). `iac-scanner` has **no** preference order, so the alphabetical fallback picks **`checkov`** and drops **`tflint`**. Flipping both to `auto` without splitting the group (or both-enabling with finding-level dedup) makes `test_tflint_auto_enables_on_terraform_fixture` fail. W17 must satisfy **both** membership asserts on the same `batch-y/terraform` + `["main.tf"]` call.

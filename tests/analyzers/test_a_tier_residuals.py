@@ -456,19 +456,11 @@ def test_shellcheck_already_auto() -> None:
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W16: yamllint default_enabled auto (#323)",
-    strict=False,
-)
 def test_yamllint_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("yamllint")
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W16: yamllint auto on *.yaml (#323)",
-    strict=False,
-)
 def test_yamllint_auto_enables_on_yaml_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "yaml"
     assert "yamllint" in _enabled_ids(repo, ["hello.yaml"])
