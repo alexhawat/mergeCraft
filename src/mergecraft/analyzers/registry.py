@@ -48,7 +48,7 @@ def load_catalog() -> tuple[AnalyzerManifest, ...]:
 
 
 def _glob_match(path: str, pattern: str) -> bool:
-    return PurePosixPath(path).match(pattern, case_sensitive=True)
+    return PurePosixPath(path).match(pattern)
 
 
 def _matches_detect_patterns(changed_file: str, patterns: list[str]) -> bool:

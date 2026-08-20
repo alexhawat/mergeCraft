@@ -14,7 +14,7 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 [![CodeQL](https://github.com/alexhawat/mergeCraft/actions/workflows/codeql.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/codeql.yml)
 [![Docker](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](pyproject.toml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
 
 [Get started](#-get-started-in-3-steps) ·
 [Features](#-features) ·
@@ -123,19 +123,20 @@ into a comment changes nothing. Details:
 
 ## 🚀 Get started in 3 steps
 
-> **Requirements:** **Python 3.14+** (hard requirement for `uv tool install` — see
-> [pyproject.toml](pyproject.toml)), [uv](https://docs.astral.sh/uv/), an
+> **Requirements:** **Python 3.11+**, [uv](https://docs.astral.sh/uv/), an
 > authenticated [GitHub CLI](https://cli.github.com), and one provider credential.
-> **Without Python 3.14**, use the [Docker Action](#example-1--auto-review-every-pr)
-> (`alexhawat/mergeCraft@…`) — the container image ships a compatible runtime; no
-> local Python install needed ([`docs/distribution.md`](docs/distribution.md)).
+> Install from git with `uv tool install` (PyPI is not published yet). For a
+> pinned runtime without managing Python versions, use the
+> [Docker Action](#example-1--auto-review-every-pr) (`alexhawat/mergeCraft@…`) —
+> the container image ships a compatible runtime; no local Python install needed
+> ([`docs/distribution.md`](docs/distribution.md)).
 > **SCM:** mergeCraft 0.1.0 supports **GitHub** repositories only. GitLab support is
 > planned via the `ScmProvider` abstraction.
 
 **1. Install and scaffold** (in the repo you want reviewed):
 
 ```bash
-uv tool install "git+https://github.com/alexhawat/mergeCraft@v0.1.0"
+uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
 mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```

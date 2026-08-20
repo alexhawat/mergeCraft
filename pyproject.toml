@@ -7,7 +7,7 @@ name = "merge-craft"
 version = "0.1.0"
 description = "Standalone BYOK GitHub Action for AI-powered PR review (mergeCraft)"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Alex Hawat" }]
 keywords = ["github-actions", "ai-coding-agent", "code-review"]
@@ -39,7 +39,7 @@ mergecraft = "mergecraft.cli.app:main"
 
 [project.optional-dependencies]
 harbor = [
-    "harbor==0.20.0",
+    "harbor==0.20.0; python_version >= '3.12'",
 ]
 # W8 / D6 — `tracing` extra behind which `logfire` and `opentelemetry-*` live.
 # Imports are lazy and guarded inside the sink factory; `make ci-resume` passes
@@ -85,7 +85,7 @@ artifacts = [
 include = ["src/mergecraft", "tests", "README.md", "pyproject.toml"]
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py311"
 line-length = 100
 src = ["src", "tests", "scripts"]
 extend-exclude = ["tests/analyzers/fixtures/repo"]
@@ -144,7 +144,7 @@ ignore = [
 quote-style = "double"
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.11"
 strict = true
 ignore_missing_imports = true
 mypy_path = ["src"]

@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from loguru import logger
 
@@ -68,7 +68,7 @@ CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 # A Codex ``config.toml`` is built as a nested mapping and rendered once; a
 # nested value is a table, a scalar is a key in the table that holds it.
-type TomlTable = dict[str, "str | bool | TomlTable"]
+TomlTable: TypeAlias = dict[str, "str | bool | TomlTable"]
 _BARE_TOML_KEY = re.compile(r"[A-Za-z0-9_-]+")
 CODEX_REVIEW_PERMISSION_PROFILE = "mergecraft-review"
 # D16 — env var name that carries the per-run MCP bearer token into the Codex

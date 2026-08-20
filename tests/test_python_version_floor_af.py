@@ -26,8 +26,6 @@ import pytest
 
 from tests.ci.workflow_support import REPO_ROOT
 
-_XFAIL_REASON_W14 = "green after W14: lower requires-python to >=3.11"
-
 _SRC_ROOT = REPO_ROOT / "src" / "mergecraft"
 _PYPROJECT = REPO_ROOT / "pyproject.toml"
 
@@ -36,11 +34,12 @@ W12_UNPAREN_EXCEPT_FILE_COUNT = 27
 W12_UNPAREN_EXCEPT_SITE_COUNT = 44
 
 # W13: parenthesize all sites except 19e-active analyzer files (D6).
-AF343_19E_SKIPPED_EXCEPT_PARENTHESES: frozenset[str] = frozenset({"mergecraft/analyzers/detect.py"})
+# W14: detect.py parenthesized for 3.11 compile gate (behavior-neutral).
+AF343_19E_SKIPPED_EXCEPT_PARENTHESES: frozenset[str] = frozenset()
 
-# Post-W13 remaining bare sites (19e skip list only until 19e merges).
-EXPECTED_UNPAREN_EXCEPT_FILE_COUNT = len(AF343_19E_SKIPPED_EXCEPT_PARENTHESES)
-EXPECTED_UNPAREN_EXCEPT_SITE_COUNT = 1
+# Post-W14: no bare PEP 758 except sites remain.
+EXPECTED_UNPAREN_EXCEPT_FILE_COUNT = 0
+EXPECTED_UNPAREN_EXCEPT_SITE_COUNT = 0
 
 # Patterns that block lowering ``requires-python`` until gated or removed (W12 audit).
 _PYTHON314_ONLY_IMPORTS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -265,10 +264,9 @@ def test_af_no_python_314_only_apis_block_floor() -> None:
     )
 
 
-@pytest.mark.xfail(reason=_XFAIL_REASON_W14, strict=False)
 def test_af_pyproject_requires_python_floor_is_311() -> None:
     """``requires-python`` must be lowered to ``>=3.11`` once parenthesize + audit land (W14)."""
-    data = tomllib.loads(_PYPROJECT.read_bytes())
+    data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
     requires = data["project"]["requires-python"]
     assert requires == ">=3.11", f"expected >=3.11, got {requires!r}"
 

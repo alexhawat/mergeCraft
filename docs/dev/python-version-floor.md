@@ -6,8 +6,8 @@
 
 ## Context
 
-mergeCraft currently declares `requires-python = ">=3.14"` in `pyproject.toml`.
-That floor was chosen while the codebase used PEP 758 bare multi-type except
+mergeCraft declares `requires-python = ">=3.11"` in `pyproject.toml` (lowered from
+3.14 in batch AF W14). That floor was raised while the codebase used PEP 758 bare multi-type except
 syntax (`except A, B:`), which is invalid on Python 3.11–3.13. Lowering the
 install floor widens who can run the CLI and Action locally without changing
 review behaviour.
