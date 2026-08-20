@@ -23,9 +23,16 @@ into a comment changes nothing. Details:
 
 </details>
 
+## Comment-trigger authorization
+
+Only `OWNER`, `MEMBER`, and `COLLABORATOR` may start a run from an
+`issue_comment` or `pull_request_review_comment`. The gate reads
+`comment.author_association` from the GitHub event payload — never the
+comment body. Under `pull_request_target`, comment triggers also require
+`allow_pr_target_comments: true` on the Action input (default off). See
+[`allow_pr_target_comments`](action-reference.md) in the action reference.
 
 
-# Workflow examples and placement
 
 ### Example 2 — hardened, review as a required check
 
