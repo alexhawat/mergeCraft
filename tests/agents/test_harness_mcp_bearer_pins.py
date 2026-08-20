@@ -52,7 +52,6 @@ def _authorization_header(headers: dict[str, Any] | None) -> str | None:
     return value if isinstance(value, str) else None
 
 
-@pytest.mark.xfail(reason="green after W3: gemini/opencode/cursor Bearer pins", strict=False)
 def test_gemini_write_mcp_config_includes_bearer_when_token_set(tmp_path: Path) -> None:
     """Gemini ``settings.json`` must forward ``Authorization: Bearer`` when token is set."""
     gemini_module = _load_module("mergecraft.agents.gemini")
@@ -69,7 +68,6 @@ def test_gemini_write_mcp_config_includes_bearer_when_token_set(tmp_path: Path) 
     assert _authorization_header(headers) == f"Bearer {_PER_RUN_TOKEN}"
 
 
-@pytest.mark.xfail(reason="green after W3: gemini/opencode/cursor Bearer pins", strict=False)
 def test_gemini_write_mcp_config_omits_bearer_when_token_empty(tmp_path: Path) -> None:
     """Gemini must not emit ``Authorization`` when ``ctx.mcp_auth_token`` is empty."""
     gemini_module = _load_module("mergecraft.agents.gemini")
@@ -86,7 +84,6 @@ def test_gemini_write_mcp_config_omits_bearer_when_token_empty(tmp_path: Path) -
     assert _authorization_header(headers) is None
 
 
-@pytest.mark.xfail(reason="green after W3: gemini/opencode/cursor Bearer pins", strict=False)
 def test_opencode_build_security_config_includes_bearer_when_token_set(tmp_path: Path) -> None:
     """OpenCode security JSON must include Bearer headers when token is set."""
     opencode_module = _load_module("mergecraft.agents.opencode")
@@ -102,7 +99,6 @@ def test_opencode_build_security_config_includes_bearer_when_token_set(tmp_path:
     assert _authorization_header(headers) == f"Bearer {_PER_RUN_TOKEN}"
 
 
-@pytest.mark.xfail(reason="green after W3: gemini/opencode/cursor Bearer pins", strict=False)
 def test_opencode_build_security_config_omits_headers_when_token_empty(tmp_path: Path) -> None:
     """OpenCode must omit the MCP ``headers`` block when no token was issued."""
     opencode_module = _load_module("mergecraft.agents.opencode")
@@ -117,7 +113,6 @@ def test_opencode_build_security_config_omits_headers_when_token_empty(tmp_path:
     assert "headers" not in config["mcp"][MERGECRAFT_MCP_NAME]
 
 
-@pytest.mark.xfail(reason="green after W3: gemini/opencode/cursor Bearer pins", strict=False)
 def test_cursor_build_mcp_servers_includes_bearer_when_token_set(tmp_path: Path) -> None:
     """Cursor cloud payload must include Bearer headers for reachable MCP URLs."""
     cursor_module = _load_module("mergecraft.agents.cursor")
@@ -134,7 +129,6 @@ def test_cursor_build_mcp_servers_includes_bearer_when_token_set(tmp_path: Path)
     assert _authorization_header(headers) == f"Bearer {_PER_RUN_TOKEN}"
 
 
-@pytest.mark.xfail(reason="green after W3: gemini/opencode/cursor Bearer pins", strict=False)
 def test_cursor_build_mcp_servers_omits_headers_when_token_empty(tmp_path: Path) -> None:
     """Cursor must omit MCP ``headers`` when ``ctx.mcp_auth_token`` is empty."""
     cursor_module = _load_module("mergecraft.agents.cursor")
