@@ -156,6 +156,19 @@ def test_bundler_audit_uses_reported_path_and_line() -> None:
     assert findings[0].end_line == 12
 
 
+def test_tsc_project_diagnostic_without_location_is_body_only() -> None:
+    raw = (
+        "error TS18003: No inputs were found in config file 'tsconfig.json'. "
+        "Specified 'include' paths were '[\"**/*\"]' and 'exclude' paths were '[]'."
+    )
+    findings = _parse("tsc_pretty", raw, tool_id="tsc")
+    assert len(findings) == 1
+    assert findings[0].rule_id == "TS18003"
+    assert findings[0].start_line is None
+    assert findings[0].end_line is None
+    assert "No inputs were found" in findings[0].message
+
+
 def test_cargo_audit_lockfile_finding_omits_invented_line() -> None:
     raw = (FIXTURES_DIR / "native/cargo-audit-minimal.json").read_text(encoding="utf-8")
     findings = _parse("cargo_audit_json", raw, tool_id="cargo-audit")
