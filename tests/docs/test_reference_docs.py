@@ -28,8 +28,6 @@ README = REPO_ROOT / "README.md"
 ACTION_REFERENCE_DOC = REPO_ROOT / "docs" / "action-reference.md"
 CLI_DOC = REPO_ROOT / "docs" / "cli.md"
 
-_RD1_XFAIL = pytest.mark.xfail(reason="green after RD1.2", strict=False)
-
 # ---------------------------------------------------------------------------
 # action.yml helpers
 # ---------------------------------------------------------------------------
@@ -269,7 +267,6 @@ def _write_scratch_repo(tmp_path: Path, module: Any) -> dict[str, Path]:
 # ---------------------------------------------------------------------------
 
 
-@_RD1_XFAIL
 def test_action_inputs_table_lives_in_action_reference_doc() -> None:
     real = set(_action_inputs())
     documented = set(_action_reference_input_table())
@@ -283,7 +280,6 @@ def test_action_inputs_table_lives_in_action_reference_doc() -> None:
     )
 
 
-@_RD1_XFAIL
 def test_action_outputs_table_lives_in_action_reference_doc() -> None:
     outputs = set(_action_outputs())
     assert outputs, "action.yml declares no outputs — nothing to check against"
@@ -299,7 +295,6 @@ def test_action_outputs_table_lives_in_action_reference_doc() -> None:
     )
 
 
-@_RD1_XFAIL
 def test_cli_table_lives_in_cli_doc() -> None:
     real = _walk_typer_commands(root_app)
     documented = _cli_doc_documented_cli_paths()
@@ -311,7 +306,6 @@ def test_cli_table_lives_in_cli_doc() -> None:
     )
 
 
-@_RD1_XFAIL
 def test_generator_check_fails_on_cli_doc_drift(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -339,7 +333,6 @@ def test_generator_check_fails_on_cli_doc_drift(
     assert diff_lines, "--check must emit a unified diff on CLI doc drift; got:\n" + output
 
 
-@_RD1_XFAIL
 def test_generator_check_fails_on_action_doc_drift(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -371,7 +364,6 @@ def test_generator_check_fails_on_action_doc_drift(
     )
 
 
-@_RD1_XFAIL
 def test_readme_links_to_generated_reference_pages() -> None:
     readme_text = README.read_text(encoding="utf-8")
     assert "docs/cli.md" in readme_text, "README.md must link to docs/cli.md"
@@ -385,7 +377,6 @@ def test_readme_links_to_generated_reference_pages() -> None:
 # ---------------------------------------------------------------------------
 
 
-@_RD1_XFAIL
 def test_every_action_input_is_documented() -> None:
     real = set(_action_inputs())
     documented = set(_action_reference_input_table())
@@ -395,7 +386,6 @@ def test_every_action_input_is_documented() -> None:
     )
 
 
-@_RD1_XFAIL
 def test_both_action_outputs_are_documented() -> None:
     outputs = set(_action_outputs())
     assert outputs, "action.yml declares no outputs — nothing to check against"
@@ -407,7 +397,6 @@ def test_both_action_outputs_are_documented() -> None:
     assert not missing, f"action.yml outputs undocumented in {ACTION_REFERENCE_DOC.name}: {missing}"
 
 
-@_RD1_XFAIL
 def test_action_input_defaults_match_yaml() -> None:
     inputs = _action_inputs()
     documented = _action_reference_input_table()
@@ -427,7 +416,6 @@ def test_action_input_defaults_match_yaml() -> None:
     assert not mismatches, "\n".join(mismatches)
 
 
-@_RD1_XFAIL
 def test_every_cli_command_is_documented() -> None:
     real = _walk_typer_commands(root_app)
     documented = _cli_doc_documented_cli_paths()
@@ -435,7 +423,6 @@ def test_every_cli_command_is_documented() -> None:
     assert not missing, f"CLI commands missing from {CLI_DOC.name}: {missing}"
 
 
-@_RD1_XFAIL
 def test_documented_cli_commands_all_exist() -> None:
     real = _walk_typer_commands(root_app)
     documented = _cli_doc_documented_cli_paths()
@@ -446,7 +433,6 @@ def test_documented_cli_commands_all_exist() -> None:
     )
 
 
-@_RD1_XFAIL
 def test_auth_provider_list_matches_registry() -> None:
     real = _auth_registry_providers()
     documented = _cli_doc_auth_providers()
@@ -461,7 +447,6 @@ def test_auth_provider_list_matches_registry() -> None:
 # ---------------------------------------------------------------------------
 
 
-@_RD1_XFAIL
 def test_generator_check_mode_is_idempotent(tmp_path: Path) -> None:
     module = _load_gen_reference_docs()
     _write_scratch_repo(tmp_path, module)
@@ -473,7 +458,6 @@ def test_generator_check_mode_is_idempotent(tmp_path: Path) -> None:
     assert check_exit == 0, "--check must exit 0 immediately after a write pass (idempotent)"
 
 
-@_RD1_XFAIL
 def test_generator_check_mode_detects_drift(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -505,7 +489,6 @@ def test_generator_check_mode_detects_drift(
     )
 
 
-@_RD1_XFAIL
 def test_generator_fails_when_a_sentinel_pair_is_removed(tmp_path: Path) -> None:
     assert _generator_splices_doc_paths(), (
         "gen_reference_docs.py must splice docs/action-reference.md (RD1.2)"

@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
@@ -32,8 +31,6 @@ _REQUIRED_MANIFEST_PATHS = (
 _TEMPLATE_NAMES = ("consumer", "generated-ref", "contributor", "satellite")
 
 _EXCLUDED_MANIFEST_PREFIXES = ("docs/test-plans/", "docs/artifacts/")
-
-_RD1_XFAIL = pytest.mark.xfail(reason="green after RD1.2", strict=False)
 
 
 def _load_manifest() -> dict[str, Any]:
@@ -67,7 +64,6 @@ def _markdown_links(text: str) -> set[str]:
     return links
 
 
-@_RD1_XFAIL
 def test_manifest_lists_required_pages() -> None:
     manifest = _load_manifest()
     paths = set(_manifest_paths(manifest))
@@ -84,7 +80,6 @@ def test_manifest_lists_required_pages() -> None:
     )
 
 
-@_RD1_XFAIL
 def test_generated_docs_index_lists_every_manifest_row() -> None:
     manifest = _load_manifest()
     paths = _manifest_paths(manifest)
@@ -97,7 +92,6 @@ def test_generated_docs_index_lists_every_manifest_row() -> None:
     )
 
 
-@_RD1_XFAIL
 def test_templates_exist() -> None:
     missing_files: list[str] = []
     bad_templates: list[str] = []
@@ -121,7 +115,6 @@ def _makefile_prerequisite_tokens(makefile: str, target: str) -> set[str]:
     return set(match.group(1).split())
 
 
-@_RD1_XFAIL
 def test_make_docs_check_is_in_ci_steps() -> None:
     """D3: ``docs-check`` supersedes ``reference-docs-check`` in ``CI_STEPS`` (RD1.2)."""
     makefile = read_text("Makefile")

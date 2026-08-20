@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""Regenerate README's action-input, action-output, and CLI reference tables.
+"""Regenerate CLI and Action reference tables in dedicated docs pages.
 
 Module: scripts.gen_reference_docs
 Depends: argparse, difflib, inspect, re, sys, typing, pathlib, yaml,
     mergecraft.cli.app
 
-The two reference tables in ``README.md`` (the ``action.yml`` "full input
-list" and the ``## CLI`` command table) are hand-maintained prose that drifts
-from the live sources — see the ``issues-showcase-readiness`` wave plan, PR
-G2. This script derives both from the live sources (``action.yml`` for
-inputs/outputs, the live Typer ``app`` object for CLI commands — never a
-subprocess) and splices them into ``README.md`` between HTML sentinel
-comments, so the tables can be regenerated (default) or checked for drift
-(``--check``) without hand-editing.
+Derives action-input/output tables from ``action.yml`` and the CLI command
+table from the live Typer ``app`` object, splicing them into
+``docs/action-reference.md`` and ``docs/cli.md`` between HTML sentinel
+comments. The landing ``README.md`` keeps pointer links only (RD1).
 
 Exports:
-    main — regenerate (default) or ``--check`` the README reference tables.
+    main — regenerate (default) or ``--check`` the reference doc pages.
 """
 
 from __future__ import annotations
@@ -35,6 +31,8 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ACTION_YML_PATH = REPO_ROOT / "action.yml"
 README_PATH = REPO_ROOT / "README.md"
+CLI_DOC_PATH = REPO_ROOT / "docs" / "cli.md"
+ACTION_DOC_PATH = REPO_ROOT / "docs" / "action-reference.md"
 
 _ACTION_INPUTS_BEGIN = "<!-- BEGIN:action-inputs -->"
 _ACTION_INPUTS_END = "<!-- END:action-inputs -->"
@@ -236,34 +234,68 @@ def _render_cli_table(commands: list[tuple[CommandPath, Any]]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _splice(text: str, begin: str, end: str, content: str) -> str:
+def _splice(text: str, begin: str, end: str, content: str, *, doc_path: Path) -> str:
     """Replace the text between a ``<!-- BEGIN:x -->`` / ``<!-- END:x -->`` pair.
 
     Every sentinel pair is mandatory: a removed pair must fail the generator
     loudly (``--check`` as well as default/write mode), not silently leave a
-    now-unmanaged table in place. A table that survives sentinel removal
-    would still contain the right substrings today, so ``--check`` would
-    report clean even though nothing regenerates or verifies it anymore.
+    now-unmanaged table in place.
     """
     pattern = re.compile(re.escape(begin) + r"\n.*?" + re.escape(end), re.DOTALL)
     if not pattern.search(text):
-        msg = f"{README_PATH}: sentinel pair not found: {begin} / {end}"
+        msg = f"{doc_path}: sentinel pair not found: {begin} / {end}"
         raise SystemExit(msg)
     replacement = f"{begin}\n{content}{end}"
     return pattern.sub(lambda _match: replacement, text, count=1)
 
 
-def _generate(
-    action_data: dict[str, Any], readme_text: str, commands: list[tuple[CommandPath, Any]]
-) -> str:
+def _generate_reference_docs(
+    action_data: dict[str, Any],
+    action_doc_text: str,
+    cli_doc_text: str,
+    commands: list[tuple[CommandPath, Any]],
+) -> tuple[str, str]:
     inputs = dict(action_data.get("inputs") or {})
     outputs = dict(action_data.get("outputs") or {})
-    text = readme_text
-    text = _splice(text, _ACTION_INPUTS_BEGIN, _ACTION_INPUTS_END, _render_action_inputs(inputs))
-    text = _splice(
-        text, _ACTION_OUTPUTS_BEGIN, _ACTION_OUTPUTS_END, _render_action_outputs(outputs)
+    action_doc = _splice(
+        action_doc_text,
+        _ACTION_INPUTS_BEGIN,
+        _ACTION_INPUTS_END,
+        _render_action_inputs(inputs),
+        doc_path=ACTION_DOC_PATH,
     )
-    return _splice(text, _CLI_COMMANDS_BEGIN, _CLI_COMMANDS_END, _render_cli_table(commands))
+    action_doc = _splice(
+        action_doc,
+        _ACTION_OUTPUTS_BEGIN,
+        _ACTION_OUTPUTS_END,
+        _render_action_outputs(outputs),
+        doc_path=ACTION_DOC_PATH,
+    )
+    cli_doc = _splice(
+        cli_doc_text,
+        _CLI_COMMANDS_BEGIN,
+        _CLI_COMMANDS_END,
+        _render_cli_table(commands),
+        doc_path=CLI_DOC_PATH,
+    )
+    return action_doc, cli_doc
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _emit_check_diff(path: Path, current: str, generated: str) -> None:
+    diff = difflib.unified_diff(
+        current.splitlines(keepends=True),
+        generated.splitlines(keepends=True),
+        fromfile=str(path),
+        tofile=f"{path} (generated)",
+    )
+    sys.stdout.writelines(diff)
 
 
 # ---------------------------------------------------------------------------
@@ -272,46 +304,49 @@ def _generate(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Regenerate (default) or ``--check`` README's action/CLI reference tables."""
+    """Regenerate (default) or ``--check`` the action/CLI reference doc pages."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit non-zero (with a unified diff) when README drifts from action.yml / the live CLI.",
+        help=(
+            "Exit non-zero (with a unified diff) when reference pages drift from "
+            "action.yml / the live CLI."
+        ),
     )
     args = parser.parse_args(argv)
 
-    # Imported here (not at module scope) so ``--check``/write always reflect
-    # whatever ``mergecraft.cli.app`` looks like right now — and so a bare
-    # ``python -c "import scripts.gen_reference_docs"`` never has an import-time
-    # side effect of loading the whole CLI app.
     from mergecraft.cli.app import app as root_app
 
     action_data = _load_action_yml()
     commands = _walk_typer_commands(root_app)
-    readme_text = README_PATH.read_text(encoding="utf-8")
-    generated = _generate(action_data, readme_text, commands)
+    action_doc_text = ACTION_DOC_PATH.read_text(encoding="utf-8")
+    cli_doc_text = CLI_DOC_PATH.read_text(encoding="utf-8")
+    generated_action, generated_cli = _generate_reference_docs(
+        action_data, action_doc_text, cli_doc_text, commands
+    )
 
     if args.check:
-        if generated == readme_text:
-            print(f"{README_PATH.name}: reference tables match action.yml / the live CLI")
-            return 0
-        diff = difflib.unified_diff(
-            readme_text.splitlines(keepends=True),
-            generated.splitlines(keepends=True),
-            fromfile=str(README_PATH),
-            tofile=f"{README_PATH} (generated)",
-        )
-        sys.stdout.writelines(diff)
-        print(
-            f"{README_PATH.name}: reference tables drifted from action.yml / the live CLI"
-            " (run: make reference-docs)",
-            file=sys.stderr,
-        )
-        return 1
+        drifted = False
+        if generated_action != action_doc_text:
+            _emit_check_diff(ACTION_DOC_PATH, action_doc_text, generated_action)
+            drifted = True
+        if generated_cli != cli_doc_text:
+            _emit_check_diff(CLI_DOC_PATH, cli_doc_text, generated_cli)
+            drifted = True
+        if drifted:
+            print(
+                "reference docs drifted from action.yml / the live CLI (run: make docs)",
+                file=sys.stderr,
+            )
+            return 1
+        print("reference docs match action.yml / the live CLI")
+        return 0
 
-    README_PATH.write_text(generated, encoding="utf-8")
-    print(f"wrote {README_PATH}")
+    ACTION_DOC_PATH.write_text(generated_action, encoding="utf-8")
+    CLI_DOC_PATH.write_text(generated_cli, encoding="utf-8")
+    print(f"wrote {_display_path(ACTION_DOC_PATH)}")
+    print(f"wrote {_display_path(CLI_DOC_PATH)}")
     return 0
 
 

@@ -1,0 +1,62 @@
+<!-- Generated header — sentinel blocks below are spliced by scripts/gen_reference_docs.py. -->
+
+# Action reference
+
+Complete `action.yml` input and output reference for the mergeCraft GitHub Action.
+
+**Audience:** consumer
+
+## Action inputs (`with:`)
+
+<!-- BEGIN:action-inputs -->
+The full input list:
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `allow_pr_target_comments` | `false` | Opt-in to comment-driven invocation under `pull_request_target`. Default: false (refused). When set to `true`, comments from authors in {OWNER, MEMBER, COLLABORATOR} dispatch the agent even under `pull_request_target`. Set this only on workflows whose `if:` already gates comment triggers to trusted authors; leave it off everywhere else. See issue #72 / D6. |
+| `analyzers` | `auto` | Analyzer execution tier: off (disabled), auto (detect + provision), full (baked image tools), or untrusted-only (trust-aware: run only analyzers that need no secrets, no network and no PR-authored command construction — trusted-tier and repo-native manifests are skipped with a named reason rather than failing). Under `pull_request_target` and fork-head pull requests, `auto` resolves to `untrusted-only`. An unrecognised value also resolves to `untrusted-only`, with a warning. Default: auto |
+| `codex_sandbox` | _(unset)_ | Codex platform-sandbox policy. Leave unset (default) to keep Codex's own bubblewrap/Landlock sandbox. Set to `danger-full-access` ONLY when the runner is already an ephemeral, isolated container — inside a Docker container action, bubblewrap cannot create a nested user namespace and every Codex call fails before doing work. mergeCraft's own shell/push controls are unaffected either way. See issue #70. |
+| `cwd` | _(unset)_ | Working directory for the agent (defaults to GITHUB_WORKSPACE) |
+| `logfire-token` | _(empty)_ | Direct logfire token (W8.5 / W7.7). Wire from a `LOGFIRE_TOKEN` GitHub Actions secret (interpolated in your workflow YAML, not written literally here) so the secret never appears in the workflow file. Held at runtime only; never inlined into config dumps. |
+| `model` | _(unset)_ | Model to use — a curated slug (e.g. anthropic/claude-opus, tokenhub/hy3, nous/deepseek/deepseek-v4-flash) or a raw models.dev specifier. Overrides repo settings. OpenAI-compatible gateways: set NOUS_API_KEY or TOKENHUB_API_KEY (or MERGECRAFT_CUSTOM_PROVIDER_*). Default behaviour (#37 / W4): the supplied `model:` becomes the **head** of the configured chain — the repo's `models:` list (and any `modelFallbacks:`) is retained as the tail and walked on credential miss or retryable failure. To restore the legacy "use exactly this model, suppress the chain" semantics, set `model_pin: enabled`. |
+| `model_pin` | `disabled` | #37 / W4 / D8 — opt into the legacy "use exactly this model" semantics for the `model:` input. Default `disabled`: `model:` becomes the chain head; the configured `models:` / `modelFallbacks:` tail is walked on credential miss or retryable failure. Set to `enabled` to collapse the chain to `[model]` (suppress fallbacks). Wire this through `.mergecraft/ config.yaml`'s `modelPin: true` for repo-wide default; the action input wins. |
+| `otel-endpoint` | _(empty)_ | OTLP collector URL (W8.5 / W7.7): e.g. `http://127.0.0.1:4318/v1/traces`. Wins over the config block. |
+| `output_schema` | _(unset)_ | JSON Schema (draft-07) for structured output validation. |
+| `prompt` | _(unset)_ | Prompt to send to the agent (string or JSON payload) |
+| `prompt_file` | _(unset)_ | Path to a file (relative to GITHUB_WORKSPACE) whose contents are used as the prompt. Set exactly one of prompt or prompt_file. |
+| `provider_api_key_env` | _(unset)_ | Name of an environment variable that holds the singleton provider's API key (e.g. `MY_PROVIDER_API_KEY`). mergeCraft reads this env var's value and exposes it to the harness as `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`. Never inline the API key value here — reference the env-var *name* only (convention 7). Wire the secret via the workflow's `env:` block from a GitHub Actions secret named `MY_PROVIDER_API_KEY` (interpolated in your workflow YAML, not written literally here — a literal `secrets.*` expression inside this file's own description text fails action.yml validation, since `secrets` isn't a valid context for a composite action's metadata). See issue #71. |
+| `provider_base_url` | _(unset)_ | Custom OpenAI-compatible base URL for the singleton provider (`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`, PR #79 / D7). Use this to point Codex or OpenCode at a third-party OpenAI-compatible gateway without committing env-var names in workflow YAML. The indexed multi-provider form (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>` for `N >= 1`) is env-only and not exposed here — that path is for advanced multi-provider setups where `with:` cannot enumerate multiple entries. See issue #71. |
+| `push` | _(unset)_ | Git push permission: disabled, restricted, or enabled. Default: restricted |
+| `sarif_upload` | `disabled` | Upload catalog-analyzer findings to GitHub code scanning as SARIF 2.1.0: disabled (default) or enabled. Complementary evidence for when the review narrative is thin or findings overflow the inline comment budget — never a gate: an upload failure is logged and the run still completes. Requires `security-events: write` on the job, and code scanning to be available on the repository. Only findings from catalog analyzers that this run's trust tier, shell policy and `analyzers:` mode actually admitted are uploaded, after secret redaction. CI-sourced and agent-sourced findings are never uploaded. An unrecognised value resolves to disabled, with a warning. When unset, `.mergecraft/config.yaml`'s `analyzers.sarifUpload` decides (default false). See issue #39. |
+| `setup_failure_policy` | _(empty)_ | S1 / D10 — what happens when a trusted-tier `setupScript` fails (non-zero exit) or times out. `inconclusive` (default) maps the run to `RunOutcome.inconclusive` (a `neutral` check conclusion) — the run is treated as no-verdict, never a passing review of an under-provisioned tree. `fail` aborts the run as `RunOutcome.configuration_error` (the consumer has declared the failure is unrecoverable). `warn` reproduces the legacy continue-on-failure behaviour; the prompt still carries the failure text so the reviewing agent knows its tree may be partially provisioned. Unknown values fail closed as `configuration_error` (this is a security/runtime surface — `extra="forbid"` semantics). |
+| `setup_timeout` | _(empty)_ | S1 / F6 — maximum wall-clock duration for `setupScript` (e.g. `5m`, `30s`, `1h`). A hanging install stalls the run otherwise. The setup runs as a session leader so its whole process tree is TERM→KILLed on timeout. Reusing `resolve_timeout_ms` — the same parser the `timeout` input uses. Default `10m` applies even when `timeout` is unset or `--notimeout`; setup never consumes the whole run budget. Note: `setupTimeout` must be strictly less than `timeout` (or the run aborts as `configuration_error`). Equal / larger budgets would let the setup script eat the whole run deadline; the agent is then given ≈1 ms and a setup timeout surfaces as `timed_out` instead of the `inconclusive` / `configuration_error` the setup policy was supposed to produce. Lower `setupTimeout` or raise `timeout` to satisfy the guard — see `docs/config-failure-policy.md` for the runtime reason text. |
+| `shell` | _(unset)_ | Shell permission: disabled, restricted, or enabled. |
+| `status_checks` | _(unset)_ | Post mergecraft and mergecraft-approval commit-status checks: disabled (default) or enabled. |
+| `suggest_eval_add` | `disabled` | Opt-in (W12.4 / #44): when enabled, log a logger.info suggestion to add the run to the eval bank when the run produced no positive findings, the trust tier is trusted, and the trigger is a re-review (not a fresh PR). Accepts disabled\|enabled (also true/false aliases). Default: disabled; mergeCraft never auto-adds. |
+| `timeout` | _(unset)_ | Maximum run duration (e.g., 10m, 1h30m). Default: 1h |
+| `token` | `${{ github.token }}` | GitHub-provided token with job-scoped permissions. |
+| `tracing` | _(empty)_ | Tracing enablement (W8.5 / W7.7): true / false. Wins over the .mergecraft/config.yaml `tracing.enabled` block when set. Unset defers to the config (default off). |
+| `tracing-to` | _(empty)_ | Tracing shorthand (W8.5 / W7.7): `local_files` / `logfire` / `otel`. Wins over the config block. `logfire` requires the optional `[tracing]` extra plus a `LOGFIRE_TOKEN` secret wired via `logfire-token` below; `otel` requires an `otel-endpoint`. |
+<!-- END:action-inputs -->
+
+Behavioural note: `setup_failure_policy`'s and `setup_timeout`'s literal
+`action.yml` default is an empty string (unset defers to the S1/D10 policy
+described in [config failure policy](docs/config-failure-policy.md)); the
+*effective* runtime default when left unset is `inconclusive` and `10m`
+respectively.
+
+## Action outputs
+
+<!-- BEGIN:action-outputs -->
+| Output | Description |
+|--------|-------------|
+| `evidence_packet` | JSON body of this run's Merge Evidence Packet (#47) — the versioned, structured record of the findings, deterministic checks, blast-radius lane, self-assessment, and decision behind the review. Emitted via `$GITHUB_OUTPUT` as multiline JSON (not a filesystem path). Empty when the run had no pull request to attest to. To upload as an artifact, write the output to a file in a later step. Schema: `docs/evidence-packet.md`. |
+| `result` | Set when the prompt requests it; required when output_schema is provided. |
+| `verdict_diagnostic` | Closed VerdictDiagnostic code from the terminal-verdict policy path for this run. Empty when the run did not evaluate terminal protocol policy. |
+<!-- END:action-outputs -->
+
+## See also
+
+- [CLI reference](docs/cli.md)
+- [Authentication](../README.md#-authentication)
+- [Config failure policy](docs/config-failure-policy.md)
