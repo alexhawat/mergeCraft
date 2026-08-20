@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import secrets
 import socket
 import threading
@@ -59,6 +58,13 @@ from mergecraft.mcp.issue_events import get_issue_events_tool
 from mergecraft.mcp.issue_info import get_issue_tool
 from mergecraft.mcp.labels import add_labels_tool, remove_labels_tool
 from mergecraft.mcp.output import set_output_tool
+from mergecraft.mcp.ports import (
+    MCP_HOST as MCP_HOST,
+)
+from mergecraft.mcp.ports import (
+    _port_available,
+    _select_port,
+)
 from mergecraft.mcp.pr import (
     close_pull_request_tool,
     create_pull_request_tool,
@@ -107,8 +113,6 @@ if TYPE_CHECKING:
     from jsonschema.protocols import Validator
 
     from mergecraft.mcp.context import ToolContext
-
-MCP_HOST = "127.0.0.1"
 
 
 def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None) -> list[ToolSpec]:
@@ -231,46 +235,6 @@ def build_orchestrator_tools(
     if ctx.signed_commits:
         tools.append(commit_changes_tool(ctx))
     return tools
-
-
-def _read_env_port() -> int | None:
-    raw = os.environ.get("MERGECRAFT_MCP_PORT")
-    if not raw:
-        return None
-    try:
-        parsed = int(raw)
-    except ValueError as err:
-        msg = f"invalid MERGECRAFT_MCP_PORT: {raw}"
-        raise ValueError(msg) from err
-    if parsed <= 0 or parsed > 65535:
-        msg = f"invalid MERGECRAFT_MCP_PORT: {raw}"
-        raise ValueError(msg)
-    return parsed
-
-
-def _port_available(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind((MCP_HOST, port))
-        except OSError:
-            return False
-    return True
-
-
-def _select_port() -> int:
-    requested = _read_env_port()
-    if requested is not None and _port_available(requested):
-        return requested
-    # Let the OS allocate an ephemeral port by binding to 0, then release it.
-    # A concurrent process could claim the port in the brief window between
-    # release and uvicorn's bind, but this is orders of magnitude safer than
-    # the old 50-wide scan from a fixed base (which was both predictable and
-    # racy in the same way).
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((MCP_HOST, 0))
-        return sock.getsockname()[1]
 
 
 def _tool_result_to_rpc(result: ToolResult | Any) -> dict[str, Any]:
@@ -678,7 +642,7 @@ def _serve_in_thread(
     config: uvicorn.Config,
     *,
     thread_name: str,
-) -> tuple[uvicorn.Server, Any, asyncio.AbstractEventLoop]:
+) -> tuple[uvicorn.Server, threading.Thread, asyncio.AbstractEventLoop]:
     """Start a uvicorn server on a new event loop in a daemon thread.
 
     Returns ``(server, thread, loop)`` so callers can stop the server

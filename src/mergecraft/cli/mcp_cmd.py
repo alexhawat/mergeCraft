@@ -16,7 +16,7 @@ from mergecraft.cli.mcp_serve import (
 )
 from mergecraft.cli.profiles import apply_profile_env, resolve_profile
 from mergecraft.config.settings import parse_cli_trust_override
-from mergecraft.mcp.server import MCP_HOST, _read_env_port, _select_port
+from mergecraft.mcp.ports import MCP_HOST, _read_env_port, _select_port
 
 app = typer.Typer(
     name="mcp",

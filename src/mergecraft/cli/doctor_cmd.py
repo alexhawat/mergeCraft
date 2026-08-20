@@ -16,7 +16,7 @@ from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
-from mergecraft.mcp.server import _port_available, _read_env_port
+from mergecraft.mcp.ports import _port_available, _read_env_port
 from mergecraft.models import MODEL_ALIASES
 from mergecraft.utils.agent_resolve import has_credentials_for_slug
 

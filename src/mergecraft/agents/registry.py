@@ -24,6 +24,7 @@ from mergecraft.mcp.server import build_orchestrator_tools
 from mergecraft.mcp.shared import (
     PRIMARY_MUTATING_ALLOWLIST,
     PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES,
+    READONLY_MUTATING_ALLOWLIST,
     VERIFIER_ALLOWED_TOOL_CLASSES,
     ToolClass,
     admits_readonly_role,
@@ -71,6 +72,17 @@ class AgentRole(StrEnum):
     verifier = "verifier"
     judge = "judge"
     classifier = "classifier"
+
+
+def _mutating_allowlist_for(role: AgentRole) -> frozenset[str]:
+    """Return the mutating-tool allowlist for *role*.
+
+    The reviewer uses ``PRIMARY_MUTATING_ALLOWLIST`` (D9 dual allowlist);
+    all other roles use the narrower ``READONLY_MUTATING_ALLOWLIST``.
+    """
+    if role is AgentRole.reviewer:
+        return PRIMARY_MUTATING_ALLOWLIST
+    return READONLY_MUTATING_ALLOWLIST
 
 
 class RegistryValidationError(ValueError):
@@ -291,17 +303,15 @@ class Registry:
         tools = build_orchestrator_tools(ctx)
         if binding.role is AgentRole.orchestrator:
             return [spec.name for spec in tools]
-        if binding.role is AgentRole.reviewer:
-            return [
-                spec.name
-                for spec in tools
-                if admits_readonly_role(
-                    spec,
-                    binding.tool_classes,
-                    mutating_allowlist=PRIMARY_MUTATING_ALLOWLIST,
-                )
-            ]
-        return [spec.name for spec in tools if admits_readonly_role(spec, binding.tool_classes)]
+        return [
+            spec.name
+            for spec in tools
+            if admits_readonly_role(
+                spec,
+                binding.tool_classes,
+                mutating_allowlist=_mutating_allowlist_for(binding.role),
+            )
+        ]
 
     def all_bindings(self) -> tuple[AgentBinding, ...]:
         return tuple(self._bindings.values())
