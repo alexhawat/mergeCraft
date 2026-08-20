@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `yamllint` flipped to `default_enabled: auto`; activates on any `*.yaml` or `*.yml` change or `.yamllint` config presence — provides the default YAML lint path (#323); `shellcheck` and `hadolint` were already `auto` (#322, #324)
 
+- `checkmake` flipped to `default_enabled: auto`; activates on any `Makefile`, `makefile`, or `*.mk` change — provides the default Make lint path (#325)
+- `markdownlint` flipped to `default_enabled: auto`; activates on any `*.md` change or `.markdownlint.json`/`.markdownlint.yaml` presence — provides the default Markdown lint path (#326)
+- `tflint` and `checkov` both flipped to `default_enabled: auto`; activate on any `*.tf` or `*.tfvars` change; the shared `iac-scanner` exclusive group was removed (split to `exclusive_group: null`) so both tools run concurrently — `tflint` provides Terraform lint, `checkov` provides IaC security scanning (#327)
+
 - `cppcheck` flipped to `default_enabled: auto`; activates on any `*.c`, `*.cpp`, `*.h`, or `*.hpp` change — provides the default C/C++ SAST path (#315); `clang-tidy` remains `default_enabled: false` (requires `compile_commands.json`, C4)
 - `pmd` flipped to `default_enabled: auto`; activates on any `*.java` change or `pmd.ruleset.xml` presence — provides the default Java lint path (#312); `infer` remains `default_enabled: false` (requires compilation database, C4)
 

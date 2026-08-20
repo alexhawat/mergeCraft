@@ -19,8 +19,8 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `bundler-audit` | vuln | ruby | auto | repo-native | trusted | — | — |
 | `cargo-audit` | vuln | rust | auto | repo-native | trusted | — | — |
 | `cargo-deny` | license | rust | auto | repo-native | trusted | — | — |
-| `checkmake` | lint | make | disabled | managed | trusted | — | — |
-| `checkov` | security | terraform, cloudformation | disabled | managed | untrusted | iac-scanner | — |
+| `checkmake` | lint | make | auto | managed | trusted | — | — |
+| `checkov` | security | terraform, cloudformation | auto | managed | untrusted | — | — |
 | `circleci` | lint | yaml | disabled | managed | untrusted | — | — |
 | `clang-tidy` | lint | c, cpp | disabled | container | trusted | — | requires compile_commands.json — mergeCraft never guesses compiler flags (C4) |
 | `clippy` | lint | rust | auto | repo-native | trusted | rust-lint | — |
@@ -40,7 +40,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `knip` | quality | javascript, typescript | auto | repo-native | trusted | — | — |
 | `languagetool` | lint | text | disabled | container | trusted | — | manifest-only — LanguageTool runtime not bundled on Linux runners (C6 out of scope) |
 | `luacheck` | lint | lua | disabled | repo-native | trusted | — | — |
-| `markdownlint` | lint | markdown | disabled | repo-native | trusted | — | — |
+| `markdownlint` | lint | markdown | auto | repo-native | trusted | — | — |
 | `mypy` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `oasdiff` | contract | — | auto | managed | untrusted | — | — |
 | `opengrep` | security | python, javascript, typescript, go, java, ruby, rust, yaml | disabled | managed | untrusted | pattern-scanner | — |
@@ -66,7 +66,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `squawk` | migration | — | auto | managed | untrusted | — | — |
 | `stylelint` | lint | css | auto | repo-native | trusted | — | — |
 | `swiftlint` | lint | swift | auto | managed | trusted | — | requires non-Linux runner — SwiftLint needs macOS (C6 out of scope) |
-| `tflint` | lint | terraform | disabled | managed | untrusted | iac-scanner | — |
+| `tflint` | lint | terraform | auto | managed | untrusted | — | — |
 | `trivy` | vuln | — | auto | managed | untrusted | dependency-vuln | — |
 | `trufflehog` | secrets | — | auto | managed | untrusted | — | verify off by default; impossible on fork PRs (C2). |
 | `tsc` | lint | typescript | auto | repo-native | trusted | — | — |

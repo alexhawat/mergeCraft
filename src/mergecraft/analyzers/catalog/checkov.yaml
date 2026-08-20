@@ -18,7 +18,7 @@ command:
 scope: diff
 parser: sarif
 supports_fix: false
-default_enabled: false
+default_enabled: auto
 version: 3.2.366
 runtime: managed
 timeout_s: 300
@@ -32,4 +32,4 @@ provenance:
     url: https://pypi.org/project/checkov/3.2.366/
     sha256: '0000000000000000000000000000000000000000000000000000000000000000'
 network_allowlist: []
-exclusive_group: iac-scanner
+exclusive_group: null

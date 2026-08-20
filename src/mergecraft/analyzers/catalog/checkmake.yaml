@@ -13,7 +13,7 @@ command:
 scope: diff
 parser: sarif
 supports_fix: false
-default_enabled: false
+default_enabled: auto
 version: 0.2.2
 runtime: managed
 timeout_s: 60
