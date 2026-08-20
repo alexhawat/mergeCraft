@@ -19,7 +19,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `checkov` | security | terraform, cloudformation | disabled | managed | untrusted | iac-scanner | — |
 | `circleci` | lint | yaml | disabled | managed | untrusted | — | — |
 | `clang-tidy` | lint | c, cpp | disabled | container | trusted | — | requires compile_commands.json — mergeCraft never guesses compiler flags (C4) |
-| `clippy` | lint | rust | disabled | repo-native | trusted | rust-lint | — |
+| `clippy` | lint | rust | auto | repo-native | trusted | rust-lint | — |
 | `cppcheck` | lint | c, cpp | disabled | managed | trusted | — | — |
 | `detekt` | lint | kotlin | disabled | repo-native | trusted | — | — |
 | `dotenv-linter` | lint | — | disabled | managed | trusted | — | Values never printed in findings (D8). |
@@ -27,7 +27,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `eslint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `flake8` | lint | python | disabled | repo-native | trusted | python-lint | — |
 | `fortitude` | lint | fortran | disabled | managed | trusted | — | manifest-only — Fortitude not bundled on Linux runners (C6 out of scope) |
-| `golangci-lint` | lint | go | disabled | managed | trusted | go-lint | — |
+| `golangci-lint` | lint | go | auto | managed | trusted | go-lint | — |
 | `hadolint` | lint | docker | auto | managed | untrusted | — | — |
 | `htmlhint` | lint | html | disabled | repo-native | trusted | — | — |
 | `infer` | security | java, c, cpp | disabled | container | trusted | — | requires compilation database and build — container-only heavyweight (C4) |
@@ -41,7 +41,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `oxlint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `phpcs` | lint | php | disabled | repo-native | trusted | php-lint | — |
 | `phpmd` | lint | php | disabled | repo-native | trusted | — | — |
-| `phpstan` | lint | php | disabled | repo-native | trusted | — | — |
+| `phpstan` | lint | php | auto | repo-native | trusted | — | No phpstan.neon/neon.dist → runs at --level=0 (D12). |
 | `pmd` | lint | java | disabled | managed | trusted | — | — |
 | `presidio` | security | — | disabled | container | trusted | — | Container-only; high-confidence entity types only. |
 | `prisma-lint` | lint | prisma | disabled | repo-native | trusted | — | — |
@@ -49,7 +49,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `pylint` | lint | python | disabled | managed | trusted | python-lint | — |
 | `pyright` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `regal` | lint | rego | disabled | managed | trusted | — | — |
-| `rubocop` | lint | ruby | disabled | repo-native | trusted | ruby-lint | — |
+| `rubocop` | lint | ruby | auto | repo-native | trusted | ruby-lint | — |
 | `ruff` | lint | python | auto | repo-native | trusted | python-lint | — |
 | `semgrep` | security | python, javascript, typescript, go, java, ruby, rust, yaml | enabled | managed | untrusted | pattern-scanner | — |
 | `shellcheck` | lint | shell | auto | managed | untrusted | — | — |

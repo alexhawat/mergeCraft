@@ -35,6 +35,8 @@ _ESLINT_CONFIG_NAMES = (
 )
 _BIOME_CONFIG_NAMES = ("biome.json", "biome.jsonc")
 _OXLINT_CONFIG_NAMES = (".oxlintrc.json", "oxlint.json")
+_RUBOCOP_CONFIG_NAMES = (".rubocop.yml", ".rubocop.yaml", ".rubocop.yml.dist")
+_RUBOCOP_GEM_RE = re.compile(r"""gem\s+["']rubocop["']""")
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +116,17 @@ def has_oxlint_config(repo_root: Path) -> bool:
     return any((repo_root / name).is_file() for name in _OXLINT_CONFIG_NAMES)
 
 
+def has_rubocop_config(repo_root: Path) -> bool:
+    """D11: return True when a RuboCop config file or Gemfile gem declaration is found."""
+    repo_root = repo_root.resolve()
+    if any((repo_root / name).is_file() for name in _RUBOCOP_CONFIG_NAMES):
+        return True
+    gemfile = repo_root / "Gemfile"
+    if gemfile.is_file():
+        return bool(_RUBOCOP_GEM_RE.search(_read_text(gemfile)))
+    return False
+
+
 def _package_json(repo_root: Path) -> dict[str, object]:
     path = repo_root / "package.json"
     if not path.is_file():
@@ -189,6 +202,7 @@ def manifest_config_present(manifest_id: str, repo_root: Path) -> bool:
         "eslint": has_eslint_config,
         "biome": has_biome_config,
         "oxlint": has_oxlint_config,
+        "rubocop": has_rubocop_config,
     }
     check = checks.get(manifest_id)
     if check is None:
@@ -382,6 +396,7 @@ __all__ = [
     "has_mypy_config",
     "has_oxlint_config",
     "has_pyright_config",
+    "has_rubocop_config",
     "has_ruff_config",
     "manifest_config_present",
     "resolve_repo_tool",

@@ -83,6 +83,21 @@ def _declared_unavailable_plan(manifest: AnalyzerManifest) -> AnalyzerPlan | Non
     )
 
 
+def _rubocop_config_gate(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
+    """D11: skip rubocop when no RuboCop config is detected in the repo."""
+    if manifest.id != "rubocop":
+        return None
+    from mergecraft.analyzers.detect import has_rubocop_config
+
+    if not has_rubocop_config(repo_root):
+        return AnalyzerPlan(
+            manifest_id=manifest.id,
+            mode="skip",
+            reason="skipped rubocop: no RuboCop config detected (D11 — unavailable without config)",
+        )
+    return None
+
+
 def _agentsec_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
     """Per-source resolver: the ``agentsec`` special-case (mergeCraft's native engine)."""
     if manifest.id != "agentsec":
@@ -173,6 +188,20 @@ def _repo_native_plan(
             argv = (prefix[0], *manifest.command[1:])
     elif state.tool_path and argv and argv[0] == _repo_tool_binary(manifest):
         argv = (state.tool_path, *argv[1:])
+
+    if manifest.id == "phpstan":
+        repo_root_resolved = repo_root.resolve()
+        neon_present = (repo_root_resolved / "phpstan.neon").is_file() or (
+            repo_root_resolved / "phpstan.neon.dist"
+        ).is_file()
+        if not neon_present:
+            argv_list = list(argv)
+            if FILES_TOKEN in argv_list:
+                argv_list.insert(argv_list.index(FILES_TOKEN), "--level=0")
+            else:
+                argv_list.append("--level=0")
+            argv = tuple(argv_list)
+
     version_note = _format_version_note(
         manifest, repo_tool_version=state.tool_version, config_note=state.config_note
     )
@@ -279,6 +308,10 @@ def resolve_analyzer(
         repo_has_tool = False
 
     plan = _declared_unavailable_plan(manifest)
+    if plan is not None:
+        return plan
+
+    plan = _rubocop_config_gate(manifest, repo_root)
     if plan is not None:
         return plan
 

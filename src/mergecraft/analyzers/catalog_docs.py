@@ -421,6 +421,8 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             notes.append("Values never printed in findings (D8).")
         if manifest.id == "trufflehog":
             notes.append("verify off by default; impossible on fork PRs (C2).")
+        if manifest.id == "phpstan":
+            notes.append("No phpstan.neon/neon.dist → runs at --level=0 (D12).")
         note_text = " ".join(notes) if notes else "—"
         lines.append(
             f"| `{manifest.id}` | {manifest.category} | {languages} | "
