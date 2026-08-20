@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,16 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 pytest_plugins = ["tests.orchestrator.conftest", "tests.support.provider_harness.pytest_plugin"]
+
+
+@pytest.fixture(autouse=True)
+def _reset_process_tracer_cache() -> Iterator[None]:
+    """Reset the process-wide Tracer cache (#292) so tests do not leak tracers."""
+    from mergecraft.tracing.tracer import reset_process_tracer_cache
+
+    reset_process_tracer_cache()
+    yield
+    reset_process_tracer_cache()
 
 
 # ---------------------------------------------------------------------------

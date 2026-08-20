@@ -246,9 +246,15 @@ def captured_streaming_sink() -> CapturedSink:
     the standard tracer pathway so the assertions below see them. The
     fixture's ``by_kind`` helper makes the assertion shape stable across
     the W6 implementation.
+
+    Resets the process-wide ``Tracer`` cache (#292 / W4) so each test gets
+    a fresh ``Tracer`` bound to *its* ``MemorySink`` rather than a cached one
+    from a sibling test.
     """
     from mergecraft.tracing import sink_factory
+    from mergecraft.tracing.tracer import reset_process_tracer_cache
 
+    reset_process_tracer_cache()
     settings = _build_memory_tracing_settings()
     sink = sink_factory(settings.tracing)
     memory = sink.inner.sinks[0]

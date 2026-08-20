@@ -22,6 +22,7 @@ from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_BASE_URL_ENV,
     resolve_gateway_endpoint,
     resolve_gateway_endpoints,
+    resolve_model_params_for_model,
 )
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.shared import (
@@ -40,7 +41,7 @@ from mergecraft.tracing.genai import (
     output_messages_attrs,
     request_attrs,
     resolve_capture_policy,
-    usage_attrs,
+    usage_attrs_from_agent_usage,
 )
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
@@ -294,6 +295,7 @@ async def _prompt_session(
     session_id: str,
     text: str,
     model: dict[str, str] | None,
+    resolved_model: str | None = None,
     capture_policy: ContentCapture | None = None,
 ) -> AgentResult:
     """Prompt the opencode session — the one harness path with full payload visibility.
@@ -316,7 +318,8 @@ async def _prompt_session(
     model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
     with tracer.start_span("llm.call") as span:
         try:
-            for key, value in request_attrs(model=model_slug).items():
+            model_params = resolve_model_params_for_model(resolved_model or model_slug)
+            for key, value in request_attrs(model=model_slug, params=model_params).items():
                 span.set_attribute(key, value)
             if capture_policy is not None:
                 for key, value in input_messages_attrs(
@@ -330,10 +333,11 @@ async def _prompt_session(
         )
         try:
             if result.usage is not None:
-                for key, value in usage_attrs(
+                for key, value in usage_attrs_from_agent_usage(
                     input_tokens=result.usage.input_tokens,
                     output_tokens=result.usage.output_tokens,
-                    cache_read_input_tokens=result.usage.cache_read_tokens,
+                    cache_read_tokens=result.usage.cache_read_tokens,
+                    cache_write_tokens=result.usage.cache_write_tokens,
                     cost_usd=result.usage.cost_usd,
                 ).items():
                     span.set_attribute(key, value)
@@ -490,6 +494,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             session_id=session_id,
             text=prompt,
             model=model_obj,
+            resolved_model=model,
             capture_policy=capture_policy,
         )
 
@@ -499,6 +504,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 session_id=session_id,
                 text=followup,
                 model=model_obj,
+                resolved_model=model,
                 capture_policy=capture_policy,
             )
 

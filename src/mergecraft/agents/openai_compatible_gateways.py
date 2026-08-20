@@ -16,15 +16,20 @@ preserved; the multi-provider resolver adds a dict-valued surface that both
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import urlparse
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.functional_serializers import PlainSerializer
 from pydantic.functional_validators import BeforeValidator
+
+if TYPE_CHECKING:
+    from mergecraft.tracing.genai import ModelParams
 
 NOUS_API_KEY_ENV = "NOUS_API_KEY"
 NOUS_BASE_URL_ENV = "NOUS_BASE_URL"
@@ -36,6 +41,8 @@ DEFAULT_TOKENHUB_BASE_URL = "https://tokenhub-intl.tencentcloudmaas.com/v1"
 
 CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
 CUSTOM_PROVIDER_API_KEY_ENV = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
+CUSTOM_PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS"
+PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_PROVIDER_EXTRA_OPTIONS"
 
 # W6 (#34): MiniMax is reachable through the existing custom-provider helper
 # (operator-locked D10 / option ii). The alias env vars re-use the D7
@@ -53,6 +60,7 @@ DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 # (no renumbering).
 INDEXED_CUSTOM_PROVIDER_BASE_URL_RE = re.compile(r"^MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_(\d+)$")
 INDEXED_CUSTOM_PROVIDER_API_KEY_RE = re.compile(r"^MERGECRAFT_CUSTOM_PROVIDER_API_KEY_(\d+)$")
+INDEXED_CUSTOM_PROVIDER_EXTRA_OPTIONS_FMT = "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS_{n}"
 # Provider-id derivation rule (operator locked): ``"provider_" + str(N)`` for
 # indexed pairs; ``"default"`` for the singleton back-compat alias.
 INDEXED_PROVIDER_ID_FMT = "provider_{n}"
@@ -244,16 +252,58 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
     return provider_id, base_url, api_key
 
 
+def _parse_extra_options_env(env_name: str) -> dict[str, Any]:
+    """Parse a JSON object env var into ``extra_options``; missing/invalid → ``{}``."""
+    raw = os.environ.get(env_name, "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.debug("invalid {} JSON: {}", env_name, exc)
+        return {}
+    if not isinstance(parsed, dict):
+        logger.debug("{} must be a JSON object, got {}", env_name, type(parsed).__name__)
+        return {}
+    return parsed
+
+
+def _extra_options_for_provider(
+    provider_id: str, *, indexed_env: str | None = None
+) -> dict[str, Any]:
+    """Resolve ``extra_options`` for one provider from env (O4 / #295).
+
+    Precedence:
+    1. Indexed ``MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS_<N>`` when supplied.
+    2. Singleton ``MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS``.
+    3. Per-provider entry in ``MERGECRAFT_PROVIDER_EXTRA_OPTIONS`` JSON map.
+    """
+    if indexed_env is not None:
+        indexed = _parse_extra_options_env(indexed_env)
+        if indexed:
+            return indexed
+    singleton = _parse_extra_options_env(CUSTOM_PROVIDER_EXTRA_OPTIONS_ENV)
+    if singleton:
+        return singleton
+    by_provider = _parse_extra_options_env(PROVIDER_EXTRA_OPTIONS_ENV)
+    provider_entry = by_provider.get(provider_id)
+    if isinstance(provider_entry, dict):
+        return provider_entry
+    return {}
+
+
 def _provider_config_from_env_pair(
     *,
     provider_id: str,
     base_url: str,
     api_key_env: str,
+    extra_options_env: str | None = None,
 ) -> ProviderConfig:
     return ProviderConfig(
         provider_id=provider_id,
         base_url=base_url,
         api_key_env=api_key_env,
+        extra_options=_extra_options_for_provider(provider_id, indexed_env=extra_options_env),
     )
 
 
@@ -295,6 +345,7 @@ def _resolve_indexed_providers() -> dict[str, ProviderConfig]:
             provider_id=provider_id,
             base_url=base_url,
             api_key_env=f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{n}",
+            extra_options_env=INDEXED_CUSTOM_PROVIDER_EXTRA_OPTIONS_FMT.format(n=n),
         )
     return out
 
@@ -344,6 +395,48 @@ def resolve_gateway_endpoints() -> dict[str, ProviderConfig]:
     return {singleton.provider_id: singleton}
 
 
+def _provider_config_for_model(model: str) -> ProviderConfig | None:
+    """Return the configured ``ProviderConfig`` for ``provider/model``, if any."""
+    slash = model.find("/")
+    if slash <= 0:
+        return None
+    provider_id = model[:slash].lower()
+
+    endpoints = resolve_gateway_endpoints()
+    config = endpoints.get(provider_id)
+    if config is None and len(endpoints) == 1:
+        config = next(iter(endpoints.values()))
+    if config is not None:
+        return config
+
+    resolved = resolve_gateway_endpoint(model)
+    if resolved is None:
+        return None
+    preset_provider_id, base_url, _api_key = resolved
+    preset = GATEWAY_PRESETS.get(preset_provider_id)
+    if preset is None:
+        return None
+    return ProviderConfig(
+        provider_id=preset_provider_id,
+        base_url=base_url,
+        api_key_env=preset.api_key_env,
+        extra_options=_extra_options_for_provider(preset_provider_id),
+    )
+
+
+def resolve_model_params_for_model(model: str | None) -> ModelParams | None:
+    """Resolve request knobs from a configured gateway's ``extra_options`` (O4)."""
+    if not model:
+        return None
+    from mergecraft.tracing.genai import ModelParams, model_params_from_mapping
+
+    config = _provider_config_for_model(model)
+    if config is None or not config.extra_options:
+        return None
+    params = model_params_from_mapping(config.extra_options)
+    return None if params == ModelParams() else params
+
+
 __all__ = [
     "CAPABILITY_VALUES",
     "CUSTOM_PROVIDER_API_KEY_ENV",
@@ -366,4 +459,5 @@ __all__ = [
     "require_capabilities",
     "resolve_gateway_endpoint",
     "resolve_gateway_endpoints",
+    "resolve_model_params_for_model",
 ]

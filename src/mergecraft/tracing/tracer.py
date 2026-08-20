@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from types import TracebackType
 
-    from mergecraft.config.settings import RepoSettings
+    from mergecraft.config.settings import RepoSettings, TracingSettings
 
 
 # G-F10 / #56 D6 — a guard, not a budget. A large review emits on the order
@@ -409,6 +409,63 @@ _ACTIVE_SPAN: ContextVar[Span | NullSpan | None] = ContextVar(
     "mergecraft_active_trace_span", default=None
 )
 
+_PROCESS_TRACER: Tracer | None = None
+_PROCESS_TRACING_FINGERPRINT: str | None = None
+
+
+def reset_process_tracer_cache() -> None:
+    """Drop the process-wide ``Tracer`` cache (test seam for MCP-style reuse)."""
+    global _PROCESS_TRACER, _PROCESS_TRACING_FINGERPRINT
+
+    _PROCESS_TRACER = None
+    _PROCESS_TRACING_FINGERPRINT = None
+
+
+def resolve_trace_id(*, pin: bool = False) -> str:
+    """Resolve the per-run trace identifier (Logfire / OTel ``trace_id``).
+
+    One ``trace_id`` is shared by every span emitted by a single
+    ``mergecraft diff-review`` run; Logfire (and any OTel backend) groups
+    those spans under one trace. The precedence mirrors the existing
+    session-id resolver (D7 / T3.2):
+
+    1. ``MERGECRAFT_TRACE_ID`` — explicit per-run override.
+    2. ``MERGECRAFT_TRACE_SESSION_ID`` — alias preserving the
+       pre-#137 contract so existing pipelines keep working.
+    3. ``GITHUB_RUN_ID`` — the Actions run id, monotonic and unique.
+    4. ``uuid.uuid4().hex`` — local fallback when no env vars are set.
+
+    When ``pin`` is true and ``MERGECRAFT_TRACE_ID`` is unset, the resolved
+    value is written to ``os.environ`` so MCP-style repeated
+    ``get_tracer_from_settings`` calls share one id (#292).
+
+    Args:
+        pin: Persist the resolved id in ``MERGECRAFT_TRACE_ID`` when minting.
+
+    Returns:
+        str: 32-hex (uuid4) trace identifier, or the resolved env value.
+
+    Examples:
+        >>> bool(resolve_trace_id())
+        True
+    """
+    existing = os.environ.get("MERGECRAFT_TRACE_ID")
+    if existing:
+        return existing
+    minted = (
+        os.environ.get("MERGECRAFT_TRACE_SESSION_ID")
+        or os.environ.get("GITHUB_RUN_ID")
+        or uuid.uuid4().hex
+    )
+    if pin:
+        os.environ["MERGECRAFT_TRACE_ID"] = minted
+    return minted
+
+
+def _tracing_fingerprint(active_tracing: TracingSettings) -> str:
+    """Stable key for reusing a ``Tracer`` when tracing settings match."""
+    return active_tracing.model_dump_json()
+
 
 def resolve_correlation_from_env() -> dict[str, Any]:
     """Resolve root-span correlation fields from GitHub Actions variables.
@@ -707,35 +764,6 @@ def resolve_session_id() -> str:
     )
 
 
-def resolve_trace_id() -> str:
-    """Resolve the per-run trace identifier (Logfire / OTel ``trace_id``).
-
-    One ``trace_id`` is shared by every span emitted by a single
-    ``mergecraft diff-review`` run; Logfire (and any OTel backend) groups
-    those spans under one trace. The precedence mirrors the existing
-    session-id resolver (D7 / T3.2):
-
-    1. ``MERGECRAFT_TRACE_ID`` — explicit per-run override.
-    2. ``MERGECRAFT_TRACE_SESSION_ID`` — alias preserving the
-       pre-#137 contract so existing pipelines keep working.
-    3. ``GITHUB_RUN_ID`` — the Actions run id, monotonic and unique.
-    4. ``uuid.uuid4().hex`` — local fallback when no env vars are set.
-
-    Returns:
-        str: 32-hex (uuid4) trace identifier, or the resolved env value.
-
-    Examples:
-        >>> bool(resolve_trace_id())
-        True
-    """
-    return (
-        os.environ.get("MERGECRAFT_TRACE_ID")
-        or os.environ.get("MERGECRAFT_TRACE_SESSION_ID")
-        or os.environ.get("GITHUB_RUN_ID")
-        or uuid.uuid4().hex
-    )
-
-
 def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     """Build the enabled tracer for ``settings`` or return the null path.
 
@@ -750,6 +778,8 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
         >>> isinstance(get_tracer_from_settings(RepoSettings()), NullTracer)
         True
     """
+    global _PROCESS_TRACER, _PROCESS_TRACING_FINGERPRINT
+
     # Honor the env/CLI/YAML/default precedence (``MERGECRAFT_TRACING``,
     # ``--tracing``, ``.mergecraft/config.yaml``) rather than the YAML block
     # alone, so an operator's ``.env`` token + ``--tracing-to logfire`` drives
@@ -764,6 +794,10 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     if isinstance(active, Span):
         return active.tracer
 
+    fingerprint = _tracing_fingerprint(active_tracing)
+    if _PROCESS_TRACER is not None and fingerprint == _PROCESS_TRACING_FINGERPRINT:
+        return _PROCESS_TRACER
+
     try:
         sink = claim_sink(active_tracing)
     except Exception as exc:
@@ -773,9 +807,9 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     correlation = resolve_correlation_from_env()
     session_id = resolve_session_id()
     run_id = str(correlation.get("run_id") or session_id)
-    trace_id = resolve_trace_id()
+    trace_id = resolve_trace_id(pin=True)
     tier = os.environ.get("MERGECRAFT_TRUST_TIER") or "balanced"
-    return Tracer(
+    tracer = Tracer(
         sink=sink,
         session_id=session_id,
         run_id=run_id,
@@ -783,6 +817,9 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
         trace_id=trace_id,
         baseline_attrs=baseline_run_attrs(),
     )
+    _PROCESS_TRACER = tracer
+    _PROCESS_TRACING_FINGERPRINT = fingerprint
+    return tracer
 
 
 __all__ = [

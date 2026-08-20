@@ -367,6 +367,26 @@ def resolve_git_common_dir(cwd: Path) -> Path | None:
     return common if common.is_dir() else None
 
 
+def is_registered_git_worktree(cwd: Path) -> bool:
+    """Return whether *cwd* is a git-registered worktree, not a forged ``.git`` file.
+
+    Matching ``--git-common-dir`` alone is insufficient: a plain ``.git`` file
+    can aim at another repo's metadata directory and inherit its common dir
+    without being enrolled in ``git worktree list``.
+    """
+    resolved = cwd.resolve()
+    try:
+        output = _run_git(["worktree", "list", "--porcelain"], cwd=str(resolved))
+    except RuntimeError:
+        return False
+    for line in output.splitlines():
+        if line.startswith("worktree "):
+            listed = Path(line.removeprefix("worktree ").strip()).resolve()
+            if listed == resolved:
+                return True
+    return False
+
+
 def _normalize_remote_repo(repo: str) -> str:
     candidate = repo.strip()
     if _OWNER_REPO_RE.match(candidate):
@@ -562,6 +582,7 @@ __all__ = [
     "cli_analyzer_sandbox_applies",
     "confine_path",
     "filter_confined_paths",
+    "is_registered_git_worktree",
     "materialize_resolved_diff",
     "parse_commit_range",
     "resolve_auth_token",
