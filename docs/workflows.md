@@ -98,7 +98,7 @@ staticChecks:
 Add `model: <slug>` to the workflow `with:` block to pick the **head** of
 the chain (default chain head is the first `models:` entry); the configured
 fallbacks are walked on credential miss or retryable failure. See
-[Chain semantics](#chain-semantics--model-37--w4) for the contract.
+[Chain semantics in authentication.md](authentication.md#chain-semantics--model-37--w4) for the contract.
 
 ### Example 5 — SARIF upload to code scanning (opt-in)
 
@@ -161,23 +161,6 @@ the payload/span-count caps: [docs/TRACING.md](TRACING.md).
 committed under assets/ and linked here — operator-captured, see the
 issues-showcase-readiness wave plan (PR G5 / D7). -->
 
-## 🔑 Authentication
-
-See [authentication.md](authentication.md) for provider credentials, custom
-OpenAI-compatible gateways, model fallback chains, harness matrix, and action
-parity.
-## 🧰 CLI
-
-See [docs/cli.md](cli.md) for the full command list (one row per real leaf
-command — pass `--help` to any invocation for its full flag set). Action
-inputs and outputs live in [docs/action-reference.md](action-reference.md).
-
-The bare `gha` group invocation (no subcommand) is the Docker action's
-runtime entry point — it is a Typer group callback, not a
-`registered_commands` leaf itself, so it is described here in prose rather
-than as its own table row; `gha token` above is the one real leaf command
-under that group.
-
 <span id="security-model"></span>
 
 ## 🔒 Security model
@@ -207,8 +190,8 @@ under that group.
   Run temp dirs and registered leak-surface paths are removed on success and
   failure; ``wipe_runner_leak_surface`` only unlinks mergeCraft-owned paths.
 - **`push` / `shell` value semantics are defined in the action-inputs
-  table** — see [Action inputs (`with:`)](#action-inputs-with) above for the
-  `disabled` / `restricted` / `enabled` vocabulary both inputs share.
+  table** — see [Action inputs (`with:`) in action-reference.md](action-reference.md#action-inputs-with)
+  for the `disabled` / `restricted` / `enabled` vocabulary both inputs share.
 - **Containment hardening** — ``safe.directory`` is scoped to
   ``$GITHUB_WORKSPACE`` and registered cross-repo checkout roots (no wildcard).
   Git hooks run only when ``shell: enabled``; ``restricted`` and ``disabled``

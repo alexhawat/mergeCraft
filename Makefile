@@ -147,7 +147,7 @@ example-workflows-check: ## Fail when committed example workflows drift from tem
 docs: ## Regenerate generated doc pages (CLI, action ref, docs index, llms-full)
 	$(UV) run python scripts/gen_docs.py
 
-docs-check: llms-check ## Fail when generated docs drift
+docs-check: llms-check diagrams-check ## Fail when generated docs drift
 	$(UV) run python scripts/gen_docs.py --check
 
 llms: ## Regenerate llms-full.txt concatenation
@@ -167,7 +167,15 @@ diagrams-check: ## Assert committed pipeline SVGs exist and README references th
 	@test -s $(PIPELINE_DARK) || (echo "missing $(PIPELINE_DARK)" >&2; exit 1)
 	@rg -q 'assets/diagrams/pipeline-light.svg' README.md
 	@rg -q 'assets/diagrams/pipeline-dark.svg' README.md
-	@if [ -n "$$MERGECRAFT_REQUIRE_D2" ]; then $(MAKE) diagrams; fi
+	@if [ -n "$$MERGECRAFT_REQUIRE_D2" ]; then \
+		command -v d2 >/dev/null 2>&1 || { echo "d2 not found — install from https://d2lang.com" >&2; exit 1; }; \
+		tmp=$$(mktemp -d); \
+		trap 'rm -rf "$$tmp"' EXIT; \
+		d2 --theme 0 $(PIPELINE_D2) "$$tmp/pipeline-light.svg"; \
+		d2 --theme 200 $(PIPELINE_D2) "$$tmp/pipeline-dark.svg"; \
+		cmp -s "$$tmp/pipeline-light.svg" $(PIPELINE_LIGHT) || { echo "$(PIPELINE_LIGHT) drifted from $(PIPELINE_D2) (run: make diagrams)" >&2; exit 1; }; \
+		cmp -s "$$tmp/pipeline-dark.svg" $(PIPELINE_DARK) || { echo "$(PIPELINE_DARK) drifted from $(PIPELINE_D2) (run: make diagrams)" >&2; exit 1; }; \
+	fi
 
 reference-docs: docs ## Regenerate the README action + CLI reference tables (alias)
 
