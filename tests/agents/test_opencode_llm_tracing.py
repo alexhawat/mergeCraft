@@ -85,7 +85,6 @@ def _llm_call_attrs(opencode_tracer: Any) -> dict[str, Any]:
     return events[0].attrs
 
 
-@pytest.mark.xfail(reason="green after W12: OpenCode ModelParams on llm.call", strict=False)
 async def test_opencode_llm_call_stamps_max_tokens_at_metadata_capture(
     opencode_tracer: Any,
     session_response: Any,

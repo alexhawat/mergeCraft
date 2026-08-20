@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from loguru import logger
@@ -36,6 +36,7 @@ from mergecraft.agents.shared import (
 )
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.genai import (
+    ModelParams,
     input_messages_attrs,
     output_messages_attrs,
     request_attrs,
@@ -288,6 +289,94 @@ def _parse_model(value: str | None) -> dict[str, str] | None:
     return {"providerID": value[:slash], "modelID": value[slash + 1 :]}
 
 
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _model_params_from_mapping(raw: dict[str, Any]) -> ModelParams:
+    stop_raw = raw.get("stop") if raw.get("stop") is not None else raw.get("stop_sequences")
+    stop: list[str] | None = None
+    if isinstance(stop_raw, str) and stop_raw:
+        stop = [stop_raw]
+    elif isinstance(stop_raw, (list, tuple)):
+        stop = [str(item) for item in stop_raw if str(item)]
+
+    reasoning = raw.get("reasoning_effort")
+    return ModelParams(
+        temperature=_optional_float(raw.get("temperature")),
+        top_p=_optional_float(raw.get("top_p")),
+        top_k=_optional_int(raw.get("top_k")),
+        max_tokens=_optional_int(raw.get("max_tokens")),
+        stop=stop,
+        seed=_optional_int(raw.get("seed")),
+        reasoning_effort=str(reasoning) if reasoning else None,
+        thinking_budget=_optional_int(raw.get("thinking_budget")),
+    )
+
+
+def _model_params_is_empty(params: ModelParams) -> bool:
+    return params == ModelParams()
+
+
+def _resolve_opencode_model_params(resolved_model: str | None) -> ModelParams | None:
+    """Resolve request knobs from the configured OpenAI-compatible provider (O4)."""
+    if not resolved_model:
+        return None
+    from mergecraft.agents.openai_compatible_gateways import resolve_gateway_endpoints
+
+    slash = resolved_model.find("/")
+    provider_id = resolved_model[:slash].lower() if slash > 0 else None
+    endpoints = resolve_gateway_endpoints()
+    if not endpoints:
+        return None
+    config = endpoints.get(provider_id) if provider_id else None
+    if config is None and len(endpoints) == 1:
+        config = next(iter(endpoints.values()))
+    if config is None or not config.extra_options:
+        return None
+    params = _model_params_from_mapping(config.extra_options)
+    return None if _model_params_is_empty(params) else params
+
+
+def _usage_attrs_from_agent_usage(usage: AgentUsage) -> dict[str, Any]:
+    """Map ``AgentUsage`` to span attrs, omitting unset/zero counters (O4)."""
+    return usage_attrs(
+        input_tokens=usage.input_tokens or None,
+        output_tokens=usage.output_tokens or None,
+        cache_read_input_tokens=usage.cache_read_tokens,
+        cache_creation_input_tokens=usage.cache_write_tokens,
+        cost_usd=usage.cost_usd,
+    )
+
+
 async def _prompt_session(
     *,
     base_url: str,
@@ -315,9 +404,10 @@ async def _prompt_session(
             base_url=base_url, session_id=session_id, text=text, model=model
         )
     model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
+    model_params = _resolve_opencode_model_params(resolved_model or model_slug)
     with tracer.start_span("llm.call") as span:
         try:
-            for key, value in request_attrs(model=model_slug).items():
+            for key, value in request_attrs(model=model_slug, params=model_params).items():
                 span.set_attribute(key, value)
             if capture_policy is not None:
                 for key, value in input_messages_attrs(
