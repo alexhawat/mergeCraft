@@ -24,7 +24,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `circleci` | lint | yaml | disabled | managed | untrusted | — | — |
 | `clang-tidy` | lint | c, cpp | disabled | container | trusted | — | requires compile_commands.json — mergeCraft never guesses compiler flags (C4) |
 | `clippy` | lint | rust | auto | repo-native | trusted | rust-lint | — |
-| `cppcheck` | lint | c, cpp | disabled | managed | trusted | — | — |
+| `cppcheck` | lint | c, cpp | auto | managed | trusted | — | — |
 | `detekt` | lint | kotlin | disabled | repo-native | trusted | — | — |
 | `dotenv-linter` | lint | — | disabled | managed | trusted | — | Values never printed in findings (D8). |
 | `ember-template-lint` | lint | ember | disabled | repo-native | trusted | — | — |
@@ -46,8 +46,8 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `opengrep` | security | python, javascript, typescript, go, java, ruby, rust, yaml | disabled | managed | untrusted | pattern-scanner | — |
 | `osv-scanner` | vuln | — | auto | managed | untrusted | dependency-vuln | — |
 | `oxlint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
-| `phpcs` | lint | php | disabled | repo-native | trusted | php-lint | — |
-| `phpmd` | lint | php | disabled | repo-native | trusted | — | — |
+| `phpcs` | lint | php | disabled | repo-native | trusted | php-lint | Legacy opt-in — disabled by default; phpstan is the default PHP signal. |
+| `phpmd` | lint | php | disabled | repo-native | trusted | — | Legacy opt-in — disabled by default; phpstan is the default PHP signal. |
 | `phpstan` | lint | php | auto | repo-native | trusted | — | No phpstan.neon/neon.dist → runs at --level=0 (D12). |
 | `pmd` | lint | java | disabled | managed | trusted | — | — |
 | `presidio` | security | — | disabled | container | trusted | — | Container-only; high-confidence entity types only. |
