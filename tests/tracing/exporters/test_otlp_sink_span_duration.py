@@ -68,10 +68,6 @@ def _export_event_via_otlp_sink(event: Any) -> dict[str, Any]:
     return spans[0]
 
 
-@pytest.mark.xfail(
-    reason="green after W4: #373 OTLP span start_time/end_time from TraceEvent",
-    strict=False,
-)
 @pytest.mark.parametrize("wall_seconds", [1, 3])
 def test_exported_span_duration_matches_trace_event_wall_time(
     trace_event_payload: dict[str, Any],

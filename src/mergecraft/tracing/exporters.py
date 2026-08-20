@@ -653,10 +653,14 @@ class OTLPSink:
                 except (TypeError, ValueError):  # fmt: skip
                     otel_trace_id = None
                 attrs["mergecraft.trace_id"] = event.trace_id
-            span = self._tracer.start_span(name=event.kind, attributes=attrs)
+            span = self._tracer.start_span(
+                name=event.kind,
+                attributes=attrs,
+                start_time=event.ts_start_ns,
+            )
             if otel_trace_id:
                 self._override_span_trace_id(span, otel_trace_id)
-            span.end()
+            span.end(end_time=event.ts_end_ns)
         except Exception as exc:
             # Convention 6 — never fail the caller's review on a remote sink.
             if not self._warned:
