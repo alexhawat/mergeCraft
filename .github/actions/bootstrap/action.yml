@@ -4,6 +4,10 @@ name: Bootstrap mergecraft toolchain
 description: Install uv (pinned) and run make setup.
 
 inputs:
+  python-version:
+    description: Python version for the uv-managed virtualenv (CI matrix uses 3.11 and 3.14).
+    required: false
+    default: "3.14"
   uv-version:
     description: uv version to install (keep in sync across all jobs here).
     required: false
@@ -17,7 +21,7 @@ runs:
       uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       with:
         version: ${{ inputs.uv-version }}
-        python-version: "3.14"
+        python-version: ${{ inputs.python-version }}
         enable-cache: true
 
     - name: Bootstrap toolchain (make setup)

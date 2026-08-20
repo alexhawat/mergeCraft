@@ -11,14 +11,19 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, NoReturn
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 import typer
 from dotenv import set_key as _dotenv_set_key
 from loguru import logger
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import (
+    CLI_SUCCESS_EXIT_CODE,
+    CLI_USAGE_EXIT_CODE,
+)
 from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
@@ -27,7 +32,6 @@ if TYPE_CHECKING:
 app = typer.Typer(
     help="Manage provider credentials for the current repository.", no_args_is_help=True
 )
-console = Console()
 
 CODEX_AUTH_SECRET = "CODEX_AUTH_JSON"
 CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN"
@@ -82,22 +86,17 @@ _SCOPE_OPTION: str = typer.Option(
 )
 
 
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
-
-
 def _get_gh_token() -> str:
     try:
         token = subprocess.check_output(["gh", "auth", "token"], text=True).strip()
-    except subprocess.CalledProcessError, FileNotFoundError, OSError:
-        _bail(
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
+        cli_bail(
             "gh cli not found or not authenticated.\n"
             "  install: https://cli.github.com\n"
             "  then:    gh auth login"
         )
     if not token:
-        _bail("gh cli returned an empty token. try: gh auth login")
+        cli_bail("gh cli returned an empty token. try: gh auth login")
     return token
 
 
@@ -106,11 +105,11 @@ def _parse_git_remote() -> tuple[str, str]:
         url = subprocess.check_output(
             ["git", "remote", "get-url", "origin"], text=True, stderr=subprocess.DEVNULL
         ).strip()
-    except subprocess.CalledProcessError, FileNotFoundError, OSError:
-        _bail("not a git repository or no 'origin' remote found.")
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
+        cli_bail("not a git repository or no 'origin' remote found.")
     match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
     if not match:
-        _bail(f"could not parse github owner/repo from remote: {url}")
+        cli_bail(f"could not parse github owner/repo from remote: {url}")
     return match.group(1), match.group(2)
 
 
@@ -124,7 +123,7 @@ def _set_gh_secret(*, name: str, value: str, repo_slug: str) -> bool:
             capture_output=True,
         )
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:  # fmt: skip
         logger.warning("gh secret set failed: {}", exc)
         return False
 
@@ -188,7 +187,7 @@ def _single_line_credential(*, name: str, value: str) -> str:
     try:
         parsed = json.loads(value)
     except ValueError:
-        _bail(
+        cli_bail(
             f"{name} spans multiple lines and is not JSON — refusing to write a "
             f"broken .env entry. Set {name} manually, or use --scope github."
         )
@@ -241,7 +240,7 @@ def _persist_credential(
 
     if target.github is None:
         if not wrote_local:
-            _bail(f"nothing was written — could not save {name} locally.")
+            cli_bail(f"nothing was written — could not save {name} locally.")
         return
 
     console.print(f"saving [cyan]{name}[/cyan] via gh secret set...")
@@ -250,14 +249,14 @@ def _persist_credential(
     if wrote_github:
         console.print(f"[green]saved {name}[/green] to GitHub Actions secrets")
     elif not target.local:
-        _bail(f"could not set secret — set it manually at:\n  {secrets_url}")
+        cli_bail(f"could not set secret — set it manually at:\n  {secrets_url}")
     else:
         console.print(
             f"[yellow]warning:[/yellow] gh secret set failed — set it manually at:\n  {secrets_url}"
         )
 
     if not wrote_local and not wrote_github:
-        _bail(
+        cli_bail(
             "nothing was written — both local and github scopes failed. "
             "retry with --scope local or --scope github to isolate the failure."
         )
@@ -269,7 +268,7 @@ def auth_codex(scope: str = _SCOPE_OPTION) -> None:
     target = _resolve_auth_target(scope)
 
     if not shutil.which("codex"):
-        _bail(
+        cli_bail(
             "codex CLI not found on PATH.\n"
             "  install: npm i -g @openai/codex\n"
             "  then:    mergecraft auth codex"
@@ -285,11 +284,11 @@ def auth_codex(scope: str = _SCOPE_OPTION) -> None:
                 check=True,
             )
         except subprocess.CalledProcessError as exc:
-            _bail(f"codex login failed (exit {exc.returncode})")
+            cli_bail(f"codex login failed (exit {exc.returncode})")
 
         auth_path = Path(tmp) / "auth.json"
         if not auth_path.is_file():
-            _bail("no auth.json was written — enable device-code auth and retry")
+            cli_bail("no auth.json was written — enable device-code auth and retry")
         # Read inside the block: ``tmp`` is deleted on exit, so the captured
         # bytes must be in scope before teardown for the local write to have
         # anything to persist (#221).
@@ -308,12 +307,12 @@ def auth_claude(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         oauth_token = getpass.getpass("Claude Code OAuth token (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not oauth_token:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not oauth_token.startswith(CLAUDE_OAUTH_TOKEN_PREFIX):
         console.print(
             f"[yellow]warning:[/yellow] that doesn't look like a claude setup-token "
@@ -352,14 +351,14 @@ def auth_gemini(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         api_key = getpass.getpass("Gemini API key (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_gemini_api_key(api_key):
-        _bail("Gemini API key validation failed (401/403). Check the key and retry.")
+        cli_bail("Gemini API key validation failed (401/403). Check the key and retry.")
 
     _persist_credential(target=target, name=GEMINI_API_SECRET, value=api_key)
 
@@ -401,14 +400,14 @@ def auth_cursor(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         api_key = getpass.getpass("Cursor API key (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_cursor_api_key(api_key):
-        _bail("Cursor API key validation failed (401/403). Check the key and retry.")
+        cli_bail("Cursor API key validation failed (401/403). Check the key and retry.")
 
     _persist_credential(target=target, name=CURSOR_API_SECRET, value=api_key)
 
@@ -482,14 +481,14 @@ def auth_nous(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         api_key = getpass.getpass("Nous Portal API key (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_nous_api_key(api_key):
-        _bail("Nous API key validation failed (401/403). Check the key and retry.")
+        cli_bail("Nous API key validation failed (401/403). Check the key and retry.")
 
     _persist_credential(target=target, name=NOUS_API_SECRET, value=api_key)
     console.print(
@@ -509,16 +508,16 @@ def auth_tokenhub(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         api_key = getpass.getpass("TokenHub API key (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_openai_compatible_key(
         api_key=api_key, base_url=DEFAULT_TOKENHUB, label="tokenhub"
     ):
-        _bail("TokenHub API key validation failed (401/403). Check the key and retry.")
+        cli_bail("TokenHub API key validation failed (401/403). Check the key and retry.")
 
     _persist_credential(target=target, name=TOKENHUB_API_SECRET, value=api_key)
     console.print(
@@ -699,7 +698,7 @@ def _repo_root() -> Path:
     """Return the git repository root, bailing when there is none to anchor to."""
     top = git_repo_root()
     if top is None:
-        _bail(
+        cli_bail(
             "could not locate the repository root for the local .env — run "
             "mergecraft auth from inside the repository, or point "
             "MERGECRAFT_ENV at the .env you want written."
@@ -739,7 +738,8 @@ def _normalise_scope(value: str) -> CredentialScope:
     if lowered in {"both", "all"}:
         return "both"
     msg = f"unknown --scope value {value!r}; expected one of: local, github, both"
-    _bail(msg)
+    cli_bail(msg, code=CLI_USAGE_EXIT_CODE)
+    raise AssertionError("unreachable")
 
 
 @app.command("logfire")
@@ -783,14 +783,14 @@ def auth_logfire(
     )
     try:
         token = getpass.getpass("Logfire write token (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not token:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_logfire_token(token):
-        _bail(
+        cli_bail(
             "Logfire token validation failed (HTTP 401/403 or auth redirect). "
             "Check the token and retry."
         )
@@ -802,11 +802,11 @@ def auth_logfire(
     ).strip()
     if not project:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     # Same surface as the validator: reject whitespace inside the project label
     # so a stray newline does not silently change the stored value.
     if any(ch.isspace() for ch in project):
-        _bail("Logfire project label must not contain whitespace.")
+        cli_bail("Logfire project label must not contain whitespace.")
 
     # Optional-but-loud check: the [tracing] extra must be installed for
     # spans to actually leave the runner. Don't fail closed — the operator
@@ -905,14 +905,14 @@ def auth_minimax(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         api_key = getpass.getpass("MiniMax API key (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not _validate_minimax_api_key(api_key):
-        _bail("MiniMax API key validation failed (401/403). Check the key and retry.")
+        cli_bail("MiniMax API key validation failed (401/403). Check the key and retry.")
 
     _persist_credential(target=target, name=MINIMAX_API_SECRET, value=api_key)
     console.print(

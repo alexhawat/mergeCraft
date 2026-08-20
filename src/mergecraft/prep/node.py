@@ -39,7 +39,7 @@ def _detect_package_manager(cwd: Path) -> NodePackageManager:
                 name = str(pm.get("name", "")).split("@")[0].strip().lower()
                 if name in {"npm", "pnpm", "yarn", "bun", "deno"}:
                     return name  # type: ignore[return-value]  # — name verified against the PackageManager literal set above
-        except OSError, ValueError, TypeError:
+        except (OSError, ValueError, TypeError):  # fmt: skip
             pass
     for lockfile, manager in _LOCKFILES.items():
         if (cwd / lockfile).is_file():

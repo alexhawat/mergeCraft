@@ -83,17 +83,18 @@ def _patch_bound_context(record: dict[str, Any]) -> None:
             extra[key] = value
 
 
-def configure_logging(*, force: bool = False) -> None:
+def configure_logging(*, force: bool = False, level: str | None = None) -> None:
     """Configure loguru sinks from ``LOG_LEVEL`` / ``ACTIONS_STEP_DEBUG``.
 
     Opt into JSON via ``MERGECRAFT_LOG_FORMAT=json`` (or ``LOG_FORMAT=json``).
-    Idempotent unless ``force=True``.
+    Idempotent unless ``force=True``. Pass ``level`` to override env resolution
+    (root ``--log-level`` / ``--quiet`` / ``--verbose`` / ``MERGECRAFT_LOG_LEVEL``).
     """
     global _CONFIGURED
     if _CONFIGURED and not force:
         return
 
-    level = resolve_log_level()
+    effective_level = level if level is not None else resolve_log_level()
     log_format = resolve_log_format()
     logger.remove()
     logger.configure(patcher=_patch_bound_context)  # type: ignore[arg-type]  # — loguru patcher stub is overly restrictive; _patch_bound_context(record) signature is compatible at runtime
@@ -101,26 +102,26 @@ def configure_logging(*, force: bool = False) -> None:
     if log_format == "json":
         logger.add(
             sys.stderr,
-            level=level,
+            level=effective_level,
             serialize=True,
             enqueue=False,
-            backtrace=level == "DEBUG",
+            backtrace=effective_level == "DEBUG",
             diagnose=False,
         )
     else:
         logger.add(
             sys.stderr,
-            level=level,
+            level=effective_level,
             format=(
                 "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
                 "<level>{level: <8}</level> | "
                 "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
                 "<level>{message}</level>"
-                if level == "DEBUG"
+                if effective_level == "DEBUG"
                 else "<level>{message}</level>"
             ),
             enqueue=False,
-            backtrace=level == "DEBUG",
+            backtrace=effective_level == "DEBUG",
             diagnose=False,
         )
     _CONFIGURED = True

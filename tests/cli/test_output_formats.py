@@ -1,6 +1,6 @@
 """CC1 — CLI output formats (`.ignorelocal/02-cli-sources-trust-wave-plan.md`).
 
-Pins ``--format text|json|jsonl|sarif`` and regression on existing ``--json`` findings
+Pins ``--output-format text|json|jsonl|sarif`` and regression on existing ``--json`` findings
 schema. Authoring wave: **CC1.1** (RED). Implementation: **CC1.2**.
 """
 
@@ -98,11 +98,11 @@ def test_text_format_default(tmp_path: Path) -> None:
 
 
 def test_json_format_requires_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``--format json`` without ``--output`` or ``--json`` is rejected."""
+    """``--output-format json`` without ``--output`` or ``--json`` is rejected."""
     _install_fake_review(monkeypatch, findings=[_agent_finding_dict()])
     result = runner.invoke(
         app,
-        _review_argv(tmp_path, "--format", "json"),
+        _review_argv(tmp_path, "--output-format", "json"),
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     combined = _plain(result.stdout + result.stderr)
@@ -111,13 +111,13 @@ def test_json_format_requires_output(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_json_format_writes_output_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``--format json --output`` writes findings to the requested path."""
+    """``--output-format json --output`` writes findings to the requested path."""
     finding = _agent_finding_dict()
     _install_fake_review(monkeypatch, findings=[finding])
     json_out = tmp_path / "report.json"
     result = runner.invoke(
         app,
-        _review_argv(tmp_path, "--format", "json", "--output", str(json_out)),
+        _review_argv(tmp_path, "--output-format", "json", "--output", str(json_out)),
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     combined = _plain(result.stdout + result.stderr)
@@ -161,13 +161,13 @@ def test_json_format_matches_existing_findings_schema(
 
 
 def test_sarif_includes_agent_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``--format sarif`` exports agent findings, not only analyzer findings."""
+    """``--output-format sarif`` exports agent findings, not only analyzer findings."""
     finding = _agent_finding_dict()
     _install_fake_review(monkeypatch, findings=[finding])
     sarif_out = tmp_path / "report.sarif.json"
     result = runner.invoke(
         app,
-        _review_argv(tmp_path, "--format", "sarif", "--output", str(sarif_out)),
+        _review_argv(tmp_path, "--output-format", "sarif", "--output", str(sarif_out)),
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     combined = _plain(result.stdout + result.stderr)
@@ -180,12 +180,12 @@ def test_sarif_includes_agent_findings(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_jsonl_is_one_object_per_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``--format jsonl`` writes one JSON object per line."""
+    """``--output-format jsonl`` writes one JSON object per line."""
     _install_fake_review(monkeypatch, findings=[_agent_finding_dict()])
     jsonl_out = tmp_path / "stream.jsonl"
     result = runner.invoke(
         app,
-        _review_argv(tmp_path, "--format", "jsonl", "--output", str(jsonl_out)),
+        _review_argv(tmp_path, "--output-format", "jsonl", "--output", str(jsonl_out)),
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     combined = _plain(result.stdout + result.stderr)
@@ -201,7 +201,7 @@ def test_jsonl_is_one_object_per_line(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_jsonl_requests_structured_findings_from_run_offline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``--format jsonl`` threads a ``json_path`` to the review so the agent
+    """``--output-format jsonl`` threads a ``json_path`` to the review so the agent
     produces structured findings — not the empty-file regression.
 
     mergeCraft review (PR #242, finding ``3f363546e98dad517048b8b9``) noted
@@ -232,7 +232,7 @@ def test_jsonl_requests_structured_findings_from_run_offline(
     jsonl_out = tmp_path / "stream.jsonl"
     result = runner.invoke(
         app,
-        _review_argv(tmp_path, "--format", "jsonl", "--output", str(jsonl_out)),
+        _review_argv(tmp_path, "--output-format", "jsonl", "--output", str(jsonl_out)),
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     combined = _plain(result.stdout + result.stderr)
@@ -240,14 +240,14 @@ def test_jsonl_requests_structured_findings_from_run_offline(
     assert jsonl_out.is_file(), combined
     sent_json_path = captured["kwargs"].get("json_path")  # type: ignore[union-attr]
     assert sent_json_path is not None, (
-        f"--format jsonl must request structured findings from the review; got json_path={sent_json_path!r}"
+        f"--output-format jsonl must request structured findings from the review; got json_path={sent_json_path!r}"
     )
 
 
 def test_sarif_requests_structured_findings_from_run_offline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``--format sarif`` threads a ``json_path`` to the review (PR #242 / 3f363546…)."""
+    """``--output-format sarif`` threads a ``json_path`` to the review (PR #242 / 3f363546…)."""
     captured: dict[str, object] = {}
 
     async def _capture_run(**kwargs: object) -> OfflineReviewResult:
@@ -269,7 +269,7 @@ def test_sarif_requests_structured_findings_from_run_offline(
     sarif_out = tmp_path / "report.sarif.json"
     result = runner.invoke(
         app,
-        _review_argv(tmp_path, "--format", "sarif", "--output", str(sarif_out)),
+        _review_argv(tmp_path, "--output-format", "sarif", "--output", str(sarif_out)),
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     combined = _plain(result.stdout + result.stderr)
@@ -277,14 +277,50 @@ def test_sarif_requests_structured_findings_from_run_offline(
     assert sarif_out.is_file(), combined
     sent_json_path = captured["kwargs"].get("json_path")  # type: ignore[union-attr]
     assert sent_json_path is not None, (
-        f"--format sarif must request structured findings from the review; got json_path={sent_json_path!r}"
+        f"--output-format sarif must request structured findings from the review; got json_path={sent_json_path!r}"
     )
+
+
+def test_global_format_json_inherited_by_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Root ``--format json`` selects JSON output when ``--output-format`` is omitted."""
+    finding = _agent_finding_dict()
+    _install_fake_review(monkeypatch, findings=[finding])
+    json_out = tmp_path / "report.json"
+    result = runner.invoke(
+        app,
+        ["--format", "json", *_review_argv(tmp_path, "--output", str(json_out))],
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == 10, combined
+    assert json_out.is_file(), combined
+
+
+def test_explicit_output_format_text_wins_over_global_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Explicit ``--output-format text`` renders human text even with root ``--format json``."""
+    _install_fake_review(monkeypatch, findings=[_agent_finding_dict()])
+    result = runner.invoke(
+        app,
+        [
+            "--format",
+            "json",
+            *_review_argv(tmp_path, "--output-format", "text"),
+        ],
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == 10, combined
+    assert "review" in combined.lower()
 
 
 def test_default_text_review_requests_structured_findings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Default ``review`` (no --format/--json) requests structured findings so
+    """Default ``review`` (no --output-format/--json) requests structured findings so
     exit codes 10/11 reflect findings.
 
     mergeCraft review (PR #242, finding ``7a3cdf5ef1994610113e8e37``) noted

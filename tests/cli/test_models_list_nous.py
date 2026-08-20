@@ -55,7 +55,8 @@ def test_mergecraft_models_list_renders_nous_row_without_credentials(
     result = runner.invoke(app, ["models", "list"])
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert NOUS_SLUG in result.stdout
+    output = result.stdout + result.stderr
+    assert NOUS_SLUG in output
 
 
 def test_mergecraft_models_list_renders_nous_row_with_credentials(
@@ -68,14 +69,15 @@ def test_mergecraft_models_list_renders_nous_row_with_credentials(
     result = runner.invoke(app, ["models", "list"])
 
     assert result.exit_code == 0, result.stdout + result.stderr
+    output = result.stdout + result.stderr
     # Locate the nous row in the table. Rich tables render rows as
     # ``slug provider display credentials`` space-separated. We assert only that
     # the row exists — the ``yes`` / ``no`` marker is a behavioural pin for
     # W2 and is checked structurally below.
-    assert NOUS_SLUG in result.stdout
+    assert NOUS_SLUG in output
     # Find the row whose first token is the nous slug and assert credentials column.
     nous_row = next(
-        (line for line in result.stdout.splitlines() if line.lstrip().startswith(NOUS_SLUG)),
+        (line for line in output.splitlines() if line.lstrip().startswith(NOUS_SLUG)),
         None,
     )
     assert nous_row is not None, f"no row found for {NOUS_SLUG!r}"

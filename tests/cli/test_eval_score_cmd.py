@@ -21,6 +21,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 
 runner = CliRunner()
 
@@ -61,6 +62,7 @@ def test_eval_score_json_output_keeps_its_existing_key_set(tmp_path: Path) -> No
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
     assert set(payload) == {
+        "schema_version",
         "total_issues",
         "total_reported",
         "found",
@@ -93,9 +95,9 @@ def test_eval_score_human_output_keeps_its_existing_lines(tmp_path: Path) -> Non
     expected = _write_json(tmp_path, "expected.json", _EXPECTED_ISSUES)
 
     result = runner.invoke(app, ["eval", "score", str(actual), str(expected)])
-    output = _plain(result.stdout)
+    output = _plain(result.stdout + result.stderr)
 
-    assert result.exit_code == 0, result.stdout
+    assert result.exit_code == 0, result.stdout + result.stderr
     assert "baseline issues : 1" in output
     assert "findings reported: 1" in output
     assert "located          : 1" in output
@@ -110,7 +112,7 @@ def test_eval_score_min_recall_gate_is_unchanged(tmp_path: Path) -> None:
     result = runner.invoke(
         app, ["eval", "score", str(actual), str(expected), "--min-recall", "0.5"]
     )
-    output = _plain(result.stdout)
+    output = _plain(result.stdout + result.stderr)
 
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     assert "recall 0.00% is below the required 50.00%" in output

@@ -60,7 +60,7 @@ def retry_after_ms(error: BaseException) -> float | None:
 
             date_ms = parsedate_to_datetime(retry_after).timestamp() * 1000
             return max(0.0, date_ms - time.time() * 1000)
-        except TypeError, ValueError, OverflowError:
+        except (TypeError, ValueError, OverflowError):  # fmt: skip
             pass
     remaining = headers.get("x-ratelimit-remaining") if hasattr(headers, "get") else None
     if remaining == "0":

@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NoReturn
 
 import typer
 import yaml
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.agents.registry import (
@@ -16,6 +14,8 @@ from mergecraft.agents.registry import (
     load_registry,
     resolve_prompt_text,
 )
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.config.settings import AgentBindingOverride, load_repo_settings
 from mergecraft.mcp.context import (
@@ -34,12 +34,6 @@ app = typer.Typer(
     help="Inspect and override the mergeCraft agent registry.",
     no_args_is_help=True,
 )
-console = Console()
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
 
 
 def _tool_ctx(target_dir: Path) -> ToolContext:
@@ -76,7 +70,7 @@ def list_cmd(
     try:
         registry = load_registry(settings=settings, repo_root=target_dir)
     except RegistryValidationError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
     ctx = _tool_ctx(target_dir)
 
     table = Table(title="Agent registry")
@@ -110,16 +104,16 @@ def show_cmd(
     try:
         AgentRole(role)
     except ValueError:
-        _bail(f"unknown role: {role!r}")
+        cli_bail(f"unknown role: {role!r}")
 
     settings = load_repo_settings(root=target_dir)
     try:
         registry = load_registry(settings=settings, repo_root=target_dir)
         binding = registry.resolve_role(role)
     except RegistryValidationError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
     except KeyError:
-        _bail(f"unknown role: {role!r}")
+        cli_bail(f"unknown role: {role!r}")
 
     prompt = resolve_prompt_text(binding.prompt_id, version=binding.prompt_version)
     tools = registry.resolve_tool_names(binding, _tool_ctx(target_dir))
@@ -143,31 +137,31 @@ def set_cmd(
 ) -> None:
     """Write a single agent binding override into ``.mergecraft/config.yaml``."""
     if model is None:
-        _bail("pass at least one override flag (e.g. --model)")
+        cli_bail("pass at least one override flag (e.g. --model)")
 
     role_key = role.lower()
     try:
         AgentRole(role_key)
     except ValueError:
         known = ", ".join(item.value for item in AgentRole)
-        _bail(f"unknown role: {role!r} (expected one of: {known})")
+        cli_bail(f"unknown role: {role!r} (expected one of: {known})")
 
     target_dir = resolve_target_dir(cwd)
     config_path = target_dir / ".mergecraft" / "config.yaml"
     if not config_path.is_file():
-        _bail(f"no config at {config_path} — run mergecraft init first")
+        cli_bail(f"no config at {config_path} — run mergecraft init first")
 
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-        _bail(f"config must be a mapping: {config_path}")
+        cli_bail(f"config must be a mapping: {config_path}")
 
     agents = raw.setdefault("agents", {})
     if not isinstance(agents, dict):
-        _bail("agents block must be a mapping")
+        cli_bail("agents block must be a mapping")
 
     entry = agents.setdefault(role_key, {})
     if not isinstance(entry, dict):
-        _bail(f"agents.{role_key} must be a mapping")
+        cli_bail(f"agents.{role_key} must be a mapping")
 
     if model is not None:
         entry["modelChain"] = [model]

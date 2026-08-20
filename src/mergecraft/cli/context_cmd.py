@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.context.change_graph import ChangedSymbol, resolve_change_graph
 from mergecraft.context.provenance import ContextItem, inspect_context
 from mergecraft.context.repo_paths import git_blob_sha, git_show_text
@@ -18,7 +18,6 @@ app = typer.Typer(
     help="Inspect repository context retrieval for a scope.",
     no_args_is_help=True,
 )
-console = Console()
 
 
 def _parse_scope(scope: str) -> tuple[str, str]:

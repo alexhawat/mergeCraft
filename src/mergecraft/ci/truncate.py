@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TypeVar
+
 DEFAULT_TRUNCATION_CAP = 3
 
+T = TypeVar("T")
 
-def apply_truncation[T](
-    items: list[T], *, cap: int = DEFAULT_TRUNCATION_CAP
-) -> tuple[list[T], int]:
+
+def apply_truncation(items: list[T], *, cap: int = DEFAULT_TRUNCATION_CAP) -> tuple[list[T], int]:
     """Return the analyzed prefix and how many items were dropped."""
     if cap < 0:
         cap = 0

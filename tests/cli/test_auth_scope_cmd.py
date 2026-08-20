@@ -53,6 +53,7 @@ from dotenv import dotenv_values
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE, CLI_USAGE_EXIT_CODE
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -343,12 +344,11 @@ def test_auth_default_scope_is_github_only(
 def test_auth_rejects_unknown_scope(
     provider: str, env_key: str, tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    """An unknown ``--scope`` bails ``Exit(1)`` naming the three valid values.
+    """An unknown ``--scope`` exits with ``CLI_USAGE_EXIT_CODE`` naming valid values.
 
-    Matched to ``_normalise_scope`` as it already behaves for ``auth logfire``
-    (``cli/auth_cmd.py:583-598``) rather than invented: exit code 1 (a
-    ``_bail``, not Typer's usage exit 2) and a message that lists ``local``,
-    ``github`` and ``both``. Nothing is captured or written first.
+    After Batch AD (#341), invalid ``--scope`` is a usage error (exit 2), with
+    a message listing ``local``, ``github`` and ``both``. Nothing is captured or
+    written first.
     """
     module = _load_auth_cmd()
     _arrange_provider(provider, module, monkeypatch)
@@ -359,8 +359,8 @@ def test_auth_rejects_unknown_scope(
 
     result = runner.invoke(app, ["auth", provider, "--scope", "everywhere"])
 
-    assert result.exit_code == 1, (
-        f"expected a _bail (exit 1), got {result.exit_code}: {_flat(result)}"
+    assert result.exit_code == CLI_USAGE_EXIT_CODE, (
+        f"expected usage exit {CLI_USAGE_EXIT_CODE}, got {result.exit_code}: {_flat(result)}"
     )
     output = _flat(result)
     assert "expected one of" in output, output
@@ -525,8 +525,8 @@ def test_multiline_non_json_credential_bails_instead_of_writing(
     """A multi-line value that is not JSON must fail loudly, not write a broken entry.
 
     Compaction is JSON-shaped re-serialisation, so a multi-line credential
-    that is not JSON has no safe flattening. The contract is a ``_bail``
-    (exit 1) naming the key, and — the half that actually matters — **no**
+    that is not JSON has no safe flattening. The contract is a configuration
+    error (exit 30) naming the key, and — the half that actually matters — **no**
     ``.env`` written at all, rather than a first line plus orphaned junk.
     """
     module = _load_auth_cmd()
@@ -538,7 +538,7 @@ def test_multiline_non_json_credential_bails_instead_of_writing(
 
     result = runner.invoke(app, ["auth", "nous", "--scope", "local"])
 
-    assert result.exit_code == 1, _flat(result)
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE, _flat(result)
     output = _flat(result)
     assert "nous_api_key" in output, output
     assert not env_path.exists(), env_path.read_text(encoding="utf-8")

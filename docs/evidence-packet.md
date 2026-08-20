@@ -50,7 +50,7 @@ writes the body to a file first:
     path: merge-evidence-packet.json
 ```
 
-Locally, `mergecraft diff-review --evidence-packet PATH` writes the packet for
+Locally, `mergecraft review --evidence-packet PATH` writes the packet for
 an offline review; without the flag it lands in the run's temp directory and
 the path is logged.
 

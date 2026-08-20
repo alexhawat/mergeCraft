@@ -147,7 +147,7 @@ def _stringify(value: Any) -> str:
 def _load_json(path: Path) -> Any | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):  # fmt: skip
         return None
 
 

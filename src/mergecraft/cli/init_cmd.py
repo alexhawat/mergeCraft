@@ -8,9 +8,8 @@ from pathlib import Path
 import typer
 import yaml
 from loguru import logger
-from rich.console import Console
 
-console = Console()
+from mergecraft.cli.consoles import err_console as console
 
 DEFAULT_CONFIG: dict[str, object] = {
     "model": "anthropic/claude-sonnet",
@@ -65,7 +64,7 @@ def _parse_git_remote() -> tuple[str, str] | None:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except subprocess.CalledProcessError, OSError, FileNotFoundError:
+    except (subprocess.CalledProcessError, OSError, FileNotFoundError):  # fmt: skip
         return None
     import re
 

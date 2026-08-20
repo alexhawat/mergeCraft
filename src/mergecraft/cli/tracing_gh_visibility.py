@@ -60,7 +60,7 @@ def _has_mergecraft_step(workflow_path: Path) -> bool:
     """True when the workflow has a step using the mergeCraft action."""
     try:
         data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-    except yaml.YAMLError, OSError:
+    except (yaml.YAMLError, OSError):  # fmt: skip
         return False
     return _find_mergecraft_inputs(data) is not None
 
@@ -122,7 +122,7 @@ def detect_github_action_tracing(
 
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (yaml.YAMLError, OSError) as exc:
+    except (yaml.YAMLError, OSError) as exc:  # fmt: skip
         return {
             "github_action_tracing": False,
             "source": source,

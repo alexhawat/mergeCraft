@@ -41,7 +41,7 @@ def test_agents_list_shows_model_prompt_and_tools(tmp_path: Path, monkeypatch: M
     result = runner.invoke(app, ["agents", "list"])
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    output = result.stdout.lower()
+    output = (result.stdout + result.stderr).lower()
     assert "reviewer" in output
     assert "verifier" in output
     assert "prompt" in output
@@ -60,7 +60,7 @@ def test_agents_show_prints_the_resolved_prompt_and_exact_tool_names(
     result = runner.invoke(app, ["agents", "show", "reviewer"])
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    output = result.stdout
+    output = result.stdout + result.stderr
     assert REVIEWER_SYSTEM_PROMPT[:80] in output
     assert "checkout_pr" in output
     assert "verify_agent_findings" in output

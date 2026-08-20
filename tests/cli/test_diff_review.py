@@ -115,7 +115,7 @@ def test_cli_diff_review_dry_run_with_patch(tmp_path: Path) -> None:
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout)
+    out = _plain(result.stdout + result.stderr)
     assert "offline" in out.lower()
     assert "Review" in out
     assert "demo.py" in out
@@ -130,4 +130,4 @@ def test_cli_diff_review_empty_patch(tmp_path: Path) -> None:
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "empty" in _plain(result.stdout).lower()
+    assert "empty" in _plain(result.stdout + result.stderr).lower()

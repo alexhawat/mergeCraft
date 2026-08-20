@@ -81,11 +81,13 @@ def test_yes_package_not_renamed_unless_d15_allows() -> None:
     assert yes_dir.is_dir(), "src/mergecraft/yes/ was renamed; D15 forbids that in this program"
 
 
-def test_python_314_requirement_documented() -> None:
-    """D16 — Python >=3.14 stays hard; Docker is the supported path without it."""
-    text = read_text("README.md")
-    assert "3.14" in text
-    assert re.search(r"Docker", text)
+def test_python_311_floor_documented() -> None:
+    """D16/W14 — Python >=3.11 floor; Docker remains for pinned runtimes."""
+    readme = read_text("README.md")
+    distribution = read_text("docs/distribution.md")
+    assert "3.11" in readme
+    assert "3.11" in distribution
+    assert re.search(r"Docker", readme)
 
 
 def test_docs_assets_dir_exists() -> None:

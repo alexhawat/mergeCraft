@@ -207,7 +207,7 @@ def acquire(
         ]
         _run_git(fetch_args, cwd=str(dest), env=env)
         _run_git(["checkout", "-B", source.ref, "FETCH_HEAD"], cwd=str(dest))
-    except (RuntimeError, CloneAuthError) as exc:
+    except (RuntimeError, CloneAuthError) as exc:  # fmt: skip
         shutil.rmtree(dest, ignore_errors=True)
         err = str(exc)
         if source.token is None and (
@@ -250,14 +250,14 @@ def confine_path(workspace_root: Path, relative_path: str | Path) -> Path | None
             (root / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
         )
         resolved.relative_to(root)
-    except OSError, ValueError:
+    except (OSError, ValueError):  # fmt: skip
         logger.info("dropped path outside workspace: {}", relative_path)
         return None
     if resolved.is_symlink():
         try:
             target = resolved.resolve()
             target.relative_to(root)
-        except OSError, ValueError:
+        except (OSError, ValueError):  # fmt: skip
             logger.info("dropped symlink escaping workspace: {}", relative_path)
             return None
     return resolved

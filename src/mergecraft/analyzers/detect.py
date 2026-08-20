@@ -153,7 +153,7 @@ def _package_json(repo_root: Path) -> dict[str, object]:
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, ValueError, TypeError:
+    except (OSError, ValueError, TypeError):  # fmt: skip
         return {}
     return payload if isinstance(payload, dict) else {}
 

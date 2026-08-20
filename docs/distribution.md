@@ -82,10 +82,12 @@ to add there. The one binary still outstanding is the demo capture; see
 
 ## Python version and Docker (D16)
 
-**Python >=3.14** is a hard requirement for `uv tool install` / local CLI development
-(`pyproject.toml` classifier is not relaxed). Operators without Python 3.14 should
-use the **Docker Action** (`alexhawat/mergeCraft@…`) — the image ships a compatible
-runtime; no local Python install is required.
+**Python >=3.11** is the install floor for `uv tool install` / local CLI development
+(`pyproject.toml`). CI runs on **3.11** and **3.14**. PyPI (`merge-craft`) is **not**
+published yet — install from git or a local checkout via `uv`. Operators who want a
+pinned runtime without managing Python versions should use the **Docker Action**
+(`alexhawat/mergeCraft@…`) — the image ships a compatible runtime; no local Python
+install is required.
 
 ## Shipped package names (D15)
 

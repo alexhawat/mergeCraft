@@ -12,25 +12,24 @@ from typing import TYPE_CHECKING, Literal, NoReturn
 
 import typer
 from loguru import logger
-from rich.console import Console
 
 from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.agent_protocol import AgentProtocolStream
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
+from mergecraft.cli.global_surface import get_cli_globals
 from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.offline_review import (
     OfflineReviewResult,
     parse_offline_review_findings,
     run_offline_diff_review,
 )
-from mergecraft.run_outcome import RunOutcome, cli_exit_code_for_review
 from mergecraft.utils.log import configure_logging
 from mergecraft.utils.source_resolve import SourceResolverSpec
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
-console = Console()
-error_console = Console(stderr=True)
 
 OutputFormat = Literal["text", "json", "jsonl", "sarif"]
 
@@ -98,16 +97,33 @@ Examples — output:
 
 \b
   mergecraft review --json findings.json
-  mergecraft review --format sarif --output report.sarif.json
-  mergecraft review --format jsonl --output stream.jsonl
+  mergecraft review --output-format sarif --output report.sarif.json
+  mergecraft review --output-format jsonl --output stream.jsonl
   mergecraft review --agent
+  mergecraft review 2> review.md              # human text lives on stderr (D14)
+
+Human-readable review text (default ``--output-format text``) is written to stderr
+so stdout stays free for ``--agent`` JSONL. Shell redirects like ``> review.md``
+capture nothing useful — use ``2> review.md`` instead.
 """
 
 
-def _exit_with_message(msg: str, exit_code: int, *, agent_mode: bool = False) -> NoReturn:
-    target = error_console if agent_mode else console
-    target.print(f"[red]{msg}[/red]")
+def _exit_with_message(msg: str, exit_code: int) -> NoReturn:
+    console.print(f"[red]{msg}[/red]")
     raise typer.Exit(exit_code)
+
+
+def _resolve_review_output_format(
+    ctx: typer.Context,
+    *,
+    output_format: OutputFormat | None,
+) -> OutputFormat:
+    """Resolve review payload format: explicit flag wins, else inherit root ``--format json``."""
+    if output_format is not None:
+        return output_format
+    if get_cli_globals(ctx).format == "json":
+        return "json"
+    return "text"
 
 
 def _resolve_outcome(result: OfflineReviewResult) -> RunOutcome:
@@ -155,7 +171,13 @@ def _emit_agent_protocol(
     stream.run_finished(exit_code)
 
 
+_DIFF_REVIEW_DEPRECATION = (
+    "warning: `mergecraft diff-review` is deprecated; use `mergecraft review` instead."
+)
+
+
 def run(
+    ctx: typer.Context,
     base: str | None = typer.Option(
         None,
         "--base",
@@ -244,7 +266,7 @@ def run(
         None,
         "--output",
         "-o",
-        help="Write review markdown or structured output (depends on --format) to this file.",
+        help="Write review markdown or structured output (depends on --output-format) to this file.",
         rich_help_panel=_PANEL_OUTPUT,
     ),
     json_output: Path | None = typer.Option(
@@ -253,10 +275,16 @@ def run(
         help="Write structured findings JSON to this file.",
         rich_help_panel=_PANEL_OUTPUT,
     ),
-    output_format: OutputFormat = typer.Option(
-        "text",
-        "--format",
-        help="Machine output format: text (default), json, jsonl, or sarif.",
+    output_format: OutputFormat | None = typer.Option(
+        None,
+        "--output-format",
+        help=(
+            "Review payload format: text (default), json, jsonl, or sarif. "
+            "Root --format json selects json when this flag is omitted; "
+            "explicit --output-format text always renders human markdown on stderr. "
+            "Default text mode writes human-readable review text to stderr (D14); "
+            "redirect with 2> to capture it."
+        ),
         rich_help_panel=_PANEL_OUTPUT,
     ),
     agent_mode: bool = typer.Option(
@@ -339,7 +367,10 @@ def run(
         rich_help_panel=_PANEL_TRUST,
     ),
 ) -> None:
+    if ctx.info_name == "diff-review":
+        console.print(_DIFF_REVIEW_DEPRECATION)
     configure_logging()
+    effective_output_format = _resolve_review_output_format(ctx, output_format=output_format)
     invocation_root = Path.cwd().resolve()
     root = cwd.resolve()
     source_spec = SourceResolverSpec(
@@ -371,9 +402,14 @@ def run(
     except ValueError as exc:
         _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
 
-    if output_format == "json" and json_output is None and output is None:
+    if (
+        effective_output_format == "json"
+        and json_output is None
+        and output is None
+        and not agent_mode
+    ):
         _exit_with_message(
-            "--output is required for --format json (or use --json PATH)",
+            "--output is required for --output-format json (or use --json PATH)",
             cli_exit_code_for_review(RunOutcome.configuration_error),
         )
 
@@ -396,7 +432,7 @@ def run(
     # ``_needs_structured_output`` — always True now). Precedence of the
     # structured sink path:
     # 1. ``--json PATH`` if supplied — that is the canonical findings file.
-    # 2. ``--output PATH`` for ``--format json|jsonl|sarif`` — the writer is
+    # 2. ``--output PATH`` for ``--output-format json|jsonl|sarif`` — the writer is
     #    the same JSON in the requested container (jsonl/sarif readers get
     #    *real* findings instead of an empty file — PR #242 / 3f363546…).
     # 3. Default text mode — a temp file inside the run tmpdir that is parsed
@@ -407,7 +443,7 @@ def run(
     if (
         json_path_for_run is None
         and output is not None
-        and output_format
+        and effective_output_format
         in {
             "json",
             "jsonl",
@@ -425,7 +461,7 @@ def run(
         )
 
     internal_json_sink = json_output is None and not (
-        output is not None and output_format in {"json", "jsonl", "sarif"}
+        output is not None and effective_output_format in {"json", "jsonl", "sarif"}
     )
 
     try:
@@ -461,9 +497,7 @@ def run(
                 console.print(result.output)
             if agent_mode:
                 _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
-            _exit_with_message(
-                result.error or "diff-review failed", exit_code, agent_mode=agent_mode
-            )
+            _exit_with_message(result.error or "diff-review failed", exit_code)
 
         if agent_mode:
             _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
@@ -471,26 +505,26 @@ def run(
 
         text = result.output or ""
 
-        if output_format == "text":
+        if effective_output_format == "text":
             if output is not None:
                 output.write_text(text, encoding="utf-8")
                 console.print(f"[green]wrote[/green] {output}")
             elif json_output is None:
                 console.print(text)
-        elif output_format == "json":
+        elif effective_output_format == "json":
             target = json_output or output
             if target is not None and target.is_file():
                 console.print(f"[green]wrote[/green] {target}")
-        elif output_format == "jsonl":
+        elif effective_output_format == "jsonl":
             target = output
             if target is None:
-                _exit_with_message("--output is required for --format jsonl", exit_code)
+                _exit_with_message("--output is required for --output-format jsonl", exit_code)
             _write_jsonl_findings(target, findings)
             console.print(f"[green]wrote[/green] {target}")
-        elif output_format == "sarif":
+        elif effective_output_format == "sarif":
             target = output
             if target is None:
-                _exit_with_message("--output is required for --format sarif", exit_code)
+                _exit_with_message("--output is required for --output-format sarif", exit_code)
             document = export_sarif(findings)
             target.write_text(json.dumps(document, indent=2), encoding="utf-8")
             console.print(f"[green]wrote[/green] {target}")

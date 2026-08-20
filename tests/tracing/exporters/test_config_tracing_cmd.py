@@ -64,7 +64,7 @@ def test_config_tracing_renders_resolved_sinks(
         env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_CONFIG": str(config)},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout)
+    out = _plain(result.stdout + result.stderr)
     assert "jsonl_file" in out or "traces" in out
 
 
@@ -91,7 +91,7 @@ def test_config_tracing_redacts_token(monkeypatch: pytest.MonkeyPatch, tmp_path:
         },
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout)
+    out = _plain(result.stdout + result.stderr)
     assert _CANARY not in out
     # The reference name and a redaction marker are both shown.
     assert "MERGECRAFT_LOGFIRE_TOKEN" in out or "redact" in out.lower() or "***" in out
@@ -113,7 +113,7 @@ def test_config_tracing_reports_disabled_when_unset(
         env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_CONFIG": str(config)},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout).lower()
+    out = _plain(result.stdout + result.stderr).lower()
     assert "disabled" in out or "off" in out or "false" in out
 
 
@@ -138,7 +138,7 @@ def test_config_tracing_shows_local_sinks_none_when_disabled(
         env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_CONFIG": str(config)},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout)
+    out = _plain(result.stdout + result.stderr)
     assert "local sinks" in out.lower()
     assert "none" in out.lower()
 
@@ -173,7 +173,7 @@ def test_config_tracing_lists_trace_env_vars_when_disabled(
         },
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout)
+    out = _plain(result.stdout + result.stderr)
     assert "trace env" in out.lower()
     assert "MERGECRAFT_LOGFIRE_TOKEN" in out
     assert "MERGECRAFT_TRACING_PROJECT" in out
@@ -200,7 +200,7 @@ def test_config_tracing_prints_next_steps_when_disabled(
         env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_CONFIG": str(config)},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout).lower()
+    out = _plain(result.stdout + result.stderr).lower()
     assert "next steps" in out
     assert "mergecraft tracing logfire enable" in out
     assert "--token" in out
@@ -226,7 +226,7 @@ def test_config_tracing_omits_next_steps_when_enabled(
         env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_CONFIG": str(config)},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout).lower()
+    out = _plain(result.stdout + result.stderr).lower()
     assert "enabled" in out
     assert "next steps" not in out
 
@@ -261,7 +261,7 @@ def test_traces_command_reads_local_jsonl(monkeypatch: pytest.MonkeyPatch, tmp_p
         env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_TRACE_DIR": str(trace_dir)},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout)
+    out = _plain(result.stdout + result.stderr)
     assert "run-42" in out or "mergecraft.run" in out
 
 
@@ -308,5 +308,5 @@ def test_traces_command_redacts_secrets_in_dump(
         env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_TRACE_DIR": str(trace_dir)},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout)
+    out = _plain(result.stdout + result.stderr)
     assert canary not in out

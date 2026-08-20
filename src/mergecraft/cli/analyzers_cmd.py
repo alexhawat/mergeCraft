@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.analyzers.adapters import run_adapter
@@ -17,6 +16,8 @@ from mergecraft.analyzers.lockfile import LockEntry, read_lock, write_lock
 from mergecraft.analyzers.provision import resolve_with_lock
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.analyzers.sarif import export_sarif
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 
 if TYPE_CHECKING:
@@ -27,12 +28,6 @@ app = typer.Typer(
     help="Inspect and run the mergeCraft analyzer catalog.",
     no_args_is_help=True,
 )
-console = Console()
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
 
 
 def _git_changed_files(target_dir: Path) -> list[str]:
@@ -55,7 +50,8 @@ def _manifest_by_id(analyzer_id: str) -> AnalyzerManifest:
     for manifest in load_catalog():
         if manifest.id == analyzer_id:
             return manifest
-    _bail(f"unknown analyzer id: {analyzer_id!r}")
+    cli_bail(f"unknown analyzer id: {analyzer_id!r}")
+    raise AssertionError("unreachable")
 
 
 @app.command("list")
@@ -87,7 +83,7 @@ def detect_cmd(
     target_dir = resolve_target_dir(cwd)
     changed = files or _git_changed_files(target_dir)
     if not changed:
-        _bail("no changed files — pass --file or run inside a git repo with local changes")
+        cli_bail("no changed files — pass --file or run inside a git repo with local changes")
     enabled = detect_enabled(repo_root=target_dir, changed_files=changed)
     for manifest in enabled:
         console.print(f"{manifest.id} ({manifest.category}, {manifest.runtime})")
@@ -103,7 +99,7 @@ def run_cmd(
     target_dir = resolve_target_dir(cwd)
     changed = files or _git_changed_files(target_dir)
     if not changed:
-        _bail("no changed files — pass --file or run inside a git repo with local changes")
+        cli_bail("no changed files — pass --file or run inside a git repo with local changes")
     result = run_adapter(
         tool_id=analyzer_id,
         repo_root=target_dir,
@@ -111,7 +107,7 @@ def run_cmd(
         tier="trusted",
     )
     if result.skipped:
-        _bail(result.skip_reason or f"skipped {analyzer_id}")
+        cli_bail(result.skip_reason or f"skipped {analyzer_id}")
     console.print(f"findings: {len(result.findings)}")
     if result.version_note:
         console.print(result.version_note)
@@ -151,11 +147,11 @@ def export_cmd(
 ) -> None:
     """Run one analyzer and export findings as SARIF."""
     if not sarif and output is None:
-        _bail("pass --sarif or --output")
+        cli_bail("pass --sarif or --output")
     target_dir = resolve_target_dir(cwd)
     changed = files or _git_changed_files(target_dir)
     if not changed:
-        _bail("no changed files — pass --file or run inside a git repo with local changes")
+        cli_bail("no changed files — pass --file or run inside a git repo with local changes")
     result = run_adapter(
         tool_id=analyzer_id,
         repo_root=target_dir,
@@ -163,7 +159,7 @@ def export_cmd(
         tier="trusted",
     )
     if result.skipped:
-        _bail(result.skip_reason or f"skipped {analyzer_id}")
+        cli_bail(result.skip_reason or f"skipped {analyzer_id}")
     document = export_sarif(result.findings)
     payload = json.dumps(document, indent=2)
     if output is not None:

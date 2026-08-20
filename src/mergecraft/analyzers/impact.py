@@ -185,7 +185,7 @@ def _find_declarations_batch(
         try:
             resolved = (repo_root / fp).resolve()
             resolved.relative_to(repo_root)
-        except OSError, ValueError:
+        except (OSError, ValueError):  # fmt: skip
             continue
         if not resolved.is_file():
             continue
@@ -227,7 +227,7 @@ def _find_references(
             text=True,
             timeout=15,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:  # fmt: skip
         msg = f"git grep failed for {symbol!r}: {exc}"
         raise _ExtractionFailed(msg) from exc
     if result.returncode not in {0, 1}:
@@ -246,7 +246,7 @@ def _find_references(
             continue
         try:
             ref_line = int(parts[1])
-        except ValueError, IndexError:
+        except (ValueError, IndexError):  # fmt: skip
             continue
         total += 1
         if len(refs) < max_refs:

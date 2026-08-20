@@ -97,7 +97,7 @@ That is deliberate — a judge with nothing to be secondary to is the failure mo
 
 **`run_static_checks` is withheld under `shell: disabled`.** Gates execute commands the repo
 config names; on a pull request those are commands the PR author controls. Offline
-`mergecraft diff-review` keeps the tool because config and tree belong to the operator.
+`mergecraft review` keeps the tool because config and tree belong to the operator.
 
 ## Provenance
 

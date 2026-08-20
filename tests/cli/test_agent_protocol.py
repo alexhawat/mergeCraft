@@ -156,6 +156,35 @@ def test_protocol_is_parseable_line_by_line_while_streaming(
     assert parsed[-1]["event"] == "run_finished"
 
 
+def test_global_format_json_with_agent_does_not_require_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Root ``--format json`` must not require ``--output`` when ``--agent`` streams JSONL."""
+    _install_agent_review(monkeypatch)
+    patch = tmp_path / "change.diff"
+    patch.write_text(_SAMPLE_PATCH, encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "--format",
+            "json",
+            "review",
+            "--diff",
+            str(patch),
+            "--cwd",
+            str(tmp_path),
+            "--agent",
+        ],
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+        catch_exceptions=False,
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert "--output is required" not in combined.lower()
+    events = _parse_agent_lines(result.stdout)
+    assert events[0]["event"] == "run_started"
+    assert result.exit_code == 10, combined
+
+
 def test_agent_failure_routes_error_to_stderr(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NoReturn
 
 import typer
 import yaml
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.policy.exceptions import PolicyException, parse_exceptions_document
 from mergecraft.policy.schema import PolicyConfigError, PolicyRule, parse_rules_document
 from mergecraft.policy.scoping import ScopeContext, resolve_effective_rules
@@ -18,12 +21,6 @@ app = typer.Typer(
     help="Lint, test, and explain versioned policy-as-code rules.",
     no_args_is_help=True,
 )
-console = Console()
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
 
 
 def _policy_dir(repo: Path) -> Path:
@@ -33,11 +30,11 @@ def _policy_dir(repo: Path) -> Path:
 def _load_policy_rules(repo: Path) -> list[PolicyRule]:
     rules_path = _policy_dir(repo) / "rules.yaml"
     if not rules_path.is_file():
-        _bail(f"policy rules file not found: {rules_path}")
+        cli_bail(f"policy rules file not found: {rules_path}")
     try:
         return parse_rules_document(rules_path.read_text(encoding="utf-8"))
     except PolicyConfigError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
 
 
 def _load_policy_exceptions(repo: Path) -> list[PolicyException]:
@@ -47,7 +44,7 @@ def _load_policy_exceptions(repo: Path) -> list[PolicyException]:
     try:
         return parse_exceptions_document(exceptions_path.read_text(encoding="utf-8"))
     except PolicyConfigError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
 
 
 @app.command("lint")
@@ -110,7 +107,7 @@ def run_fixtures_cmd(
     rules = _load_policy_rules(repo_root)
     fixture_paths = sorted(fixtures.glob("*.yaml"))
     if not fixture_paths:
-        _bail(f"no fixture YAML files found in {fixtures}")
+        cli_bail(f"no fixture YAML files found in {fixtures}")
 
     failures: list[str] = []
     for fixture_path in fixture_paths:
@@ -148,7 +145,7 @@ def run_fixtures_cmd(
     if failures:
         for failure in failures:
             console.print(f"[red]{failure}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 @app.command("explain")

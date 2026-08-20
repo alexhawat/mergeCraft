@@ -8,6 +8,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from mergecraft.cli.eval_cmd import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 
 runner = CliRunner()
 
@@ -49,6 +50,7 @@ def test_gate_passes_on_a_healthy_bank(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
+    assert payload["schema_version"]
     assert payload["status"] == "pass"
     assert payload["loaded"] == 1
 
@@ -61,7 +63,7 @@ def test_gate_fails_on_an_unparsable_case(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["gate", "--bank", str(bank), "--json"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     payload = json.loads(result.stdout)
     assert payload["status"] == "fail"
     assert len(payload["broken"]) == 1
@@ -74,7 +76,7 @@ def test_gate_fails_on_duplicate_case_ids(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["gate", "--bank", str(bank), "--json"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     assert json.loads(result.stdout)["duplicates"]
 
 
@@ -103,7 +105,7 @@ def test_unpromoted_cases_only_fail_when_required(tmp_path: Path) -> None:
     assert json.loads(warned.stdout)["unpromoted"] == ["synthetic-001"]
 
     required = runner.invoke(app, ["gate", "--bank", str(bank), "--require-promoted", "--json"])
-    assert required.exit_code == 1
+    assert required.exit_code == CLI_CONFIGURATION_EXIT_CODE
 
 
 def test_score_reports_recall_against_a_baseline(tmp_path: Path) -> None:
@@ -150,7 +152,7 @@ def test_score_fails_below_the_required_recall(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["score", str(actual), str(expected), "--min-recall", "0.5"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     assert "below the required" in result.output
 
 
@@ -164,14 +166,14 @@ def test_a_promoted_case_is_not_reported_as_unpromoted(tmp_path: Path) -> None:
     permanent.mkdir()
     permanent_test_path(permanent, "synthetic-001").write_text("# promoted\n", encoding="utf-8")
 
-    import mergecraft.cli.eval_cmd as eval_cmd
+    import mergecraft.cli.eval_gate_cmd as eval_gate_cmd
 
-    original = eval_cmd._default_permanent_dir
-    eval_cmd._default_permanent_dir = lambda: permanent  # type: ignore[assignment]
+    original = eval_gate_cmd.default_permanent_dir
+    eval_gate_cmd.default_permanent_dir = lambda: permanent  # type: ignore[assignment,misc]
     try:
         result = runner.invoke(app, ["gate", "--bank", str(bank), "--require-promoted", "--json"])
     finally:
-        eval_cmd._default_permanent_dir = original  # type: ignore[assignment]
+        eval_gate_cmd.default_permanent_dir = original  # type: ignore[assignment,misc]
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["unpromoted"] == []
