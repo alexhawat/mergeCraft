@@ -268,6 +268,37 @@ def test_flipped_tool_plan_carries_manifest_timeout(tool_id: str, tmp_path: Path
     assert plan.timeout_s == manifest.timeout_s
 
 
+def test_clippy_command_is_workspace_cargo_not_file_list(tmp_path: Path) -> None:
+    registry = _registry()
+    resolve = import_module("mergecraft.analyzers.resolve")
+    execution = import_module("mergecraft.analyzers.execution")
+    manifest = registry.get_manifest("clippy")
+    assert "{files}" not in manifest.command
+    assert manifest.command == ["cargo", "clippy", "--message-format=json"]
+    (tmp_path / "Cargo.toml").write_text(
+        '[package]\nname = "demo"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text("pub fn f() {}\n", encoding="utf-8")
+    plan = resolve.AnalyzerPlan(
+        manifest_id="clippy",
+        mode="repo-native",
+        argv=tuple(manifest.command),
+        cwd=tmp_path,
+    )
+    final = execution.finalize_plan(
+        plan,
+        manifest=manifest,
+        repo_root=tmp_path,
+        changed_files=["Cargo.toml", "src/lib.rs"],
+        tier="trusted",
+    )
+    argv = [str(arg) for arg in final.argv]
+    assert argv == ["cargo", "clippy", "--message-format=json"]
+    assert "--" not in argv
+    assert not any(arg.endswith((".rs", "Cargo.toml")) for arg in argv)
+
+
 def test_four_cheap_flips_findings_honor_inline_budget() -> None:
     budget = import_module("mergecraft.analyzers.budget")
     finding_mod = import_module("mergecraft.analyzers.finding")

@@ -10,7 +10,6 @@ command:
 - cargo
 - clippy
 - --message-format=json
-- '{files}'
 scope: diff
 parser: rustc_json
 supports_fix: false
