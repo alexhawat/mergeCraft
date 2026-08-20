@@ -96,10 +96,16 @@ def _listed_names(client: TestClient) -> set[str]:
 
 
 def test_reviewer_tools_list_includes_create_pull_request_review(tmp_path: Path) -> None:
-    """W11.2 / W13: ``/mcp/reviewer`` ``tools/list`` admits primary publication (D9)."""
+    """W11.2 / W13: ``/mcp/reviewer`` ``tools/list`` admits primary publication (D9).
+
+    Also asserts that the session tools the primary must call are admitted:
+    ``set_output``, ``select_mode``, ``report_progress``.
+    """
     names = _listed_names(_reviewer_client(tmp_path))
     assert "create_pull_request_review" in names
     assert "checkout_pr" in names
+    for session_tool in ("set_output", "select_mode", "report_progress"):
+        assert session_tool in names, f"{session_tool!r} must be on primary /mcp/reviewer"
 
 
 def test_reviewer_tools_list_keeps_git_and_excludes_repo_mutations(tmp_path: Path) -> None:

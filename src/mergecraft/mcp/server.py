@@ -186,11 +186,14 @@ def build_reviewer_tools(
     """Primary reviewer surface — class-filtered with publication admission (D9).
 
     ``PRIMARY_MUTATING_ALLOWLIST`` explicitly names ``create_pull_request_review``
-    (and ``checkout_pr``).  REVIEW_WRITE class is shared by several tools so
-    class membership alone would leak review-write tools to the reviewer; the
-    named allowlist stays the sole gate for D9 publication.  Subagents call
-    ``_filter_tools_by_class`` with the default ``READONLY_MUTATING_ALLOWLIST``
-    so they remain denied publication regardless of class.
+    (and ``checkout_pr``), plus the three session tools the primary must call:
+    ``set_output`` (Action output / offline --json), ``select_mode`` (Step 1 of
+    the default procedure), and ``report_progress`` (no-action path).
+    REVIEW_WRITE class is shared by several tools so class membership alone would
+    leak review-write tools to the reviewer; the named allowlist stays the sole
+    gate for D9 publication.  Subagents call ``_filter_tools_by_class`` with the
+    default ``READONLY_MUTATING_ALLOWLIST`` so they remain denied publication
+    regardless of class.
     """
     return _filter_tools_by_class(
         build_orchestrator_tools(ctx, output_schema),

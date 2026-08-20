@@ -128,7 +128,13 @@ def test_every_registered_tool_declares_a_class(tool_ctx: ToolContext) -> None:
 
 
 def test_reviewer_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
-    """H4 / D9 — reviewer toolset is class-filtered; publication is the sole mutation exception."""
+    """H4 / D9 — reviewer toolset is class-filtered; named mutations are the exception.
+
+    ``create_pull_request_review`` (D9 publication) and ``report_progress``
+    (no-action path, REVIEW_WRITE) are the only review-write tools admitted on
+    the primary reviewer via ``PRIMARY_MUTATING_ALLOWLIST``; all other mutation
+    classes stay off.
+    """
     _assert_real_toolspecs(build_orchestrator_tools(tool_ctx))
 
     from mergecraft.mcp.server import build_reviewer_tools
@@ -136,11 +142,11 @@ def test_reviewer_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
     reviewer = build_reviewer_tools(tool_ctx)
     _assert_real_toolspecs(reviewer)
     leaked = [spec.name for spec in reviewer if _class_value(spec) in MUTATION_CLASSES]
-    assert set(leaked) <= {"create_pull_request_review"}, (
-        f"reviewer received mutation tools: {leaked}"
+    assert set(leaked) <= {"create_pull_request_review", "report_progress"}, (
+        f"reviewer received unexpected mutation tools: {leaked}"
     )
     for spec in reviewer:
-        if spec.name == "create_pull_request_review":
+        if spec.name in {"create_pull_request_review", "report_progress"}:
             assert _class_value(spec) == "review-write"
             continue
         assert _class_value(spec) in REVIEWER_ALLOWED_CLASSES, (
@@ -345,12 +351,21 @@ def test_read_only_roles_exclude_mutating_tools_except_checkout_pr(tool_ctx: Too
     """Class membership is not enough: mutates=True tools stay off read-only surfaces.
 
     ``checkout_pr`` is the HA4.2 / D14 exception on the reviewer. D9 also admits
-    ``create_pull_request_review`` on the primary reviewer only. Verifier gets none.
+    ``create_pull_request_review`` on the primary reviewer only. The session tools
+    ``set_output``, ``select_mode``, and ``report_progress`` are admitted on the
+    primary reviewer via ``PRIMARY_MUTATING_ALLOWLIST``; subagents still deny them.
+    Verifier gets no mutating tool.
     """
     reviewer, verifier = _read_only_toolsets(tool_ctx)
     reviewer_mutating = [spec.name for spec in reviewer if spec.mutates]
     assert "checkout_pr" in reviewer_mutating
-    assert set(reviewer_mutating) <= {"checkout_pr", "create_pull_request_review"}
+    assert set(reviewer_mutating) <= {
+        "checkout_pr",
+        "create_pull_request_review",
+        "set_output",
+        "select_mode",
+        "report_progress",
+    }
     assert not [spec.name for spec in verifier if spec.mutates]
 
     subagent_denied = subagent_denied_tool_names(tool_ctx)
@@ -417,7 +432,13 @@ def test_live_verifier_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
 
 
 def test_live_reviewer_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> None:
-    """Runtime ``tools/list`` on the live reviewer endpoint is class-filtered (H4)."""
+    """Runtime ``tools/list`` on the live reviewer endpoint is class-filtered (H4).
+
+    Session tools ``set_output``, ``select_mode``, and ``report_progress`` are
+    admitted on the primary reviewer via ``PRIMARY_MUTATING_ALLOWLIST``.
+    ``record_finding_verdict`` stays off (REVIEW_WRITE + mutates but not in the
+    allowlist). ``push_branch`` and other repo mutations stay off (D9).
+    """
     import json
     from urllib.request import Request, urlopen
 
@@ -439,10 +460,10 @@ def test_live_reviewer_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
         names = {entry["name"] for entry in listed["result"]["tools"]}
         assert "checkout_pr" in names
         assert "git" in names
+        for present in ("set_output", "select_mode", "report_progress"):
+            assert present in names, f"{present!r} must be on primary /mcp/reviewer"
         for denied in (
-            "set_output",
             "start_dependency_installation",
-            "select_mode",
             "record_finding_verdict",
             "push_branch",
         ):
@@ -453,7 +474,7 @@ def test_live_reviewer_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
                 "jsonrpc": "2.0",
                 "id": 2,
                 "method": "tools/call",
-                "params": {"name": "select_mode", "arguments": {}},
+                "params": {"name": "record_finding_verdict", "arguments": {}},
             }
         ).encode()
         with urlopen(
@@ -462,6 +483,6 @@ def test_live_reviewer_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
         ) as resp:
             called = json.loads(resp.read().decode())
         assert called["error"]["code"] == -32601
-        assert "select_mode" in called["error"]["message"]
+        assert "record_finding_verdict" in called["error"]["message"]
     finally:
         stop()

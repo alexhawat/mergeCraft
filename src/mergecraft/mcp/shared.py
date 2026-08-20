@@ -56,10 +56,20 @@ VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
 # (HA4.2 / D14). Every other mutating tool is orchestrator-only even when its
 # class is otherwise allowed on a read-only role.
 READONLY_MUTATING_ALLOWLIST: Final[frozenset[str]] = frozenset({"checkout_pr"})
-# Primary reviewer additionally allows review publication (D9). Subagents still
-# use READONLY_MUTATING_ALLOWLIST so they cannot publish reviews.
+# Primary reviewer additionally allows review publication (D9) and the three
+# session tools the primary must be able to call:
+#   - ``set_output``      (ANALYSIS, mutates=True) — Action output_schema + offline --json
+#   - ``select_mode``     (SCOPE, mutates=True)    — default procedure Step 1
+#   - ``report_progress`` (REVIEW_WRITE, mutates=True) — no-action path
+# Subagents still use READONLY_MUTATING_ALLOWLIST so they cannot publish reviews
+# or emit structured output.
 PRIMARY_MUTATING_ALLOWLIST: Final[frozenset[str]] = READONLY_MUTATING_ALLOWLIST | frozenset(
-    {"create_pull_request_review"}
+    {
+        "create_pull_request_review",
+        "set_output",
+        "select_mode",
+        "report_progress",
+    }
 )
 
 
@@ -122,9 +132,10 @@ def admits_readonly_role(
     by several tools (``create_pull_request_review``, ``record_finding_verdict``,
     ``report_progress``, ``resolve_review_thread``); class membership alone
     would leak all of them to the reviewer.  The primary reviewer passes
-    ``PRIMARY_MUTATING_ALLOWLIST`` which adds ``create_pull_request_review``
-    by name; subagents keep ``READONLY_MUTATING_ALLOWLIST`` (checkout_pr only)
-    so they remain denied publication regardless of their class set.
+    ``PRIMARY_MUTATING_ALLOWLIST`` which adds ``create_pull_request_review``,
+    ``set_output``, ``select_mode``, and ``report_progress`` by name; subagents
+    keep ``READONLY_MUTATING_ALLOWLIST`` (checkout_pr only) so they remain
+    denied publication and cannot call session tools.
     """
     if spec.tool_class not in allowed:
         return False
