@@ -1,9 +1,9 @@
 """Batch Z (#328-#336) B-tier detect fixtures and auto-flip pins.
 
-Detect globs that already match shipped manifests are green. ``default_enabled:
-auto``, ``detect_enabled`` membership, ``supports_fix``, extra Fortran /
-PowerShell globs, theme/ember gates, Smarty ``*.tpl`` docs, and the Prisma
-fallback are RED until W19 (``strict=False``).
+Detect globs, ``default_enabled: auto``, ``detect_enabled`` membership,
+``supports_fix``, extra Fortran / PowerShell globs, theme/ember gates, Smarty
+``*.tpl`` docs, and the Prisma fallback are real passes after W19. Bare liquid
+and bare hbs stay off.
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ B_TIER_IDS: tuple[str, ...] = (
 )
 BATCH_Z_FIXTURES = FIXTURES_DIR / "batch-z"
 _CATALOG_DIR = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "analyzers" / "catalog"
-_XFAIL_AUTO = "green after W19: B-tier default_enabled auto (#328-#336)"
 
 # W18.1 language markers that already match current catalog YAML.
 _LANGUAGE_DETECT_PATHS: tuple[tuple[str, str], ...] = (
@@ -105,8 +104,6 @@ _F_TIER_IDS: tuple[str, ...] = (
     "graphql",
     "nix",
 )
-
-_XFAIL_W19 = pytest.mark.xfail(reason=_XFAIL_AUTO, strict=False)
 
 
 def _registry():
@@ -270,17 +267,15 @@ def test_ember_template_lint_does_not_auto_enable_on_bare_hbs() -> None:
     assert "ember-template-lint" not in _enabled_ids(repo, ["hello.hbs"])
 
 
-# --- RED until W19: auto flip + extras from the issue table ---
+# --- W19 greened: auto flip + extras from the issue table ---
 
 
-@_XFAIL_W19
 @pytest.mark.parametrize("tool_id", B_TIER_IDS)
 def test_b_tier_default_enabled_auto(tool_id: str) -> None:
     manifest = _registry().get_manifest(tool_id)
     assert manifest.default_enabled == "auto"
 
 
-@_XFAIL_W19
 @pytest.mark.parametrize(("tool_id", "repo", "changed"), _AUTO_DETECT_CASES)
 def test_b_tier_auto_enables_on_detect_markers(
     tool_id: str, repo: Path, changed: list[str]
@@ -289,10 +284,6 @@ def test_b_tier_auto_enables_on_detect_markers(
     assert tool_id in _enabled_ids(repo, changed)
 
 
-@pytest.mark.xfail(
-    reason="green after W19: fortitude/psscriptanalyzer extra detect globs (#329/#331)",
-    strict=False,
-)
 @pytest.mark.parametrize(("tool_id", "changed"), _W19_EXTRA_DETECT_PATHS)
 def test_b_tier_w19_extra_detect_globs(tool_id: str, changed: str) -> None:
     registry = _registry()
@@ -304,31 +295,21 @@ def test_b_tier_w19_extra_detect_globs(tool_id: str, changed: str) -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W19: psscriptanalyzer supports_fix (#331)", strict=False)
 def test_psscriptanalyzer_declares_supports_fix() -> None:
     manifest = _registry().get_manifest("psscriptanalyzer")
     assert manifest.supports_fix is True
 
 
-@pytest.mark.xfail(reason="green after W19: ember-template-lint supports_fix (#335)", strict=False)
 def test_ember_template_lint_declares_supports_fix() -> None:
     manifest = _registry().get_manifest("ember-template-lint")
     assert manifest.supports_fix is True
 
 
-@pytest.mark.xfail(
-    reason="green after W19: shopify-theme-check theme layout markers (#333)",
-    strict=False,
-)
 def test_shopify_theme_check_auto_enables_on_theme_layout_without_yml() -> None:
     repo = BATCH_Z_FIXTURES / "liquid-theme-layout"
     assert "shopify-theme-check" in _enabled_ids(repo, ["templates/index.liquid"])
 
 
-@pytest.mark.xfail(
-    reason="green after W19: ember-template-lint ember-source package.json marker (#335)",
-    strict=False,
-)
 def test_ember_template_lint_auto_enables_on_ember_source_package_json() -> None:
     repo = BATCH_Z_FIXTURES / "ember-source"
     assert "ember-template-lint" in _enabled_ids(
@@ -336,20 +317,12 @@ def test_ember_template_lint_auto_enables_on_ember_source_package_json() -> None
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W19: smarty-lint documents *.tpl ambiguity (#334)",
-    strict=False,
-)
 def test_smarty_lint_docs_note_tpl_ambiguity() -> None:
     row = _analyzers_doc_row("smarty-lint").casefold()
     assert "*.tpl" in row or "tpl" in row
     assert "ambigu" in row
 
 
-@pytest.mark.xfail(
-    reason="green after W19: prisma-lint conservative fallback ruleset (#336)",
-    strict=False,
-)
 def test_prisma_lint_ships_conservative_fallback_ruleset() -> None:
     hits = [
         path
@@ -365,10 +338,6 @@ def test_prisma_lint_ships_conservative_fallback_ruleset() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W19: prisma-lint uses fallback when no repo rules (#336)",
-    strict=False,
-)
 def test_prisma_lint_without_rules_uses_conservative_fallback(tmp_path: Path) -> None:
     resolve = import_module("mergecraft.analyzers.resolve")
     (tmp_path / "schema.prisma").write_text("model User { id Int }\n", encoding="utf-8")

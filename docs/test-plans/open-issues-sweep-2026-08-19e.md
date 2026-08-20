@@ -3,11 +3,11 @@
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19e-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19e` @ `wave/open-issues-sweep-2026-08-19e`
 Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337) · **W7** (Batch Y RED — #309-#327 leftovers) · **W18** (Batch Z RED — #328-#336)
-Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl); **W10 recon** un-xfail brakeman auto+Rails + bundler-audit catalog (`b5165e9` impl); **W12 recon** un-xfail cppcheck auto (`ce31bee6` impl); **W13 recon** un-xfail detekt + swiftlint auto (`88b348ca` impl); **W14 recon** un-xfail pmd auto (`5174cedd` impl); **W15 recon** un-xfail sqlfluff + stylelint + htmlhint auto (`6847b055` impl); **W16 recon** un-xfail yamllint auto (`dfb2b97a` impl); **W17 recon** un-xfail checkmake + markdownlint + tflint + checkov auto (`a0b00e46` impl)
+Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl); **W10 recon** un-xfail brakeman auto+Rails + bundler-audit catalog (`b5165e9` impl); **W12 recon** un-xfail cppcheck auto (`ce31bee6` impl); **W13 recon** un-xfail detekt + swiftlint auto (`88b348ca` impl); **W14 recon** un-xfail pmd auto (`5174cedd` impl); **W15 recon** un-xfail sqlfluff + stylelint + htmlhint auto (`6847b055` impl); **W16 recon** un-xfail yamllint auto (`dfb2b97a` impl); **W17 recon** un-xfail checkmake + markdownlint + tflint + checkov auto (`a0b00e46` impl); **W19 recon** un-xfail B-tier auto + extras (`e8671ea2` impl)
 
 W7 pins leftover A-tier acceptances for #309-#327. Do **not** re-add tsc/bandit/jscpd/govulncheck/cargo-audit/cargo-deny/typos/knip/vulture (D10). Do **not** re-flip golangci-lint/clippy/rubocop/phpstan (D7). File: `tests/analyzers/test_a_tier_residuals.py` + `tests/analyzers/fixtures/batch-y/`. All cross-wave markers are `strict=False`.
 
-W18 pins B-tier detect fixtures for #328-#336. Do **not** flip `default_enabled` (W19). File: `tests/analyzers/test_b_tier_flips.py` + `tests/analyzers/fixtures/batch-z/`. Do **not** lift F-tier (D9). `strict=False` on every `green after W19` marker.
+W18 pins B-tier detect fixtures for #328-#336. File: `tests/analyzers/test_b_tier_flips.py` + `tests/analyzers/fixtures/batch-z/`. Do **not** lift F-tier (D9). W19 greened `default_enabled: auto` + extras; **W19 recon** removed every `green after W19` marker. Batch Z tests: **0** xfail, **0** XPASS. No ZF yet.
 
 W1 pinned detect + catalog-check fixtures for `golangci-lint`, `clippy`, `rubocop`,
 and `phpstan` (D7). W2 greened `default_enabled: auto` and applied D11 / D12 / D19.
@@ -393,22 +393,22 @@ W17 landed (`a0b00e46`); all 8 `green after W17:` markers removed. Do **not** ad
 
 **`iac-scanner` trap (resolved in W17):** W17 cleared `exclusive_group` on tflint and checkov so both auto-enable on `*.tf`. Both membership asserts pass on the same `batch-y/terraform` + `["main.tf"]` call.
 
-## Batch Z xfail schedule (W18 — RED until W19)
+## Batch Z xfail schedule (W18 — greened after W19 recon)
 
-File: `tests/analyzers/test_b_tier_flips.py`. Fixtures: `tests/analyzers/fixtures/batch-z/`. All markers `strict=False`. Do **not** xfail detect globs that already match current YAML.
+File: `tests/analyzers/test_b_tier_flips.py`. Fixtures: `tests/analyzers/fixtures/batch-z/`. **0** remaining xfails after W19 recon. **0** XPASS. No `@pytest.mark.xfail` remains.
 
 | Wave | Test | Marker reason | Status |
 |------|------|---------------|--------|
-| **W19** | `test_b_tier_default_enabled_auto` (9 ids) | `green after W19: B-tier default_enabled auto (#328-#336)` | RED |
-| **W19** | `test_b_tier_auto_enables_on_detect_markers` (9 ids) | same | RED |
-| **W19** | `test_b_tier_w19_extra_detect_globs` | `green after W19: fortitude/psscriptanalyzer extra detect globs (#329/#331)` | RED |
-| **W19** | `test_psscriptanalyzer_declares_supports_fix` | `green after W19: psscriptanalyzer supports_fix (#331)` | RED |
-| **W19** | `test_ember_template_lint_declares_supports_fix` | `green after W19: ember-template-lint supports_fix (#335)` | RED |
-| **W19** | `test_shopify_theme_check_auto_enables_on_theme_layout_without_yml` | `green after W19: shopify-theme-check theme layout markers (#333)` | RED |
-| **W19** | `test_ember_template_lint_auto_enables_on_ember_source_package_json` | `green after W19: ember-template-lint ember-source package.json marker (#335)` | RED |
-| **W19** | `test_smarty_lint_docs_note_tpl_ambiguity` | `green after W19: smarty-lint documents *.tpl ambiguity (#334)` | RED |
-| **W19** | `test_prisma_lint_ships_conservative_fallback_ruleset` | `green after W19: prisma-lint conservative fallback ruleset (#336)` | RED |
-| **W19** | `test_prisma_lint_without_rules_uses_conservative_fallback` | `green after W19: prisma-lint uses fallback when no repo rules (#336)` | RED |
+| **W19** | `test_b_tier_default_enabled_auto` (9 ids) | `green after W19: B-tier default_enabled auto (#328-#336)` | **green** after W19 recon |
+| **W19** | `test_b_tier_auto_enables_on_detect_markers` (9 ids) | same | **green** after W19 recon |
+| **W19** | `test_b_tier_w19_extra_detect_globs` | `green after W19: fortitude/psscriptanalyzer extra detect globs (#329/#331)` | **green** after W19 recon |
+| **W19** | `test_psscriptanalyzer_declares_supports_fix` | `green after W19: psscriptanalyzer supports_fix (#331)` | **green** after W19 recon |
+| **W19** | `test_ember_template_lint_declares_supports_fix` | `green after W19: ember-template-lint supports_fix (#335)` | **green** after W19 recon |
+| **W19** | `test_shopify_theme_check_auto_enables_on_theme_layout_without_yml` | `green after W19: shopify-theme-check theme layout markers (#333)` | **green** after W19 recon |
+| **W19** | `test_ember_template_lint_auto_enables_on_ember_source_package_json` | `green after W19: ember-template-lint ember-source package.json marker (#335)` | **green** after W19 recon |
+| **W19** | `test_smarty_lint_docs_note_tpl_ambiguity` | `green after W19: smarty-lint documents *.tpl ambiguity (#334)` | **green** after W19 recon |
+| **W19** | `test_prisma_lint_ships_conservative_fallback_ruleset` | `green after W19: prisma-lint conservative fallback ruleset (#336)` | **green** after W19 recon |
+| **W19** | `test_prisma_lint_without_rules_uses_conservative_fallback` | `green after W19: prisma-lint uses fallback when no repo rules (#336)` | **green** after W19 recon |
 
 ### Already green (do not xfail)
 
@@ -423,7 +423,7 @@ File: `tests/analyzers/test_b_tier_flips.py`. Fixtures: `tests/analyzers/fixture
 | Bare `*.liquid` is **not** a theme | `test_shopify_theme_check_does_not_auto_enable_on_bare_liquid` |
 | Bare `*.hbs` is **not** Ember | `test_ember_template_lint_does_not_auto_enable_on_bare_hbs` |
 
-Bare-liquid / bare-hbs stay green today because `default_enabled` is `false`. After the W19 `auto` flip they **must stay green** — that is the theme/ember gate. Do not remove `*.liquid` / `*.hbs` from `detect.files` without keeping `_auto_manifest_enabled` (or equivalent) so a real theme/Ember repo still fires on those paths.
+Bare-liquid / bare-hbs stay green after the W19 `auto` flip — that is the theme/ember gate. Do not remove `*.liquid` / `*.hbs` from `detect.files` without keeping `_auto_manifest_enabled` (or equivalent) so a real theme/Ember repo still fires on those paths.
 
 ## Batch Z contract matrix
 
@@ -435,23 +435,23 @@ Bare-liquid / bare-hbs stay green today because `default_enabled` is `false`. Af
 | Z4 | D15 parser fixture | unit | happy | `test_b_tier_has_catalog_check_parser_fixture` | **green** |
 | Z5 | D19 timeout + unavailable + budget | unit/integration | error/edge | `test_b_tier_declares_timeout`, `test_b_tier_reports_unavailable_when_toolchain_absent`, `test_b_tier_findings_honor_inline_budget` | **green** |
 | Z6 | D9 F-tier not added | unit | error | `test_f_tier_languages_are_not_lifted` | **green** |
-| Z7 | `default_enabled == "auto"` | unit | happy | `test_b_tier_default_enabled_auto` | **xfail W19** |
-| Z8 | `detect_enabled` on language/theme/ember/prisma fixtures | integration | happy | `test_b_tier_auto_enables_on_detect_markers` | **xfail W19** |
-| Z9 | Fortitude `*.F90` / `*.f03` / `*.f` / `*.for`; PSSAanalyzer `*.psd1` | unit | happy | `test_b_tier_w19_extra_detect_globs` | **xfail W19** |
-| Z10 | `psscriptanalyzer.supports_fix is True` | unit | happy | `test_psscriptanalyzer_declares_supports_fix` | **xfail W19** |
-| Z11 | Theme layout without `.theme-check.yml` still auto-enables | integration | happy | `test_shopify_theme_check_auto_enables_on_theme_layout_without_yml` | **xfail W19** |
+| Z7 | `default_enabled == "auto"` | unit | happy | `test_b_tier_default_enabled_auto` | **green** after W19 recon |
+| Z8 | `detect_enabled` on language/theme/ember/prisma fixtures | integration | happy | `test_b_tier_auto_enables_on_detect_markers` | **green** after W19 recon |
+| Z9 | Fortitude `*.F90` / `*.f03` / `*.f` / `*.for`; PSSAanalyzer `*.psd1` | unit | happy | `test_b_tier_w19_extra_detect_globs` | **green** after W19 recon |
+| Z10 | `psscriptanalyzer.supports_fix is True` | unit | happy | `test_psscriptanalyzer_declares_supports_fix` | **green** after W19 recon |
+| Z11 | Theme layout without `.theme-check.yml` still auto-enables | integration | happy | `test_shopify_theme_check_auto_enables_on_theme_layout_without_yml` | **green** after W19 recon |
 | Z12 | Bare `*.liquid` does not auto-enable | integration | edge | `test_shopify_theme_check_does_not_auto_enable_on_bare_liquid` | **green** |
-| Z13 | Document `*.tpl` ambiguity in ANALYZERS.md notes | unit | happy | `test_smarty_lint_docs_note_tpl_ambiguity` | **xfail W19** |
-| Z14 | Ember marker (`ember-cli-build.js`) auto-enables | integration | happy | `test_b_tier_auto_enables_on_detect_markers[ember-template-lint-…]` | **xfail W19** |
-| Z15 | Ember marker (`ember-source` in `package.json`) auto-enables | integration | happy | `test_ember_template_lint_auto_enables_on_ember_source_package_json` | **xfail W19** |
+| Z13 | Document `*.tpl` ambiguity in ANALYZERS.md notes | unit | happy | `test_smarty_lint_docs_note_tpl_ambiguity` | **green** after W19 recon |
+| Z14 | Ember marker (`ember-cli-build.js`) auto-enables | integration | happy | `test_b_tier_auto_enables_on_detect_markers[ember-template-lint-…]` | **green** after W19 recon |
+| Z15 | Ember marker (`ember-source` in `package.json`) auto-enables | integration | happy | `test_ember_template_lint_auto_enables_on_ember_source_package_json` | **green** after W19 recon |
 | Z16 | Bare `*.hbs` does not auto-enable | integration | edge | `test_ember_template_lint_does_not_auto_enable_on_bare_hbs` | **green** |
-| Z17 | `ember-template-lint.supports_fix is True` | unit | happy | `test_ember_template_lint_declares_supports_fix` | **xfail W19** |
-| Z18 | Prisma conservative fallback ruleset file | unit | happy | `test_prisma_lint_ships_conservative_fallback_ruleset` | **xfail W19** |
-| Z19 | No repo prisma-lint rules → still uses fallback (not inert skip) | integration | happy | `test_prisma_lint_without_rules_uses_conservative_fallback` | **xfail W19** |
+| Z17 | `ember-template-lint.supports_fix is True` | unit | happy | `test_ember_template_lint_declares_supports_fix` | **green** after W19 recon |
+| Z18 | Prisma conservative fallback ruleset file | unit | happy | `test_prisma_lint_ships_conservative_fallback_ruleset` | **green** after W19 recon |
+| Z19 | No repo prisma-lint rules → still uses fallback (not inert skip) | integration | happy | `test_prisma_lint_without_rules_uses_conservative_fallback` | **green** after W19 recon |
 
-### W19 #328-#336 — exact contracts for wave-plan-executor
+### W19 #328-#336 — exact contracts (landed `e8671ea2`)
 
-Flip these nine existing manifests to `default_enabled: auto`. Do **not** add F-tier languages (D9). Honour D19 (existing `budget.py` / skip → `unavailable`). `make catalog-check` + CHANGELOG in the same commit. Do not touch 19c/19d paths (D6).
+W19 flipped these nine existing manifests to `default_enabled: auto`. Do **not** add F-tier languages (D9). Honour D19 (existing `budget.py` / skip → `unavailable`). `make catalog-check` + CHANGELOG already in the impl commit. Do not touch 19c/19d paths (D6).
 
 | Issue | id | Detect files W19 must satisfy | Extra |
 |---|---|---|---|
@@ -474,3 +474,11 @@ Detect fixture trees: `tests/analyzers/fixtures/batch-z/` (`lua`, `fortran`, `re
 - `make lint` + `make typecheck` pass; collection has 0 import errors
 - No product/source edits (`src/` untouched)
 - No `strict=True` on Batch Z markers
+
+## Acceptance (W19 recon)
+
+- Removed every `green after W19:` xfail from `tests/analyzers/test_b_tier_flips.py` (9 auto + 9 detect_enabled + extras + supports_fix + theme/ember gates + smarty docs + prisma fallback)
+- Batch Z tests: **0** remaining xfails, **0** XPASS (`112 passed` on `tests/analyzers/test_b_tier_flips.py`). Bare liquid / bare hbs stay off
+- `make lint` + `make typecheck` pass
+- No product/source edits (`src/` untouched)
+- No ZF yet
