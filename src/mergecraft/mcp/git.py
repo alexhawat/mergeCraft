@@ -34,6 +34,7 @@ from mergecraft.mcp.git_guards import (
 )
 from mergecraft.mcp.shared import ToolClass, execute, repository_mutation_class_for_push, tool
 from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.modes import refuse_review_only_mutation
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -365,6 +366,7 @@ def _require_push_allowed(
 
 def push_branch_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
+        refuse_review_only_mutation(ctx.tool_state.selected_mode, action="git push")
         cwd = primary_repo_state(ctx.tool_state).dir
         branch = params.get("branchName")
         if not branch:
@@ -474,6 +476,7 @@ def delete_branch_tool(ctx: ToolContext):
 
 def commit_changes_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
+        refuse_review_only_mutation(ctx.tool_state.selected_mode, action="git commit")
         message = str(params["message"])
         cwd = primary_repo_state(ctx.tool_state).dir
         branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()

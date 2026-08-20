@@ -9,6 +9,7 @@ from loguru import logger
 
 from mergecraft.mcp.comment import add_footer
 from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.modes import refuse_review_only_mutation
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -25,6 +26,10 @@ def _current_branch(cwd: str) -> str:
 
 def create_pull_request_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
+        refuse_review_only_mutation(
+            ctx.tool_state.selected_mode,
+            action="open a code-changing pull request",
+        )
         cwd = primary_dir(ctx)
         head = _current_branch(cwd)
         body = add_footer(ctx, str(params["body"]))
