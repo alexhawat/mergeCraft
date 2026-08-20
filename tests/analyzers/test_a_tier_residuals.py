@@ -241,6 +241,12 @@ def test_brakeman_auto_enables_on_rails_markers() -> None:
     assert "brakeman" in _enabled_ids(repo, ["hello.rb", "Gemfile", "config/application.rb"])
 
 
+def test_brakeman_auto_enables_on_model_rb_with_rails_markers() -> None:
+    """A typical Rails PR touching app/models must enable Brakeman when Rails markers exist."""
+    repo = BATCH_Y_FIXTURES / "rails"
+    assert "brakeman" in _enabled_ids(repo, ["app/models/user.rb"])
+
+
 def test_brakeman_does_not_auto_enable_on_plain_ruby() -> None:
     repo = BATCH_Y_FIXTURES / "ruby-plain"
     assert "brakeman" not in _enabled_ids(repo, ["hello.rb", "Gemfile"])
@@ -419,6 +425,42 @@ def test_sqlfluff_default_enabled_auto() -> None:
 def test_sqlfluff_auto_enables_on_sql_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "sql"
     assert "sqlfluff" in _enabled_ids(repo, ["hello.sql"])
+
+
+def test_sqlfluff_skips_when_no_dialect_declared(tmp_path: Path) -> None:
+    """Finding 4: resolve_analyzer must skip sqlfluff when no dialect is declared."""
+    resolve = import_module("mergecraft.analyzers.resolve")
+    (tmp_path / "hello.sql").write_text("SELECT 1;\n", encoding="utf-8")
+    manifest = _registry().get_manifest("sqlfluff")
+    plan_no_dialect = resolve.resolve_analyzer(
+        manifest=manifest,
+        repo_root=tmp_path,
+        repo_has_tool=True,
+        repo_tool_path="/usr/bin/sqlfluff",
+        managed_available=True,
+    )
+    assert plan_no_dialect.mode == "skip", (
+        f"sqlfluff must skip when no dialect declared; got mode={plan_no_dialect.mode!r}"
+    )
+    assert "dialect" in (plan_no_dialect.reason or "").casefold()
+
+
+def test_sqlfluff_runs_when_dialect_declared(tmp_path: Path) -> None:
+    """sqlfluff must NOT skip when .sqlfluff declares a dialect."""
+    resolve = import_module("mergecraft.analyzers.resolve")
+    (tmp_path / "hello.sql").write_text("SELECT 1;\n", encoding="utf-8")
+    (tmp_path / ".sqlfluff").write_text("[sqlfluff]\ndialect = ansi\n", encoding="utf-8")
+    manifest = _registry().get_manifest("sqlfluff")
+    plan = resolve.resolve_analyzer(
+        manifest=manifest,
+        repo_root=tmp_path,
+        repo_has_tool=True,
+        repo_tool_path="/usr/bin/sqlfluff",
+        managed_available=False,
+    )
+    assert plan.mode != "skip", (
+        f"sqlfluff must not skip when dialect is declared; got mode={plan.mode!r}"
+    )
 
 
 def test_stylelint_default_enabled_auto() -> None:

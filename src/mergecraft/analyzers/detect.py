@@ -242,6 +242,39 @@ def has_ember_template_lint_config(repo_root: Path) -> bool:
     return _dependency_mentions_tool(repo_root, "ember-source")
 
 
+def has_rails_app(repo_root: Path) -> bool:
+    """Return True when the repo contains Rails application markers.
+
+    Checks for ``config/application.rb`` or ``config/routes.rb`` — the canonical
+    Rails project layout signals (W10 contract: Rails only, not every .rb file).
+    """
+    repo_root = repo_root.resolve()
+    return (repo_root / "config" / "application.rb").is_file() or (
+        repo_root / "config" / "routes.rb"
+    ).is_file()
+
+
+_SQLFLUFF_DIALECT_RE = re.compile(r"^\s*dialect\s*=\s*\S", re.MULTILINE)
+_SQLFLUFF_PYPROJECT_SECTION_RE = re.compile(r"^\s*\[tool\.sqlfluff", re.MULTILINE)
+
+
+def has_sqlfluff_dialect(repo_root: Path) -> bool:
+    """Return True when a SQLFluff dialect is declared in .sqlfluff or pyproject.toml.
+
+    SQLFluff requires an explicit dialect to lint meaningfully; without one every
+    ``SELECT`` is ambiguous.  Checks ``[sqlfluff] dialect =`` in ``.sqlfluff`` (INI)
+    and ``[tool.sqlfluff...] dialect =`` in ``pyproject.toml`` (TOML).
+    """
+    repo_root = repo_root.resolve()
+    sqlfluff_cfg = repo_root / ".sqlfluff"
+    if sqlfluff_cfg.is_file() and _SQLFLUFF_DIALECT_RE.search(_read_text(sqlfluff_cfg)):
+        return True
+    pyproject = _pyproject_text(repo_root)
+    return bool(
+        _SQLFLUFF_PYPROJECT_SECTION_RE.search(pyproject) and _SQLFLUFF_DIALECT_RE.search(pyproject)
+    )
+
+
 def manifest_config_present(manifest_id: str, repo_root: Path) -> bool:
     """Return whether the repo declares configuration for a language-gate analyzer."""
     checks = {
@@ -255,6 +288,7 @@ def manifest_config_present(manifest_id: str, repo_root: Path) -> bool:
         "rubocop": has_rubocop_config,
         "shopify-theme-check": has_shopify_theme_config,
         "ember-template-lint": has_ember_template_lint_config,
+        "brakeman": has_rails_app,
     }
     check = checks.get(manifest_id)
     if check is None:
@@ -451,9 +485,11 @@ __all__ = [
     "has_phpstan_config",
     "has_prisma_lint_config",
     "has_pyright_config",
+    "has_rails_app",
     "has_rubocop_config",
     "has_ruff_config",
     "has_shopify_theme_config",
+    "has_sqlfluff_dialect",
     "manifest_config_present",
     "resolve_repo_tool",
 ]

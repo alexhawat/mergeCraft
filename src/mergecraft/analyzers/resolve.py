@@ -11,6 +11,7 @@ from mergecraft.analyzers.detect import (
     _eslint_command_prefix,
     has_phpstan_config,
     has_prisma_lint_config,
+    has_sqlfluff_dialect,
     resolve_repo_tool,
 )
 
@@ -202,6 +203,15 @@ def _repo_native_plan(
     """Per-source resolver: the repo's own binary, once availability is known."""
     if not state.available:
         return None
+    if manifest.id == "sqlfluff" and not has_sqlfluff_dialect(repo_root):
+        return AnalyzerPlan(
+            manifest_id=manifest.id,
+            mode="skip",
+            reason=(
+                "skipped sqlfluff: no SQL dialect declared "
+                "(.sqlfluff or [tool.sqlfluff] in pyproject.toml)"
+            ),
+        )
     argv = tuple(manifest.command)
     if manifest.id == "eslint":
         prefix = _eslint_command_prefix(repo_root)
@@ -264,6 +274,15 @@ def _managed_plan(
     """Per-source resolver: mergeCraft's own pinned binary."""
     if not (managed_available and manifest.runtime in {"managed", "repo-native"}):
         return None
+    if manifest.id == "sqlfluff" and not has_sqlfluff_dialect(repo_root):
+        return AnalyzerPlan(
+            manifest_id=manifest.id,
+            mode="skip",
+            reason=(
+                "skipped sqlfluff: no SQL dialect declared "
+                "(.sqlfluff or [tool.sqlfluff] in pyproject.toml)"
+            ),
+        )
     version = managed_version or manifest.version
     version_note = f"ran mergeCraft's pinned {manifest.id} {version}; your repo pins none"
     return AnalyzerPlan(

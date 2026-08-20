@@ -1,7 +1,9 @@
 # prisma-lint conservative default fallback ruleset (shipped with mergeCraft)
 # Applied when no repo-level prisma-lint config is found.
-# These rules are intentionally minimal to avoid false positives on first run.
+# Enables a small, safe subset: naming conventions (idiomatic Prisma) and
+# one footgun guard (required ignored fields have surprising side-effects).
 rules:
-  require-field-type: off
-  forbid-field-name: off
-  require-model-name: off
+  model-name-pascal-case: error
+  field-name-camel-case: error
+  enum-name-pascal-case: error
+  forbid-required-ignored-field: error
