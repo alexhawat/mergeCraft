@@ -8,6 +8,7 @@ import pytest
 from tests.analyzers.support import FIXTURES_DIR, import_module
 
 _CASES: tuple[tuple[str, str, str, str], ...] = (
+    ("bandit", "bandit_json", "native/bandit-minimal.json", "B301"),
     ("cargo-audit", "cargo_audit_json", "native/cargo-audit-minimal.json", "RUSTSEC-2024-0001"),
     ("cargo-deny", "cargo_deny_json", "native/cargo-deny-minimal.jsonl", "license-denied"),
     ("vulture", "vulture_text", "native/vulture-minimal.txt", "unused"),
@@ -20,6 +21,7 @@ _CASES: tuple[tuple[str, str, str, str], ...] = (
 )
 
 _JSON_OBJECT_TOOLS: tuple[tuple[str, str], ...] = (
+    ("bandit", "bandit_json"),
     ("cargo-audit", "cargo_audit_json"),
     ("knip", "knip_json"),
     ("jscpd", "jscpd_json"),

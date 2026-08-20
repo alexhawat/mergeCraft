@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from mergecraft.analyzers.finding import Finding
+from mergecraft.analyzers.parsers.bandit_json import parse_bandit_json
 from mergecraft.analyzers.parsers.buf_native import parse_buf_native
 from mergecraft.analyzers.parsers.bundler_audit_json import parse_bundler_audit_json
 from mergecraft.analyzers.parsers.cargo_audit_json import parse_cargo_audit_json
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
 ParserFn = Callable[..., list[Finding]]
 
 _PARSERS: dict[str, ParserFn] = {
+    "bandit_json": parse_bandit_json,
     "buf_native": parse_buf_native,
     "sarif": parse_sarif,
     "ruff_json": parse_ruff_json,

@@ -260,6 +260,38 @@ def test_bandit_version_reuses_make_security_pin() -> None:
     assert manifest.version == _make_security_bandit_pin()
     assert manifest.command[0] == "bandit"
     assert manifest.category == "security"
+    assert manifest.parser == "bandit_json"
+    assert "--format" in manifest.command
+    assert "json" in manifest.command
+    assert "sarif" not in manifest.command
+
+
+def test_bandit_command_is_json_not_sarif(tmp_path: Path) -> None:
+    """Bandit 1.9.4 ships JSON built-in; SARIF needs the optional ``sarif`` extra."""
+    registry = _registry()
+    resolve = import_module("mergecraft.analyzers.resolve")
+    execution = import_module("mergecraft.analyzers.execution")
+    manifest = registry.get_manifest("bandit")
+    assert manifest.command == ["bandit", "-r", "--format", "json", "{files}"]
+    (tmp_path / "hello.py").write_text("print('ok')\n", encoding="utf-8")
+    plan = resolve.AnalyzerPlan(
+        manifest_id="bandit",
+        mode="repo-native",
+        argv=tuple(manifest.command),
+        cwd=tmp_path,
+    )
+    final = execution.finalize_plan(
+        plan,
+        manifest=manifest,
+        repo_root=tmp_path,
+        changed_files=["hello.py"],
+        tier="trusted",
+    )
+    argv = [str(arg) for arg in final.argv]
+    assert argv[:4] == ["bandit", "-r", "--format", "json"]
+    assert "json" in argv
+    assert "sarif" not in argv
+    assert any(arg.endswith("hello.py") for arg in argv)
 
 
 def test_jscpd_scope_is_repo() -> None:
