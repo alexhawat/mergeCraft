@@ -49,10 +49,6 @@ _CONSTANT_NAMES = [
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W10: mcp.git_guards module does not exist yet (#299)",
-    strict=True,
-)
 def test_git_guards_module_is_importable() -> None:
     """W9.1a — ``mergecraft.mcp.git_guards`` can be imported."""
     import importlib
@@ -60,10 +56,6 @@ def test_git_guards_module_is_importable() -> None:
     importlib.import_module("mergecraft.mcp.git_guards")
 
 
-@pytest.mark.xfail(
-    reason="green after W10: mcp.git_guards module does not exist yet (#299)",
-    strict=True,
-)
 @pytest.mark.parametrize("name", _GUARD_NAMES)
 def test_git_guards_exports_guard(name: str) -> None:
     """W9.1b — each guard function is exported from ``mcp.git_guards``."""
@@ -73,10 +65,6 @@ def test_git_guards_exports_guard(name: str) -> None:
     assert hasattr(module, name), f"mcp.git_guards is missing {name!r}"
 
 
-@pytest.mark.xfail(
-    reason="green after W10: mcp.git_guards module does not exist yet (#299)",
-    strict=True,
-)
 @pytest.mark.parametrize("name", _CONSTANT_NAMES)
 def test_git_guards_exports_constant(name: str) -> None:
     """W9.1c — each guard constant is exported from ``mcp.git_guards``."""
