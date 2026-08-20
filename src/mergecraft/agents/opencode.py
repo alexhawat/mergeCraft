@@ -294,6 +294,7 @@ async def _prompt_session(
     session_id: str,
     text: str,
     model: dict[str, str] | None,
+    resolved_model: str | None = None,
     capture_policy: ContentCapture | None = None,
 ) -> AgentResult:
     """Prompt the opencode session — the one harness path with full payload visibility.
@@ -490,6 +491,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             session_id=session_id,
             text=prompt,
             model=model_obj,
+            resolved_model=model,
             capture_policy=capture_policy,
         )
 
@@ -499,6 +501,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 session_id=session_id,
                 text=followup,
                 model=model_obj,
+                resolved_model=model,
                 capture_policy=capture_policy,
             )
 
