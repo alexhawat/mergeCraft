@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `mergecraft mcp serve` now mints a per-serve Bearer token and requires it on every MCP request; unauthenticated `tools/list` and `tools/call` are rejected with HTTP 401 / JSON-RPC `-32600` (#345). `build_mcp_tool_context` mints the token via `secrets.token_hex(32)`, stores it as `ctx.mcp_auth_token`, and passes it as `auth_token=` into `create_mcp_app`; the token is printed to stderr as `MERGECRAFT_MCP_BEARER=<token>` at startup.
+
 ### Added
 
 - `scripts/check_type_ignores.py` fails when a `type: ignore` or `cast(` in allowed `src/mergecraft/` lacks a one-line reason (#275); wired into `make lint`

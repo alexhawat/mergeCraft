@@ -11,7 +11,6 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from fastapi.testclient import TestClient
 
 from mergecraft.mcp.server import MCP_REVIEWER_ENDPOINT
@@ -82,7 +81,6 @@ def _is_auth_rejection(status_code: int, body: dict[str, Any]) -> bool:
     return isinstance(error, dict) and error.get("code") == -32600
 
 
-@pytest.mark.xfail(reason="green after W2: mcp serve Bearer auth", strict=False)
 def test_reviewer_serve_rejects_unauthenticated_tools_list(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -97,7 +95,6 @@ def test_reviewer_serve_rejects_unauthenticated_tools_list(
     )
 
 
-@pytest.mark.xfail(reason="green after W2: mcp serve Bearer auth", strict=False)
 def test_reviewer_serve_rejects_unauthenticated_tools_call(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

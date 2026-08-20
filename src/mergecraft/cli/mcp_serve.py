@@ -53,6 +53,16 @@ def _parse_role(role: str) -> ServeRole:
     return key  # type: ignore[return-value]  # — key verified against {"orchestrator","reviewer","verifier"} above
 
 
+def _resolve_serve_auth_token() -> str:
+    """Return the bearer token for standalone MCP serve (D15).
+
+    Honors ``MERGECRAFT_MCP_TOKEN`` when set; otherwise issues a fresh secret
+    so ``tools/list`` and ``tools/call`` are never left unauthenticated.
+    """
+    configured = os.environ.get("MERGECRAFT_MCP_TOKEN", "").strip()
+    return configured or secrets.token_hex(32)
+
+
 def build_mcp_tool_context(
     *,
     cwd: Path,
@@ -92,6 +102,7 @@ def build_mcp_tool_context(
         push=push_policy,
         cwd=str(repo_root),
     )
+    run_token = _resolve_serve_auth_token()
     return ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="local", name=repo_root.name),
@@ -103,6 +114,7 @@ def build_mcp_tool_context(
         modes=modes,
         tool_state=state,
         mcp_server_url="",
+        mcp_auth_token=run_token,
         tmpdir=str(repo_root),
         signed_commits=False,
         pr_approve_enabled=False,
@@ -154,14 +166,38 @@ def resolve_served_tool_names(
     ]
 
 
-def _resolve_serve_auth_token() -> str:
-    """Return the bearer token for standalone MCP serve (D15).
+def build_mcp_app_from_ctx(role: str, ctx: ToolContext) -> FastAPI:
+    """Build an MCP FastAPI app from a pre-resolved context.
 
-    Honors ``MERGECRAFT_MCP_TOKEN`` when set; otherwise issues a fresh secret
-    so ``tools/list`` and ``tools/call`` are never left unauthenticated.
+    ``ctx.mcp_auth_token`` is passed as the Bearer gate so every request to
+    the returned app must present it as ``Authorization: Bearer <token>``.
+
+    Args:
+        role: Agent role — ``orchestrator``, ``reviewer``, or ``verifier``.
+        ctx: Pre-resolved :class:`~mergecraft.mcp.context.ToolContext` whose
+            ``mcp_auth_token`` was set by the caller (e.g.
+            :func:`build_mcp_tool_context`).
+
+    Returns:
+        Configured :class:`~fastapi.FastAPI` application.
     """
-    configured = os.environ.get("MERGECRAFT_MCP_TOKEN", "").strip()
-    return configured or secrets.token_hex(32)
+    parsed_role = _parse_role(role)
+    if parsed_role == "orchestrator":
+        orchestrator_tools = build_orchestrator_tools(ctx)
+        return create_mcp_app(orchestrator_tools, ctx, auth_token=ctx.mcp_auth_token)
+    if parsed_role == "reviewer":
+        return create_mcp_app(
+            [],
+            ctx,
+            role_tools={"reviewer": build_reviewer_tools(ctx)},
+            auth_token=ctx.mcp_auth_token,
+        )
+    return create_mcp_app(
+        [],
+        ctx,
+        role_tools={"verifier": build_verifier_tools(ctx)},
+        auth_token=ctx.mcp_auth_token,
+    )
 
 
 def build_mcp_app_for_role(
@@ -172,38 +208,20 @@ def build_mcp_app_for_role(
     trust_override: str | None = None,
 ) -> FastAPI:
     """Stand up an in-process MCP app for tests and tooling."""
-    parsed_role = _parse_role(role)
     ctx = build_mcp_tool_context(
         cwd=cwd,
         invocation_root=invocation_root,
         trust_override=trust_override,
     )
-    auth_token = _resolve_serve_auth_token()
-    ctx.mcp_auth_token = auth_token
-    if parsed_role == "orchestrator":
-        orchestrator_tools = build_orchestrator_tools(ctx)
-        app = create_mcp_app(orchestrator_tools, ctx, auth_token=auth_token)
-    elif parsed_role == "reviewer":
-        app = create_mcp_app(
-            [],
-            ctx,
-            role_tools={"reviewer": build_reviewer_tools(ctx)},
-            auth_token=auth_token,
-        )
-    else:
-        app = create_mcp_app(
-            [],
-            ctx,
-            role_tools={"verifier": build_verifier_tools(ctx)},
-            auth_token=auth_token,
-        )
-    app.state.mcp_auth_token = auth_token
+    app = build_mcp_app_from_ctx(role, ctx)
+    app.state.mcp_auth_token = ctx.mcp_auth_token
     return app
 
 
 __all__ = [
     "_role_endpoint",
     "build_mcp_app_for_role",
+    "build_mcp_app_from_ctx",
     "build_mcp_tool_context",
     "resolve_served_tool_names",
     "resolve_served_tool_specs",
