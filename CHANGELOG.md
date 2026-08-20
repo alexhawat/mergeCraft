@@ -174,6 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- docs: `SECURITY.md` secret-stripping claim narrowed to the agent subprocess (`build_agent_env` / `filter_env`) and the sandboxed `shell` tool (`resolve_env`); `_run_git` inherits the process environment and is not covered by the filter (#286)
 - Untrusted PR trees no longer receive a `shell` tool when PID-namespace isolation is unavailable (#287)
 - Untrusted PR trees no longer run package install lifecycle scripts in the Action process when `shell` is the default `restricted` (#284)
 - `mcp/git`: replaced permissive `_SUBCOMMAND_RE` with an explicit read-only allowlist (`status`, `log`, `diff`, `show`, `rev-parse`, `describe`, `ls-files`, `blame`, `cat-file`, `rev-list`, read-only `branch`); `git reset`, `git clean`, `git stash`, and all other mutating subcommands now raise `ValueError` unconditionally (#257)

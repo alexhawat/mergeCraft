@@ -15,16 +15,10 @@ from __future__ import annotations
 import inspect
 import re
 
-import pytest
-
 from mergecraft.mcp.git import _run_git
 from tests.ci.workflow_support import REPO_ROOT
 
 _SECURITY_MD = REPO_ROOT / "SECURITY.md"
-_XFAIL_W10 = pytest.mark.xfail(
-    reason="green after W10: SECURITY.md residual",
-    strict=False,
-)
 
 # Broad overclaims W10 must remove. Slash spacing is normalised before match.
 _OVERCLAIM_PHRASES = (
@@ -56,7 +50,6 @@ def test_run_git_still_defaults_to_os_environ_copy() -> None:
     assert "os.environ.copy()" in body
 
 
-@_XFAIL_W10
 def test_security_md_does_not_claim_stripping_for_any_mcp_tool() -> None:
     """W10: the 'any shell/MCP tool' (or equivalent) sentence is gone or narrowed."""
     text = _security_text()
@@ -72,7 +65,6 @@ def test_security_md_does_not_claim_stripping_for_any_mcp_tool() -> None:
         )
 
 
-@_XFAIL_W10
 def test_security_md_limits_stripping_to_agent_env_and_shell() -> None:
     """W10 rewrite names the real strip sites and does not claim git."""
     text = _security_text()
