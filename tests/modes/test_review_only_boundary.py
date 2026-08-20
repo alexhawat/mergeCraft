@@ -1,12 +1,10 @@
-"""Batch CA / #350 — review-only production boundary (W1 RED).
+"""Batch CA / #350 — review-only production boundary.
 
-Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-20c-wave-plan.md`` (W1.1).
-Implementation: W2 (drop write modes, workspace RO, un-xfail negatives).
-
-W1 pins the live registry (``Fix`` and other write-capable modes still ship)
-and the W2 negatives: a Review / IncrementalReview run must not edit a tracked
-file, ``git commit``, ``git push``, or open a code-changing PR. Out of scope
-(#350): MCP transport auth (#345/#346) and trust/privilege drop.
+Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-20c-wave-plan.md``
+(W2.2 recon). Production registry is Review / IncrementalReview / Plan only.
+Write-capable modules stay importable (D12). A reviewer-shaped run cannot
+edit a tracked file, ``git commit``, ``git push``, or open a code-changing PR.
+Out of scope (#350): MCP transport auth (#345/#346) and trust/privilege drop.
 """
 
 from __future__ import annotations
@@ -52,10 +50,6 @@ REVIEW_ONLY_MODE_NAMES: tuple[str, ...] = (
     "Plan",
 )
 _REVIEWER_SHAPED: tuple[str, ...] = ("Review", "IncrementalReview")
-_XFAIL_W2 = pytest.mark.xfail(
-    reason="green after W2: review-only production boundary (#350)",
-    strict=False,
-)
 
 
 def _registry_names() -> list[str]:
@@ -158,26 +152,7 @@ class _RecordingScm:
         }
 
 
-# ── W1.1 current-state pins (green until W2 recon removes them) ───────────────
-
-
-def test_production_registry_still_lists_write_capable_modes() -> None:
-    """W1.1 baseline: ``_MODE_DEFS`` still registers write-capable modes (#350)."""
-    names = _registry_names()
-    for mode_name in WRITE_CAPABLE_MODE_NAMES:
-        assert mode_name in names, mode_name
-
-
-def test_compute_modes_still_exposes_write_capable_modes() -> None:
-    """W1.1 baseline: ``compute_modes`` still returns write-capable names."""
-    names = _computed_names()
-    for mode_name in WRITE_CAPABLE_MODE_NAMES:
-        assert mode_name in names, mode_name
-
-
-def test_static_modes_export_still_includes_fix() -> None:
-    """W1.1 baseline: the UI-facing ``modes`` list still includes ``Fix``."""
-    assert "Fix" in [mode.name for mode in modes]
+# ── D12: unregistered write-mode modules stay importable ───────────────────────
 
 
 def test_write_mode_modules_remain_importable_as_negative_fixtures() -> None:
@@ -191,21 +166,9 @@ def test_write_mode_modules_remain_importable_as_negative_fixtures() -> None:
     assert ResolveConflicts.NAME == "ResolveConflicts"
 
 
-@pytest.mark.parametrize("mode_name", WRITE_CAPABLE_MODE_NAMES)
-async def test_select_mode_still_accepts_write_capable_names(
-    tmp_path: Path, mode_name: str
-) -> None:
-    """W1.1 baseline: ``select_mode`` still resolves write-capable built-ins."""
-    result = await select_mode_tool(_ctx(tmp_path)).execute({"mode": mode_name})
-    payload = json.loads(_tool_text(result))
-    assert "error" not in payload, payload
-    assert payload["modeName"] == mode_name
+# ── W2 production registry ─────────────────────────────────────────────────────
 
 
-# ── W2 desired registry (xfail until write modes leave production) ────────────
-
-
-@_XFAIL_W2
 def test_production_registry_excludes_write_capable_modes() -> None:
     """After W2, ``_MODE_DEFS`` is review-only (D12)."""
     names = set(_registry_names())
@@ -215,7 +178,6 @@ def test_production_registry_excludes_write_capable_modes() -> None:
         assert mode_name in names, mode_name
 
 
-@_XFAIL_W2
 def test_compute_modes_excludes_write_capable_modes() -> None:
     """After W2, ``compute_modes`` must not return write-capable names."""
     names = set(_computed_names())
@@ -223,7 +185,6 @@ def test_compute_modes_excludes_write_capable_modes() -> None:
     assert not leaked, f"compute_modes still lists write modes: {sorted(leaked)}"
 
 
-@_XFAIL_W2
 def test_static_modes_export_excludes_write_capable_modes() -> None:
     """After W2, the static ``modes`` export matches the production registry."""
     names = {mode.name for mode in modes}
@@ -231,7 +192,6 @@ def test_static_modes_export_excludes_write_capable_modes() -> None:
     assert not leaked, f"static modes still lists write modes: {sorted(leaked)}"
 
 
-@_XFAIL_W2
 @pytest.mark.parametrize("mode_name", WRITE_CAPABLE_MODE_NAMES)
 async def test_select_mode_rejects_write_capable_names(tmp_path: Path, mode_name: str) -> None:
     """After W2, ``select_mode`` cannot resolve a write-capable built-in."""
@@ -243,7 +203,6 @@ async def test_select_mode_rejects_write_capable_names(tmp_path: Path, mode_name
     assert mode_name not in available
 
 
-@_XFAIL_W2
 async def test_custom_config_cannot_reenable_write_capable_fix(tmp_path: Path) -> None:
     """D12: a ``.mergecraft/config.yaml`` custom mode must not re-enable writes."""
     custom = _custom_modes(
@@ -264,10 +223,9 @@ async def test_custom_config_cannot_reenable_write_capable_fix(tmp_path: Path) -
     assert "not found" in str(payload["error"]).lower()
 
 
-# ── W2 reviewer-shaped negatives (xfail until the run cannot mutate) ──────────
+# ── Reviewer-shaped negatives ──────────────────────────────────────────────────
 
 
-@_XFAIL_W2
 @pytest.mark.parametrize("selected_mode", _REVIEWER_SHAPED)
 async def test_reviewer_shaped_run_cannot_edit_tracked_file(
     tmp_path: Path, selected_mode: str
@@ -287,7 +245,6 @@ async def test_reviewer_shaped_run_cannot_edit_tracked_file(
     assert tracked.read_text(encoding="utf-8") == before
 
 
-@_XFAIL_W2
 @pytest.mark.parametrize("selected_mode", _REVIEWER_SHAPED)
 async def test_reviewer_shaped_run_cannot_git_commit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected_mode: str
@@ -304,7 +261,6 @@ async def test_reviewer_shaped_run_cannot_git_commit(
     assert not any("commit" in call for call in recorder.calls), recorder.calls
 
 
-@_XFAIL_W2
 @pytest.mark.parametrize("selected_mode", _REVIEWER_SHAPED)
 async def test_reviewer_shaped_run_cannot_git_push(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected_mode: str
@@ -321,7 +277,6 @@ async def test_reviewer_shaped_run_cannot_git_push(
     assert not any("push" in call for call in recorder.calls), recorder.calls
 
 
-@_XFAIL_W2
 @pytest.mark.parametrize("selected_mode", _REVIEWER_SHAPED)
 async def test_reviewer_shaped_run_cannot_open_code_changing_pr(
     tmp_path: Path, selected_mode: str
@@ -345,7 +300,7 @@ async def test_reviewer_shaped_run_cannot_open_code_changing_pr(
 async def test_git_mcp_tool_does_not_forward_commit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The ``git`` MCP tool already refuses ``commit``; W2 must not reopen it."""
+    """The ``git`` MCP tool already refuses ``commit``; must not reopen it."""
     recorder = _GitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
     result = await git_tool(_ctx(tmp_path, selected_mode="Review")).execute(
