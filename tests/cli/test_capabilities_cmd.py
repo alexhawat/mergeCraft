@@ -1,13 +1,9 @@
-"""W3 RED — ``mergecraft capabilities`` capability manifest (#350 / D10).
+"""W3 — ``mergecraft capabilities`` capability manifest (#350 / D10).
 
 Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-20c-wave-plan.md``.
 New module ``mergecraft.cli.capabilities_cmd`` (leaf ``run``, like ``doctor`` /
 ``plan``). Root callback ``--format`` / ``--quiet`` / ``--color`` stay untouched
 (D10); JSON uses the existing global ``--format json``.
-
-Wiring ``app.command`` / ``add_typer`` is the impl wave's job. These tests
-invoke the live ``app`` and lazy-import the new module so collection stays
-clean while the module is missing.
 """
 
 from __future__ import annotations
@@ -25,11 +21,6 @@ from typer.testing import CliRunner
 from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import CLI_JSON_SCHEMA_VERSION
-
-pytestmark = pytest.mark.xfail(
-    reason="green after W3: mergecraft capabilities manifest (#350 / D10)",
-    strict=False,
-)
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")

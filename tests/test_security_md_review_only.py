@@ -1,6 +1,6 @@
-"""W3 RED — ``SECURITY.md`` is the public review-only contract (D9 / #350).
+"""W3 — ``SECURITY.md`` is the public review-only contract (D9 / #350).
 
-The guarantee lives in ``SECURITY.md`` (and CHANGELOG, which impl writes).
+The guarantee lives in ``SECURITY.md`` (and CHANGELOG).
 Not README.md. Not AGENTS.md. File 7 owns those (D6).
 """
 
@@ -8,14 +8,7 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT
-
-pytestmark = pytest.mark.xfail(
-    reason="green after W3: SECURITY.md review-only guarantee (D9 / #350)",
-    strict=False,
-)
 
 _SECURITY_MD = REPO_ROOT / "SECURITY.md"
 _REVIEW_ONLY = re.compile(r"review[\s-]+only", re.IGNORECASE)

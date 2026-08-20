@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-20c-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-2026-08-20c` @ `wave/open-issues-sweep-2026-08-20c`
 Authoring wave: **W1** (Batch CA RED) · Implementation: **W2.1** (`a2c76fd9`) · Recon: **W2.2**
-W3 RED (this pass): `mergecraft capabilities` + `SECURITY.md` — xfail until W3.1
+W3.1 impl: `16a01b47` · W3 recon: un-xfail `capabilities` + `SECURITY.md` pins
 
 Issue #350 out of scope (honoured — no tests): MCP Bearer/auth-header gaps (#345/#346); trust tiers / privilege drop (`analyzers/trust.py`, `utils/privilege.py`).
 
@@ -22,8 +22,8 @@ All cross-wave markers use `@pytest.mark.xfail(..., strict=False)`.
 | **W2** | `test_reviewer_shaped_run_cannot_git_commit[*]` | same | **PASS** — un-xfailed W2.2 |
 | **W2** | `test_reviewer_shaped_run_cannot_git_push[*]` | same | **PASS** — un-xfailed W2.2 |
 | **W2** | `test_reviewer_shaped_run_cannot_open_code_changing_pr[*]` | same | **PASS** — un-xfailed W2.2 |
-| **W3** | `tests/cli/test_capabilities_cmd.py` (11 tests) | `green after W3: mergecraft capabilities manifest (#350 / D10)` | **XFAIL** until W3.1 |
-| **W3** | `tests/test_security_md_review_only.py` (3 tests) | `green after W3: SECURITY.md review-only guarantee (D9 / #350)` | **XFAIL** until W3.1 |
+| **W3** | `tests/cli/test_capabilities_cmd.py` (11 tests) | `green after W3: mergecraft capabilities manifest (#350 / D10)` | **PASS** — un-xfailed W3 recon |
+| **W3** | `tests/test_security_md_review_only.py` (3 tests) | `green after W3: SECURITY.md review-only guarantee (D9 / #350)` | **PASS** — un-xfailed W3 recon |
 
 W1.1 current-state pins (CA350a / still-accepts `select_mode`) **deleted** in W2.2.
 
@@ -72,26 +72,16 @@ Error contract for W2 negatives: `ToolResult.is_error is True` and the message c
 - `make lint` + `make typecheck` clean
 - No `src/` edits; no CHANGELOG (Unreleased Security bullet already in `a2c76fd9`)
 
-## W3 RED (`mergecraft capabilities` + SECURITY.md)
+## W3 recon (`mergecraft capabilities` + SECURITY.md)
 
-Impl must green the xfail suite. Do **not** tick W3.1 until that lands.
+- Un-xfailed every `green after W3` marker in `tests/cli/test_capabilities_cmd.py`
+  and `tests/test_security_md_review_only.py` (14 tests).
+- W3.1 (`16a01b47`) already added `capabilities_cmd.py`, additive
+  `app.command("capabilities")`, and the `SECURITY.md` review-only guarantee.
+- CAF not started.
 
-1. Add `src/mergecraft/cli/capabilities_cmd.py` with `run` and
-   `capabilities_manifest()` (no `schema_version` in the helper; CLI JSON
-   wrapping adds it). Additive `app.command("capabilities")` only — do not
-   edit the root callback (`--format` / `--quiet` / `--color`).
-2. Manifest dict:
-   - `review_only: true`
-   - `modes`: exactly `{Review, IncrementalReview, Plan}`
-   - `allowed`: `{identify, investigate, verify, explain, prioritize, suggest}`
-   - `forbidden`: `{edit_source, apply_fixes, commit, push, open_code_changing_pr}`
-3. `mergecraft --format json capabilities` uses existing
-   `emit_cli_json` / `schema_version == CLI_JSON_SCHEMA_VERSION`.
-4. Default table/text mentions review-only and the three production modes.
-5. Extra positional or unknown option → `CLI_USAGE_EXIT_CODE` (2).
-6. `SECURITY.md` (not README.md / AGENTS.md) states the review-only
-   guarantee and the allow/deny verbs above.
-7. After impl, recon removes the `xfail(..., strict=False)` markers.
+## Acceptance (W3 recon)
 
-Out of scope: file 7 docs, 20b tracing, P12–P31 (#377–#385), MCP Bearer
-(#345/#346), trust/privilege drop.
+- W3 pins **PASS** (no leftover xfail, no XPASS)
+- `make lint` + `make typecheck` clean
+- No `src/` or `SECURITY.md` edits; CAF not marked
