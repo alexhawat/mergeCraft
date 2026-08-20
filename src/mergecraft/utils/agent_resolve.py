@@ -25,6 +25,7 @@ from mergecraft.models import (
     resolve_cli_model,
     resolve_display_alias,
 )
+from mergecraft.tracing.genai import usage_unavailable_attrs
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -660,11 +661,14 @@ async def run_with_model_chain(
                     "gen_ai.operation.name": "chat",
                     "gen_ai.request.model": slug,
                     "gen_ai.response.model": slug,
+                    "gen_ai.system": _agent_provider_for_slug(slug),
                 }
                 usage = result.usage
                 if usage is not None:
                     usage_cost = _cost_attrs_from_usage(usage)
                     call_attrs.update(usage_cost)
+                else:
+                    call_attrs.update(usage_unavailable_attrs())
 
                 attempt_parent_id = (
                     attempt_span.span_id if hasattr(attempt_span, "span_id") else None

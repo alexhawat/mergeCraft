@@ -52,6 +52,8 @@ from loguru import logger
 from mergecraft.tracing.content import ContentCapture, capture_text, resolve_content_capture
 
 _THINKING_PREFIX = "mergecraft.thinking"
+# Convention 6 — no stable OTel GenAI name for "provider reported no usage".
+USAGE_UNAVAILABLE_ATTR = "mergecraft.usage.unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +207,14 @@ def usage_attrs(
     return attrs
 
 
+def usage_unavailable_attrs() -> dict[str, Any]:
+    """Explicit marker when a provider reports no token usage (#375).
+
+    Distinguishes "provider reported none" from "not instrumented" in Logfire.
+    """
+    return {USAGE_UNAVAILABLE_ATTR: True}
+
+
 def usage_attrs_from_agent_usage(
     *,
     input_tokens: int | None = None,
@@ -355,6 +365,7 @@ def resolve_capture_policy(trust_tier: str | None) -> ContentCapture:
 
 
 __all__ = [
+    "USAGE_UNAVAILABLE_ATTR",
     "ModelParams",
     "input_messages_attrs",
     "model_params_from_mapping",
@@ -365,4 +376,5 @@ __all__ = [
     "thinking_attrs",
     "usage_attrs",
     "usage_attrs_from_agent_usage",
+    "usage_unavailable_attrs",
 ]

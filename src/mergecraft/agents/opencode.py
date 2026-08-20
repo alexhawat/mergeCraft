@@ -46,6 +46,7 @@ from mergecraft.tracing.genai import (
     request_attrs,
     resolve_capture_policy,
     usage_attrs_from_agent_usage,
+    usage_unavailable_attrs,
 )
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
@@ -451,8 +452,11 @@ async def _prompt_session(
             base_url=base_url, session_id=session_id, text=text, model=model
         )
     model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
+    gen_ai_system = model.get("providerID") if model else None
     with tracer.start_span("llm.call") as span:
         try:
+            if gen_ai_system:
+                span.set_attribute("gen_ai.system", gen_ai_system)
             model_params = opencode_applied_model_params(resolved_model or model_slug)
             for key, value in request_attrs(model=model_slug, params=model_params).items():
                 span.set_attribute(key, value)
@@ -475,6 +479,9 @@ async def _prompt_session(
                     cache_write_tokens=result.usage.cache_write_tokens,
                     cost_usd=result.usage.cost_usd,
                 ).items():
+                    span.set_attribute(key, value)
+            else:
+                for key, value in usage_unavailable_attrs().items():
                     span.set_attribute(key, value)
             if capture_policy is not None and result.output:
                 for key, value in output_messages_attrs(

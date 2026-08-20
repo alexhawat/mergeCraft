@@ -8,7 +8,7 @@ silently omitting usage keys so Logfire NULLs are distinguishable from
 "not instrumented".
 
 W8 audits claude / codex / gemini / opencode for driver parity via
-``usage_attrs`` / ``response_attrs``. These tests xfail until W8 greens them.
+``usage_attrs`` / ``response_attrs``.
 """
 
 from __future__ import annotations
@@ -99,8 +99,12 @@ def _assert_usage_unavailable_marker(attrs: dict[str, Any]) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_opencode_http_instrumentation(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+
+    opencode_mod = importlib.import_module("mergecraft.agents.opencode")
     monkeypatch.setattr(
-        "mergecraft.agents.opencode.instrument_httpx",
+        opencode_mod,
+        "instrument_httpx",
         lambda client, tracer=None: None,
     )
 
@@ -124,10 +128,6 @@ def opencode_tracer(monkeypatch: pytest.MonkeyPatch) -> Any:
     return {"sink": sink, "tracer": tracer}
 
 
-@pytest.mark.xfail(
-    reason="green after W8: #375 llm.call gen_ai usage + identity (opencode HTTP)",
-    strict=False,
-)
 async def test_opencode_llm_call_stamps_gen_ai_identity_when_usage_reported(
     opencode_tracer: Any,
     opencode_session_response: Any,
@@ -161,10 +161,6 @@ async def test_opencode_llm_call_stamps_gen_ai_identity_when_usage_reported(
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W8: #375 llm.call explicit usage unavailable marker (opencode HTTP)",
-    strict=False,
-)
 async def test_opencode_llm_call_marks_usage_unavailable_when_provider_reports_none(
     opencode_tracer: Any,
     opencode_session_response: Any,
@@ -190,10 +186,6 @@ async def test_opencode_llm_call_marks_usage_unavailable_when_provider_reports_n
     assert "gen_ai.usage.output_tokens" not in attrs
 
 
-@pytest.mark.xfail(
-    reason="green after W8: #375 llm.call gen_ai.system on llm span (claude stream)",
-    strict=False,
-)
 def test_claude_streaming_llm_call_stamps_gen_ai_system_on_llm_span(
     patch_driver_subprocess: Any,
     make_agent_run_context: Any,
@@ -257,10 +249,6 @@ def _drive_chain(settings: Any, results: list[Any]) -> None:
     asyncio.run(run_with_model_chain(settings=settings, run_once=run_once))
 
 
-@pytest.mark.xfail(
-    reason="green after W8: #375 llm.call gen_ai.system on chain-level llm.call",
-    strict=False,
-)
 def test_model_chain_llm_call_stamps_gen_ai_system_when_usage_reported(
     captured_sink: Any,
 ) -> None:
@@ -285,10 +273,6 @@ def test_model_chain_llm_call_stamps_gen_ai_system_when_usage_reported(
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W8: #375 llm.call explicit usage unavailable marker (chain)",
-    strict=False,
-)
 def test_model_chain_llm_call_marks_usage_unavailable_when_no_usage(
     captured_sink: Any,
 ) -> None:
