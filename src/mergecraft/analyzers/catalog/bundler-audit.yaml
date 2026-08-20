@@ -1,29 +1,28 @@
-id: brakeman
-category: security
+id: bundler-audit
+category: vuln
 languages:
 - ruby
 detect:
   files:
-  - config/application.rb
-  - config/routes.rb
+  - Gemfile.lock
 command:
-- brakeman
-- -f
+- bundle
+- audit
+- --format
 - sarif
-- -o
-- brakeman.sarif
 scope: repo
 parser: sarif
 supports_fix: false
 default_enabled: auto
-version: 6.4.0
+version: "0.9.2"
 runtime: repo-native
-timeout_s: 300
+timeout_s: 180
 trust: trusted
 severity_map:
   error: Major
   warning: Minor
   note: Trivial
 provenance: {}
-network_allowlist: []
+network_allowlist:
+- "https://rubysec.com"
 exclusive_group: null

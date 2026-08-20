@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Flip `golangci-lint`, `clippy`, `rubocop`, `phpstan` to `default_enabled: auto`; adds `go.mod`, `Gemfile`, `composer.json` to their detect globs; RuboCop gates on config presence (D11 — silent without `.rubocop.yml`/`Gemfile gem`); PHPStan injects `--level=0` when no `phpstan.neon` is found (D12) (#338)
 
+- `brakeman` flipped to `default_enabled: auto` with tight Rails detection — only activates on Rails marker files (`config/application.rb`, `config/routes.rb`), never on plain Ruby repos (#313)
+- New catalog manifest for `bundler-audit` (Ruby gem vulnerability audit, `category: vuln`, `scope: repo`, detects on `Gemfile.lock`) (#313)
+
 - `scripts/check_type_ignores.py` fails when a `type: ignore` or `cast(` in allowed `src/mergecraft/` lacks a one-line reason (#275); wired into `make lint`
 - `scripts/check_xpass.py` fails when unexpected pytest xpasses remain on the allowed test tree (#276)
 - xpass ratchet now runs as a `pytest_sessionfinish` conftest hook inside the coverage-gate pytest session — no standalone log file or extra CI step (#276)

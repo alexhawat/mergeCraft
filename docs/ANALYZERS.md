@@ -14,8 +14,9 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `basedpyright` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `biome` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `blinter` | lint | batch | disabled | managed | trusted | — | requires non-Linux runner — Windows batch lint not supported on Linux (C6) |
-| `brakeman` | security | ruby | disabled | repo-native | trusted | — | — |
+| `brakeman` | security | ruby | auto | repo-native | trusted | — | — |
 | `buf` | contract | — | auto | managed | untrusted | — | — |
+| `bundler-audit` | vuln | ruby | auto | repo-native | trusted | — | — |
 | `cargo-audit` | vuln | rust | auto | repo-native | trusted | — | — |
 | `cargo-deny` | license | rust | auto | repo-native | trusted | — | — |
 | `checkmake` | lint | make | disabled | managed | trusted | — | — |
@@ -96,7 +97,7 @@ to run the *repo's* tool against the *repo's* config.
 
 | runtime | trust | `shell: disabled` | `shell: restricted` / `enabled` |
 |---------|-------|-------------------|----------------------------------|
-| `repo-native` (32) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
+| `repo-native` (33) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
 | `repo-native` (1) | `untrusted` | withheld — `runtime` needs repo-provided tooling | runs |
 | `managed` (12) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
 | `managed` (17) | `untrusted` | **runs** (pinned binary only) | runs |
@@ -122,15 +123,15 @@ with a warning, rather than silently widening to `auto`.
 `full` requests more provisioning; it is never a trust override, and cannot
 re-admit a manifest the tier axis skipped.
 
-Counts below are analyzers passing selection, out of 66 shipped, with
+Counts below are analyzers passing selection, out of 67 shipped, with
 `shell: restricted` (the shell axis inert) so the mode axis is isolated.
 
 | mode | trusted event | untrusted event (`pull_request_target`, fork) |
 |------|---------------|-----------------------------------------------|
 | **`off`** | surface not registered | surface not registered |
-| **`auto`** | 66 of 66 | 18 of 66 — `auto` ⇒ `untrusted-only` |
-| **`full`** | 66 of 66 | 18 of 66 |
-| **`untrusted-only`** | 18 of 66 | 18 of 66 |
+| **`auto`** | 67 of 67 | 18 of 67 — `auto` ⇒ `untrusted-only` |
+| **`full`** | 67 of 67 | 18 of 67 |
+| **`untrusted-only`** | 18 of 67 | 18 of 67 |
 
 Passing these axes is necessary, not sufficient: a `container` manifest
 is eligible but still reports `unavailable` wherever no container runtime is
