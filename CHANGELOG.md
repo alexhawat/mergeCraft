@@ -202,6 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Primary reviewer surface (`/mcp/reviewer`) now includes `create_pull_request_review` (`ToolClass.REVIEW_WRITE`) via `PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES` and `PRIMARY_MUTATING_ALLOWLIST`; subagents retain the narrower `REVIEWER_ALLOWED_TOOL_CLASSES` complement so they remain denied review publication (D9, #282)
 - MCP HTTP server now issues a per-run secret at startup (`ToolContext.mcp_auth_token`); `tools/list` and `tools/call` reject unauthenticated requests with HTTP 401 / JSON-RPC `-32600`; the bearer token is wired into the harness MCP `headers` config for Claude, Gemini, OpenCode, and Cursor; Codex connects via a Unix-domain socket (`socket_path` in `config.toml`) rather than HTTP headers (D15/D16, #283)
 - Port allocator replaced: `_select_port` now uses `bind((MCP_HOST, 0))` to let the OS pick an ephemeral port instead of scanning a fixed 50-wide band from 3764; `MERGECRAFT_MCP_PORT` override is preserved; `mergecraft doctor` reports "ephemeral port" instead of a fixed number (#283)
+- `AgentRegistry.resolve_tool_names` and `_default_tool_classes` now align with `build_reviewer_tools`: reviewer binding uses `PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES` and `PRIMARY_MUTATING_ALLOWLIST`, so `create_pull_request_review` is correctly included in the registry-derived surface (D9, #282)
 
 ### Removed
 

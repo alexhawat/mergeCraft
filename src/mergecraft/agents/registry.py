@@ -22,7 +22,8 @@ from mergecraft.config.settings import (  # noqa: TC001
 )
 from mergecraft.mcp.server import build_orchestrator_tools
 from mergecraft.mcp.shared import (
-    REVIEWER_ALLOWED_TOOL_CLASSES,
+    PRIMARY_MUTATING_ALLOWLIST,
+    PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES,
     VERIFIER_ALLOWED_TOOL_CLASSES,
     ToolClass,
     admits_readonly_role,
@@ -162,7 +163,7 @@ def _default_tool_classes(role: AgentRole) -> frozenset[ToolClass]:
         case AgentRole.orchestrator:
             return _ORCHESTRATOR_TOOL_CLASSES
         case AgentRole.reviewer:
-            return REVIEWER_ALLOWED_TOOL_CLASSES
+            return PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES
         case AgentRole.verifier | AgentRole.judge:
             return VERIFIER_ALLOWED_TOOL_CLASSES
         case AgentRole.classifier:
@@ -290,6 +291,16 @@ class Registry:
         tools = build_orchestrator_tools(ctx)
         if binding.role is AgentRole.orchestrator:
             return [spec.name for spec in tools]
+        if binding.role is AgentRole.reviewer:
+            return [
+                spec.name
+                for spec in tools
+                if admits_readonly_role(
+                    spec,
+                    binding.tool_classes,
+                    mutating_allowlist=PRIMARY_MUTATING_ALLOWLIST,
+                )
+            ]
         return [spec.name for spec in tools if admits_readonly_role(spec, binding.tool_classes)]
 
     def all_bindings(self) -> tuple[AgentBinding, ...]:
