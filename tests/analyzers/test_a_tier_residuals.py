@@ -314,10 +314,6 @@ def test_phpmd_remains_false() -> None:
 # --- W12 #315 C/C++ (cppcheck is the default SAST path; not Semgrep languages) ---
 
 
-@pytest.mark.xfail(
-    reason="green after W12: cppcheck default_enabled auto (#315)",
-    strict=False,
-)
 def test_cppcheck_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("cppcheck")
     assert manifest.default_enabled == "auto"
@@ -330,10 +326,6 @@ def test_cppcheck_detects_c_and_cpp() -> None:
     assert registry.filter_changed_files_for_manifest(manifest, ["hello.cpp"]) == ["hello.cpp"]
 
 
-@pytest.mark.xfail(
-    reason="green after W12: cppcheck auto on C/C++ fixtures (#315)",
-    strict=False,
-)
 def test_cppcheck_auto_enables_on_cpp_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "cpp"
     assert "cppcheck" in _enabled_ids(repo, ["hello.cpp", "hello.c"])
