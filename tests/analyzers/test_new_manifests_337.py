@@ -14,7 +14,7 @@ _CATALOG_DIR = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "ana
 _PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 # #337 proposed additions minus Roslyn/C# (D9). cargo-audit and cargo-deny are
-# both named in issue §6 (vuln vs license); pin both ids, green after W5.
+# both named in issue §6 (vuln vs license); pin both ids (greened after W5).
 W4_IDS: tuple[str, ...] = ("tsc", "bandit", "jscpd")
 W5_IDS: tuple[str, ...] = ("govulncheck", "cargo-audit", "cargo-deny", "typos")
 W6_IDS: tuple[str, ...] = ("knip", "vulture")
@@ -107,7 +107,7 @@ def _registry():
 
 def _wave_xfail(tool_id: str) -> tuple[pytest.MarkDecorator, ...]:
     wave = _TOOL_WAVE[tool_id]
-    if wave == "W4":
+    if wave in {"W4", "W5"}:
         return ()
     return (
         pytest.mark.xfail(
@@ -225,7 +225,7 @@ def test_unrelated_readme_does_not_match_before_manifest(tool_id: str) -> None:
     assert tool_id not in ids
 
 
-# --- xfail until W5 / W6 (W4 tsc/bandit/jscpd greened) --------------------
+# --- xfail until W6 (W4 tsc/bandit/jscpd + W5 govulncheck/cargo/typos greened) ---
 
 
 @pytest.mark.parametrize("tool_id", _id_params(NEW_MANIFEST_IDS))
@@ -339,9 +339,6 @@ def test_tsc_diff_filter_keeps_only_changed_lines() -> None:
     assert kept == [on_diff]
 
 
-@pytest.mark.xfail(
-    reason="green after W5: cargo-audit vs cargo-deny are distinct ids (#337)", strict=False
-)
 def test_cargo_audit_and_deny_are_distinct_catalog_ids() -> None:
     registry = _registry()
     audit = registry.get_manifest("cargo-audit")
