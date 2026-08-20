@@ -170,7 +170,6 @@ def test_model_params_from_mapping_ignores_non_finite_int_fields() -> None:
     ],
     ids=["float_nan_inf", "string_nan_inf"],
 )
-@pytest.mark.xfail(reason="green after W5: _optional_float isfinite", strict=False)
 def test_model_params_from_mapping_ignores_non_finite_float_fields(
     raw: dict[str, object],
 ) -> None:

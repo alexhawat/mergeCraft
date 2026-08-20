@@ -89,12 +89,18 @@ def _optional_float(value: object) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        result = float(value)
+        if not math.isfinite(result):
+            return None
+        return result
     if isinstance(value, str):
         try:
-            return float(value.strip())
+            result = float(value.strip())
         except ValueError:
             return None
+        if not math.isfinite(result):
+            return None
+        return result
     return None
 
 
