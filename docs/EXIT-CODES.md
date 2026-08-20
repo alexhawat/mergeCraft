@@ -43,7 +43,7 @@ review logic.
 Examples:
 
 - `mergecraft auth codex --scope everywhere` → `2` (unknown `--scope`)
-- `mergecraft findings export --format xml` → `2` (unsupported `--format`)
+- `mergecraft findings export --output-format xml` → `2` (unsupported `--output-format`)
 - `mergecraft eval replay` with a verdict regression → `12` (`CLI_FAILED_EXIT_CODE`)
 - `mergecraft doctor` with a missing dependency → `30` (configuration / environment)
 - `mergecraft config validate` with a YAML schema error → `30`
