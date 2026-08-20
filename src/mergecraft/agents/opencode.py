@@ -421,12 +421,7 @@ async def _prompt_session(
         )
         try:
             if result.usage is not None:
-                for key, value in usage_attrs(
-                    input_tokens=result.usage.input_tokens,
-                    output_tokens=result.usage.output_tokens,
-                    cache_read_input_tokens=result.usage.cache_read_tokens,
-                    cost_usd=result.usage.cost_usd,
-                ).items():
+                for key, value in _usage_attrs_from_agent_usage(result.usage).items():
                     span.set_attribute(key, value)
             if capture_policy is not None and result.output:
                 for key, value in output_messages_attrs(

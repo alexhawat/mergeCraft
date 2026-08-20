@@ -144,7 +144,6 @@ async def test_opencode_llm_call_stamps_usage_from_http_response(
     assert attrs.get("gen_ai.usage.output_tokens") == _OUTPUT
 
 
-@pytest.mark.xfail(reason="green after W13: OpenCode HTTP usage on llm.call", strict=False)
 async def test_opencode_llm_call_omits_zero_input_tokens_when_only_output_reported(
     opencode_tracer: Any,
     session_response: Any,
