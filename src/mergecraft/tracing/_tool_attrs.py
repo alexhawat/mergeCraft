@@ -171,15 +171,10 @@ def enrich_tool_response(
         span.set_attribute("gen_ai.tool.output", redact_tool_payload(message))
         return
 
-    # D9 / #296: classify ToolResult.is_error (or dict fallbacks) as error span.
+    # D9 / #296: classify ToolResult.is_error as error span (MCP always wraps).
     from mergecraft.mcp.shared import ToolResult
 
-    _output_is_error = isinstance(output, ToolResult) and output.is_error
-    if not _output_is_error and isinstance(output, dict):
-        _output_is_error = bool(output.get("isError") or output.get("is_error"))
-    if not _output_is_error and output is not None:
-        _output_is_error = bool(getattr(output, "is_error", False))
-    if _output_is_error:
+    if isinstance(output, ToolResult) and output.is_error:
         span.set_attribute("tool.exit_code", "error")
         span.set_attribute("tool.error_class", "ToolResult")
         span.set_status("error", "ToolResult.is_error=True")

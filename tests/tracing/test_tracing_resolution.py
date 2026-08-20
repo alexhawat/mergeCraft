@@ -129,6 +129,26 @@ def test_otel_cli_flag_builds_otel_sink(monkeypatch: pytest.MonkeyPatch) -> None
     assert entry.endpoint == "http://collector:4318/"
 
 
+def test_otel_endpoint_env_implies_otel_sink(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``MERGECRAFT_OTEL_ENDPOINT`` alone selects OTLP when ``tracing_to`` is unset."""
+    _env_snapshot(
+        monkeypatch,
+        {
+            "MERGECRAFT_TRACING": "true",
+            "MERGECRAFT_OTEL_ENDPOINT": "http://collector:4318/v1/traces",
+        },
+    )
+
+    from mergecraft.tracing.resolve import resolve_active_tracing
+
+    settings = resolve_active_tracing()
+    assert settings.enabled is True
+    assert len(settings.sinks) == 1
+    entry = settings.sinks[0]
+    assert entry.type == "otel"
+    assert entry.endpoint == "http://collector:4318/v1/traces"
+
+
 def test_no_tracing_env_yields_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """With nothing set, the resolver returns an enabled=False settings block."""
     _clear_tracing_env(monkeypatch)

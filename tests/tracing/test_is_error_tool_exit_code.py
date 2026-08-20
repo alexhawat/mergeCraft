@@ -126,3 +126,20 @@ def test_plain_dict_output_stays_ok() -> None:
     tool_span = by_kind["tool.call"][0]
 
     assert tool_span.attrs.get("tool.exit_code") == "ok"
+
+
+def test_plain_dict_with_is_error_data_stays_ok() -> None:
+    """Dict payloads carrying ``is_error`` as data must not be misclassified."""
+    from mergecraft.tracing._tool_attrs import enrich_tool_response
+
+    tracer, sink = _make_tracer()
+
+    with tracer.start_span("tool.call") as span:
+        enrich_tool_response(
+            span,
+            output={"is_error": True, "detail": "upstream reported a condition"},
+        )
+
+    by_kind = _events_by_kind(sink)
+    tool_span = by_kind["tool.call"][0]
+    assert tool_span.attrs.get("tool.exit_code") == "ok"
