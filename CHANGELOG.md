@@ -35,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `markdownlint` flipped to `default_enabled: auto`; activates on any `*.md` change or `.markdownlint.json`/`.markdownlint.yaml` presence — provides the default Markdown lint path (#326)
 - `tflint` and `checkov` both flipped to `default_enabled: auto`; activate on any `*.tf` or `*.tfvars` change; the shared `iac-scanner` exclusive group was removed (split to `exclusive_group: null`) so both tools run concurrently — `tflint` provides Terraform lint, `checkov` provides IaC security scanning (#327)
 
+- `luacheck` flipped to `default_enabled: auto`; activates on any `*.lua` change or `.luacheckrc` presence — provides the default Lua lint path (#328)
+- `fortitude` flipped to `default_enabled: auto`; activates on Fortran files (`*.f90`, `*.f95`, `*.F90`, `*.f03`, `*.f`, `*.for`) or `.fortitude.toml` — provides the default Fortran lint path (#329)
+- `regal` flipped to `default_enabled: auto`; activates on any `*.rego` change — provides the default Rego/OPA policy lint path (#330)
+- `psscriptanalyzer` flipped to `default_enabled: auto`, adds `*.psd1` detect glob, and sets `supports_fix: true` — provides the default PowerShell lint and auto-fix path (#331)
+- `blinter` flipped to `default_enabled: auto`; activates on `*.bat`/`*.cmd` changes — provides the default Windows Batch lint path (#332)
+- `shopify-theme-check` flipped to `default_enabled: auto`; gates on `.theme-check.yml` or the canonical Shopify theme layout (`sections/`, `templates/`, `snippets/` dirs) — bare `*.liquid` files do not trigger it (#333)
+- `smarty-lint` flipped to `default_enabled: auto`; `ANALYZERS.md` notes that `*.tpl` is ambiguous (Go templates, Terraform) — enable only when `.smarty-lint.json` confirms Smarty intent (#334)
+- `ember-template-lint` flipped to `default_enabled: auto`, sets `supports_fix: true`; gates on `ember-cli-build.js` or `ember-source` in `package.json` — bare `*.hbs` files do not trigger it (#335)
+- `prisma-lint` flipped to `default_enabled: auto`; ships a conservative fallback ruleset (`prisma-lint-default-rules.yml`) and sets `config_note` referencing it when no repo-level prisma-lint config is found — avoids inert no-op runs (#336)
+
 - `cppcheck` flipped to `default_enabled: auto`; activates on any `*.c`, `*.cpp`, `*.h`, or `*.hpp` change — provides the default C/C++ SAST path (#315); `clang-tidy` remains `default_enabled: false` (requires `compile_commands.json`, C4)
 - `pmd` flipped to `default_enabled: auto`; activates on any `*.java` change or `pmd.ruleset.xml` presence — provides the default Java lint path (#312); `infer` remains `default_enabled: false` (requires compilation database, C4)
 
