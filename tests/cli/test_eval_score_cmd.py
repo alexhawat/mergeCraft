@@ -21,6 +21,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 
 runner = CliRunner()
 
@@ -112,5 +113,5 @@ def test_eval_score_min_recall_gate_is_unchanged(tmp_path: Path) -> None:
     )
     output = _plain(result.stdout + result.stderr)
 
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     assert "recall 0.00% is below the required 50.00%" in output

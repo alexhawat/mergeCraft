@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -91,7 +92,7 @@ def test_eval_bench_errors_clearly_when_no_model_configured(
         ],
     )
 
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     assert "No model configured" in (result.stdout + result.stderr)
 
 

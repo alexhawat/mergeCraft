@@ -22,6 +22,7 @@ from tests.ci.workflow_support import REPO_ROOT
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 
 runner = CliRunner()
 
@@ -100,7 +101,7 @@ def test_json_stdout_is_strict_while_chrome_enabled(tmp_path: Path) -> None:
         ],
         env=_CHROME_ENV,
     )
-    assert result.exit_code == 1, result.stdout + result.stderr
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE, result.stdout + result.stderr
     payload = json.loads(result.stdout)
     assert payload["recall"] == 0.0
     assert payload["missed_issue_ids"] == ["x-1"]

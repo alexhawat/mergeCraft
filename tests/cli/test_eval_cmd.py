@@ -17,6 +17,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 from mergecraft.evals.store import list_cases, load_case
 
 runner = CliRunner()
@@ -356,12 +357,12 @@ def test_eval_replay_reports_blocked_without_current_decision(tmp_path: Path) ->
 
 
 def test_eval_replay_reports_missing_case(tmp_path: Path) -> None:
-    """``mergecraft eval replay <missing>`` exits 1."""
+    """``mergecraft eval replay <missing>`` exits with a configuration error."""
     result = runner.invoke(
         app,
         ["eval", "replay", "synthetic-missing", "--bank", str(tmp_path)],
     )
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
 
 
 # ── promote (W12.1) ────────────────────────────────────────────────────
@@ -437,7 +438,7 @@ def test_eval_promote_refuses_overwrite_by_default(tmp_path: Path) -> None:
 
 
 def test_eval_promote_reports_missing_case(tmp_path: Path) -> None:
-    """``mergecraft eval promote <missing>`` exits 1."""
+    """``mergecraft eval promote <missing>`` exits with a configuration error."""
     target_dir = tmp_path / "permanent"
     result = runner.invoke(
         app,
@@ -451,7 +452,7 @@ def test_eval_promote_reports_missing_case(tmp_path: Path) -> None:
             str(target_dir),
         ],
     )
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
 
 
 def test_eval_replay_json_emits_structured_diff(tmp_path: Path) -> None:

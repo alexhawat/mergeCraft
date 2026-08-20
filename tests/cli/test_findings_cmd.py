@@ -9,6 +9,7 @@ import httpx
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 from mergecraft.review_resolution import finding_fingerprints_in
 from mergecraft.review_taxonomy import stamp_finding_fingerprint
 
@@ -181,7 +182,7 @@ def test_carryover_exits_nonzero_when_a_finding_could_not_be_filed(
         app, ["findings", "carryover", "--pr", "7", "--repo", "o/r", "--apply", "--json"]
     )
 
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     payload = json.loads(result.stdout)
     assert payload["filed"] == []
     assert len(payload["failed"]) == 1

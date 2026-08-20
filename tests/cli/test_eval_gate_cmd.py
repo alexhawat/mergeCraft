@@ -8,6 +8,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from mergecraft.cli.eval_cmd import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 
 runner = CliRunner()
 
@@ -61,7 +62,7 @@ def test_gate_fails_on_an_unparsable_case(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["gate", "--bank", str(bank), "--json"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     payload = json.loads(result.stdout)
     assert payload["status"] == "fail"
     assert len(payload["broken"]) == 1
@@ -74,7 +75,7 @@ def test_gate_fails_on_duplicate_case_ids(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["gate", "--bank", str(bank), "--json"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     assert json.loads(result.stdout)["duplicates"]
 
 
@@ -103,7 +104,7 @@ def test_unpromoted_cases_only_fail_when_required(tmp_path: Path) -> None:
     assert json.loads(warned.stdout)["unpromoted"] == ["synthetic-001"]
 
     required = runner.invoke(app, ["gate", "--bank", str(bank), "--require-promoted", "--json"])
-    assert required.exit_code == 1
+    assert required.exit_code == CLI_CONFIGURATION_EXIT_CODE
 
 
 def test_score_reports_recall_against_a_baseline(tmp_path: Path) -> None:
@@ -150,7 +151,7 @@ def test_score_fails_below_the_required_recall(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["score", str(actual), str(expected), "--min-recall", "0.5"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     assert "below the required" in result.output
 
 
