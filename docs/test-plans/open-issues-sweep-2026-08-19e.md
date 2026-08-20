@@ -2,8 +2,10 @@
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19e-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19e` @ `wave/open-issues-sweep-2026-08-19e`
-Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337)
+Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337) · **W7** (Batch Y RED — #309-#327 leftovers)
 Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone)
+
+W7 pins leftover A-tier acceptances for #309-#327. Do **not** re-add tsc/bandit/jscpd/govulncheck/cargo-audit/cargo-deny/typos/knip/vulture (D10). Do **not** re-flip golangci-lint/clippy/rubocop/phpstan (D7). File: `tests/analyzers/test_a_tier_residuals.py` + `tests/analyzers/fixtures/batch-y/`. All cross-wave markers are `strict=False`.
 
 W1 pinned detect + catalog-check fixtures for `golangci-lint`, `clippy`, `rubocop`,
 and `phpstan` (D7). W2 greened `default_enabled: auto` and applied D11 / D12 / D19.
@@ -214,3 +216,93 @@ Deferred (must **not** appear — D9 / #337 second tier): `roslyn`, `roslyn-anal
 - D9: Roslyn / C# / F-tier second-tier ids still absent
 - `make lint` + `make typecheck` pass
 - No product/source edits (`src/` untouched)
+
+## Batch Y xfail schedule (W7 — RED until W8-W17)
+
+File: `tests/analyzers/test_a_tier_residuals.py`. **37** `strict=False` xfails. **69** already-green pins (no xfail). **0** XPASS.
+
+| Wave | xfail count | Marker reason prefix |
+|------|-------------|----------------------|
+| **W8** | 3 | `green after W8:` D16 no-config mypy; osv-scanner `uv.lock` |
+| **W9** | 3 | `green after W9:` D17 biome over eslint+scripts; biome/eslint `supports_fix` |
+| **W10** | 7 | `green after W10:` brakeman auto+Rails; bundler-audit catalog |
+| **W11** | 0 | phpcs/phpmd remain false (already green; phpstan is enough) |
+| **W12** | 2 | `green after W12:` cppcheck auto (SAST path; not Semgrep `languages:`) |
+| **W13** | 4 | `green after W13:` detekt + swiftlint auto |
+| **W14** | 2 | `green after W14:` pmd auto |
+| **W15** | 6 | `green after W15:` sqlfluff + stylelint + htmlhint auto |
+| **W16** | 2 | `green after W16:` yamllint auto |
+| **W17** | 8 | `green after W17:` checkmake + markdownlint + tflint + checkov auto |
+
+### W8 #309 Python — exact contracts for wave-plan-executor
+
+1. **D16 exclusive_group** already exists (`python-typecheck` on mypy/pyright/basedpyright). Do not invent a second group. **green**.
+2. **Config-file winner (already green):** `mypy.ini` → mypy; `pyrightconfig.json` → pyright *or* basedpyright (not mypy); `[tool.basedpyright]` → basedpyright. Never all three.
+3. **No type-checker config → mypy still wins** (`test_no_typechecker_config_defaults_to_mypy`). Today none of the three auto-enable without config. **RED**.
+4. **flake8 / pylint** stay catalog rows, `default_enabled: false`, `exclusive_group: python-lint`. Document as legacy opt-in in `docs/ANALYZERS.md`. Do not delete. **green** (docs prose is W8.1 CHANGELOG/docs).
+5. **bandit / vulture** already `auto` from X. Do not re-add. **green**.
+6. **osv-scanner** already matches `requirements.txt`. **green**.
+7. **osv-scanner must match `uv.lock`** (and auto-enable on that fixture). Do **not** add `pip-audit`. **RED**.
+
+### W9 #310 JS/TS
+
+- `eslint` / `biome` / `oxlint` already share `exclusive_group: js-lint`. Config-only fixtures already pick biome > eslint > oxlint. **green**.
+- **RED:** `biome.json` must beat eslint even when `package.json` has eslint scripts/deps (D17).
+- **RED:** `supports_fix: true` on biome and eslint.
+- tsc / knip already auto from X. **green**.
+
+### W10 #311/#313/#314
+
+- Go: golangci-lint + govulncheck already auto; detect `go.mod` / `*.go`. **green**. Do not re-flip.
+- Rust: clippy + cargo-audit + cargo-deny already auto. **green**. Do not re-flip clippy.
+- Ruby: rubocop already auto. **green**.
+- **RED:** brakeman `default_enabled: auto` and auto-enable on Rails markers (`config/application.rb` / `gem "rails"`). Plain Ruby must stay off (already green).
+- **RED:** add `bundler-audit` catalog YAML (`auto`, detect `Gemfile.lock`, SARIF fixture at `tests/analyzers/fixtures/sarif/bundler-audit-minimal.sarif.json`). osv-scanner already covers `Gemfile.lock` (**green**).
+
+### W11 #316 PHP (decision pinned)
+
+**phpcs and phpmd remain `default_enabled: false`** even when `phpcs.xml` is present. Detection is not treated as tight enough to join auto. **phpstan is enough** default PHP signal (already auto). No W11 xfails.
+
+### W12 #315 C/C++ (SAST choice pinned)
+
+**Default SAST path is flip `cppcheck` to `auto`**, not a Semgrep `languages:` add. cppcheck needs no compile database; clang-tidy stays `false` (opt-in). Semgrep is **not** required to list `c`/`cpp`. Do not add `flawfinder`. **RED:** cppcheck auto + detect_enabled on `hello.c` / `hello.cpp`.
+
+### W13-W17 leftovers
+
+| Wave | RED | Already green (do not xfail) |
+|------|-----|------------------------------|
+| W13 | detekt auto + `*.kt`; swiftlint auto + `*.swift` | detect globs already match |
+| W14 | pmd auto + `*.java` | **D13** infer stays `false`; Java SAST via Semgrep `languages: java` |
+| W15 | sqlfluff / stylelint / htmlhint auto | HTML a11y gap: no axe/pa11y/html-validate catalog row (document, do not add) |
+| W16 | yamllint auto | shellcheck auto; hadolint auto; do not add shfmt/dockle (D9 / catalog-rows-only) |
+| W17 | checkmake / markdownlint / tflint / checkov auto | languagetool stays false; tflint+checkov already detect `*.tf`. `iac-scanner` exclusive_group currently collapses both; W17 must split it or both-enable (finding-level dedup) so both auto tests pass |
+
+## Batch Y contract matrix
+
+| # | Contract | Layer | Scenario | Primary test | After W7 |
+|---|----------|-------|----------|--------------|----------|
+| Y8a | D16 no-config → mypy | integration | happy | `test_no_typechecker_config_defaults_to_mypy` | xfail W8 |
+| Y8b | osv-scanner `uv.lock` | unit | happy | `test_osv_scanner_covers_uv_lock` | xfail W8 |
+| Y8c | type-checker exclusive_group + config winners | integration | happy | `test_python_type_checkers_share_exclusive_group`, `test_mypy_ini_selects_mypy_not_pyright` | **green** |
+| Y8d | flake8/pylint legacy opt-in | unit | happy | `test_flake8_pylint_remain_legacy_opt_in` | **green** |
+| Y9a | D17 biome beats eslint+scripts | integration | happy | `test_biome_json_beats_eslint_even_with_eslint_script_signals` | xfail W9 |
+| Y9b | biome/eslint `supports_fix` | unit | happy | `test_biome_and_eslint_declare_supports_fix` | xfail W9 |
+| Y9c | js-lint exclusive_group config-only order | integration | happy | `test_biome_config_wins_js_lint_group` | **green** |
+| Y10a | brakeman auto + Rails gate | integration | happy/edge | `test_brakeman_default_enabled_auto`, `test_brakeman_auto_enables_on_rails_markers`, `test_brakeman_does_not_auto_enable_on_plain_ruby` | xfail / **green** (plain ruby) |
+| Y10b | bundler-audit new manifest | unit | happy | `test_bundler_audit_*` | xfail W10 |
+| Y11 | phpcs/phpmd stay false; phpstan signal | integration | happy | `test_phpcs_remains_false_even_with_phpcs_xml`, `test_phpmd_remains_false`, `test_phpstan_is_enough_default_php_signal` | **green** |
+| Y12 | cppcheck auto; clang-tidy opt-in | integration | happy | `test_cppcheck_default_enabled_auto`, `test_clang_tidy_stays_opt_in` | xfail / **green** |
+| Y13 | detekt + swiftlint auto | integration | happy | `test_detekt_*`, `test_swiftlint_*` | xfail W13 |
+| Y14 | pmd auto; infer false (D13) | unit | happy | `test_pmd_default_enabled_auto`, `test_infer_stays_false` | xfail / **green** |
+| Y15 | sqlfluff/stylelint/htmlhint auto; a11y gap | unit | happy | `test_sqlfluff_*`, `test_html_a11y_catalog_gap_no_axe_or_pa11y` | xfail / **green** |
+| Y16 | yamllint auto; shell/docker already on | unit | happy | `test_yamllint_*`, `test_shellcheck_already_auto` | xfail / **green** |
+| Y17 | checkmake/markdownlint/tflint/checkov auto | integration | happy | `test_checkmake_*`, `test_tflint_*`, `test_checkov_*` | xfail W17 |
+
+Batch Y fixture trees: `tests/analyzers/fixtures/batch-y/` (`python-noconfig`, `python-mypy`, `python-pyright`, `python-basedpyright`, `python-uv`, `js-biome`, `js-eslint`, `js-oxlint`, `js-biome-over-eslint`, `rails`, `ruby-plain`, `bundler-audit`, `cpp`, `kotlin`, `swift`, `java`, `sql`, `css`, `html`, `yaml`, `make`, `markdown`, `terraform`, `php-phpcs`, `php-plain`).
+
+## Acceptance (W7)
+
+- 37 xfails, 0 XPASS, 0 collection errors
+- `make lint` + `make typecheck` pass
+- No product/source edits (`src/` untouched)
+- No `strict=True` on Batch Y markers
