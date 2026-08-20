@@ -1,7 +1,10 @@
-# Open issues sweep 2026-08-20b — Batch BA test plan (#372)
+# Open issues sweep 2026-08-20b — tracing batches test plan (#372–#375)
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-20b-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-2026-08-20b` @ `wave/open-issues-sweep-2026-08-20b`
+
+## Batch BA (#372)
+
 Authoring wave: **W1** (Batch BA RED) · Implementation: **W2** (#372 sink dedupe)
 
 ## xfail schedule
@@ -30,4 +33,38 @@ Authoring wave: **W1** (Batch BA RED) · Implementation: **W2** (#372 sink dedup
 - New tests collect with zero import errors
 - ``make lint`` + ``make typecheck`` clean on touched paths
 - Both Batch BA tests xfail (**FAIL**, not XPASS)
+- No ``src/`` edits; D6 honoured
+
+---
+
+## Batch BB (#373)
+
+Authoring wave: **W3** (Batch BB RED) · Implementation: **W4** (#373 explicit start/end)
+
+### xfail schedule
+
+| Wave | Test | Marker reason | Status |
+|------|------|---------------|--------|
+| **W4** | `test_exported_span_duration_matches_trace_event_wall_time[1]` | `green after W4: #373 OTLP span start_time/end_time from TraceEvent` | pending — **FAIL** (~15µs today) |
+| **W4** | `test_exported_span_duration_matches_trace_event_wall_time[3]` | same | pending — **FAIL** (~15µs today) |
+
+### Contract matrix
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| BB373a | ``ts_end_ns - ts_start_ns`` wall time → OTel ``end_time - start_time`` | integration | happy — 1s and 3s ``llm.call`` | `tests/tracing/exporters/test_otlp_sink_span_duration.py::test_exported_span_duration_matches_trace_event_wall_time` |
+| BB373b | Exported span is not zero-width (~15µs export artifact) | integration | regression — ceiling 100µs | same (first assertion) |
+| BB373c | ``duration_ms`` attribute unchanged (D9) | unit | out of W3 scope — W4 keeps attribute | — |
+
+### W3 notes
+
+- **D9/D10:** W4 must pass ``start_time=event.ts_start_ns`` and ``end_time=event.ts_end_ns``; epoch nanoseconds assumed (W0 confirmed).
+- **Recording seam:** Duration is read from ``start_time`` / ``end_time`` on ``_RecordingSpanProcessor`` payloads, not from ``duration_ms`` attrs alone.
+- **Shared surface:** Batch BC (#374) also touches ``OTLPSink.write`` but gets its own RED file in W5.
+
+### Acceptance (W3)
+
+- New tests collect with zero import errors
+- ``make lint`` + ``make typecheck`` clean on touched paths
+- Both parametrized Batch BB cases xfail (**FAIL**, not XPASS)
 - No ``src/`` edits; D6 honoured
