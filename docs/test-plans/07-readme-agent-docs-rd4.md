@@ -58,4 +58,4 @@ Authoring wave: **RD4.1** (RED) · Implementation: **RD4.2** (docs gate + `llms-
 - 8 named tests collected with zero import errors
 - `make lint` + `make typecheck` clean on touched paths
 - 4 tests **XFAIL** (strict=False) + 4 green pins (3 D11/eval + link gate) pending RD4.2 reconciliation
-- Plan RD4.1 checkboxes flipped with commit SHA evidence
+- Plan RD4.1 checkboxes flipped with commit SHA evidence (2026-08-20 ✅: `9589985e` — 4 passed, 4 xfailed)
