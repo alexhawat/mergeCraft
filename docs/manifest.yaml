@@ -161,7 +161,7 @@ pages:
     audience: consumer
     template: consumer
     generator: null
-    purpose: Workflow examples 2–6, trust tiers, and pull_request_target placement gotchas.
+    purpose: Workflow examples 2–6, trust tiers, [security model](workflows.md#security-model), and pull_request_target placement gotchas.
 
   - path: assets/diagrams/README.md
     audience: satellite

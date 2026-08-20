@@ -78,11 +78,12 @@ the operator-owned GIF path. No placeholder image ships until a real capture exi
 > authenticated [GitHub CLI](https://cli.github.com), and one provider credential.
 > Full install paths: [`docs/install.md`](docs/install.md).
 
-1. **Add the GitHub Action** — pin to an immutable ref (commit SHA until the first
-   release tag exists):
+1. **Add the GitHub Action step** — pin to an immutable ref (commit SHA until the
+   first release tag exists). Add this inside `jobs.<job>.steps` (Example 1 below
+   is a complete workflow file):
 
 ```yaml
-# .github/workflows/mergecraft.yml (minimal — see Example 1 below)
+# jobs.<job>.steps[] — not a standalone workflow file (see Example 1 below)
 - uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
   env:
     CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
