@@ -160,15 +160,20 @@ def _dependency_mentions_tool(repo_root: Path, tool: str) -> bool:
 
 
 def detect_js_linter_intent(repo_root: Path) -> JsLinterIntent | None:
-    """Pick exactly one JS linter from config files and package scripts (C1.4)."""
+    """Pick exactly one JS linter by config-file presence (D17), then package scripts.
+
+    D17: config-file presence is the sole tier-one signal; precedence is
+    biome > eslint > oxlint.  Package-script / dependency signals are only
+    consulted when no config file is found for any of the three tools.
+    """
     repo_root = repo_root.resolve()
-    signals: dict[JsLinterIntent, int] = {"eslint": 0, "biome": 0, "oxlint": 0}
-    if has_eslint_config(repo_root):
-        signals["eslint"] += 2
     if has_biome_config(repo_root):
-        signals["biome"] += 2
+        return "biome"
+    if has_eslint_config(repo_root):
+        return "eslint"
     if has_oxlint_config(repo_root):
-        signals["oxlint"] += 2
+        return "oxlint"
+    signals: dict[JsLinterIntent, int] = {"eslint": 0, "biome": 0, "oxlint": 0}
     if _script_mentions_tool(repo_root, "eslint"):
         signals["eslint"] += 1
     if _script_mentions_tool(repo_root, "biome"):
@@ -181,14 +186,10 @@ def detect_js_linter_intent(repo_root: Path) -> JsLinterIntent | None:
         signals["biome"] += 1
     if _dependency_mentions_tool(repo_root, "oxlint"):
         signals["oxlint"] += 1
-
     ranked = sorted(signals.items(), key=lambda item: (-item[1], item[0]))
     winner, score = ranked[0]
     if score <= 0:
         return None
-    if len(ranked) > 1 and ranked[1][1] == score:
-        # Tie — prefer explicit config over scripts; eslint wins on stable ordering.
-        return winner
     return winner
 
 
