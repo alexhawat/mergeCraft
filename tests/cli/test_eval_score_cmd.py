@@ -62,6 +62,7 @@ def test_eval_score_json_output_keeps_its_existing_key_set(tmp_path: Path) -> No
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
     assert set(payload) == {
+        "schema_version",
         "total_issues",
         "total_reported",
         "found",

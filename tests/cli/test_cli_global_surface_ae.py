@@ -170,7 +170,7 @@ def test_force_color_enables_ansi_on_dumb_tty() -> None:
     result = runner.invoke(
         app,
         ["--help"],
-        env={"FORCE_COLOR": "1", "TERM": "dumb"},
+        env={"FORCE_COLOR": "1", "TERM": "dumb", "NO_COLOR": None},
     )
     combined = result.stdout + result.stderr
     assert result.exit_code == 0, _plain(combined)
