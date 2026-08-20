@@ -15,6 +15,7 @@ from mergecraft.cli import (
     analyzers_cmd,
     auth_cmd,
     cache_cmd,
+    capabilities_cmd,
     config_surface_cmd,
     context_cmd,
     diff_review_cmd,
@@ -88,6 +89,7 @@ app.add_typer(analyzers_cmd.app, name="analyzers")
 app.command("init")(init_cmd.run)
 app.command("watch")(watch_cmd.run)
 app.command("doctor")(doctor_cmd.run)
+app.command("capabilities")(capabilities_cmd.run)
 app.command("plan")(plan_cmd.run)
 app.command("review")(diff_review_cmd.run)
 app.command("diff-review", hidden=True)(diff_review_cmd.run)

@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added: generated CLI and Action reference pages (`docs/cli.md`,
   `docs/action-reference.md`) plus a docs manifest; `make docs-check`
   replaces landing-README table splices.
+- `mergecraft capabilities` prints the review-only capability manifest (modes Review, IncrementalReview, Plan; identify / investigate / verify / explain / prioritize / suggest) (#350)
 - Python 3.11 install floor (#343, option A): `requires-python` lowered to `>=3.11`; mypy/Pyright target 3.11; CI matrix runs on 3.11 and 3.14. README and `docs/distribution.md` install copy use stock `uv` from git (PyPI not published); Docker remains for pinned runtimes. Parenthesized the last PEP 758 site in `analyzers/detect.py` for the 3.11 compile gate; `harbor` extra gated to Python >=3.12.
 - Python 3.11 floor ADR (#343, option A): `docs/dev/python-version-floor.md` records parenthesize-now / binary-later (D8). PEP 758 multi-type `except` handlers under `src/mergecraft/` are parenthesized (44 sites / 27 files).
 - JS/TS lint: `biome` and `eslint` declare `supports_fix: true`; the JS-lint exclusive group (`js-lint`) now resolves the winner by config-file presence alone — `biome.json`/`biome.jsonc` beats any eslint config; eslint config beats any oxlint config — package-script and dependency signals are only consulted when no config file is found (D17, #310)
@@ -257,6 +258,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `SECURITY.md` states the review-only guarantee: identify, investigate, verify, explain, prioritize, and suggest; no source edits, applied fixes, commits, pushes, or code-changing pull requests (#350)
 - Review runs are review-only: `Fix`, `Build`, `Task`, `AddressReviews`, and `ResolveConflicts` are no longer selectable, and a Review or IncrementalReview run cannot edit the workspace, commit, push, or open a code-changing PR. Illustrative diffs stay GitHub suggestion comments (#350)
 - `mergecraft mcp serve` now mints a per-serve Bearer token and requires it on every MCP request; unauthenticated `tools/list` and `tools/call` are rejected with HTTP 401 / JSON-RPC `-32600` (#345). `build_mcp_tool_context` mints the token via `secrets.token_hex(32)`, stores it as `ctx.mcp_auth_token`, and passes it as `auth_token=` into `create_mcp_app`; the token is printed to stderr as `MERGECRAFT_MCP_BEARER=<token>` at startup.
 - `mcp/server`: primary `/mcp/reviewer` now admits session tools `set_output`, `select_mode`, and `report_progress` via `PRIMARY_MUTATING_ALLOWLIST`; routing the primary agent to `/mcp/reviewer` no longer drops tools required by the Action output schema, the mode-selection playbook (Step 1), and the no-action path. Repo mutations (`push_branch`, `commit_changes`, etc.) and review-write tools not in the allowlist (`resolve_review_thread`) stay off the reviewer surface; subagents continue to use the narrower `READONLY_MUTATING_ALLOWLIST`

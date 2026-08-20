@@ -12,6 +12,15 @@ You will receive an acknowledgement as soon as possible.
 This project is under active early development; only the latest `main` /
 `pre-0.0.1` branch is supported.
 
+## Review-only product boundary
+
+mergeCraft is **review-only**. Reviewers may identify, investigate, verify,
+explain, prioritize, and suggest. They must not edit source in the reviewed
+tree, apply fixes, commit, push, or open a code-changing pull request.
+
+Production modes are Review, IncrementalReview, and Plan. `mergecraft
+capabilities` prints this manifest.
+
 ## Security model
 
 mergeCraft is BYOK (bring-your-own-key/subscription): it talks directly to
