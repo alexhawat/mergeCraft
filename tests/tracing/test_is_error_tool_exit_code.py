@@ -21,8 +21,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # Minimal in-process Tracer + MemorySink
 # ---------------------------------------------------------------------------
@@ -51,10 +49,6 @@ def _events_by_kind(sink: Any) -> dict[str, list[Any]]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W6: enrich_tool_response classifies is_error (#296)",
-    strict=True,
-)
 def test_tool_result_is_error_true_sets_exit_code_error() -> None:
     """W5.1a — ToolResult(is_error=True) as output= → tool.exit_code=error.
 

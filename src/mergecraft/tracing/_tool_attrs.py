@@ -171,6 +171,19 @@ def enrich_tool_response(
         span.set_attribute("gen_ai.tool.output", redact_tool_payload(message))
         return
 
+    # D9 / #296: classify ToolResult.is_error (or any mapping key "isError" /
+    # "is_error") as an error span even when no Python exception was raised.
+    # JSON-RPC is unchanged; the agent still receives the ToolResult.
+    _output_is_error = getattr(output, "is_error", None)
+    if _output_is_error is None and isinstance(output, dict):
+        _output_is_error = output.get("isError") or output.get("is_error")
+    if _output_is_error:
+        span.set_attribute("tool.exit_code", "error")
+        span.set_status("error", "ToolResult.is_error=True")
+        if output is not None:
+            span.set_attribute("gen_ai.tool.output", redact_tool_payload(output))
+        return
+
     span.set_attribute("tool.exit_code", "ok")
     if output is not None:
         output_bytes = _safe_json_bytes(output)
