@@ -128,7 +128,7 @@ def test_every_registered_tool_declares_a_class(tool_ctx: ToolContext) -> None:
 
 
 def test_reviewer_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
-    """H4 — reviewer toolset is class-filtered, never a mutation class."""
+    """H4 / D9 — reviewer toolset is class-filtered; publication is the sole mutation exception."""
     _assert_real_toolspecs(build_orchestrator_tools(tool_ctx))
 
     from mergecraft.mcp.server import build_reviewer_tools
@@ -136,8 +136,13 @@ def test_reviewer_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
     reviewer = build_reviewer_tools(tool_ctx)
     _assert_real_toolspecs(reviewer)
     leaked = [spec.name for spec in reviewer if _class_value(spec) in MUTATION_CLASSES]
-    assert not leaked, f"reviewer received mutation tools: {leaked}"
+    assert set(leaked) <= {"create_pull_request_review"}, (
+        f"reviewer received mutation tools: {leaked}"
+    )
     for spec in reviewer:
+        if spec.name == "create_pull_request_review":
+            assert _class_value(spec) == "review-write"
+            continue
         assert _class_value(spec) in REVIEWER_ALLOWED_CLASSES, (
             f"reviewer received {spec.name!r} with class {_class_value(spec)!r}"
         )
@@ -339,11 +344,13 @@ def test_record_finding_verdict_is_absent_from_verifier_surface(tool_ctx: ToolCo
 def test_read_only_roles_exclude_mutating_tools_except_checkout_pr(tool_ctx: ToolContext) -> None:
     """Class membership is not enough: mutates=True tools stay off read-only surfaces.
 
-    ``checkout_pr`` is the HA4.2 / D14 exception on the reviewer. Verifier gets none.
+    ``checkout_pr`` is the HA4.2 / D14 exception on the reviewer. D9 also admits
+    ``create_pull_request_review`` on the primary reviewer only. Verifier gets none.
     """
     reviewer, verifier = _read_only_toolsets(tool_ctx)
     reviewer_mutating = [spec.name for spec in reviewer if spec.mutates]
-    assert reviewer_mutating == ["checkout_pr"]
+    assert "checkout_pr" in reviewer_mutating
+    assert set(reviewer_mutating) <= {"checkout_pr", "create_pull_request_review"}
     assert not [spec.name for spec in verifier if spec.mutates]
 
     subagent_denied = subagent_denied_tool_names(tool_ctx)
@@ -367,6 +374,9 @@ def test_live_verifier_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
         verifier_url = url[: -len(MCP_ENDPOINT)] + MCP_VERIFIER_ENDPOINT
         list_body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
         headers = {"Content-Type": "application/json"}
+        token = getattr(tool_ctx, "mcp_auth_token", None)
+        if isinstance(token, str) and token:
+            headers["Authorization"] = f"Bearer {token}"
         with urlopen(
             Request(verifier_url, data=list_body, headers=headers, method="POST"),
             timeout=5,
@@ -418,6 +428,9 @@ def test_live_reviewer_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
         reviewer_url = url[: -len(MCP_ENDPOINT)] + MCP_REVIEWER_ENDPOINT
         list_body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
         headers = {"Content-Type": "application/json"}
+        token = getattr(tool_ctx, "mcp_auth_token", None)
+        if isinstance(token, str) and token:
+            headers["Authorization"] = f"Bearer {token}"
         with urlopen(
             Request(reviewer_url, data=list_body, headers=headers, method="POST"),
             timeout=5,

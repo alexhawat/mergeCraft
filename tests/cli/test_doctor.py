@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -109,3 +110,27 @@ def test_never_prints_a_credential_value(tmp_path: Path, monkeypatch: MonkeyPatc
     assert secret not in output
     assert "lf-doctor-secret-xyz" not in output
     assert "auth" in output.lower()
+
+
+@pytest.mark.xfail(
+    reason="green after W14: per-run MCP token and unguessable port",
+    strict=False,
+)
+def test_doctor_mcp_probe_does_not_treat_3764_as_the_mcp_port(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """W14.2: doctor may report ephemeral / in-use, not a fixed 3764 band."""
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["doctor"],
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _plain(result.stdout + result.stderr)
+    assert result.exit_code == 0, output
+    assert "mcp" in output.lower()
+    lowered = output.lower()
+    names_fixed_port = "3764" in lowered and "ephemeral" not in lowered
+    assert not names_fixed_port, output

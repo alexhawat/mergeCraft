@@ -2,7 +2,7 @@
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19c-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19c` @ `wave/open-issues-sweep-2026-08-19c`
-Authoring wave: **W1** (Batch K RED — #284 / D10)
+Authoring wave: **W11** (Batch O RED — #282 / #283 / D9 / D14 / D15 / D16)
 
 W1 pins #284: PR install lifecycle scripts must not run in the privileged Action
 process when the tree is untrusted. Today `start_installation` sets
@@ -14,8 +14,7 @@ W1.2: `tests/mcp/test_dependencies_python_skip.py` is **not** edited. It asserts
 `ignore_scripts is True` under `shell: disabled` (a subset of D10 that stays
 true after W3). The old exclusive coupling is pinned in the sibling below.
 
-Later batches (L–O) get their own RED waves; this doc is Batch K only until
-those waves land.
+Batches K–N landed. **W11** authors Batch O RED (#282 / #283 / D9 / D14 / D15 / D16).
 
 ## xfail schedule
 
@@ -25,9 +24,19 @@ those waves land.
 | **W3** | `test_start_installation_ignore_scripts_follows_d10[untrusted-enabled]` | `green after W3: ignore_scripts follows trust` | greened |
 | **W3** | `test_start_installation_untrusted_restricted_does_not_run_postinstall` | `green after W3: ignore_scripts follows trust` | greened |
 | **W6** | `test_untrusted_restricted_sandbox_none_omits_shell` | `green after W6: untrusted + sandbox none does not register shell` | greened |
-| **W8** | `test_harness_mcp_cli_name_fixture_exists` (+ AgentId pins) | `green after W8: harness deny-list CLI name fixtures` | pending |
-| **W10** | `test_security_md_does_not_claim_stripping_for_any_mcp_tool` | `green after W10: SECURITY.md residual` | pending |
-| **W10** | `test_security_md_limits_stripping_to_agent_env_and_shell` | `green after W10: SECURITY.md residual` | pending |
+| **W8** | `test_harness_mcp_cli_name_fixture_exists` (+ AgentId pins) | `green after W8: harness deny-list CLI name fixtures` | greened |
+| **W10** | `test_security_md_does_not_claim_stripping_for_any_mcp_tool` | `green after W10: SECURITY.md residual` | greened |
+| **W10** | `test_security_md_limits_stripping_to_agent_env_and_shell` | `green after W10: SECURITY.md residual` | greened |
+| **W12** | `test_primary_reviewer_dispatch_url_ends_with_reviewer_endpoint` | `green after W12: role MCP URL dispatch` | pending |
+| **W12** | `test_verifier_dispatch_url_ends_with_verifier_endpoint` | `green after W12: role MCP URL dispatch` | pending |
+| **W12** | `test_reviewer_role_mcp_post_push_branch_is_not_orchestrator_invocation` | `green after W12: CLI single-role mount` | pending |
+| **W12** | `test_verifier_role_mcp_post_push_branch_is_not_orchestrator_invocation` | `green after W12: CLI single-role mount` | pending |
+| **W13** | `test_reviewer_tools_list_includes_create_pull_request_review` | `green after W13: primary reviewer publication allow` | pending |
+| **W14** | `test_tools_list_and_call_require_per_run_token` | `green after W14: per-run MCP token and unguessable port` | pending |
+| **W14** | `test_select_port_is_not_3764_plus_fifty_wide_scan` | `green after W14: per-run MCP token and unguessable port` | pending |
+| **W14** | `test_started_server_port_is_loopback_and_not_the_3764_band` | `green after W14: per-run MCP token and unguessable port` | pending |
+| **W14** | `test_codex_mcp_config_uses_unix_domain_socket` | `green after W14: per-run MCP token and unguessable port` | pending |
+| **W14** | `test_doctor_mcp_probe_does_not_treat_3764_as_the_mcp_port` | `green after W14: per-run MCP token and unguessable port` | pending |
 
 All cross-wave xfails use `strict=False`. Do not use `strict=True` (pytest.ini
 has `xfail_strict = true`).
@@ -130,3 +139,56 @@ parity, not docs wording).
 
 N286e passes against current `src/` — W10 must not restore the broad sentence
 and must not edit `git.py`.
+
+## Batch O — #282 / #283 / D9 / D14 / D15 / D16 (W11 RED)
+
+Primary reviewer is still wired to orchestrator `/mcp`. Role routes exist
+and are class-filtered; the Action never uses them. `create_pull_request_review`
+is `REVIEW_WRITE` + `mutates=True` and is **not** in
+`REVIEWER_ALLOWED_TOOL_CLASSES`, so naive `/mcp/reviewer` routing would
+stop reviews from publishing. D9 splits primary publication from the
+subagent complement. `git` stays on the reviewer surface (still
+`REPOSITORY_READ`). `tools/call` / `tools/list` are unauthenticated
+loopback. Port allocator is `3764 + randint(0, 49)`. Codex cannot send
+`http_headers` (D16 = unix-socket).
+
+Do not invent `http_headers` in Codex tests. `x-mergecraft-agent-id` is
+tracing-only, not the credential. Keep morning E `jsonschema.validate` in
+`handle_rpc` (D17). Tests only under `tests/mcp/` / `tests/agents/` /
+`tests/cli/`.
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| O282a | Primary reviewer `AgentRunContext.mcp_server_url` path is `/mcp/reviewer`, not `/mcp` | functional | happy (bug) | `tests/agents/test_role_dispatch_urls.py::test_primary_reviewer_dispatch_url_ends_with_reviewer_endpoint` (xfail W12) |
+| O282b | Verifier dispatch / harness config path is `/mcp/verifier` | integration | happy (bug) | `test_verifier_dispatch_url_ends_with_verifier_endpoint` (xfail W12) |
+| O282c | `/mcp/reviewer` `tools/list` includes `create_pull_request_review` + `checkout_pr` | integration | happy (bug) | `tests/mcp/test_reviewer_publication_allow.py::test_reviewer_tools_list_includes_create_pull_request_review` (xfail W13) |
+| O282d | `/mcp/reviewer` keeps `git`; excludes `push_branch`, `upload_file`, `delete_branch`, `create_pull_request` | integration | control | `test_reviewer_tools_list_keeps_git_and_excludes_repo_mutations` |
+| O282e | `tools/call` `push_branch` on `/mcp/reviewer` is `-32601` | integration | error | `test_reviewer_tools_call_push_branch_errors` |
+| O282f | CLI `build_mcp_app_for_role(role="reviewer")` `POST /mcp` `push_branch` is not a successful orchestrator invocation | functional | happy (bug) | `tests/cli/test_mcp_serve_single_role.py::test_reviewer_role_mcp_post_push_branch_is_not_orchestrator_invocation` (xfail W12) |
+| O282g | Same single-role mount for `role="verifier"` | functional | edge | `test_verifier_role_mcp_post_push_branch_is_not_orchestrator_invocation` (xfail W12) |
+| O282h | Subagent deny list still contains `create_pull_request_review` after D9 | unit | regression pin | `test_subagent_deny_list_still_contains_create_pull_request_review` (passes today; must survive W13) |
+| O283a | Unauthenticated `tools/list` + `tools/call` fail (401 or JSON-RPC `-32600`); Bearer token succeeds | functional | happy (bug) + error | `tests/mcp/test_mcp_auth_and_port.py::test_tools_list_and_call_require_per_run_token` (xfail W14) |
+| O283b | `x-mergecraft-agent-id` alone does not authenticate | functional | edge | same test |
+| O283c | `/health` stays unauthenticated | functional | control | `test_health_stays_unauthenticated` |
+| O283d | Port allocator is not `3764 + offset ∈ [0, 49]` | unit | happy (bug) | `test_select_port_is_not_3764_plus_fifty_wide_scan` (xfail W14) |
+| O283e | `MERGECRAFT_MCP_PORT` override still honored | unit | control | `test_mergecraft_mcp_port_override_still_honored` |
+| O283f | Codex MCP config has no `http_headers` | unit | control (D16) | `tests/agents/test_codex_mcp_unix_socket.py::test_codex_mcp_config_does_not_invent_http_headers` |
+| O283g | Codex MCP config uses a Unix-domain socket (or documented equivalent) | unit | happy (bug) | `test_codex_mcp_config_uses_unix_domain_socket` (xfail W14) |
+| O283h | `mergecraft doctor` MCP probe does not name 3764 as "the" port | functional | edge | `tests/cli/test_doctor.py::test_doctor_mcp_probe_does_not_treat_3764_as_the_mcp_port` (xfail W14) |
+
+O282d, O282e, O282h, O283e, O283f pass against current `src/`. W13 must not
+drop `create_pull_request_review` from the subagent deny list or put
+`push_branch` on `/mcp/reviewer`. W14 must not invent Codex
+`http_headers`.
+
+Existing live `tools/list` tests in `tests/mcp/test_tool_classes.py`
+forward a Bearer token when `ctx.mcp_auth_token` is set so W14 does not
+break them. Reviewer mutation assertions there now allow D9's primary
+publication exception without requiring it (W13 greens O282c).
+
+## Acceptance (W11)
+
+- New tests collect with zero import errors
+- `make lint` clean
+- O282d/e/h, O283e/f pass today; remaining rows xfail until the tagged wave
+- No `src/` edits; D6 O-allowlist is for impl waves W12–W14 only
