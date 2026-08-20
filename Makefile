@@ -16,9 +16,13 @@ PRE_COMMIT ?= $(UV) run pre-commit
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	examples example-workflows-check docs docs-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
-	bench-detect \
+	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check
+
+PIPELINE_D2 := docs/diagrams/pipeline.d2
+PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
+PIPELINE_DARK := assets/diagrams/pipeline-dark.svg
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -145,6 +149,19 @@ docs: ## Regenerate generated doc pages (CLI, action ref, docs index)
 
 docs-check: ## Fail when generated docs drift
 	$(UV) run python scripts/gen_docs.py --check
+
+diagrams: ## Regenerate architecture SVGs from D2 source (requires d2 on PATH)
+	@command -v d2 >/dev/null 2>&1 || { echo "d2 not found — install from https://d2lang.com" >&2; exit 1; }
+	d2 --theme 0 $(PIPELINE_D2) $(PIPELINE_LIGHT)
+	d2 --theme 200 $(PIPELINE_D2) $(PIPELINE_DARK)
+
+diagrams-check: ## Assert committed pipeline SVGs exist and README references them
+	@test -s $(PIPELINE_D2) || (echo "missing $(PIPELINE_D2)" >&2; exit 1)
+	@test -s $(PIPELINE_LIGHT) || (echo "missing $(PIPELINE_LIGHT)" >&2; exit 1)
+	@test -s $(PIPELINE_DARK) || (echo "missing $(PIPELINE_DARK)" >&2; exit 1)
+	@rg -q 'assets/diagrams/pipeline-light.svg' README.md
+	@rg -q 'assets/diagrams/pipeline-dark.svg' README.md
+	@if [ -n "$$MERGECRAFT_REQUIRE_D2" ]; then $(MAKE) diagrams; fi
 
 reference-docs: docs ## Regenerate the README action + CLI reference tables (alias)
 

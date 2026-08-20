@@ -1,17 +1,14 @@
-"""RD2.1 — outline-B landing README contracts (RED until RD2.2).
+"""RD2 — outline-B landing README contracts.
 
 Pins the REACH-style landing page: outline-B headings, problem/solution cards,
 D2 architecture ``<picture>``, numbered install, Example 1 workflow pin, satellite
-page moves, and the G1 docs-site badge regression guard. RD2.2 implements the
-README rewrite, D2 source, committed SVGs, and satellite essays.
+page moves, and the G1 docs-site badge regression guard.
 """
 
 from __future__ import annotations
 
 import re
 import subprocess
-
-import pytest
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
 
@@ -29,8 +26,6 @@ _DEMO_PATHS = (
 
 _ACTION_USES = re.compile(r"uses:\s*alexhawat/mergeCraft@(\S+)")
 _SHA_REF = re.compile(r"^[0-9a-f]{40}$")
-
-_RD2_XFAIL = pytest.mark.xfail(reason="green after RD2.2", strict=False)
 
 
 def _readme_text() -> str:
@@ -102,7 +97,6 @@ def _example_one_section(text: str) -> str:
     return match.group(1)
 
 
-@_RD2_XFAIL
 def test_landing_has_outline_b_headings() -> None:
     text = _readme_text()
     missing: list[str] = []
@@ -119,7 +113,6 @@ def test_landing_has_outline_b_headings() -> None:
     assert not missing, f"README missing outline-B headings or jump-nav anchors: {missing}"
 
 
-@_RD2_XFAIL
 def test_landing_has_problem_solution_cards() -> None:
     text = _readme_text()
     region = _section_body(text, r".*(?:Problem|Why)")
@@ -131,7 +124,6 @@ def test_landing_has_problem_solution_cards() -> None:
     )
 
 
-@_RD2_XFAIL
 def test_landing_has_picture_architecture_diagram() -> None:
     text = _readme_text()
     assert "assets/diagrams/pipeline-dark.svg" in text, (
@@ -143,14 +135,12 @@ def test_landing_has_picture_architecture_diagram() -> None:
     assert "<picture>" in text, "README must wrap the architecture hero in a <picture> element"
 
 
-@_RD2_XFAIL
 def test_diagram_svgs_exist_and_are_nonempty() -> None:
     for path in (_PIPELINE_LIGHT, _PIPELINE_DARK):
         assert path.is_file(), f"missing committed diagram {path.relative_to(REPO_ROOT)} (RD2.2)"
         assert path.stat().st_size > 0, f"{path.name} must be non-empty"
 
 
-@_RD2_XFAIL
 def test_d2_source_exists() -> None:
     assert _D2_SOURCE.is_file(), f"missing {_D2_SOURCE.relative_to(REPO_ROOT)} (RD2.2)"
     text = _D2_SOURCE.read_text(encoding="utf-8").lower()
@@ -169,7 +159,6 @@ def test_landing_omits_broken_demo_image() -> None:
     assert not broken, f"README references demo assets that are not tracked: {broken}"
 
 
-@_RD2_XFAIL
 def test_landing_has_numbered_install() -> None:
     text = _readme_text()
     region = _section_body(text, r".*Install")
@@ -186,7 +175,6 @@ def test_landing_has_numbered_install() -> None:
     ), "Install steps must document how to trigger a review"
 
 
-@_RD2_XFAIL
 def test_landing_keeps_example_one_workflow() -> None:
     text = _readme_text()
     section = _example_one_section(text)
@@ -209,7 +197,6 @@ def test_landing_does_not_contain_full_cli_table() -> None:
     )
 
 
-@_RD2_XFAIL
 def test_satellite_pages_received_moved_essays() -> None:
     workflows = REPO_ROOT / "docs" / "workflows.md"
     authentication = REPO_ROOT / "docs" / "authentication.md"

@@ -121,6 +121,30 @@ pages:
     generator: null
     purpose: Demo capture path and rules — omit broken GIF/MP4 until a real asset exists.
 
+  - path: docs/install.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback.
+
+  - path: docs/authentication.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Provider auth, custom OpenAI-compatible gateways, and model fallback chains.
+
+  - path: docs/workflows.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Workflow examples 2–6, trust tiers, and pull_request_target placement gotchas.
+
+  - path: assets/diagrams/README.md
+    audience: satellite
+    template: satellite
+    generator: null
+    purpose: Architecture diagram SVG inventory and D2 regeneration commands.
+
   - path: assets/brand/README.md
     audience: satellite
     template: satellite

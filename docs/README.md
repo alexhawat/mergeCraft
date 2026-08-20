@@ -10,6 +10,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [Landing README](README.md) | consumer | Product landing page — install, features, and pointers to generated reference pages. |
 | [REVIEW-CHECKS](REVIEW-CHECKS.md) | contributor | Enumerated review checks mergeCraft applies on pull requests. |
 | [brand README](assets/brand/README.md) | satellite | Brand SVG inventory and regeneration commands for logo assets. |
+| [diagrams README](assets/diagrams/README.md) | satellite | Architecture diagram SVG inventory and D2 regeneration commands. |
 | [ANALYZERS](docs/ANALYZERS.md) | consumer | Shipped analyzer catalog — rows generated from manifests via make catalog-check. |
 | [CONTRIBUTING-ANALYZERS](docs/CONTRIBUTING-ANALYZERS.md) | contributor | How to add or change a catalog analyzer and keep make catalog-check green. |
 | [EXIT-CODES](docs/EXIT-CODES.md) | consumer | Named CLI exit codes and when mergecraft returns each status. |
@@ -18,6 +19,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [TRACING](docs/TRACING.md) | contributor | Tracing sinks, retention, and Logfire/OTLP wiring for operators. |
 | [action-reference](docs/action-reference.md) | consumer | Complete action.yml input and output reference for the GitHub Action. |
 | [assets README](docs/assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
+| [authentication](docs/authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
 | [blast-radius](docs/blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
 | [cli](docs/cli.md) | consumer | Full mergecraft CLI command reference derived from the live Typer app. |
 | [compatibility-matrix](docs/compatibility-matrix.md) | contributor | Harness and provider compatibility notes for maintainers. |
@@ -28,7 +30,9 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [eval-bank](docs/eval-bank.md) | contributor | Eval bank layout, promotion, and CI gate semantics. |
 | [evidence-packet](docs/evidence-packet.md) | contributor | Merge evidence packet schema emitted as the evidence_packet action output. |
 | [findings-carryover](docs/findings-carryover.md) | contributor | Findings carryover and export CLI behaviour for unresolved review items. |
+| [install](docs/install.md) | consumer | Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback. |
 | [supply-chain](docs/supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
+| [workflows](docs/workflows.md) | consumer | Workflow examples 2–6, trust tiers, and pull_request_target placement gotchas. |
 | [evals README](evals/README.md) | satellite | Eval bank vs ReviewBench — what each mechanism measures and how to run gates. |
 
 ## See also

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Landing README redesigned as a REACH-style product page (outline B): problem/solution
+  cards, D2 architecture hero, numbered install, and jump-nav. Long-form install,
+  authentication, and workflow essays moved to `docs/install.md`,
+  `docs/authentication.md`, and `docs/workflows.md`.
+
 ### Added
 
 - Added: generated CLI and Action reference pages (`docs/cli.md`,
