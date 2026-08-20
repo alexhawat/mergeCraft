@@ -3,10 +3,9 @@
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-20c-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-2026-08-20c` @ `wave/open-issues-sweep-2026-08-20c`
 Authoring wave: **W1** (Batch CA RED) · Implementation: **W2.1** (`a2c76fd9`) · Recon: **W2.2**
+W3 RED (this pass): `mergecraft capabilities` + `SECURITY.md` — xfail until W3.1
 
 Issue #350 out of scope (honoured — no tests): MCP Bearer/auth-header gaps (#345/#346); trust tiers / privilege drop (`analyzers/trust.py`, `utils/privilege.py`).
-
-Do **not** cover W3 here (`mergecraft capabilities`, `SECURITY.md`).
 
 ## xfail schedule
 
@@ -23,6 +22,8 @@ All cross-wave markers use `@pytest.mark.xfail(..., strict=False)`.
 | **W2** | `test_reviewer_shaped_run_cannot_git_commit[*]` | same | **PASS** — un-xfailed W2.2 |
 | **W2** | `test_reviewer_shaped_run_cannot_git_push[*]` | same | **PASS** — un-xfailed W2.2 |
 | **W2** | `test_reviewer_shaped_run_cannot_open_code_changing_pr[*]` | same | **PASS** — un-xfailed W2.2 |
+| **W3** | `tests/cli/test_capabilities_cmd.py` (11 tests) | `green after W3: mergecraft capabilities manifest (#350 / D10)` | **XFAIL** until W3.1 |
+| **W3** | `tests/test_security_md_review_only.py` (3 tests) | `green after W3: SECURITY.md review-only guarantee (D9 / #350)` | **XFAIL** until W3.1 |
 
 W1.1 current-state pins (CA350a / still-accepts `select_mode`) **deleted** in W2.2.
 
@@ -42,6 +43,14 @@ W1.1 current-state pins (CA350a / still-accepts `select_mode`) **deleted** in W2
 | CA350k | `git` MCP tool still does not forward `commit` | unit | already green | `test_git_mcp_tool_does_not_forward_commit` |
 | CA350l | Write-mode modules remain importable (D12) | unit | happy | `test_write_mode_modules_remain_importable_as_negative_fixtures` |
 | CA350m | Production catalog names are Review / IncrementalReview / Plan | unit | happy | `tests/test_modes.py::EXPECTED_MODE_NAMES` / `test_compute_modes_returns_all_built_ins` |
+| CA350n | New `cli/capabilities_cmd.py` with `run` + `capabilities_manifest()` | unit | happy | `tests/cli/test_capabilities_cmd.py::test_capabilities_module_is_a_new_cli_file`, `test_capabilities_module_exports_run_and_manifest` |
+| CA350o | `mergecraft capabilities` in root help; default table is review-only | functional | happy | `test_root_help_lists_capabilities_command`, `test_capabilities_help_describes_manifest`, `test_capabilities_table_states_review_only` |
+| CA350p | Global `--format json` emits schema_versioned review-only manifest | functional | happy | `test_capabilities_json_uses_global_format_flag` |
+| CA350q | Manifest allowed/forbidden sets; no write mode names | functional | edge | `test_capabilities_json_forbidden_covers_write_surface`, `test_capabilities_json_allowed_is_review_verbs_only`, `test_capabilities_json_modes_exclude_write_capable_names` |
+| CA350r | Extra argv / unknown option → usage exit 2 | functional | error | `test_capabilities_rejects_unexpected_positional`, `test_capabilities_unknown_option_is_usage_error` |
+| CA350s | `SECURITY.md` states review-only guarantee (D9) | unit | happy | `tests/test_security_md_review_only.py::test_security_md_states_review_only_guarantee` |
+| CA350t | `SECURITY.md` forbids edit/commit/push/code-changing PR | unit | happy | `test_security_md_forbids_source_edits_commits_pushes_and_code_changing_prs` |
+| CA350u | `SECURITY.md` allows identify/investigate/verify/explain/prioritize/suggest | unit | happy | `test_security_md_allows_identify_investigate_verify_explain_prioritize_suggest` |
 
 Write-capable names under test: `Build`, `AddressReviews`, `Fix`, `ResolveConflicts`, `Task`.
 Reviewer-shaped modes: `Review`, `IncrementalReview`.
@@ -62,3 +71,27 @@ Error contract for W2 negatives: `ToolResult.is_error is True` and the message c
 - W1.1 still-registered pins gone
 - `make lint` + `make typecheck` clean
 - No `src/` edits; no CHANGELOG (Unreleased Security bullet already in `a2c76fd9`)
+
+## W3 RED (`mergecraft capabilities` + SECURITY.md)
+
+Impl must green the xfail suite. Do **not** tick W3.1 until that lands.
+
+1. Add `src/mergecraft/cli/capabilities_cmd.py` with `run` and
+   `capabilities_manifest()` (no `schema_version` in the helper; CLI JSON
+   wrapping adds it). Additive `app.command("capabilities")` only — do not
+   edit the root callback (`--format` / `--quiet` / `--color`).
+2. Manifest dict:
+   - `review_only: true`
+   - `modes`: exactly `{Review, IncrementalReview, Plan}`
+   - `allowed`: `{identify, investigate, verify, explain, prioritize, suggest}`
+   - `forbidden`: `{edit_source, apply_fixes, commit, push, open_code_changing_pr}`
+3. `mergecraft --format json capabilities` uses existing
+   `emit_cli_json` / `schema_version == CLI_JSON_SCHEMA_VERSION`.
+4. Default table/text mentions review-only and the three production modes.
+5. Extra positional or unknown option → `CLI_USAGE_EXIT_CODE` (2).
+6. `SECURITY.md` (not README.md / AGENTS.md) states the review-only
+   guarantee and the allow/deny verbs above.
+7. After impl, recon removes the `xfail(..., strict=False)` markers.
+
+Out of scope: file 7 docs, 20b tracing, P12–P31 (#377–#385), MCP Bearer
+(#345/#346), trust/privilege drop.
