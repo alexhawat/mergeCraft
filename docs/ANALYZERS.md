@@ -25,7 +25,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `clang-tidy` | lint | c, cpp | disabled | container | trusted | — | requires compile_commands.json — mergeCraft never guesses compiler flags (C4) |
 | `clippy` | lint | rust | auto | repo-native | trusted | rust-lint | — |
 | `cppcheck` | lint | c, cpp | auto | managed | trusted | — | — |
-| `detekt` | lint | kotlin | disabled | repo-native | trusted | — | — |
+| `detekt` | lint | kotlin | auto | repo-native | trusted | — | — |
 | `dotenv-linter` | lint | — | disabled | managed | trusted | — | Values never printed in findings (D8). |
 | `ember-template-lint` | lint | ember | disabled | repo-native | trusted | — | — |
 | `eslint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
@@ -65,7 +65,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `sqlfluff` | lint | sql | disabled | managed | trusted | — | Dialect is mandatory — skip when repo declares none. |
 | `squawk` | migration | — | auto | managed | untrusted | — | — |
 | `stylelint` | lint | css | disabled | repo-native | trusted | — | — |
-| `swiftlint` | lint | swift | disabled | managed | trusted | — | requires non-Linux runner — SwiftLint needs macOS (C6 out of scope) |
+| `swiftlint` | lint | swift | auto | managed | trusted | — | requires non-Linux runner — SwiftLint needs macOS (C6 out of scope) |
 | `tflint` | lint | terraform | disabled | managed | untrusted | iac-scanner | — |
 | `trivy` | vuln | — | auto | managed | untrusted | dependency-vuln | — |
 | `trufflehog` | secrets | — | auto | managed | untrusted | — | verify off by default; impossible on fork PRs (C2). |
