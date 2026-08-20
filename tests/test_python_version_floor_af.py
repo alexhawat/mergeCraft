@@ -112,6 +112,8 @@ def find_unparenthesized_except_violations(
 
 def _find_pep750_t_string_lines(source: str) -> list[int]:
     """Return 1-based line numbers that contain PEP 750 t-string tokens."""
+    if not hasattr(tokenize, "TSTRING_START"):
+        return []
     tstring_types = {
         tokenize.TSTRING_START,
         tokenize.TSTRING_MIDDLE,

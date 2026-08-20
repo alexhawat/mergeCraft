@@ -1562,6 +1562,7 @@ dependencies = [
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
     { name = "typer" },
+    { name = "typing-extensions" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1640,6 +1641,7 @@ requires-dist = [
     { name = "types-aiofiles", marker = "extra == 'dev'", specifier = "==25.1.0.20251011" },
     { name = "types-jsonschema", marker = "extra == 'dev'", specifier = "==4.25.1.20250822" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = "==6.0.12.20260724" },
+    { name = "typing-extensions", specifier = "==4.16.0" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.51.0" },
 ]
 provides-extras = ["harbor", "tracing", "dev"]

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TypedDict
+
+from typing_extensions import TypedDict
 
 from mergecraft.review_policy.manifest_names import GENERATOR_CONFIG_NAMES
 from mergecraft.review_policy.paths import normalize_repo_path
