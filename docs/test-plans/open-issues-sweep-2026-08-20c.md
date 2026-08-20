@@ -85,3 +85,67 @@ Error contract for W2 negatives: `ToolResult.is_error is True` and the message c
 - W3 pins **PASS** (no leftover xfail, no XPASS)
 - `make lint` + `make typecheck` clean
 - No `src/` or `SECURITY.md` edits; CAF not marked
+
+---
+
+# Batch CB — wire dead packages (#351–#353)
+
+Authoring wave: **W4** (Batch CB RED) · Implementation: **W5** `#351 pr` · **W6** `#352 requirements` · **W7** `#353 xrepo`
+
+Helper: `tests/support/dead_package_wiring.py` (runtime import scan; `TYPE_CHECKING` and package-internal imports do not count).
+
+Out of scope (D8 — no tests): P12–P31 / #377–#385. D6 — no README / `docs/cli.md` / `AGENTS.md` / file 7 / 20b product files.
+
+After each impl wave, recon **deletes** the matching W4.1 current-state "unwired" pins and **un-xfails** `green after W5|W6|W7` markers (`strict=False`).
+
+## xfail schedule (W4)
+
+| Wave | Tests | Marker reason | Status |
+|------|-------|---------------|--------|
+| **W5** | `tests/pr/test_pr_wiring.py` (9) | `green after W5: wire mergecraft.pr (#351)` | **XFAIL** |
+| **W6** | `tests/requirements/test_requirements_wiring.py` (13, incl. 3 ingest sources) | `green after W6: wire mergecraft.requirements (#352)` | **XFAIL** |
+| **W7** | `tests/xrepo/test_xrepo_wiring.py` (8) | `green after W7: wire mergecraft.xrepo (#353)` | **XFAIL** |
+
+W5 xfails: `test_pr_has_a_review_or_cli_production_call_site`, `test_pr_cli_is_a_new_cmd_module`, `test_root_help_lists_describe`, `test_describe_help_names_output_only_summary`, `test_describe_cli_emits_title_summary_walkthrough_risk_and_tests`, `test_describe_cli_does_not_write_the_reviewed_tree`, `test_production_wiring_invokes_pr_library_surfaces`, `test_similar_issues_and_changes_are_wired`, `test_unknown_describe_option_is_usage_error`.
+
+W6 xfails: `test_requirements_has_a_review_or_cli_production_call_site`, `test_requirements_cli_is_a_new_cmd_module`, `test_root_help_lists_requirements`, `test_requirements_inspect_help_is_registered`, `test_requirements_explain_help_is_registered`, `test_ingest_fences_external_requirement_text_with_nonce`, `test_requirement_states_are_the_five_named_outcomes`, `test_ingest_accepts_named_requirement_sources[*]`, `test_inspect_cli_lists_states`, `test_explain_unknown_requirement_id_is_an_error`, `test_policy_may_require_requirements_evidence`.
+
+W7 xfails: `test_xrepo_has_a_review_or_cli_production_call_site`, `test_xrepo_cli_is_a_new_cmd_module`, `test_root_help_lists_xrepo`, `test_xrepo_explain_help_is_registered`, `test_review_path_uses_sha_pinned_linked_repos`, `test_unauthorized_linked_repo_is_blocked_on_the_review_path`, `test_explain_unknown_finding_id_is_an_error`, `test_multi_service_fixture_reports_producer_consumer_breakage`.
+
+## Contract matrix (W4)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| CB351a | `mergecraft.pr` has no production importer yet | unit | current | `test_pr_package_has_no_production_call_site_yet` |
+| CB351b | No `cli/pr_cmd.py` / `describe_cmd.py` yet | unit | current | `test_pr_cli_cmd_module_does_not_exist_yet` |
+| CB351c | `describe` absent from root help / usage-exit | functional | current | `test_root_help_does_not_list_describe_yet`, `test_describe_command_is_currently_a_usage_error` |
+| CB351d | D10 root callback still owns `--format` / `--quiet` / `--color` | unit | happy | `test_d10_root_callback_still_owns_format_quiet_color`, `test_w5_does_not_fold_describe_into_root_callback` |
+| CB351e | Review path or CLI imports `mergecraft.pr` | integration | happy | `test_pr_has_a_review_or_cli_production_call_site` |
+| CB351f | New `cli/*_cmd.py` (not `app.py`) | unit | happy | `test_pr_cli_is_a_new_cmd_module` |
+| CB351g | `mergecraft describe` help + sections | functional | happy | `test_root_help_lists_describe`, `test_describe_help_names_output_only_summary`, `test_describe_cli_emits_title_summary_walkthrough_risk_and_tests` |
+| CB351h | Describe is output-only (D13) | functional | edge | `test_describe_cli_does_not_write_the_reviewed_tree` |
+| CB351i | Library surfaces invoked from production | integration | happy | `test_production_wiring_invokes_pr_library_surfaces` |
+| CB351j | Similar issues / similar changes wired | integration | happy | `test_similar_issues_and_changes_are_wired` |
+| CB351k | Unknown describe flag → usage 2 | functional | error | `test_unknown_describe_option_is_usage_error` |
+| CB352a | `mergecraft.requirements` unwired | unit | current | `test_requirements_package_has_no_production_call_site_yet` |
+| CB352b | No `cli/requirements_cmd.py` / command | functional | current | `test_requirements_cli_cmd_module_does_not_exist_yet`, `test_root_help_does_not_list_requirements_yet`, `test_requirements_command_is_currently_a_usage_error` |
+| CB352c | Review/CLI import + new cmd module | integration | happy | `test_requirements_has_a_review_or_cli_production_call_site`, `test_requirements_cli_is_a_new_cmd_module` |
+| CB352d | `requirements inspect` / `explain` | functional | happy | `test_root_help_lists_requirements`, `test_requirements_inspect_help_is_registered`, `test_requirements_explain_help_is_registered`, `test_inspect_cli_lists_states` |
+| CB352e | Ingest + nonce fence | integration | happy | `test_ingest_fences_external_requirement_text_with_nonce`, `test_ingest_accepts_named_requirement_sources` |
+| CB352f | Five requirement states | unit | happy | `test_requirement_states_are_the_five_named_outcomes` |
+| CB352g | Unknown requirement id | functional | error | `test_explain_unknown_requirement_id_is_an_error` |
+| CB352h | D14: `decide_approval` remains the only gate | unit | current | `test_decide_approval_is_the_only_approval_gate` |
+| CB352i | Policy may require requirements evidence | integration | happy | `test_policy_may_require_requirements_evidence` |
+| CB353a | `mergecraft.xrepo` unwired | unit | current | `test_xrepo_package_has_no_production_call_site_yet` |
+| CB353b | No `cli/xrepo_cmd.py` / command | functional | current | `test_xrepo_cli_cmd_module_does_not_exist_yet`, `test_root_help_does_not_list_xrepo_yet`, `test_xrepo_command_is_currently_a_usage_error` |
+| CB353c | Review/CLI import + new cmd module | integration | happy | `test_xrepo_has_a_review_or_cli_production_call_site`, `test_xrepo_cli_is_a_new_cmd_module` |
+| CB353d | `xrepo explain` | functional | happy / error | `test_root_help_lists_xrepo`, `test_xrepo_explain_help_is_registered`, `test_explain_unknown_finding_id_is_an_error` |
+| CB353e | SHA-pinned linked repos on review path | integration | happy | `test_review_path_uses_sha_pinned_linked_repos` |
+| CB353f | Authorization boundary (`LinkedRepoAccessError`) | integration | error | `test_unauthorized_linked_repo_is_blocked_on_the_review_path` |
+| CB353g | Multi-service producer/consumer breakage fixture | functional | happy | `test_multi_service_fixture_reports_producer_consumer_breakage` |
+
+## Acceptance (W4)
+
+- Collection clean; current-state pins **PASS**; wiring-exists pins **XFAIL** (`strict=False`); **no XPASS**
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W5 not started
