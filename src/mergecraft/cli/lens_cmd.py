@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING
 
 import typer
 from rich.table import Table
@@ -11,9 +11,7 @@ from rich.table import Table
 from mergecraft.agents.lenses import get_lens, load_lens_catalog, resolve_lens_prompt
 from mergecraft.classify.change_classifier import classify_change
 from mergecraft.cli.consoles import err_console as console
-from mergecraft.cli.exits import (
-    CLI_CONFIGURATION_EXIT_CODE,
-)
+from mergecraft.cli.errors import cli_bail
 from mergecraft.review.lens_routing import load_routing_registry, route_lenses
 
 if TYPE_CHECKING:
@@ -24,11 +22,6 @@ app = typer.Typer(
     help="Inspect and test bundled review lenses.",
     no_args_is_help=True,
 )
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 @app.command("list")
@@ -50,7 +43,7 @@ def show_cmd(lens_id: str = typer.Argument(..., help="Lens id (e.g. security).")
     try:
         lens = get_lens(lens_id)
     except KeyError:
-        _bail(f"unknown lens id: {lens_id!r}")
+        cli_bail(f"unknown lens id: {lens_id!r}")
 
     console.print(f"[bold]{lens.lens_id}[/bold] — {lens.title}")
     typer.echo("\n--- rubric ---\n")
@@ -75,7 +68,7 @@ def run_lens_test(
     try:
         lens = get_lens(lens_id)
     except KeyError:
-        _bail(f"unknown lens id: {lens_id!r}")
+        cli_bail(f"unknown lens id: {lens_id!r}")
 
     diff_text = diff.read_text(encoding="utf-8")
     changed_paths = [

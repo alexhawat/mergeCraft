@@ -10,7 +10,6 @@ before it is trusted with an automation trigger.
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Annotated, Any
 
 import typer
@@ -20,6 +19,7 @@ from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
     CLI_USAGE_EXIT_CODE,
 )
+from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.findings.select import (
     DEFAULT_LABEL,
     CarryoverFinding,
@@ -94,6 +94,7 @@ def _render_markdown(findings: list[CarryoverFinding], *, pull_number: int) -> s
 
 @app.command("export")
 def export(
+    ctx: typer.Context,
     pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
     repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
     output_format: Annotated[
@@ -133,16 +134,13 @@ def export(
             await client.aclose()
 
     findings = asyncio.run(_run())
-    if output_format == "json":
-        typer.echo(
-            json.dumps(
-                {
-                    "pull_number": pr,
-                    "count": len(findings),
-                    "findings": [_finding_payload(f) for f in findings],
-                },
-                indent=2,
-            )
+    if wants_json_output(ctx, json_flag=(output_format == "json")):
+        emit_cli_json(
+            {
+                "pull_number": pr,
+                "count": len(findings),
+                "findings": [_finding_payload(f) for f in findings],
+            }
         )
         return
     typer.echo(_render_markdown(findings, pull_number=pr))
@@ -166,6 +164,7 @@ def _print_plan(plan: CarryoverPlan) -> None:
 
 @app.command("carryover")
 def carryover(
+    ctx: typer.Context,
     pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
     repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
     label: Annotated[
@@ -217,24 +216,17 @@ def carryover(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
-    if json_output:
-        typer.echo(
-            json.dumps(
-                {
-                    "applied": outcome is not None,
-                    "pull_number": plan.pull_number,
-                    "truncated": plan.truncated,
-                    "to_file": [_finding_payload(f) for f in plan.to_file],
-                    "already_filed": [_finding_payload(f) for f in plan.already_filed],
-                    "filed": [
-                        i.model_dump(mode="json") for i in (outcome.filed if outcome else [])
-                    ],
-                    "failed": [
-                        f.model_dump(mode="json") for f in (outcome.failed if outcome else [])
-                    ],
-                },
-                indent=2,
-            )
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(
+            {
+                "applied": outcome is not None,
+                "pull_number": plan.pull_number,
+                "truncated": plan.truncated,
+                "to_file": [_finding_payload(f) for f in plan.to_file],
+                "already_filed": [_finding_payload(f) for f in plan.already_filed],
+                "filed": [i.model_dump(mode="json") for i in (outcome.filed if outcome else [])],
+                "failed": [f.model_dump(mode="json") for f in (outcome.failed if outcome else [])],
+            }
         )
     elif outcome is None:
         _print_plan(plan)

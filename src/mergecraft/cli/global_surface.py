@@ -12,6 +12,8 @@ from typing import Any, Literal, cast
 import typer
 
 from mergecraft.cli import consoles
+from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.utils.log import configure_logging
 
 CLI_JSON_SCHEMA_VERSION = "1.0.0"
@@ -126,6 +128,10 @@ def resolve_effective_log_level(
         normalized = log_level.strip().upper()
         if normalized in _LOG_LEVELS:
             return normalized
+        cli_bail(
+            f"invalid --log-level {log_level!r} — must be one of: {', '.join(sorted(_LOG_LEVELS))}",
+            code=CLI_USAGE_EXIT_CODE,
+        )
     if verbose:
         return "DEBUG"
     if quiet:
@@ -138,6 +144,19 @@ def resolve_effective_log_level(
     return resolve_log_level()
 
 
+def validate_log_level_option(value: str | None) -> str | None:
+    """Typer callback — reject unknown ``--log-level`` values at the CLI boundary."""
+    if value is None:
+        return None
+    normalized = value.strip().upper()
+    if normalized not in _LOG_LEVELS:
+        cli_bail(
+            f"invalid --log-level {value!r} — must be one of: {', '.join(sorted(_LOG_LEVELS))}",
+            code=CLI_USAGE_EXIT_CODE,
+        )
+    return normalized
+
+
 def apply_global_cli_options(
     ctx: typer.Context,
     *,
@@ -147,7 +166,11 @@ def apply_global_cli_options(
     log_level: str | None,
     color: ColorMode,
 ) -> None:
-    """Store root options on ``ctx.obj`` and configure logging + colour sinks."""
+    """Store root options on ``ctx.obj`` and configure logging.
+
+    Colour is applied earlier by :func:`bootstrap_cli_surface_from_argv` so
+    ``--help`` renders with the correct Rich policy before this callback runs.
+    """
     ctx.obj = CliGlobals(
         format=output_format,
         quiet=quiet,
@@ -155,9 +178,6 @@ def apply_global_cli_options(
         log_level=log_level,
         color=color,
     )
-    color_enabled, force_terminal = resolve_color_enabled(color=color)
-    apply_console_color(color_enabled=color_enabled, force_terminal=force_terminal)
-    apply_typer_rich_help_color(color=color)
     level = resolve_effective_log_level(quiet=quiet, verbose=verbose, log_level=log_level)
     configure_logging(force=True, level=level)
 
@@ -202,5 +222,6 @@ __all__ = [
     "parse_color_flag_from_argv",
     "resolve_color_enabled",
     "resolve_effective_log_level",
+    "validate_log_level_option",
     "wants_json_output",
 ]

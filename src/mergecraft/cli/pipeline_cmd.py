@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NoReturn
 
 import typer
 from rich.table import Table
 
 from mergecraft.agents.registry import load_registry
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
@@ -29,11 +29,6 @@ app = typer.Typer(
 )
 
 
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
-
-
 def _default_pipeline_path(target_dir: Path, settings: object) -> Path:
     configured = getattr(settings, "pipeline", None)
     if configured:
@@ -46,7 +41,7 @@ def _load_pipeline(target_dir: Path) -> tuple[PipelineDefinition, Path]:
     settings = load_repo_settings(root=target_dir)
     path = _default_pipeline_path(target_dir, settings)
     if not path.is_file():
-        _bail(f"pipeline file not found: {path}")
+        cli_bail(f"pipeline file not found: {path}")
     text = path.read_text(encoding="utf-8")
     return parse_pipeline(text), path
 

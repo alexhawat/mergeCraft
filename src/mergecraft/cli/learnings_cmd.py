@@ -8,7 +8,6 @@ sections; ``influence`` shows both.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,10 +16,12 @@ import typer
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
     CLI_SUCCESS_EXIT_CODE,
 )
+from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.utils.learnings import (
     LearningProvenance,
     list_active_entries,
@@ -53,9 +54,7 @@ def _entry_to_dict(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _format_output(payload: list[dict[str, Any]], *, json_output: bool) -> str:
-    if json_output:
-        return json.dumps(payload, indent=2, sort_keys=True)
+def _format_human_output(payload: list[dict[str, Any]]) -> str:
     if not payload:
         return "(no entries)"
     lines: list[str] = []
@@ -80,6 +79,7 @@ def _format_output(payload: list[dict[str, Any]], *, json_output: bool) -> str:
 
 @app.command("influence")
 def influence(
+    ctx: typer.Context,
     repo: Path = typer.Option(
         Path("."),
         "--repo",
@@ -110,28 +110,30 @@ def influence(
         text = learn_path.read_text(encoding="utf-8")
     except OSError as exc:
         logger.warning("could not read {}: {}", learn_path, exc)
-        console.print(f"[red]could not read {learn_path}: {exc}[/red]")
-        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from None
-    payload: list[dict[str, Any]] = []
-    for entry in list_active_entries(text):
-        payload.append(_entry_to_dict(entry))
-    output = _format_output(payload, json_output=json_output)
-    if json_output:
-        typer.echo(output)
+        cli_bail(f"could not read {learn_path}: {exc}", code=CLI_CONFIGURATION_EXIT_CODE)
+    active_payload = [_entry_to_dict(entry) for entry in list_active_entries(text)]
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(
+            {
+                "active": active_payload,
+                "staging": [_entry_to_dict(e) for e in list_staging_entries(text)],
+            }
+        )
+        sys.stdout.flush()
+        return
+    typer.echo(_format_human_output(active_payload))
+    staging_payload = [_entry_to_dict(e) for e in list_staging_entries(text)]
+    if staging_payload:
+        typer.echo("\nstaging (quarantined — promotion required):")
+        typer.echo(_format_human_output(staging_payload))
     else:
-        typer.echo(output)
-    if not json_output:
-        staging_payload = [_entry_to_dict(e) for e in list_staging_entries(text)]
-        if staging_payload:
-            typer.echo("\nstaging (quarantined — promotion required):")
-            typer.echo(_format_output(staging_payload, json_output=False))
-        else:
-            typer.echo("\nstaging (quarantined — promotion required): (none)")
+        typer.echo("\nstaging (quarantined — promotion required): (none)")
     sys.stdout.flush()
 
 
 @app.command("active")
 def active(
+    ctx: typer.Context,
     repo: Path = typer.Option(
         Path("."),
         "--repo",
@@ -150,11 +152,15 @@ def active(
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     text = learn_path.read_text(encoding="utf-8")
     payload = [_entry_to_dict(e) for e in list_active_entries(text)]
-    typer.echo(_format_output(payload, json_output=json_output))
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json({"entries": payload})
+    else:
+        typer.echo(_format_human_output(payload))
 
 
 @app.command("staging")
 def staging(
+    ctx: typer.Context,
     repo: Path = typer.Option(
         Path("."),
         "--repo",
@@ -173,4 +179,7 @@ def staging(
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     text = learn_path.read_text(encoding="utf-8")
     payload = [_entry_to_dict(e) for e in list_staging_entries(text)]
-    typer.echo(_format_output(payload, json_output=json_output))
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json({"entries": payload})
+    else:
+        typer.echo(_format_human_output(payload))

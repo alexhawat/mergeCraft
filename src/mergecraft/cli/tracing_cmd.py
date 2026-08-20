@@ -22,14 +22,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any
 
 import typer
 from rich.table import Table
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import (
-    CLI_CONFIGURATION_EXIT_CODE,
     CLI_SUCCESS_EXIT_CODE,
 )
 from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
@@ -48,11 +47,6 @@ app = typer.Typer(
 
 _TOKEN_REDACTED_MARKER = "***"
 _REDACTION_INDICATORS = ("redact", "***")
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _is_redacted(value: Any) -> bool:

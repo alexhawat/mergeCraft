@@ -16,7 +16,6 @@ from __future__ import annotations
 import getpass
 import os
 from pathlib import Path
-from typing import NoReturn
 
 import typer
 
@@ -30,8 +29,8 @@ from mergecraft.cli.auth_cmd import (
     _write_env_value,
 )
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
-    CLI_CONFIGURATION_EXIT_CODE,
     CLI_SUCCESS_EXIT_CODE,
 )
 from mergecraft.cli.tracing_logfire_wf_yaml import (
@@ -60,11 +59,6 @@ logfire_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(logfire_app, name="logfire")
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _delete_gh_secret(*, name: str, repo_slug: str) -> bool:
@@ -107,10 +101,10 @@ def _parse_repo_slug() -> str:
             stderr=subprocess.DEVNULL,
         ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
-        _bail(f"could not read git origin remote: {exc}")
+        cli_bail(f"could not read git origin remote: {exc}")
     match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
     if not match:
-        _bail(f"could not parse github owner/repo from remote: {url}")
+        cli_bail(f"could not parse github owner/repo from remote: {url}")
     return f"{match.group(1)}/{match.group(2)}"
 
 
@@ -164,7 +158,7 @@ def logfire_enable(
     if region is not None:
         region = region.strip().lower()
         if region not in _VALID_REGIONS:
-            _bail(f"--region must be one of: {', '.join(_VALID_REGIONS)} (got {region!r}).")
+            cli_bail(f"--region must be one of: {', '.join(_VALID_REGIONS)} (got {region!r}).")
 
     # Resolve per-key precedence: flag > env (.env, loaded by main()) > prompt.
     # Each key is independent so a partial `.env` (token present, project
@@ -200,19 +194,19 @@ def logfire_enable(
 
             project = _typer.prompt("Logfire project label").strip()
             if not project:
-                _bail("--project is required (logfire is a named export target).")
+                cli_bail("--project is required (logfire is a named export target).")
 
     # Always validate the token before writing — flag, env, or prompt.
     # The flag/env paths skip re-prompting; this probe is the only guarantee
     # that the operator has a credential that actually ingests.
     if not _validate_logfire_token(token):
-        _bail(
+        cli_bail(
             "Logfire token validation failed (HTTP 401/403 or auth redirect). "
             "Check the token and retry."
         )
 
     if any(ch.isspace() for ch in project):
-        _bail("Logfire project label must not contain whitespace.")
+        cli_bail("Logfire project label must not contain whitespace.")
 
     console.print(f"[dim]resolved token via {token_source}; project via {project_source}[/dim]")
 
@@ -262,7 +256,7 @@ def logfire_enable(
             )
 
     if not wrote_local and not wrote_github:
-        _bail(
+        cli_bail(
             "nothing was written — both local and github scopes failed. "
             "retry with --scope local or --scope github to isolate the failure."
         )
@@ -332,7 +326,7 @@ def logfire_disable(
             )
 
     if not wrote_local and not wrote_github:
-        _bail(
+        cli_bail(
             "nothing was cleared — both local and github scopes failed. "
             "retry with --scope local or --scope github to isolate the failure."
         )
@@ -426,9 +420,9 @@ def logfire_wire_workflow(
     unless ``--force`` is given. Dry-run by default; ``--apply`` writes.
     """
     if not secret:
-        _bail("--secret cannot be empty")
+        cli_bail("--secret cannot be empty")
     if not project_var:
-        _bail("--project-var cannot be empty")
+        cli_bail("--project-var cannot be empty")
     try:
         proposed = apply_logfire_wiring(
             workflow_path=workflow,
@@ -438,7 +432,7 @@ def logfire_wire_workflow(
             force=force,
         )
     except LogfireWorkflowError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
 
     if proposed.was_modified:
         diff_text = render_workflow_diff(workflow, proposed)
@@ -453,7 +447,7 @@ def logfire_wire_workflow(
     try:
         workflow.write_text(proposed.new_text, encoding="utf-8")
     except OSError as exc:
-        _bail(f"could not write {workflow}: {exc}")
+        cli_bail(f"could not write {workflow}: {exc}")
     console.print(f"[green]wrote[/green] {workflow}")
 
 
@@ -498,7 +492,7 @@ def logfire_unwire_workflow(
             step_selector=step,
         )
     except LogfireWorkflowError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
 
     if proposed.was_modified:
         diff_text = render_workflow_diff(workflow, proposed)
@@ -513,7 +507,7 @@ def logfire_unwire_workflow(
     try:
         workflow.write_text(proposed.new_text, encoding="utf-8")
     except OSError as exc:
-        _bail(f"could not write {workflow}: {exc}")
+        cli_bail(f"could not write {workflow}: {exc}")
     console.print(f"[green]wrote[/green] {workflow}")
 
 

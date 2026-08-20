@@ -23,15 +23,16 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any
 
 import typer
 from pydantic import ValidationError
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
-    CLI_USAGE_EXIT_CODE,
+    CLI_FAILED_EXIT_CODE,
 )
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.config import load_repo_settings
@@ -85,11 +86,6 @@ app = typer.Typer(
 # ── helpers ────────────────────────────────────────────────────────────
 
 
-def _bail(msg: str, *, code: int = CLI_CONFIGURATION_EXIT_CODE) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(code)
-
-
 def _bank_dir(bank: Path | None) -> Path:
     """Return the resolved bank directory (default = ``evals/cases/``)."""
     return bank if bank is not None else DEFAULT_BANK_DIR
@@ -98,7 +94,7 @@ def _bank_dir(bank: Path | None) -> Path:
 def _case_path(bank_dir: Path, case_id: str) -> Path:
     """Return the on-disk path for ``case_id`` under ``bank_dir``."""
     if not case_id or not case_id.replace("-", "").replace("_", "").replace(".", "").isalnum():
-        _bail(f"invalid case id: {case_id!r}")
+        cli_bail(f"invalid case id: {case_id!r}")
     return bank_dir / f"{case_id}{CASE_FILE_SUFFIX}"
 
 
@@ -130,9 +126,9 @@ def _format_diff_human(diff: ReplayDiff) -> str:
     return "\n".join(lines)
 
 
-def _format_diff_json(diff: ReplayDiff) -> str:
-    """Render a :class:`ReplayDiff` as JSON."""
-    return json.dumps(diff.model_dump(mode="json"), indent=2, sort_keys=True)
+def _format_diff_json(diff: ReplayDiff) -> dict[str, Any]:
+    """Return a JSON-safe replay diff payload."""
+    return diff.model_dump(mode="json")
 
 
 def _resolve_synthetic_provenance(
@@ -284,13 +280,13 @@ def add(
             trust_tier=trust_tier_recorded,
         )
     except ValidationError as exc:
-        _bail(f"case failed validation: {exc}")
+        cli_bail(f"case failed validation: {exc}")
     try:
         target = add_case(bank_dir, case, overwrite=overwrite)
     except FileExistsError:
-        _bail(f"case {case_id!r} already exists at {bank_dir}; use --overwrite to replace")
+        cli_bail(f"case {case_id!r} already exists at {bank_dir}; use --overwrite to replace")
     except OSError as exc:
-        _bail(f"could not write case to {bank_dir}: {exc}")
+        cli_bail(f"could not write case to {bank_dir}: {exc}")
     console.print(f"[green]added case {case_id}[/green] → {target}")
 
 
@@ -299,6 +295,7 @@ def add(
 
 @app.command("list")
 def list_cmd(
+    ctx: typer.Context,
     category: str | None = typer.Option(
         None,
         "--category",
@@ -337,16 +334,15 @@ def list_cmd(
         try:
             since_dt = datetime.fromisoformat(since)
         except ValueError:
-            _bail(f"--since must be an ISO-8601 timestamp; got {since!r}")
+            cli_bail(f"--since must be an ISO-8601 timestamp; got {since!r}")
     cases = list_cases(
         bank_dir,
         category=category,
         since=since_dt,
         id_prefix=id_prefix,
     )
-    if json_output:
-        payload = [_case_to_json(c) for c in cases]
-        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json({"cases": [_case_to_json(c) for c in cases]})
         return
     if not cases:
         console.print(f"[yellow]no cases in {bank_dir}[/yellow]")
@@ -360,6 +356,7 @@ def list_cmd(
 
 @app.command("replay")
 def replay(
+    ctx: typer.Context,
     case_id: str = typer.Argument(..., help="Case id to replay."),
     current_decision: str | None = typer.Option(
         None,
@@ -391,19 +388,19 @@ def replay(
     bank_dir = _bank_dir(bank)
     case_path = _case_path(bank_dir, case_id)
     if not case_path.is_file():
-        _bail(f"case {case_id!r} not found at {case_path}")
+        cli_bail(f"case {case_id!r} not found at {case_path}")
     try:
         case = load_case(case_path)
     except Exception as exc:
-        _bail(f"could not load case {case_id!r}: {exc}")
+        cli_bail(f"could not load case {case_id!r}: {exc}")
     diff = replay_case(case, current_decision=current_decision)
-    if json_output:
-        typer.echo(_format_diff_json(diff))
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(_format_diff_json(diff))
     else:
         console.print(_format_diff_human(diff))
     if diff.status == "regression":
         # Exit non-zero so a CI loop can latch on the regression.
-        raise typer.Exit(CLI_USAGE_EXIT_CODE)
+        raise typer.Exit(CLI_FAILED_EXIT_CODE)
 
 
 # ── promote ────────────────────────────────────────────────────────────
@@ -454,23 +451,23 @@ def promote(
     bank_dir = _bank_dir(bank)
     case_path = _case_path(bank_dir, case_id)
     if not case_path.is_file():
-        _bail(f"case {case_id!r} not found at {case_path}")
+        cli_bail(f"case {case_id!r} not found at {case_path}")
     try:
         case = load_case(case_path)
     except Exception as exc:
-        _bail(f"could not load case {case_id!r}: {exc}")
+        cli_bail(f"could not load case {case_id!r}: {exc}")
     out_dir = target_dir if target_dir is not None else _default_permanent_dir()
     try:
         target = write_permanent_test(out_dir, case, overwrite=overwrite)
     except FileExistsError:
-        _bail(
+        cli_bail(
             f"permanent test for case {case_id!r} already exists at {out_dir}; "
             "use --overwrite to replace"
         )
     except ValueError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
     except OSError as exc:
-        _bail(f"could not write permanent test to {out_dir}: {exc}")
+        cli_bail(f"could not write permanent test to {out_dir}: {exc}")
     console.print(f"[green]promoted case {case_id}[/green] → {target}")
 
 
@@ -483,16 +480,16 @@ def _replay_inputs_from_packet(path: Path) -> tuple[list[dict[str, Any]], bool, 
     dropped at capture time.
     """
     if not path.is_file():
-        _bail(f"{path} is not a file")
+        cli_bail(f"{path} is not a file")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        _bail(f"could not read packet {path}: {exc}")
+        cli_bail(f"could not read packet {path}: {exc}")
     if not isinstance(payload, dict):
-        _bail(f"{path}: expected a merge evidence packet object")
+        cli_bail(f"{path}: expected a merge evidence packet object")
     rows = payload.get("findings")
     if not isinstance(rows, list):
-        _bail(f"{path}: packet has no 'findings' array")
+        cli_bail(f"{path}: packet has no 'findings' array")
     findings = [row for row in rows if isinstance(row, dict)]
     run = payload.get("run")
     run_succeeded = True
@@ -533,6 +530,7 @@ def _read_json_or_jsonl(path: Path) -> Any:
 
 @app.command("replay-bank")
 def replay_bank_cmd(
+    ctx: typer.Context,
     bank: Path | None = typer.Option(
         None,
         "--bank",
@@ -570,36 +568,36 @@ def replay_bank_cmd(
     out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
     providers = tuple(provider) if provider else DEFAULT_BENCHMARK_PROVIDERS
     result, path = replay_bank(bank_dir, results_dir=out_dir, providers=providers)
-    if json_output:
-        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
-    else:
-        console.print(f"[green]benchmark result set[/green] → {path}")
-        console.print(f"  cases     : {result.metrics.cases_total}")
-        console.print(f"  replayable: {result.metrics.cases_replayable}")
-        console.print(f"  passed    : {result.metrics.cases_passed}")
-        console.print(f"  regression: {result.metrics.cases_regression}")
-        console.print(f"  blocked   : {result.metrics.cases_blocked}")
-        console.print(f"  pass rate : {result.metrics.decision_replay_pass_rate:.2%}")
-        console.print(f"  corpus @  : {result.pins.corpus_commit[:12]}")
-        console.print(f"  rubric    : {result.pins.rubric_version}")
-        if gate:
-            matrix = result.metrics.gate_matrix
-            console.print("  gate matrix (directional, #140):")
-            console.print(
-                f"    buggy : {matrix.buggy_total} total, "
-                f"{matrix.buggy_correct_block} correctly blocked, "
-                f"{matrix.buggy_unsafe_approval} unsafe approvals, "
-                f"{matrix.buggy_inconclusive} inconclusive"
-            )
-            console.print(
-                f"    clean : {matrix.clean_total} total, "
-                f"{matrix.clean_correct_approval} correctly approved, "
-                f"{matrix.clean_unsafe_block} unsafe blocks, "
-                f"{matrix.clean_inconclusive} inconclusive"
-            )
-            console.print(f"  unsafe approval rate: {result.metrics.unsafe_approval_rate:.2%}")
-            console.print(f"  clean block rate    : {result.metrics.clean_block_rate:.2%}")
-            console.print(f"  inconclusive rate   : {result.metrics.inconclusive_rate:.2%}")
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[green]benchmark result set[/green] → {path}")
+    console.print(f"  cases     : {result.metrics.cases_total}")
+    console.print(f"  replayable: {result.metrics.cases_replayable}")
+    console.print(f"  passed    : {result.metrics.cases_passed}")
+    console.print(f"  regression: {result.metrics.cases_regression}")
+    console.print(f"  blocked   : {result.metrics.cases_blocked}")
+    console.print(f"  pass rate : {result.metrics.decision_replay_pass_rate:.2%}")
+    console.print(f"  corpus @  : {result.pins.corpus_commit[:12]}")
+    console.print(f"  rubric    : {result.pins.rubric_version}")
+    if gate:
+        matrix = result.metrics.gate_matrix
+        console.print("  gate matrix (directional, #140):")
+        console.print(
+            f"    buggy : {matrix.buggy_total} total, "
+            f"{matrix.buggy_correct_block} correctly blocked, "
+            f"{matrix.buggy_unsafe_approval} unsafe approvals, "
+            f"{matrix.buggy_inconclusive} inconclusive"
+        )
+        console.print(
+            f"    clean : {matrix.clean_total} total, "
+            f"{matrix.clean_correct_approval} correctly approved, "
+            f"{matrix.clean_unsafe_block} unsafe blocks, "
+            f"{matrix.clean_inconclusive} inconclusive"
+        )
+        console.print(f"  unsafe approval rate: {result.metrics.unsafe_approval_rate:.2%}")
+        console.print(f"  clean block rate    : {result.metrics.clean_block_rate:.2%}")
+        console.print(f"  inconclusive rate   : {result.metrics.inconclusive_rate:.2%}")
 
 
 # ── bench ──────────────────────────────────────────────────────────────
@@ -607,6 +605,7 @@ def replay_bank_cmd(
 
 @app.command("bench")
 def bench_cmd(
+    ctx: typer.Context,
     bank: Path | None = typer.Option(
         None,
         "--bank",
@@ -695,8 +694,8 @@ def bench_cmd(
     # update_latest=False: a single-provider detection result must not
     # silently become "latest.json" — see write_result_set's docstring (D12).
     path = write_result_set(result, results_dir=out_dir, update_latest=False)
-    if json_output:
-        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(result.model_dump(mode="json"))
         return
 
     console.print(f"[green]benchmark result set[/green] → {path}")
@@ -718,6 +717,7 @@ def bench_cmd(
 
 @app.command("gate")
 def gate(
+    ctx: typer.Context,
     bank: Path | None = typer.Option(
         None,
         "--bank",
@@ -773,7 +773,7 @@ def gate(
     that regresses beyond the band fails the release, noise inside it passes.
     """
     if (baseline is None) != (candidate is None):
-        _bail("--baseline and --candidate must be given together")
+        cli_bail("--baseline and --candidate must be given together")
 
     gate_report = None
     if baseline is not None and candidate is not None:
@@ -787,8 +787,8 @@ def gate(
     permanent_dir = _default_permanent_dir()
 
     if not bank_dir.is_dir():
-        if json_output:
-            typer.echo(json.dumps({"status": "empty", "bank": str(bank_dir), "cases": 0}, indent=2))
+        if wants_json_output(ctx, json_flag=json_output):
+            emit_cli_json({"status": "empty", "bank": str(bank_dir), "cases": 0})
         else:
             console.print(f"[yellow]eval bank {bank_dir} does not exist yet[/yellow]")
         if gate_report is not None and not gate_report.passed:
@@ -825,7 +825,7 @@ def gate(
     if gate_failed:
         failures += 1
 
-    if json_output:
+    if wants_json_output(ctx, json_flag=json_output):
         payload: dict[str, Any] = {
             "status": "fail" if failures else "pass",
             "bank": str(bank_dir),
@@ -837,7 +837,7 @@ def gate(
         }
         if gate_report is not None:
             payload["regression_gate"] = gate_report.model_dump(mode="json")
-        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        emit_cli_json(payload)
     else:
         console.print(f"eval bank: {bank_dir}")
         console.print(f"  cases    : {len(paths)}")
@@ -912,12 +912,12 @@ def score(
     """
     for path in (actual, expected):
         if not path.is_file():
-            _bail(f"{path} is not a file")
+            cli_bail(f"{path} is not a file")
     try:
         actual_payload = _read_json_or_jsonl(actual)
         expected_payload = _read_json_or_jsonl(expected)
     except (OSError, json.JSONDecodeError) as exc:
-        _bail(f"could not read scoring inputs: {exc}")
+        cli_bail(f"could not read scoring inputs: {exc}")
 
     issues = load_baseline_issues(expected_payload)
     findings = load_reported_findings(actual_payload)

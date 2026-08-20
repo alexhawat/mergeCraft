@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import os
-from typing import NoReturn
 
 import typer
 from rich.table import Table
 
 from mergecraft.cli.consoles import err_console as console
-from mergecraft.cli.exits import (
-    CLI_CONFIGURATION_EXIT_CODE,
-)
 from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.run_cache import RunCache, default_cache_root, open_run_cache
 
@@ -20,11 +16,6 @@ app = typer.Typer(
     help="Inspect and maintain the mergeCraft run cache.",
     no_args_is_help=True,
 )
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _cache_from_env() -> RunCache:

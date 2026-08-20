@@ -6,7 +6,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING
 
 import typer
 import yaml
@@ -47,11 +47,6 @@ class ProbeResult:
     status: str
     detail: str
     hard_failure: bool = False
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _git_probe(cwd: Path) -> ProbeResult:

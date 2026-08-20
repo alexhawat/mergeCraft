@@ -2,8 +2,9 @@
 
 Every `mergecraft` CLI command exits with a named process exit code. Review
 outcomes reuse the `RunOutcome` taxonomy via `exit_code_for_outcome` /
-`cli_exit_code_for_review`; other commands import constants from
-`mergecraft.cli.exits` (re-exported from `mergecraft.run_outcome`).
+`cli_exit_code_for_review` from `mergecraft.run_outcome`; general CLI codes
+(`CLI_SUCCESS_EXIT_CODE`, `CLI_USAGE_EXIT_CODE`) and review aliases live in
+`mergecraft.cli.exits`. See this table for the full mapping.
 
 **Breaking change (pre-0.0.1):** scripts that branched on exit code `1` for
 generic CLI failures must follow this table instead. Usage / operator-input
@@ -43,6 +44,7 @@ Examples:
 
 - `mergecraft auth codex --scope everywhere` → `2` (unknown `--scope`)
 - `mergecraft findings export --format xml` → `2` (unsupported `--format`)
+- `mergecraft eval replay` with a verdict regression → `12` (`CLI_FAILED_EXIT_CODE`)
 - `mergecraft doctor` with a missing dependency → `30` (configuration / environment)
 - `mergecraft config validate` with a YAML schema error → `30`
 

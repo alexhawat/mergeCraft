@@ -75,8 +75,6 @@ RUN_OUTCOME_EXIT_CODE: Final[dict[RunOutcome, int]] = {
     RunOutcome.timed_out: 50,
 }
 
-CLI_SUCCESS_EXIT_CODE: Final[int] = 0
-CLI_USAGE_EXIT_CODE: Final[int] = 2
 CLI_FINDINGS_EXIT_CODE: Final[int] = 10
 CLI_BLOCKED_EXIT_CODE: Final[int] = 11
 
@@ -141,8 +139,6 @@ def cli_exit_code_for_review(
 __all__ = [
     "CLI_BLOCKED_EXIT_CODE",
     "CLI_FINDINGS_EXIT_CODE",
-    "CLI_SUCCESS_EXIT_CODE",
-    "CLI_USAGE_EXIT_CODE",
     "RUN_OUTCOME_CONCLUSION",
     "RUN_OUTCOME_EXIT_CODE",
     "CompletionConclusion",

@@ -23,6 +23,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -226,6 +227,54 @@ def test_mergecraft_log_level_env_overrides_default_quietness() -> None:
         stderr = _plain(result.stderr)
         assert result.exit_code == 0, stderr
         assert "init complete at" in stderr
+
+
+def test_invalid_log_level_exits_usage_code() -> None:
+    """Unknown ``--log-level`` values exit with ``CLI_USAGE_EXIT_CODE``."""
+    result = runner.invoke(app, ["--log-level", "NOTALEVEL", "init"], env=_DUMB_ENV)
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_USAGE_EXIT_CODE, combined
+    assert "invalid --log-level" in combined.lower()
+
+
+def test_global_format_json_inherited_by_eval_list(tmp_path: Path) -> None:
+    """Root ``--format json`` applies to ``eval list`` without a per-command flag."""
+    bank = tmp_path / "bank"
+    bank.mkdir()
+    case_path = bank / "synthetic-001.md"
+    case_path.write_text(
+        "---\n"
+        "id: synthetic-001\n"
+        "title: demo\n"
+        "category: missed_finding\n"
+        "submitted_at: 2026-08-01T00:00:00+00:00\n"
+        "run_id: synthetic\n"
+        "pr_number: 1\n"
+        "failure_mode: missed_finding\n"
+        "expected_finding: demo\n"
+        "expected_decision: block\n"
+        "replay_command: mergecraft eval replay synthetic-001\n"
+        "provenance:\n"
+        "  run_id: synthetic\n"
+        "  pr_number: 1\n"
+        "  source_field: eval_bank\n"
+        "  author_login: synthetic\n"
+        "  author_association: OWNER\n"
+        "  trust_tier: trusted\n"
+        "  timestamp: 2026-08-01T00:00:00+00:00\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        ["--format", "json", "eval", "list", "--bank", str(bank)],
+        env=_DUMB_ENV,
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == 0, combined
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"]
+    assert payload["cases"][0]["id"] == "synthetic-001"
 
 
 def test_diff_review_hidden_alias_emits_one_stderr_deprecation_line(

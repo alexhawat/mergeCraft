@@ -17,7 +17,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
-from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE, CLI_FAILED_EXIT_CODE
 from mergecraft.evals.store import list_cases, load_case
 
 runner = CliRunner()
@@ -184,11 +184,13 @@ def test_eval_list_json_emits_structured_payload(tmp_path: Path) -> None:
     result = runner.invoke(app, ["eval", "list", "--bank", str(tmp_path), "--json"])
     assert result.exit_code == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
-    assert isinstance(payload, list)
-    assert len(payload) == 1
-    assert payload[0]["id"] == "synthetic-001"
-    assert payload[0]["expected_decision"] == "block"
-    assert payload[0]["provenance"]["trust_tier"] == "trusted"
+    assert payload["schema_version"]
+    cases = payload["cases"]
+    assert isinstance(cases, list)
+    assert len(cases) == 1
+    assert cases[0]["id"] == "synthetic-001"
+    assert cases[0]["expected_decision"] == "block"
+    assert cases[0]["provenance"]["trust_tier"] == "trusted"
 
 
 def test_eval_list_filters_by_category(tmp_path: Path) -> None:
@@ -259,7 +261,7 @@ def test_eval_list_distinguishes_rejected_and_reverted(tmp_path: Path) -> None:
     )
     assert rej_result.exit_code == 0, rej_result.stdout + rej_result.stderr
     rej_payload = json.loads(rej_result.stdout)
-    assert {c["id"] for c in rej_payload} == {"synthetic-rej"}
+    assert {c["id"] for c in rej_payload["cases"]} == {"synthetic-rej"}
 
     rev_result = runner.invoke(
         app,
@@ -267,7 +269,7 @@ def test_eval_list_distinguishes_rejected_and_reverted(tmp_path: Path) -> None:
     )
     assert rev_result.exit_code == 0, rev_result.stdout + rev_result.stderr
     rev_payload = json.loads(rev_result.stdout)
-    assert {c["id"] for c in rev_payload} == {"synthetic-rev"}
+    assert {c["id"] for c in rev_payload["cases"]} == {"synthetic-rev"}
 
 
 def test_eval_list_filters_by_id_prefix(tmp_path: Path) -> None:
@@ -326,8 +328,8 @@ def test_eval_replay_passes_when_verdicts_match(tmp_path: Path) -> None:
     assert "passed" in (result.stdout + result.stderr)
 
 
-def test_eval_replay_exits_2_on_regression(tmp_path: Path) -> None:
-    """``mergecraft eval replay`` exits 2 when the verdict drifts."""
+def test_eval_replay_exits_12_on_regression(tmp_path: Path) -> None:
+    """``mergecraft eval replay`` exits 12 when the verdict drifts."""
     _add_synthetic(tmp_path, case_id="synthetic-001")
     result = runner.invoke(
         app,
@@ -341,7 +343,7 @@ def test_eval_replay_exits_2_on_regression(tmp_path: Path) -> None:
             str(tmp_path),
         ],
     )
-    assert result.exit_code == 2
+    assert result.exit_code == CLI_FAILED_EXIT_CODE
     assert "regression" in (result.stdout + result.stderr).lower()
 
 
@@ -473,6 +475,7 @@ def test_eval_replay_json_emits_structured_diff(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
+    assert payload["schema_version"]
     assert payload["case_id"] == "synthetic-001"
     assert payload["status"] == "passed"
     assert payload["expected_decision"] == "block"
@@ -510,7 +513,7 @@ def test_eval_add_list_replay_round_trip(tmp_path: Path) -> None:
     list_result = runner.invoke(app, ["eval", "list", "--bank", str(tmp_path), "--json"])
     assert list_result.exit_code == 0, list_result.stdout + list_result.stderr
     payload = json.loads(list_result.stdout)
-    assert any(c["id"] == "synthetic-e2e" for c in payload)
+    assert any(c["id"] == "synthetic-e2e" for c in payload["cases"])
 
     replay_result = runner.invoke(
         app,

@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NoReturn
 
 import typer
 import uvicorn
 
 from mergecraft.cli.consoles import err_console as console
-from mergecraft.cli.exits import (
-    CLI_CONFIGURATION_EXIT_CODE,
-)
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.mcp_serve import (
     _role_endpoint,
     build_mcp_app_from_ctx,
@@ -27,11 +24,6 @@ app = typer.Typer(
     help="Serve mergeCraft MCP tools to external clients.",
     no_args_is_help=True,
 )
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 @app.command("list")
@@ -58,11 +50,11 @@ def list_cmd(
     try:
         resolve_profile(profile)
     except ValueError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
     try:
         parse_cli_trust_override(trust)
     except ValueError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
 
     with apply_profile_env(resolve_profile(profile)):
         try:
@@ -72,7 +64,7 @@ def list_cmd(
                 trust_override=trust,
             )
         except ValueError as exc:
-            _bail(str(exc))
+            cli_bail(str(exc))
 
     for name in sorted(names):
         typer.echo(name)
@@ -109,18 +101,18 @@ def serve_cmd(
     try:
         bundle = resolve_profile(profile)
     except ValueError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
     try:
         parse_cli_trust_override(trust)
     except ValueError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
 
     with apply_profile_env(bundle):
         try:
             ctx = build_mcp_tool_context(cwd=cwd, trust_override=trust)
             fastapi_app = build_mcp_app_from_ctx(role, ctx)
         except ValueError as exc:
-            _bail(str(exc))
+            cli_bail(str(exc))
 
         # D9 — print the per-serve Bearer token to stderr so the caller can pin it.
         console.print(f"MERGECRAFT_MCP_BEARER={ctx.mcp_auth_token}")

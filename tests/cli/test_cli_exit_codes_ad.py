@@ -25,6 +25,7 @@ from tests.ci.workflow_support import REPO_ROOT
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.offline_review import OfflineReviewResult
 from mergecraft.run_outcome import (
     CLI_BLOCKED_EXIT_CODE,
@@ -284,9 +285,7 @@ def test_run_outcome_exit_code_contract_pins(
 
 def test_cli_usage_exit_code_constant_is_two() -> None:
     """Usage / operator-input errors reserve exit code 2 (D11)."""
-    mod = import_analyzer_module("mergecraft.run_outcome")
-    usage_code = getattr(mod, "CLI_USAGE_EXIT_CODE", None)
-    assert usage_code == 2
+    assert CLI_USAGE_EXIT_CODE == 2
 
 
 @pytest.mark.parametrize(

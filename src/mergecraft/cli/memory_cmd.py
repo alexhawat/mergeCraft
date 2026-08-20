@@ -10,10 +10,8 @@ from typing import Any
 import typer
 from loguru import logger
 
-from mergecraft.cli.consoles import err_console as console
-from mergecraft.cli.exits import (
-    CLI_CONFIGURATION_EXIT_CODE,
-)
+from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.utils.learnings import repo_memory_paths
 from mergecraft.utils.memory import (
     FeedbackOutcome,
@@ -55,6 +53,7 @@ def _find_entry(entries: list[dict[str, str]], memory_id: str) -> dict[str, str]
 
 @app.command("list")
 def list_cmd(
+    ctx: typer.Context,
     repo: Path = typer.Option(
         Path("."),
         "--repo",
@@ -68,8 +67,8 @@ def list_cmd(
 ) -> None:
     """List active memory entries for a repository."""
     payload: list[dict[str, Any]] = _load_entries(repo)
-    if json_output:
-        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json({"entries": payload})
     else:
         if not payload:
             typer.echo("(no entries)")
@@ -80,6 +79,7 @@ def list_cmd(
 
 @app.command("show")
 def show_cmd(
+    ctx: typer.Context,
     memory_id: str,
     repo: Path = typer.Option(
         Path("."),
@@ -95,10 +95,9 @@ def show_cmd(
     """Show one memory entry by id."""
     entry = _find_entry(_load_entries(repo), memory_id)
     if entry is None:
-        console.print(f"[red]unknown memory id {memory_id}[/red]")
-        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
-    if json_output:
-        typer.echo(json.dumps(entry, indent=2, sort_keys=True))
+        cli_bail(f"unknown memory id {memory_id}")
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(entry)
     else:
         typer.echo(f"id: {entry['id']}\ntext: {entry['text']}")
     sys.stdout.flush()
@@ -120,11 +119,9 @@ def forget_cmd(
     """Remove one active memory entry."""
     path = _learnings_path(repo)
     if not path.is_file():
-        console.print(f"[red]no learnings file at {path}[/red]")
-        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
+        cli_bail(f"no learnings file at {path}")
     if _find_entry(_load_entries(repo), memory_id) is None:
-        console.print(f"[red]unknown memory id {memory_id}[/red]")
-        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
+        cli_bail(f"unknown memory id {memory_id}")
     text = path.read_text(encoding="utf-8")
     path.write_text(remove_memory_entry_from_learnings(text, memory_id), encoding="utf-8")
     typer.echo(f"forgot {memory_id}")
@@ -133,6 +130,7 @@ def forget_cmd(
 
 @app.command("feedback")
 def feedback_cmd(
+    ctx: typer.Context,
     fingerprint: str,
     outcome: FeedbackOutcome = typer.Option(
         ...,
@@ -161,19 +159,15 @@ def feedback_cmd(
         reason=reason,
         pr_number=pr_number,
     )
-    if json_output:
-        typer.echo(
-            json.dumps(
-                {
-                    "fingerprint": record.fingerprint,
-                    "outcome": record.outcome.value,
-                    "reason": record.reason,
-                    "pr_number": record.pr_number,
-                    "recorded_at": record.recorded_at.astimezone().isoformat(),
-                },
-                indent=2,
-                sort_keys=True,
-            )
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(
+            {
+                "fingerprint": record.fingerprint,
+                "outcome": record.outcome.value,
+                "reason": record.reason,
+                "pr_number": record.pr_number,
+                "recorded_at": record.recorded_at.astimezone().isoformat(),
+            }
         )
     else:
         typer.echo(f"recorded {record.outcome.value} for {record.fingerprint}")
@@ -218,8 +212,7 @@ def import_cmd(
     raw = bundle_path.read_text(encoding="utf-8")
     bundle = json.loads(raw)
     if not isinstance(bundle, dict):
-        console.print("[red]bundle must be a JSON object[/red]")
-        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
+        cli_bail("bundle must be a JSON object")
     import_memory_bundle(repo=repo, bundle=bundle)
     typer.echo(f"imported from {bundle_path}")
     sys.stdout.flush()

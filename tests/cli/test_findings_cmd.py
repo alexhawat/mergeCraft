@@ -93,6 +93,7 @@ def test_export_json_lists_the_findings(monkeypatch: MonkeyPatch) -> None:
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
+    assert payload["schema_version"]
     assert payload["count"] == 1
     assert payload["findings"][0]["fingerprint"] == _FP
     assert payload["findings"][0]["line"] == 42

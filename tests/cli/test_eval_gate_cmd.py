@@ -50,6 +50,7 @@ def test_gate_passes_on_a_healthy_bank(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
+    assert payload["schema_version"]
     assert payload["status"] == "pass"
     assert payload["loaded"] == 1
 

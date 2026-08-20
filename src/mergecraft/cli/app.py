@@ -46,6 +46,7 @@ from mergecraft.cli.global_surface import (
     ColorMode,
     OutputFormat,
     apply_global_cli_options,
+    validate_log_level_option,
 )
 from mergecraft.cli.typer_group import MergecraftTyperGroup
 
@@ -119,6 +120,7 @@ def _root(
         None,
         "--log-level",
         help="Explicit Loguru level (TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL).",
+        callback=validate_log_level_option,
     ),
     color: ColorMode = typer.Option(
         "auto",

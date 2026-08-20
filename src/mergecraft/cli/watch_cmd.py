@@ -7,33 +7,26 @@ import json
 import re
 import subprocess
 import sys
-from typing import Any, NoReturn
+from typing import Any
 
 import httpx
 import typer
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
-from mergecraft.cli.exits import (
-    CLI_CONFIGURATION_EXIT_CODE,
-)
+from mergecraft.cli.errors import cli_bail
 from mergecraft.yes import OpOptions, op
 
 REQUEST_TIMEOUT_MS = 35_000
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _get_gh_token() -> str:
     try:
         token = subprocess.check_output(["gh", "auth", "token"], text=True).strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
-        _bail("gh cli not found or not authenticated — run `gh auth login`.")
+        cli_bail("gh cli not found or not authenticated — run `gh auth login`.")
     if not token:
-        _bail("gh cli returned an empty token.")
+        cli_bail("gh cli returned an empty token.")
     return token
 
 
@@ -43,10 +36,10 @@ def _parse_git_remote() -> tuple[str, str]:
             ["git", "remote", "get-url", "origin"], text=True, stderr=subprocess.DEVNULL
         ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
-        _bail("not a git repository or no 'origin' remote found.")
+        cli_bail("not a git repository or no 'origin' remote found.")
     match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
     if not match:
-        _bail(f"could not parse github owner/repo from remote: {url}")
+        cli_bail(f"could not parse github owner/repo from remote: {url}")
     return match.group(1), match.group(2)
 
 
@@ -55,7 +48,7 @@ def _resolve_repo(positional: str | None) -> tuple[str, str]:
         return _parse_git_remote()
     match = re.match(r"^([^/\s]+)/([^/\s]+)$", positional)
     if not match:
-        _bail(f'invalid repo "{positional}" — expected <owner>/<repo>')
+        cli_bail(f'invalid repo "{positional}" — expected <owner>/<repo>')
     return match.group(1), match.group(2)
 
 
@@ -81,9 +74,9 @@ async def _poll_timeline(ctx: dict[str, Any]) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_MS / 1000.0) as client:
         response = await client.get(url, headers=headers, params=params or None)
         if response.status_code in {401, 403}:
-            _bail("invalid or expired github token — run `gh auth login`.")
+            cli_bail("invalid or expired github token — run `gh auth login`.")
         if response.status_code == 404:
-            _bail(f"repository {owner}/{repo} or issue/PR #{number} not found.")
+            cli_bail(f"repository {owner}/{repo} or issue/PR #{number} not found.")
         response.raise_for_status()
         events = response.json()
         if not isinstance(events, list):
@@ -142,7 +135,7 @@ def run(
 ) -> None:
     """Stream a PR/issue timeline as one JSON line per new event."""
     if pr <= 0:
-        _bail("--pr <number> is required")
+        cli_bail("--pr <number> is required")
     owner, name = _resolve_repo(repo)
     token = _get_gh_token()
 
