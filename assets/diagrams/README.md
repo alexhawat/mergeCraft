@@ -7,7 +7,7 @@ Committed SVGs for the landing README architecture hero (`<picture>` in `README.
 | `pipeline-light.svg` | Light (`d2 --theme 0`) | `README.md` `<img>` fallback |
 | `pipeline-dark.svg` | Dark (`d2 --theme 200`) | `README.md` `<source media="(prefers-color-scheme: dark)">` |
 
-**Source:** [`docs/diagrams/pipeline.d2`](../docs/diagrams/pipeline.d2) — PR event → trust tier → analyzers → review agent → verifier → typed findings, with outputs for approval status, inline comments, and optional SARIF upload.
+**Source:** [`docs/diagrams/pipeline.d2`](../../docs/diagrams/pipeline.d2) — PR event → trust tier → analyzers → review agent → verifier → typed findings, with outputs for approval status, inline comments, and optional SARIF upload.
 
 ## Regenerate
 

@@ -15,8 +15,7 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 [![Docker](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
-[![Agent skill](skills/mergecraft/SKILL.md)](skills/mergecraft/SKILL.md)
-[![llms.txt](llms.txt)](llms.txt)
+[Agent skill](skills/mergecraft/SKILL.md) · [llms.txt](llms.txt)
 
 [Problem](#problem) ·
 [How it works](#how-it-works) ·
