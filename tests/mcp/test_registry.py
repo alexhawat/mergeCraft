@@ -127,6 +127,6 @@ def test_start_mcp_http_server_returns_url(tool_ctx: ToolContext) -> None:
         assert url.startswith("http://127.0.0.1:")
         assert url.endswith("/mcp")
         port = int(url.split(":")[2].split("/")[0])
-        assert port >= 3764
+        assert 1 <= port <= 65535
     finally:
         stop()

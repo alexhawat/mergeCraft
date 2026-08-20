@@ -28,6 +28,7 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    mcp_http_server_entry,
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import (
@@ -55,7 +56,7 @@ from mergecraft.tracing.tracer import (
     _close_provider_llm_pair,
     _open_provider_llm_pair,
 )
-from mergecraft.types import MERGECRAFT_MCP_NAME, format_mcp_tool_ref
+from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.privilege import prepare_workspace_for_agent, wrap_agent_command
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
@@ -68,10 +69,7 @@ if TYPE_CHECKING:
     from mergecraft.tracing.tracer import Tracer
 
 CLAUDE_EXEC_TOOLS = ("Bash", "Monitor", "REPL", "Workflow")
-CLAUDE_EXEC_TOOL_DENY_RULES = [
-    *CLAUDE_EXEC_TOOLS,
-    *[f"Agent({t})" for t in CLAUDE_EXEC_TOOLS],
-]
+CLAUDE_EXEC_TOOL_DENY_RULES = [*CLAUDE_EXEC_TOOLS, *[f"Agent({t})" for t in CLAUDE_EXEC_TOOLS]]
 CLAUDE_DISALLOWED_TOOLS = ",".join(CLAUDE_EXEC_TOOL_DENY_RULES)
 # O4 (OB3) — the effort level passed as ``--effort`` is the one request
 # parameter the claude harness exposes; the constant keeps the CLI flag and
@@ -85,22 +83,25 @@ def _strip_provider_prefix(specifier: str) -> str:
 
 
 def write_mcp_config(ctx: AgentRunContext) -> str:
-    from mergecraft.tracing.signals import current_agent_id
-
     config_dir = Path(ctx.tmpdir) / ".claude"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "mcp.json"
-    server_entry: dict[str, Any] = {"type": "http", "url": ctx.mcp_server_url}
-    # D10 (OB4) — forward the dispatch-issued agent id as a header on every
-    # MCP call so the server can attribute this agent's tool.call spans.
-    agent_id = current_agent_id()
-    if agent_id:
-        server_entry["headers"] = {"X-MergeCraft-Agent-Id": agent_id}
+    # Always write both role URLs at startup. This function runs once in the
+    # orchestrator (agent_id="claude"), not inside a verifier span.
+    # - MERGECRAFT_MCP_NAME       → /mcp/reviewer  (primary reviewer surface)
+    # - MERGECRAFT_VERIFIER_MCP_NAME → /mcp/verifier  (verifier subagent surface)
+    # Verifier subagents inherit the full mcp.json and call the verifier
+    # server; their disallowedTools list gates the reviewer-surface entries.
+    # D10 (OB4): forward the orchestrator agent id on the reviewer entry so
+    # the server can attribute the primary reviewer's tool.call spans.
+    reviewer_entry = mcp_http_server_entry(ctx, "claude")
+    verifier_entry = mcp_http_server_entry(ctx, VERIFIER_AGENT_NAME)
     config_path.write_text(
         json.dumps(
             {
                 "mcpServers": {
-                    MERGECRAFT_MCP_NAME: server_entry,
+                    MERGECRAFT_MCP_NAME: reviewer_entry,
+                    MERGECRAFT_VERIFIER_MCP_NAME: verifier_entry,
                 }
             }
         ),

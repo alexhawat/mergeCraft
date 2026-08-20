@@ -63,7 +63,8 @@ def test_agents_show_prints_the_resolved_prompt_and_exact_tool_names(
     output = result.stdout
     assert REVIEWER_SYSTEM_PROMPT[:80] in output
     assert "checkout_pr" in output
-    assert "verify_agent_findings" not in output
+    assert "verify_agent_findings" in output
+    assert "push_branch" not in output
 
 
 def test_agents_set_overrides_one_binding(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
