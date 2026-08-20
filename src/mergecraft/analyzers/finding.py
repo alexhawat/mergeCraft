@@ -41,8 +41,8 @@ class Finding(BaseModel):
     confidence: str
     message: str
     path: str
-    start_line: int = Field(ge=1)
-    end_line: int = Field(ge=1)
+    start_line: int | None = Field(default=None, ge=1)
+    end_line: int | None = Field(default=None, ge=1)
     fingerprint: str
     evidence: list[str]
     remediation: str | None
@@ -91,8 +91,8 @@ def make_finding(
     confidence: str,
     message: str,
     path: str,
-    start_line: int,
-    end_line: int,
+    start_line: int | None,
+    end_line: int | None,
     source: FindingSource,
     evidence: list[str] | None = None,
     remediation: str | None = None,
@@ -102,6 +102,8 @@ def make_finding(
     fingerprint: str | None = None,
 ) -> Finding:
     """Construct a finding with taxonomy validation and fingerprint stamping."""
+    if end_line is None:
+        end_line = start_line
     body = message
     computed = fingerprint or finding_fingerprint(path=path, body=body)
     try:

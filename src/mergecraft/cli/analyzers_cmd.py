@@ -116,9 +116,10 @@ def run_cmd(
     if result.version_note:
         console.print(result.version_note)
     for finding in result.findings[:20]:
-        console.print(
-            f"  {finding.path}:{finding.start_line} [{finding.severity}] {finding.message}"
+        anchor = (
+            finding.path if finding.start_line is None else f"{finding.path}:{finding.start_line}"
         )
+        console.print(f"  {anchor} [{finding.severity}] {finding.message}")
 
 
 @app.command("explain")

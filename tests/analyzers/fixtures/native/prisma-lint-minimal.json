@@ -1,0 +1,15 @@
+{
+  "violations": [
+    {
+      "ruleName": "model-name-pascal-case",
+      "message": "Model name must be PascalCase.",
+      "fileName": "schema.prisma",
+      "location": {
+        "startLine": 2,
+        "startColumn": 1,
+        "endLine": 2,
+        "endColumn": 12
+      }
+    }
+  ]
+}

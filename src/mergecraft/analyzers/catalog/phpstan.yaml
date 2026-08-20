@@ -7,15 +7,18 @@ detect:
   - '*.php'
   - phpstan.neon
   - phpstan.neon.dist
+  - composer.json
+  lint_files:
+  - '*.php'
 command:
 - phpstan
 - analyse
-- --error-format=json
+- --error-format=sarif
 - '{files}'
 scope: diff
 parser: sarif
 supports_fix: false
-default_enabled: false
+default_enabled: auto
 version: 2.1.2
 runtime: repo-native
 timeout_s: 300

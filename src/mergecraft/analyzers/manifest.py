@@ -34,6 +34,24 @@ _PARSER_NATIVE_SEVERITIES: dict[str, frozenset[str]] = {
     "trufflehog_jsonl": frozenset({"verified", "unverified"}),
     "agentsec_native": frozenset({"critical", "major", "minor"}),
     "buf_native": frozenset({"breaking", "lint"}),
+    "bandit_json": frozenset({"high", "medium", "low", "undefined"}),
+    "cargo_audit_json": frozenset({"error", "warning"}),
+    "cargo_deny_json": frozenset({"error", "warning", "note"}),
+    "vulture_text": frozenset({"warning"}),
+    "tsc_pretty": frozenset({"error", "warning"}),
+    "knip_json": frozenset({"error", "warning"}),
+    "jscpd_json": frozenset({"warning"}),
+    "bundler_audit_json": frozenset({"error", "warning"}),
+    "sqlfluff_json": frozenset({"warning"}),
+    "rustc_json": frozenset({"error", "warning", "note"}),
+    "htmlhint_json": frozenset({"error", "warning"}),
+    "stylelint_json": frozenset({"error", "warning"}),
+    "yamllint_parsable": frozenset({"error", "warning"}),
+    "markdownlint_json": frozenset({"error"}),
+    "prisma_lint_json": frozenset({"error"}),
+    "luacheck_text": frozenset({"error", "warning"}),
+    "checkmake_text": frozenset({"warning"}),
+    "ember_template_lint_json": frozenset({"error", "warning"}),
 }
 
 
@@ -45,6 +63,7 @@ class DetectRules(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     files: list[str] = Field(min_length=1)
+    lint_files: list[str] | None = None
 
 
 class ProvenanceEntry(BaseModel):

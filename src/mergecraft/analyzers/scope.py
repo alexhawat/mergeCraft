@@ -165,10 +165,14 @@ def _record_exception_paths(
         changed_migrations.add(path)
 
 
-def _line_intersects_hunks(path: str, start_line: int, end_line: int, scope: DiffScope) -> bool:
+def _line_intersects_hunks(
+    path: str, start_line: int | None, end_line: int | None, scope: DiffScope
+) -> bool:
     ranges = scope.hunk_ranges.get(path)
     if not ranges:
         return False
+    if start_line is None or end_line is None:
+        return True
     return any(start_line <= hunk_end and end_line >= hunk_start for hunk_start, hunk_end in ranges)
 
 

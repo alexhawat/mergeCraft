@@ -95,8 +95,8 @@ def _to_reported(findings: list[Finding]) -> list[ReportedFinding]:
     return [
         ReportedFinding(
             path=finding.path,
-            start_line=finding.start_line,
-            end_line=finding.end_line,
+            start_line=finding.start_line or 1,
+            end_line=finding.end_line or finding.start_line or 1,
             message=finding.message,
             severity=finding.severity,
             category=finding.category,

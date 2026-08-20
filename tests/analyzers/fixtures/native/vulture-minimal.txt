@@ -1,0 +1,2 @@
+src/example.py:12: unused function 'helper' (60% confidence)
+src/example.py:24: unused variable 'tmp' (80% confidence)

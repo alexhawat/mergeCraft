@@ -1,0 +1,10 @@
+{
+  "files": ["src/unused.ts"],
+  "issues": [
+    {
+      "file": "src/math.ts",
+      "exports": [{ "name": "factorial", "line": 12, "col": 14, "pos": 256 }],
+      "dependencies": [{ "name": "lodash" }]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "version": "0.9.2",
+  "created_at": "2026-08-20T00:00:00Z",
+  "results": [
+    {
+      "type": "unpatched_gem",
+      "gem": { "name": "actionpack", "version": "6.0.0" },
+      "advisory": {
+        "id": "CVE-2021-22885",
+        "title": "Possible Information Disclosure in Action Pack"
+      }
+    },
+    {
+      "type": "insecure_source",
+      "source": "http://rubygems.org/"
+    }
+  ]
+}

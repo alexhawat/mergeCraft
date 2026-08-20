@@ -189,7 +189,7 @@ def _messages_semantically_similar(first: str, second: str) -> bool:
     return shared_domain == 1 and each_side_two and ratio >= _SINGLE_DOMAIN_OVERLAP_RATIO
 
 
-def _location_key(finding: Finding) -> tuple[str, int, int, str]:
+def _location_key(finding: Finding) -> tuple[str, int | None, int | None, str]:
     return (
         normalize_repo_path(finding.path),
         finding.start_line,
@@ -204,7 +204,7 @@ def dedupe_findings_with_indices(findings: list[Finding]) -> DedupeResult:
         return DedupeResult(findings=[], kept_indices=[])
 
     indexed: list[tuple[int, Finding]] = list(enumerate(findings))
-    buckets: dict[tuple[str, int, int, str], list[tuple[int, Finding]]] = {}
+    buckets: dict[tuple[str, int | None, int | None, str], list[tuple[int, Finding]]] = {}
     for index, finding in indexed:
         buckets.setdefault(_location_key(finding), []).append((index, finding))
 
