@@ -63,8 +63,16 @@ class _FakeOtelTracer:
         name: str,
         attributes: dict[str, Any],
         start_time: int | None = None,
+        context: Any | None = None,
     ) -> _FakeOtelSpan:
-        self.calls.append({"name": name, "attributes": dict(attributes), "start_time": start_time})
+        self.calls.append(
+            {
+                "name": name,
+                "attributes": dict(attributes),
+                "start_time": start_time,
+                "context": context,
+            }
+        )
         return _FakeOtelSpan()
 
 
