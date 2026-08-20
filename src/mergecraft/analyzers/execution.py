@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Literal
 from loguru import logger
 
 from mergecraft.analyzers.provision import ProvisionError, resolve_baked_binary, resolve_with_lock
-from mergecraft.analyzers.registry import filter_changed_files_for_manifest
+from mergecraft.analyzers.registry import filter_lint_targets_for_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv, resolve_analyzer
 from mergecraft.analyzers.run import run_plan
 from mergecraft.analyzers.sandbox import plan_sandbox
@@ -44,7 +44,7 @@ def finalize_plan(
     tier: TrustTier,
     event: dict[str, object] | None = None,
 ) -> AnalyzerPlan:
-    scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
+    scoped_files = filter_lint_targets_for_manifest(manifest, changed_files)
     argv = list(expand_analyzer_argv(plan.argv, repo_root=repo_root, changed_files=scoped_files))
     if manifest.id == "trufflehog":
         argv = _trufflehog_argv(argv, repo_root=repo_root, tier=tier, event=event)

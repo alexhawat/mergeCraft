@@ -12,7 +12,7 @@ command:
 - --input
 - '{files}'
 - --report
-- sarif:detekt.sarif
+- sarif:/dev/stdout
 scope: diff
 parser: sarif
 supports_fix: false

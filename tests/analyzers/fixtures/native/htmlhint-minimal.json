@@ -1,0 +1,14 @@
+[
+  {
+    "file": "index.html",
+    "messages": [
+      {
+        "type": "error",
+        "message": "The id attribute value must be unique.",
+        "line": 3,
+        "col": 5,
+        "rule": { "id": "id-unique" }
+      }
+    ]
+  }
+]

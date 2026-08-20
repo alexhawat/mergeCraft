@@ -19,6 +19,30 @@ _CASES: tuple[tuple[str, str, str, str], ...] = (
     ("clippy", "rustc_json", "native/clippy-minimal.jsonl", "clippy::unwrap_used"),
 )
 
+_JSON_OBJECT_TOOLS: tuple[tuple[str, str], ...] = (
+    ("cargo-audit", "cargo_audit_json"),
+    ("knip", "knip_json"),
+    ("jscpd", "jscpd_json"),
+    ("bundler-audit", "bundler_audit_json"),
+)
+_JSONL_TOOLS: tuple[tuple[str, str], ...] = (
+    ("cargo-deny", "cargo_deny_json"),
+    ("clippy", "rustc_json"),
+)
+_TEXT_TOOLS: tuple[tuple[str, str], ...] = (
+    ("vulture", "vulture_text"),
+    ("tsc", "tsc_pretty"),
+)
+_GARBAGE = (
+    "",
+    "not-json",
+    "{",
+    "[",
+    "error: no such command: 'audit'",
+    "error: no such command: 'deny'",
+    "error: no such command: 'clippy'",
+)
+
 
 def _manifest(tool_id: str):
     return import_module("mergecraft.analyzers.registry").get_manifest(tool_id)
@@ -41,9 +65,50 @@ def test_auto_enabled_parser_happy_path(
     assert _manifest(tool_id).parser == parser_id
 
 
-@pytest.mark.parametrize(("tool_id", "parser_id"), [(row[0], row[1]) for row in _CASES])
+@pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS)
+@pytest.mark.parametrize("raw", _GARBAGE)
+def test_json_object_parser_raises_on_garbage(tool_id: str, parser_id: str, raw: str) -> None:
+    with pytest.raises(ValueError, match="JSON"):
+        _parse(parser_id, raw, tool_id=tool_id)
+
+
+@pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS)
+def test_json_object_parser_empty_object_is_clean(tool_id: str, parser_id: str) -> None:
+    assert _parse(parser_id, "{}", tool_id=tool_id) == []
+
+
+@pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS)
+def test_json_object_parser_empty_array_is_wrong_shape(tool_id: str, parser_id: str) -> None:
+    with pytest.raises(ValueError, match="JSON object"):
+        _parse(parser_id, "[]", tool_id=tool_id)
+
+
+def test_sqlfluff_parser_raises_on_garbage() -> None:
+    with pytest.raises(ValueError, match="JSON"):
+        _parse("sqlfluff_json", "error: no such command: 'sqlfluff'", tool_id="sqlfluff")
+
+
+@pytest.mark.parametrize("raw", ["[]", "{}"])
+def test_sqlfluff_parser_empty_document_is_clean(raw: str) -> None:
+    assert _parse("sqlfluff_json", raw, tool_id="sqlfluff") == []
+
+
+@pytest.mark.parametrize(("tool_id", "parser_id"), _JSONL_TOOLS)
+@pytest.mark.parametrize("raw", ["not-json", "{", "error: no such command: 'deny'"])
+def test_jsonl_parser_raises_on_garbage(tool_id: str, parser_id: str, raw: str) -> None:
+    with pytest.raises(ValueError, match="JSON"):
+        _parse(parser_id, raw, tool_id=tool_id)
+
+
+@pytest.mark.parametrize(("tool_id", "parser_id"), _JSONL_TOOLS)
+@pytest.mark.parametrize("raw", ["", "   ", "[]", "{}"])
+def test_jsonl_parser_empty_document_is_clean(tool_id: str, parser_id: str, raw: str) -> None:
+    assert _parse(parser_id, raw, tool_id=tool_id) == []
+
+
+@pytest.mark.parametrize(("tool_id", "parser_id"), _TEXT_TOOLS)
 @pytest.mark.parametrize("raw", ["", "   ", "not-json", "{", "[", "[]", "{}"])
-def test_auto_enabled_parser_empty_or_malformed_does_not_crash(
+def test_text_parser_empty_or_unmatched_does_not_crash(
     tool_id: str, parser_id: str, raw: str
 ) -> None:
     findings = _parse(parser_id, raw, tool_id=tool_id)

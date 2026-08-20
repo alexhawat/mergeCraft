@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, Any
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
     coerce_line,
+    load_json,
     map_confidence,
     map_native_severity,
     resolve_repo_relative_path,
     taxonomy_category,
-    try_load_json,
 )
 
 if TYPE_CHECKING:
@@ -33,9 +33,10 @@ def _file_rows(payload: object) -> list[dict[str, Any]]:
 
 
 def parse_sqlfluff_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> list[Finding]:
-    payload = try_load_json(raw)
-    if payload is None:
-        return []
+    payload = load_json(raw)
+    if not isinstance(payload, list | dict):
+        msg = "sqlfluff JSON output must be an array or object"
+        raise ValueError(msg)
 
     category = taxonomy_category(manifest)
     findings: list[Finding] = []

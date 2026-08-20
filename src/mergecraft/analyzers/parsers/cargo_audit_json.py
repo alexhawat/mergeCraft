@@ -8,9 +8,9 @@ from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
     map_confidence,
     map_native_severity,
+    require_json_object,
     resolve_repo_relative_path,
     taxonomy_category,
-    try_load_json,
 )
 
 if TYPE_CHECKING:
@@ -65,9 +65,7 @@ def _advisory_finding(
 def parse_cargo_audit_json(
     raw: str, *, manifest: AnalyzerManifest, repo_root: Path
 ) -> list[Finding]:
-    payload = try_load_json(raw)
-    if not isinstance(payload, dict):
-        return []
+    payload = require_json_object(raw, what="cargo-audit JSON output")
 
     category = taxonomy_category(manifest)
     path = _lockfile_path(payload, repo_root=repo_root)

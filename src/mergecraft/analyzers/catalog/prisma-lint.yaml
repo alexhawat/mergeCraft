@@ -7,9 +7,11 @@ detect:
   - '*.prisma'
 command:
 - prisma-lint
+- --output-format
+- json
 - '{files}'
 scope: diff
-parser: sarif
+parser: prisma_lint_json
 supports_fix: false
 default_enabled: auto
 version: 0.10.1
@@ -18,8 +20,6 @@ timeout_s: 120
 trust: trusted
 severity_map:
   error: Major
-  warning: Minor
-  note: Trivial
 provenance: {}
 network_allowlist: []
 exclusive_group: null

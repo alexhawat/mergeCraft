@@ -9,9 +9,9 @@ from mergecraft.analyzers.parsers._common import (
     coerce_line,
     map_confidence,
     map_native_severity,
+    require_json_object,
     resolve_repo_relative_path,
     taxonomy_category,
-    try_load_json,
 )
 
 if TYPE_CHECKING:
@@ -62,9 +62,7 @@ def _issue_finding(
 
 
 def parse_knip_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> list[Finding]:
-    payload = try_load_json(raw)
-    if not isinstance(payload, dict):
-        return []
+    payload = require_json_object(raw, what="knip JSON output")
 
     category = taxonomy_category(manifest)
     findings: list[Finding] = []

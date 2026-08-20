@@ -8,6 +8,8 @@ detect:
   - phpstan.neon
   - phpstan.neon.dist
   - composer.json
+  lint_files:
+  - '*.php'
 command:
 - phpstan
 - analyse

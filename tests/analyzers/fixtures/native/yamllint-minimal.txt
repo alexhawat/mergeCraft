@@ -1,0 +1,1 @@
+hello.yaml:1:1: [error] too many spaces inside braces (trailing-spaces)

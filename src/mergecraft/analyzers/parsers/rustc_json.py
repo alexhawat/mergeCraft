@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
     coerce_line,
-    iter_json_objects,
+    load_jsonl_objects,
     map_confidence,
     map_native_severity,
     resolve_repo_relative_path,
@@ -52,7 +52,7 @@ def _primary_span(message: dict[str, Any]) -> dict[str, Any] | None:
 def parse_rustc_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> list[Finding]:
     category = taxonomy_category(manifest)
     findings: list[Finding] = []
-    for item in iter_json_objects(raw):
+    for item in load_jsonl_objects(raw):
         message = _diagnostic_message(item)
         if message is None:
             continue

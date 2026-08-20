@@ -123,6 +123,45 @@ def try_load_json(raw: str) -> object | None:
         return None
 
 
+def load_json(raw: str) -> object:
+    """Parse JSON from ``raw`` or raise ``ValueError``.
+
+    A valid empty document (``[]`` / ``{}``) is returned as-is. Tool error
+    text, argparse noise, and other non-JSON stdout must not look like a
+    clean scan.
+    """
+    payload = try_load_json(raw)
+    if payload is None:
+        msg = "expected JSON object or array"
+        raise ValueError(msg)
+    return payload
+
+
+def require_json_object(raw: str, *, what: str) -> dict[str, Any]:
+    """Parse ``raw`` as a JSON object or raise ``ValueError``."""
+    payload = load_json(raw)
+    if not isinstance(payload, dict):
+        msg = f"{what} must be a JSON object"
+        raise ValueError(msg)
+    return cast("dict[str, Any]", payload)  # json.loads values are typed Any
+
+
+def require_json_array(raw: str, *, what: str) -> list[Any]:
+    """Parse ``raw`` as a JSON array or raise ``ValueError``."""
+    payload = load_json(raw)
+    if not isinstance(payload, list):
+        msg = f"{what} must be a JSON array"
+        raise ValueError(msg)
+    return payload
+
+
+def require_diagnostic_text(raw: str, *, matched: bool, what: str) -> None:
+    """Raise when non-empty stdout matched no diagnostic lines."""
+    if raw.strip() and not matched:
+        msg = f"{what} output is not in the expected diagnostic format"
+        raise ValueError(msg)
+
+
 def iter_json_objects(raw: str) -> Iterator[dict[str, Any]]:
     """Yield JSON objects from JSONL (or a single object/array) without raising."""
     stripped = raw.strip()
@@ -150,6 +189,29 @@ def iter_json_objects(raw: str) -> Iterator[dict[str, Any]]:
         for item in loaded:
             if isinstance(item, dict):
                 yield item
+
+
+def load_jsonl_objects(raw: str) -> list[dict[str, Any]]:
+    """Return JSON objects from JSONL (or a JSON array/object), else raise.
+
+    Empty stdout is a valid empty document. Non-JSON tool error text is not.
+    """
+    stripped = raw.strip()
+    if not stripped:
+        return []
+    objects = list(iter_json_objects(raw))
+    if objects:
+        return objects
+    payload = try_load_json(raw)
+    if payload is None:
+        msg = "expected JSONL objects"
+        raise ValueError(msg)
+    if payload in ({}, []):
+        return []
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    msg = "expected JSONL objects"
+    raise ValueError(msg)
 
 
 def coerce_line(value: object, *, default: int = 1) -> int:

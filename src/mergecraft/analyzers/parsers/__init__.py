@@ -10,12 +10,18 @@ from mergecraft.analyzers.parsers.buf_native import parse_buf_native
 from mergecraft.analyzers.parsers.bundler_audit_json import parse_bundler_audit_json
 from mergecraft.analyzers.parsers.cargo_audit_json import parse_cargo_audit_json
 from mergecraft.analyzers.parsers.cargo_deny_json import parse_cargo_deny_json
+from mergecraft.analyzers.parsers.checkmake_text import parse_checkmake_text
+from mergecraft.analyzers.parsers.ember_template_lint_json import parse_ember_template_lint_json
 from mergecraft.analyzers.parsers.eslint_json import parse_eslint_json
+from mergecraft.analyzers.parsers.htmlhint_json import parse_htmlhint_json
 from mergecraft.analyzers.parsers.jscpd_json import parse_jscpd_json
 from mergecraft.analyzers.parsers.knip_json import parse_knip_json
+from mergecraft.analyzers.parsers.luacheck_text import parse_luacheck_text
+from mergecraft.analyzers.parsers.markdownlint_json import parse_markdownlint_json
 from mergecraft.analyzers.parsers.mypy_json import parse_mypy_json
 from mergecraft.analyzers.parsers.oasdiff_json import parse_oasdiff_json
 from mergecraft.analyzers.parsers.osv_json import parse_osv_json
+from mergecraft.analyzers.parsers.prisma_lint_json import parse_prisma_lint_json
 from mergecraft.analyzers.parsers.pyright_json import parse_pyright_json
 from mergecraft.analyzers.parsers.ruff_json import parse_ruff_json
 from mergecraft.analyzers.parsers.rustc_json import parse_rustc_json
@@ -23,10 +29,12 @@ from mergecraft.analyzers.parsers.sarif import parse_sarif
 from mergecraft.analyzers.parsers.shellcheck_json import parse_shellcheck_json
 from mergecraft.analyzers.parsers.sqlfluff_json import parse_sqlfluff_json
 from mergecraft.analyzers.parsers.squawk_json import parse_squawk_json
+from mergecraft.analyzers.parsers.stylelint_json import parse_stylelint_json
 from mergecraft.analyzers.parsers.trivy_json import parse_trivy_json
 from mergecraft.analyzers.parsers.trufflehog_jsonl import parse_trufflehog_jsonl
 from mergecraft.analyzers.parsers.tsc_pretty import parse_tsc_pretty
 from mergecraft.analyzers.parsers.vulture_text import parse_vulture_text
+from mergecraft.analyzers.parsers.yamllint_parsable import parse_yamllint_parsable
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -57,6 +65,14 @@ _PARSERS: dict[str, ParserFn] = {
     "bundler_audit_json": parse_bundler_audit_json,
     "sqlfluff_json": parse_sqlfluff_json,
     "rustc_json": parse_rustc_json,
+    "htmlhint_json": parse_htmlhint_json,
+    "stylelint_json": parse_stylelint_json,
+    "yamllint_parsable": parse_yamllint_parsable,
+    "markdownlint_json": parse_markdownlint_json,
+    "prisma_lint_json": parse_prisma_lint_json,
+    "luacheck_text": parse_luacheck_text,
+    "checkmake_text": parse_checkmake_text,
+    "ember_template_lint_json": parse_ember_template_lint_json,
 }
 
 

@@ -8,8 +8,8 @@ from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
     map_confidence,
     map_native_severity,
+    require_json_object,
     taxonomy_category,
-    try_load_json,
 )
 
 if TYPE_CHECKING:
@@ -29,9 +29,7 @@ def parse_bundler_audit_json(
     raw: str, *, manifest: AnalyzerManifest, repo_root: Path
 ) -> list[Finding]:
     _ = repo_root
-    payload = try_load_json(raw)
-    if not isinstance(payload, dict):
-        return []
+    payload = require_json_object(raw, what="bundler-audit JSON output")
 
     category = taxonomy_category(manifest)
     findings: list[Finding] = []

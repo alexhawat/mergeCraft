@@ -9,9 +9,11 @@ detect:
   - '*.mk'
 command:
 - checkmake
+- --format
+- '{{.FileName}}:{{.LineNumber}}:{{.Rule}}:{{.Violation}}'
 - '{files}'
 scope: diff
-parser: sarif
+parser: checkmake_text
 supports_fix: false
 default_enabled: auto
 version: 0.2.2
@@ -19,9 +21,7 @@ runtime: managed
 timeout_s: 60
 trust: trusted
 severity_map:
-  error: Major
   warning: Minor
-  note: Trivial
 provenance:
   linux-amd64:
     url: https://github.com/mrtazz/checkmake/releases/download/0.2.2/checkmake-0.2.2.linux.amd64

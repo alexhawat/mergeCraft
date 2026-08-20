@@ -6,6 +6,8 @@ detect:
   files:
   - '*.go'
   - go.mod
+  lint_files:
+  - '*.go'
 command:
 - golangci-lint
 - run
