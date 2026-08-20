@@ -19,12 +19,15 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.functional_serializers import PlainSerializer
 from pydantic.functional_validators import BeforeValidator
+
+if TYPE_CHECKING:
+    from mergecraft.tracing.genai import ModelParams
 
 NOUS_API_KEY_ENV = "NOUS_API_KEY"
 NOUS_BASE_URL_ENV = "NOUS_BASE_URL"
@@ -344,6 +347,26 @@ def resolve_gateway_endpoints() -> dict[str, ProviderConfig]:
     return {singleton.provider_id: singleton}
 
 
+def resolve_model_params_for_model(model: str | None) -> ModelParams | None:
+    """Resolve request knobs from a configured gateway's ``extra_options`` (O4)."""
+    if not model:
+        return None
+    from mergecraft.tracing.genai import ModelParams, model_params_from_mapping
+
+    slash = model.find("/")
+    provider_id = model[:slash].lower() if slash > 0 else None
+    endpoints = resolve_gateway_endpoints()
+    if not endpoints:
+        return None
+    config = endpoints.get(provider_id) if provider_id else None
+    if config is None and len(endpoints) == 1:
+        config = next(iter(endpoints.values()))
+    if config is None or not config.extra_options:
+        return None
+    params = model_params_from_mapping(config.extra_options)
+    return None if params == ModelParams() else params
+
+
 __all__ = [
     "CAPABILITY_VALUES",
     "CUSTOM_PROVIDER_API_KEY_ENV",
@@ -366,4 +389,5 @@ __all__ = [
     "require_capabilities",
     "resolve_gateway_endpoint",
     "resolve_gateway_endpoints",
+    "resolve_model_params_for_model",
 ]

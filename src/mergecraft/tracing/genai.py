@@ -67,6 +67,56 @@ class ModelParams:
     thinking_budget: int | None = None
 
 
+def _optional_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def model_params_from_mapping(raw: dict[str, Any]) -> ModelParams:
+    """Build ``ModelParams`` from a mapping; unset keys stay omitted (O4)."""
+    stop_raw = raw.get("stop") if raw.get("stop") is not None else raw.get("stop_sequences")
+    stop: list[str] | None = None
+    if isinstance(stop_raw, str) and stop_raw:
+        stop = [stop_raw]
+    elif isinstance(stop_raw, (list, tuple)):
+        stop = [str(item) for item in stop_raw if str(item)]
+
+    reasoning = raw.get("reasoning_effort")
+    return ModelParams(
+        temperature=_optional_float(raw.get("temperature")),
+        top_p=_optional_float(raw.get("top_p")),
+        top_k=_optional_int(raw.get("top_k")),
+        max_tokens=_optional_int(raw.get("max_tokens")),
+        stop=stop,
+        seed=_optional_int(raw.get("seed")),
+        reasoning_effort=str(reasoning) if reasoning else None,
+        thinking_budget=_optional_int(raw.get("thinking_budget")),
+    )
+
+
 def request_attrs(*, model: str | None, params: ModelParams | None = None) -> dict[str, Any]:
     """Request-side attrs: the requested model plus every SET knob (O4/D11).
 
@@ -144,6 +194,28 @@ def usage_attrs(
     if cost_usd is not None:
         attrs["gen_ai.usage.cost_usd"] = cost_usd
     return attrs
+
+
+def usage_attrs_from_agent_usage(
+    *,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cache_read_tokens: int | None = None,
+    cache_write_tokens: int | None = None,
+    cost_usd: float | None = None,
+) -> dict[str, Any]:
+    """Map agent usage counters to span attrs, omitting unset/zero values (O4).
+
+    Legitimate zero input/output counts are treated as unset so output-only
+    HTTP responses do not zero-fill ``gen_ai.usage.input_tokens``.
+    """
+    return usage_attrs(
+        input_tokens=input_tokens or None,
+        output_tokens=output_tokens or None,
+        cache_read_input_tokens=cache_read_tokens,
+        cache_creation_input_tokens=cache_write_tokens,
+        cost_usd=cost_usd,
+    )
 
 
 def _messages_attrs(
@@ -276,10 +348,12 @@ def resolve_capture_policy(trust_tier: str | None) -> ContentCapture:
 __all__ = [
     "ModelParams",
     "input_messages_attrs",
+    "model_params_from_mapping",
     "output_messages_attrs",
     "request_attrs",
     "resolve_capture_policy",
     "response_attrs",
     "thinking_attrs",
     "usage_attrs",
+    "usage_attrs_from_agent_usage",
 ]

@@ -1,9 +1,8 @@
-"""Batch V RED — OpenCode ``llm.call`` ModelParams (#295) and HTTP usage (#297).
+"""Batch V — OpenCode ``llm.call`` ModelParams (#295) and HTTP usage (#297).
 
 Wave plan: ``open-issues-sweep-2026-08-19d-wave-plan.md`` (W11-W13).
-Live anchor: ``agents/opencode.py::_prompt_session`` stamps
-``request_attrs(model=model_slug)`` without ``params=`` (#295) and forwards
-usage to ``usage_attrs`` without omitting unset zero counters (#297 / O4).
+Pins ``request_attrs(..., params=)`` from gateway ``extra_options`` and
+``usage_attrs_from_agent_usage`` omitting zero/unset counters on the HTTP path.
 """
 
 from __future__ import annotations
