@@ -32,6 +32,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft cache clear` | Remove every entry from the run cache. |
 | `mergecraft cache info` | Show cache location, byte ceiling, and current usage. |
 | `mergecraft cache prune` | Evict oldest entries until usage is within the byte ceiling. |
+| `mergecraft capabilities` | Print the review-only capability manifest. |
 | `mergecraft config explain <key>` | Explain which precedence layer wins for a config key. |
 | `mergecraft config show <key>` | Show a resolved config value and the precedence layer that supplied it. |
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
