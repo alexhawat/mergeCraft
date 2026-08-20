@@ -1,4 +1,4 @@
-"""Batch X (#337) RED catalog pins for new-manifest tools (minus C# / F-tier)."""
+"""Batch X (#337) catalog pins for new-manifest tools (minus C# / F-tier)."""
 
 from __future__ import annotations
 
@@ -19,18 +19,6 @@ W4_IDS: tuple[str, ...] = ("tsc", "bandit", "jscpd")
 W5_IDS: tuple[str, ...] = ("govulncheck", "cargo-audit", "cargo-deny", "typos")
 W6_IDS: tuple[str, ...] = ("knip", "vulture")
 NEW_MANIFEST_IDS: tuple[str, ...] = W4_IDS + W5_IDS + W6_IDS
-
-_TOOL_WAVE: dict[str, str] = {
-    "tsc": "W4",
-    "bandit": "W4",
-    "jscpd": "W4",
-    "govulncheck": "W5",
-    "cargo-audit": "W5",
-    "cargo-deny": "W5",
-    "typos": "W5",
-    "knip": "W6",
-    "vulture": "W6",
-}
 
 _EXPECTED_CATEGORY: dict[str, str] = {
     "tsc": "lint",
@@ -105,43 +93,16 @@ def _registry():
     return import_module("mergecraft.analyzers.registry")
 
 
-def _wave_xfail(tool_id: str) -> tuple[pytest.MarkDecorator, ...]:
-    wave = _TOOL_WAVE[tool_id]
-    if wave in {"W4", "W5"}:
-        return ()
-    return (
-        pytest.mark.xfail(
-            reason=f"green after {wave}: {tool_id} catalog manifest (#337)",
-            strict=False,
-        ),
-    )
-
-
-def _id_params(ids: tuple[str, ...]) -> list[pytest.ParameterSet]:
-    return [pytest.param(tool_id, id=tool_id, marks=_wave_xfail(tool_id)) for tool_id in ids]
-
-
 def _detect_params() -> list[pytest.ParameterSet]:
     return [
-        pytest.param(
-            tool_id,
-            changed,
-            id=f"{tool_id}-{changed}",
-            marks=_wave_xfail(tool_id),
-        )
+        pytest.param(tool_id, changed, id=f"{tool_id}-{changed}")
         for tool_id, changed in _DETECT_PATHS
     ]
 
 
 def _auto_params() -> list[pytest.ParameterSet]:
     return [
-        pytest.param(
-            tool_id,
-            repo,
-            changed,
-            id=tool_id,
-            marks=_wave_xfail(tool_id),
-        )
+        pytest.param(tool_id, repo, changed, id=tool_id)
         for tool_id, repo, changed in _AUTO_DETECT_CASES
     ]
 
@@ -225,40 +186,40 @@ def test_unrelated_readme_does_not_match_before_manifest(tool_id: str) -> None:
     assert tool_id not in ids
 
 
-# --- xfail until W6 (W4 tsc/bandit/jscpd + W5 govulncheck/cargo/typos greened) ---
+# --- catalog contracts (W4-W6 greened; no remaining #337 xfails) ---
 
 
-@pytest.mark.parametrize("tool_id", _id_params(NEW_MANIFEST_IDS))
+@pytest.mark.parametrize("tool_id", NEW_MANIFEST_IDS)
 def test_new_manifest_catalog_yaml_exists(tool_id: str) -> None:
     path = _CATALOG_DIR / f"{tool_id}.yaml"
     assert path.is_file(), f"{tool_id} catalog YAML missing at {path}"
 
 
-@pytest.mark.parametrize("tool_id", _id_params(NEW_MANIFEST_IDS))
+@pytest.mark.parametrize("tool_id", NEW_MANIFEST_IDS)
 def test_new_manifest_is_importable(tool_id: str) -> None:
     manifest = _registry().get_manifest(tool_id)
     assert manifest.id == tool_id
 
 
-@pytest.mark.parametrize("tool_id", _id_params(NEW_MANIFEST_IDS))
+@pytest.mark.parametrize("tool_id", NEW_MANIFEST_IDS)
 def test_new_manifest_default_enabled_auto(tool_id: str) -> None:
     manifest = _registry().get_manifest(tool_id)
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.parametrize("tool_id", _id_params(NEW_MANIFEST_IDS))
+@pytest.mark.parametrize("tool_id", NEW_MANIFEST_IDS)
 def test_new_manifest_category(tool_id: str) -> None:
     manifest = _registry().get_manifest(tool_id)
     assert manifest.category == _EXPECTED_CATEGORY[tool_id]
 
 
-@pytest.mark.parametrize("tool_id", _id_params(NEW_MANIFEST_IDS))
+@pytest.mark.parametrize("tool_id", NEW_MANIFEST_IDS)
 def test_new_manifest_declares_timeout(tool_id: str) -> None:
     manifest = _registry().get_manifest(tool_id)
     assert manifest.timeout_s > 0
 
 
-@pytest.mark.parametrize("tool_id", _id_params(NEW_MANIFEST_IDS))
+@pytest.mark.parametrize("tool_id", NEW_MANIFEST_IDS)
 def test_new_manifest_has_catalog_check_parser_fixture(tool_id: str) -> None:
     docs = import_module("mergecraft.analyzers.catalog_docs")
     manifest = _registry().get_manifest(tool_id)
@@ -350,7 +311,7 @@ def test_cargo_audit_and_deny_are_distinct_catalog_ids() -> None:
     assert "deny" in " ".join(deny.command)
 
 
-@pytest.mark.parametrize("tool_id", _id_params(NEW_MANIFEST_IDS))
+@pytest.mark.parametrize("tool_id", NEW_MANIFEST_IDS)
 def test_new_manifest_reports_unavailable_when_toolchain_absent(
     tool_id: str, tmp_path: Path
 ) -> None:

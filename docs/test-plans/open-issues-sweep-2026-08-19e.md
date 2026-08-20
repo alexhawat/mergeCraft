@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19e-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19e` @ `wave/open-issues-sweep-2026-08-19e`
 Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337)
-Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; W6 un-xfail remaining Batch X after knip+vulture
+Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone)
 
 W1 pinned detect + catalog-check fixtures for `golangci-lint`, `clippy`, `rubocop`,
 and `phpstan` (D7). W2 greened `default_enabled: auto` and applied D11 / D12 / D19.
@@ -14,8 +14,8 @@ skeletons live under `tests/analyzers/fixtures/batch-x/` plus
 `tests/analyzers/fixtures/sarif/<id>-minimal.sarif.json`. Catalog YAML is **W4–W6**
 — do not add it in W3.
 
-All remaining cross-wave xfails use `strict=False`.
-Do not use `strict=True` (`xfail_strict = true` in `pyproject.toml`).
+Batch X (#337) has **0** remaining xfails. Do not use `strict=True`
+(`xfail_strict = true` in `pyproject.toml`) on any later Batch Y/Z RED markers.
 
 ## xfail schedule
 
@@ -31,10 +31,10 @@ Do not use `strict=True` (`xfail_strict = true` in `pyproject.toml`).
 
 No W2-scope xfails remain in `tests/analyzers/test_four_cheap_flips.py`.
 
-### Batch X (W3 — RED until W6; W4 + W5 greened)
+### Batch X (W3 — RED until W6; W4 + W5 + W6 greened)
 
-File: `tests/analyzers/test_new_manifests_337.py`. Parametrized catalog/import/detect/auto
-tests for remaining ids carry `@pytest.mark.xfail(..., strict=False)` tagged `green after W6`.
+File: `tests/analyzers/test_new_manifests_337.py`. No `@pytest.mark.xfail` remains
+for #337 new manifests after W6.2.
 
 | Wave | Ids | Marker reason prefix | Status |
 |------|-----|----------------------|--------|
@@ -45,7 +45,7 @@ tests for remaining ids carry `@pytest.mark.xfail(..., strict=False)` tagged `gr
 | **W4** | `tsc` diff-filter | `green after W4: tsc whole-program + diff-filter (#337)` | **green** after W4 recon |
 | **W5** | `govulncheck`, `cargo-audit`, `cargo-deny`, `typos` | `green after W5: <id> catalog manifest (#337)` | **green** after W5 recon |
 | **W5** | cargo pair | `green after W5: cargo-audit vs cargo-deny are distinct ids (#337)` | **green** after W5 recon |
-| **W6** | `knip`, `vulture` | `green after W6: <id> catalog manifest (#337)` | **xfail** |
+| **W6** | `knip`, `vulture` | `green after W6: <id> catalog manifest (#337)` | **green** after W6.2 recon |
 
 `#337` §6 names **both** `cargo-audit` (category `vuln`) and `cargo-deny`
 (category `license`). W3 pins both ids. Do not collapse them.
@@ -128,28 +128,28 @@ Use existing `analyzers/budget.py` (inline cap) and `manifest.timeout_s` /
 
 Primary file: `tests/analyzers/test_new_manifests_337.py`.
 
-| # | Contract | Layer | Scenario | Primary test | After W5 recon |
-|---|----------|-------|----------|--------------|----------------|
-| X1 | Catalog YAML exists / `get_manifest` importable | unit | happy | `test_new_manifest_catalog_yaml_exists`, `test_new_manifest_is_importable` | **green** W4–W5 ids; **xfail** W6 |
-| X2 | `default_enabled == "auto"` | unit | happy | `test_new_manifest_default_enabled_auto` | **green** W4–W5 ids; **xfail** W6 |
-| X3 | Category per #337 | unit | happy | `test_new_manifest_category` | **green** W4–W5 ids; **xfail** W6 |
-| X4 | Detect globs (see table below) | unit | happy | `test_new_manifest_detect_globs` | **green** W4–W5 ids; **xfail** W6 |
-| X5 | `detect_enabled` on fixture markers | integration | happy | `test_new_manifest_auto_enables_on_detect_markers` | **green** W4–W5 ids; **xfail** W6 |
+| # | Contract | Layer | Scenario | Primary test | After W6.2 recon |
+|---|----------|-------|----------|--------------|------------------|
+| X1 | Catalog YAML exists / `get_manifest` importable | unit | happy | `test_new_manifest_catalog_yaml_exists`, `test_new_manifest_is_importable` | **green** |
+| X2 | `default_enabled == "auto"` | unit | happy | `test_new_manifest_default_enabled_auto` | **green** |
+| X3 | Category per #337 | unit | happy | `test_new_manifest_category` | **green** |
+| X4 | Detect globs (see table below) | unit | happy | `test_new_manifest_detect_globs` | **green** |
+| X5 | `detect_enabled` on fixture markers | integration | happy | `test_new_manifest_auto_enables_on_detect_markers` | **green** |
 | X6 | Empty changed files do not enable new ids | unit | edge | `test_empty_changed_files_do_not_enable_new_manifests` | **green** |
-| X7 | README.md does not enable (except typos/jscpd) | unit | edge | `test_unrelated_readme_does_not_match_before_manifest` | **green** |
+| X7 | README.md does not enable (except typos/jscpd) | unit | edge | `test_unrelated_readme_does_not_match_before_manifest` | **green** (2 skips: typos/jscpd) |
 | X8 | D9: no C# / Roslyn / second-tier ids | unit | error | `test_deferred_tools_are_not_in_catalog` | **green** |
 | X9 | Parser skeleton under `sarif/` or `native/` | unit | happy | `test_batch_x_catalog_check_parser_skeleton_exists` | **green** |
 | X10 | Detect fixture tree per id | unit | happy | `test_batch_x_detect_fixture_skeleton_exists` | **green** |
-| X11 | D15 `manifest_has_fixture` after YAML lands | unit | happy | `test_new_manifest_has_catalog_check_parser_fixture` | **green** W4–W5 ids; **xfail** W6 |
-| X12 | `timeout_s > 0` | unit | happy | `test_new_manifest_declares_timeout` | **green** W4–W5 ids; **xfail** W6 |
-| X13 | Missing toolchain → skip / `unavailable` (D19) | integration | error | `test_new_manifest_reports_unavailable_when_toolchain_absent` | **green** W4–W5 ids; **xfail** W6 |
+| X11 | D15 `manifest_has_fixture` after YAML lands | unit | happy | `test_new_manifest_has_catalog_check_parser_fixture` | **green** |
+| X12 | `timeout_s > 0` | unit | happy | `test_new_manifest_declares_timeout` | **green** |
+| X13 | Missing toolchain → skip / `unavailable` (D19) | integration | error | `test_new_manifest_reports_unavailable_when_toolchain_absent` | **green** |
 | X14 | Findings honor inline budget (D19) | unit | edge | `test_new_manifest_findings_honor_inline_budget` (all nine ids, 27 findings) | **green** |
 | X15 | `tsc --noEmit`; `scope: repo`; category `lint` | unit | happy | `test_tsc_command_is_no_emit_whole_program` | **green** |
 | X16 | `tsc` whole-program + diff-filter | unit | edge | `test_tsc_diff_filter_keeps_only_changed_lines` | **green** |
 | X17 | `bandit` version == `bandit[toml]` pin in `pyproject.toml` (`1.9.4`); category `security` | unit | happy | `test_bandit_version_reuses_make_security_pin`, `test_make_security_bandit_pin_is_present` | **green** |
 | X18 | D14: `jscpd` `scope: repo` | unit | happy | `test_jscpd_scope_is_repo` | **green** |
 | X19 | D14: drop pre-existing clones off the diff | unit | edge | `test_jscpd_drops_preexisting_clones_off_the_diff` | **green** |
-| X20 | `cargo-audit` (`vuln`) ≠ `cargo-deny` (`license`) | unit | happy | `test_cargo_audit_and_deny_are_distinct_catalog_ids` | **green** after W5 recon |
+| X20 | `cargo-audit` (`vuln`) ≠ `cargo-deny` (`license`) | unit | happy | `test_cargo_audit_and_deny_are_distinct_catalog_ids` | **green** |
 
 Detect globs W4 must satisfy (`tsc` / `bandit` / `jscpd`):
 
@@ -159,7 +159,7 @@ Detect globs W4 must satisfy (`tsc` / `bandit` / `jscpd`):
 | `bandit` | `*.py` (`hello.py`) | `security` | `auto` | `command[0] == "bandit"`; `version` == pyproject `bandit[toml]==1.9.4` |
 | `jscpd` | `src/clone-a.js`, `src/index.ts`, `hello.py` | `quality` | `auto` | `scope: repo`; findings attributed to **diff lines** only (D14) |
 
-Detect globs W5 (greened) / W6 (still xfail):
+Detect globs W5 / W6 (all greened after W6.2):
 
 | id | Wave | must match | category |
 |----|------|------------|----------|
@@ -190,13 +190,13 @@ Deferred (must **not** appear — D9 / #337 second tier): `roslyn`, `roslyn-anal
 
 ## Already green vs RED
 
-| Class | Status after W5 recon |
-|-------|------------------------|
+| Class | Status after W6.2 recon |
+|-------|-------------------------|
 | Detect globs (`*.go`, `*.rs`, `Cargo.toml`, `*.rb`, `.rubocop.yml`, `*.php`, `phpstan.neon`, `go.mod`, `Gemfile`, `composer.json`) | **green** (Batch W) |
 | `default_enabled: auto` + auto `detect_enabled` (four cheap flips) | **green** |
 | D11 / D12 / D15 SARIF / D19 for the four | **green** |
 | Batch X fixture skeletons + SARIF skeletons | **green** (W3) |
-| D9 deferred ids absent | **green** (W3) |
+| D9 deferred ids absent | **green** (W3; Roslyn not added) |
 | Empty changed files do not enable #337 ids | **green** (W3; stays green after YAML) |
 | #337 `tsc` / `bandit` / `jscpd` catalog YAML / import / auto / category / detect | **green** after W4 recon |
 | D14 jscpd `scope: repo` + diff-line filter | **green** after W4 recon |
@@ -204,11 +204,13 @@ Deferred (must **not** appear — D9 / #337 second tier): `roslyn`, `roslyn-anal
 | `bandit` version == make-security pin | **green** after W4 recon |
 | #337 `govulncheck` / `cargo-audit` / `cargo-deny` / `typos` catalog YAML | **green** after W5 recon |
 | `cargo-audit` (`vuln`) ≠ `cargo-deny` (`license`) | **green** after W5 recon |
-| #337 `knip` / `vulture` catalog YAML | **xfail** until W6 |
+| #337 `knip` / `vulture` catalog YAML | **green** after W6.2 recon |
+| #337 new-manifest xfails | **none** (0 xfail / 0 XPASS) |
 
-## Acceptance (W5 recon)
+## Acceptance (W6.2 recon)
 
-- W5 `govulncheck` / `cargo-audit` / `cargo-deny` / `typos` assertions are real passes (no `green after W5` xfail; 0 XPASS)
-- Remaining `strict=False` xfails tagged `green after W6` only (`knip`, `vulture`)
+- W6 `knip` / `vulture` assertions are real passes (no `green after W6` xfail; 0 XPASS)
+- Batch X `#337` file has **0** remaining xfails (intentional skips only: typos/jscpd README)
+- D9: Roslyn / C# / F-tier second-tier ids still absent
 - `make lint` + `make typecheck` pass
 - No product/source edits (`src/` untouched)
