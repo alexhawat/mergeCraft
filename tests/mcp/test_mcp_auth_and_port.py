@@ -31,7 +31,6 @@ from mergecraft.mcp.context import (
 from mergecraft.mcp.server import (
     MCP_ENDPOINT,
     MCP_HOST,
-    MCP_PORT_START,
     _select_port,
     start_mcp_http_server,
 )
@@ -212,7 +211,7 @@ def test_started_server_port_is_loopback_and_not_the_3764_band(tmp_path: Path) -
         parsed = urlparse(url)
         assert parsed.hostname == MCP_HOST
         assert parsed.port is not None
-        band = set(range(MCP_PORT_START, MCP_PORT_START + 50))
+        band = set(range(3764, 3764 + 50))
         src = inspect.getsource(_select_port)
         if "randint(0, 49)" in src:
             pytest.fail("port allocator still scans 3764 + offset in [0, 49]")
@@ -229,7 +228,6 @@ def test_started_server_port_is_loopback_and_not_the_3764_band(tmp_path: Path) -
 def test_mcp_endpoint_constant_is_still_slash_mcp() -> None:
     """D14 / D17: role paths hang off ``MCP_ENDPOINT``; do not rename it for auth."""
     assert MCP_ENDPOINT == "/mcp"
-    assert MCP_PORT_START == 3764
 
 
 def test_unauthenticated_mixed_batch_with_notification_shaped_tools_call_returns_401(

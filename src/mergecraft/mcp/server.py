@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import socket
+import threading
 from math import isfinite
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -106,8 +107,6 @@ if TYPE_CHECKING:
 
     from mergecraft.mcp.context import ToolContext
 
-MCP_PORT_START = 3764
-MCP_PORT_ATTEMPTS = 100
 MCP_HOST = "127.0.0.1"
 
 
@@ -647,7 +646,8 @@ def create_mcp_app(
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    _register_mcp_route(app, MCP_ENDPOINT, tools, ctx, auth_token)
+    if tools:
+        _register_mcp_route(app, MCP_ENDPOINT, tools, ctx, auth_token)
     for role, role_tool_list in (role_tools or {}).items():
         _register_mcp_route(app, f"{MCP_ENDPOINT}/{role}", role_tool_list, ctx, auth_token)
     return app
@@ -667,34 +667,21 @@ def _serve_in_thread(
     config: uvicorn.Config,
     *,
     thread_name: str,
-    suppress_oserror: bool = False,
 ) -> tuple[uvicorn.Server, Any, asyncio.AbstractEventLoop]:
     """Start a uvicorn server on a new event loop in a daemon thread.
 
     Returns ``(server, thread, loop)`` so callers can stop the server
     (``server.should_exit = True``), join the thread, and schedule
-    cleanup on the loop.  When ``suppress_oserror`` is True any
-    ``OSError`` raised during ``serve()`` is swallowed and logged at
-    DEBUG (used for UDS paths that may be too long or unavailable).
+    cleanup on the loop.
     """
-    import threading as _threading
-
     server = uvicorn.Server(config)
     loop = asyncio.new_event_loop()
 
     def _run() -> None:
         asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(server.serve())
-        except OSError as exc:
-            if suppress_oserror:
-                logger.debug(
-                    "unix socket MCP listener failed (path too long or unavailable): {}", exc
-                )
-            else:
-                raise
+        loop.run_until_complete(server.serve())
 
-    thread = _threading.Thread(target=_run, name=thread_name, daemon=True)
+    thread = threading.Thread(target=_run, name=thread_name, daemon=True)
     thread.start()
     return server, thread, loop
 
@@ -709,8 +696,6 @@ def start_mcp_http_server(
     Returns ``(url, stop)`` where ``stop`` is an idempotent disposer.
     """
     import time
-
-    from mergecraft.mcp.endpoints import MCP_UDS_NAME
 
     # D15 — issue a per-run secret at startup; every request to tools/list
     # or tools/call must present it as ``Authorization: Bearer <token>``.
@@ -750,35 +735,6 @@ def start_mcp_http_server(
                 pass
         time.sleep(0.05)
 
-    # D16 — also start a unix-domain socket listener for Codex (which cannot
-    # send HTTP headers). The socket is 0600, so only the creating process
-    # (and processes running as the same user) can connect — that is the
-    # peer-credential equivalent of the bearer token.
-    uds_path = os.path.join(ctx.tmpdir, MCP_UDS_NAME) if ctx.tmpdir else ""
-    uds_server: uvicorn.Server | None = None
-    uds_thread: Any | None = None
-    if uds_path:
-        uds_config = uvicorn.Config(
-            app,
-            uds=uds_path,
-            log_level="warning",
-            access_log=False,
-        )
-        uds_server, uds_thread, _ = _serve_in_thread(
-            uds_config,
-            thread_name="mergecraft-mcp-uds",
-            suppress_oserror=True,
-        )
-        # Brief wait for the unix socket to appear
-        for _ in range(20):
-            if os.path.exists(uds_path):
-                break
-            time.sleep(0.05)
-        try:
-            os.chmod(uds_path, 0o600)
-        except OSError:
-            pass
-
     url = f"http://{MCP_HOST}:{port}{MCP_ENDPOINT}"
     ctx.mcp_server_url = url
     logger.info("MCP HTTP server listening at {}", url)
@@ -798,14 +754,5 @@ def start_mcp_http_server(
             logger.warning("background-process kill scheduling failed: {}", exc)
         server.should_exit = True
         thread.join(timeout=5)
-        if uds_server is not None:
-            uds_server.should_exit = True
-        if uds_thread is not None:
-            uds_thread.join(timeout=5)
-        if uds_path and os.path.exists(uds_path):
-            try:
-                os.unlink(uds_path)
-            except OSError:
-                pass
 
     return url, stop

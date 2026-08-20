@@ -471,9 +471,6 @@ def _add_mcp_server_table(config: TomlTable, ctx: AgentRunContext) -> None:
     # D16 — Use documented Codex MCP transport: HTTP ``url`` + ``bearer_token_env_var``.
     # ``socket_path`` is not a documented Codex config key. ``http_headers`` was
     # explicitly ruled out (unverified — unknown keys can break Codex's TOML parse).
-    # The UDS listener still starts (see ``start_mcp_http_server``) but it requires
-    # HTTP Authorization that Codex cannot send; the documented HTTP transport with
-    # an env-var-carried bearer token is the only path that lets Codex authenticate.
     # The per-run token is written into ``_CODEX_MCP_TOKEN_ENV`` by ``_build_env``
     # so it travels to the subprocess without appearing in config.toml.
     from mergecraft.mcp.endpoints import mcp_role_url

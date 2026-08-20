@@ -31,11 +31,8 @@ from mergecraft.main_outcome import (
 )
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.dependencies import start_installation
-from mergecraft.mcp.server import (
-    MCP_ENDPOINT,
-    MCP_REVIEWER_ENDPOINT,
-    start_mcp_http_server,
-)
+from mergecraft.mcp.endpoints import mcp_role_url
+from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import ProgressComment, ToolState, init_tool_state
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
@@ -910,8 +907,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
     tool_context.mcp_server_url = mcp_url
     ctx.mcp_url = mcp_url
     ctx.stop_mcp = stop_mcp
-    _mcp_base = mcp_url[: -len(MCP_ENDPOINT)] if mcp_url.endswith(MCP_ENDPOINT) else mcp_url
-    _reviewer_mcp_url = _mcp_base + MCP_REVIEWER_ENDPOINT
+    _reviewer_mcp_url = mcp_role_url(mcp_url, None)
     logger.info("» MCP server started at {}", mcp_url)
 
     subagent_denied = subagent_denied_tool_names(tool_context, ctx.output_schema)

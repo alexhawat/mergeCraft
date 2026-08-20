@@ -13,9 +13,6 @@ MCP_ENDPOINT: str = "/mcp"
 MCP_REVIEWER_ENDPOINT: str = "/mcp/reviewer"
 MCP_VERIFIER_ENDPOINT: str = "/mcp/verifier"
 
-# Unix-domain socket filename used by the MCP server and consumed by the Codex driver.
-MCP_UDS_NAME: str = "mergecraft-mcp.sock"
-
 
 def mcp_role_url(base: str, agent_id: str | None) -> str:
     """Derive the role-specific MCP URL from the base URL and the current agent id.
