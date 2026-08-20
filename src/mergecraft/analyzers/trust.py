@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 — used at runtime by ReviewSource / build_review_source
 from typing import TYPE_CHECKING, Any, Literal
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
 AnalyzersMode = Literal["off", "auto", "full", "untrusted-only"]
 
-ReviewSourceKind = Literal["local_cwd", "local_path", "cloned_remote"]
+ReviewSourceKind = Literal["local_cwd", "local_path", "local_worktree", "cloned_remote"]
 
 #: Every value the ``analyzers:`` Action input accepts.
 ANALYZERS_MODES: frozenset[str] = frozenset({"off", "auto", "full", "untrusted-only"})
@@ -67,13 +68,46 @@ class ReviewSource:
     invocation_root: Path
 
 
+def _git_common_dir(path: Path) -> str | None:
+    """Return the resolved ``git rev-parse --git-common-dir`` for *path*.
+
+    Returns ``None`` when *path* is not inside a git repo or the command fails.
+    The common-dir is shared by all linked worktrees of the same repository,
+    so comparing two paths' common-dirs detects the D10 same-repo relationship
+    (#294).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        raw = result.stdout.strip()
+        if not raw:
+            return None
+        # Resolve relative to the repo path, not the process cwd.
+        # Primary repos emit ".git" (relative); worktrees emit an absolute path.
+        return str((path / raw).resolve())
+    except subprocess.CalledProcessError, OSError:
+        return None
+
+
 def build_review_source(
     *,
     cwd: Path,
     invocation_root: Path,
     cloned: bool = False,
 ) -> ReviewSource:
-    """Construct a :class:`ReviewSource` from a review cwd and invocation root."""
+    """Construct a :class:`ReviewSource` from a review cwd and invocation root.
+
+    D10 / #294: when *cwd* is a linked git worktree of the same repo as
+    *invocation_root* (same ``git rev-parse --git-common-dir``), the kind is
+    ``"local_worktree"`` and :func:`derive_source_trust_tier` maps it to
+    ``"trusted"``.  Clones (``cloned=True``), unrelated repos, and non-git
+    paths fall back to ``"cloned_remote"`` / ``"local_path"`` as before.
+    """
     resolved_cwd = cwd.resolve()
     resolved_root = invocation_root.resolve()
     if cloned:
@@ -85,6 +119,15 @@ def build_review_source(
     if resolved_cwd == resolved_root:
         return ReviewSource(
             kind="local_cwd",
+            path=resolved_cwd,
+            invocation_root=resolved_root,
+        )
+    # D10 / #294: detect a linked worktree of the same repo.
+    cwd_common = _git_common_dir(resolved_cwd)
+    root_common = _git_common_dir(resolved_root)
+    if cwd_common and root_common and cwd_common == root_common:
+        return ReviewSource(
+            kind="local_worktree",
             path=resolved_cwd,
             invocation_root=resolved_root,
         )
@@ -118,6 +161,10 @@ def derive_source_trust_tier(
 
     if source.kind == "cloned_remote":
         return "untrusted"
+
+    # D10 / #294: linked worktrees of the same repo are trusted without --trust.
+    if source.kind == "local_worktree":
+        return "trusted"
 
     try:
         source.path.resolve().relative_to(source.invocation_root.resolve())

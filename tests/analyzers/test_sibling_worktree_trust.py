@@ -27,8 +27,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 
 def _git(cwd: Path, *args: str) -> str:
     result = subprocess.run(
@@ -78,10 +76,6 @@ def _derive_trust(cwd: Path, invocation_root: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W8: sibling worktree trust detection (#294)",
-    strict=True,
-)
 def test_sibling_worktree_is_trusted(tmp_path: Path) -> None:
     """W7.1a — a linked worktree of the same repo is trusted (D10).
 
@@ -93,10 +87,6 @@ def test_sibling_worktree_is_trusted(tmp_path: Path) -> None:
     assert tier == "trusted", f"sibling worktree of the same repo should be trusted; got {tier!r}"
 
 
-@pytest.mark.xfail(
-    reason="green after W8: sibling worktree trust detection (#294)",
-    strict=True,
-)
 def test_sibling_worktree_source_kind(tmp_path: Path) -> None:
     """W7.1b — build_review_source sets kind to indicate a same-repo worktree.
 
