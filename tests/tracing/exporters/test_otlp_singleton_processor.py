@@ -50,7 +50,7 @@ def _otel_settings_dict() -> dict[str, Any]:
                 {
                     "type": "otel",
                     "endpoint": "http://127.0.0.1:1/canary-singleton-processor",
-                    "headers": {"x-test": "batch-p"},
+                    "headers": {},
                 }
             ],
         }
@@ -71,8 +71,8 @@ def test_setup_tracer_provider_stacks_at_most_one_batch_processor(
 
     exporters._reset_test_seam()
     _ensure_real_tracer_provider()
-    endpoint = "http://127.0.0.1:1/canary-singleton-processor"
-    headers = {"x-test": "batch-p"}
+    endpoint = "http://127.0.0.1:1/canary-singleton-batch-processor"
+    headers: dict[str, str] = {}
 
     for _ in range(construction_count):
         exporters._setup_tracer_provider(
@@ -120,8 +120,8 @@ def test_n_otlp_sinks_export_one_payload_per_span(
     from mergecraft.tracing.exporters import OTLPSink, _reset_test_seam, captured_payload
 
     _ensure_real_tracer_provider()
-    endpoint = "http://127.0.0.1:1/canary-singleton-processor"
-    headers = {"x-test": "batch-p"}
+    endpoint = "http://127.0.0.1:1/canary-singleton-otlp-sinks"
+    headers: dict[str, str] = {}
 
     sinks: list[OTLPSink] = []
     for _ in range(construction_count):
@@ -157,12 +157,18 @@ def test_get_tracer_from_settings_does_not_multiply_otlp_exports(
 
     _ensure_real_tracer_provider()
     monkeypatch.setenv("MERGECRAFT_TRACING", "true")
-    monkeypatch.setenv(
-        "MERGECRAFT_OTEL_ENDPOINT",
-        "http://127.0.0.1:1/canary-singleton-processor",
-    )
+    endpoint = "http://127.0.0.1:1/canary-singleton-get-tracer"
+    monkeypatch.setenv("MERGECRAFT_OTEL_ENDPOINT", endpoint)
 
-    settings = RepoSettings.model_validate(_otel_settings_dict())
+    settings = RepoSettings.model_validate(
+        _otel_settings_dict()
+        | {
+            "tracing": {
+                "enabled": True,
+                "sinks": [{"type": "otel", "endpoint": endpoint, "headers": {}}],
+            }
+        }
+    )
     tracers = [get_tracer_from_settings(settings) for _ in range(construction_count)]
 
     _reset_test_seam()
