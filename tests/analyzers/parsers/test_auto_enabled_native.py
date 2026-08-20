@@ -128,3 +128,61 @@ def test_typos_keeps_sarif_at_pinned_version() -> None:
     assert manifest.parser == "sarif"
     assert "--format" in manifest.command
     assert "sarif" in manifest.command
+
+
+def test_bundler_audit_lockfile_finding_omits_invented_line() -> None:
+    raw = (FIXTURES_DIR / "native/bundler-audit-minimal.json").read_text(encoding="utf-8")
+    findings = _parse("bundler_audit_json", raw, tool_id="bundler-audit")
+    assert findings
+    first = findings[0]
+    assert first.path == "Gemfile.lock"
+    assert first.start_line is None
+    assert first.end_line is None
+    assert "actionpack" in first.message
+
+
+def test_bundler_audit_uses_reported_path_and_line() -> None:
+    raw = (
+        '{"results":[{"type":"unpatched_gem","file":"vendor/Gemfile.lock","line":12,'
+        '"advisory":{"id":"CVE-2021-22885","title":"disclosure"},'
+        '"gem":{"name":"actionpack","version":"6.0.0"}}]}'
+    )
+    findings = _parse("bundler_audit_json", raw, tool_id="bundler-audit")
+    assert len(findings) == 1
+    assert findings[0].path == "vendor/Gemfile.lock"
+    assert findings[0].start_line == 12
+    assert findings[0].end_line == 12
+
+
+def test_cargo_deny_uses_label_line_without_inventing_file_line_one() -> None:
+    raw = (FIXTURES_DIR / "native/cargo-deny-minimal.jsonl").read_text(encoding="utf-8")
+    findings = _parse("cargo_deny_json", raw, tool_id="cargo-deny")
+    assert findings
+    assert findings[0].path == "Cargo.toml"
+    assert findings[0].start_line == 3
+    assert findings[0].end_line == 3
+
+
+def test_cargo_deny_omits_invented_line_when_json_has_no_location() -> None:
+    raw = (
+        '{"type":"diagnostic","fields":{"severity":"error","code":"license-denied",'
+        '"message":"license not allowed","graphs":[{"Krate":{"name":"foo","version":"1.0.0"}}]}}'
+    )
+    findings = _parse("cargo_deny_json", raw, tool_id="cargo-deny")
+    assert len(findings) == 1
+    assert findings[0].path == "Cargo.toml"
+    assert findings[0].start_line is None
+    assert findings[0].end_line is None
+    assert "foo 1.0.0" in findings[0].message
+
+
+def test_cargo_deny_uses_reported_file_and_line() -> None:
+    raw = (
+        '{"type":"diagnostic","fields":{"severity":"error","code":"license-denied",'
+        '"message":"license not allowed","labels":[{"file":"deny.toml","line":9}]}}'
+    )
+    findings = _parse("cargo_deny_json", raw, tool_id="cargo-deny")
+    assert len(findings) == 1
+    assert findings[0].path == "deny.toml"
+    assert findings[0].start_line == 9
+    assert findings[0].end_line == 9

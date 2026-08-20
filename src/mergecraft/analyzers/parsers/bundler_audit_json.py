@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
+    coerce_optional_line,
     map_confidence,
     map_native_severity,
     require_json_object,
@@ -23,6 +24,19 @@ def _result_native_level(result: dict[str, Any]) -> str:
     if result_type in {"insecure_source", "insecuresource"}:
         return "warning"
     return "error"
+
+
+def _gem_coordinate(gem: dict[str, Any]) -> str:
+    name = str(gem.get("name") or "").strip()
+    version = str(gem.get("version") or "").strip()
+    if not name:
+        return ""
+    return f"{name} {version}".strip()
+
+
+def _result_path(result: dict[str, Any], advisory: dict[str, Any]) -> str:
+    raw = str(result.get("file") or result.get("path") or advisory.get("path") or "Gemfile.lock")
+    return raw or "Gemfile.lock"
 
 
 def parse_bundler_audit_json(
@@ -45,9 +59,10 @@ def parse_bundler_audit_json(
         gem = gem_raw if isinstance(gem_raw, dict) else {}
         rule_id = str(advisory.get("id") or result.get("type") or "bundler-audit")
         title = str(advisory.get("title") or rule_id)
-        gem_name = str(gem.get("name") or "")
-        gem_version = str(gem.get("version") or "")
-        evidence = [f"gem: {gem_name} {gem_version}".strip()] if gem_name else []
+        coordinate = _gem_coordinate(gem)
+        message = f"{title} ({coordinate})" if coordinate and coordinate not in title else title
+        evidence = [f"gem: {coordinate}"] if coordinate else []
+        start_line = coerce_optional_line(result.get("line") or advisory.get("line"))
         findings.append(
             make_finding(
                 tool=manifest.id,
@@ -55,10 +70,10 @@ def parse_bundler_audit_json(
                 category=category,
                 severity=map_native_severity(manifest, _result_native_level(result)),
                 confidence=map_confidence(None),
-                message=title,
-                path="Gemfile.lock",
-                start_line=1,
-                end_line=1,
+                message=message,
+                path=_result_path(result, advisory),
+                start_line=start_line,
+                end_line=start_line,
                 source="analyzer",
                 evidence=evidence,
             )

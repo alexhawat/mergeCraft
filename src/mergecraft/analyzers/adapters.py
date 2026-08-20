@@ -347,6 +347,15 @@ def run_adapter(
         changed_files=scoped_files,
         tier=tier,
     )
+    if plan.mode == "skip":
+        logger.info("{}", plan.reason)
+        return AdapterRunResult(
+            findings=[],
+            skipped=True,
+            skip_reason=plan.reason,
+            version_note=plan.version_note,
+            config_note=plan.config_note,
+        )
 
     absolute_files = [
         str((repo_root / rel).resolve()) if not Path(rel).is_absolute() else rel

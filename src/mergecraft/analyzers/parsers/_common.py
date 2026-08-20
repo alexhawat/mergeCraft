@@ -227,3 +227,24 @@ def coerce_line(value: object, *, default: int = 1) -> int:
         except ValueError:
             return default
     return default
+
+
+def coerce_optional_line(value: object) -> int | None:
+    """Return a 1-based line, or ``None`` when the tool did not report one."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 1 else None
+    if isinstance(value, float):
+        parsed = int(value)
+        return parsed if parsed >= 1 else None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            parsed = int(stripped)
+        except ValueError:
+            return None
+        return parsed if parsed >= 1 else None
+    return None

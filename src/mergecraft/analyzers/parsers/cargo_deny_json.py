@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
-    coerce_line,
+    coerce_optional_line,
     load_jsonl_objects,
     map_confidence,
     map_native_severity,
@@ -27,19 +27,45 @@ _SEVERITY_ALIASES: dict[str, str] = {
 }
 
 
-def _label_location(fields: dict[str, Any], *, repo_root: Path) -> tuple[str, int]:
+def _package_coordinate(fields: dict[str, Any]) -> str:
+    for key in ("package", "crate", "krate"):
+        raw = fields.get(key)
+        if isinstance(raw, dict):
+            name = str(raw.get("name") or "").strip()
+            version = str(raw.get("version") or "").strip()
+            if name:
+                return f"{name} {version}".strip()
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    graphs = fields.get("graphs")
+    if not isinstance(graphs, list):
+        return ""
+    for graph in graphs:
+        if not isinstance(graph, dict):
+            continue
+        krate = graph.get("Krate") or graph.get("krate") or graph.get("package")
+        if not isinstance(krate, dict):
+            continue
+        name = str(krate.get("name") or "").strip()
+        version = str(krate.get("version") or "").strip()
+        if name:
+            return f"{name} {version}".strip()
+    return ""
+
+
+def _label_location(fields: dict[str, Any], *, repo_root: Path) -> tuple[str, int | None]:
     labels = fields.get("labels")
     if isinstance(labels, list):
         for label in labels:
             if not isinstance(label, dict):
                 continue
             raw_path = str(label.get("file") or label.get("path") or "")
-            line = coerce_line(label.get("line", 1))
+            line = coerce_optional_line(label.get("line"))
             if raw_path:
                 return resolve_repo_relative_path(raw_path, repo_root=repo_root), line
-            if line > 1:
+            if line is not None:
                 return "Cargo.toml", line
-    return "Cargo.toml", 1
+    return "Cargo.toml", None
 
 
 def parse_cargo_deny_json(
@@ -57,6 +83,9 @@ def parse_cargo_deny_json(
         if native is None or native not in manifest.severity_map:
             continue
         path, start_line = _label_location(fields, repo_root=repo_root)
+        base = str(fields.get("message") or "cargo-deny finding")
+        coordinate = _package_coordinate(fields)
+        message = f"{base} ({coordinate})" if coordinate and coordinate not in base else base
         findings.append(
             make_finding(
                 tool=manifest.id,
@@ -64,7 +93,7 @@ def parse_cargo_deny_json(
                 category=category,
                 severity=map_native_severity(manifest, native),
                 confidence=map_confidence(None),
-                message=str(fields.get("message") or "cargo-deny finding"),
+                message=message,
                 path=path,
                 start_line=start_line,
                 end_line=start_line,

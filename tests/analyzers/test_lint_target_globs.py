@@ -63,3 +63,49 @@ def test_finalize_plan_does_not_pass_markers_as_files(tmp_path: Path) -> None:
         assert any(arg.endswith(source) for arg in argv), (
             f"{tool_id} argv must still include source {source!r}: {argv!r}"
         )
+        assert final.mode != "skip"
+
+
+def test_marker_only_changed_files_skip_instead_of_empty_or_unscoped_run(tmp_path: Path) -> None:
+    registry = _registry()
+    execution = import_module("mergecraft.analyzers.execution")
+    resolve = import_module("mergecraft.analyzers.resolve")
+    (tmp_path / ".sqlfluff").write_text("[sqlfluff]\ndialect = postgres\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.sqlfluff]\ndialect = postgres\n", encoding="utf-8"
+    )
+    (tmp_path / "composer.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "go.mod").write_text("module example\n", encoding="utf-8")
+    for tool_id, marker, _source in _CASES:
+        manifest = registry.get_manifest(tool_id)
+        enabled_ids = {
+            item.id for item in registry.detect_enabled(repo_root=tmp_path, changed_files=[marker])
+        }
+        assert tool_id in enabled_ids, (
+            f"{tool_id} detect_enabled must stay true for marker-only {marker!r}"
+        )
+        plan = resolve.AnalyzerPlan(
+            manifest_id=tool_id,
+            mode="repo-native",
+            argv=tuple(manifest.command),
+            cwd=tmp_path,
+        )
+        final = execution.finalize_plan(
+            plan,
+            manifest=manifest,
+            repo_root=tmp_path,
+            changed_files=[marker],
+            tier="trusted",
+        )
+        reason = final.reason or ""
+        assert final.mode == "skip", (
+            f"{tool_id} marker-only plan must skip, got mode={final.mode!r} argv={final.argv!r}"
+        )
+        assert "no source files to lint" in reason or "enablement markers" in reason
+        argv = [str(arg) for arg in final.argv]
+        assert argv == [], f"{tool_id} skip must not expand {{files}} to argv={argv!r}"
+        if tool_id == "golangci-lint":
+            joined = " ".join(argv)
+            assert "run" not in argv
+            assert "--out-format" not in argv
+            assert joined != "golangci-lint run --out-format sarif"
