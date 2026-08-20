@@ -402,7 +402,12 @@ def run(
     except ValueError as exc:
         _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
 
-    if effective_output_format == "json" and json_output is None and output is None:
+    if (
+        effective_output_format == "json"
+        and json_output is None
+        and output is None
+        and not agent_mode
+    ):
         _exit_with_message(
             "--output is required for --output-format json (or use --json PATH)",
             cli_exit_code_for_review(RunOutcome.configuration_error),

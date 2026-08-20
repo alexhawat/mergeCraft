@@ -69,6 +69,34 @@ def test_show_completion_exits_zero() -> None:
     assert result.stdout.strip(), "completion script must be non-empty"
 
 
+def test_install_completion_without_explicit_shell(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bare ``--install-completion`` accepts no shell arg and calls ``install()``."""
+    from typer import completion as typer_completion
+
+    monkeypatch.delenv("_TYPER_COMPLETE_TEST_DISABLE_SHELL_DETECTION", raising=False)
+
+    calls: list[str | None] = []
+
+    def fake_install(*, shell: str | None = None, **kwargs: object) -> tuple[str, Path]:
+        calls.append(shell)
+        target = tmp_path / "mergecraft.sh"
+        target.write_text("# completion\n", encoding="utf-8")
+        return "bash", target
+
+    monkeypatch.setattr(typer_completion, "install", fake_install)
+    result = runner.invoke(
+        app,
+        ["--install-completion"],
+        env=_CHROME_ENV,
+    )
+    combined = result.stdout + result.stderr
+    assert "requires an argument" not in combined.lower()
+    assert calls == [None], combined
+    assert result.exit_code == 0, combined
+
+
 def test_json_stdout_is_strict_while_chrome_enabled(tmp_path: Path) -> None:
     """``--json`` payloads must not share stdout with Rich status chrome (D14)."""
     actual = tmp_path / "actual.json"

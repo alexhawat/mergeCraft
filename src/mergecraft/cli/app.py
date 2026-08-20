@@ -3,15 +3,8 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
-
-from mergecraft.cli.exits import (
-    CLI_SUCCESS_EXIT_CODE,
-)
-
-# Typer 0.25+: explicit ``--show-completion bash|zsh|fish`` (shellingham is unreliable
-# in CI and non-interactive shells). Must be set before the Typer() constructor runs.
-os.environ.setdefault("_TYPER_COMPLETE_TEST_DISABLE_SHELL_DETECTION", "1")
 
 import typer
 from dotenv import load_dotenv
@@ -42,6 +35,9 @@ from mergecraft.cli import (
     tracing_logfire_cmd,
     watch_cmd,
 )
+from mergecraft.cli.exits import (
+    CLI_SUCCESS_EXIT_CODE,
+)
 from mergecraft.cli.global_surface import (
     ColorMode,
     OutputFormat,
@@ -49,6 +45,28 @@ from mergecraft.cli.global_surface import (
     validate_log_level_option,
 )
 from mergecraft.cli.typer_group import MergecraftTyperGroup
+
+
+def _enable_install_completion_auto_detect(argv: list[str] | None = None) -> bool:
+    """Return True when argv invokes bare ``--install-completion`` (README flow)."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if "--install-completion" not in args:
+        return False
+    idx = args.index("--install-completion")
+    next_arg = args[idx + 1] if idx + 1 < len(args) else None
+    return next_arg is None or next_arg.startswith("-")
+
+
+def _configure_typer_shell_detection() -> None:
+    """Configure Typer completion shell detection before ``Typer()`` is built."""
+    # Typer 0.25: disable shellingham auto-detection by default so explicit
+    # ``--show-completion bash|zsh|fish`` stays reliable in CI. Re-enable only for
+    # bare ``--install-completion`` so Typer can auto-detect the current shell.
+    if not _enable_install_completion_auto_detect():
+        os.environ.setdefault("_TYPER_COMPLETE_TEST_DISABLE_SHELL_DETECTION", "1")
+
+
+_configure_typer_shell_detection()
 
 app = typer.Typer(
     name="mergecraft",
