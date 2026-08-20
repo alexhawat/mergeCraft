@@ -36,6 +36,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `htmlhint` | lint | html | disabled | repo-native | trusted | — | — |
 | `infer` | security | java, c, cpp | disabled | container | trusted | — | requires compilation database and build — container-only heavyweight (C4) |
 | `jscpd` | quality | javascript, typescript, python | auto | repo-native | trusted | — | — |
+| `knip` | quality | javascript, typescript | auto | repo-native | trusted | — | — |
 | `languagetool` | lint | text | disabled | container | trusted | — | manifest-only — LanguageTool runtime not bundled on Linux runners (C6 out of scope) |
 | `luacheck` | lint | lua | disabled | repo-native | trusted | — | — |
 | `markdownlint` | lint | markdown | disabled | repo-native | trusted | — | — |
@@ -69,6 +70,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `trufflehog` | secrets | — | auto | managed | untrusted | — | verify off by default; impossible on fork PRs (C2). |
 | `tsc` | lint | typescript | auto | repo-native | trusted | — | — |
 | `typos` | lint | python, javascript, typescript, rust, go, markdown | auto | repo-native | trusted | — | — |
+| `vulture` | quality | python | auto | repo-native | trusted | — | — |
 | `yamllint` | lint | yaml | disabled | managed | untrusted | — | — |
 | `zizmor` | ci | — | auto | managed | untrusted | — | — |
 
@@ -94,7 +96,7 @@ to run the *repo's* tool against the *repo's* config.
 
 | runtime | trust | `shell: disabled` | `shell: restricted` / `enabled` |
 |---------|-------|-------------------|----------------------------------|
-| `repo-native` (30) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
+| `repo-native` (32) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
 | `repo-native` (1) | `untrusted` | withheld — `runtime` needs repo-provided tooling | runs |
 | `managed` (12) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
 | `managed` (17) | `untrusted` | **runs** (pinned binary only) | runs |
@@ -120,15 +122,15 @@ with a warning, rather than silently widening to `auto`.
 `full` requests more provisioning; it is never a trust override, and cannot
 re-admit a manifest the tier axis skipped.
 
-Counts below are analyzers passing selection, out of 64 shipped, with
+Counts below are analyzers passing selection, out of 66 shipped, with
 `shell: restricted` (the shell axis inert) so the mode axis is isolated.
 
 | mode | trusted event | untrusted event (`pull_request_target`, fork) |
 |------|---------------|-----------------------------------------------|
 | **`off`** | surface not registered | surface not registered |
-| **`auto`** | 64 of 64 | 18 of 64 — `auto` ⇒ `untrusted-only` |
-| **`full`** | 64 of 64 | 18 of 64 |
-| **`untrusted-only`** | 18 of 64 | 18 of 64 |
+| **`auto`** | 66 of 66 | 18 of 66 — `auto` ⇒ `untrusted-only` |
+| **`full`** | 66 of 66 | 18 of 66 |
+| **`untrusted-only`** | 18 of 66 | 18 of 66 |
 
 Passing these axes is necessary, not sufficient: a `container` manifest
 is eligible but still reports `unavailable` wherever no container runtime is

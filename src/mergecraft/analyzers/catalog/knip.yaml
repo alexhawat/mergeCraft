@@ -1,0 +1,31 @@
+id: knip
+category: quality
+languages:
+  - javascript
+  - typescript
+detect:
+  files:
+    - "package.json"
+    - "*.js"
+    - "*.jsx"
+    - "*.ts"
+    - "*.tsx"
+command:
+  - knip
+  - --reporter
+  - sarif
+scope: repo
+parser: sarif
+supports_fix: false
+default_enabled: auto
+version: "5.42.0"
+runtime: repo-native
+timeout_s: 300
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: null
