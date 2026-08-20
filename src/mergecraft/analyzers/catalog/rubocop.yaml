@@ -6,6 +6,7 @@ detect:
   files:
   - '*.rb'
   - .rubocop.yml
+  - Gemfile
 command:
 - rubocop
 - --format
@@ -14,7 +15,7 @@ command:
 scope: diff
 parser: sarif
 supports_fix: false
-default_enabled: false
+default_enabled: auto
 version: 1.69.2
 runtime: repo-native
 timeout_s: 180

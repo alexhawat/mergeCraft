@@ -12,8 +12,13 @@ from typing import TYPE_CHECKING, Literal
 from loguru import logger
 
 from mergecraft.analyzers.provision import ProvisionError, resolve_baked_binary, resolve_with_lock
-from mergecraft.analyzers.registry import filter_changed_files_for_manifest
-from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv, resolve_analyzer
+from mergecraft.analyzers.registry import filter_lint_targets_for_manifest
+from mergecraft.analyzers.resolve import (
+    FILES_TOKEN,
+    AnalyzerPlan,
+    expand_analyzer_argv,
+    resolve_analyzer,
+)
 from mergecraft.analyzers.run import run_plan
 from mergecraft.analyzers.sandbox import plan_sandbox
 from mergecraft.analyzers.trust import build_analyzer_env
@@ -22,6 +27,17 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
 TrustTier = Literal["trusted", "untrusted"]
+
+_NO_LINT_TARGETS_REASON = "no source files to lint after dropping enablement markers"
+
+
+def marker_only_lint_skip_reason(manifest: AnalyzerManifest) -> str:
+    """Return the skip reason when ``{files}`` would expand to no lint targets."""
+    return f"skipped {manifest.id}: {_NO_LINT_TARGETS_REASON}"
+
+
+def _uses_files_token(plan: AnalyzerPlan, manifest: AnalyzerManifest) -> bool:
+    return FILES_TOKEN in plan.argv or FILES_TOKEN in manifest.command
 
 
 def provision_platform_key() -> str:
@@ -44,7 +60,11 @@ def finalize_plan(
     tier: TrustTier,
     event: dict[str, object] | None = None,
 ) -> AnalyzerPlan:
-    scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
+    scoped_files = filter_lint_targets_for_manifest(manifest, changed_files)
+    if manifest.detect.lint_files and _uses_files_token(plan, manifest) and not scoped_files:
+        reason = marker_only_lint_skip_reason(manifest)
+        logger.info("{}", reason)
+        return replace(plan, mode="skip", argv=(), reason=reason)
     argv = list(expand_analyzer_argv(plan.argv, repo_root=repo_root, changed_files=scoped_files))
     if manifest.id == "trufflehog":
         argv = _trufflehog_argv(argv, repo_root=repo_root, tier=tier, event=event)
@@ -171,6 +191,8 @@ def run_argv(
         changed_files=changed_files,
         tier=tier,
     )
+    if finalized.mode == "skip":
+        return None, finalized.reason or f"skipped {manifest.id}"
 
     scratch = repo_root / ".mergecraft" / "analyzer-scratch" / f"{manifest.id}{scratch_suffix}"
     scratch.mkdir(parents=True, exist_ok=True)
@@ -197,6 +219,7 @@ def run_argv(
 
 __all__ = [
     "finalize_plan",
+    "marker_only_lint_skip_reason",
     "provision_managed_argv",
     "provision_platform_key",
     "provision_resolved_plan",

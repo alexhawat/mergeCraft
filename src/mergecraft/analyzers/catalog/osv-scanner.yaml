@@ -10,6 +10,7 @@ detect:
     - "package-lock.json"
     - "yarn.lock"
     - "pnpm-lock.yaml"
+    - "uv.lock"
     - "go.sum"
     - "Gemfile.lock"
     - "Cargo.lock"

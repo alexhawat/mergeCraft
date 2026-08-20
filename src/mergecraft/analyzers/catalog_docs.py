@@ -44,6 +44,7 @@ def _fixture_candidates(manifest_id: str) -> tuple[Path, ...]:
         _DEFAULT_FIXTURE_ROOT / "sarif" / f"{manifest_id}-minimal.sarif.json",
         _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.json",
         _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.jsonl",
+        _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.txt",
         _DEFAULT_FIXTURE_ROOT / "agentsec" / f"{manifest_id}-minimal.yaml",
     )
 
@@ -63,6 +64,7 @@ def manifest_has_fixture(
             Path("sarif") / f"{manifest.id}-minimal.sarif.json",
             Path("native") / f"{manifest.id}-minimal.json",
             Path("native") / f"{manifest.id}-minimal.jsonl",
+            Path("native") / f"{manifest.id}-minimal.txt",
         )
     )
 
@@ -421,6 +423,17 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             notes.append("Values never printed in findings (D8).")
         if manifest.id == "trufflehog":
             notes.append("verify off by default; impossible on fork PRs (C2).")
+        if manifest.id == "phpstan":
+            notes.append("No phpstan.neon/neon.dist → runs at --level=0 (D12).")
+        if manifest.id in ("flake8", "pylint"):
+            notes.append("Legacy opt-in — disabled by default; enable via config override.")
+        if manifest.id in ("phpcs", "phpmd"):
+            notes.append("Legacy opt-in — disabled by default; phpstan is the default PHP signal.")
+        if manifest.id == "smarty-lint":
+            notes.append(
+                "*.tpl extension is ambiguous (Go templates, Terraform, Smarty) — "
+                "enable only when .smarty-lint.json confirms Smarty intent."
+            )
         note_text = " ".join(notes) if notes else "—"
         lines.append(
             f"| `{manifest.id}` | {manifest.category} | {languages} | "

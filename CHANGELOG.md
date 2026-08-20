@@ -9,18 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+
 - `mergecraft mcp serve` now mints a per-serve Bearer token and requires it on every MCP request; unauthenticated `tools/list` and `tools/call` are rejected with HTTP 401 / JSON-RPC `-32600` (#345). `build_mcp_tool_context` mints the token via `secrets.token_hex(32)`, stores it as `ctx.mcp_auth_token`, and passes it as `auth_token=` into `create_mcp_app`; the token is printed to stderr as `MERGECRAFT_MCP_BEARER=<token>` at startup.
 
 ### Added
 
+
 - Python 3.11 install floor (#343, option A): `requires-python` lowered to `>=3.11`; mypy/Pyright target 3.11; CI matrix runs on 3.11 and 3.14. README and `docs/distribution.md` install copy use stock `uv` from git (PyPI not published); Docker remains for pinned runtimes. Parenthesized the last PEP 758 site in `analyzers/detect.py` for the 3.11 compile gate; `harbor` extra gated to Python >=3.12.
 - Python 3.11 floor ADR (#343, option A): `docs/dev/python-version-floor.md` records parenthesize-now / binary-later (D8). PEP 758 multi-type `except` handlers under `src/mergecraft/` are parenthesized (44 sites / 27 files).
-### Changed
 
-- Thermo-nuclear CLI remediation: global `--format json` now drives every `--json`-capable subcommand (`eval`, `findings`, `learnings`, `memory`, …) with a pinned `schema_version`; invalid `--log-level` exits `2`; eval replay regressions exit `12` (`CLI_FAILED_EXIT_CODE`); duplicate `_bail()` helpers collapsed to `mergecraft.cli.errors.cli_bail`; `CLI_SUCCESS_EXIT_CODE` / `CLI_USAGE_EXIT_CODE` moved to `mergecraft.cli.exits`; colour policy runs once via pre-help bootstrap. `findings export` uses `--output-format {json,markdown}` (not `--format`) so it no longer collides with the root `--format {table,json}` switch; explicit markdown wins over inherited JSON. `eval_cmd` split into `eval_cli_output.py` / `eval_gate_cmd.py`; `diff_review_cmd` and `gha_cmd` route exit helpers through `mergecraft.cli.exits`.
-- Global CLI surface (#342): root `--format {table,json}`, `--quiet` / `--verbose` / `--log-level`, and `--color {auto,always,never}` honour `NO_COLOR`, `FORCE_COLOR`, and non-TTY sinks; JSON payloads carry `schema_version`; `review` is the documented command and `diff-review` is a hidden deprecated alias (one stderr line per invocation).
-- CLI exit-code contract (#341): every exit under `src/mergecraft/cli/` routes through named constants (`mergecraft.cli.exits` / `RunOutcome` helpers); usage errors exit `2`. See [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md). **Breaking:** scripts that branched on exit code `1` for generic CLI failures must follow the new table (most former `1` paths now exit `30`).
-- Shell completion for the `mergecraft` CLI: `mergecraft --install-completion` (bash/zsh/fish) and `mergecraft --show-completion` (#340). CLI status and Rich chrome now go through shared stderr consoles; machine-readable `--json` payloads stay on stdout only.
+- JS/TS lint: `biome` and `eslint` declare `supports_fix: true`; the JS-lint exclusive group (`js-lint`) now resolves the winner by config-file presence alone — `biome.json`/`biome.jsonc` beats any eslint config; eslint config beats any oxlint config — package-script and dependency signals are only consulted when no config file is found (D17, #310)
+- `mypy` is now the default type checker for Python repos with no explicit type-checker config: auto-enabled when neither `pyrightconfig.json` nor `[tool.pyright]`/`[tool.basedpyright]` is present (D16, #309)
+- `osv-scanner` detect globs now include `uv.lock`, so repos using uv's lock file trigger vulnerability scanning without pip-audit (#309)
+- docs: `flake8` and `pylint` catalog entries note they are legacy opt-in; enabled via config override only (#309)
+
+- Catalog manifests for `knip` (JS/TS unused exports/dependencies, `scope: repo`, `category: quality`) and `vulture` (Python dead code, `scope: repo`, `category: quality`) (#337)
+
+- Catalog manifests for `govulncheck` (Go vulnerability scan, `scope: repo`, network allowlist `vuln.go.dev`), `cargo-audit` (Rust advisory vulnerability scan, `category: vuln`), `cargo-deny` (Rust license/advisory check, `category: license`), and `typos` (universal typo checker, `scope: repo`, `supports_fix: true`) (#337)
+
+- Catalog manifests for `tsc` (TypeScript whole-program lint, `scope: repo`, `--noEmit`), `bandit` (Python security, version pinned to `make security` pin `1.9.4`), and `jscpd` (copy-paste detection, `scope: repo`, diff-line attribution via existing `filter_to_diff` pipeline — pre-existing clones off the diff are dropped) (#337)
+
+- Flip `golangci-lint`, `clippy`, `rubocop`, `phpstan` to `default_enabled: auto`; adds `go.mod`, `Gemfile`, `composer.json` to their detect globs; RuboCop gates on config presence (D11 — silent without `.rubocop.yml`/`Gemfile gem`); PHPStan injects `--level=0` when no `phpstan.neon` is found (D12) (#338)
+
+- `detekt` flipped to `default_enabled: auto`; activates on any `*.kt` or `*.kts` change, or when `detekt.yml` is detected — provides the default Kotlin lint path (#317)
+- `swiftlint` flipped to `default_enabled: auto`; activates on any `*.swift` change or when `.swiftlint.yml` is detected — provides the default Swift lint path (#318); reports `unavailable` on Linux runners (requires macOS, `declared_unavailable`)
+
+- `sqlfluff` flipped to `default_enabled: auto`; activates on any `*.sql` change or `.sqlfluff` config presence — skips silently when no SQL dialect is declared (#319)
+- `stylelint` flipped to `default_enabled: auto`; activates on any `*.css`/`*.scss` change or `stylelint.config.js`/`.stylelintrc.json` presence — provides the default CSS lint path (#320)
+- `htmlhint` flipped to `default_enabled: auto`; activates on any `*.html` change or `.htmlhintrc` presence — provides the default HTML lint path (#321)
+
+- `yamllint` flipped to `default_enabled: auto`; activates on any `*.yaml` or `*.yml` change or `.yamllint` config presence — provides the default YAML lint path (#323); `shellcheck` and `hadolint` were already `auto` (#322, #324)
+
+- `checkmake` flipped to `default_enabled: auto`; activates on any `Makefile`, `makefile`, or `*.mk` change — provides the default Make lint path (#325)
+- `markdownlint` flipped to `default_enabled: auto`; activates on any `*.md` change or `.markdownlint.json`/`.markdownlint.yaml` presence — provides the default Markdown lint path (#326)
+- `tflint` and `checkov` both flipped to `default_enabled: auto`; activate on any `*.tf` or `*.tfvars` change; the shared `iac-scanner` exclusive group was removed (split to `exclusive_group: null`) so both tools run concurrently — `tflint` provides Terraform lint, `checkov` provides IaC security scanning (#327)
+
+- `luacheck` flipped to `default_enabled: auto`; activates on any `*.lua` change or `.luacheckrc` presence — provides the default Lua lint path (#328)
+- `fortitude` flipped to `default_enabled: auto`; activates on Fortran files (`*.f90`, `*.f95`, `*.F90`, `*.f03`, `*.f`, `*.for`) or `.fortitude.toml` — provides the default Fortran lint path (#329)
+- `regal` flipped to `default_enabled: auto`; activates on any `*.rego` change — provides the default Rego/OPA policy lint path (#330)
+- `psscriptanalyzer` flipped to `default_enabled: auto`, adds `*.psd1` detect glob, and sets `supports_fix: true` — provides the default PowerShell lint and auto-fix path (#331)
+- `blinter` flipped to `default_enabled: auto`; activates on `*.bat`/`*.cmd` changes — provides the default Windows Batch lint path (#332)
+- `shopify-theme-check` flipped to `default_enabled: auto`; gates on `.theme-check.yml` or the canonical Shopify theme layout (`sections/`, `templates/`, `snippets/` dirs) — bare `*.liquid` files do not trigger it (#333)
+- `smarty-lint` flipped to `default_enabled: auto`; `ANALYZERS.md` notes that `*.tpl` is ambiguous (Go templates, Terraform) — enable only when `.smarty-lint.json` confirms Smarty intent (#334)
+- `ember-template-lint` flipped to `default_enabled: auto`, sets `supports_fix: true`; gates on `ember-cli-build.js` or `ember-source` in `package.json` — bare `*.hbs` files do not trigger it (#335)
+- `prisma-lint` flipped to `default_enabled: auto`; ships a conservative fallback ruleset (`prisma-lint-default-rules.yml`) and sets `config_note` referencing it when no repo-level prisma-lint config is found — avoids inert no-op runs (#336)
+
+- `cppcheck` flipped to `default_enabled: auto`; activates on any `*.c`, `*.cpp`, `*.h`, or `*.hpp` change — provides the default C/C++ SAST path (#315); `clang-tidy` remains `default_enabled: false` (requires `compile_commands.json`, C4)
+- `pmd` flipped to `default_enabled: auto`; activates on any `*.java` change or `pmd.ruleset.xml` presence — provides the default Java lint path (#312); `infer` remains `default_enabled: false` (requires compilation database, C4)
+
+- `phpcs` and `phpmd` remain `default_enabled: false`; catalog entries note they are legacy opt-in — `phpstan` (auto) is the default PHP signal (#316)
+- `brakeman` flipped to `default_enabled: auto` with tight Rails detection — only activates on Rails marker files (`config/application.rb`, `config/routes.rb`), never on plain Ruby repos (#313)
+- New catalog manifest for `bundler-audit` (Ruby gem vulnerability audit, `category: vuln`, `scope: repo`, detects on `Gemfile.lock`) (#313)
+
+- `scripts/check_type_ignores.py` fails when a `type: ignore` or `cast(` in allowed `src/mergecraft/` lacks a one-line reason (#275); wired into `make lint`
 - `scripts/check_xpass.py` fails when unexpected pytest xpasses remain on the allowed test tree (#276)
 - xpass ratchet now runs as a `pytest_sessionfinish` conftest hook inside the coverage-gate pytest session — no standalone log file or extra CI step (#276)
 - `MERGECRAFT_LIVE=1` opt-in gate for live provider tests (#278): `tests/conftest.py` centralizes skip policy via `pytest_collection_modifyitems`; `make test-integration-live` and the CI `integration-live` job export the flag so the suite stays fail-closed when secrets are absent
@@ -98,7 +139,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (PR G2): the README table documented 9 of 24 real `action.yml` inputs and
   neither declared output anywhere
 
+### Changed
+
+- Thermo-nuclear CLI remediation: global `--format json` now drives every `--json`-capable subcommand (`eval`, `findings`, `learnings`, `memory`, …) with a pinned `schema_version`; invalid `--log-level` exits `2`; eval replay regressions exit `12` (`CLI_FAILED_EXIT_CODE`); duplicate `_bail()` helpers collapsed to `mergecraft.cli.errors.cli_bail`; `CLI_SUCCESS_EXIT_CODE` / `CLI_USAGE_EXIT_CODE` moved to `mergecraft.cli.exits`; colour policy runs once via pre-help bootstrap. `findings export` uses `--output-format {json,markdown}` (not `--format`) so it no longer collides with the root `--format {table,json}` switch; explicit markdown wins over inherited JSON. `eval_cmd` split into `eval_cli_output.py` / `eval_gate_cmd.py`; `diff_review_cmd` and `gha_cmd` route exit helpers through `mergecraft.cli.exits`.
+- Global CLI surface (#342): root `--format {table,json}`, `--quiet` / `--verbose` / `--log-level`, and `--color {auto,always,never}` honour `NO_COLOR`, `FORCE_COLOR`, and non-TTY sinks; JSON payloads carry `schema_version`; `review` is the documented command and `diff-review` is a hidden deprecated alias (one stderr line per invocation).
+- CLI exit-code contract (#341): every exit under `src/mergecraft/cli/` routes through named constants (`mergecraft.cli.exits` / `RunOutcome` helpers); usage errors exit `2`. See [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md). **Breaking:** scripts that branched on exit code `1` for generic CLI failures must follow the new table (most former `1` paths now exit `30`).
+- Shell completion for the `mergecraft` CLI: `mergecraft --install-completion` (bash/zsh/fish) and `mergecraft --show-completion` (#340). CLI status and Rich chrome now go through shared stderr consoles; machine-readable `--json` payloads stay on stdout only.
+
 ### Fixed
+
+
+- `bandit` now uses built-in `--format json` instead of the optional SARIF extra, so auto-enabled Python security coverage still runs on plain Bandit
+- `bundler-audit` now runs the gem CLI (`bundler-audit check --format json`) instead of `bundle audit`, so Ruby lockfile audits actually execute
+- `tflint` no longer passes changed `.tf` files as positional args (invalid since TFLint 0.47); it lints the working directory and the pipeline still scopes findings to the diff
+- `phpstan`, `golangci-lint`, and `sqlfluff` now skip when a PR only changes enablement markers (`composer.json`, `go.mod`, `.sqlfluff`) and has no source files to lint, instead of running with empty paths or linting the whole tree
+- `bundler-audit` and `cargo-deny` findings no longer fake a line-1 GitHub anchor when the tool did not report a line; crate/gem coordinates stay in the message
+- `clippy` now runs as `cargo clippy --message-format=json` (package/workspace) instead of passing PR paths as cargo args, so auto-enabled Clippy keeps rustc JSON findings
+- Auto-enabled analyzers whose stdout is not SARIF now keep findings: `cargo-audit` (`--json`), `cargo-deny` (`--format json`), `vulture` (line text), `tsc` (`--pretty false`), `knip` (`--reporter json`), `jscpd` (`--reporters json`), `bundler-audit` (`--format json`), `sqlfluff` (`--format json`), and `clippy` (`--message-format=json`); `typos` 1.32.0 already emits SARIF and stays on `parser: sarif` (Thermos Finding 1)
+
+- `phpstan`: command changed from `--error-format=json` to `--error-format=sarif` so the output aligns with `parser: sarif`; previously the JSON output caused `parse_sarif()` to raise `ValueError` and silently drop all findings (Thermos Finding 1, #338)
+- `brakeman`: command changed from `-o brakeman.sarif` (writes to file) to `-o -` (stdout) so the SARIF output is captured by the adapter; `parser: sarif` is unchanged (Thermos Finding 1, #338)
 
 - MCP HTTP server now issues a separate bearer token for the orchestrator ``/mcp`` route; reviewer/verifier harnesses keep ``ToolContext.mcp_auth_token`` for their role endpoints (#349)
 - OpenCode gateway ``extra_options`` generation knobs (temperature, ``top_p``, ``max_tokens`` when a context window is known) are applied through provider model ``limit`` / ``options`` and the primary ``build`` agent config instead of being copied into ``provider.options``; ``llm.call`` tracing stamps only params the config path actually applies (#295, #349)

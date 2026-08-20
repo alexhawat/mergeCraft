@@ -74,6 +74,9 @@ def test_resolve_analyzer_behaviour_unchanged(tmp_path: Path) -> None:
         if plan.mode == "skip" and not plan.reason:
             failures.append(f"{manifest_id} nothing-available: skip with no reason recorded")
 
+        sqlfluff_needs_dialect = manifest_id == "sqlfluff"
+        # tmp_path has no .sqlfluff / [tool.sqlfluff]; Finding 4 skips sqlfluff.
+
         # -- scenario 2: repo already has the tool installed -----------------
         plan = resolve_analyzer(
             manifest=manifest,
@@ -85,7 +88,10 @@ def test_resolve_analyzer_behaviour_unchanged(tmp_path: Path) -> None:
             managed_available=True,
             container_available=True,
         )
-        expected_mode = "skip" if manifest.declared_unavailable else "repo-native"
+        if manifest.declared_unavailable or sqlfluff_needs_dialect:
+            expected_mode = "skip"
+        else:
+            expected_mode = "repo-native"
         if plan.mode != expected_mode:
             failures.append(
                 f"{manifest_id} repo-has-tool: mode={plan.mode!r}, expected {expected_mode!r}"
@@ -109,7 +115,7 @@ def test_resolve_analyzer_behaviour_unchanged(tmp_path: Path) -> None:
             managed_available=True,
             container_available=False,
         )
-        if manifest.declared_unavailable:
+        if manifest.declared_unavailable or sqlfluff_needs_dialect:
             expected_mode = "skip"
         elif manifest_id == "agentsec":
             expected_mode = "repo-native"
@@ -134,7 +140,7 @@ def test_resolve_analyzer_behaviour_unchanged(tmp_path: Path) -> None:
             managed_available=True,
             container_available=True,
         )
-        if manifest.declared_unavailable:
+        if manifest.declared_unavailable or sqlfluff_needs_dialect:
             expected_mode = "skip"
         elif manifest_id == "agentsec":
             expected_mode = "repo-native"

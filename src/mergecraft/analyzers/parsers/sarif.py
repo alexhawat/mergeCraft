@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.finding import Finding, make_finding
@@ -10,6 +9,7 @@ from mergecraft.analyzers.parsers._common import (
     coerce_line,
     map_confidence,
     map_native_severity,
+    require_json_object,
     resolve_repo_relative_path,
     taxonomy_category,
 )
@@ -142,10 +142,7 @@ def _parse_run(
 
 def parse_sarif(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> list[Finding]:
     """Parse SARIF 2.1.0 text into normalized findings."""
-    document = json.loads(raw)
-    if not isinstance(document, dict):
-        msg = "SARIF document must be a JSON object"
-        raise ValueError(msg)
+    document = require_json_object(raw, what="SARIF document")
     if document.get("version") != "2.1.0":
         runs = document.get("runs")
         if not isinstance(runs, list) or not runs:

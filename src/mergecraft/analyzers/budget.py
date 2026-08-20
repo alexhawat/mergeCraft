@@ -36,6 +36,8 @@ def default_inline_budget() -> int:
 def _is_body_only_finding(item: Finding | dict[str, Any]) -> bool:
     if isinstance(item, dict):
         return item.get("severity") == BODY_ONLY_SEVERITY or item.get("effort") == BODY_ONLY_EFFORT
+    if item.start_line is None:
+        return True
     return item.severity == BODY_ONLY_SEVERITY
 
 
@@ -55,11 +57,10 @@ def _severity_rank(item: Finding | dict[str, Any]) -> int:
 
 def _sort_key(item: Finding | dict[str, Any]) -> tuple[int, int, str, int]:
     path = item.path if isinstance(item, Finding) else str(item.get("path", ""))
-    line = (
-        item.start_line
-        if isinstance(item, Finding)
-        else int(item.get("line", item.get("start_line", 0)))
-    )
+    if isinstance(item, Finding):
+        line = item.start_line if item.start_line is not None else 0
+    else:
+        line = int(item.get("line", item.get("start_line", 0)))
     return (_source_rank(item), _severity_rank(item), path, line)
 
 
@@ -94,9 +95,10 @@ def _render_mechanical_section(mechanical: list[Finding]) -> str | None:
         lines.append(f"| {tool} | {count} |")
     lines.append("")
     for finding in mechanical:
-        lines.append(
-            f"- **{finding.tool}** `{finding.rule_id}` — {finding.path}:{finding.start_line}"
+        anchor = (
+            finding.path if finding.start_line is None else f"{finding.path}:{finding.start_line}"
         )
+        lines.append(f"- **{finding.tool}** `{finding.rule_id}` — {anchor}")
     return "\n".join(lines)
 
 

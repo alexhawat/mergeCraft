@@ -1,0 +1,29 @@
+id: bandit
+category: security
+languages:
+  - python
+detect:
+  files:
+    - "*.py"
+command:
+  - bandit
+  - -r
+  - --format
+  - json
+  - "{files}"
+scope: diff
+parser: bandit_json
+supports_fix: false
+default_enabled: auto
+version: "1.9.4"
+runtime: repo-native
+timeout_s: 120
+trust: trusted
+severity_map:
+  high: Major
+  medium: Minor
+  low: Trivial
+  undefined: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: null

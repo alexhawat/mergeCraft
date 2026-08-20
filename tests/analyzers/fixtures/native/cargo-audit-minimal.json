@@ -1,0 +1,28 @@
+{
+  "lockfile": { "path": "Cargo.lock", "dependency-count": 1 },
+  "vulnerabilities": {
+    "found": true,
+    "count": 1,
+    "list": [
+      {
+        "advisory": {
+          "id": "RUSTSEC-2024-0001",
+          "package": "openssl",
+          "title": "openssl use-after-free"
+        },
+        "package": { "name": "openssl", "version": "0.10.5" }
+      }
+    ]
+  },
+  "warnings": {
+    "unmaintained": [
+      {
+        "advisory": {
+          "id": "RUSTSEC-2024-0002",
+          "title": "unmaintained crate"
+        },
+        "package": { "name": "old-crate", "version": "0.1.0" }
+      }
+    ]
+  }
+}

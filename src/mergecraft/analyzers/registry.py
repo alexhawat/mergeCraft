@@ -64,6 +64,20 @@ def filter_changed_files_for_manifest(
     return [path for path in changed_files if _matches_detect_patterns(path, patterns)]
 
 
+def filter_lint_targets_for_manifest(
+    manifest: AnalyzerManifest,
+    changed_files: list[str],
+) -> list[str]:
+    """Keep paths that may be expanded into the command ``{files}`` token.
+
+    ``detect.files`` may include enablement markers (``composer.json``,
+    ``go.mod``, ``pyproject.toml``). When ``detect.lint_files`` is set, only
+    those source globs are passed to the tool.
+    """
+    patterns = manifest.detect.lint_files or manifest.detect.files
+    return [path for path in changed_files if _matches_detect_patterns(path, patterns)]
+
+
 def _detect_matches(manifest: AnalyzerManifest, changed_files: list[str]) -> bool:
     if not changed_files:
         return False
@@ -100,7 +114,11 @@ def _auto_manifest_enabled(manifest: AnalyzerManifest, repo_root: Path) -> bool:
     if manifest.id == "ruff":
         return has_ruff_config(repo_root)
     if manifest.id == "mypy":
-        return has_mypy_config(repo_root)
+        # mypy is the default type checker (D16): auto-enabled when it has its own
+        # config, or when no explicit pyright/basedpyright config is present.
+        return has_mypy_config(repo_root) or not (
+            has_pyright_config(repo_root) or has_basedpyright_config(repo_root)
+        )
     if manifest.id == "pyright":
         return has_pyright_config(repo_root)
     if manifest.id == "basedpyright":
@@ -327,6 +345,7 @@ def warn_unknown_analyzer_overrides(settings: dict[str, Any]) -> None:
 __all__ = [
     "detect_enabled",
     "filter_changed_files_for_manifest",
+    "filter_lint_targets_for_manifest",
     "get_manifest",
     "known_analyzer_ids",
     "load_catalog",

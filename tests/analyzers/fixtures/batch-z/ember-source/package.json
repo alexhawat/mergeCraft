@@ -1,0 +1,7 @@
+{
+  "name": "ember-source-fixture",
+  "private": true,
+  "dependencies": {
+    "ember-source": "5.0.0"
+  }
+}

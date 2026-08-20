@@ -1,0 +1,2 @@
+{"reason":"compiler-message","message":{"code":{"code":"clippy::unwrap_used"},"level":"warning","message":"used `unwrap()` on a `Result` value","spans":[{"file_name":"src/lib.rs","line_start":10,"line_end":10,"is_primary":true}]}}
+{"reason":"build-finished","success":true}

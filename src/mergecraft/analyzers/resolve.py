@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from mergecraft.analyzers.detect import _eslint_command_prefix, resolve_repo_tool
+from mergecraft.analyzers.detect import (
+    _eslint_command_prefix,
+    has_phpstan_config,
+    has_prisma_lint_config,
+    has_sqlfluff_dialect,
+    resolve_repo_tool,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -80,6 +86,20 @@ def _declared_unavailable_plan(manifest: AnalyzerManifest) -> AnalyzerPlan | Non
         manifest_id=manifest.id,
         mode="skip",
         reason=f"skipped {manifest.id}: {manifest.declared_unavailable}",
+    )
+
+
+def _sqlfluff_no_dialect_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
+    """Skip sqlfluff when no dialect is declared — dialect-ambiguous SQL is not reviewable."""
+    if manifest.id != "sqlfluff" or has_sqlfluff_dialect(repo_root):
+        return None
+    return AnalyzerPlan(
+        manifest_id=manifest.id,
+        mode="skip",
+        reason=(
+            "skipped sqlfluff: no SQL dialect declared "
+            "(.sqlfluff or [tool.sqlfluff] in pyproject.toml)"
+        ),
     )
 
 
@@ -158,6 +178,55 @@ def _detect_repo_tool_state(
     )
 
 
+_PRISMA_LINT_FALLBACK_NOTE = (
+    "@catalog:prisma-lint-default-rules.yml — conservative fallback ruleset"
+)
+
+
+def _apply_config_absent_patches(
+    manifest_id: str, repo_root: Path, argv: tuple[str, ...]
+) -> tuple[tuple[str, ...], str | None]:
+    """Return (patched_argv, override_config_note) for tools with config-presence defaults.
+
+    Returns the original argv and ``None`` when no patch applies or the tool's
+    config is present.  The override_config_note replaces ``state.config_note``
+    only when a non-``None`` value is returned.
+    """
+    if manifest_id == "phpstan" and not has_phpstan_config(repo_root):
+        argv_list = list(argv)
+        if FILES_TOKEN in argv_list:
+            argv_list.insert(argv_list.index(FILES_TOKEN), "--level=0")
+        else:
+            argv_list.append("--level=0")
+        return tuple(argv_list), None
+    if manifest_id == "prisma-lint" and not has_prisma_lint_config(repo_root):
+        fallback = str(_CATALOG_DIR / "prisma-lint-default-rules.yml")
+        argv_list = list(argv)
+        if FILES_TOKEN in argv_list:
+            idx = argv_list.index(FILES_TOKEN)
+            argv_list[idx:idx] = ["--config", fallback]
+        else:
+            argv_list.extend(["--config", fallback])
+        return tuple(argv_list), _PRISMA_LINT_FALLBACK_NOTE
+    return argv, None
+
+
+def _with_config_absent_patches(plan: AnalyzerPlan, repo_root: Path) -> AnalyzerPlan:
+    """Apply config-absent argv patches after the source ladder has picked a plan."""
+    if not plan.argv:
+        return plan
+    argv, patch_note = _apply_config_absent_patches(plan.manifest_id, repo_root, plan.argv)
+    if argv == plan.argv and patch_note is None:
+        return plan
+    if patch_note is None:
+        return replace(plan, argv=argv)
+    version_note = plan.version_note
+    if version_note is not None:
+        base = version_note.split("; config:", 1)[0]
+        version_note = f"{base}; config: {patch_note}"
+    return replace(plan, argv=argv, config_note=patch_note, version_note=version_note)
+
+
 def _repo_native_plan(
     manifest: AnalyzerManifest, repo_root: Path, state: _RepoToolState
 ) -> AnalyzerPlan | None:
@@ -173,8 +242,10 @@ def _repo_native_plan(
             argv = (prefix[0], *manifest.command[1:])
     elif state.tool_path and argv and argv[0] == _repo_tool_binary(manifest):
         argv = (state.tool_path, *argv[1:])
+
+    config_note = state.config_note
     version_note = _format_version_note(
-        manifest, repo_tool_version=state.tool_version, config_note=state.config_note
+        manifest, repo_tool_version=state.tool_version, config_note=config_note
     )
     return AnalyzerPlan(
         manifest_id=manifest.id,
@@ -183,7 +254,7 @@ def _repo_native_plan(
         cwd=repo_root,
         timeout_s=manifest.timeout_s,
         version_note=version_note,
-        config_note=state.config_note,
+        config_note=config_note,
     )
 
 
@@ -271,56 +342,57 @@ def resolve_analyzer(
     disabled`` requires, since the working tree is then PR-authored (#35, D5).
 
     The ladder is a small ordered dispatch of per-source resolvers —
-    declared-unavailable → agentsec special-case → repo-native →
-    type-checker-only-skip → managed → container — each either producing a
-    plan or yielding (``None``) to the next.
+    declared-unavailable → sqlfluff-no-dialect → agentsec special-case →
+    repo-native → type-checker-only-skip → managed → container — each either
+    producing a plan or yielding (``None``) to the next. Config-absent argv
+    patches (phpstan ``--level=0``, prisma-lint fallback ``--config``) apply
+    once after the ladder, for any plan that already has argv.
     """
     if not allow_repo_binaries:
         repo_has_tool = False
 
     plan = _declared_unavailable_plan(manifest)
-    if plan is not None:
-        return plan
-
-    plan = _agentsec_plan(manifest, repo_root)
-    if plan is not None:
-        return plan
-
-    repo_tool_state, early_skip = _detect_repo_tool_state(
-        manifest,
-        repo_root,
-        repo_has_tool=repo_has_tool,
-        repo_tool_path=repo_tool_path,
-        repo_tool_version=repo_tool_version,
-    )
-    if early_skip is not None:
-        return early_skip
-
-    resolvers: tuple[Callable[[], AnalyzerPlan | None], ...] = (
-        lambda: _repo_native_plan(manifest, repo_root, repo_tool_state),
-        lambda: _type_checker_missing_plan(manifest),
-        lambda: _ci_result_plan(manifest, repo_root, ci_artifact_available),
-        lambda: _managed_plan(
+    if plan is None:
+        plan = _sqlfluff_no_dialect_plan(manifest, repo_root)
+    if plan is None:
+        plan = _agentsec_plan(manifest, repo_root)
+    if plan is None:
+        repo_tool_state, early_skip = _detect_repo_tool_state(
             manifest,
             repo_root,
-            managed_available=managed_available,
-            managed_version=managed_version,
-        ),
-        lambda: _container_plan(manifest, repo_root, container_available),
-    )
-    for resolver in resolvers:
-        plan = resolver()
-        if plan is not None:
-            return plan
-
-    return AnalyzerPlan(
-        manifest_id=manifest.id,
-        mode="skip",
-        reason=(
-            f"skipped {manifest.id}: no repo-native tool, CI artifact, managed binary, "
-            "or container runtime available"
-        ),
-    )
+            repo_has_tool=repo_has_tool,
+            repo_tool_path=repo_tool_path,
+            repo_tool_version=repo_tool_version,
+        )
+        if early_skip is not None:
+            plan = early_skip
+        else:
+            resolvers: tuple[Callable[[], AnalyzerPlan | None], ...] = (
+                lambda: _repo_native_plan(manifest, repo_root, repo_tool_state),
+                lambda: _type_checker_missing_plan(manifest),
+                lambda: _ci_result_plan(manifest, repo_root, ci_artifact_available),
+                lambda: _managed_plan(
+                    manifest,
+                    repo_root,
+                    managed_available=managed_available,
+                    managed_version=managed_version,
+                ),
+                lambda: _container_plan(manifest, repo_root, container_available),
+            )
+            for resolver in resolvers:
+                plan = resolver()
+                if plan is not None:
+                    break
+    if plan is None:
+        plan = AnalyzerPlan(
+            manifest_id=manifest.id,
+            mode="skip",
+            reason=(
+                f"skipped {manifest.id}: no repo-native tool, CI artifact, managed binary, "
+                "or container runtime available"
+            ),
+        )
+    return _with_config_absent_patches(plan, repo_root)
 
 
 def expand_analyzer_argv(

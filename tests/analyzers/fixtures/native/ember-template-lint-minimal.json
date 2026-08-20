@@ -1,0 +1,12 @@
+{
+  "app/templates/application.hbs": [
+    {
+      "rule": "no-bare-strings",
+      "severity": 2,
+      "message": "Non-translated string used",
+      "line": 1,
+      "column": 0,
+      "source": "Hello"
+    }
+  ]
+}

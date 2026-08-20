@@ -1,0 +1,38 @@
+id: typos
+category: lint
+languages:
+  - python
+  - javascript
+  - typescript
+  - rust
+  - go
+  - markdown
+detect:
+  files:
+    - "*.py"
+    - "*.js"
+    - "*.ts"
+    - "*.tsx"
+    - "*.md"
+    - "*.rs"
+    - "*.go"
+command:
+  - typos
+  - --format
+  - sarif
+  - .
+scope: repo
+parser: sarif
+supports_fix: true
+default_enabled: auto
+version: "1.32.0"
+runtime: repo-native
+timeout_s: 120
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+  note: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: null

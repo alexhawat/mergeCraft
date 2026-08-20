@@ -6,6 +6,10 @@ detect:
   files:
   - '*.f90'
   - '*.f95'
+  - '*.F90'
+  - '*.f03'
+  - '*.f'
+  - '*.for'
   - .fortitude.toml
 command:
 - fortitude
@@ -14,7 +18,7 @@ command:
 scope: diff
 parser: sarif
 supports_fix: false
-default_enabled: false
+default_enabled: auto
 version: 0.6.2
 runtime: managed
 timeout_s: 180

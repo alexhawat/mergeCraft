@@ -5,6 +5,9 @@ languages:
 detect:
   files:
   - '*.go'
+  - go.mod
+  lint_files:
+  - '*.go'
 command:
 - golangci-lint
 - run
@@ -14,7 +17,7 @@ command:
 scope: diff
 parser: sarif
 supports_fix: false
-default_enabled: false
+default_enabled: auto
 version: 1.62.2
 runtime: managed
 timeout_s: 300

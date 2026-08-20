@@ -14,9 +14,9 @@ command:
 - json
 - '{files}'
 scope: diff
-parser: sarif
+parser: stylelint_json
 supports_fix: false
-default_enabled: false
+default_enabled: auto
 version: 16.12.0
 runtime: repo-native
 timeout_s: 120
@@ -24,7 +24,6 @@ trust: trusted
 severity_map:
   error: Major
   warning: Minor
-  note: Trivial
 provenance: {}
 network_allowlist: []
 exclusive_group: null

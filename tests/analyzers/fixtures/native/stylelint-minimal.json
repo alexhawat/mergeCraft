@@ -1,0 +1,17 @@
+[
+  {
+    "source": "hello.css",
+    "errored": true,
+    "warnings": [
+      {
+        "line": 1,
+        "column": 8,
+        "endLine": 1,
+        "endColumn": 12,
+        "rule": "color-no-invalid-hex",
+        "severity": "error",
+        "text": "Unexpected invalid hex color \"#zzz\" (color-no-invalid-hex)"
+      }
+    ]
+  }
+]
