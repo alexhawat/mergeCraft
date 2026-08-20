@@ -165,8 +165,8 @@ diagrams-check: ## Assert committed pipeline SVGs exist and README references th
 	@test -s $(PIPELINE_D2) || (echo "missing $(PIPELINE_D2)" >&2; exit 1)
 	@test -s $(PIPELINE_LIGHT) || (echo "missing $(PIPELINE_LIGHT)" >&2; exit 1)
 	@test -s $(PIPELINE_DARK) || (echo "missing $(PIPELINE_DARK)" >&2; exit 1)
-	@rg -q 'assets/diagrams/pipeline-light.svg' README.md
-	@rg -q 'assets/diagrams/pipeline-dark.svg' README.md
+	@grep -q 'assets/diagrams/pipeline-light.svg' README.md
+	@grep -q 'assets/diagrams/pipeline-dark.svg' README.md
 	@if [ -n "$$MERGECRAFT_REQUIRE_D2" ]; then \
 		command -v d2 >/dev/null 2>&1 || { echo "d2 not found — install from https://d2lang.com" >&2; exit 1; }; \
 		tmp=$$(mktemp -d); \
