@@ -67,32 +67,27 @@ def attach_trace_context(span: Span) -> Iterator[None]:
         yield
         return
 
-    from mergecraft.tracing.exporters import (
-        _build_otel_parent_context,
-        _parse_mergecraft_otel_span_id,
-        _parse_mergecraft_otel_trace_id,
+    from mergecraft.tracing.otel_context import (
+        parse_mergecraft_otel_span_id,
+        parse_mergecraft_otel_trace_id,
+        resolve_start_context,
     )
 
-    otel_trace_id = _parse_mergecraft_otel_trace_id(span.trace_id) if span.trace_id else None
+    otel_trace_id = parse_mergecraft_otel_trace_id(span.trace_id) if span.trace_id else None
     if not otel_trace_id:
         yield
         return
 
-    otel_span_id = _parse_mergecraft_otel_span_id(span.span_id) if span.span_id else None
+    otel_span_id = parse_mergecraft_otel_span_id(span.span_id) if span.span_id else None
     if otel_span_id is None:
         yield
         return
 
-    parent_context = _build_otel_parent_context(otel_trace_id, span.parent_span_id)
-    base_context = parent_context
-    if base_context is None and not span.parent_span_id:
-        from mergecraft.tracing.exporters import _root_otel_context
-
-        base_context = _root_otel_context()
+    base_context = resolve_start_context(span.trace_id, span.parent_span_id)
 
     # Build the bridged context directly — do not ``start_span`` on the
     # ProxyTracerProvider placeholder (``get_current_span()`` returns that
-    # same object; ``_override_span_context`` would leak valid ids).
+    # same object; ``override_span_context`` would leak valid ids).
     bridged_ctx = SpanContext(
         trace_id=otel_trace_id,
         span_id=otel_span_id,

@@ -10,11 +10,140 @@ fails closed without raising an unhandled ``ImportError``.
 
 from __future__ import annotations
 
+import json
 import socket
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+
+def ensure_real_tracer_provider() -> None:
+    """Install a real ``TracerProvider`` when OTel is still on the proxy default."""
+    pytest.importorskip("opentelemetry")
+
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+
+    existing = trace.get_tracer_provider()
+    if type(existing).__name__ == "ProxyTracerProvider":
+        trace.set_tracer_provider(TracerProvider())
+
+
+def recorded_spans() -> list[dict[str, Any]]:
+    """Parse every JSON-array chunk the recording processor appended."""
+    from mergecraft.tracing.exporters import captured_payload
+
+    spans: list[dict[str, Any]] = []
+    for chunk in captured_payload():
+        parsed = json.loads(chunk.decode("utf-8"))
+        if isinstance(parsed, list):
+            spans.extend(parsed)
+        else:
+            spans.append(parsed)
+    return spans
+
+
+def export_events_via_otlp_sink(
+    events: list[Any],
+    *,
+    endpoint: str,
+    service_name: str,
+) -> list[dict[str, Any]]:
+    """Write ``events`` through a fresh OTLP sink and return recorded spans in order."""
+    from mergecraft.tracing.exporters import OTLPSink, _reset_test_seam
+
+    ensure_real_tracer_provider()
+    _reset_test_seam()
+    sink = OTLPSink(
+        endpoint=endpoint,
+        headers={},
+        service_name=service_name,
+    )
+    for event in events:
+        sink.write(event)
+    sink.flush()
+
+    spans = recorded_spans()
+    assert len(spans) == len(events), f"expected {len(events)} recorded spans, got {len(spans)}"
+    return spans
+
+
+def export_event_via_otlp_sink(
+    event: Any,
+    *,
+    endpoint: str,
+    service_name: str,
+) -> dict[str, Any]:
+    """Write ``event`` through a fresh OTLP sink and return the recorded span."""
+    spans = export_events_via_otlp_sink([event], endpoint=endpoint, service_name=service_name)
+    assert len(spans) == 1, f"expected exactly one recorded span, got {len(spans)}"
+    return spans[0]
+
+
+def otlp_sink_children(sink: Any) -> list[Any]:
+    """Return live :class:`OTLPSink` children under the redacting wrapper."""
+    from mergecraft.tracing.exporters import OTLPSink
+
+    inner = getattr(sink, "inner", sink)
+    children = getattr(inner, "sinks", ())
+    return [child for child in children if isinstance(child, OTLPSink)]
+
+
+def export_span_count(event: Any, otlp_sinks: list[Any]) -> int:
+    """Count recorded spans when each resolved OTLP sink exports ``event`` once."""
+    from mergecraft.tracing.exporters import _reset_test_seam
+
+    total = 0
+    for child in otlp_sinks:
+        _reset_test_seam()
+        child.write(event)
+        child.flush()
+        total += len(recorded_spans())
+    return total
+
+
+def shared_endpoint_settings_dict(*, endpoint: str, token: str) -> dict[str, Any]:
+    """Tracing config with logfire + otel aimed at the same OTLP destination."""
+    auth = {"authorization": f"Bearer {token}"}
+    return {
+        "tracing": {
+            "enabled": True,
+            "sinks": [
+                {
+                    "type": "logfire",
+                    "tokenRef": "MERGECRAFT_LOGFIRE_TOKEN",
+                    "endpoint": endpoint,
+                },
+                {
+                    "type": "otel",
+                    "endpoint": endpoint,
+                    "headers": auth,
+                },
+            ],
+        }
+    }
+
+
+def build_deduped_otlp_sink(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    endpoint: str,
+    token: str,
+) -> Any:
+    """Resolve a sink factory product with logfire + otel on the same endpoint."""
+    pytest.importorskip("logfire")
+    pytest.importorskip("opentelemetry")
+
+    from mergecraft.config import RepoSettings
+    from mergecraft.tracing import sink_factory
+
+    monkeypatch.setenv("MERGECRAFT_LOGFIRE_TOKEN", token)
+    settings = RepoSettings.model_validate(
+        shared_endpoint_settings_dict(endpoint=endpoint, token=token)
+    )
+    ensure_real_tracer_provider()
+    return sink_factory(settings.tracing)
 
 
 @pytest.fixture

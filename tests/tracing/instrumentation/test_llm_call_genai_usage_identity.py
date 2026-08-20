@@ -20,8 +20,7 @@ import pytest
 from tests.tracing.instrumentation.conftest import make_agent_usage
 from tests.tracing.streaming.conftest import CLAUDE_TOOL_CALL_STREAM, serialize_stream
 
-# Issue #375 — no stable OTel GenAI name; lives under mergecraft.* (convention 6).
-USAGE_UNAVAILABLE_ATTR = "mergecraft.usage.unavailable"
+from mergecraft.tracing.genai import USAGE_UNAVAILABLE_ATTR
 
 _INPUT_TOKENS = 100
 _OUTPUT_TOKENS = 7

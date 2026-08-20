@@ -15,23 +15,12 @@ import json
 from typing import Any
 
 import pytest
+from tests.tracing.exporters.conftest import export_events_via_otlp_sink
 
 _CANARY_ENDPOINT = "http://127.0.0.1:1/canary-374-parent-context"
 _TRACE_ID_HEX = "37400000000000000000000000000001"
 _PARENT_SPAN_ID = "37400000000000000000000000000001"
 _CHILD_SPAN_ID = "37400000000000000000000000000002"
-
-
-def _ensure_real_tracer_provider() -> None:
-    """Install a real ``TracerProvider`` when OTel is still on the proxy default."""
-    pytest.importorskip("opentelemetry")
-
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-
-    existing = trace.get_tracer_provider()
-    if type(existing).__name__ == "ProxyTracerProvider":
-        trace.set_tracer_provider(TracerProvider())
 
 
 @pytest.fixture(autouse=True)
@@ -69,43 +58,9 @@ def _enrich_recording_with_span_context(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(exporters._RecordingSpanProcessor, "on_end", enriched_on_end)
 
 
-def _recorded_spans() -> list[dict[str, Any]]:
-    """Parse every JSON-array chunk the recording processor appended."""
-    from mergecraft.tracing.exporters import captured_payload
-
-    spans: list[dict[str, Any]] = []
-    for chunk in captured_payload():
-        parsed = json.loads(chunk.decode("utf-8"))
-        if isinstance(parsed, list):
-            spans.extend(parsed)
-        else:
-            spans.append(parsed)
-    return spans
-
-
 def _mergecraft_otel_span_id(mergecraft_span_id: str) -> str:
     """Map mergeCraft ``span_id`` to the OTel width W6 will use (issue #374)."""
     return mergecraft_span_id[:16]
-
-
-def _export_events_via_otlp_sink(events: list[Any]) -> list[dict[str, Any]]:
-    """Write ``events`` through a fresh OTLP sink and return recorded spans in order."""
-    from mergecraft.tracing.exporters import OTLPSink, _reset_test_seam
-
-    _ensure_real_tracer_provider()
-    _reset_test_seam()
-    sink = OTLPSink(
-        endpoint=_CANARY_ENDPOINT,
-        headers={},
-        service_name="mergecraft-otel-parent-374",
-    )
-    for event in events:
-        sink.write(event)
-    sink.flush()
-
-    spans = _recorded_spans()
-    assert len(spans) == len(events), f"expected {len(events)} recorded spans, got {len(spans)}"
-    return spans
 
 
 def test_child_export_carries_otel_parent_and_mergecraft_span_id(
@@ -135,7 +90,11 @@ def test_child_export_carries_otel_parent_and_mergecraft_span_id(
         }
     )
 
-    parent_recorded, child_recorded = _export_events_via_otlp_sink([parent_event, child_event])
+    parent_recorded, child_recorded = export_events_via_otlp_sink(
+        [parent_event, child_event],
+        endpoint=_CANARY_ENDPOINT,
+        service_name="mergecraft-otel-parent-374",
+    )
 
     expected_parent_otel = _mergecraft_otel_span_id(_PARENT_SPAN_ID)
     expected_child_otel = _mergecraft_otel_span_id(_CHILD_SPAN_ID)

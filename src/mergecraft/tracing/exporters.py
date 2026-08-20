@@ -36,6 +36,13 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.tracing.otel_context import (
+    override_span_context,
+    parse_mergecraft_otel_span_id,
+    parse_mergecraft_otel_trace_id,
+    resolve_start_context,
+)
+
 if TYPE_CHECKING:
     from mergecraft.tracing.event import TraceEvent
 
@@ -509,74 +516,6 @@ def _otel_safe_attr_value(value: Any) -> Any:
     return _json.dumps(value, default=str)
 
 
-def _parse_mergecraft_otel_trace_id(trace_id: str) -> int | None:
-    """Parse a mergeCraft ``trace_id`` hex string into a 128-bit OTel trace id."""
-    try:
-        return int(trace_id[:32], 16)
-    except (TypeError, ValueError):  # fmt: skip
-        return None
-
-
-def _parse_mergecraft_otel_span_id(span_id: str) -> int | None:
-    """Parse a mergeCraft ``span_id`` hex string into a 64-bit OTel span id."""
-    try:
-        return int(span_id[:16], 16)
-    except (TypeError, ValueError):  # fmt: skip
-        return None
-
-
-def _build_otel_parent_context(trace_id: int, parent_span_id: str | None) -> Any | None:
-    """Return an OTel ``context`` carrying the parent ``SpanContext``, if any."""
-    if not parent_span_id:
-        return None
-    parent_otel_span_id = _parse_mergecraft_otel_span_id(parent_span_id)
-    if parent_otel_span_id is None:
-        return None
-    try:
-        from opentelemetry import trace as otel_trace
-        from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, TraceState
-    except ImportError:
-        return None
-    parent_ctx = SpanContext(
-        trace_id=trace_id,
-        span_id=parent_otel_span_id,
-        is_remote=False,
-        trace_flags=TraceFlags(TraceFlags.SAMPLED),
-        trace_state=TraceState(),
-    )
-    return otel_trace.set_span_in_context(NonRecordingSpan(parent_ctx))
-
-
-def _root_otel_context() -> Any | None:
-    """Return an OTel ``context`` with no parent span (isolates from leaked context)."""
-    try:
-        from opentelemetry import trace as otel_trace
-        from opentelemetry.trace import INVALID_SPAN_CONTEXT, NonRecordingSpan
-    except ImportError:
-        return None
-    return otel_trace.set_span_in_context(NonRecordingSpan(INVALID_SPAN_CONTEXT))
-
-
-def _override_span_context(span: Any, trace_id: int, span_id: int) -> None:
-    """Rewrite the OTel ``trace_id`` and ``span_id`` on a freshly-built span."""
-    try:
-        from opentelemetry.trace import SpanContext, TraceFlags, TraceState
-    except ImportError:
-        return
-    try:
-        new_ctx = SpanContext(
-            trace_id=trace_id,
-            span_id=span_id,
-            is_remote=False,
-            trace_flags=TraceFlags(TraceFlags.SAMPLED),
-            trace_state=TraceState(),
-        )
-        if hasattr(span, "_context"):
-            span._context = new_ctx
-    except Exception as exc:
-        logger.debug("trace otel sink span context override failed: {}", exc)
-
-
 class OTLPSink:
     """One sink class serving both ``logfire`` and ``otel`` (D5).
 
@@ -717,16 +656,14 @@ class OTLPSink:
             otel_trace_id: int | None = None
             otel_span_id: int | None = None
             if event.trace_id:
-                otel_trace_id = _parse_mergecraft_otel_trace_id(event.trace_id)
+                otel_trace_id = parse_mergecraft_otel_trace_id(event.trace_id)
                 if otel_trace_id is not None:
                     attrs["mergecraft.trace_id"] = event.trace_id
             if event.span_id:
-                otel_span_id = _parse_mergecraft_otel_span_id(event.span_id)
+                otel_span_id = parse_mergecraft_otel_span_id(event.span_id)
             parent_context: Any | None = None
-            if otel_trace_id is not None:
-                parent_context = _build_otel_parent_context(otel_trace_id, event.parent_span_id)
-                if parent_context is None and not event.parent_span_id:
-                    parent_context = _root_otel_context()
+            if event.trace_id:
+                parent_context = resolve_start_context(event.trace_id, event.parent_span_id)
             span = self._tracer.start_span(
                 name=event.kind,
                 attributes=attrs,
@@ -734,7 +671,7 @@ class OTLPSink:
                 context=parent_context,
             )
             if otel_trace_id is not None and otel_span_id is not None:
-                _override_span_context(span, otel_trace_id, otel_span_id)
+                override_span_context(span, otel_trace_id, otel_span_id)
             elif otel_trace_id is not None:
                 self._override_span_trace_id(span, otel_trace_id)
             span.end(end_time=event.ts_end_ns)
@@ -761,7 +698,7 @@ class OTLPSink:
             span_ctx = span.get_span_context()
         except Exception:
             return
-        _override_span_context(span, trace_id, span_ctx.span_id)
+        override_span_context(span, trace_id, span_ctx.span_id)
 
     def flush(self) -> None:
         """Best-effort flush; idempotent and never raises (convention 6).

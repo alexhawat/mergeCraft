@@ -25,7 +25,12 @@ from mergecraft.models import (
     resolve_cli_model,
     resolve_display_alias,
 )
-from mergecraft.tracing.genai import usage_unavailable_attrs
+from mergecraft.tracing.genai import (
+    request_attrs,
+    response_attrs,
+    usage_attrs_from_agent_usage,
+    usage_unavailable_attrs,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -659,14 +664,24 @@ async def run_with_model_chain(
                     "model.resolved": slug,
                     "model.fallback_index": chain_index,
                     "gen_ai.operation.name": "chat",
-                    "gen_ai.request.model": slug,
-                    "gen_ai.response.model": slug,
                     "gen_ai.system": _agent_provider_for_slug(slug),
                 }
+                call_attrs.update(request_attrs(model=slug))
+                call_attrs.update(response_attrs(model=slug))
                 usage = result.usage
                 if usage is not None:
-                    usage_cost = _cost_attrs_from_usage(usage)
-                    call_attrs.update(usage_cost)
+                    call_attrs.update(
+                        usage_attrs_from_agent_usage(
+                            input_tokens=getattr(usage, "input_tokens", None),
+                            output_tokens=getattr(usage, "output_tokens", None),
+                            cache_read_tokens=getattr(usage, "cache_read_tokens", None),
+                            cache_write_tokens=getattr(usage, "cache_write_tokens", None),
+                            cost_usd=getattr(usage, "cost_usd", None),
+                        )
+                    )
+                    for key, value in _cost_attrs_from_usage(usage).items():
+                        if key.startswith("cost."):
+                            call_attrs[key] = value
                 else:
                     call_attrs.update(usage_unavailable_attrs())
 
