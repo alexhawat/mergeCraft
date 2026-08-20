@@ -44,9 +44,11 @@ class _FakeOtelSpan:
 
     def __init__(self) -> None:
         self.ended = False
+        self.end_time: int | None = None
 
-    def end(self) -> None:
+    def end(self, *, end_time: int | None = None) -> None:
         self.ended = True
+        self.end_time = end_time
 
 
 class _FakeOtelTracer:
@@ -55,8 +57,14 @@ class _FakeOtelTracer:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    def start_span(self, *, name: str, attributes: dict[str, Any]) -> _FakeOtelSpan:
-        self.calls.append({"name": name, "attributes": dict(attributes)})
+    def start_span(
+        self,
+        *,
+        name: str,
+        attributes: dict[str, Any],
+        start_time: int | None = None,
+    ) -> _FakeOtelSpan:
+        self.calls.append({"name": name, "attributes": dict(attributes), "start_time": start_time})
         return _FakeOtelSpan()
 
 
