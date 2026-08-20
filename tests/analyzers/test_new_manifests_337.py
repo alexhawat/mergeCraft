@@ -105,11 +105,15 @@ def _registry():
     return import_module("mergecraft.analyzers.registry")
 
 
-def _wave_xfail(tool_id: str) -> pytest.MarkDecorator:
+def _wave_xfail(tool_id: str) -> tuple[pytest.MarkDecorator, ...]:
     wave = _TOOL_WAVE[tool_id]
-    return pytest.mark.xfail(
-        reason=f"green after {wave}: {tool_id} catalog manifest (#337)",
-        strict=False,
+    if wave == "W4":
+        return ()
+    return (
+        pytest.mark.xfail(
+            reason=f"green after {wave}: {tool_id} catalog manifest (#337)",
+            strict=False,
+        ),
     )
 
 
@@ -221,7 +225,7 @@ def test_unrelated_readme_does_not_match_before_manifest(tool_id: str) -> None:
     assert tool_id not in ids
 
 
-# --- xfail until W4 / W5 / W6 ---------------------------------------------
+# --- xfail until W5 / W6 (W4 tsc/bandit/jscpd greened) --------------------
 
 
 @pytest.mark.parametrize("tool_id", _id_params(NEW_MANIFEST_IDS))
@@ -282,7 +286,6 @@ def test_new_manifest_auto_enables_on_detect_markers(
     assert tool_id in _enabled_ids(repo, changed)
 
 
-@pytest.mark.xfail(reason="green after W4: tsc --noEmit whole-program catalog (#337)", strict=False)
 def test_tsc_command_is_no_emit_whole_program() -> None:
     manifest = _registry().get_manifest("tsc")
     assert "--noEmit" in manifest.command
@@ -290,7 +293,6 @@ def test_tsc_command_is_no_emit_whole_program() -> None:
     assert manifest.category == "lint"
 
 
-@pytest.mark.xfail(reason="green after W4: bandit reuses make security pin (#337)", strict=False)
 def test_bandit_version_reuses_make_security_pin() -> None:
     manifest = _registry().get_manifest("bandit")
     assert manifest.version == _make_security_bandit_pin()
@@ -298,18 +300,12 @@ def test_bandit_version_reuses_make_security_pin() -> None:
     assert manifest.category == "security"
 
 
-@pytest.mark.xfail(
-    reason="green after W4: jscpd scope repo + diff-line attribution (D14)", strict=False
-)
 def test_jscpd_scope_is_repo() -> None:
     manifest = _registry().get_manifest("jscpd")
     assert manifest.scope == "repo"
     assert manifest.category == "quality"
 
 
-@pytest.mark.xfail(
-    reason="green after W4: jscpd scope repo + diff-line attribution (D14)", strict=False
-)
 def test_jscpd_drops_preexisting_clones_off_the_diff() -> None:
     """D14: duplication is repo-wide, but findings must sit on diff lines only."""
     scope = import_module("mergecraft.analyzers.scope")
@@ -328,7 +324,6 @@ def test_jscpd_drops_preexisting_clones_off_the_diff() -> None:
     assert kept == [on_diff]
 
 
-@pytest.mark.xfail(reason="green after W4: tsc whole-program + diff-filter (#337)", strict=False)
 def test_tsc_diff_filter_keeps_only_changed_lines() -> None:
     scope = import_module("mergecraft.analyzers.scope")
     manifest = _registry().get_manifest("tsc")
