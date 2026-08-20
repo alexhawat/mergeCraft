@@ -54,8 +54,10 @@ Examples:
   Import from `mergecraft.cli.exits`.
 - `CLI_USAGE_EXIT_CODE` is reserved for operator-input mistakes; Typer may also
   emit `2` for its own usage errors before a command handler runs.
-- GitHub Actions consumers should prefer structured `--format json` output and
-  the documented codes above over parsing stderr text.
+- GitHub Actions consumers should prefer structured `--output-format json` (or root
+  `--format json`) and the documented codes above over parsing stderr text.
+- Default `mergecraft review` human text is written to stderr (D14); stdout stays
+  reserved for `--agent` JSONL. Capture text with `2>`, not `>`.
 
 See also: README review examples (exit-code summary), `docs/REVIEW-DOCTRINE.md`
 ("Run outcome taxonomy").

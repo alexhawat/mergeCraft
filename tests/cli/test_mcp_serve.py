@@ -61,10 +61,6 @@ def _write_config(tmp_path: Path) -> None:
     )
 
 
-def _auth_headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {_SERVE_AUTH_TOKEN}"}
-
-
 def test_serves_the_toolset_for_a_named_role(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``mcp serve`` exposes the registry-resolved tool surface for a named role."""
     from mergecraft.cli.mcp_serve import build_mcp_app_from_ctx, build_mcp_tool_context

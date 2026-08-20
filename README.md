@@ -208,10 +208,17 @@ mergecraft review --staged                               # staged changes only
 mergecraft review --diff changes.patch --dry-run         # inspect the prompt, no LLM call
 gh pr diff 42 > /tmp/pr-42.diff && mergecraft review --diff /tmp/pr-42.diff
 mergecraft review --json findings.json                 # machine-readable Finding[] for scoring
-mergecraft review --format sarif --output report.sarif.json
-mergecraft review --format jsonl --output stream.jsonl
+mergecraft review --output-format sarif --output report.sarif.json
+mergecraft review --output-format jsonl --output stream.jsonl
 mergecraft review --agent                              # JSONL agent protocol on stdout
+mergecraft review 2> review.md                         # human text is on stderr (D14)
 ```
+
+Human-readable review text (default mode) is written to **stderr** so stdout stays free
+for `--agent` JSONL and other machine payloads. Redirecting stdout (`mergecraft review > review.md`)
+captures nothing useful — use `2>` instead (`mergecraft review 2> review.md`). Structured
+findings still go to `--json` / `--output` paths as documented above. Root `--format json`
+selects JSON output when `--output-format` is omitted (same pattern as `findings export`).
 
 Process exit codes: `0` clean pass; `10` non-blocking findings; `11` blocking severities;
 `12` review failed (no findings); `20` inconclusive; `30` configuration error; `40` infra error;
