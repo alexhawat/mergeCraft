@@ -5,10 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### Fixed
+## [Unreleased]
 
-- MCP HTTP server now issues a separate bearer token for the orchestrator ``/mcp`` route; reviewer/verifier harnesses keep ``ToolContext.mcp_auth_token`` for their role endpoints (#349)
-- OpenCode gateway ``extra_options`` generation knobs (temperature, ``top_p``, ``max_tokens`` when a context window is known) are applied through provider model ``limit`` / ``options`` and the primary ``build`` agent config instead of being copied into ``provider.options``; ``llm.call`` tracing stamps only params the config path actually applies (#295, #349)
+### Added
 
 - `scripts/check_type_ignores.py` fails when a `type: ignore` or `cast(` in allowed `src/mergecraft/` lacks a one-line reason (#275); wired into `make lint`
 - `scripts/check_xpass.py` fails when unexpected pytest xpasses remain on the allowed test tree (#276)
@@ -90,6 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP HTTP server now issues a separate bearer token for the orchestrator ``/mcp`` route; reviewer/verifier harnesses keep ``ToolContext.mcp_auth_token`` for their role endpoints (#349)
+- OpenCode gateway ``extra_options`` generation knobs (temperature, ``top_p``, ``max_tokens`` when a context window is known) are applied through provider model ``limit`` / ``options`` and the primary ``build`` agent config instead of being copied into ``provider.options``; ``llm.call`` tracing stamps only params the config path actually applies (#295, #349)
 - OpenCode ``llm.call`` spans now carry ``ModelParams`` request knobs (``gen_ai.request.max_tokens``, temperature, and siblings) resolved from gateway ``extra_options`` env vars (``MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS``, indexed ``…_<N>``, or per-provider ``MERGECRAFT_PROVIDER_EXTRA_OPTIONS``) including named presets when only ``NOUS_API_KEY`` / ``TOKENHUB_API_KEY`` are set (#295)
 - OpenCode HTTP ``llm.call`` usage attrs omit unset counters instead of zero-filling ``gen_ai.usage.*`` when the session response reports output tokens only (#297)
 
