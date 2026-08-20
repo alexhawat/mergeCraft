@@ -16,6 +16,7 @@ import ast
 import re
 import shutil
 import subprocess
+import sys
 import tokenize
 import tomllib
 from dataclasses import dataclass
@@ -209,6 +210,8 @@ def test_find_unparenthesized_except_violations_parametrized(
     tmp_path: Path, source: str, violations: int
 ) -> None:
     """Scanner flags bare ``except A, B:`` and accepts parenthesized / single-type handlers."""
+    if violations and sys.version_info < (3, 14):
+        pytest.skip("PEP 758 bare except is a SyntaxError below 3.14; AST scan is N/A")
     src_root = tmp_path / "src" / "mergecraft"
     _write_src_module(src_root, "sample.py", source)
     found = find_unparenthesized_except_violations(src_root)

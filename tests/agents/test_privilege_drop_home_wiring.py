@@ -76,7 +76,7 @@ def _simulate_root_privilege_drop(monkeypatch: MonkeyPatch) -> None:
         "which",
         lambda name: f"/usr/bin/{name}" if name == "setpriv" else None,
     )
-    monkeypatch.setattr(privilege_module.os, "stat", lambda _path: MagicMock(st_uid=0))
+    monkeypatch.setattr(privilege_module.os, "stat", lambda _path, **kwargs: MagicMock(st_uid=0))
     fake_pwd = MagicMock()
     fake_pwd.getpwnam.return_value = _FakePw()
     monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
