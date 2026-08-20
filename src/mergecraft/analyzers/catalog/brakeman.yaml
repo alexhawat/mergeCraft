@@ -4,6 +4,7 @@ languages:
 - ruby
 detect:
   files:
+  - '*.rb'
   - config/application.rb
   - config/routes.rb
 command:
@@ -11,7 +12,7 @@ command:
 - -f
 - sarif
 - -o
-- brakeman.sarif
+- "-"
 scope: repo
 parser: sarif
 supports_fix: false

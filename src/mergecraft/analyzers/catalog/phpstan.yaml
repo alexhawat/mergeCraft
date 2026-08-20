@@ -11,7 +11,7 @@ detect:
 command:
 - phpstan
 - analyse
-- --error-format=json
+- --error-format=sarif
 - '{files}'
 scope: diff
 parser: sarif
