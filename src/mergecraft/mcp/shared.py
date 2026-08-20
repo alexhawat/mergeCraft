@@ -149,9 +149,10 @@ def admits_readonly_role(
     ``report_progress``, ``resolve_review_thread``); class membership alone
     would leak all of them to the reviewer.  The primary reviewer passes
     ``PRIMARY_MUTATING_ALLOWLIST`` which adds ``create_pull_request_review``,
-    ``set_output``, ``select_mode``, and ``report_progress`` by name; subagents
-    keep ``READONLY_MUTATING_ALLOWLIST`` (checkout_pr only) so they remain
-    denied publication and cannot call session tools.
+    ``record_finding_verdict``, ``set_output``, ``select_mode``, and
+    ``report_progress`` by name; subagents keep ``READONLY_MUTATING_ALLOWLIST``
+    (checkout_pr only) so they remain denied publication and cannot call
+    session tools.
     """
     if spec.tool_class not in allowed:
         return False

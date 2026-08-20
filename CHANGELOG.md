@@ -177,7 +177,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- `mcp/server`: primary `/mcp/reviewer` now admits session tools `set_output`, `select_mode`, and `report_progress` via `PRIMARY_MUTATING_ALLOWLIST`; routing the primary agent to `/mcp/reviewer` no longer drops tools required by the Action output schema, the mode-selection playbook (Step 1), and the no-action path. Repo mutations (`push_branch`, `commit_changes`, etc.) and review-write tools not in the allowlist (`record_finding_verdict`, `resolve_review_thread`) stay off the reviewer surface; subagents continue to use the narrower `READONLY_MUTATING_ALLOWLIST`
+- `mcp/server`: primary `/mcp/reviewer` now admits session tools `set_output`, `select_mode`, and `report_progress` via `PRIMARY_MUTATING_ALLOWLIST`; routing the primary agent to `/mcp/reviewer` no longer drops tools required by the Action output schema, the mode-selection playbook (Step 1), and the no-action path. Repo mutations (`push_branch`, `commit_changes`, etc.) and review-write tools not in the allowlist (`resolve_review_thread`) stay off the reviewer surface; subagents continue to use the narrower `READONLY_MUTATING_ALLOWLIST`
 - docs: `SECURITY.md` secret-stripping claim narrowed to the agent subprocess (`build_agent_env` / `filter_env`) and the sandboxed `shell` tool (`resolve_env`); `_run_git` inherits the process environment and is not covered by the filter (#286)
 - Untrusted PR trees no longer receive a `shell` tool when PID-namespace isolation is unavailable (#287)
 - Untrusted PR trees no longer run package install lifecycle scripts in the Action process when `shell` is the default `restricted` (#284)
