@@ -10,6 +10,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `actionlint` | ci | — | auto | managed | untrusted | — | — |
 | `agentsec` | security | — | enabled | repo-native | untrusted | — | — |
 | `ast-grep` | security | python, javascript, typescript, go, java, rust, c, cpp, yaml | auto | managed | untrusted | pattern-scanner | Substrate for a future native policy engine — not built in C3. |
+| `bandit` | security | python | auto | repo-native | trusted | — | — |
 | `basedpyright` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `biome` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `blinter` | lint | batch | disabled | managed | trusted | — | requires non-Linux runner — Windows batch lint not supported on Linux (C6) |
@@ -31,6 +32,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `hadolint` | lint | docker | auto | managed | untrusted | — | — |
 | `htmlhint` | lint | html | disabled | repo-native | trusted | — | — |
 | `infer` | security | java, c, cpp | disabled | container | trusted | — | requires compilation database and build — container-only heavyweight (C4) |
+| `jscpd` | quality | javascript, typescript, python | auto | repo-native | trusted | — | — |
 | `languagetool` | lint | text | disabled | container | trusted | — | manifest-only — LanguageTool runtime not bundled on Linux runners (C6 out of scope) |
 | `luacheck` | lint | lua | disabled | repo-native | trusted | — | — |
 | `markdownlint` | lint | markdown | disabled | repo-native | trusted | — | — |
@@ -62,6 +64,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `tflint` | lint | terraform | disabled | managed | untrusted | iac-scanner | — |
 | `trivy` | vuln | — | auto | managed | untrusted | dependency-vuln | — |
 | `trufflehog` | secrets | — | auto | managed | untrusted | — | verify off by default; impossible on fork PRs (C2). |
+| `tsc` | lint | typescript | auto | repo-native | trusted | — | — |
 | `yamllint` | lint | yaml | disabled | managed | untrusted | — | — |
 | `zizmor` | ci | — | auto | managed | untrusted | — | — |
 
@@ -87,7 +90,7 @@ to run the *repo's* tool against the *repo's* config.
 
 | runtime | trust | `shell: disabled` | `shell: restricted` / `enabled` |
 |---------|-------|-------------------|----------------------------------|
-| `repo-native` (23) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
+| `repo-native` (26) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
 | `repo-native` (1) | `untrusted` | withheld — `runtime` needs repo-provided tooling | runs |
 | `managed` (12) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
 | `managed` (17) | `untrusted` | **runs** (pinned binary only) | runs |
@@ -113,15 +116,15 @@ with a warning, rather than silently widening to `auto`.
 `full` requests more provisioning; it is never a trust override, and cannot
 re-admit a manifest the tier axis skipped.
 
-Counts below are analyzers passing selection, out of 57 shipped, with
+Counts below are analyzers passing selection, out of 60 shipped, with
 `shell: restricted` (the shell axis inert) so the mode axis is isolated.
 
 | mode | trusted event | untrusted event (`pull_request_target`, fork) |
 |------|---------------|-----------------------------------------------|
 | **`off`** | surface not registered | surface not registered |
-| **`auto`** | 57 of 57 | 18 of 57 — `auto` ⇒ `untrusted-only` |
-| **`full`** | 57 of 57 | 18 of 57 |
-| **`untrusted-only`** | 18 of 57 | 18 of 57 |
+| **`auto`** | 60 of 60 | 18 of 60 — `auto` ⇒ `untrusted-only` |
+| **`full`** | 60 of 60 | 18 of 60 |
+| **`untrusted-only`** | 18 of 60 | 18 of 60 |
 
 Passing these axes is necessary, not sufficient: a `container` manifest
 is eligible but still reports `unavailable` wherever no container runtime is
