@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Agent install surfaces: `AGENTS.md`, consumer skill (`skills/mergecraft/SKILL.md`),
+  Claude plugin manifests (`.claude-plugin/`), slash commands (`commands/`),
+  GitHub Copilot instructions (`.github/copilot-instructions.md`), curated
+  `llms.txt`, and a **For AI coding agents** section on the landing README.
 - Added: generated CLI and Action reference pages (`docs/cli.md`,
   `docs/action-reference.md`) plus a docs manifest; `make docs-check`
   replaces landing-README table splices.

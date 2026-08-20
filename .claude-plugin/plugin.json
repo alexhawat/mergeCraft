@@ -1,0 +1,10 @@
+{
+  "name": "mergecraft",
+  "version": "0.1.0",
+  "description": "Set up, run, and troubleshoot mergeCraft AI PR review (BYOK GitHub Action + CLI).",
+  "author": { "name": "alexhawat" },
+  "homepage": "https://github.com/alexhawat/mergeCraft",
+  "license": "MIT",
+  "skills": "./skills/mergecraft",
+  "commands": "./commands"
+}

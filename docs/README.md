@@ -6,6 +6,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 
 | Page | Audience | Purpose |
 |------|----------|---------|
+| [AGENTS](AGENTS.md) | consumer | Cross-vendor agent guidance — consumer setup and mergeCraft development rules. |
 | [CONTRIBUTING](CONTRIBUTING.md) | contributor | Contributor setup, make targets, and PR expectations for mergeCraft itself. |
 | [Landing README](README.md) | consumer | Product landing page — install, features, and pointers to generated reference pages. |
 | [REVIEW-CHECKS](REVIEW-CHECKS.md) | contributor | Enumerated review checks mergeCraft applies on pull requests. |
@@ -34,6 +35,8 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [supply-chain](docs/supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
 | [workflows](docs/workflows.md) | consumer | Workflow examples 2–6, trust tiers, and pull_request_target placement gotchas. |
 | [evals README](evals/README.md) | satellite | Eval bank vs ReviewBench — what each mechanism measures and how to run gates. |
+| [llms.txt](llms.txt) | consumer | Curated documentation map for LLM agents (llms.txt convention). |
+| [SKILL](skills/mergecraft/SKILL.md) | consumer | Agent-Skills consumer skill — install checklist, CLI reference, troubleshooting. |
 
 ## See also
 

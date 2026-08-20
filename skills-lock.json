@@ -36,6 +36,12 @@
       "sourceType": "github",
       "skillPath": "skills/pydantic-ai-harness/SKILL.md",
       "computedHash": "24ebd64439b138bb1f7c0fa466d0a64a9d99d36108a670673c9c75c455f9ce8d"
+    },
+    "mergecraft": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/mergecraft/SKILL.md",
+      "computedHash": "0196572cd8e4b718c8ac9d998a8a7c60e981b850afa4e53873de9a38430bab50"
     }
   }
 }

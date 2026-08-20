@@ -15,6 +15,8 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 [![Docker](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
+[![Agent skill](skills/mergecraft/SKILL.md)](skills/mergecraft/SKILL.md)
+[![llms.txt](llms.txt)](llms.txt)
 
 [Problem](#problem) ·
 [How it works](#how-it-works) ·
@@ -133,7 +135,84 @@ jobs:
 > see [CONTRIBUTING.md § Verify a published image](CONTRIBUTING.md#verify-a-published-image).
 
 <span id="for-agents"></span>
-<!-- RD3: For AI coding agents -->
+
+## For AI coding agents
+
+mergeCraft is designed to be installed and operated **by an agent, from a
+prompt**. Point your agent at this repo and paste one of the prompts below.
+
+### One-line setup prompts (copy/paste into your agent)
+
+**Claude Code / Copilot CLI / Gemini CLI / any shell-capable agent:**
+
+> Set up mergeCraft PR review in this repository. Follow
+> https://github.com/alexhawat/mergeCraft#install. Steps: (1) ensure Python
+> 3.11+ and uv are installed; (2) run
+> `uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"`;
+> (3) run `mergecraft init`; (4) run `mergecraft auth claude` (or
+> `mergecraft auth codex` — ask me which provider); (5) commit the generated
+> `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml` on a new
+> branch and open a PR. Do not commit secrets. Stop and ask me before any
+> step that needs interactive authentication.
+
+**Cursor (chat / composer):**
+
+> Read [`AGENTS.md`](AGENTS.md) and set up mergeCraft in this repo: install the
+> CLI with uv (`uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"`),
+> run `mergecraft init`, then generate the workflow and config. Leave the
+> `mergecraft auth` step to me — print the exact command I should run.
+
+**ChatGPT (Codex / cloud agent):**
+
+> Task: make this repo use mergeCraft for AI PR review. Create a branch that
+> adds `.github/workflows/mergecraft.yml` (use [Example 1](#example-1--auto-review-every-pr)
+> — pin `uses: alexhawat/mergeCraft@…` to a full commit SHA or an existing git tag,
+> with `CLAUDE_CODE_OAUTH_TOKEN` from secrets) and a default
+> `.mergecraft/config.yaml`. Open a PR. I will add the secret myself.
+
+### What the agent will need from you
+
+- **One credential** — either a Claude Pro/Max or ChatGPT subscription login
+  (via `mergecraft auth claude` / `mergecraft auth codex`, interactive), or an
+  API key set as a GitHub secret. The agent cannot do the interactive login
+  for you; a good agent will stop and hand that step back.
+- **An authenticated `gh` CLI** if the agent should store the secret for you
+  (`gh secret set`). Otherwise it will print the secret name to add in the
+  GitHub UI.
+
+### Install mergeCraft as a skill in your agent
+
+If your agent supports skills (Claude Code, Copilot CLI, and other
+Agent-Skills-compatible tools), install the mergeCraft skill so the agent
+knows mergeCraft's commands, config keys, and failure modes:
+
+```bash
+# Claude Code / Copilot CLI (project-scoped)
+mkdir -p .claude/skills
+git clone --depth 1 https://github.com/alexhawat/mergeCraft /tmp/mergecraft
+cp -r /tmp/mergecraft/skills/mergecraft .claude/skills/mergecraft
+```
+
+Or with a skills-aware installer (example):
+
+```bash
+npx skills add alexhawat/mergeCraft --skill mergecraft
+```
+
+Or install the **Claude plugin** (skill + commands, one step):
+
+```bash
+# Inside Claude Code:
+/plugin marketplace add alexhawat/mergeCraft
+/plugin install mergecraft@mergecraft
+```
+
+Once installed, prompts like *"review my local diff with mergeCraft"* or
+*"why did the mergeCraft check fail on this PR?"* work out of the box. Local
+review uses **`mergecraft review`** ([`docs/cli.md`](docs/cli.md)).
+
+Curated doc map for LLMs: [`llms.txt`](llms.txt) · full agent guidance:
+[`AGENTS.md`](AGENTS.md) · skill: [`skills/mergecraft/SKILL.md`](skills/mergecraft/SKILL.md)
 
 ## Features
 

@@ -1,8 +1,7 @@
 """RD3 — LLM-agent install surface contracts.
 
 Pins ``AGENTS.md``, the consumer skill, plugin manifests, slash commands, Copilot
-instructions, ``llms.txt``, and the README agent section. RD3.1 stays RED (xfail)
-until RD3.2 ships the artefacts.
+instructions, ``llms.txt``, and the README agent section.
 """
 
 from __future__ import annotations
@@ -16,8 +15,6 @@ from pathlib import Path
 import pytest
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
-
-_XFAIL_RD3_2 = pytest.mark.xfail(reason="green after RD3.2", strict=False)
 
 AGENTS_MD = REPO_ROOT / "AGENTS.md"
 SKILL_MD = REPO_ROOT / "skills" / "mergecraft" / "SKILL.md"
@@ -90,7 +87,6 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-@_XFAIL_RD3_2
 def test_agents_md_exists_and_teaches_review_not_diff_review_as_primary() -> None:
     text = _read(AGENTS_MD)
     assert "mergecraft review" in text, "AGENTS.md must teach mergecraft review as primary (D10)"
@@ -101,7 +97,6 @@ def test_agents_md_exists_and_teaches_review_not_diff_review_as_primary() -> Non
         )
 
 
-@_XFAIL_RD3_2
 def test_agents_md_stops_on_interactive_auth() -> None:
     text = _read(AGENTS_MD).lower()
     assert "mergecraft auth" in text, "AGENTS.md must document mergecraft auth"
@@ -111,21 +106,18 @@ def test_agents_md_stops_on_interactive_auth() -> None:
     )
 
 
-@_XFAIL_RD3_2
 def test_agents_md_install_ref_resolves() -> None:
     text = _read(AGENTS_MD)
     assert _UNPINNED_INSTALL in text, "AGENTS.md must teach the unpinned uv tool install form (D11)"
     _assert_no_unresolvable_version_pins(text, label="AGENTS.md")
 
 
-@_XFAIL_RD3_2
 def test_agents_md_this_repo_uses_make() -> None:
     region = _development_section(_read(AGENTS_MD)).lower()
     assert "make lint" in region, "AGENTS.md contributor section must name make lint"
     assert "make test" in region, "AGENTS.md contributor section must name make test"
 
 
-@_XFAIL_RD3_2
 def test_skill_frontmatter() -> None:
     text = _read(SKILL_MD)
     assert re.search(r"^---\s*\n.*?^name:\s*mergecraft\s*$", text, re.MULTILINE | re.DOTALL), (
@@ -136,7 +128,6 @@ def test_skill_frontmatter() -> None:
     )
 
 
-@_XFAIL_RD3_2
 def test_skill_lock_hash_matches() -> None:
     assert SKILL_MD.is_file(), f"missing {SKILL_MD.relative_to(REPO_ROOT)} (RD3.2)"
     lock = json.loads(SKILLS_LOCK.read_text(encoding="utf-8"))
@@ -148,7 +139,6 @@ def test_skill_lock_hash_matches() -> None:
     )
 
 
-@_XFAIL_RD3_2
 def test_plugin_manifests() -> None:
     plugin = json.loads(_read(PLUGIN_JSON))
     assert plugin.get("name") == "mergecraft", ".claude-plugin/plugin.json must name mergecraft"
@@ -159,13 +149,11 @@ def test_plugin_manifests() -> None:
     assert MARKETPLACE_JSON.is_file(), f"missing {MARKETPLACE_JSON.relative_to(REPO_ROOT)} (RD3.2)"
 
 
-@_XFAIL_RD3_2
 def test_slash_commands_exist() -> None:
     assert SETUP_CMD.is_file(), f"missing {SETUP_CMD.relative_to(REPO_ROOT)} (RD3.2)"
     assert REVIEW_CMD.is_file(), f"missing {REVIEW_CMD.relative_to(REPO_ROOT)} (RD3.2)"
 
 
-@_XFAIL_RD3_2
 def test_copilot_instructions_point_at_agents_md() -> None:
     text = _read(COPILOT_INSTRUCTIONS)
     assert "AGENTS.md" in text, (
@@ -173,7 +161,6 @@ def test_copilot_instructions_point_at_agents_md() -> None:
     )
 
 
-@_XFAIL_RD3_2
 def test_readme_has_for_ai_coding_agents_section() -> None:
     text = read_text("README.md")
     assert re.search(r"^##\s+.*For AI coding agents", text, re.MULTILINE | re.IGNORECASE), (
@@ -191,7 +178,6 @@ def test_readme_has_for_ai_coding_agents_section() -> None:
     )
 
 
-@_XFAIL_RD3_2
 def test_readme_agent_badges() -> None:
     text = read_text("README.md")
     assert "skills/mergecraft/SKILL.md" in text, (
@@ -200,7 +186,6 @@ def test_readme_agent_badges() -> None:
     assert "llms.txt" in text, "README must link or badge llms.txt (RD3.2)"
 
 
-@_XFAIL_RD3_2
 def test_llms_txt_lists_required_urls() -> None:
     text = _read(LLMS_TXT)
     required = (

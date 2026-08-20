@@ -1,0 +1,32 @@
+# mergeCraft
+
+> AI-powered PR review as a standalone, BYOK GitHub Action. Deterministic
+> analyzers + LLM reviewer + read-only verifier; findings gate merges via the
+> mergecraft-approval commit status. No SaaS; your repo, your keys.
+
+## Setup
+
+- README.md — landing page, numbered install, Example 1 workflow
+- README.md#for-agents — For AI coding agents (copy/paste setup prompts)
+- docs/install.md — Python 3.11+ floor, Action vs CLI, Docker fallback
+- AGENTS.md — cross-vendor agent guidance (consumer setup + this-repo development)
+- skills/mergecraft/SKILL.md — Agent-Skills consumer skill (setup checklist + CLI)
+
+## Docs
+
+- docs/README.md — generated index from docs/manifest.yaml
+- docs/cli.md — full mergecraft CLI reference
+- docs/action-reference.md — action.yml inputs and outputs
+- docs/authentication.md — providers, custom gateways, model chains
+- docs/workflows.md — workflow examples, trust tiers, pull_request_target
+- REVIEW-CHECKS.md — every check a review applies
+- docs/ANALYZERS.md — shipped analyzer catalog
+- docs/REVIEW-DOCTRINE.md — review philosophy and grading
+- docs/TRACING.md — tracing sinks and Logfire/OTLP wiring
+
+## Agent surfaces
+
+- .github/copilot-instructions.md — GitHub Copilot pointer to AGENTS.md
+- .claude-plugin/plugin.json — Claude plugin manifest (skill + slash commands)
+- commands/mergecraft-setup.md — slash command: scaffold without auth
+- commands/mergecraft-review.md — slash command: local mergecraft review

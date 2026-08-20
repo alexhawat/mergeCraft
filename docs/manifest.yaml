@@ -7,6 +7,24 @@ pages:
     generator: null
     purpose: Product landing page — install, features, and pointers to generated reference pages.
 
+  - path: AGENTS.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Cross-vendor agent guidance — consumer setup and mergeCraft development rules.
+
+  - path: skills/mergecraft/SKILL.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Agent-Skills consumer skill — install checklist, CLI reference, troubleshooting.
+
+  - path: llms.txt
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Curated documentation map for LLM agents (llms.txt convention).
+
   - path: docs/README.md
     audience: contributor
     template: contributor

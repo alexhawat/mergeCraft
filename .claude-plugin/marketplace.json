@@ -1,0 +1,11 @@
+{
+  "name": "mergecraft",
+  "owner": { "name": "alexhawat" },
+  "plugins": [
+    {
+      "name": "mergecraft",
+      "source": "./",
+      "description": "AI-powered PR review, BYOK. Setup, local review, troubleshooting."
+    }
+  ]
+}
