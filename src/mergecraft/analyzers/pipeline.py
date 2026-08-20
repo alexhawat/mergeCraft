@@ -391,14 +391,14 @@ def run_analyzer_pipeline(
         inline_payload: list[dict[str, Any]] = []
         for item in placement.inline:
             if isinstance(item, Finding):
-                inline_payload.append(
-                    {
-                        "finding": _serialize_finding(item),
-                        "inlineBody": format_analyzer_inline_body(item),
-                        "path": item.path,
-                        "line": item.start_line,
-                    }
-                )
+                payload: dict[str, Any] = {
+                    "finding": _serialize_finding(item),
+                    "inlineBody": format_analyzer_inline_body(item),
+                    "path": item.path,
+                }
+                if item.start_line is not None:
+                    payload["line"] = item.start_line
+                inline_payload.append(payload)
 
         lock_path = repo_root / ".mergecraft" / "analyzers.lock"
         digest = lock_digest(lock_path)

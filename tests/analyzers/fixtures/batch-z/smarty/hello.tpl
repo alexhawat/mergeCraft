@@ -1,0 +1,2 @@
+{* smarty *}
+Hello

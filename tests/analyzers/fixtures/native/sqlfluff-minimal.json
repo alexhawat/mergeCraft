@@ -1,0 +1,13 @@
+[
+  {
+    "filepath": "hello.sql",
+    "violations": [
+      {
+        "line_no": 1,
+        "line_pos": 1,
+        "code": "LT01",
+        "description": "Unnecessary trailing whitespace."
+      }
+    ]
+  }
+]

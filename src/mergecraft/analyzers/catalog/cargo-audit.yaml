@@ -1,0 +1,26 @@
+id: cargo-audit
+category: vuln
+languages:
+  - rust
+detect:
+  files:
+    - Cargo.lock
+    - Cargo.toml
+command:
+  - cargo
+  - audit
+  - --json
+scope: repo
+parser: cargo_audit_json
+supports_fix: false
+default_enabled: auto
+version: "0.21.1"
+runtime: repo-native
+timeout_s: 180
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+provenance: {}
+network_allowlist: []
+exclusive_group: null

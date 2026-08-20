@@ -5,18 +5,18 @@ languages:
 detect:
   files:
   - '*.rb'
-  - Gemfile
+  - config/application.rb
   - config/routes.rb
 command:
 - brakeman
 - -f
 - sarif
 - -o
-- brakeman.sarif
+- "-"
 scope: repo
 parser: sarif
 supports_fix: false
-default_enabled: false
+default_enabled: auto
 version: 6.4.0
 runtime: repo-native
 timeout_s: 300

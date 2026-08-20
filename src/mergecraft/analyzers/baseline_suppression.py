@@ -62,7 +62,7 @@ def _changed_line_count(diff_text: str) -> int:
     )
 
 
-def _baseline_identity(finding: Finding) -> tuple[str, int, str]:
+def _baseline_identity(finding: Finding) -> tuple[str, int | None, str]:
     return (normalize_repo_path(finding.path), finding.start_line, finding.rule_id)
 
 

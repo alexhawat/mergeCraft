@@ -1,0 +1,22 @@
+{
+  "duplicates": [
+    {
+      "format": "javascript",
+      "lines": 4,
+      "tokens": 20,
+      "firstFile": {
+        "name": "src/clone-a.js",
+        "start": 1,
+        "end": 4
+      },
+      "secondFile": {
+        "name": "src/clone-b.js",
+        "start": 1,
+        "end": 4
+      }
+    }
+  ],
+  "statistics": {
+    "total": { "clones": 1, "percentage": 10.0 }
+  }
+}

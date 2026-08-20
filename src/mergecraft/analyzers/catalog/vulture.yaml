@@ -1,0 +1,25 @@
+id: vulture
+category: quality
+languages:
+  - python
+detect:
+  files:
+    - "*.py"
+command:
+  - vulture
+  - --min-confidence
+  - "60"
+  - .
+scope: repo
+parser: vulture_text
+supports_fix: false
+default_enabled: auto
+version: "2.14"
+runtime: repo-native
+timeout_s: 120
+trust: trusted
+severity_map:
+  warning: Minor
+provenance: {}
+network_allowlist: []
+exclusive_group: null

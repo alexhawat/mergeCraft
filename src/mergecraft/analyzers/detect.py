@@ -35,6 +35,16 @@ _ESLINT_CONFIG_NAMES = (
 )
 _BIOME_CONFIG_NAMES = ("biome.json", "biome.jsonc")
 _OXLINT_CONFIG_NAMES = (".oxlintrc.json", "oxlint.json")
+_RUBOCOP_CONFIG_NAMES = (".rubocop.yml", ".rubocop.yaml", ".rubocop.yml.dist")
+_RUBOCOP_GEM_RE = re.compile(r"""gem\s+["']rubocop["']""")
+_PHPSTAN_NEON_NAMES = ("phpstan.neon", "phpstan.neon.dist")
+_PRISMA_LINT_CONFIG_NAMES = (
+    ".prismalintrc",
+    ".prismalintrc.json",
+    ".prismalintrc.yaml",
+    ".prismalintrc.yml",
+    "prismalint.config.js",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +124,29 @@ def has_oxlint_config(repo_root: Path) -> bool:
     return any((repo_root / name).is_file() for name in _OXLINT_CONFIG_NAMES)
 
 
+def has_rubocop_config(repo_root: Path) -> bool:
+    """D11: return True when a RuboCop config file or Gemfile gem declaration is found."""
+    repo_root = repo_root.resolve()
+    if any((repo_root / name).is_file() for name in _RUBOCOP_CONFIG_NAMES):
+        return True
+    gemfile = repo_root / "Gemfile"
+    if gemfile.is_file():
+        return bool(_RUBOCOP_GEM_RE.search(_read_text(gemfile)))
+    return False
+
+
+def has_phpstan_config(repo_root: Path) -> bool:
+    """Return True when a phpstan.neon or phpstan.neon.dist config file is present."""
+    repo_root = repo_root.resolve()
+    return any((repo_root / name).is_file() for name in _PHPSTAN_NEON_NAMES)
+
+
+def has_prisma_lint_config(repo_root: Path) -> bool:
+    """Return True when a project-level prisma-lint config file is present."""
+    repo_root = repo_root.resolve()
+    return any((repo_root / name).is_file() for name in _PRISMA_LINT_CONFIG_NAMES)
+
+
 def _package_json(repo_root: Path) -> dict[str, object]:
     path = repo_root / "package.json"
     if not path.is_file():
@@ -147,15 +180,20 @@ def _dependency_mentions_tool(repo_root: Path, tool: str) -> bool:
 
 
 def detect_js_linter_intent(repo_root: Path) -> JsLinterIntent | None:
-    """Pick exactly one JS linter from config files and package scripts (C1.4)."""
+    """Pick exactly one JS linter by config-file presence (D17), then package scripts.
+
+    D17: config-file presence is the sole tier-one signal; precedence is
+    biome > eslint > oxlint.  Package-script / dependency signals are only
+    consulted when no config file is found for any of the three tools.
+    """
     repo_root = repo_root.resolve()
-    signals: dict[JsLinterIntent, int] = {"eslint": 0, "biome": 0, "oxlint": 0}
-    if has_eslint_config(repo_root):
-        signals["eslint"] += 2
     if has_biome_config(repo_root):
-        signals["biome"] += 2
+        return "biome"
+    if has_eslint_config(repo_root):
+        return "eslint"
     if has_oxlint_config(repo_root):
-        signals["oxlint"] += 2
+        return "oxlint"
+    signals: dict[JsLinterIntent, int] = {"eslint": 0, "biome": 0, "oxlint": 0}
     if _script_mentions_tool(repo_root, "eslint"):
         signals["eslint"] += 1
     if _script_mentions_tool(repo_root, "biome"):
@@ -168,15 +206,73 @@ def detect_js_linter_intent(repo_root: Path) -> JsLinterIntent | None:
         signals["biome"] += 1
     if _dependency_mentions_tool(repo_root, "oxlint"):
         signals["oxlint"] += 1
-
     ranked = sorted(signals.items(), key=lambda item: (-item[1], item[0]))
     winner, score = ranked[0]
     if score <= 0:
         return None
-    if len(ranked) > 1 and ranked[1][1] == score:
-        # Tie — prefer explicit config over scripts; eslint wins on stable ordering.
-        return winner
     return winner
+
+
+def has_shopify_theme_config(repo_root: Path) -> bool:
+    """Gate shopify-theme-check auto-enable on .theme-check.yml or theme layout dirs.
+
+    Returns True when the repo has an explicit ``.theme-check.yml`` config, or when
+    the canonical Shopify theme layout (sections/, templates/, snippets/ directories)
+    is present — indicating a Shopify theme project even without a config file.
+    """
+    repo_root = repo_root.resolve()
+    if (repo_root / ".theme-check.yml").is_file():
+        return True
+    return (
+        (repo_root / "sections").is_dir()
+        and (repo_root / "templates").is_dir()
+        and (repo_root / "snippets").is_dir()
+    )
+
+
+def has_ember_template_lint_config(repo_root: Path) -> bool:
+    """Gate ember-template-lint auto-enable on ember-cli-build.js or ember-source dep.
+
+    Returns True when the repo has ``ember-cli-build.js`` (the canonical Ember CLI
+    entry point) or when ``ember-source`` appears as a dependency in ``package.json``.
+    """
+    repo_root = repo_root.resolve()
+    if (repo_root / "ember-cli-build.js").is_file():
+        return True
+    return _dependency_mentions_tool(repo_root, "ember-source")
+
+
+def has_rails_app(repo_root: Path) -> bool:
+    """Return True when the repo contains Rails application markers.
+
+    Checks for ``config/application.rb`` or ``config/routes.rb`` — the canonical
+    Rails project layout signals (W10 contract: Rails only, not every .rb file).
+    """
+    repo_root = repo_root.resolve()
+    return (repo_root / "config" / "application.rb").is_file() or (
+        repo_root / "config" / "routes.rb"
+    ).is_file()
+
+
+_SQLFLUFF_DIALECT_RE = re.compile(r"^\s*dialect\s*=\s*\S", re.MULTILINE)
+_SQLFLUFF_PYPROJECT_SECTION_RE = re.compile(r"^\s*\[tool\.sqlfluff", re.MULTILINE)
+
+
+def has_sqlfluff_dialect(repo_root: Path) -> bool:
+    """Return True when a SQLFluff dialect is declared in .sqlfluff or pyproject.toml.
+
+    SQLFluff requires an explicit dialect to lint meaningfully; without one every
+    ``SELECT`` is ambiguous.  Checks ``[sqlfluff] dialect =`` in ``.sqlfluff`` (INI)
+    and ``[tool.sqlfluff...] dialect =`` in ``pyproject.toml`` (TOML).
+    """
+    repo_root = repo_root.resolve()
+    sqlfluff_cfg = repo_root / ".sqlfluff"
+    if sqlfluff_cfg.is_file() and _SQLFLUFF_DIALECT_RE.search(_read_text(sqlfluff_cfg)):
+        return True
+    pyproject = _pyproject_text(repo_root)
+    return bool(
+        _SQLFLUFF_PYPROJECT_SECTION_RE.search(pyproject) and _SQLFLUFF_DIALECT_RE.search(pyproject)
+    )
 
 
 def manifest_config_present(manifest_id: str, repo_root: Path) -> bool:
@@ -189,6 +285,10 @@ def manifest_config_present(manifest_id: str, repo_root: Path) -> bool:
         "eslint": has_eslint_config,
         "biome": has_biome_config,
         "oxlint": has_oxlint_config,
+        "rubocop": has_rubocop_config,
+        "shopify-theme-check": has_shopify_theme_config,
+        "ember-template-lint": has_ember_template_lint_config,
+        "brakeman": has_rails_app,
     }
     check = checks.get(manifest_id)
     if check is None:
@@ -378,11 +478,18 @@ __all__ = [
     "find_repo_binary",
     "has_basedpyright_config",
     "has_biome_config",
+    "has_ember_template_lint_config",
     "has_eslint_config",
     "has_mypy_config",
     "has_oxlint_config",
+    "has_phpstan_config",
+    "has_prisma_lint_config",
     "has_pyright_config",
+    "has_rails_app",
+    "has_rubocop_config",
     "has_ruff_config",
+    "has_shopify_theme_config",
+    "has_sqlfluff_dialect",
     "manifest_config_present",
     "resolve_repo_tool",
 ]

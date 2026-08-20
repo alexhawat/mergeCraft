@@ -8,11 +8,13 @@ detect:
   - .template-lintrc.js
 command:
 - ember-template-lint
+- --format
+- json
 - '{files}'
 scope: diff
-parser: sarif
-supports_fix: false
-default_enabled: false
+parser: ember_template_lint_json
+supports_fix: true
+default_enabled: auto
 version: 6.0.0
 runtime: repo-native
 timeout_s: 120
@@ -20,7 +22,6 @@ trust: trusted
 severity_map:
   error: Major
   warning: Minor
-  note: Trivial
 provenance: {}
 network_allowlist: []
 exclusive_group: null

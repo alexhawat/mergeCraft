@@ -6,14 +6,15 @@ detect:
   files:
   - '*.ps1'
   - '*.psm1'
+  - '*.psd1'
 command:
 - Invoke-ScriptAnalyzer
 - -Path
 - '{files}'
 scope: diff
 parser: sarif
-supports_fix: false
-default_enabled: false
+supports_fix: true
+default_enabled: auto
 version: 1.23.0
 runtime: managed
 timeout_s: 120

@@ -1,0 +1,10 @@
+{
+  "name": "batch-y-biome-over-eslint",
+  "private": true,
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "eslint": "8.57.0"
+  }
+}

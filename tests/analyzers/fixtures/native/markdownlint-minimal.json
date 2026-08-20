@@ -1,0 +1,11 @@
+[
+  {
+    "fileName": "README.md",
+    "lineNumber": 1,
+    "ruleNames": ["MD041", "first-line-heading"],
+    "ruleDescription": "First line in a file should be a top-level heading",
+    "errorDetail": null,
+    "errorContext": "Hello",
+    "errorRange": [1, 5]
+  }
+]

@@ -7,7 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `bandit` now uses built-in `--format json` instead of the optional SARIF extra, so auto-enabled Python security coverage still runs on plain Bandit
+- `bundler-audit` now runs the gem CLI (`bundler-audit check --format json`) instead of `bundle audit`, so Ruby lockfile audits actually execute
+- `tflint` no longer passes changed `.tf` files as positional args (invalid since TFLint 0.47); it lints the working directory and the pipeline still scopes findings to the diff
+- `phpstan`, `golangci-lint`, and `sqlfluff` now skip when a PR only changes enablement markers (`composer.json`, `go.mod`, `.sqlfluff`) and has no source files to lint, instead of running with empty paths or linting the whole tree
+- `bundler-audit`, `cargo-audit`, and `cargo-deny` findings no longer fake a line-1 GitHub anchor when the tool did not report a line; crate/gem coordinates stay in the message
+- `clippy` now runs as `cargo clippy --message-format=json` (package/workspace) instead of passing PR paths as cargo args, so auto-enabled Clippy keeps rustc JSON findings
+- Auto-enabled analyzers whose stdout is not SARIF now keep findings: `cargo-audit` (`--json`), `cargo-deny` (`--format json`), `vulture` (line text), `tsc` (`--pretty false`), `knip` (`--reporter json`), `jscpd` (`--reporters json`), `bundler-audit` (`--format json`), `sqlfluff` (`--format json`), and `clippy` (`--message-format=json`); `typos` 1.32.0 already emits SARIF and stays on `parser: sarif` (Thermos Finding 1)
+- A successful analyzer with empty stdout (for example a clean `tsc --noEmit`) is treated as passed instead of unavailable
+- `tsc` project-level diagnostics without a file location (for example `error TS18003`) now surface as body-only findings instead of a silent pass
+- `tsc` help text and other unmatched nonempty stdout now fail closed instead of counting as a clean pass
+- Project-level `tsc` findings survive diff scoping when the PR only changes `.ts` / `.tsx` files
+
+- `phpstan`: command changed from `--error-format=json` to `--error-format=sarif` so the output aligns with `parser: sarif`; previously the JSON output caused `parse_sarif()` to raise `ValueError` and silently drop all findings (Thermos Finding 1, #338)
+- `brakeman`: command changed from `-o brakeman.sarif` (writes to file) to `-o -` (stdout) so the SARIF output is captured by the adapter; `parser: sarif` is unchanged (Thermos Finding 1, #338)
+
 ### Added
+
+- JS/TS lint: `biome` and `eslint` declare `supports_fix: true`; the JS-lint exclusive group (`js-lint`) now resolves the winner by config-file presence alone — `biome.json`/`biome.jsonc` beats any eslint config; eslint config beats any oxlint config — package-script and dependency signals are only consulted when no config file is found (D17, #310)
+- `mypy` is now the default type checker for Python repos with no explicit type-checker config: auto-enabled when neither `pyrightconfig.json` nor `[tool.pyright]`/`[tool.basedpyright]` is present (D16, #309)
+- `osv-scanner` detect globs now include `uv.lock`, so repos using uv's lock file trigger vulnerability scanning without pip-audit (#309)
+- docs: `flake8` and `pylint` catalog entries note they are legacy opt-in; enabled via config override only (#309)
+
+- Catalog manifests for `knip` (JS/TS unused exports/dependencies, `scope: repo`, `category: quality`) and `vulture` (Python dead code, `scope: repo`, `category: quality`) (#337)
+
+- Catalog manifests for `govulncheck` (Go vulnerability scan, `scope: repo`, network allowlist `vuln.go.dev`), `cargo-audit` (Rust advisory vulnerability scan, `category: vuln`), `cargo-deny` (Rust license/advisory check, `category: license`), and `typos` (universal typo checker, `scope: repo`, `supports_fix: true`) (#337)
+
+- Catalog manifests for `tsc` (TypeScript whole-program lint, `scope: repo`, `--noEmit`), `bandit` (Python security, version pinned to `make security` pin `1.9.4`), and `jscpd` (copy-paste detection, `scope: repo`, diff-line attribution via existing `filter_to_diff` pipeline — pre-existing clones off the diff are dropped) (#337)
+
+- Flip `golangci-lint`, `clippy`, `rubocop`, `phpstan` to `default_enabled: auto`; adds `go.mod`, `Gemfile`, `composer.json` to their detect globs; RuboCop gates on config presence (D11 — silent without `.rubocop.yml`/`Gemfile gem`); PHPStan injects `--level=0` when no `phpstan.neon` is found (D12) (#338)
+
+- `detekt` flipped to `default_enabled: auto`; activates on any `*.kt` or `*.kts` change, or when `detekt.yml` is detected — provides the default Kotlin lint path (#317)
+- `swiftlint` flipped to `default_enabled: auto`; activates on any `*.swift` change or when `.swiftlint.yml` is detected — provides the default Swift lint path (#318); reports `unavailable` on Linux runners (requires macOS, `declared_unavailable`)
+
+- `sqlfluff` flipped to `default_enabled: auto`; activates on any `*.sql` change or `.sqlfluff` config presence — skips silently when no SQL dialect is declared (#319)
+- `stylelint` flipped to `default_enabled: auto`; activates on any `*.css`/`*.scss` change or `stylelint.config.js`/`.stylelintrc.json` presence — provides the default CSS lint path (#320)
+- `htmlhint` flipped to `default_enabled: auto`; activates on any `*.html` change or `.htmlhintrc` presence — provides the default HTML lint path (#321)
+
+- `yamllint` flipped to `default_enabled: auto`; activates on any `*.yaml` or `*.yml` change or `.yamllint` config presence — provides the default YAML lint path (#323); `shellcheck` and `hadolint` were already `auto` (#322, #324)
+
+- `checkmake` flipped to `default_enabled: auto`; activates on any `Makefile`, `makefile`, or `*.mk` change — provides the default Make lint path (#325)
+- `markdownlint` flipped to `default_enabled: auto`; activates on any `*.md` change or `.markdownlint.json`/`.markdownlint.yaml` presence — provides the default Markdown lint path (#326)
+- `tflint` and `checkov` both flipped to `default_enabled: auto`; activate on any `*.tf` or `*.tfvars` change; the shared `iac-scanner` exclusive group was removed (split to `exclusive_group: null`) so both tools run concurrently — `tflint` provides Terraform lint, `checkov` provides IaC security scanning (#327)
+
+- `luacheck` flipped to `default_enabled: auto`; activates on any `*.lua` change or `.luacheckrc` presence — provides the default Lua lint path (#328)
+- `fortitude` flipped to `default_enabled: auto`; activates on Fortran files (`*.f90`, `*.f95`, `*.F90`, `*.f03`, `*.f`, `*.for`) or `.fortitude.toml` — provides the default Fortran lint path (#329)
+- `regal` flipped to `default_enabled: auto`; activates on any `*.rego` change — provides the default Rego/OPA policy lint path (#330)
+- `psscriptanalyzer` flipped to `default_enabled: auto`, adds `*.psd1` detect glob, and sets `supports_fix: true` — provides the default PowerShell lint and auto-fix path (#331)
+- `blinter` flipped to `default_enabled: auto`; activates on `*.bat`/`*.cmd` changes — provides the default Windows Batch lint path (#332)
+- `shopify-theme-check` flipped to `default_enabled: auto`; gates on `.theme-check.yml` or the canonical Shopify theme layout (`sections/`, `templates/`, `snippets/` dirs) — bare `*.liquid` files do not trigger it (#333)
+- `smarty-lint` flipped to `default_enabled: auto`; `ANALYZERS.md` notes that `*.tpl` is ambiguous (Go templates, Terraform) — enable only when `.smarty-lint.json` confirms Smarty intent (#334)
+- `ember-template-lint` flipped to `default_enabled: auto`, sets `supports_fix: true`; gates on `ember-cli-build.js` or `ember-source` in `package.json` — bare `*.hbs` files do not trigger it (#335)
+- `prisma-lint` flipped to `default_enabled: auto`; ships a conservative fallback ruleset (`prisma-lint-default-rules.yml`) and sets `config_note` referencing it when no repo-level prisma-lint config is found — avoids inert no-op runs (#336)
+
+- `cppcheck` flipped to `default_enabled: auto`; activates on any `*.c`, `*.cpp`, `*.h`, or `*.hpp` change — provides the default C/C++ SAST path (#315); `clang-tidy` remains `default_enabled: false` (requires `compile_commands.json`, C4)
+- `pmd` flipped to `default_enabled: auto`; activates on any `*.java` change or `pmd.ruleset.xml` presence — provides the default Java lint path (#312); `infer` remains `default_enabled: false` (requires compilation database, C4)
+
+- `phpcs` and `phpmd` remain `default_enabled: false`; catalog entries note they are legacy opt-in — `phpstan` (auto) is the default PHP signal (#316)
+- `brakeman` flipped to `default_enabled: auto` with tight Rails detection — only activates on Rails marker files (`config/application.rb`, `config/routes.rb`), never on plain Ruby repos (#313)
+- New catalog manifest for `bundler-audit` (Ruby gem vulnerability audit, `category: vuln`, `scope: repo`, detects on `Gemfile.lock`) (#313)
 
 - `scripts/check_type_ignores.py` fails when a `type: ignore` or `cast(` in allowed `src/mergecraft/` lacks a one-line reason (#275); wired into `make lint`
 - `scripts/check_xpass.py` fails when unexpected pytest xpasses remain on the allowed test tree (#276)

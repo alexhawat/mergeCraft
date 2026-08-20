@@ -1,0 +1,2 @@
+{"type":"diagnostic","fields":{"severity":"error","message":"license not allowed","code":"license-denied","labels":[{"span":"MIT","line":3,"column":1}]}}
+{"type":"msg","fields":{"message":"checking licenses"}}

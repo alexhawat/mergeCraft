@@ -1,0 +1,28 @@
+id: tsc
+category: lint
+languages:
+  - typescript
+detect:
+  files:
+    - tsconfig.json
+    - "*.ts"
+    - "*.tsx"
+command:
+  - tsc
+  - --noEmit
+  - --pretty
+  - "false"
+scope: repo
+parser: tsc_pretty
+supports_fix: false
+default_enabled: auto
+version: "5.8.3"
+runtime: repo-native
+timeout_s: 300
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+provenance: {}
+network_allowlist: []
+exclusive_group: null

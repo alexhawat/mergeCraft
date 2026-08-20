@@ -10,59 +10,69 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `actionlint` | ci | — | auto | managed | untrusted | — | — |
 | `agentsec` | security | — | enabled | repo-native | untrusted | — | — |
 | `ast-grep` | security | python, javascript, typescript, go, java, rust, c, cpp, yaml | auto | managed | untrusted | pattern-scanner | Substrate for a future native policy engine — not built in C3. |
+| `bandit` | security | python | auto | repo-native | trusted | — | — |
 | `basedpyright` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `biome` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
-| `blinter` | lint | batch | disabled | managed | trusted | — | requires non-Linux runner — Windows batch lint not supported on Linux (C6) |
-| `brakeman` | security | ruby | disabled | repo-native | trusted | — | — |
+| `blinter` | lint | batch | auto | managed | trusted | — | requires non-Linux runner — Windows batch lint not supported on Linux (C6) |
+| `brakeman` | security | ruby | auto | repo-native | trusted | — | — |
 | `buf` | contract | — | auto | managed | untrusted | — | — |
-| `checkmake` | lint | make | disabled | managed | trusted | — | — |
-| `checkov` | security | terraform, cloudformation | disabled | managed | untrusted | iac-scanner | — |
+| `bundler-audit` | vuln | ruby | auto | repo-native | trusted | — | — |
+| `cargo-audit` | vuln | rust | auto | repo-native | trusted | — | — |
+| `cargo-deny` | license | rust | auto | repo-native | trusted | — | — |
+| `checkmake` | lint | make | auto | managed | trusted | — | — |
+| `checkov` | security | terraform, cloudformation | auto | managed | untrusted | — | — |
 | `circleci` | lint | yaml | disabled | managed | untrusted | — | — |
 | `clang-tidy` | lint | c, cpp | disabled | container | trusted | — | requires compile_commands.json — mergeCraft never guesses compiler flags (C4) |
-| `clippy` | lint | rust | disabled | repo-native | trusted | rust-lint | — |
-| `cppcheck` | lint | c, cpp | disabled | managed | trusted | — | — |
-| `detekt` | lint | kotlin | disabled | repo-native | trusted | — | — |
+| `clippy` | lint | rust | auto | repo-native | trusted | rust-lint | — |
+| `cppcheck` | lint | c, cpp | auto | managed | trusted | — | — |
+| `detekt` | lint | kotlin | auto | repo-native | trusted | — | — |
 | `dotenv-linter` | lint | — | disabled | managed | trusted | — | Values never printed in findings (D8). |
-| `ember-template-lint` | lint | ember | disabled | repo-native | trusted | — | — |
+| `ember-template-lint` | lint | ember | auto | repo-native | trusted | — | — |
 | `eslint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
-| `flake8` | lint | python | disabled | repo-native | trusted | python-lint | — |
-| `fortitude` | lint | fortran | disabled | managed | trusted | — | manifest-only — Fortitude not bundled on Linux runners (C6 out of scope) |
-| `golangci-lint` | lint | go | disabled | managed | trusted | go-lint | — |
+| `flake8` | lint | python | disabled | repo-native | trusted | python-lint | Legacy opt-in — disabled by default; enable via config override. |
+| `fortitude` | lint | fortran | auto | managed | trusted | — | manifest-only — Fortitude not bundled on Linux runners (C6 out of scope) |
+| `golangci-lint` | lint | go | auto | managed | trusted | go-lint | — |
+| `govulncheck` | vuln | go | auto | repo-native | trusted | — | — |
 | `hadolint` | lint | docker | auto | managed | untrusted | — | — |
-| `htmlhint` | lint | html | disabled | repo-native | trusted | — | — |
+| `htmlhint` | lint | html | auto | repo-native | trusted | — | — |
 | `infer` | security | java, c, cpp | disabled | container | trusted | — | requires compilation database and build — container-only heavyweight (C4) |
+| `jscpd` | quality | javascript, typescript, python | auto | repo-native | trusted | — | — |
+| `knip` | quality | javascript, typescript | auto | repo-native | trusted | — | — |
 | `languagetool` | lint | text | disabled | container | trusted | — | manifest-only — LanguageTool runtime not bundled on Linux runners (C6 out of scope) |
-| `luacheck` | lint | lua | disabled | repo-native | trusted | — | — |
-| `markdownlint` | lint | markdown | disabled | repo-native | trusted | — | — |
+| `luacheck` | lint | lua | auto | repo-native | trusted | — | — |
+| `markdownlint` | lint | markdown | auto | repo-native | trusted | — | — |
 | `mypy` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `oasdiff` | contract | — | auto | managed | untrusted | — | — |
 | `opengrep` | security | python, javascript, typescript, go, java, ruby, rust, yaml | disabled | managed | untrusted | pattern-scanner | — |
 | `osv-scanner` | vuln | — | auto | managed | untrusted | dependency-vuln | — |
 | `oxlint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
-| `phpcs` | lint | php | disabled | repo-native | trusted | php-lint | — |
-| `phpmd` | lint | php | disabled | repo-native | trusted | — | — |
-| `phpstan` | lint | php | disabled | repo-native | trusted | — | — |
-| `pmd` | lint | java | disabled | managed | trusted | — | — |
+| `phpcs` | lint | php | disabled | repo-native | trusted | php-lint | Legacy opt-in — disabled by default; phpstan is the default PHP signal. |
+| `phpmd` | lint | php | disabled | repo-native | trusted | — | Legacy opt-in — disabled by default; phpstan is the default PHP signal. |
+| `phpstan` | lint | php | auto | repo-native | trusted | — | No phpstan.neon/neon.dist → runs at --level=0 (D12). |
+| `pmd` | lint | java | auto | managed | trusted | — | — |
 | `presidio` | security | — | disabled | container | trusted | — | Container-only; high-confidence entity types only. |
-| `prisma-lint` | lint | prisma | disabled | repo-native | trusted | — | — |
-| `psscriptanalyzer` | lint | powershell | disabled | managed | trusted | — | requires non-Linux runner — Windows/macOS only (C6 out of scope) |
-| `pylint` | lint | python | disabled | managed | trusted | python-lint | — |
+| `prisma-lint` | lint | prisma | auto | repo-native | trusted | — | — |
+| `psscriptanalyzer` | lint | powershell | auto | managed | trusted | — | requires non-Linux runner — Windows/macOS only (C6 out of scope) |
+| `pylint` | lint | python | disabled | managed | trusted | python-lint | Legacy opt-in — disabled by default; enable via config override. |
 | `pyright` | lint | python | auto | repo-native | trusted | python-typecheck | — |
-| `regal` | lint | rego | disabled | managed | trusted | — | — |
-| `rubocop` | lint | ruby | disabled | repo-native | trusted | ruby-lint | — |
+| `regal` | lint | rego | auto | managed | trusted | — | — |
+| `rubocop` | lint | ruby | auto | repo-native | trusted | ruby-lint | — |
 | `ruff` | lint | python | auto | repo-native | trusted | python-lint | — |
 | `semgrep` | security | python, javascript, typescript, go, java, ruby, rust, yaml | enabled | managed | untrusted | pattern-scanner | — |
 | `shellcheck` | lint | shell | auto | managed | untrusted | — | — |
-| `shopify-theme-check` | lint | liquid | disabled | repo-native | trusted | — | manifest-only — Shopify Theme Check not bundled on Linux runners (C6 out of scope) |
-| `smarty-lint` | lint | smarty | disabled | repo-native | trusted | — | manifest-only — Smarty Lint not bundled on Linux runners (C6 out of scope) |
-| `sqlfluff` | lint | sql | disabled | managed | trusted | — | Dialect is mandatory — skip when repo declares none. |
+| `shopify-theme-check` | lint | liquid | auto | repo-native | trusted | — | manifest-only — Shopify Theme Check not bundled on Linux runners (C6 out of scope) |
+| `smarty-lint` | lint | smarty | auto | repo-native | trusted | — | manifest-only — Smarty Lint not bundled on Linux runners (C6 out of scope) *.tpl extension is ambiguous (Go templates, Terraform, Smarty) — enable only when .smarty-lint.json confirms Smarty intent. |
+| `sqlfluff` | lint | sql | auto | managed | trusted | — | Dialect is mandatory — skip when repo declares none. |
 | `squawk` | migration | — | auto | managed | untrusted | — | — |
-| `stylelint` | lint | css | disabled | repo-native | trusted | — | — |
-| `swiftlint` | lint | swift | disabled | managed | trusted | — | requires non-Linux runner — SwiftLint needs macOS (C6 out of scope) |
-| `tflint` | lint | terraform | disabled | managed | untrusted | iac-scanner | — |
+| `stylelint` | lint | css | auto | repo-native | trusted | — | — |
+| `swiftlint` | lint | swift | auto | managed | trusted | — | requires non-Linux runner — SwiftLint needs macOS (C6 out of scope) |
+| `tflint` | lint | terraform | auto | managed | untrusted | — | — |
 | `trivy` | vuln | — | auto | managed | untrusted | dependency-vuln | — |
 | `trufflehog` | secrets | — | auto | managed | untrusted | — | verify off by default; impossible on fork PRs (C2). |
-| `yamllint` | lint | yaml | disabled | managed | untrusted | — | — |
+| `tsc` | lint | typescript | auto | repo-native | trusted | — | — |
+| `typos` | lint | python, javascript, typescript, rust, go, markdown | auto | repo-native | trusted | — | — |
+| `vulture` | quality | python | auto | repo-native | trusted | — | — |
+| `yamllint` | lint | yaml | auto | managed | untrusted | — | — |
 | `zizmor` | ci | — | auto | managed | untrusted | — | — |
 
 ## Runtime x shell x trust x mode
@@ -87,7 +97,7 @@ to run the *repo's* tool against the *repo's* config.
 
 | runtime | trust | `shell: disabled` | `shell: restricted` / `enabled` |
 |---------|-------|-------------------|----------------------------------|
-| `repo-native` (23) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
+| `repo-native` (33) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
 | `repo-native` (1) | `untrusted` | withheld — `runtime` needs repo-provided tooling | runs |
 | `managed` (12) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
 | `managed` (17) | `untrusted` | **runs** (pinned binary only) | runs |
@@ -113,15 +123,15 @@ with a warning, rather than silently widening to `auto`.
 `full` requests more provisioning; it is never a trust override, and cannot
 re-admit a manifest the tier axis skipped.
 
-Counts below are analyzers passing selection, out of 57 shipped, with
+Counts below are analyzers passing selection, out of 67 shipped, with
 `shell: restricted` (the shell axis inert) so the mode axis is isolated.
 
 | mode | trusted event | untrusted event (`pull_request_target`, fork) |
 |------|---------------|-----------------------------------------------|
 | **`off`** | surface not registered | surface not registered |
-| **`auto`** | 57 of 57 | 18 of 57 — `auto` ⇒ `untrusted-only` |
-| **`full`** | 57 of 57 | 18 of 57 |
-| **`untrusted-only`** | 18 of 57 | 18 of 57 |
+| **`auto`** | 67 of 67 | 18 of 67 — `auto` ⇒ `untrusted-only` |
+| **`full`** | 67 of 67 | 18 of 67 |
+| **`untrusted-only`** | 18 of 67 | 18 of 67 |
 
 Passing these axes is necessary, not sufficient: a `container` manifest
 is eligible but still reports `unavailable` wherever no container runtime is

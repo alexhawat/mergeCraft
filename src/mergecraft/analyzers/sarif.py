@@ -59,22 +59,18 @@ def export_sarif(findings: list[Finding]) -> dict[str, Any]:
     rule_ids: set[str] = set()
     for finding in findings:
         rule_ids.add(finding.rule_id)
+        physical: dict[str, Any] = {"artifactLocation": {"uri": finding.path}}
+        if finding.start_line is not None:
+            region: dict[str, int] = {"startLine": finding.start_line}
+            if finding.end_line is not None:
+                region["endLine"] = finding.end_line
+            physical["region"] = region
         results.append(
             {
                 "ruleId": finding.rule_id,
                 "level": _level_for_severity(finding.severity),
                 "message": {"text": finding.message},
-                "locations": [
-                    {
-                        "physicalLocation": {
-                            "artifactLocation": {"uri": finding.path},
-                            "region": {
-                                "startLine": finding.start_line,
-                                "endLine": finding.end_line,
-                            },
-                        }
-                    }
-                ],
+                "locations": [{"physicalLocation": physical}],
                 "properties": {"confidence": finding.confidence, "tool": finding.tool},
             }
         )

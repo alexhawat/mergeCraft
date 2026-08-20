@@ -1,0 +1,39 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "bundler-audit",
+          "rules": [
+            {
+              "id": "RULE1"
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "RULE1",
+          "level": "warning",
+          "message": {
+            "text": "minimal fixture finding"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Gemfile.lock"
+                },
+                "region": {
+                  "startLine": 1,
+                  "endLine": 1
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

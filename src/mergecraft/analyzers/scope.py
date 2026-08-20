@@ -165,10 +165,14 @@ def _record_exception_paths(
         changed_migrations.add(path)
 
 
-def _line_intersects_hunks(path: str, start_line: int, end_line: int, scope: DiffScope) -> bool:
+def _line_intersects_hunks(
+    path: str, start_line: int | None, end_line: int | None, scope: DiffScope
+) -> bool:
     ranges = scope.hunk_ranges.get(path)
     if not ranges:
         return False
+    if start_line is None or end_line is None:
+        return True
     return any(start_line <= hunk_end and end_line >= hunk_start for hunk_start, hunk_end in ranges)
 
 
@@ -206,6 +210,11 @@ def apply_scope_exceptions(
     scope = scope if scope is not None else parse_diff_scope(diff_text)
     kept: list[Finding] = []
     for finding in findings:
+        # Project-level findings have no line; their path is often a config
+        # file that is not in the diff (tsc → tsconfig.json on a .ts-only PR).
+        if finding.start_line is None:
+            kept.append(finding)
+            continue
         on_hunk = _line_intersects_hunks(finding.path, finding.start_line, finding.end_line, scope)
         if on_hunk or _matches_scope_exception(finding.path, scope):
             kept.append(finding)

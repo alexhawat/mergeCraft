@@ -347,6 +347,15 @@ def run_adapter(
         changed_files=scoped_files,
         tier=tier,
     )
+    if plan.mode == "skip":
+        logger.info("{}", plan.reason)
+        return AdapterRunResult(
+            findings=[],
+            skipped=True,
+            skip_reason=plan.reason,
+            version_note=plan.version_note,
+            config_note=plan.config_note,
+        )
 
     absolute_files = [
         str((repo_root / rel).resolve()) if not Path(rel).is_absolute() else rel
@@ -369,8 +378,32 @@ def run_adapter(
         config_note = plan.config_note or f"ruleset: {ruleset.name} ({ruleset.source})"
         plan = replace(plan, env=augment_pattern_env(dict(plan.env), scratch_dir=scratch_dir))
 
+    if tool_id == "jscpd" and plan.argv:
+        # JsonReporter writes ``<output>/jscpd-report.json`` rather than stdout.
+        plan = replace(
+            plan,
+            argv=(plan.argv[0], "--output", str(scratch_dir), *plan.argv[1:]),
+        )
+
     outcome = run_plan(plan, sandbox_context=sandbox_context)
-    if not outcome.ran or outcome.output_path is None:
+    if not outcome.ran:
+        reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
+        return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
+
+    if tool_id == "jscpd":
+        report = scratch_dir / "jscpd-report.json"
+        if report.is_file():
+            outcome = replace(outcome, output_path=str(report))
+
+    if outcome.output_path is None:
+        # Empty stdout after a real run is a clean pass (tsc --noEmit, clippy
+        # with no diagnostics). Only a never-executed plan is unavailable.
+        if outcome.exit_code == 0 or outcome.status == "passed":
+            return AdapterRunResult(
+                findings=[],
+                version_note=plan.version_note,
+                config_note=config_note,
+            )
         reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
