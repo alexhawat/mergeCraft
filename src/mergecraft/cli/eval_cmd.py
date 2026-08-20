@@ -30,6 +30,16 @@ from pydantic import ValidationError
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.eval_cli_output import (
+    case_to_json,
+    default_permanent_dir,
+    format_diff_human,
+    format_diff_json,
+    format_human,
+    read_json_or_jsonl,
+    replay_inputs_from_packet,
+)
+from mergecraft.cli.eval_gate_cmd import register_gate_command
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
     CLI_FAILED_EXIT_CODE,
@@ -42,7 +52,6 @@ from mergecraft.evals.benchmark import (
     replay_bank,
     write_result_set,
 )
-from mergecraft.evals.gate import DEFAULT_GATE_TOLERANCE, eval_gate, load_result_set
 from mergecraft.evals.live_run import (
     DEFAULT_DETECTION_CORPUS_DIR,
     run_full_benchmark,
@@ -60,13 +69,10 @@ from mergecraft.evals.store import (
     CATEGORY_REVERTED,
     DEFAULT_BANK_DIR,
     FAILURE_CATEGORIES,
-    PERMANENT_TEST_DIR_NAME,
     Case,
-    ReplayDiff,
     add_case,
     list_cases,
     load_case,
-    permanent_test_path,
     replay_case,
     write_permanent_test,
 )
@@ -82,6 +88,8 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+register_gate_command(app)
+
 
 # ── helpers ────────────────────────────────────────────────────────────
 
@@ -96,39 +104,6 @@ def _case_path(bank_dir: Path, case_id: str) -> Path:
     if not case_id or not case_id.replace("-", "").replace("_", "").replace(".", "").isalnum():
         cli_bail(f"invalid case id: {case_id!r}")
     return bank_dir / f"{case_id}{CASE_FILE_SUFFIX}"
-
-
-def _case_to_json(case: Case) -> dict[str, Any]:
-    """Return the JSON-safe dict representation of a case."""
-    return case.model_dump(mode="json")
-
-
-def _format_human(case: Case) -> str:
-    """Render a case as a one-line human-readable summary."""
-    pr_part = f" pr=#{case.pr_number}" if case.pr_number is not None else ""
-    return (
-        f"- {case.id} [{case.category}] {case.title} "
-        f"(submitted={case.submitted_at.isoformat()}{pr_part}, "
-        f"expected={case.expected_decision})"
-    )
-
-
-def _format_diff_human(diff: ReplayDiff) -> str:
-    """Render a :class:`ReplayDiff` as a human-readable text block."""
-    lines = [
-        f"case: {diff.case_id}",
-        f"expected: {diff.expected_decision}",
-        f"current:  {diff.current_decision or '(unavailable)'}",
-        f"status:   {diff.status}",
-    ]
-    if diff.notes:
-        lines.append(f"notes:    {diff.notes}")
-    return "\n".join(lines)
-
-
-def _format_diff_json(diff: ReplayDiff) -> dict[str, Any]:
-    """Return a JSON-safe replay diff payload."""
-    return diff.model_dump(mode="json")
 
 
 def _resolve_synthetic_provenance(
@@ -258,7 +233,7 @@ def add(
     run_succeeded = True
     trust_tier_recorded = "trusted"
     if from_packet is not None:
-        recorded_findings, run_succeeded, trust_tier_recorded = _replay_inputs_from_packet(
+        recorded_findings, run_succeeded, trust_tier_recorded = replay_inputs_from_packet(
             from_packet
         )
     try:
@@ -342,13 +317,13 @@ def list_cmd(
         id_prefix=id_prefix,
     )
     if wants_json_output(ctx, json_flag=json_output):
-        emit_cli_json({"cases": [_case_to_json(c) for c in cases]})
+        emit_cli_json({"cases": [case_to_json(c) for c in cases]})
         return
     if not cases:
         console.print(f"[yellow]no cases in {bank_dir}[/yellow]")
         return
     for case in cases:
-        console.print(_format_human(case))
+        console.print(format_human(case))
 
 
 # ── replay ─────────────────────────────────────────────────────────────
@@ -395,25 +370,15 @@ def replay(
         cli_bail(f"could not load case {case_id!r}: {exc}")
     diff = replay_case(case, current_decision=current_decision)
     if wants_json_output(ctx, json_flag=json_output):
-        emit_cli_json(_format_diff_json(diff))
+        emit_cli_json(format_diff_json(diff))
     else:
-        console.print(_format_diff_human(diff))
+        console.print(format_diff_human(diff))
     if diff.status == "regression":
         # Exit non-zero so a CI loop can latch on the regression.
         raise typer.Exit(CLI_FAILED_EXIT_CODE)
 
 
 # ── promote ────────────────────────────────────────────────────────────
-
-
-def _default_permanent_dir() -> Path:
-    """Return the default permanent-test target directory.
-
-    Resolves against the current working directory so the CLI works
-    regardless of where it is invoked from. Tests pass an explicit
-    ``--target-dir`` to override.
-    """
-    return Path("tests") / "evals" / PERMANENT_TEST_DIR_NAME
 
 
 @app.command("promote")
@@ -456,7 +421,7 @@ def promote(
         case = load_case(case_path)
     except Exception as exc:
         cli_bail(f"could not load case {case_id!r}: {exc}")
-    out_dir = target_dir if target_dir is not None else _default_permanent_dir()
+    out_dir = target_dir if target_dir is not None else default_permanent_dir()
     try:
         target = write_permanent_test(out_dir, case, overwrite=overwrite)
     except FileExistsError:
@@ -469,63 +434,6 @@ def promote(
     except OSError as exc:
         cli_bail(f"could not write permanent test to {out_dir}: {exc}")
     console.print(f"[green]promoted case {case_id}[/green] → {target}")
-
-
-def _replay_inputs_from_packet(path: Path) -> tuple[list[dict[str, Any]], bool, str]:
-    """Extract ``decide_approval()``'s three inputs from a merge evidence packet.
-
-    Returns ``(findings_rows, run_succeeded, trust_tier)``. The rows are stored
-    verbatim rather than re-validated here: a schema change that invalidates
-    them should surface at replay time as "cannot decide", not be silently
-    dropped at capture time.
-    """
-    if not path.is_file():
-        cli_bail(f"{path} is not a file")
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        cli_bail(f"could not read packet {path}: {exc}")
-    if not isinstance(payload, dict):
-        cli_bail(f"{path}: expected a merge evidence packet object")
-    rows = payload.get("findings")
-    if not isinstance(rows, list):
-        cli_bail(f"{path}: packet has no 'findings' array")
-    findings = [row for row in rows if isinstance(row, dict)]
-    run = payload.get("run")
-    run_succeeded = True
-    if isinstance(run, dict) and isinstance(run.get("succeeded"), bool):
-        run_succeeded = bool(run["succeeded"])
-    tier = "trusted"
-    for holder in (payload, run if isinstance(run, dict) else {}):
-        value = holder.get("trust_tier") if isinstance(holder, dict) else None
-        if value in {"trusted", "untrusted"}:
-            tier = str(value)
-            break
-    return findings, run_succeeded, tier
-
-
-def _read_json_or_jsonl(path: Path) -> Any:
-    """Decode a corpus file that may be JSON or JSON Lines.
-
-    Benchmark corpora ship both shapes — a ``findings`` envelope for Harbor task
-    fixtures, and one-object-per-line ``baseline.jsonl`` for promoted baselines —
-    so the reader accepts either rather than making the caller know which.
-    """
-    text = path.read_text(encoding="utf-8")
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        rows = [
-            json.loads(line)
-            for line in text.splitlines()
-            if line.strip() and not line.lstrip().startswith("//")
-        ]
-        if not rows:
-            raise
-        return rows
-
-
-# ── replay-bank ────────────────────────────────────────────────────────
 
 
 @app.command("replay-bank")
@@ -712,169 +620,6 @@ def bench_cmd(
         console.print(f"[yellow]detection skipped[/yellow]: {result.skipped_reason}")
 
 
-# ── gate ───────────────────────────────────────────────────────────────
-
-
-@app.command("gate")
-def gate(
-    ctx: typer.Context,
-    bank: Path | None = typer.Option(
-        None,
-        "--bank",
-        help="Bank directory (default: evals/cases/).",
-    ),
-    require_promoted: bool = typer.Option(
-        False,
-        "--require-promoted",
-        help="Also fail when a case has no permanent test (default: warn only).",
-    ),
-    baseline: Path | None = typer.Option(
-        None,
-        "--baseline",
-        help="Baseline benchmark result set (JSON) for the release regression gate (EV3).",
-    ),
-    candidate: Path | None = typer.Option(
-        None,
-        "--candidate",
-        help="Candidate benchmark result set (JSON) for the release regression gate (EV3).",
-    ),
-    tolerance: float = typer.Option(
-        DEFAULT_GATE_TOLERANCE,
-        "--tolerance",
-        help="Declared tolerance band for the release regression gate.",
-    ),
-    json_output: bool = typer.Option(
-        False,
-        "--json",
-        help="Emit the result as JSON.",
-    ),
-) -> None:
-    """Check the eval bank's integrity — the CI-safe half of the eval loop.
-
-    This gate is **structural, not behavioural**. It proves every durable case
-    still parses against the current schema and provenance model, that ids are
-    unique, and (optionally) that each case has been promoted into a permanent
-    test. It deliberately does **not** replay verdicts: ``replay_case()`` is a
-    pure function that takes the current decision as an *input*, so replaying in
-    CI would require a live agent run per case — non-deterministic, key-bearing,
-    and far too slow for a per-PR gate.
-
-    The behavioural regression signal is ``mergecraft eval promote``: a promoted
-    case becomes a permanent pytest that ``make test`` already runs. This gate's
-    job is to stop the bank itself from silently rotting in the meantime.
-
-    An empty bank passes with a notice, so the target can be wired into CI now
-    and grow teeth as cases accumulate.
-
-    With ``--baseline`` and ``--candidate`` (both required together) the
-    command also runs the **release regression gate** (EV3): the candidate
-    result set is compared against the published baseline with the declared
-    ``--tolerance`` band via ``mergecraft.evals.gate.eval_gate`` — a metric
-    that regresses beyond the band fails the release, noise inside it passes.
-    """
-    if (baseline is None) != (candidate is None):
-        cli_bail("--baseline and --candidate must be given together")
-
-    gate_report = None
-    if baseline is not None and candidate is not None:
-        gate_report = eval_gate(
-            candidate=load_result_set(candidate),
-            baseline=load_result_set(baseline),
-            tolerance=tolerance,
-        )
-
-    bank_dir = _bank_dir(bank)
-    permanent_dir = _default_permanent_dir()
-
-    if not bank_dir.is_dir():
-        if wants_json_output(ctx, json_flag=json_output):
-            emit_cli_json({"status": "empty", "bank": str(bank_dir), "cases": 0})
-        else:
-            console.print(f"[yellow]eval bank {bank_dir} does not exist yet[/yellow]")
-        if gate_report is not None and not gate_report.passed:
-            raise typer.Exit(code=CLI_CONFIGURATION_EXIT_CODE)
-        return
-
-    paths = sorted(bank_dir.glob(f"*{CASE_FILE_SUFFIX}"))
-    broken: list[dict[str, str]] = []
-    seen: dict[str, str] = {}
-    duplicates: list[dict[str, str]] = []
-    unpromoted: list[str] = []
-
-    for path in paths:
-        try:
-            case = load_case(path)
-        except Exception as exc:  # any parse failure is itself the finding
-            broken.append({"path": str(path), "error": str(exc)})
-            continue
-        if case.id in seen:
-            duplicates.append({"id": case.id, "path": str(path), "first": seen[case.id]})
-        else:
-            seen[case.id] = str(path)
-        # Ask the store for the path rather than rebuilding the name here —
-        # reconstructing it got the `test_permanent_` prefix wrong and reported
-        # every promoted case as unpromoted.
-        if not permanent_test_path(permanent_dir, case.id).is_file():
-            unpromoted.append(case.id)
-
-    gate_failed = gate_report is not None and not gate_report.passed
-
-    failures = len(broken) + len(duplicates)
-    if require_promoted:
-        failures += len(unpromoted)
-    if gate_failed:
-        failures += 1
-
-    if wants_json_output(ctx, json_flag=json_output):
-        payload: dict[str, Any] = {
-            "status": "fail" if failures else "pass",
-            "bank": str(bank_dir),
-            "cases": len(paths),
-            "loaded": len(seen),
-            "broken": broken,
-            "duplicates": duplicates,
-            "unpromoted": unpromoted,
-        }
-        if gate_report is not None:
-            payload["regression_gate"] = gate_report.model_dump(mode="json")
-        emit_cli_json(payload)
-    else:
-        console.print(f"eval bank: {bank_dir}")
-        console.print(f"  cases    : {len(paths)}")
-        console.print(f"  loaded   : {len(seen)}")
-        for row in broken:
-            console.print(f"  [red]unparsable[/red]: {row['path']} — {row['error']}")
-        for row in duplicates:
-            console.print(
-                f"  [red]duplicate id[/red]: {row['id']} in {row['path']} "
-                f"(first seen {row['first']})"
-            )
-        if unpromoted:
-            colour = "red" if require_promoted else "yellow"
-            console.print(f"  [{colour}]not promoted[/{colour}]: {', '.join(unpromoted)}")
-        if gate_report is not None:
-            console.print(
-                f"release regression gate (tolerance {gate_report.tolerance:.2%}): "
-                + ("[green]passed[/green]" if gate_report.passed else "[red]failed[/red]")
-            )
-            for delta in gate_report.deltas:
-                marker = " [red]REGRESSED[/red]" if delta.regressed else ""
-                console.print(
-                    f"  {delta.metric}: {delta.baseline:.2%} → {delta.candidate:.2%} "
-                    f"(Δ {delta.delta:+.2%}){marker}"
-                )
-        if not paths:
-            console.print(
-                "  [yellow]bank is empty — the gate passes, but it is not yet "
-                "measuring anything[/yellow]"
-            )
-        elif failures == 0:
-            console.print("  [green]bank is healthy[/green]")
-
-    if failures:
-        raise typer.Exit(code=CLI_CONFIGURATION_EXIT_CODE)
-
-
 # ── score ──────────────────────────────────────────────────────────────
 
 
@@ -914,8 +659,8 @@ def score(
         if not path.is_file():
             cli_bail(f"{path} is not a file")
     try:
-        actual_payload = _read_json_or_jsonl(actual)
-        expected_payload = _read_json_or_jsonl(expected)
+        actual_payload = read_json_or_jsonl(actual)
+        expected_payload = read_json_or_jsonl(expected)
     except (OSError, json.JSONDecodeError) as exc:
         cli_bail(f"could not read scoring inputs: {exc}")
 

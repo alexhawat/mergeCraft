@@ -117,6 +117,11 @@ def bootstrap_cli_surface_from_argv(
     apply_typer_rich_help_color(color=color, is_tty=is_tty, env=env)
 
 
+def _normalize_log_level(value: str) -> str:
+    """Strip and upper-case a log level (validation happens in the Typer callback)."""
+    return value.strip().upper()
+
+
 def resolve_effective_log_level(
     *,
     quiet: bool,
@@ -125,13 +130,7 @@ def resolve_effective_log_level(
 ) -> str:
     """Resolve Loguru level from root flags and ``MERGECRAFT_LOG_LEVEL`` / ``LOG_LEVEL``."""
     if log_level is not None:
-        normalized = log_level.strip().upper()
-        if normalized in _LOG_LEVELS:
-            return normalized
-        cli_bail(
-            f"invalid --log-level {log_level!r} — must be one of: {', '.join(sorted(_LOG_LEVELS))}",
-            code=CLI_USAGE_EXIT_CODE,
-        )
+        return _normalize_log_level(log_level)
     if verbose:
         return "DEBUG"
     if quiet:
@@ -148,7 +147,7 @@ def validate_log_level_option(value: str | None) -> str | None:
     """Typer callback — reject unknown ``--log-level`` values at the CLI boundary."""
     if value is None:
         return None
-    normalized = value.strip().upper()
+    normalized = _normalize_log_level(value)
     if normalized not in _LOG_LEVELS:
         cli_bail(
             f"invalid --log-level {value!r} — must be one of: {', '.join(sorted(_LOG_LEVELS))}",

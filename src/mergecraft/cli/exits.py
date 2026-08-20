@@ -17,6 +17,7 @@ from mergecraft.run_outcome import (
     RUN_OUTCOME_EXIT_CODE,
     RunOutcome,
     cli_exit_code_for_review,
+    error_code_for_outcome,
     exit_code_for_outcome,
 )
 
@@ -42,5 +43,6 @@ __all__ = [
     "RUN_OUTCOME_EXIT_CODE",
     "RunOutcome",
     "cli_exit_code_for_review",
+    "error_code_for_outcome",
     "exit_code_for_outcome",
 ]

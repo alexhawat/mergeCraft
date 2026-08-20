@@ -7,7 +7,6 @@ import json
 import os
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import typer
 from loguru import logger
@@ -16,10 +15,9 @@ from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
+    RunOutcome,
+    error_code_for_outcome,
 )
-
-if TYPE_CHECKING:
-    from mergecraft.run_outcome import RunOutcome
 
 app = typer.Typer(
     help="Run the GitHub Action runtime flow.",
@@ -85,8 +83,6 @@ def _structured_failure_result(outcome: RunOutcome, message: str) -> str:
     (``analyzers.redact.redact_secrets``) before it ever reaches the output
     file, which GitHub echoes back into logs.
     """
-    from mergecraft.run_outcome import error_code_for_outcome
-
     payload = {
         "outcome": outcome.value,
         "error": {
@@ -114,7 +110,7 @@ def _write_evidence_packet_output(packet_path: str) -> None:
 
 
 async def _run_main() -> None:
-    from mergecraft.main import RunOutcome, main
+    from mergecraft.main import main
 
     result = await main()
     if result.evidence_packet_path:

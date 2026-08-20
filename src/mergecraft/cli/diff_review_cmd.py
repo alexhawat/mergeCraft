@@ -16,13 +16,13 @@ from loguru import logger
 from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.agent_protocol import AgentProtocolStream
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
 from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.offline_review import (
     OfflineReviewResult,
     parse_offline_review_findings,
     run_offline_diff_review,
 )
-from mergecraft.run_outcome import RunOutcome, cli_exit_code_for_review
 from mergecraft.utils.log import configure_logging
 from mergecraft.utils.source_resolve import SourceResolverSpec
 

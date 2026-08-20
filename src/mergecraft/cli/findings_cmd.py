@@ -19,7 +19,7 @@ from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
     CLI_USAGE_EXIT_CODE,
 )
-from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.cli.global_surface import emit_cli_json, get_cli_globals, wants_json_output
 from mergecraft.findings.select import (
     DEFAULT_LABEL,
     CarryoverFinding,
@@ -98,9 +98,16 @@ def export(
     pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
     repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
     output_format: Annotated[
-        str,
-        typer.Option("--format", help="Output format: json or markdown."),
-    ] = "markdown",
+        str | None,
+        typer.Option(
+            "--output-format",
+            help=(
+                "Export payload format: json or markdown (default: markdown). "
+                "Root --format json emits JSON when this flag is omitted; "
+                "explicit --output-format markdown always renders markdown."
+            ),
+        ),
+    ] = None,
     include_resolved: Annotated[
         bool, typer.Option("--include-resolved", help=_RESOLVED_HELP)
     ] = False,
@@ -109,9 +116,14 @@ def export(
     ] = False,
 ) -> None:
     """Print the findings a merge would bury. Never writes anything."""
-    if output_format not in {"json", "markdown"}:
-        console.print("[red]--format must be 'json' or 'markdown'[/red]")
+    if output_format is not None and output_format not in {"json", "markdown"}:
+        console.print("[red]--output-format must be 'json' or 'markdown'[/red]")
         raise typer.Exit(CLI_USAGE_EXIT_CODE)
+    emit_json = (
+        output_format == "json"
+        if output_format is not None
+        else get_cli_globals(ctx).format == "json"
+    )
     owner, name = _resolve_repo(repo)
 
     async def _run() -> list[CarryoverFinding]:
@@ -134,7 +146,7 @@ def export(
             await client.aclose()
 
     findings = asyncio.run(_run())
-    if wants_json_output(ctx, json_flag=(output_format == "json")):
+    if emit_json:
         emit_cli_json(
             {
                 "pull_number": pr,

@@ -166,14 +166,14 @@ def test_a_promoted_case_is_not_reported_as_unpromoted(tmp_path: Path) -> None:
     permanent.mkdir()
     permanent_test_path(permanent, "synthetic-001").write_text("# promoted\n", encoding="utf-8")
 
-    import mergecraft.cli.eval_cmd as eval_cmd
+    import mergecraft.cli.eval_gate_cmd as eval_gate_cmd
 
-    original = eval_cmd._default_permanent_dir
-    eval_cmd._default_permanent_dir = lambda: permanent  # type: ignore[assignment]
+    original = eval_gate_cmd.default_permanent_dir
+    eval_gate_cmd.default_permanent_dir = lambda: permanent  # type: ignore[assignment,misc]
     try:
         result = runner.invoke(app, ["gate", "--bank", str(bank), "--require-promoted", "--json"])
     finally:
-        eval_cmd._default_permanent_dir = original  # type: ignore[assignment]
+        eval_gate_cmd.default_permanent_dir = original  # type: ignore[assignment,misc]
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["unpromoted"] == []

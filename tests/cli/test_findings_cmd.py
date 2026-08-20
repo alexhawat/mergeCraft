@@ -88,7 +88,7 @@ def test_export_json_lists_the_findings(monkeypatch: MonkeyPatch) -> None:
     _patch(monkeypatch)
 
     result = runner.invoke(
-        app, ["findings", "export", "--pr", "7", "--repo", "o/r", "--format", "json"]
+        app, ["findings", "export", "--pr", "7", "--repo", "o/r", "--output-format", "json"]
     )
 
     assert result.exit_code == 0, result.output
@@ -113,10 +113,50 @@ def test_export_rejects_an_unknown_format(monkeypatch: MonkeyPatch) -> None:
     _patch(monkeypatch)
 
     result = runner.invoke(
-        app, ["findings", "export", "--pr", "7", "--repo", "o/r", "--format", "yaml"]
+        app, ["findings", "export", "--pr", "7", "--repo", "o/r", "--output-format", "yaml"]
     )
 
     assert result.exit_code == 2
+
+
+def test_export_global_format_json_without_local_flag(monkeypatch: MonkeyPatch) -> None:
+    """Root ``--format json`` applies to ``findings export`` when ``--output-format`` is omitted."""
+    _patch(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        ["--format", "json", "findings", "export", "--pr", "7", "--repo", "o/r"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"]
+    assert payload["count"] == 1
+
+
+def test_export_output_format_markdown_overrides_global_json(monkeypatch: MonkeyPatch) -> None:
+    """Explicit ``--output-format markdown`` wins over root ``--format json``."""
+    _patch(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        [
+            "--format",
+            "json",
+            "findings",
+            "export",
+            "--pr",
+            "7",
+            "--repo",
+            "o/r",
+            "--output-format",
+            "markdown",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Missing timeout on the retry loop." in result.stdout
+    assert result.stdout.strip().startswith("# Carryover findings")
 
 
 def test_carryover_without_apply_writes_nothing(monkeypatch: MonkeyPatch) -> None:
