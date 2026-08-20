@@ -349,10 +349,6 @@ def test_w12_does_not_require_semgrep_c_languages() -> None:
 # --- W13 #317/#318 Kotlin + Swift ---
 
 
-@pytest.mark.xfail(
-    reason="green after W13: detekt default_enabled auto (#317)",
-    strict=False,
-)
 def test_detekt_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("detekt")
     assert manifest.default_enabled == "auto"
@@ -364,19 +360,11 @@ def test_detekt_detects_kotlin() -> None:
     assert registry.filter_changed_files_for_manifest(manifest, ["hello.kt"]) == ["hello.kt"]
 
 
-@pytest.mark.xfail(
-    reason="green after W13: detekt auto on *.kt (#317)",
-    strict=False,
-)
 def test_detekt_auto_enables_on_kotlin_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "kotlin"
     assert "detekt" in _enabled_ids(repo, ["hello.kt"])
 
 
-@pytest.mark.xfail(
-    reason="green after W13: swiftlint default_enabled auto (#318)",
-    strict=False,
-)
 def test_swiftlint_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("swiftlint")
     assert manifest.default_enabled == "auto"
@@ -388,10 +376,6 @@ def test_swiftlint_detects_swift() -> None:
     assert registry.filter_changed_files_for_manifest(manifest, ["hello.swift"]) == ["hello.swift"]
 
 
-@pytest.mark.xfail(
-    reason="green after W13: swiftlint auto on *.swift (#318)",
-    strict=False,
-)
 def test_swiftlint_auto_enables_on_swift_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "swift"
     assert "swiftlint" in _enabled_ids(repo, ["hello.swift"])

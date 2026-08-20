@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19e-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19e` @ `wave/open-issues-sweep-2026-08-19e`
 Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337) · **W7** (Batch Y RED — #309-#327 leftovers)
-Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl); **W10 recon** un-xfail brakeman auto+Rails + bundler-audit catalog (`b5165e9` impl); **W12 recon** un-xfail cppcheck auto (`ce31bee6` impl)
+Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl); **W10 recon** un-xfail brakeman auto+Rails + bundler-audit catalog (`b5165e9` impl); **W12 recon** un-xfail cppcheck auto (`ce31bee6` impl); **W13 recon** un-xfail detekt + swiftlint auto (`88b348ca` impl)
 
 W7 pins leftover A-tier acceptances for #309-#327. Do **not** re-add tsc/bandit/jscpd/govulncheck/cargo-audit/cargo-deny/typos/knip/vulture (D10). Do **not** re-flip golangci-lint/clippy/rubocop/phpstan (D7). File: `tests/analyzers/test_a_tier_residuals.py` + `tests/analyzers/fixtures/batch-y/`. All cross-wave markers are `strict=False`.
 
@@ -219,7 +219,7 @@ Deferred (must **not** appear — D9 / #337 second tier): `roslyn`, `roslyn-anal
 
 ## Batch Y xfail schedule (W7 — RED until W8-W17)
 
-File: `tests/analyzers/test_a_tier_residuals.py`. **22** remaining `strict=False` xfails after W12 recon (was 24). **0** XPASS for W12. W11 has **0** xfails (phpcs/phpmd stay false).
+File: `tests/analyzers/test_a_tier_residuals.py`. **18** remaining `strict=False` xfails after W13 recon (was 22). **0** XPASS for W13. W11 has **0** xfails (phpcs/phpmd stay false).
 
 | Wave | xfail count | Marker reason prefix |
 |------|-------------|----------------------|
@@ -228,7 +228,7 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **22** remaining `strict=False
 | **W10** | 0 | `green after W10:` brakeman auto+Rails; bundler-audit catalog — **green** after W10 recon |
 | **W11** | 0 | phpcs/phpmd remain false (already green; phpstan is enough) |
 | **W12** | 0 | `green after W12:` cppcheck auto (SAST path; not Semgrep `languages:`) — **green** after W12 recon |
-| **W13** | 4 | `green after W13:` detekt + swiftlint auto |
+| **W13** | 0 | `green after W13:` detekt + swiftlint auto — **green** after W13 recon |
 | **W14** | 2 | `green after W14:` pmd auto |
 | **W15** | 6 | `green after W15:` sqlfluff + stylelint + htmlhint auto |
 | **W16** | 2 | `green after W16:` yamllint auto |
@@ -271,7 +271,7 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **22** remaining `strict=False
 
 | Wave | RED | Already green (do not xfail) |
 |------|-----|------------------------------|
-| W13 | detekt auto + `*.kt`; swiftlint auto + `*.swift` | detect globs already match |
+| W13 | — | **green** after W13 recon: detekt auto + `*.kt`; swiftlint auto + `*.swift` |
 | W14 | pmd auto + `*.java` | **D13** infer stays `false`; Java SAST via Semgrep `languages: java` |
 | W15 | sqlfluff / stylelint / htmlhint auto | HTML a11y gap: no axe/pa11y/html-validate catalog row (document, do not add) |
 | W16 | yamllint auto | shellcheck auto; hadolint auto; do not add shfmt/dockle (D9 / catalog-rows-only) |
@@ -292,7 +292,7 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **22** remaining `strict=False
 | Y10b | bundler-audit new manifest | unit | happy | `test_bundler_audit_*` | **green** after W10 recon |
 | Y11 | phpcs/phpmd stay false; phpstan signal | integration | happy | `test_phpcs_remains_false_even_with_phpcs_xml`, `test_phpmd_remains_false`, `test_phpstan_is_enough_default_php_signal` | **green** |
 | Y12 | cppcheck auto; clang-tidy opt-in | integration | happy | `test_cppcheck_default_enabled_auto`, `test_clang_tidy_stays_opt_in` | **green** after W12 recon |
-| Y13 | detekt + swiftlint auto | integration | happy | `test_detekt_*`, `test_swiftlint_*` | xfail W13 |
+| Y13 | detekt + swiftlint auto | integration | happy | `test_detekt_*`, `test_swiftlint_*` | **green** after W13 recon |
 | Y14 | pmd auto; infer false (D13) | unit | happy | `test_pmd_default_enabled_auto`, `test_infer_stays_false` | xfail / **green** |
 | Y15 | sqlfluff/stylelint/htmlhint auto; a11y gap | unit | happy | `test_sqlfluff_*`, `test_html_a11y_catalog_gap_no_axe_or_pa11y` | xfail / **green** |
 | Y16 | yamllint auto; shell/docker already on | unit | happy | `test_yamllint_*`, `test_shellcheck_already_auto` | xfail / **green** |
@@ -336,5 +336,13 @@ Batch Y fixture trees: `tests/analyzers/fixtures/batch-y/` (`python-noconfig`, `
 - Removed 2 `green after W12:` xfails from `tests/analyzers/test_a_tier_residuals.py`
 - W12 assertions are real passes: `test_cppcheck_default_enabled_auto`, `test_cppcheck_auto_enables_on_cpp_fixture`
 - W13–W17 xfails remain (`strict=False`); 0 XPASS for W12. W13 reminder: 4 xfails — detekt + swiftlint `auto`
+- `make lint` + `make typecheck` pass
+- No product/source edits (`src/` untouched)
+
+## Acceptance (W13 recon)
+
+- Removed 4 `green after W13:` xfails from `tests/analyzers/test_a_tier_residuals.py`
+- W13 assertions are real passes: `test_detekt_default_enabled_auto`, `test_detekt_auto_enables_on_kotlin_fixture`, `test_swiftlint_default_enabled_auto`, `test_swiftlint_auto_enables_on_swift_fixture`
+- W14–W17 xfails remain (`strict=False`); 0 XPASS for W13. W14 reminder: 2 xfails — pmd `auto`; infer stays false (D13)
 - `make lint` + `make typecheck` pass
 - No product/source edits (`src/` untouched)
