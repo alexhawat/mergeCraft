@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `swiftlint` flipped to `default_enabled: auto`; activates on any `*.swift` change or when `.swiftlint.yml` is detected — provides the default Swift lint path (#318); reports `unavailable` on Linux runners (requires macOS, `declared_unavailable`)
 
 - `cppcheck` flipped to `default_enabled: auto`; activates on any `*.c`, `*.cpp`, `*.h`, or `*.hpp` change — provides the default C/C++ SAST path (#315); `clang-tidy` remains `default_enabled: false` (requires `compile_commands.json`, C4)
+- `pmd` flipped to `default_enabled: auto`; activates on any `*.java` change or `pmd.ruleset.xml` presence — provides the default Java lint path (#312); `infer` remains `default_enabled: false` (requires compilation database, C4)
 
 - `phpcs` and `phpmd` remain `default_enabled: false`; catalog entries note they are legacy opt-in — `phpstan` (auto) is the default PHP signal (#316)
 - `brakeman` flipped to `default_enabled: auto` with tight Rails detection — only activates on Rails marker files (`config/application.rb`, `config/routes.rb`), never on plain Ruby repos (#313)

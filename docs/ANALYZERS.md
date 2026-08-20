@@ -49,7 +49,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `phpcs` | lint | php | disabled | repo-native | trusted | php-lint | Legacy opt-in — disabled by default; phpstan is the default PHP signal. |
 | `phpmd` | lint | php | disabled | repo-native | trusted | — | Legacy opt-in — disabled by default; phpstan is the default PHP signal. |
 | `phpstan` | lint | php | auto | repo-native | trusted | — | No phpstan.neon/neon.dist → runs at --level=0 (D12). |
-| `pmd` | lint | java | disabled | managed | trusted | — | — |
+| `pmd` | lint | java | auto | managed | trusted | — | — |
 | `presidio` | security | — | disabled | container | trusted | — | Container-only; high-confidence entity types only. |
 | `prisma-lint` | lint | prisma | disabled | repo-native | trusted | — | — |
 | `psscriptanalyzer` | lint | powershell | disabled | managed | trusted | — | requires non-Linux runner — Windows/macOS only (C6 out of scope) |
