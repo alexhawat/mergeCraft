@@ -9,6 +9,9 @@ import typer
 import yaml
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.policy.exceptions import PolicyException, parse_exceptions_document
 from mergecraft.policy.schema import PolicyConfigError, PolicyRule, parse_rules_document
 from mergecraft.policy.scoping import ScopeContext, resolve_effective_rules
@@ -22,7 +25,7 @@ app = typer.Typer(
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _policy_dir(repo: Path) -> Path:
@@ -147,7 +150,7 @@ def run_fixtures_cmd(
     if failures:
         for failure in failures:
             console.print(f"[red]{failure}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 @app.command("explain")

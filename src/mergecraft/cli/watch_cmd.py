@@ -14,6 +14,9 @@ import typer
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.yes import OpOptions, op
 
 REQUEST_TIMEOUT_MS = 35_000
@@ -21,7 +24,7 @@ REQUEST_TIMEOUT_MS = 35_000
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _get_gh_token() -> str:

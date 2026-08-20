@@ -30,6 +30,10 @@ from mergecraft.cli.auth_cmd import (
     _write_env_value,
 )
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+    CLI_SUCCESS_EXIT_CODE,
+)
 from mergecraft.cli.tracing_logfire_wf_yaml import (
     DEFAULT_WORKFLOW_RELATIVE_PATH,
     LogfireWorkflowError,
@@ -60,7 +64,7 @@ app.add_typer(logfire_app, name="logfire")
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _delete_gh_secret(*, name: str, repo_slug: str) -> bool:
@@ -179,7 +183,7 @@ def logfire_enable(
             token = getpass.getpass("Logfire write token (Enter to cancel): ").strip()
             if not token:
                 console.print("canceled.")
-                raise typer.Exit(0)
+                raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
 
     project_source: str
     if project is not None and project.strip():
@@ -444,7 +448,7 @@ def logfire_wire_workflow(
 
     if not apply:
         console.print("[dim]dry-run (re-run with --apply to write)[/dim]")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
 
     try:
         workflow.write_text(proposed.new_text, encoding="utf-8")
@@ -504,7 +508,7 @@ def logfire_unwire_workflow(
 
     if not apply:
         console.print("[dim]dry-run (re-run with --apply to write)[/dim]")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
 
     try:
         workflow.write_text(proposed.new_text, encoding="utf-8")

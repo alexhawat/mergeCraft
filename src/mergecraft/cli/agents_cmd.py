@@ -16,6 +16,9 @@ from mergecraft.agents.registry import (
     resolve_prompt_text,
 )
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.config.settings import AgentBindingOverride, load_repo_settings
 from mergecraft.mcp.context import (
@@ -38,7 +41,7 @@ app = typer.Typer(
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _tool_ctx(target_dir: Path) -> ToolContext:

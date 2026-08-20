@@ -15,6 +15,9 @@ from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
 from mergecraft.mcp.ports import port_available, read_env_port
 from mergecraft.models import MODEL_ALIASES
@@ -48,7 +51,7 @@ class ProbeResult:
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _git_probe(cwd: Path) -> ProbeResult:
@@ -174,7 +177,7 @@ def run(cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root to di
     results = run_doctor_probes(root)
     console.print(render_doctor_table(results))
     if any(row.hard_failure for row in results):
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def assert_output_contains_no_secrets(text: str) -> None:

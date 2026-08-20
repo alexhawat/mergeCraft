@@ -11,6 +11,9 @@ from rich.table import Table
 from mergecraft.agents.lenses import get_lens, load_lens_catalog, resolve_lens_prompt
 from mergecraft.classify.change_classifier import classify_change
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.review.lens_routing import load_routing_registry, route_lenses
 
 if TYPE_CHECKING:
@@ -25,7 +28,7 @@ app = typer.Typer(
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 @app.command("list")

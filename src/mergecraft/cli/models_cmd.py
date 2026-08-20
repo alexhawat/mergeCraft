@@ -10,6 +10,9 @@ import typer
 import yaml
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import MODEL_ALIASES
@@ -30,7 +33,7 @@ app = typer.Typer(
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _configured_model_slugs(settings: RepoSettings) -> list[str]:

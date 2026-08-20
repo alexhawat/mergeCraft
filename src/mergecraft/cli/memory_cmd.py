@@ -11,6 +11,9 @@ import typer
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.utils.learnings import repo_memory_paths
 from mergecraft.utils.memory import (
     FeedbackOutcome,
@@ -93,7 +96,7 @@ def show_cmd(
     entry = _find_entry(_load_entries(repo), memory_id)
     if entry is None:
         console.print(f"[red]unknown memory id {memory_id}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
     if json_output:
         typer.echo(json.dumps(entry, indent=2, sort_keys=True))
     else:
@@ -118,10 +121,10 @@ def forget_cmd(
     path = _learnings_path(repo)
     if not path.is_file():
         console.print(f"[red]no learnings file at {path}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
     if _find_entry(_load_entries(repo), memory_id) is None:
         console.print(f"[red]unknown memory id {memory_id}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
     text = path.read_text(encoding="utf-8")
     path.write_text(remove_memory_entry_from_learnings(text, memory_id), encoding="utf-8")
     typer.echo(f"forgot {memory_id}")
@@ -216,7 +219,7 @@ def import_cmd(
     bundle = json.loads(raw)
     if not isinstance(bundle, dict):
         console.print("[red]bundle must be a JSON object[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
     import_memory_bundle(repo=repo, bundle=bundle)
     typer.echo(f"imported from {bundle_path}")
     sys.stdout.flush()

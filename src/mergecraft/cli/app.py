@@ -5,6 +5,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from mergecraft.cli.exits import (
+    CLI_SUCCESS_EXIT_CODE,
+)
+
 # Typer 0.25+: explicit ``--show-completion bash|zsh|fish`` (shellingham is unreliable
 # in CI and non-interactive shells). Must be set before the Typer() constructor runs.
 os.environ.setdefault("_TYPER_COMPLETE_TEST_DISABLE_SHELL_DETECTION", "1")
@@ -90,10 +94,10 @@ def _root(
 ) -> None:
     if version:
         typer.echo(__version__)
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
 
 
 @app.command("version")

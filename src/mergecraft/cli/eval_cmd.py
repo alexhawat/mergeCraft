@@ -29,6 +29,10 @@ import typer
 from pydantic import ValidationError
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+    CLI_USAGE_EXIT_CODE,
+)
 from mergecraft.config import load_repo_settings
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
@@ -80,9 +84,9 @@ app = typer.Typer(
 # ── helpers ────────────────────────────────────────────────────────────
 
 
-def _bail(msg: str) -> NoReturn:
+def _bail(msg: str, *, code: int = CLI_CONFIGURATION_EXIT_CODE) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(code)
 
 
 def _bank_dir(bank: Path | None) -> Path:
@@ -398,7 +402,7 @@ def replay(
         console.print(_format_diff_human(diff))
     if diff.status == "regression":
         # Exit non-zero so a CI loop can latch on the regression.
-        raise typer.Exit(2)
+        raise typer.Exit(CLI_USAGE_EXIT_CODE)
 
 
 # ── promote ────────────────────────────────────────────────────────────
@@ -667,7 +671,7 @@ def bench_cmd(
             "[red]No model configured[/red] — pass --model, or set MERGECRAFT_MODEL / "
             "model: in .mergecraft/config.yaml."
         )
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
     try:
         detection_provider = get_model_provider(resolved_model)
     except ValueError:
@@ -675,7 +679,7 @@ def bench_cmd(
             f'[red]Could not derive a provider[/red] from model slug "{resolved_model}" '
             '— expected "provider/model" (see `mergecraft models list`).'
         )
-        raise typer.Exit(1) from None
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from None
 
     bank_dir = _bank_dir(bank)
     out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
@@ -787,7 +791,7 @@ def gate(
         else:
             console.print(f"[yellow]eval bank {bank_dir} does not exist yet[/yellow]")
         if gate_report is not None and not gate_report.passed:
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=CLI_CONFIGURATION_EXIT_CODE)
         return
 
     paths = sorted(bank_dir.glob(f"*{CASE_FILE_SUFFIX}"))
@@ -867,7 +871,7 @@ def gate(
             console.print("  [green]bank is healthy[/green]")
 
     if failures:
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=CLI_CONFIGURATION_EXIT_CODE)
 
 
 # ── score ──────────────────────────────────────────────────────────────
@@ -941,7 +945,7 @@ def score(
         console.print(
             f"[red]recall {report.recall:.2%} is below the required {min_recall:.2%}[/red]"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=CLI_CONFIGURATION_EXIT_CODE)
 
 
 __all__ = ["CATEGORY_REJECTED", "CATEGORY_REVERTED", "FAILURE_CATEGORIES", "app"]

@@ -8,9 +8,9 @@ Authoring wave: **W8** (Batch AD RED) · Implementation: **W9** (#341 named exit
 
 | Wave | Test | Marker reason | Status |
 |------|------|---------------|--------|
-| **W9** | `test_no_bare_integer_typer_exit_in_cli_module` | `green after W9: named exit constants + EXIT-CODES.md` | pending — **XFAIL** (61 bare `typer.Exit(int)` sites) |
-| **W9** | `test_cli_usage_exit_code_constant_is_two` | `green after W9: named exit constants + EXIT-CODES.md` | pending — **XFAIL** (`CLI_USAGE_EXIT_CODE` absent) |
-| **W9** | `test_cli_exit_code_contract_pins[usage_error-2-auth_invalid_scope]` | `green after W9: named exit constants + EXIT-CODES.md` | pending — **XFAIL** (invalid `--scope` bails with exit 1 today) |
+| **W9** | `test_no_bare_integer_typer_exit_in_cli_module` | `green after W9: named exit constants + EXIT-CODES.md` | **green** @ W9 |
+| **W9** | `test_cli_usage_exit_code_constant_is_two` | `green after W9: named exit constants + EXIT-CODES.md` | **green** @ W9 |
+| **W9** | `test_cli_exit_code_contract_pins[usage_error-2-auth_invalid_scope]` | `green after W9: named exit constants + EXIT-CODES.md` | **green** @ W9 |
 
 ## Contract matrix
 

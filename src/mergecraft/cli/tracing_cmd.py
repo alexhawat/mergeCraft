@@ -28,6 +28,10 @@ import typer
 from rich.table import Table
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+    CLI_SUCCESS_EXIT_CODE,
+)
 from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.tracing.redaction import redact_attrs
@@ -48,7 +52,7 @@ _REDACTION_INDICATORS = ("redact", "***")
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _is_redacted(value: Any) -> bool:
@@ -277,7 +281,7 @@ def traces_callback(
         return
     if run_id is None:
         console.print(ctx.get_help())
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     traces_show(run_id=run_id, trace_dir=trace_dir)
 
 

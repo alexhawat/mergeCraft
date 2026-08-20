@@ -16,6 +16,10 @@ from typing import Annotated, Any
 import typer
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+    CLI_USAGE_EXIT_CODE,
+)
 from mergecraft.findings.select import (
     DEFAULT_LABEL,
     CarryoverFinding,
@@ -52,7 +56,7 @@ def _resolve_repo(repo: str | None) -> tuple[str, str]:
         ctx = parse_repo_context(repo)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(2) from exc
+        raise typer.Exit(CLI_USAGE_EXIT_CODE) from exc
     return ctx.owner, ctx.name
 
 
@@ -62,7 +66,7 @@ def _client() -> GitHubClient:
         return GitHubClient(get_job_token())
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(2) from exc
+        raise typer.Exit(CLI_USAGE_EXIT_CODE) from exc
 
 
 def _finding_payload(finding: CarryoverFinding) -> dict[str, Any]:
@@ -106,7 +110,7 @@ def export(
     """Print the findings a merge would bury. Never writes anything."""
     if output_format not in {"json", "markdown"}:
         console.print("[red]--format must be 'json' or 'markdown'[/red]")
-        raise typer.Exit(2)
+        raise typer.Exit(CLI_USAGE_EXIT_CODE)
     owner, name = _resolve_repo(repo)
 
     async def _run() -> list[CarryoverFinding]:
@@ -211,7 +215,7 @@ def carryover(
         plan, outcome = asyncio.run(_run())
     except ValueError as exc:  # truncated read — filing it would drop findings
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
     if json_output:
         typer.echo(
@@ -250,7 +254,7 @@ def carryover(
     # triggered the sweep does not fire again, so an unfiled finding is lost
     # unless the run is visibly red.
     if outcome is not None and outcome.failed:
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 __all__ = ["app"]

@@ -10,6 +10,9 @@ from rich.table import Table
 
 from mergecraft.agents.registry import load_registry
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.orchestrator.executor import PipelineExecutor
@@ -28,7 +31,7 @@ app = typer.Typer(
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _default_pipeline_path(target_dir: Path, settings: object) -> Path:
@@ -61,7 +64,7 @@ def lint_cmd(
     if errors:
         for err in errors:
             typer.echo(err, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
     console.print(f"[green]pipeline OK[/green] ({path})")
 
 

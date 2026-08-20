@@ -19,6 +19,11 @@ from dotenv import set_key as _dotenv_set_key
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+    CLI_SUCCESS_EXIT_CODE,
+    CLI_USAGE_EXIT_CODE,
+)
 from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
@@ -81,9 +86,9 @@ _SCOPE_OPTION: str = typer.Option(
 )
 
 
-def _bail(msg: str) -> NoReturn:
+def _bail(msg: str, *, code: int = CLI_CONFIGURATION_EXIT_CODE) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(code)
 
 
 def _get_gh_token() -> str:
@@ -309,10 +314,10 @@ def auth_claude(scope: str = _SCOPE_OPTION) -> None:
         oauth_token = getpass.getpass("Claude Code OAuth token (Enter to cancel): ").strip()
     except EOFError, KeyboardInterrupt:
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not oauth_token:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not oauth_token.startswith(CLAUDE_OAUTH_TOKEN_PREFIX):
         console.print(
             f"[yellow]warning:[/yellow] that doesn't look like a claude setup-token "
@@ -353,10 +358,10 @@ def auth_gemini(scope: str = _SCOPE_OPTION) -> None:
         api_key = getpass.getpass("Gemini API key (Enter to cancel): ").strip()
     except EOFError, KeyboardInterrupt:
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_gemini_api_key(api_key):
         _bail("Gemini API key validation failed (401/403). Check the key and retry.")
 
@@ -402,10 +407,10 @@ def auth_cursor(scope: str = _SCOPE_OPTION) -> None:
         api_key = getpass.getpass("Cursor API key (Enter to cancel): ").strip()
     except EOFError, KeyboardInterrupt:
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_cursor_api_key(api_key):
         _bail("Cursor API key validation failed (401/403). Check the key and retry.")
 
@@ -483,10 +488,10 @@ def auth_nous(scope: str = _SCOPE_OPTION) -> None:
         api_key = getpass.getpass("Nous Portal API key (Enter to cancel): ").strip()
     except EOFError, KeyboardInterrupt:
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_nous_api_key(api_key):
         _bail("Nous API key validation failed (401/403). Check the key and retry.")
 
@@ -510,10 +515,10 @@ def auth_tokenhub(scope: str = _SCOPE_OPTION) -> None:
         api_key = getpass.getpass("TokenHub API key (Enter to cancel): ").strip()
     except EOFError, KeyboardInterrupt:
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_openai_compatible_key(
         api_key=api_key, base_url=DEFAULT_TOKENHUB, label="tokenhub"
     ):
@@ -738,7 +743,7 @@ def _normalise_scope(value: str) -> CredentialScope:
     if lowered in {"both", "all"}:
         return "both"
     msg = f"unknown --scope value {value!r}; expected one of: local, github, both"
-    _bail(msg)
+    _bail(msg, code=CLI_USAGE_EXIT_CODE)
 
 
 @app.command("logfire")
@@ -784,10 +789,10 @@ def auth_logfire(
         token = getpass.getpass("Logfire write token (Enter to cancel): ").strip()
     except EOFError, KeyboardInterrupt:
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not token:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_logfire_token(token):
         _bail(
             "Logfire token validation failed (HTTP 401/403 or auth redirect). "
@@ -801,7 +806,7 @@ def auth_logfire(
     ).strip()
     if not project:
         console.print("canceled.")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     # Same surface as the validator: reject whitespace inside the project label
     # so a stray newline does not silently change the stored value.
     if any(ch.isspace() for ch in project):
@@ -906,10 +911,10 @@ def auth_minimax(scope: str = _SCOPE_OPTION) -> None:
         api_key = getpass.getpass("MiniMax API key (Enter to cancel): ").strip()
     except EOFError, KeyboardInterrupt:
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
         console.print("canceled.")
-        raise typer.Exit(0) from None
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not _validate_minimax_api_key(api_key):
         _bail("MiniMax API key validation failed (401/403). Check the key and retry.")
 

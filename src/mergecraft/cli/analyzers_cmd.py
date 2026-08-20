@@ -17,6 +17,9 @@ from mergecraft.analyzers.provision import resolve_with_lock
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 
 if TYPE_CHECKING:
@@ -31,7 +34,7 @@ app = typer.Typer(
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _git_changed_files(target_dir: Path) -> list[str]:

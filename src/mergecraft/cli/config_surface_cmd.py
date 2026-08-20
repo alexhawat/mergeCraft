@@ -13,10 +13,14 @@ from rich.table import Table
 
 from mergecraft.cli.config_precedence import explain_setting, resolve_setting
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+    CLI_SUCCESS_EXIT_CODE,
+)
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
 
 
-def _bail(msg: str, *, code: int = 1) -> NoReturn:
+def _bail(msg: str, *, code: int = CLI_CONFIGURATION_EXIT_CODE) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
     raise typer.Exit(code)
 
@@ -88,14 +92,14 @@ def config_validate(
     config_path = config or _config_path(root)
     if config_path is None or not config_path.is_file():
         console.print("[green]ok[/green] — no config file (defaults apply)")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     try:
         loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         _bail(f"config parse error: {exc}")
     if loaded is None:
         console.print(f"[green]ok[/green] — empty config at {config_path}")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not isinstance(loaded, dict):
         _bail(f"config root must be a mapping: {config_path}")
     try:

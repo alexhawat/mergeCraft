@@ -14,6 +14,9 @@ from loguru import logger
 
 from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 
 if TYPE_CHECKING:
     from mergecraft.run_outcome import RunOutcome
@@ -31,7 +34,7 @@ _STATE_ENV = "STATE_token"
 def _set_failed(message: str) -> None:
     console.print(f"::error::{message}")
     logger.error("{}", message)
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _save_state(name: str, value: str) -> None:

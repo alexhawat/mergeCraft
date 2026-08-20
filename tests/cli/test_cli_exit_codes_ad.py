@@ -35,10 +35,6 @@ from mergecraft.run_outcome import (
 runner = CliRunner()
 _CLI_ROOT = REPO_ROOT / "src" / "mergecraft" / "cli"
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_W9_XFAIL = pytest.mark.xfail(
-    reason="green after W9: named exit constants + EXIT-CODES.md",
-    strict=False,
-)
 
 _SAMPLE_PATCH = (
     "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
@@ -250,7 +246,6 @@ def test_find_cli_bare_exit_violations_parametrized(
     assert len(found) == violations
 
 
-@_W9_XFAIL
 def test_no_bare_integer_typer_exit_in_cli_module() -> None:
     """Every CLI exit must route through named constants, not bare ``typer.Exit(N)``."""
     violations = find_cli_bare_exit_violations()
@@ -287,7 +282,6 @@ def test_run_outcome_exit_code_contract_pins(
         assert expected_code == CLI_BLOCKED_EXIT_CODE
 
 
-@_W9_XFAIL
 def test_cli_usage_exit_code_constant_is_two() -> None:
     """Usage / operator-input errors reserve exit code 2 (D11)."""
     mod = import_analyzer_module("mergecraft.run_outcome")
@@ -302,12 +296,7 @@ def test_cli_usage_exit_code_constant_is_two() -> None:
         ("blocking_findings", 11, "review_blocked"),
         ("missing_credential_infra", 40, "review_infra"),
         ("timeout", 50, "review_timeout"),
-        pytest.param(
-            "usage_error",
-            2,
-            "auth_invalid_scope",
-            marks=_W9_XFAIL,
-        ),
+        ("usage_error", 2, "auth_invalid_scope"),
     ],
 )
 def test_cli_exit_code_contract_pins(

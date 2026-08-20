@@ -17,6 +17,10 @@ import typer
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+    CLI_SUCCESS_EXIT_CODE,
+)
 from mergecraft.utils.learnings import (
     LearningProvenance,
     list_active_entries,
@@ -101,13 +105,13 @@ def influence(
         console.print(
             f"[yellow]no learnings file at {learn_path}[/yellow] — run mergeCraft once to seed it."
         )
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     try:
         text = learn_path.read_text(encoding="utf-8")
     except OSError as exc:
         logger.warning("could not read {}: {}", learn_path, exc)
         console.print(f"[red]could not read {learn_path}: {exc}[/red]")
-        raise typer.Exit(1) from None
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from None
     payload: list[dict[str, Any]] = []
     for entry in list_active_entries(text):
         payload.append(_entry_to_dict(entry))
@@ -143,7 +147,7 @@ def active(
     learn_path = _resolve_learnings_path(repo)
     if not learn_path.is_file():
         console.print(f"[yellow]no learnings file at {learn_path}[/yellow]")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     text = learn_path.read_text(encoding="utf-8")
     payload = [_entry_to_dict(e) for e in list_active_entries(text)]
     typer.echo(_format_output(payload, json_output=json_output))
@@ -166,7 +170,7 @@ def staging(
     learn_path = _resolve_learnings_path(repo)
     if not learn_path.is_file():
         console.print(f"[yellow]no learnings file at {learn_path}[/yellow]")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     text = learn_path.read_text(encoding="utf-8")
     payload = [_entry_to_dict(e) for e in list_staging_entries(text)]
     typer.echo(_format_output(payload, json_output=json_output))

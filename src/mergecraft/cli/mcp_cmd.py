@@ -9,6 +9,9 @@ import typer
 import uvicorn
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.cli.mcp_serve import (
     _role_endpoint,
     build_mcp_app_from_ctx,
@@ -28,7 +31,7 @@ app = typer.Typer(
 
 def _bail(msg: str) -> NoReturn:
     console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 @app.command("list")
