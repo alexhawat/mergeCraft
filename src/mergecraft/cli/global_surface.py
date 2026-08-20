@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 import typer
+from rich.console import COLOR_SYSTEMS
 
 from mergecraft.cli import consoles
 from mergecraft.cli.errors import cli_bail
@@ -98,15 +99,17 @@ def apply_typer_rich_help_color(
 
 
 def apply_console_color(*, color_enabled: bool, force_terminal: bool) -> None:
-    """Apply the resolved colour policy to shared Rich consoles.
-
-    ``force_terminal`` is applied to Typer help via :func:`apply_typer_rich_help_color`.
-    Command modules bind ``err_console`` at import time, so Rich terminal forcing
-    on subcommand output needs a console indirection refactor (deferred follow-up).
-    """
-    _ = force_terminal
+    """Apply the resolved colour policy to shared Rich consoles."""
     for console in (consoles.out_console, consoles.err_console):
         console.no_color = not color_enabled
+        console._force_terminal = True if force_terminal else None
+        if color_enabled:
+            color_system = console._detect_color_system()
+            if color_system is None and force_terminal:
+                color_system = COLOR_SYSTEMS["truecolor"]
+            console._color_system = color_system
+        else:
+            console._color_system = None
 
 
 def bootstrap_cli_surface_from_argv(

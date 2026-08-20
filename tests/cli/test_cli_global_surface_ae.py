@@ -178,6 +178,19 @@ def test_force_color_enables_ansi_on_dumb_tty() -> None:
     assert _has_ansi(combined)
 
 
+def test_color_always_enables_ansi_in_subcommand_output() -> None:
+    """``--color always`` forces Rich ANSI on subcommand output when stdout/stderr are redirected."""
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            app,
+            ["--color", "always", "init"],
+            env={**_CHROME_ENV, "NO_COLOR": None},
+        )
+        combined = result.stdout + result.stderr
+        assert result.exit_code == 0, _plain(combined)
+        assert _has_ansi(combined), f"expected ANSI in subcommand output: {_plain(combined)!r}"
+
+
 def test_log_level_debug_shows_init_debug_message() -> None:
     """``--log-level DEBUG`` reconfigures Loguru before subcommands run."""
     with runner.isolated_filesystem():
