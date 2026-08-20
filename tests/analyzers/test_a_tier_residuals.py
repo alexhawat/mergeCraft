@@ -411,55 +411,31 @@ def test_java_already_has_default_sast_via_semgrep() -> None:
 # --- W15 #319-#321 SQL / CSS / HTML ---
 
 
-@pytest.mark.xfail(
-    reason="green after W15: sqlfluff default_enabled auto (#319)",
-    strict=False,
-)
 def test_sqlfluff_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("sqlfluff")
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W15: sqlfluff auto on *.sql (#319)",
-    strict=False,
-)
 def test_sqlfluff_auto_enables_on_sql_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "sql"
     assert "sqlfluff" in _enabled_ids(repo, ["hello.sql"])
 
 
-@pytest.mark.xfail(
-    reason="green after W15: stylelint default_enabled auto (#320)",
-    strict=False,
-)
 def test_stylelint_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("stylelint")
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W15: stylelint auto on *.css (#320)",
-    strict=False,
-)
 def test_stylelint_auto_enables_on_css_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "css"
     assert "stylelint" in _enabled_ids(repo, ["hello.css"])
 
 
-@pytest.mark.xfail(
-    reason="green after W15: htmlhint default_enabled auto (#321)",
-    strict=False,
-)
 def test_htmlhint_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("htmlhint")
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W15: htmlhint auto on *.html (#321)",
-    strict=False,
-)
 def test_htmlhint_auto_enables_on_html_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "html"
     assert "htmlhint" in _enabled_ids(repo, ["hello.html"])
