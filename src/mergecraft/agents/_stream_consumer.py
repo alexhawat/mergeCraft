@@ -269,7 +269,7 @@ def consume_stream(
             continue
         try:
             event = json.loads(stripped)
-        except json.JSONDecodeError, ValueError:
+        except (json.JSONDecodeError, ValueError):  # fmt: skip
             accumulator.malformed_event_count += 1
             logger.warning("stream consumer skipped malformed line: {!r}", stripped[:200])
             continue

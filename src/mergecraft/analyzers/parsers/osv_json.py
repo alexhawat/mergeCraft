@@ -38,7 +38,7 @@ def _osv_severity(vulnerability: dict[str, Any]) -> str:
     if group_severity is not None:
         try:
             score_value = float(group_severity)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):  # fmt: skip
             score_value = 0.0
         if score_value >= 9.0:
             return "critical"

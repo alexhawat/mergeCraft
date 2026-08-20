@@ -26,14 +26,21 @@ import pytest
 
 from tests.ci.workflow_support import REPO_ROOT
 
-_XFAIL_REASON = "green after W13/W14: PEP 758 parenthesize + 3.11 floor"
+_XFAIL_REASON_W14 = "green after W14: lower requires-python to >=3.11"
 
 _SRC_ROOT = REPO_ROOT / "src" / "mergecraft"
 _PYPROJECT = REPO_ROOT / "pyproject.toml"
 
-# W12 baseline @ AEF (0806d47e) — inventory pin for the test-plan doc.
-EXPECTED_UNPAREN_EXCEPT_FILE_COUNT = 27
-EXPECTED_UNPAREN_EXCEPT_SITE_COUNT = 44
+# W12 baseline @ AEF (0806d47e) — full RED scope before parenthesize.
+W12_UNPAREN_EXCEPT_FILE_COUNT = 27
+W12_UNPAREN_EXCEPT_SITE_COUNT = 44
+
+# W13: parenthesize all sites except 19e-active analyzer files (D6).
+AF343_19E_SKIPPED_EXCEPT_PARENTHESES: frozenset[str] = frozenset({"mergecraft/analyzers/detect.py"})
+
+# Post-W13 remaining bare sites (19e skip list only until 19e merges).
+EXPECTED_UNPAREN_EXCEPT_FILE_COUNT = len(AF343_19E_SKIPPED_EXCEPT_PARENTHESES)
+EXPECTED_UNPAREN_EXCEPT_SITE_COUNT = 1
 
 # Patterns that block lowering ``requires-python`` until gated or removed (W12 audit).
 _PYTHON314_ONLY_IMPORTS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -66,6 +73,16 @@ def _except_handler_is_unparenthesized(source: str, handler: ast.ExceptHandler) 
     line = source.splitlines()[handler.lineno - 1]
     rest = line.lstrip()[len("except") :].lstrip()
     return not rest.startswith("(")
+
+
+def _filter_skipped_except_violations(
+    violations: list[UnparenthesizedExceptViolation],
+    *,
+    skipped: frozenset[str] = AF343_19E_SKIPPED_EXCEPT_PARENTHESES,
+) -> list[UnparenthesizedExceptViolation]:
+    if not skipped:
+        return violations
+    return [item for item in violations if item.path not in skipped]
 
 
 def find_unparenthesized_except_violations(
@@ -198,27 +215,33 @@ def test_find_unparenthesized_except_violations_parametrized(
 
 
 def test_af_w12_inventory_baseline_file_and_site_counts() -> None:
-    """W12 inventory pin — 27 files / 44 sites @ AEF before parenthesize (passes, documents RED scope)."""
+    """W13 inventory — only 19e-skipped files may retain bare except (1 file / 1 site)."""
     violations = find_unparenthesized_except_violations()
     files = {item.path for item in violations}
     assert len(files) == EXPECTED_UNPAREN_EXCEPT_FILE_COUNT
     assert len(violations) == EXPECTED_UNPAREN_EXCEPT_SITE_COUNT
+    assert files == set(AF343_19E_SKIPPED_EXCEPT_PARENTHESES)
+    assert W12_UNPAREN_EXCEPT_FILE_COUNT == 27
+    assert W12_UNPAREN_EXCEPT_SITE_COUNT == 44
 
 
-@pytest.mark.xfail(reason=_XFAIL_REASON, strict=False)
 def test_af_no_unparenthesized_except_under_src() -> None:
     """Every multi-type ``except`` must be parenthesized for the 3.11 floor (#343)."""
-    violations = find_unparenthesized_except_violations()
+    violations = _filter_skipped_except_violations(find_unparenthesized_except_violations())
     assert not violations, _format_violation_lines(violations)
 
 
-@pytest.mark.xfail(reason=_XFAIL_REASON, strict=False)
 def test_af_src_compiles_under_python_311_syntax() -> None:
     """``src/mergecraft/**/*.py`` must compile on Python 3.11 (PEP 758 bare tuples forbidden)."""
+    skipped_paths = {
+        (REPO_ROOT / "src" / rel).resolve() for rel in AF343_19E_SKIPPED_EXCEPT_PARENTHESES
+    }
     python311 = shutil.which("python3.11")
     if python311 is not None:
         failures: list[str] = []
         for path in sorted(_SRC_ROOT.rglob("*.py")):
+            if path.resolve() in skipped_paths:
+                continue
             rel = path.relative_to(REPO_ROOT).as_posix()
             error = _py_compile_with_interpreter(python311, path)
             if error is not None:
@@ -227,7 +250,7 @@ def test_af_src_compiles_under_python_311_syntax() -> None:
         return
 
     # Host may be 3.14 — fall back to the static PEP 758 inventory (same failure surface).
-    violations = find_unparenthesized_except_violations()
+    violations = _filter_skipped_except_violations(find_unparenthesized_except_violations())
     assert not violations, (
         "python3.11 not on PATH; static PEP 758 scan found bare except tuples:\n"
         + _format_violation_lines(violations)
@@ -242,7 +265,7 @@ def test_af_no_python_314_only_apis_block_floor() -> None:
     )
 
 
-@pytest.mark.xfail(reason=_XFAIL_REASON, strict=False)
+@pytest.mark.xfail(reason=_XFAIL_REASON_W14, strict=False)
 def test_af_pyproject_requires_python_floor_is_311() -> None:
     """``requires-python`` must be lowered to ``>=3.11`` once parenthesize + audit land (W14)."""
     data = tomllib.loads(_PYPROJECT.read_bytes())
@@ -251,10 +274,14 @@ def test_af_pyproject_requires_python_floor_is_311() -> None:
 
 
 __all__ = [
+    "AF343_19E_SKIPPED_EXCEPT_PARENTHESES",
     "EXPECTED_UNPAREN_EXCEPT_FILE_COUNT",
     "EXPECTED_UNPAREN_EXCEPT_SITE_COUNT",
+    "W12_UNPAREN_EXCEPT_FILE_COUNT",
+    "W12_UNPAREN_EXCEPT_SITE_COUNT",
     "Python314OnlyApiHit",
     "UnparenthesizedExceptViolation",
+    "_filter_skipped_except_violations",
     "find_python_314_only_api_hits",
     "find_unparenthesized_except_violations",
     "test_af_no_python_314_only_apis_block_floor",

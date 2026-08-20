@@ -64,7 +64,7 @@ def _parse_git_remote() -> tuple[str, str] | None:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except subprocess.CalledProcessError, OSError, FileNotFoundError:
+    except (subprocess.CalledProcessError, OSError, FileNotFoundError):  # fmt: skip
         return None
     import re
 

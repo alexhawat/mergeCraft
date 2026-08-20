@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Python 3.11 floor ADR (#343, option A): `docs/dev/python-version-floor.md` records parenthesize-now / binary-later (D8). PEP 758 multi-type `except` handlers under `src/mergecraft/` are parenthesized (43 sites / 26 files); `analyzers/detect.py` deferred while `open-issues-sweep-2026-08-19e` is active.
 - Global CLI surface (#342): root `--format {table,json}`, `--quiet` / `--verbose` / `--log-level`, and `--color {auto,always,never}` honour `NO_COLOR`, `FORCE_COLOR`, and non-TTY sinks; JSON payloads carry `schema_version`; `review` is the documented command and `diff-review` is a hidden deprecated alias (one stderr line per invocation).
 - CLI exit-code contract (#341): every exit under `src/mergecraft/cli/` routes through named constants (`mergecraft.cli.exits` / `RunOutcome` helpers); usage errors exit `2`. See [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md). **Breaking:** scripts that branched on exit code `1` for generic CLI failures must follow the new table (most former `1` paths now exit `30`).
 - Shell completion for the `mergecraft` CLI: `mergecraft --install-completion` (bash/zsh/fish) and `mergecraft --show-completion` (#340). CLI status and Rich chrome now go through shared stderr consoles; machine-readable `--json` payloads stay on stdout only.

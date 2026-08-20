@@ -41,7 +41,7 @@ def _is_under_forbidden_temp(path: Path) -> bool:
     for root in _FORBIDDEN_TEMP_ROOTS:
         try:
             resolved.relative_to(Path(root).resolve())
-        except ValueError, OSError:
+        except (ValueError, OSError):  # fmt: skip
             continue
         else:
             return True
@@ -152,7 +152,7 @@ def _prepare_temp_dir_for_agent(path: str) -> None:
         from mergecraft.utils.privilege import agent_user_name
 
         pw = pwd.getpwnam(agent_user_name())
-    except ImportError, KeyError:
+    except (ImportError, KeyError):  # fmt: skip
         return
     with contextlib.suppress(OSError):
         os.chmod(path, 0o755)  # nosec B103 — agent must traverse non-secret temp tree
@@ -177,7 +177,7 @@ def _git_get(repo_dir: str, key: str) -> str:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except subprocess.CalledProcessError, OSError:
+    except (subprocess.CalledProcessError, OSError):  # fmt: skip
         return ""
 
 
@@ -362,7 +362,7 @@ def wipe_runner_leak_surface() -> None:
         if active_temp:
             try:
                 path.resolve().relative_to(Path(active_temp).resolve())
-            except ValueError, OSError:
+            except (ValueError, OSError):  # fmt: skip
                 pass
             else:
                 return

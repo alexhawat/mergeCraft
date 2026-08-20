@@ -59,7 +59,7 @@ class RunCache:
             return []
         try:
             raw: list[dict[str, Any]] = json.loads(self._index_path.read_text(encoding="utf-8"))
-        except OSError, json.JSONDecodeError:
+        except (OSError, json.JSONDecodeError):  # fmt: skip
             return []
         entries: list[_CacheEntry] = []
         for row in raw:

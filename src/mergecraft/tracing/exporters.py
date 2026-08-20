@@ -650,7 +650,7 @@ class OTLPSink:
             if event.trace_id:
                 try:
                     otel_trace_id = int(event.trace_id[:32], 16)
-                except TypeError, ValueError:
+                except (TypeError, ValueError):  # fmt: skip
                     otel_trace_id = None
                 attrs["mergecraft.trace_id"] = event.trace_id
             span = self._tracer.start_span(name=event.kind, attributes=attrs)

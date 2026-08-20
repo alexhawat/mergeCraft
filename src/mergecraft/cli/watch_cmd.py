@@ -30,7 +30,7 @@ def _bail(msg: str) -> NoReturn:
 def _get_gh_token() -> str:
     try:
         token = subprocess.check_output(["gh", "auth", "token"], text=True).strip()
-    except subprocess.CalledProcessError, FileNotFoundError, OSError:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
         _bail("gh cli not found or not authenticated — run `gh auth login`.")
     if not token:
         _bail("gh cli returned an empty token.")
@@ -42,7 +42,7 @@ def _parse_git_remote() -> tuple[str, str]:
         url = subprocess.check_output(
             ["git", "remote", "get-url", "origin"], text=True, stderr=subprocess.DEVNULL
         ).strip()
-    except subprocess.CalledProcessError, FileNotFoundError, OSError:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
         _bail("not a git repository or no 'origin' remote found.")
     match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
     if not match:

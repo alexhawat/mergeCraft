@@ -450,16 +450,16 @@ def _line_bounds(row: dict[str, Any]) -> tuple[int, int]:
     if isinstance(span, (list, tuple)) and len(span) == 2:
         try:
             start, end = int(span[0]), int(span[1])
-        except TypeError, ValueError:
+        except (TypeError, ValueError):  # fmt: skip
             start, end = 1, 1
     else:
         try:
             start = int(row.get("start_line") or row.get("line") or 1)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):  # fmt: skip
             start = 1
         try:
             end = int(row.get("end_line") or start)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):  # fmt: skip
             end = start
     if end < start:
         start, end = end, start

@@ -94,7 +94,7 @@ def _bail(msg: str, *, code: int = CLI_CONFIGURATION_EXIT_CODE) -> NoReturn:
 def _get_gh_token() -> str:
     try:
         token = subprocess.check_output(["gh", "auth", "token"], text=True).strip()
-    except subprocess.CalledProcessError, FileNotFoundError, OSError:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
         _bail(
             "gh cli not found or not authenticated.\n"
             "  install: https://cli.github.com\n"
@@ -110,7 +110,7 @@ def _parse_git_remote() -> tuple[str, str]:
         url = subprocess.check_output(
             ["git", "remote", "get-url", "origin"], text=True, stderr=subprocess.DEVNULL
         ).strip()
-    except subprocess.CalledProcessError, FileNotFoundError, OSError:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
         _bail("not a git repository or no 'origin' remote found.")
     match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
     if not match:
@@ -128,7 +128,7 @@ def _set_gh_secret(*, name: str, value: str, repo_slug: str) -> bool:
             capture_output=True,
         )
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:  # fmt: skip
         logger.warning("gh secret set failed: {}", exc)
         return False
 
@@ -312,7 +312,7 @@ def auth_claude(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         oauth_token = getpass.getpass("Claude Code OAuth token (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not oauth_token:
@@ -356,7 +356,7 @@ def auth_gemini(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         api_key = getpass.getpass("Gemini API key (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
@@ -405,7 +405,7 @@ def auth_cursor(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         api_key = getpass.getpass("Cursor API key (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
@@ -486,7 +486,7 @@ def auth_nous(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         api_key = getpass.getpass("Nous Portal API key (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
@@ -513,7 +513,7 @@ def auth_tokenhub(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         api_key = getpass.getpass("TokenHub API key (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:
@@ -787,7 +787,7 @@ def auth_logfire(
     )
     try:
         token = getpass.getpass("Logfire write token (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not token:
@@ -909,7 +909,7 @@ def auth_minimax(scope: str = _SCOPE_OPTION) -> None:
     )
     try:
         api_key = getpass.getpass("MiniMax API key (Enter to cancel): ").strip()
-    except EOFError, KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
         console.print("canceled.")
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not api_key:

@@ -21,7 +21,7 @@ def raw_analyzers_block(repo_root: Path) -> dict[str, Any]:
         return {}
     try:
         loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except OSError, yaml.YAMLError:
+    except (OSError, yaml.YAMLError):  # fmt: skip
         return {}
     if not isinstance(loaded, dict):
         return {}

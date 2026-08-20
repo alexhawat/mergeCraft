@@ -133,7 +133,7 @@ def _is_under_forbidden_temp(path: Path) -> bool:
     for root in _FORBIDDEN_TEMP_ROOTS:
         try:
             resolved.relative_to(Path(root).resolve())
-        except ValueError, OSError:
+        except (ValueError, OSError):  # fmt: skip
             continue
         else:
             return True

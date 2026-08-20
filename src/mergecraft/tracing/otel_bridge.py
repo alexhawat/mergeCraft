@@ -69,7 +69,7 @@ def attach_trace_context(span: Span) -> Iterator[None]:
 
     try:
         otel_trace_id = int(span.trace_id[:32], 16) if span.trace_id else None
-    except TypeError, ValueError:
+    except (TypeError, ValueError):  # fmt: skip
         # Malformed trace_id (e.g. not hex) — degrade to a no-op rather
         # than fail the caller's review (convention 6).
         yield
