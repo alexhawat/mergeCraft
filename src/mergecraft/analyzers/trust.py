@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.utils.secrets import filter_env, is_sensitive_env_name
+from mergecraft.utils.source_resolve import is_registered_git_worktree, resolve_git_common_dir
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest, TrustTier
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
 AnalyzersMode = Literal["off", "auto", "full", "untrusted-only"]
 
-ReviewSourceKind = Literal["local_cwd", "local_path", "cloned_remote"]
+ReviewSourceKind = Literal["local_cwd", "local_path", "local_worktree", "cloned_remote"]
 
 #: Every value the ``analyzers:`` Action input accepts.
 ANALYZERS_MODES: frozenset[str] = frozenset({"off", "auto", "full", "untrusted-only"})
@@ -73,7 +74,14 @@ def build_review_source(
     invocation_root: Path,
     cloned: bool = False,
 ) -> ReviewSource:
-    """Construct a :class:`ReviewSource` from a review cwd and invocation root."""
+    """Construct a :class:`ReviewSource` from a review cwd and invocation root.
+
+    D10 / #294: when *cwd* is a linked git worktree of the same repo as
+    *invocation_root* (same ``git rev-parse --git-common-dir``), the kind is
+    ``"local_worktree"`` and :func:`derive_source_trust_tier` maps it to
+    ``"trusted"``.  Clones (``cloned=True``), unrelated repos, and non-git
+    paths fall back to ``"cloned_remote"`` / ``"local_path"`` as before.
+    """
     resolved_cwd = cwd.resolve()
     resolved_root = invocation_root.resolve()
     if cloned:
@@ -85,6 +93,20 @@ def build_review_source(
     if resolved_cwd == resolved_root:
         return ReviewSource(
             kind="local_cwd",
+            path=resolved_cwd,
+            invocation_root=resolved_root,
+        )
+    # D10 / #294: detect a linked worktree of the same repo.
+    cwd_common = resolve_git_common_dir(resolved_cwd)
+    root_common = resolve_git_common_dir(resolved_root)
+    if (
+        cwd_common is not None
+        and root_common is not None
+        and cwd_common == root_common
+        and is_registered_git_worktree(resolved_cwd)
+    ):
+        return ReviewSource(
+            kind="local_worktree",
             path=resolved_cwd,
             invocation_root=resolved_root,
         )
@@ -118,6 +140,10 @@ def derive_source_trust_tier(
 
     if source.kind == "cloned_remote":
         return "untrusted"
+
+    # D10 / #294: linked worktrees of the same repo are trusted without --trust.
+    if source.kind == "local_worktree":
+        return "trusted"
 
     try:
         source.path.resolve().relative_to(source.invocation_root.resolve())

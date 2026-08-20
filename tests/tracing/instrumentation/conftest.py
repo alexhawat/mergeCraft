@@ -67,11 +67,16 @@ def captured_sink() -> Iterator[CapturedSink]:
     W4 must expose the same ``sink_factory``-driven surface from
     ``mergecraft.tracing``; until then the returned ``CapturedSink.memory``
     starts empty and the xfail assertions below turn green.
+
+    Also resets the process-wide ``Tracer`` cache introduced in W4 (#292)
+    so each test gets a fresh ``Tracer`` bound to *its* ``MemorySink``.
     """
     from mergecraft.config import RepoSettings
     from mergecraft.tracing import sink_factory
     from mergecraft.tracing.sinks import _PENDING_SINK
+    from mergecraft.tracing.tracer import reset_process_tracer_cache
 
+    reset_process_tracer_cache()
     settings = RepoSettings.model_validate(
         {
             "tracing": {
@@ -87,6 +92,7 @@ def captured_sink() -> Iterator[CapturedSink]:
         # ``asyncio.run`` copies ContextVars and does not write back; the
         # pending handoff otherwise leaks into later tests on this worker.
         _PENDING_SINK.set(None)
+        reset_process_tracer_cache()
 
 
 @pytest.fixture

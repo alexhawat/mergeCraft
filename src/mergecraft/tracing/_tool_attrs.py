@@ -171,6 +171,16 @@ def enrich_tool_response(
         span.set_attribute("gen_ai.tool.output", redact_tool_payload(message))
         return
 
+    # D9 / #296: classify ToolResult.is_error as error span (MCP always wraps).
+    from mergecraft.mcp.shared import ToolResult
+
+    if isinstance(output, ToolResult) and output.is_error:
+        span.set_attribute("tool.exit_code", "error")
+        span.set_attribute("tool.error_class", "ToolResult")
+        span.set_status("error", "ToolResult.is_error=True")
+        span.set_attribute("gen_ai.tool.output", redact_tool_payload(output))
+        return
+
     span.set_attribute("tool.exit_code", "ok")
     if output is not None:
         output_bytes = _safe_json_bytes(output)

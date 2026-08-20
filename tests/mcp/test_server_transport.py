@@ -73,7 +73,39 @@ def test_batch_containing_a_request_still_gets_responses(client: TestClient) -> 
         ],
     )
     assert response.status_code == 200
-    assert [entry.get("id") for entry in response.json()] == [None, 1]
+    # Notifications carry no ``id`` and must not produce a response; only the
+    # request (id=1) is dispatched to handle_rpc.
+    assert [entry.get("id") for entry in response.json()] == [1]
+
+
+def test_notification_shaped_tools_call_in_mixed_batch_is_not_executed(
+    client: TestClient,
+) -> None:
+    """A tools/call without ``id`` (notification-shaped) in a mixed batch must not execute.
+
+    JSON-RPC notifications must not receive a response. A notification-shaped
+    ``tools/call`` must be silently dropped from the batch — never dispatched to
+    ``handle_rpc``, never executed. Only the requests (those with an ``id``) get
+    responses.
+    """
+    response = client.post(
+        MCP_ENDPOINT,
+        json=[
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            # notification-shaped tools/call (no ``id``) — must be skipped entirely
+            {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "echo", "arguments": {}},
+            },
+        ],
+    )
+    assert response.status_code == 200
+    body = response.json()
+    # Only the initialize response; the notification-shaped tools/call produces no entry.
+    assert isinstance(body, list)
+    assert len(body) == 1, f"notification-shaped tools/call must not produce a response: {body}"
+    assert body[0]["id"] == 1
 
 
 def test_tools_list_after_handshake(client: TestClient) -> None:

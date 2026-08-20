@@ -241,6 +241,41 @@ def _reset_test_seam() -> None:
     _ACTIVE_TRACER_PROVIDERS = []
 
 
+def _provider_span_processors(provider: Any) -> tuple[Any, ...]:
+    """Return user-attached span processors on *provider* without assuming SDK layout.
+
+    Mirrors the OTel SDK's ``SynchronousMultiSpanProcessor._span_processors``
+    list, accessed via the ``_active_span_processor`` composite attribute.
+    Returns an empty tuple when the provider exposes neither attribute (e.g.
+    proxy providers or stubs).
+    """
+    composite = getattr(provider, "_active_span_processor", None)
+    if composite is None:
+        return ()
+    return tuple(getattr(composite, "_span_processors", ()))
+
+
+def _otlp_exporter_headers(exporter: Any) -> dict[str, str]:
+    """Return normalized OTLP exporter headers when the SDK exposes them."""
+    raw = getattr(exporter, "_headers", None)
+    if raw is None:
+        raw = getattr(exporter, "headers", None)
+    if isinstance(raw, dict):
+        return {str(key): str(value) for key, value in raw.items()}
+    return {}
+
+
+def _otlp_exporter_matches(exporter: Any, *, endpoint: str, headers: dict[str, str]) -> bool:
+    """Return whether *exporter* already targets the same endpoint and headers."""
+    if exporter is None:
+        return False
+    if type(exporter).__name__ != "OTLPSpanExporter":
+        return False
+    if getattr(exporter, "_endpoint", None) != endpoint:
+        return False
+    return _otlp_exporter_headers(exporter) == headers
+
+
 def _setup_tracer_provider(
     endpoint: str,
     headers: dict[str, str],
@@ -267,6 +302,14 @@ def _setup_tracer_provider(
     is the fix for spans never reaching Logfire: the unguarded
     ``set_tracer_provider`` used to swallow the override error and return
     ``None``, turning the sink into a silent no-op.
+
+    **Singleton sink (#293):** when a real provider already exists *and* the
+    same ``endpoint`` is already registered as a ``BatchSpanProcessor``, this
+    function does **not** stack another exporter pair.  Each unique
+    endpoint+provider combination gets exactly one ``BatchSpanProcessor`` and
+    exactly one ``_RecordingSpanProcessor`` regardless of how many times
+    :func:`_setup_tracer_provider` (or :class:`OTLPSink`) is called with the
+    same configuration.
 
     Returns ``None`` when the optional extra is uninstalled.
     """
@@ -317,18 +360,38 @@ def _setup_tracer_provider(
         else:
             # A real provider already exists (logfire import, prior sink, …).
             provider = existing
-        # Real exporter first so production spans reach the network.
-        provider.add_span_processor(
-            BatchSpanProcessor(
-                OTLPSpanExporter(
-                    endpoint=endpoint,
-                    headers=headers,
+
+        # Singleton guard (#293): only attach processors that are not already
+        # present on this provider.  Checking by type + exporter endpoint
+        # prevents N constructions from stacking N duplicate exporter pairs.
+        existing_processors = _provider_span_processors(provider)
+
+        has_otlp = any(
+            isinstance(p, BatchSpanProcessor)
+            and _otlp_exporter_matches(
+                getattr(p, "span_exporter", None),
+                endpoint=endpoint,
+                headers=headers,
+            )
+            for p in existing_processors
+        )
+        if not has_otlp:
+            # Real exporter first so production spans reach the network.
+            provider.add_span_processor(
+                BatchSpanProcessor(
+                    OTLPSpanExporter(
+                        endpoint=endpoint,
+                        headers=headers,
+                    )
                 )
             )
-        )
-        # Test seam: keep recording so captured_payload / has_active_tracer_provider
-        # still observe spans.
-        provider.add_span_processor(_RecordingSpanProcessor())
+
+        has_recording = any(isinstance(p, _RecordingSpanProcessor) for p in existing_processors)
+        if not has_recording:
+            # Test seam: keep recording so captured_payload / has_active_tracer_provider
+            # still observe spans.
+            provider.add_span_processor(_RecordingSpanProcessor())
+
         _ACTIVE_TRACER_PROVIDERS.append(provider)
     except Exception as exc:
         # The only expected failure here is the override error from a stale
@@ -338,7 +401,9 @@ def _setup_tracer_provider(
             existing = trace_mod.get_tracer_provider()
             if type(existing).__name__ != "ProxyTracerProvider":
                 logger.debug("trace otel provider already set; reusing it")
-                existing.add_span_processor(_RecordingSpanProcessor())
+                exc_processors = _provider_span_processors(existing)
+                if not any(isinstance(p, _RecordingSpanProcessor) for p in exc_processors):
+                    existing.add_span_processor(_RecordingSpanProcessor())
                 _ACTIVE_TRACER_PROVIDERS.append(existing)
                 return existing
         logger.warning("trace otel provider setup failed: {}", exc)

@@ -34,6 +34,7 @@ from mergecraft.config.settings import (
     build_executable_config_skip_reason,
 )
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
+from mergecraft.mcp.endpoints import mcp_role_url
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
@@ -751,6 +752,7 @@ async def _run_agent_review(
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
         tool_context.mcp_server_url = mcp_url
+        _reviewer_mcp_url = mcp_role_url(mcp_url, None)
         skills_home = str(tmpdir / "home")
         Path(skills_home).mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(install_bundled_skills, home=skills_home)
@@ -770,7 +772,8 @@ async def _run_agent_review(
         )
         run_ctx = AgentRunContext(
             payload=payload,
-            mcp_server_url=mcp_url,
+            mcp_server_url=_reviewer_mcp_url,
+            mcp_auth_token=tool_context.mcp_auth_token,
             tmpdir=str(tmpdir),
             subagent_denied_tools=subagent_denied_tool_names(tool_context, output_schema),
             instructions=instructions,

@@ -154,11 +154,20 @@ def test_cost_attrs_from_usage_carries_dual_names() -> None:
     assert attrs["gen_ai.usage.cost_usd"] == 0.002
 
 
+def test_model_params_from_mapping_ignores_non_finite_int_fields() -> None:
+    """Malformed JSON numerics degrade to omitted knobs (convention 3)."""
+    from mergecraft.tracing.genai import ModelParams, model_params_from_mapping
+
+    params = model_params_from_mapping({"max_tokens": float("nan"), "seed": float("inf")})
+    assert params == ModelParams()
+
+
 __all__ = [
     "test_agent_attempt_attrs",
     "test_cli_argv_redacted",
     "test_cost_attrs_from_usage_carries_dual_names",
     "test_llm_call_cost_attrs",
+    "test_model_params_from_mapping_ignores_non_finite_int_fields",
     "test_span_duration_nonzero",
     "test_tool_call_attrs",
 ]

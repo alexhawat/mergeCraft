@@ -73,6 +73,8 @@ class ToolContext:
     modes: list[Mode]
     tool_state: ToolState
     mcp_server_url: str
+    mcp_auth_token: str
+    mcp_orchestrator_auth_token: str
     tmpdir: str
     refresh_git_token: Callable[[str], Awaitable[str]] | None = None
     read_token: str | None = None
@@ -112,6 +114,8 @@ class ToolContext:
         modes: list[Mode] | None = None,
         tool_state: ToolState | None = None,
         mcp_server_url: str = "",
+        mcp_auth_token: str = "",
+        mcp_orchestrator_auth_token: str = "",
         tmpdir: str = "",
         refresh_git_token: Callable[[str], Awaitable[str]] | None = None,
         read_token: str | None = None,
@@ -160,6 +164,8 @@ class ToolContext:
             raise ValueError(msg)
         self.tool_state = tool_state
         self.mcp_server_url = mcp_server_url
+        self.mcp_auth_token = mcp_auth_token
+        self.mcp_orchestrator_auth_token = mcp_orchestrator_auth_token
         self.tmpdir = tmpdir
         self.refresh_git_token = refresh_git_token
         self.read_token = read_token

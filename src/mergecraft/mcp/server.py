@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import random
+import secrets
 import socket
+import threading
 from math import isfinite
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -35,6 +35,15 @@ from mergecraft.mcp.dependencies import (
     await_dependency_installation_tool,
     start_dependency_installation_tool,
 )
+from mergecraft.mcp.endpoints import (
+    MCP_ENDPOINT as MCP_ENDPOINT,
+)
+from mergecraft.mcp.endpoints import (
+    MCP_REVIEWER_ENDPOINT as MCP_REVIEWER_ENDPOINT,
+)
+from mergecraft.mcp.endpoints import (
+    MCP_VERIFIER_ENDPOINT as MCP_VERIFIER_ENDPOINT,
+)
 from mergecraft.mcp.git import (
     commit_changes_tool,
     delete_branch_tool,
@@ -49,6 +58,13 @@ from mergecraft.mcp.issue_events import get_issue_events_tool
 from mergecraft.mcp.issue_info import get_issue_tool
 from mergecraft.mcp.labels import add_labels_tool, remove_labels_tool
 from mergecraft.mcp.output import set_output_tool
+from mergecraft.mcp.ports import (
+    MCP_HOST as MCP_HOST,
+)
+from mergecraft.mcp.ports import (
+    port_available,
+    select_port,
+)
 from mergecraft.mcp.pr import (
     close_pull_request_tool,
     create_pull_request_tool,
@@ -63,7 +79,9 @@ from mergecraft.mcp.review_comments import (
 )
 from mergecraft.mcp.select_mode import select_mode_tool
 from mergecraft.mcp.shared import (
-    REVIEWER_ALLOWED_TOOL_CLASSES,
+    PRIMARY_MUTATING_ALLOWLIST,
+    PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES,
+    READONLY_MUTATING_ALLOWLIST,
     VERIFIER_ALLOWED_TOOL_CLASSES,
     JsonSchema,
     ToolClass,
@@ -71,7 +89,7 @@ from mergecraft.mcp.shared import (
     ToolSpec,
     admits_readonly_role,
 )
-from mergecraft.mcp.shell import kill_background_tool, shell_tool
+from mergecraft.mcp.shell import detect_sandbox_method, kill_background_tool, shell_tool
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.upload import upload_file_tool
 from mergecraft.mcp.verdict import submit_review_verdict_tool
@@ -95,13 +113,6 @@ if TYPE_CHECKING:
     from jsonschema.protocols import Validator
 
     from mergecraft.mcp.context import ToolContext
-
-MCP_PORT_START = 3764
-MCP_PORT_ATTEMPTS = 100
-MCP_HOST = "127.0.0.1"
-MCP_ENDPOINT = "/mcp"
-MCP_REVIEWER_ENDPOINT = "/mcp/reviewer"
-MCP_VERIFIER_ENDPOINT = "/mcp/verifier"
 
 
 def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None) -> list[ToolSpec]:
@@ -148,7 +159,9 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
     is_standalone = ctx.payload.event.trigger == "unknown"
     if is_standalone or output_schema is not None:
         tools.append(set_output_tool(ctx, output_schema))
-    if ctx.payload.shell == "restricted":
+    if ctx.payload.shell == "restricted" and not (
+        ctx.trust_tier == "untrusted" and detect_sandbox_method() == "none"
+    ):
         tools.extend([shell_tool(ctx), kill_background_tool(ctx)])
     return tools
 
@@ -156,8 +169,14 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
 def _filter_tools_by_class(
     tools: list[ToolSpec],
     allowed: frozenset[ToolClass],
+    *,
+    mutating_allowlist: frozenset[str] = READONLY_MUTATING_ALLOWLIST,
 ) -> list[ToolSpec]:
-    filtered = [spec for spec in tools if admits_readonly_role(spec, allowed)]
+    filtered = [
+        spec
+        for spec in tools
+        if admits_readonly_role(spec, allowed, mutating_allowlist=mutating_allowlist)
+    ]
     if not filtered:
         msg = "class filter yielded an empty toolset"
         raise RuntimeError(msg)
@@ -168,10 +187,21 @@ def build_reviewer_tools(
     ctx: ToolContext,
     output_schema: JsonSchema | None = None,
 ) -> list[ToolSpec]:
-    """Read-only reviewer surface — class-filtered, distinct from verifier (H4)."""
+    """Primary reviewer surface — class-filtered with publication admission (D9).
+
+    ``PRIMARY_MUTATING_ALLOWLIST`` explicitly names ``create_pull_request_review``
+    (and ``checkout_pr``), plus the three session tools the primary must call:
+    ``set_output`` (Action output / offline --json), ``select_mode`` (Step 1 of
+    the default procedure), and ``report_progress`` (no-action path).
+    REVIEW_WRITE class is shared by several tools so class membership alone would
+    leak review-write tools to the reviewer; the named allowlist stays the sole
+    gate for D9 publication.  Subagents are denied publication via
+    ``gates.subagent_denied_tool_names`` regardless of class.
+    """
     return _filter_tools_by_class(
         build_orchestrator_tools(ctx, output_schema),
-        REVIEWER_ALLOWED_TOOL_CLASSES,
+        PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES,
+        mutating_allowlist=PRIMARY_MUTATING_ALLOWLIST,
     )
 
 
@@ -204,44 +234,6 @@ def build_orchestrator_tools(
     if ctx.signed_commits:
         tools.append(commit_changes_tool(ctx))
     return tools
-
-
-def _read_env_port() -> int | None:
-    raw = os.environ.get("MERGECRAFT_MCP_PORT")
-    if not raw:
-        return None
-    try:
-        parsed = int(raw)
-    except ValueError as err:
-        msg = f"invalid MERGECRAFT_MCP_PORT: {raw}"
-        raise ValueError(msg) from err
-    if parsed <= 0 or parsed > 65535:
-        msg = f"invalid MERGECRAFT_MCP_PORT: {raw}"
-        raise ValueError(msg)
-    return parsed
-
-
-def _port_available(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind((MCP_HOST, port))
-        except OSError:
-            return False
-    return True
-
-
-def _select_port() -> int:
-    requested = _read_env_port()
-    if requested is not None and _port_available(requested):
-        return requested
-    offset0 = random.randint(0, 49)
-    for offset in range(MCP_PORT_ATTEMPTS):
-        port = MCP_PORT_START + offset0 + offset
-        if _port_available(port):
-            return port
-    msg = f"could not find available mcp port starting at {MCP_PORT_START}"
-    raise RuntimeError(msg)
 
 
 def _tool_result_to_rpc(result: ToolResult | Any) -> dict[str, Any]:
@@ -444,6 +436,7 @@ def _register_mcp_route(
     path: str,
     tools: list[ToolSpec],
     tool_ctx: ToolContext | None,
+    auth_token: str | None = None,
 ) -> None:
     """Mount one JSON-RPC MCP endpoint with a fixed tool surface."""
     by_name = {t.name: t for t in tools}
@@ -539,6 +532,17 @@ def _register_mcp_route(
         return _rpc_error(req_id, RpcError(-32601, f"Method not found: {method}"))
 
     async def mcp_endpoint(request: Request) -> Response:
+        # D15 — auth at request edge: every tools/list and tools/call (including
+        # GET probes) requires Bearer token when one was issued at startup.
+        # /health stays unauthenticated; x-mergecraft-agent-id is tracing-only.
+        if auth_token:
+            raw_auth = request.headers.get("Authorization") or ""
+            # Use compare_digest to prevent timing-based token oracle attacks.
+            if not secrets.compare_digest(raw_auth.encode(), f"Bearer {auth_token}".encode()):
+                return JSONResponse(
+                    {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Unauthorized"}},
+                    status_code=401,
+                )
         if request.method == "GET":
             # Streamable HTTP / SSE clients may probe with GET — reply with tool list.
             return JSONResponse(
@@ -570,8 +574,15 @@ def _register_mcp_route(
         if all(_is_notification(item) for item in items):
             return Response(status_code=202)
         if isinstance(body, list):
+            # Notifications (no ``id``) must not produce a response and must not
+            # be dispatched to handle_rpc — a notification-shaped tools/call in a
+            # mixed batch would otherwise execute the tool and return id=null.
             return JSONResponse(
-                [await handle_rpc(item, agent_id=calling_agent_id) for item in items]
+                [
+                    await handle_rpc(item, agent_id=calling_agent_id)
+                    for item in items
+                    if not _is_notification(item)
+                ]
             )
         return JSONResponse(await handle_rpc(body, agent_id=calling_agent_id))
 
@@ -588,6 +599,8 @@ def create_mcp_app(
     ctx: ToolContext | None = None,
     *,
     role_tools: dict[str, list[ToolSpec]] | None = None,
+    auth_token: str | None = None,
+    orchestrator_auth_token: str | None = None,
 ) -> FastAPI:
     """Build the MCP app.
 
@@ -598,6 +611,13 @@ def create_mcp_app(
     ``role_tools`` mounts extra class-filtered surfaces at ``{MCP_ENDPOINT}/{role}``
     (the reviewer lives at ``MCP_REVIEWER_ENDPOINT``, the verifier at
     ``MCP_VERIFIER_ENDPOINT``). The primary endpoint stays the orchestrator set.
+
+    ``auth_token`` secures reviewer/verifier role routes (and any caller that
+    passes only one token). ``orchestrator_auth_token``, when supplied, secures
+    the primary ``/mcp`` orchestrator surface separately from the harness token.
+
+    When ``tools`` is empty or ``None``, the ``/mcp`` primary endpoint is omitted
+    and only ``/health`` and any ``role_tools`` routes are registered.
     """
     app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.1.0")
 
@@ -605,9 +625,11 @@ def create_mcp_app(
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    _register_mcp_route(app, MCP_ENDPOINT, tools, ctx)
+    primary_token = orchestrator_auth_token if orchestrator_auth_token is not None else auth_token
+    if tools:
+        _register_mcp_route(app, MCP_ENDPOINT, tools, ctx, primary_token)
     for role, role_tool_list in (role_tools or {}).items():
-        _register_mcp_route(app, f"{MCP_ENDPOINT}/{role}", role_tool_list, ctx)
+        _register_mcp_route(app, f"{MCP_ENDPOINT}/{role}", role_tool_list, ctx, auth_token)
     return app
 
 
@@ -621,6 +643,29 @@ async def _kill_background_processes(ctx: ToolContext) -> None:
     procs.clear()
 
 
+def _serve_in_thread(
+    config: uvicorn.Config,
+    *,
+    thread_name: str,
+) -> tuple[uvicorn.Server, threading.Thread, asyncio.AbstractEventLoop]:
+    """Start a uvicorn server on a new event loop in a daemon thread.
+
+    Returns ``(server, thread, loop)`` so callers can stop the server
+    (``server.should_exit = True``), join the thread, and schedule
+    cleanup on the loop.
+    """
+    server = uvicorn.Server(config)
+    loop = asyncio.new_event_loop()
+
+    def _run() -> None:
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(server.serve())
+
+    thread = threading.Thread(target=_run, name=thread_name, daemon=True)
+    thread.start()
+    return server, thread, loop
+
+
 def start_mcp_http_server(
     ctx: ToolContext,
     *,
@@ -630,6 +675,17 @@ def start_mcp_http_server(
 
     Returns ``(url, stop)`` where ``stop`` is an idempotent disposer.
     """
+    import time
+
+    # D15 — issue per-run secrets at startup. Agent harnesses receive
+    # ``mcp_auth_token`` for reviewer/verifier role routes; the orchestrator
+    # ``/mcp`` surface gets its own bearer so a leaked harness token cannot
+    # call orchestrator-only tools after dispatch.
+    agent_token = secrets.token_hex(32)
+    orchestrator_token = secrets.token_hex(32)
+    ctx.mcp_auth_token = agent_token
+    ctx.mcp_orchestrator_auth_token = orchestrator_token
+
     tools = build_orchestrator_tools(ctx, output_schema)
     reviewer_tools = build_reviewer_tools(ctx, output_schema)
     verifier_tools = build_verifier_tools(ctx, output_schema)
@@ -637,41 +693,31 @@ def start_mcp_http_server(
         tools,
         ctx,
         role_tools={"reviewer": reviewer_tools, "verifier": verifier_tools},
+        auth_token=agent_token,
+        orchestrator_auth_token=orchestrator_token,
     )
-    port = _select_port()
-    config = uvicorn.Config(
+    port = select_port()
+    http_config = uvicorn.Config(
         app,
         host=MCP_HOST,
         port=port,
         log_level="warning",
         access_log=False,
     )
-    server = uvicorn.Server(config)
-    loop = asyncio.new_event_loop()
-
-    def _run() -> None:
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(server.serve())
-
-    import threading
-
-    thread = threading.Thread(target=_run, name="mergecraft-mcp", daemon=True)
-    thread.start()
+    server, thread, loop = _serve_in_thread(http_config, thread_name="mergecraft-mcp")
 
     # Wait briefly for bind
     for _ in range(50):
         if getattr(server, "started", False):
             break
         # uvicorn sets started after startup; also probe the port
-        if not _port_available(port):
+        if not port_available(port):
             # port is in use by our server (or something) — good enough after thread start
             try:
                 with socket.create_connection((MCP_HOST, port), timeout=0.1):
                     break
             except OSError:
                 pass
-        import time
-
         time.sleep(0.05)
 
     url = f"http://{MCP_HOST}:{port}{MCP_ENDPOINT}"

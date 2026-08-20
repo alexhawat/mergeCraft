@@ -20,6 +20,9 @@ from mergecraft.agents.gates import build_opencode_native_fs_permission
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
     CUSTOM_PROVIDER_BASE_URL_ENV,
+    SINGLETON_PROVIDER_ID,
+    ProviderConfig,
+    _provider_config_for_model,
     resolve_gateway_endpoint,
     resolve_gateway_endpoints,
 )
@@ -30,16 +33,19 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    mcp_auth_headers,
     resolve_cache_read,
     spawn_agent_cli,
 )
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.genai import (
+    ModelParams,
     input_messages_attrs,
+    model_params_from_mapping,
     output_messages_attrs,
     request_attrs,
     resolve_capture_policy,
-    usage_attrs,
+    usage_attrs_from_agent_usage,
 )
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
@@ -60,6 +66,19 @@ if TYPE_CHECKING:
 # Re-exported for tests / callers that import these names from opencode.
 __all_gateway_envs__ = (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV)
 
+# OpenCode provider.options accepts transport keys only — generation knobs belong
+# on model entries (``limit`` / ``options``) or the primary ``build`` agent.
+_OPENCODE_PROVIDER_OPTION_KEYS: frozenset[str] = frozenset(
+    {
+        "timeout",
+        "headerTimeout",
+        "chunkTimeout",
+        "setCacheKey",
+        "enterpriseUrl",
+    }
+)
+_OPENCODE_LIMIT_SOURCE_KEYS: frozenset[str] = frozenset({"context_limit", "context", "max_tokens"})
+
 
 class ProviderTimeoutError(RuntimeError):
     """Raised when the opencode provider endpoint times out.
@@ -74,6 +93,120 @@ class ProviderTimeoutError(RuntimeError):
 def _api_key_from_env(api_key_env: str) -> str:
     """Read a provider API key from the environment at emit time (HA1 / D16)."""
     return os.environ.get(api_key_env, "").strip()
+
+
+def _positive_int(value: object) -> int | None:
+    """Return a positive integer from a wire value, or ``None`` when absent/invalid."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float) and value.is_integer():
+        as_int = int(value)
+        return as_int if as_int > 0 else None
+    return None
+
+
+def _opencode_provider_options(config: ProviderConfig) -> dict[str, object]:
+    """Build OpenCode provider ``options`` (transport only — no generation knobs)."""
+    options: dict[str, object] = {
+        "baseURL": config.base_url,
+        "apiKey": _api_key_from_env(config.api_key_env),
+    }
+    for key in _OPENCODE_PROVIDER_OPTION_KEYS:
+        value = config.extra_options.get(key)
+        if value is not None:
+            options[key] = value
+    return options
+
+
+def _opencode_generation_options(extra_options: dict[str, object]) -> dict[str, object]:
+    """Return gateway generation knobs for OpenCode model/agent config."""
+    reserved = _OPENCODE_PROVIDER_OPTION_KEYS | _OPENCODE_LIMIT_SOURCE_KEYS
+    return {
+        key: value
+        for key, value in extra_options.items()
+        if key not in reserved and value is not None
+    }
+
+
+def _opencode_applied_model_params_from_config(
+    config: ProviderConfig | None,
+) -> ModelParams | None:
+    """Resolve ModelParams that the OpenCode config path actually applies (O4)."""
+    if config is None or not config.extra_options:
+        return None
+    applied_raw: dict[str, object] = dict(_opencode_generation_options(config.extra_options))
+    max_tokens = _positive_int(config.extra_options.get("max_tokens"))
+    context = _opencode_model_context_limit(config)
+    if max_tokens is not None and context is not None:
+        applied_raw["max_tokens"] = max_tokens
+    params = model_params_from_mapping(applied_raw)
+    return None if params == ModelParams() else params
+
+
+def opencode_applied_model_params(model: str | None) -> ModelParams | None:
+    """Resolve applied ModelParams for a model slug."""
+    config = _provider_config_for_model(model) if model else None
+    return _opencode_applied_model_params_from_config(config)
+
+
+def _opencode_build_agent_overrides(config: ProviderConfig | None) -> dict[str, object]:
+    """Primary-agent overrides OpenCode reads for temperature/top_p on serve runs."""
+    params = _opencode_applied_model_params_from_config(config)
+    if params is None:
+        return {}
+    overrides: dict[str, object] = {}
+    if params.temperature is not None:
+        overrides["temperature"] = params.temperature
+    if params.top_p is not None:
+        overrides["top_p"] = params.top_p
+    return overrides
+
+
+def _opencode_model_context_limit(config: ProviderConfig) -> int | None:
+    """Resolve an authoritative context window for OpenCode ``limit.context``."""
+    if config.context_limit is not None and config.context_limit > 0:
+        return config.context_limit
+    for key in ("context_limit", "context"):
+        resolved = _positive_int(config.extra_options.get(key))
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _opencode_model_entry(model_id: str, config: ProviderConfig) -> dict[str, object]:
+    """Build one OpenCode model table entry.
+
+    OpenCode 1.18.x requires both ``limit.context`` and ``limit.output`` when a
+    ``limit`` object is present; emit it only when both values are known.
+    """
+    entry: dict[str, object] = {"name": model_id}
+    max_tokens = _positive_int(config.extra_options.get("max_tokens"))
+    context = _opencode_model_context_limit(config)
+    if max_tokens is not None and context is not None:
+        entry["limit"] = {"context": context, "output": max_tokens}
+    generation_options = _opencode_generation_options(config.extra_options)
+    if generation_options:
+        entry["options"] = generation_options
+    return entry
+
+
+def _opencode_provider_block(
+    config: ProviderConfig,
+    *,
+    model_id: str | None = None,
+    provider_name: str | None = None,
+) -> dict[str, object]:
+    models: dict[str, object] = {}
+    if model_id:
+        models[model_id] = _opencode_model_entry(model_id, config)
+    return {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": provider_name or config.provider_id,
+        "options": _opencode_provider_options(config),
+        "models": models,
+    }
 
 
 def build_custom_provider(model: str | None) -> dict[str, object] | None:
@@ -112,34 +245,28 @@ def build_custom_provider(model: str | None) -> dict[str, object] | None:
             active_record = providers[active_provider_id]
             out: dict[str, object] = {}
             for record in providers.values():
-                models: dict[str, object] = {}
-                if record is active_record and active_model_id:
-                    models[active_model_id] = {"name": active_model_id}
-                out[record.provider_id] = {
-                    "npm": "@ai-sdk/openai-compatible",
-                    "name": record.provider_id,
-                    "options": {
-                        "baseURL": record.base_url,
-                        "apiKey": _api_key_from_env(record.api_key_env),
-                    },
-                    "models": models,
-                }
+                model_id = active_model_id if record is active_record else None
+                out[record.provider_id] = _opencode_provider_block(
+                    record,
+                    model_id=model_id,
+                )
             return out
         # Fall through to legacy preset path — the active model is not in
         # the resolver dict, so use the singleton (or preset) record keyed
         # by the model's prefix.
-    endpoint = resolve_gateway_endpoint(model)
-    if endpoint is None or not model:
+    config = _provider_config_for_model(model) if model else None
+    if config is None or not model:
         return None
-    provider_id, base_url, api_key = endpoint
     model_id = model[model.find("/") + 1 :]
+    provider_key = config.provider_id
+    if provider_key == SINGLETON_PROVIDER_ID and active_provider_id:
+        provider_key = active_provider_id
     return {
-        provider_id: {
-            "npm": "@ai-sdk/openai-compatible",
-            "name": provider_id,
-            "options": {"baseURL": base_url, "apiKey": api_key},
-            "models": {model_id: {"name": model_id}},
-        }
+        provider_key: _opencode_provider_block(
+            config,
+            model_id=model_id,
+            provider_name=provider_key,
+        )
     }
 
 
@@ -184,6 +311,7 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
                 "type": "remote",
                 "url": ctx.mcp_server_url,
                 "timeout": 300_000,
+                **({"headers": mcp_auth_headers(ctx)} if ctx.mcp_auth_token else {}),
             }
         },
         "agent": agent_block,
@@ -197,6 +325,16 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
             slash = model.find("/")
             if slash > 0:
                 config["enabled_providers"] = [model[:slash].lower()]
+        provider_config = _provider_config_for_model(model)
+        build_overrides = _opencode_build_agent_overrides(provider_config)
+        if build_overrides and isinstance(agent_block, dict):
+            agents = dict(agent_block)
+            existing_build = agents.get("build")
+            if isinstance(existing_build, dict):
+                agents["build"] = {**existing_build, **build_overrides}
+            else:
+                agents["build"] = build_overrides
+            config["agent"] = agents
     provider = build_custom_provider(model)
     if provider is not None:
         config["provider"] = provider
@@ -292,6 +430,7 @@ async def _prompt_session(
     session_id: str,
     text: str,
     model: dict[str, str] | None,
+    resolved_model: str | None = None,
     capture_policy: ContentCapture | None = None,
 ) -> AgentResult:
     """Prompt the opencode session — the one harness path with full payload visibility.
@@ -314,7 +453,8 @@ async def _prompt_session(
     model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
     with tracer.start_span("llm.call") as span:
         try:
-            for key, value in request_attrs(model=model_slug).items():
+            model_params = opencode_applied_model_params(resolved_model or model_slug)
+            for key, value in request_attrs(model=model_slug, params=model_params).items():
                 span.set_attribute(key, value)
             if capture_policy is not None:
                 for key, value in input_messages_attrs(
@@ -328,10 +468,11 @@ async def _prompt_session(
         )
         try:
             if result.usage is not None:
-                for key, value in usage_attrs(
+                for key, value in usage_attrs_from_agent_usage(
                     input_tokens=result.usage.input_tokens,
                     output_tokens=result.usage.output_tokens,
-                    cache_read_input_tokens=result.usage.cache_read_tokens,
+                    cache_read_tokens=result.usage.cache_read_tokens,
+                    cache_write_tokens=result.usage.cache_write_tokens,
                     cost_usd=result.usage.cost_usd,
                 ).items():
                     span.set_attribute(key, value)
@@ -488,6 +629,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             session_id=session_id,
             text=prompt,
             model=model_obj,
+            resolved_model=model,
             capture_policy=capture_policy,
         )
 
@@ -497,6 +639,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 session_id=session_id,
                 text=followup,
                 model=model_obj,
+                resolved_model=model,
                 capture_policy=capture_policy,
             )
 

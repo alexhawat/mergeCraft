@@ -39,6 +39,25 @@ REVIEWER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
         ToolClass.REVIEW_READ,
     }
 )
+# Primary reviewer adds:
+#   - REVIEW_WRITE   so ``create_pull_request_review`` / ``report_progress`` /
+#                    ``record_finding_verdict`` can be admitted on /mcp/reviewer (D9 / C6).
+#   - TERMINAL_PROTOCOL so ``submit_review_verdict`` (playbook step 10, C6) is
+#                    admitted. mutates=False so no mutating-allowlist entry is needed.
+#   - VERIFICATION   so ``verify_agent_findings`` (playbook step 8, C6) is admitted.
+#                    mutates=False so no mutating-allowlist entry is needed.
+# Subagents use REVIEWER_ALLOWED_TOOL_CLASSES (without these additions) so they
+# remain denied publication and cannot call orchestrator-only tools.
+PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = (
+    REVIEWER_ALLOWED_TOOL_CLASSES
+    | frozenset(
+        {
+            ToolClass.REVIEW_WRITE,
+            ToolClass.TERMINAL_PROTOCOL,
+            ToolClass.VERIFICATION,
+        }
+    )
+)
 VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
     {
         ToolClass.REPOSITORY_READ,
@@ -50,6 +69,24 @@ VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
 # (HA4.2 / D14). Every other mutating tool is orchestrator-only even when its
 # class is otherwise allowed on a read-only role.
 READONLY_MUTATING_ALLOWLIST: Final[frozenset[str]] = frozenset({"checkout_pr"})
+# Primary reviewer additionally allows review publication (D9) and the three
+# session tools the primary must be able to call:
+#   - ``set_output``      (ANALYSIS, mutates=True) — Action output_schema + offline --json
+#   - ``select_mode``     (SCOPE, mutates=True)    — default procedure Step 1
+#   - ``report_progress`` (REVIEW_WRITE, mutates=True) — no-action path
+# Subagents still use READONLY_MUTATING_ALLOWLIST so they cannot publish reviews
+# or emit structured output.
+PRIMARY_MUTATING_ALLOWLIST: Final[frozenset[str]] = READONLY_MUTATING_ALLOWLIST | frozenset(
+    {
+        "create_pull_request_review",
+        "set_output",
+        "select_mode",
+        "report_progress",
+        # C6: primary must be able to persist verifier verdicts (REVIEW_WRITE + mutates=True).
+        # Subagents keep READONLY_MUTATING_ALLOWLIST so they remain denied this write.
+        "record_finding_verdict",
+    }
+)
 
 
 def repository_mutation_class_for_push(
@@ -96,16 +133,30 @@ class ToolSpec:
         return entry
 
 
-def admits_readonly_role(spec: ToolSpec, allowed: frozenset[ToolClass]) -> bool:
+def admits_readonly_role(
+    spec: ToolSpec,
+    allowed: frozenset[ToolClass],
+    *,
+    mutating_allowlist: frozenset[str] = READONLY_MUTATING_ALLOWLIST,
+) -> bool:
     """True when ``spec`` may appear on a class-filtered read-only surface.
 
     Class membership is necessary but not sufficient: ``mutates=True`` tools
-    stay off reviewer/verifier unless they are on
-    ``READONLY_MUTATING_ALLOWLIST`` (today: ``checkout_pr``, HA4.2 / D14).
+    stay off reviewer/verifier unless their name is in ``mutating_allowlist``.
+
+    D9: publication is gated by name, not class.  ``REVIEW_WRITE`` is shared
+    by several tools (``create_pull_request_review``, ``record_finding_verdict``,
+    ``report_progress``, ``resolve_review_thread``); class membership alone
+    would leak all of them to the reviewer.  The primary reviewer passes
+    ``PRIMARY_MUTATING_ALLOWLIST`` which adds ``create_pull_request_review``,
+    ``record_finding_verdict``, ``set_output``, ``select_mode``, and
+    ``report_progress`` by name; subagents keep ``READONLY_MUTATING_ALLOWLIST``
+    (checkout_pr only) so they remain denied publication and cannot call
+    session tools.
     """
     if spec.tool_class not in allowed:
         return False
-    return not spec.mutates or spec.name in READONLY_MUTATING_ALLOWLIST
+    return not spec.mutates or spec.name in mutating_allowlist
 
 
 def tool(

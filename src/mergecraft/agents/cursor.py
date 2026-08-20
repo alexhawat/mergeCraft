@@ -16,6 +16,7 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
+    mcp_auth_headers,
     payload_event_branch,
 )
 from mergecraft.integrations.cursor_cloud.client import (
@@ -111,13 +112,15 @@ def _build_mcp_servers(ctx: AgentRunContext) -> list[dict[str, Any]]:
             ctx.mcp_server_url,
         )
         return []
-    return [
-        {
-            "name": MERGECRAFT_MCP_NAME,
-            "type": "sse",
-            "url": ctx.mcp_server_url,
-        }
-    ]
+    server_entry: dict[str, Any] = {
+        "name": MERGECRAFT_MCP_NAME,
+        "type": "sse",
+        "url": ctx.mcp_server_url,
+    }
+    auth = mcp_auth_headers(ctx)
+    if auth:
+        server_entry["headers"] = auth
+    return [server_entry]
 
 
 def _is_terminal_status(status: str) -> bool:
