@@ -34,7 +34,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `golangci-lint` | lint | go | auto | managed | trusted | go-lint | — |
 | `govulncheck` | vuln | go | auto | repo-native | trusted | — | — |
 | `hadolint` | lint | docker | auto | managed | untrusted | — | — |
-| `htmlhint` | lint | html | disabled | repo-native | trusted | — | — |
+| `htmlhint` | lint | html | auto | repo-native | trusted | — | — |
 | `infer` | security | java, c, cpp | disabled | container | trusted | — | requires compilation database and build — container-only heavyweight (C4) |
 | `jscpd` | quality | javascript, typescript, python | auto | repo-native | trusted | — | — |
 | `knip` | quality | javascript, typescript | auto | repo-native | trusted | — | — |
@@ -62,9 +62,9 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `shellcheck` | lint | shell | auto | managed | untrusted | — | — |
 | `shopify-theme-check` | lint | liquid | disabled | repo-native | trusted | — | manifest-only — Shopify Theme Check not bundled on Linux runners (C6 out of scope) |
 | `smarty-lint` | lint | smarty | disabled | repo-native | trusted | — | manifest-only — Smarty Lint not bundled on Linux runners (C6 out of scope) |
-| `sqlfluff` | lint | sql | disabled | managed | trusted | — | Dialect is mandatory — skip when repo declares none. |
+| `sqlfluff` | lint | sql | auto | managed | trusted | — | Dialect is mandatory — skip when repo declares none. |
 | `squawk` | migration | — | auto | managed | untrusted | — | — |
-| `stylelint` | lint | css | disabled | repo-native | trusted | — | — |
+| `stylelint` | lint | css | auto | repo-native | trusted | — | — |
 | `swiftlint` | lint | swift | auto | managed | trusted | — | requires non-Linux runner — SwiftLint needs macOS (C6 out of scope) |
 | `tflint` | lint | terraform | disabled | managed | untrusted | iac-scanner | — |
 | `trivy` | vuln | — | auto | managed | untrusted | dependency-vuln | — |
