@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19e-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19e` @ `wave/open-issues-sweep-2026-08-19e`
 Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337) · **W7** (Batch Y RED — #309-#327 leftovers)
-Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl)
+Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl)
 
 W7 pins leftover A-tier acceptances for #309-#327. Do **not** re-add tsc/bandit/jscpd/govulncheck/cargo-audit/cargo-deny/typos/knip/vulture (D10). Do **not** re-flip golangci-lint/clippy/rubocop/phpstan (D7). File: `tests/analyzers/test_a_tier_residuals.py` + `tests/analyzers/fixtures/batch-y/`. All cross-wave markers are `strict=False`.
 
@@ -219,12 +219,12 @@ Deferred (must **not** appear — D9 / #337 second tier): `roslyn`, `roslyn-anal
 
 ## Batch Y xfail schedule (W7 — RED until W8-W17)
 
-File: `tests/analyzers/test_a_tier_residuals.py`. **34** remaining `strict=False` xfails after W8 recon (was 37). **0** XPASS for W8.
+File: `tests/analyzers/test_a_tier_residuals.py`. **31** remaining `strict=False` xfails after W9 recon (was 34). **0** XPASS for W9.
 
 | Wave | xfail count | Marker reason prefix |
 |------|-------------|----------------------|
 | **W8** | 0 | `green after W8:` D16 no-config mypy; osv-scanner `uv.lock` — **green** after W8 recon |
-| **W9** | 3 | `green after W9:` D17 biome over eslint+scripts; biome/eslint `supports_fix` |
+| **W9** | 0 | `green after W9:` D17 biome over eslint+scripts; biome/eslint `supports_fix` — **green** after W9 recon |
 | **W10** | 7 | `green after W10:` brakeman auto+Rails; bundler-audit catalog |
 | **W11** | 0 | phpcs/phpmd remain false (already green; phpstan is enough) |
 | **W12** | 2 | `green after W12:` cppcheck auto (SAST path; not Semgrep `languages:`) |
@@ -247,8 +247,8 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **34** remaining `strict=False
 ### W9 #310 JS/TS
 
 - `eslint` / `biome` / `oxlint` already share `exclusive_group: js-lint`. Config-only fixtures already pick biome > eslint > oxlint. **green**.
-- **RED:** `biome.json` must beat eslint even when `package.json` has eslint scripts/deps (D17).
-- **RED:** `supports_fix: true` on biome and eslint.
+- **D17:** `biome.json` beats eslint even when `package.json` has eslint scripts/deps. **green** after W9 recon.
+- `supports_fix: true` on biome and eslint. **green** after W9 recon.
 - tsc / knip already auto from X. **green**.
 
 ### W10 #311/#313/#314
@@ -285,8 +285,8 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **34** remaining `strict=False
 | Y8b | osv-scanner `uv.lock` | unit | happy | `test_osv_scanner_covers_uv_lock` | **green** after W8 recon |
 | Y8c | type-checker exclusive_group + config winners | integration | happy | `test_python_type_checkers_share_exclusive_group`, `test_mypy_ini_selects_mypy_not_pyright` | **green** |
 | Y8d | flake8/pylint legacy opt-in | unit | happy | `test_flake8_pylint_remain_legacy_opt_in` | **green** |
-| Y9a | D17 biome beats eslint+scripts | integration | happy | `test_biome_json_beats_eslint_even_with_eslint_script_signals` | xfail W9 |
-| Y9b | biome/eslint `supports_fix` | unit | happy | `test_biome_and_eslint_declare_supports_fix` | xfail W9 |
+| Y9a | D17 biome beats eslint+scripts | integration | happy | `test_biome_json_beats_eslint_even_with_eslint_script_signals` | **green** after W9 recon |
+| Y9b | biome/eslint `supports_fix` | unit | happy | `test_biome_and_eslint_declare_supports_fix` | **green** after W9 recon |
 | Y9c | js-lint exclusive_group config-only order | integration | happy | `test_biome_config_wins_js_lint_group` | **green** |
 | Y10a | brakeman auto + Rails gate | integration | happy/edge | `test_brakeman_default_enabled_auto`, `test_brakeman_auto_enables_on_rails_markers`, `test_brakeman_does_not_auto_enable_on_plain_ruby` | xfail / **green** (plain ruby) |
 | Y10b | bundler-audit new manifest | unit | happy | `test_bundler_audit_*` | xfail W10 |
@@ -312,5 +312,13 @@ Batch Y fixture trees: `tests/analyzers/fixtures/batch-y/` (`python-noconfig`, `
 - Removed 3 `green after W8:` xfails from `tests/analyzers/test_a_tier_residuals.py`
 - W8 assertions are real passes: `test_no_typechecker_config_defaults_to_mypy`, `test_osv_scanner_covers_uv_lock`, `test_osv_scanner_auto_enables_on_uv_lock_fixture`
 - W9–W17 xfails remain (`strict=False`); 0 XPASS for W8
+- `make lint` + `make typecheck` pass
+- No product/source edits (`src/` untouched)
+
+## Acceptance (W9 recon)
+
+- Removed 3 `green after W9:` xfails from `tests/analyzers/test_a_tier_residuals.py` (1 biome-over-eslint + 2 parametrized biome/eslint `supports_fix`)
+- W9 assertions are real passes: `test_biome_json_beats_eslint_even_with_eslint_script_signals`, `test_biome_and_eslint_declare_supports_fix` (`biome`, `eslint`)
+- W10–W17 xfails remain (`strict=False`); 0 XPASS for W9
 - `make lint` + `make typecheck` pass
 - No product/source edits (`src/` untouched)

@@ -197,20 +197,12 @@ def test_oxlint_config_wins_when_no_biome_or_eslint() -> None:
     assert _js_lint_ids(_enabled_ids(repo, ["src/index.js"])) == {"oxlint"}
 
 
-@pytest.mark.xfail(
-    reason="green after W9: biome.json beats eslint config+scripts (D17)",
-    strict=False,
-)
 def test_biome_json_beats_eslint_even_with_eslint_script_signals() -> None:
     repo = BATCH_Y_FIXTURES / "js-biome-over-eslint"
     winners = _js_lint_ids(_enabled_ids(repo, ["src/index.js"]))
     assert winners == {"biome"}
 
 
-@pytest.mark.xfail(
-    reason="green after W9: biome and eslint supports_fix true (#310)",
-    strict=False,
-)
 @pytest.mark.parametrize("tool_id", ["biome", "eslint"])
 def test_biome_and_eslint_declare_supports_fix(tool_id: str) -> None:
     manifest = _registry().get_manifest(tool_id)
