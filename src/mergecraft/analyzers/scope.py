@@ -210,6 +210,11 @@ def apply_scope_exceptions(
     scope = scope if scope is not None else parse_diff_scope(diff_text)
     kept: list[Finding] = []
     for finding in findings:
+        # Project-level findings have no line; their path is often a config
+        # file that is not in the diff (tsc → tsconfig.json on a .ts-only PR).
+        if finding.start_line is None:
+            kept.append(finding)
+            continue
         on_hunk = _line_intersects_hunks(finding.path, finding.start_line, finding.end_line, scope)
         if on_hunk or _matches_scope_exception(finding.path, scope):
             kept.append(finding)

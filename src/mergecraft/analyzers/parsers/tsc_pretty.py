@@ -10,6 +10,7 @@ from mergecraft.analyzers.parsers._common import (
     coerce_line,
     map_confidence,
     map_native_severity,
+    require_diagnostic_text,
     resolve_repo_relative_path,
     taxonomy_category,
 )
@@ -66,6 +67,7 @@ def parse_tsc_pretty(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -
                 source="analyzer",
             )
         )
+    require_diagnostic_text(raw, matched=bool(findings), what="tsc")
     return findings
 
 

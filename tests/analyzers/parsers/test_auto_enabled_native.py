@@ -31,10 +31,7 @@ _JSONL_TOOLS: tuple[tuple[str, str], ...] = (
     ("cargo-deny", "cargo_deny_json"),
     ("clippy", "rustc_json"),
 )
-_TEXT_TOOLS: tuple[tuple[str, str], ...] = (
-    ("vulture", "vulture_text"),
-    ("tsc", "tsc_pretty"),
-)
+_TEXT_TOOLS: tuple[tuple[str, str], ...] = (("vulture", "vulture_text"),)
 _GARBAGE = (
     "",
     "not-json",
@@ -156,6 +153,25 @@ def test_bundler_audit_uses_reported_path_and_line() -> None:
     assert findings[0].end_line == 12
 
 
+@pytest.mark.parametrize("raw", ["", "   "])
+def test_tsc_empty_output_is_clean(raw: str) -> None:
+    assert _parse("tsc_pretty", raw, tool_id="tsc") == []
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "not-json",
+        "{",
+        "Version 5.8.3\nCOMMON COMMANDS\n  tsc",
+        "tsc: The TypeScript Compiler - Version 5.8.3",
+    ],
+)
+def test_tsc_unmatched_nonempty_output_raises(raw: str) -> None:
+    with pytest.raises(ValueError, match="diagnostic"):
+        _parse("tsc_pretty", raw, tool_id="tsc")
+
+
 def test_tsc_project_diagnostic_without_location_is_body_only() -> None:
     raw = (
         "error TS18003: No inputs were found in config file 'tsconfig.json'. "
@@ -167,6 +183,22 @@ def test_tsc_project_diagnostic_without_location_is_body_only() -> None:
     assert findings[0].start_line is None
     assert findings[0].end_line is None
     assert "No inputs were found" in findings[0].message
+
+
+def test_tsc_project_diagnostic_survives_ts_only_diff_scope() -> None:
+    raw = "error TS18003: No inputs were found in config file 'tsconfig.json'."
+    findings = _parse("tsc_pretty", raw, tool_id="tsc")
+    scope = import_module("mergecraft.analyzers.scope")
+    diff = """diff --git a/src/index.ts b/src/index.ts
+@@ -1,3 +1,4 @@
+ export const x = 1
++export const y = 2
+ export const z = 3
+"""
+    kept = scope.scope_findings(findings, diff_text=diff)
+    assert len(kept) == 1
+    assert kept[0].rule_id == "TS18003"
+    assert kept[0].start_line is None
 
 
 def test_cargo_audit_lockfile_finding_omits_invented_line() -> None:
