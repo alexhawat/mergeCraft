@@ -826,6 +826,32 @@ def _build_otel_sink(entry: Any) -> OTLPSink:
     return OTLPSink.for_otel(endpoint=endpoint, headers=headers)
 
 
+def _otlp_sink_identity(sink: OTLPSink) -> tuple[str, tuple[tuple[str, str], ...]]:
+    """Return the dedupe key for an :class:`OTLPSink` (endpoint + headers, D11)."""
+    normalized_headers = tuple(sorted((str(k), str(v)) for k, v in sink.headers.items()))
+    return sink.endpoint, normalized_headers
+
+
+def dedupe_otlp_sinks(children: list[Any]) -> list[Any]:
+    """Collapse duplicate :class:`OTLPSink` instances that share endpoint + headers.
+
+    ``logfire`` and ``otel`` config entries often resolve to the same OTLP
+    destination; without dedupe, :class:`MultiSink` fans one ``TraceEvent`` out
+    to N identical sinks (#372). The #293 processor guard is unchanged — this
+    only trims the sink list at factory time.
+    """
+    deduped: list[Any] = []
+    seen_otlp: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
+    for child in children:
+        if isinstance(child, OTLPSink):
+            identity = _otlp_sink_identity(child)
+            if identity in seen_otlp:
+                continue
+            seen_otlp.add(identity)
+        deduped.append(child)
+    return deduped
+
+
 def build_remote_sink(entry: Any) -> Any:
     """Factory entry point for ``logfire`` and ``otel`` sink entries.
 

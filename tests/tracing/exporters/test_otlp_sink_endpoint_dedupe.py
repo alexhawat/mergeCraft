@@ -116,7 +116,6 @@ def _build_sink(
     return sink_factory(settings.tracing)
 
 
-@pytest.mark.xfail(reason="green after W2: #372 OTLP sink dedupe by endpoint", strict=False)
 def test_logfire_and_otel_shared_endpoint_exports_one_span_per_event(
     monkeypatch: pytest.MonkeyPatch,
     trace_event_payload: dict[str, Any],
@@ -140,7 +139,6 @@ def test_logfire_and_otel_shared_endpoint_exports_one_span_per_event(
 
 
 @pytest.mark.parametrize("write_count", [_N_WRITES])
-@pytest.mark.xfail(reason="green after W2: #372 OTLP sink dedupe by endpoint", strict=False)
 def test_otlp_sink_list_does_not_grow_across_writes(
     monkeypatch: pytest.MonkeyPatch,
     trace_event_payload: dict[str, Any],
