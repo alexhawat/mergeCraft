@@ -47,7 +47,7 @@ def test_models_show_prints_config_order_with_env_override(
     result = runner.invoke(app, ["models", "show"])
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    output = result.stdout
+    output = result.stdout + result.stderr
     for slug in _ORDERED_MODELS:
         assert slug in output
     assert "openai/gpt-5.3-codex" in output

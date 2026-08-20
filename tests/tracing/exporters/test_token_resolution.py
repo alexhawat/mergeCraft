@@ -127,7 +127,7 @@ def test_token_value_redacted_in_config_tracing_cli(monkeypatch: pytest.MonkeyPa
         env={"MERGECRAFT_LOGFIRE_TOKEN": _CANARY, "NO_COLOR": "1", "TERM": "dumb"},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout)
+    out = _plain(result.stdout + result.stderr)
     assert _CANARY not in out
     # The reference name itself is shown; the value is not.
     assert "MERGECRAFT_LOGFIRE_TOKEN" in out or "tokenRef" in out or "redacted" in out.lower()

@@ -60,7 +60,7 @@ def test_pipeline_show_previews_steps_for_a_diff(
     result = runner.invoke(app, ["pipeline", "show", "--diff", str(diff_path)])
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    output = result.stdout.lower()
+    output = (result.stdout + result.stderr).lower()
     assert "review" in output
     assert "verify" in output
     assert "skip" in output or "run" in output or "when" in output

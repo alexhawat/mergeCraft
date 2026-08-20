@@ -487,7 +487,7 @@ def test_review_alias_diff_review_still_works(tmp_path: Path) -> None:
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout)
+    out = _plain(result.stdout + result.stderr)
     assert "offline" in out.lower()
     assert "demo.py" in out
 
