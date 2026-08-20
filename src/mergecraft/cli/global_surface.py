@@ -98,10 +98,15 @@ def apply_typer_rich_help_color(
 
 
 def apply_console_color(*, color_enabled: bool, force_terminal: bool) -> None:
-    """Apply the resolved colour policy to shared Rich consoles."""
+    """Apply the resolved colour policy to shared Rich consoles.
+
+    ``force_terminal`` is applied to Typer help via :func:`apply_typer_rich_help_color`.
+    Command modules bind ``err_console`` at import time, so Rich terminal forcing
+    on subcommand output needs a console indirection refactor (deferred follow-up).
+    """
+    _ = force_terminal
     for console in (consoles.out_console, consoles.err_console):
         console.no_color = not color_enabled
-        console.force_terminal = force_terminal or color_enabled  # type: ignore[attr-defined]  # — Rich Console accepts force_terminal at runtime; stubs omit the attribute
 
 
 def bootstrap_cli_surface_from_argv(

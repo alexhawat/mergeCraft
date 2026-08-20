@@ -123,7 +123,7 @@ def serve_cmd(
             if role.strip().lower() in {"orchestrator", "reviewer", "verifier"}
             else "reviewer"
         )
-        auth_token = getattr(fastapi_app.state, "mcp_auth_token", None)
+        auth_token = ctx.mcp_auth_token
         console.print(
             f"[green]MCP server listening on http://{host}:{listen_port}{endpoint}[/green]"
         )
