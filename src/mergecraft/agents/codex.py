@@ -33,6 +33,7 @@ from mergecraft.agents.shared import (
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -51,7 +52,7 @@ from mergecraft.tracing.tracer import (
     _close_provider_llm_pair,
     _open_provider_llm_pair,
 )
-from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
@@ -312,7 +313,9 @@ def _codex_mcp_tool_preamble() -> str:
     return (
         "## mergeCraft MCP tools (Codex)\n\n"
         "GitHub/PR operations use the localhost **mergecraft** MCP server "
-        f"(config key `[mcp_servers.{MERGECRAFT_MCP_NAME}]`). Tool names are "
+        f"(config key `[mcp_servers.{MERGECRAFT_MCP_NAME}]`). The verifier "
+        f"subagent uses `[mcp_servers.{MERGECRAFT_VERIFIER_MCP_NAME}]` at "
+        f"``{MCP_VERIFIER_ENDPOINT}``. Tool names are "
         f"prefixed: e.g. `{MERGECRAFT_MCP_NAME}_checkout_pr`, "
         f"`{MERGECRAFT_MCP_NAME}_create_pull_request_review`, "
         f"`{MERGECRAFT_MCP_NAME}_get_check_suite_logs`.\n\n"
@@ -476,21 +479,24 @@ def _add_mcp_server_table(config: TomlTable, ctx: AgentRunContext) -> None:
     from mergecraft.mcp.endpoints import mcp_role_url
 
     reviewer_url = mcp_role_url(ctx.mcp_server_url, None)
+    verifier_url = mcp_role_url(ctx.mcp_server_url, VERIFIER_AGENT_NAME)
+    server_entry = {
+        "url": reviewer_url,
+        "bearer_token_env_var": _CODEX_MCP_TOKEN_ENV,
+        # Without this, every tool call is auto-cancelled in CI. Codex
+        # auto-approves an MCP call only when the permission profile grants
+        # full disk write access (codex_mcp::mcp_permission_prompt_is_auto_approved),
+        # and the read-only review profile does not. `approval_policy =
+        # "never"` then means the elicitation is never answered, so the call
+        # resolves to "user cancelled MCP tool call" — with no interactive
+        # user anywhere in the pipeline. The server is ours and the action
+        # already runs with push/shell disabled, so approving its tools up
+        # front is the intended posture.
+        "default_tools_approval_mode": "approve",
+    }
     config["mcp_servers"] = {
-        MERGECRAFT_MCP_NAME: {
-            "url": reviewer_url,
-            "bearer_token_env_var": _CODEX_MCP_TOKEN_ENV,
-            # Without this, every tool call is auto-cancelled in CI. Codex
-            # auto-approves an MCP call only when the permission profile grants
-            # full disk write access (codex_mcp::mcp_permission_prompt_is_auto_approved),
-            # and the read-only review profile does not. `approval_policy =
-            # "never"` then means the elicitation is never answered, so the call
-            # resolves to "user cancelled MCP tool call" — with no interactive
-            # user anywhere in the pipeline. The server is ours and the action
-            # already runs with push/shell disabled, so approving its tools up
-            # front is the intended posture.
-            "default_tools_approval_mode": "approve",
-        }
+        MERGECRAFT_MCP_NAME: {**server_entry, "url": reviewer_url},
+        MERGECRAFT_VERIFIER_MCP_NAME: {**server_entry, "url": verifier_url},
     }
     # Do NOT put ctx.subagent_denied_tools into ``disabled_tools``. That list is
     # every mutates=True MCP tool (checkout_pr, create_pull_request_review, …)

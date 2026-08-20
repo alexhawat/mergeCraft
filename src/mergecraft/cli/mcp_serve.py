@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -152,6 +154,16 @@ def resolve_served_tool_names(
     ]
 
 
+def _resolve_serve_auth_token() -> str:
+    """Return the bearer token for standalone MCP serve (D15).
+
+    Honors ``MERGECRAFT_MCP_TOKEN`` when set; otherwise issues a fresh secret
+    so ``tools/list`` and ``tools/call`` are never left unauthenticated.
+    """
+    configured = os.environ.get("MERGECRAFT_MCP_TOKEN", "").strip()
+    return configured or secrets.token_hex(32)
+
+
 def build_mcp_app_for_role(
     *,
     cwd: Path,
@@ -166,12 +178,27 @@ def build_mcp_app_for_role(
         invocation_root=invocation_root,
         trust_override=trust_override,
     )
+    auth_token = _resolve_serve_auth_token()
+    ctx.mcp_auth_token = auth_token
     if parsed_role == "orchestrator":
         orchestrator_tools = build_orchestrator_tools(ctx)
-        return create_mcp_app(orchestrator_tools, ctx)
-    if parsed_role == "reviewer":
-        return create_mcp_app([], ctx, role_tools={"reviewer": build_reviewer_tools(ctx)})
-    return create_mcp_app([], ctx, role_tools={"verifier": build_verifier_tools(ctx)})
+        app = create_mcp_app(orchestrator_tools, ctx, auth_token=auth_token)
+    elif parsed_role == "reviewer":
+        app = create_mcp_app(
+            [],
+            ctx,
+            role_tools={"reviewer": build_reviewer_tools(ctx)},
+            auth_token=auth_token,
+        )
+    else:
+        app = create_mcp_app(
+            [],
+            ctx,
+            role_tools={"verifier": build_verifier_tools(ctx)},
+            auth_token=auth_token,
+        )
+    app.state.mcp_auth_token = auth_token
+    return app
 
 
 __all__ = [

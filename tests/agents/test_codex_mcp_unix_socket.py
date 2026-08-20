@@ -65,3 +65,23 @@ def test_codex_mcp_config_uses_documented_http_transport(tmp_path: Path) -> None
     assert "url" in server_block
     assert "bearer_token_env_var" in server_block
     assert "MERGECRAFT_MCP_TOKEN" in server_block
+
+
+def test_codex_mcp_config_writes_verifier_server_entry(tmp_path: Path) -> None:
+    """Codex subagents inherit a dedicated ``mergecraft-verifier`` MCP entry (D9 parity)."""
+    from mergecraft.mcp.endpoints import MCP_REVIEWER_ENDPOINT, MCP_VERIFIER_ENDPOINT
+    from mergecraft.types import MERGECRAFT_VERIFIER_MCP_NAME
+
+    codex_module = _load_codex_module()
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+    ctx.payload.shell = "disabled"
+    ctx.mcp_server_url = "http://127.0.0.1:3764/mcp"
+
+    config_path = Path(codex_module.write_mcp_config(ctx))
+    text = config_path.read_text(encoding="utf-8")
+    assert f"[mcp_servers.{MERGECRAFT_VERIFIER_MCP_NAME}]" in text
+    verifier_block = text.split(f"[mcp_servers.{MERGECRAFT_VERIFIER_MCP_NAME}]", 1)[1]
+    next_table = verifier_block.find("\n[")
+    verifier_block = verifier_block if next_table < 0 else verifier_block[:next_table]
+    assert MCP_VERIFIER_ENDPOINT in verifier_block
+    assert MCP_REVIEWER_ENDPOINT not in verifier_block

@@ -20,6 +20,9 @@ from mergecraft.agents.gates import build_opencode_native_fs_permission
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
     CUSTOM_PROVIDER_BASE_URL_ENV,
+    SINGLETON_PROVIDER_ID,
+    ProviderConfig,
+    _provider_config_for_model,
     resolve_gateway_endpoint,
     resolve_gateway_endpoints,
     resolve_model_params_for_model,
@@ -78,6 +81,43 @@ def _api_key_from_env(api_key_env: str) -> str:
     return os.environ.get(api_key_env, "").strip()
 
 
+def _opencode_provider_options(config: ProviderConfig) -> dict[str, object]:
+    """Build OpenCode provider ``options`` including gateway ``extra_options`` (#295)."""
+    options: dict[str, object] = {
+        "baseURL": config.base_url,
+        "apiKey": _api_key_from_env(config.api_key_env),
+    }
+    if config.extra_options:
+        options.update(config.extra_options)
+    return options
+
+
+def _opencode_model_entry(model_id: str, config: ProviderConfig) -> dict[str, object]:
+    """Build one OpenCode model table entry, embedding output limits when set."""
+    entry: dict[str, object] = {"name": model_id}
+    max_tokens = config.extra_options.get("max_tokens")
+    if isinstance(max_tokens, int) and max_tokens > 0:
+        entry["limit"] = {"output": max_tokens}
+    return entry
+
+
+def _opencode_provider_block(
+    config: ProviderConfig,
+    *,
+    model_id: str | None = None,
+    provider_name: str | None = None,
+) -> dict[str, object]:
+    models: dict[str, object] = {}
+    if model_id:
+        models[model_id] = _opencode_model_entry(model_id, config)
+    return {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": provider_name or config.provider_id,
+        "options": _opencode_provider_options(config),
+        "models": models,
+    }
+
+
 def build_custom_provider(model: str | None) -> dict[str, object] | None:
     """Describe an OpenAI-compatible provider (or several) for opencode.
 
@@ -114,34 +154,28 @@ def build_custom_provider(model: str | None) -> dict[str, object] | None:
             active_record = providers[active_provider_id]
             out: dict[str, object] = {}
             for record in providers.values():
-                models: dict[str, object] = {}
-                if record is active_record and active_model_id:
-                    models[active_model_id] = {"name": active_model_id}
-                out[record.provider_id] = {
-                    "npm": "@ai-sdk/openai-compatible",
-                    "name": record.provider_id,
-                    "options": {
-                        "baseURL": record.base_url,
-                        "apiKey": _api_key_from_env(record.api_key_env),
-                    },
-                    "models": models,
-                }
+                model_id = active_model_id if record is active_record else None
+                out[record.provider_id] = _opencode_provider_block(
+                    record,
+                    model_id=model_id,
+                )
             return out
         # Fall through to legacy preset path — the active model is not in
         # the resolver dict, so use the singleton (or preset) record keyed
         # by the model's prefix.
-    endpoint = resolve_gateway_endpoint(model)
-    if endpoint is None or not model:
+    config = _provider_config_for_model(model) if model else None
+    if config is None or not model:
         return None
-    provider_id, base_url, api_key = endpoint
     model_id = model[model.find("/") + 1 :]
+    provider_key = config.provider_id
+    if provider_key == SINGLETON_PROVIDER_ID and active_provider_id:
+        provider_key = active_provider_id
     return {
-        provider_id: {
-            "npm": "@ai-sdk/openai-compatible",
-            "name": provider_id,
-            "options": {"baseURL": base_url, "apiKey": api_key},
-            "models": {model_id: {"name": model_id}},
-        }
+        provider_key: _opencode_provider_block(
+            config,
+            model_id=model_id,
+            provider_name=provider_key,
+        )
     }
 
 

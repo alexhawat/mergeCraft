@@ -124,9 +124,14 @@ def serve_cmd(
             if role.strip().lower() in {"orchestrator", "reviewer", "verifier"}
             else "reviewer"
         )
+        auth_token = getattr(fastapi_app.state, "mcp_auth_token", None)
         console.print(
             f"[green]MCP server listening on http://{host}:{listen_port}{endpoint}[/green]"
         )
+        if isinstance(auth_token, str) and auth_token:
+            console.print(
+                f"[dim]Authenticated requests require Authorization: Bearer {auth_token}[/dim]"
+            )
         config = uvicorn.Config(
             fastapi_app,
             host=host,

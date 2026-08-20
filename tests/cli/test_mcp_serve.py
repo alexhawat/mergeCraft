@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_SERVE_AUTH_TOKEN = "test-mcp-serve-token"
 
 
 def _plain(text: str) -> str:
@@ -60,6 +61,10 @@ def _write_config(tmp_path: Path) -> None:
     )
 
 
+def _auth_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {_SERVE_AUTH_TOKEN}"}
+
+
 def test_serves_the_toolset_for_a_named_role(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``mcp serve`` exposes the registry-resolved tool surface for a named role."""
     from mergecraft.cli.mcp_serve import build_mcp_app_for_role
@@ -67,11 +72,13 @@ def test_serves_the_toolset_for_a_named_role(tmp_path: Path, monkeypatch: Monkey
     _init_git_repo(tmp_path)
     _write_config(tmp_path)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MERGECRAFT_MCP_TOKEN", _SERVE_AUTH_TOKEN)
 
     client = TestClient(build_mcp_app_for_role(cwd=tmp_path, role="reviewer"))
     response = client.post(
         MCP_REVIEWER_ENDPOINT,
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        headers=_auth_headers(),
     )
     assert response.status_code == 200
     names = [entry["name"] for entry in response.json()["result"]["tools"]]
@@ -86,11 +93,13 @@ def test_served_toolset_honours_tool_classes(tmp_path: Path, monkeypatch: Monkey
     _init_git_repo(tmp_path)
     _write_config(tmp_path)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MERGECRAFT_MCP_TOKEN", _SERVE_AUTH_TOKEN)
 
     client = TestClient(build_mcp_app_for_role(cwd=tmp_path, role="reviewer"))
     listed = client.post(
         MCP_REVIEWER_ENDPOINT,
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        headers=_auth_headers(),
     ).json()["result"]["tools"]
     names = {entry["name"] for entry in listed}
     assert "push_branch" not in names
@@ -104,8 +113,30 @@ def test_served_toolset_honours_tool_classes(tmp_path: Path, monkeypatch: Monkey
             "method": "tools/call",
             "params": {"name": "push_branch", "arguments": {}},
         },
+        headers=_auth_headers(),
     ).json()
     assert "error" in rejected
+
+
+def test_mcp_serve_rejects_unauthenticated_tools_list(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Standalone ``mcp serve`` must not accept unauthenticated ``tools/list`` (D15)."""
+    from mergecraft.cli.mcp_serve import build_mcp_app_for_role
+
+    _init_git_repo(tmp_path)
+    _write_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MERGECRAFT_MCP_TOKEN", _SERVE_AUTH_TOKEN)
+
+    client = TestClient(build_mcp_app_for_role(cwd=tmp_path, role="reviewer"))
+    response = client.post(
+        MCP_REVIEWER_ENDPOINT,
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
+    assert response.status_code == 401
+    body = response.json()
+    assert body.get("error", {}).get("code") == -32600
 
 
 def test_served_toolset_honours_source_trust_tier(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

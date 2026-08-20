@@ -7,12 +7,15 @@ Pins ``request_attrs(..., params=)`` from gateway ``extra_options`` and
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, ClassVar
 
 import httpx
 import pytest
+from tests.agents.conftest import make_agent_run_context
 
-from mergecraft.agents.opencode import _prompt_session
+from mergecraft.agents.opencode import _prompt_session, build_security_config
 from mergecraft.tracing.content import ContentCapture
 
 _INPUT = 100
@@ -106,6 +109,21 @@ async def test_opencode_llm_call_stamps_max_tokens_at_metadata_capture(
     attrs = _llm_call_attrs(opencode_tracer)
     assert attrs.get("gen_ai.request.model") == "nous/deepseek-v4-flash"
     assert attrs.get("gen_ai.request.max_tokens") == 4096
+
+
+def test_opencode_provider_config_forwards_extra_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#295 — gateway ``extra_options`` reach the OpenCode provider config, not just spans."""
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://inference.example/v1")
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "test-key")
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS", '{"max_tokens": 4096}')
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="nous/deepseek-v4-flash")
+    config = json.loads(build_security_config(ctx, "nous/deepseek-v4-flash"))
+    provider = config["provider"]["nous"]
+    assert provider["options"]["max_tokens"] == 4096
+    assert provider["models"]["deepseek-v4-flash"]["limit"] == {"output": 4096}
 
 
 def test_resolve_model_params_from_singleton_extra_options_env(
