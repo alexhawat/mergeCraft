@@ -156,6 +156,17 @@ def test_bundler_audit_uses_reported_path_and_line() -> None:
     assert findings[0].end_line == 12
 
 
+def test_cargo_audit_lockfile_finding_omits_invented_line() -> None:
+    raw = (FIXTURES_DIR / "native/cargo-audit-minimal.json").read_text(encoding="utf-8")
+    findings = _parse("cargo_audit_json", raw, tool_id="cargo-audit")
+    assert findings
+    first = findings[0]
+    assert first.path == "Cargo.lock"
+    assert first.start_line is None
+    assert first.end_line is None
+    assert first.rule_id == "RUSTSEC-2024-0001"
+
+
 def test_cargo_deny_uses_label_line_without_inventing_file_line_one() -> None:
     raw = (FIXTURES_DIR / "native/cargo-deny-minimal.jsonl").read_text(encoding="utf-8")
     findings = _parse("cargo_deny_json", raw, tool_id="cargo-deny")

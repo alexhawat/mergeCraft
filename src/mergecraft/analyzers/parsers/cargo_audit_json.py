@@ -57,7 +57,6 @@ def _advisory_finding(
         path=path,
         start_line=None,
         end_line=None,
-        end_line=1,
         source="analyzer",
         evidence=evidence,
     )
