@@ -71,6 +71,7 @@ def _anchor_present(text: str, *needles: str) -> bool:
 
 
 def _git_ref_exists(ref: str) -> bool:
+    ref = ref.rstrip("#").strip()
     candidates: list[list[str]]
     if _SHA_REF.fullmatch(ref):
         candidates = [["git", "rev-parse", "--verify", f"{ref}^{{commit}}"]]
@@ -84,7 +85,24 @@ def _git_ref_exists(ref: str) -> bool:
     for cmd in candidates:
         if subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, check=False).returncode == 0:
             return True
-    return False
+    if not _SHA_REF.fullmatch(ref):
+        return False
+    # CI checkouts use fetch-depth: 1 — pinned SHAs may not be in the object db.
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", ref, "--depth=1"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if fetch.returncode != 0:
+        return False
+    verify = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+    )
+    return verify.returncode == 0
 
 
 def _example_one_section(text: str) -> str:

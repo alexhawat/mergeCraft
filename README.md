@@ -79,7 +79,7 @@ the operator-owned GIF path. No placeholder image ships until a real capture exi
 
 ```yaml
 # .github/workflows/mergecraft.yml (minimal — see Example 1 below)
-- uses: alexhawat/mergeCraft@507ec34966fa4a1c82046b8316863ae59dc5f539
+- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
   env:
     CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
@@ -125,7 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: alexhawat/mergeCraft@507ec34966fa4a1c82046b8316863ae59dc5f539
+      - uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```

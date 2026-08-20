@@ -83,7 +83,7 @@ the operator-owned GIF path. No placeholder image ships until a real capture exi
 
 ```yaml
 # .github/workflows/mergecraft.yml (minimal — see Example 1 below)
-- uses: alexhawat/mergeCraft@507ec34966fa4a1c82046b8316863ae59dc5f539
+- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
   env:
     CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
@@ -129,7 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: alexhawat/mergeCraft@507ec34966fa4a1c82046b8316863ae59dc5f539
+      - uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
@@ -2140,7 +2140,7 @@ For the common single-provider case, two top-level `with:` inputs map
 onto the singleton env vars — no need to name them in `env:`:
 
 ```yaml
-- uses: alexhawat/mergeCraft@507ec34966fa4a1c82046b8316863ae59dc5f539
+- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
   with:
     model: default/your-model-id
     provider_base_url: https://api.example.com/v1
@@ -2187,7 +2187,7 @@ A raw pass-through slug reaches Nous's OpenAI-compatible endpoint via
 either harness:
 
 ```yaml
-- uses: alexhawat/mergeCraft@507ec34966fa4a1c82046b8316863ae59dc5f539
+- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
   with:
     model: nous/deepseek/deepseek-v4-flash  # raw pass-through slug
   env:
@@ -2204,7 +2204,7 @@ Two distinct OpenAI-compatible providers in one workflow (e.g. MiniMax
 and Nous alongside OpenAI):
 
 ```yaml
-- uses: alexhawat/mergeCraft@507ec34966fa4a1c82046b8316863ae59dc5f539
+- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
   with:
     model: provider_1/deepseek-v4-flash           # active provider_1
   env:
@@ -2292,7 +2292,7 @@ modelFallbacks:
 ```yaml
 # .github/workflows/mergecraft.yml — a single ``uses:`` step walks the
 # chain. ``model:`` is the head; the configured tail follows.
-- uses: alexhawat/mergeCraft@507ec34966fa4a1c82046b8316863ae59dc5f539
+- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
   with:
     model: anthropic/claude-sonnet        # ← chain head (your pick)
     # model_pin: enabled                 # ← uncomment to collapse to one model
@@ -2319,7 +2319,7 @@ semantics, set `model_pin: enabled` on the `with:` block, or
 `modelPin: true` in `.mergecraft/config.yaml` (the action input wins):
 
 ```yaml
-- uses: alexhawat/mergeCraft@507ec34966fa4a1c82046b8316863ae59dc5f539
+- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
   with:
     model: anthropic/claude-sonnet
     model_pin: enabled                 # ← chain collapses to [claude-sonnet]
