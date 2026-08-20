@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, Literal, NoReturn
 
 import typer
 from loguru import logger
-from rich.console import Console
 
 from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.agent_protocol import AgentProtocolStream
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.offline_review import (
     OfflineReviewResult,
@@ -29,8 +29,6 @@ from mergecraft.utils.source_resolve import SourceResolverSpec
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
-console = Console()
-error_console = Console(stderr=True)
 
 OutputFormat = Literal["text", "json", "jsonl", "sarif"]
 
@@ -105,8 +103,8 @@ Examples — output:
 
 
 def _exit_with_message(msg: str, exit_code: int, *, agent_mode: bool = False) -> NoReturn:
-    target = error_console if agent_mode else console
-    target.print(f"[red]{msg}[/red]")
+    del agent_mode
+    console.print(f"[red]{msg}[/red]")
     raise typer.Exit(exit_code)
 
 

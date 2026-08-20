@@ -11,10 +11,10 @@ from typing import TYPE_CHECKING, NoReturn
 import typer
 import yaml
 from pydantic import ValidationError
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
 from mergecraft.mcp.ports import port_available, read_env_port
 from mergecraft.models import MODEL_ALIASES
@@ -23,7 +23,6 @@ from mergecraft.utils.agent_resolve import has_credentials_for_slug
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-console = Console()
 
 _SECRET_ENV_KEYS = (
     "OPENAI_API_KEY",

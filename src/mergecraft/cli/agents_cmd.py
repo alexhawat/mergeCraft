@@ -7,7 +7,6 @@ from typing import NoReturn
 
 import typer
 import yaml
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.agents.registry import (
@@ -16,6 +15,7 @@ from mergecraft.agents.registry import (
     load_registry,
     resolve_prompt_text,
 )
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.config.settings import AgentBindingOverride, load_repo_settings
 from mergecraft.mcp.context import (
@@ -34,7 +34,6 @@ app = typer.Typer(
     help="Inspect and override the mergeCraft agent registry.",
     no_args_is_help=True,
 )
-console = Console()
 
 
 def _bail(msg: str) -> NoReturn:

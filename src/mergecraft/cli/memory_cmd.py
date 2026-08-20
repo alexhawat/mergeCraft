@@ -9,8 +9,8 @@ from typing import Any
 
 import typer
 from loguru import logger
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.utils.learnings import repo_memory_paths
 from mergecraft.utils.memory import (
     FeedbackOutcome,
@@ -25,7 +25,6 @@ app = typer.Typer(
     help="Manage repo-scoped review memory (active learnings, feedback, negative rules).",
     no_args_is_help=True,
 )
-console = Console()
 
 
 def _learnings_path(repo: Path) -> Path:

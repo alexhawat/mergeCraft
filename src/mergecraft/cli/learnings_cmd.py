@@ -15,8 +15,8 @@ from typing import Any
 
 import typer
 from loguru import logger
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.utils.learnings import (
     LearningProvenance,
     list_active_entries,
@@ -27,7 +27,6 @@ app = typer.Typer(
     help="Inspect the provenance-gated learnings file for a repository.",
     no_args_is_help=True,
 )
-console = Console()
 
 
 def _resolve_learnings_path(repo: Path) -> Path:

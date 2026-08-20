@@ -13,12 +13,11 @@ Pins (D14):
 
 from __future__ import annotations
 
-import ast
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from scripts.check_cli_consoles import find_cli_console_violations
 from tests.ci.workflow_support import REPO_ROOT
 from typer.testing import CliRunner
 
@@ -26,66 +25,10 @@ from mergecraft.cli.app import app
 
 runner = CliRunner()
 
-_XFAIL_W7 = pytest.mark.xfail(
-    reason="green after W7: completion + stderr consoles",
-    strict=False,
-)
-
 _CLI_ROOT = REPO_ROOT / "src" / "mergecraft" / "cli"
 
 # Rich chrome enabled — deliberately omit NO_COLOR / TERM=dumb.
 _CHROME_ENV = {"TERM": "xterm-256color"}
-
-
-@dataclass(frozen=True, slots=True)
-class ConsoleViolation:
-    """A ``Console(...)`` site under ``src/mergecraft/cli/`` missing ``stderr=True``."""
-
-    path: str
-    line: int
-    col: int
-    snippet: str
-
-
-def _console_call_has_stderr_true(node: ast.Call) -> bool:
-    for keyword in node.keywords:
-        if keyword.arg == "stderr":
-            value = keyword.value
-            if isinstance(value, ast.Constant) and value.value is True:
-                return True
-    return False
-
-
-def _is_console_call(node: ast.AST) -> bool:
-    if not isinstance(node, ast.Call):
-        return False
-    func = node.func
-    return isinstance(func, ast.Name) and func.id == "Console"
-
-
-def find_cli_console_violations(root: Path = _CLI_ROOT) -> list[ConsoleViolation]:
-    """Return ``Console(...)`` sites under ``cli/`` that omit ``stderr=True``."""
-    display_base = REPO_ROOT if root == _CLI_ROOT else root
-    violations: list[ConsoleViolation] = []
-    for path in sorted(root.rglob("*.py")):
-        rel = path.relative_to(display_base).as_posix()
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=rel)
-        for node in ast.walk(tree):
-            if not _is_console_call(node):
-                continue
-            if _console_call_has_stderr_true(node):
-                continue
-            snippet = ast.get_source_segment(source, node) or "Console(...)"
-            violations.append(
-                ConsoleViolation(
-                    path=rel,
-                    line=node.lineno,
-                    col=node.col_offset + 1,
-                    snippet=snippet.splitlines()[0].strip(),
-                )
-            )
-    return violations
 
 
 def _write_cli_module(tmp_path: Path, rel: str, body: str) -> None:
@@ -118,7 +61,6 @@ def test_find_cli_console_violations_parametrized(
     assert len(found) == violations
 
 
-@_XFAIL_W7
 def test_show_completion_exits_zero() -> None:
     """Typer shell completion is exposed on the root app (``--show-completion``)."""
     result = runner.invoke(app, ["--show-completion", "bash"], env=_CHROME_ENV)
@@ -126,7 +68,6 @@ def test_show_completion_exits_zero() -> None:
     assert result.stdout.strip(), "completion script must be non-empty"
 
 
-@_XFAIL_W7
 def test_json_stdout_is_strict_while_chrome_enabled(tmp_path: Path) -> None:
     """``--json`` payloads must not share stdout with Rich status chrome (D14)."""
     actual = tmp_path / "actual.json"
@@ -165,7 +106,6 @@ def test_json_stdout_is_strict_while_chrome_enabled(tmp_path: Path) -> None:
     assert payload["missed_issue_ids"] == ["x-1"]
 
 
-@_XFAIL_W7
 def test_no_bare_stdout_console_in_cli_module() -> None:
     """Every ``Console(...)`` under ``src/mergecraft/cli/`` must use ``stderr=True``."""
     violations = find_cli_console_violations()

@@ -7,8 +7,8 @@ from typing import NoReturn
 
 import typer
 import yaml
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.policy.exceptions import PolicyException, parse_exceptions_document
 from mergecraft.policy.schema import PolicyConfigError, PolicyRule, parse_rules_document
 from mergecraft.policy.scoping import ScopeContext, resolve_effective_rules
@@ -18,7 +18,6 @@ app = typer.Typer(
     help="Lint, test, and explain versioned policy-as-code rules.",
     no_args_is_help=True,
 )
-console = Console()
 
 
 def _bail(msg: str) -> NoReturn:

@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING
 
 import typer
 from loguru import logger
-from rich.console import Console
 
 from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.cli.consoles import err_console as console
 
 if TYPE_CHECKING:
     from mergecraft.run_outcome import RunOutcome
@@ -23,7 +23,6 @@ app = typer.Typer(
     invoke_without_command=True,
     no_args_is_help=False,
 )
-console = Console(stderr=True)
 
 STATE_TOKEN = "token"
 _STATE_ENV = "STATE_token"

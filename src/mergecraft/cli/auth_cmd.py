@@ -17,8 +17,8 @@ import httpx
 import typer
 from dotenv import set_key as _dotenv_set_key
 from loguru import logger
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 app = typer.Typer(
     help="Manage provider credentials for the current repository.", no_args_is_help=True
 )
-console = Console()
 
 CODEX_AUTH_SECRET = "CODEX_AUTH_JSON"
 CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN"

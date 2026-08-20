@@ -14,8 +14,8 @@ import json
 from typing import Annotated, Any
 
 import typer
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.findings.select import (
     DEFAULT_LABEL,
     CarryoverFinding,
@@ -37,7 +37,6 @@ app = typer.Typer(
     help="Inspect and carry forward review findings a merge would otherwise bury.",
     no_args_is_help=True,
 )
-console = Console(stderr=True)
 
 _REPO_HELP = "Repository as owner/name. Defaults to $GITHUB_REPOSITORY."
 _RESOLVED_HELP = "Include threads the author already resolved."

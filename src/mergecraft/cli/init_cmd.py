@@ -8,9 +8,8 @@ from pathlib import Path
 import typer
 import yaml
 from loguru import logger
-from rich.console import Console
 
-console = Console()
+from mergecraft.cli.consoles import err_console as console
 
 DEFAULT_CONFIG: dict[str, object] = {
     "model": "anthropic/claude-sonnet",

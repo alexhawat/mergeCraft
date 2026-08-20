@@ -27,8 +27,8 @@ from typing import Any, NoReturn
 
 import typer
 from pydantic import ValidationError
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.config import load_repo_settings
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
@@ -75,7 +75,6 @@ app = typer.Typer(
     ),
     no_args_is_help=True,
 )
-console = Console()
 
 
 # ── helpers ────────────────────────────────────────────────────────────

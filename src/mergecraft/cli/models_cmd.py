@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, NoReturn
 
 import typer
 import yaml
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import MODEL_ALIASES
@@ -26,7 +26,6 @@ app = typer.Typer(
     help="Inspect and configure ordered model preferences.",
     no_args_is_help=True,
 )
-console = Console()
 
 
 def _bail(msg: str) -> NoReturn:

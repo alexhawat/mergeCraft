@@ -9,13 +9,11 @@ from typing import NoReturn
 import typer
 import yaml
 from pydantic import ValidationError
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.cli.config_precedence import explain_setting, resolve_setting
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
-
-console = Console()
 
 
 def _bail(msg: str, *, code: int = 1) -> NoReturn:

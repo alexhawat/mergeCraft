@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import NoReturn
 
 import typer
-from rich.console import Console
 
 from mergecraft.cli.auth_cmd import (
     LOGFIRE_PROJECT_ENV,
@@ -30,6 +29,7 @@ from mergecraft.cli.auth_cmd import (
     _validate_logfire_token,
     _write_env_value,
 )
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.tracing_logfire_wf_yaml import (
     DEFAULT_WORKFLOW_RELATIVE_PATH,
     LogfireWorkflowError,
@@ -49,7 +49,6 @@ app = typer.Typer(
     help="Trace export configuration (Logfire). Mirrors ``sevn tracing logfire``.",
     no_args_is_help=True,
 )
-console = Console(stderr=True)
 
 logfire_app = typer.Typer(
     name="logfire",

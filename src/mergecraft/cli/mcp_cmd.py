@@ -7,8 +7,8 @@ from typing import NoReturn
 
 import typer
 import uvicorn
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.mcp_serve import (
     _role_endpoint,
     build_mcp_app_from_ctx,
@@ -24,8 +24,6 @@ app = typer.Typer(
     help="Serve mergeCraft MCP tools to external clients.",
     no_args_is_help=True,
 )
-console = Console()
-stderr_console = Console(stderr=True)
 
 
 def _bail(msg: str) -> NoReturn:
@@ -122,7 +120,7 @@ def serve_cmd(
             _bail(str(exc))
 
         # D9 — print the per-serve Bearer token to stderr so the caller can pin it.
-        stderr_console.print(f"MERGECRAFT_MCP_BEARER={ctx.mcp_auth_token}")
+        console.print(f"MERGECRAFT_MCP_BEARER={ctx.mcp_auth_token}")
 
         listen_port = port if port is not None else read_env_port() or select_port()
         endpoint = _role_endpoint(

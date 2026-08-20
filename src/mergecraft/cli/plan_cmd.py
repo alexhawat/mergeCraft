@@ -7,10 +7,10 @@ import tempfile
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.profiles import ReviewProfile, resolve_profile
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.mcp.shared import REVIEWER_ALLOWED_TOOL_CLASSES
@@ -23,8 +23,6 @@ from mergecraft.utils.agent_resolve import (
 from mergecraft.utils.offline_diff import materialize_diff
 from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.source_resolve import SourceResolverSpec, resolve_workspace
-
-console = Console()
 
 
 def _git_changed_files(repo_root: Path) -> list[str]:

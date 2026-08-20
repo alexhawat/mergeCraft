@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.agents.lenses import get_lens, load_lens_catalog, resolve_lens_prompt
 from mergecraft.classify.change_classifier import classify_change
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.review.lens_routing import load_routing_registry, route_lenses
 
 if TYPE_CHECKING:
@@ -21,7 +21,6 @@ app = typer.Typer(
     help="Inspect and test bundled review lenses.",
     no_args_is_help=True,
 )
-console = Console()
 
 
 def _bail(msg: str) -> NoReturn:

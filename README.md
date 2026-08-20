@@ -136,6 +136,7 @@ into a comment changes nothing. Details:
 
 ```bash
 uv tool install "git+https://github.com/alexhawat/mergeCraft@v0.1.0"
+mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 

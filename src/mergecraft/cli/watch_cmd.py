@@ -12,11 +12,9 @@ from typing import Any, NoReturn
 import httpx
 import typer
 from loguru import logger
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.yes import OpOptions, op
-
-console = Console(stderr=True)
 
 REQUEST_TIMEOUT_MS = 35_000
 

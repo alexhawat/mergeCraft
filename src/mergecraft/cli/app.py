@@ -5,9 +5,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Typer 0.25+: explicit ``--show-completion bash|zsh|fish`` (shellingham is unreliable
+# in CI and non-interactive shells). Must be set before the Typer() constructor runs.
+os.environ.setdefault("_TYPER_COMPLETE_TEST_DISABLE_SHELL_DETECTION", "1")
+
 import typer
 from dotenv import load_dotenv
-from rich.console import Console
 
 from mergecraft import __version__
 from mergecraft.cli import (
@@ -40,10 +43,8 @@ app = typer.Typer(
     name="mergecraft",
     help="Standalone BYOK GitHub Action runtime for coding agents (mergeCraft).",
     no_args_is_help=True,
-    add_completion=False,
     rich_markup_mode="rich",
 )
-console = Console(stderr=True)
 
 app.add_typer(agents_cmd.app, name="agents")
 app.add_typer(lens_cmd.app, name="lens")

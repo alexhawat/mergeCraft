@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.analyzers.adapters import run_adapter
@@ -17,6 +16,7 @@ from mergecraft.analyzers.lockfile import LockEntry, read_lock, write_lock
 from mergecraft.analyzers.provision import resolve_with_lock
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.analyzers.sarif import export_sarif
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 
 if TYPE_CHECKING:
@@ -27,7 +27,6 @@ app = typer.Typer(
     help="Inspect and run the mergeCraft analyzer catalog.",
     no_args_is_help=True,
 )
-console = Console()
 
 
 def _bail(msg: str) -> NoReturn:

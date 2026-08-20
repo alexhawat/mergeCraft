@@ -6,9 +6,9 @@ import os
 from typing import NoReturn
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
+from mergecraft.cli.consoles import err_console as console
 from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.run_cache import RunCache, default_cache_root, open_run_cache
 
@@ -17,7 +17,6 @@ app = typer.Typer(
     help="Inspect and maintain the mergeCraft run cache.",
     no_args_is_help=True,
 )
-console = Console()
 
 
 def _bail(msg: str) -> NoReturn:
