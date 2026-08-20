@@ -1,0 +1,22 @@
+{
+  "claude": {
+    "push_branch": "mcp__mergecraft__push_branch",
+    "cli_docs": "Claude Code MCP tools: mcp__<server>__<tool> (types.py format_mcp_tool_ref)"
+  },
+  "opencode": {
+    "push_branch": "mergecraft_push_branch",
+    "cli_docs": "OpenCode MCP tools: <server>_<tool> (types.py format_mcp_tool_ref)"
+  },
+  "codex": {
+    "push_branch": "mergecraft_push_branch",
+    "cli_docs": "Codex MCP tools: mergecraft_<tool> (types.py; preamble examples use this prefix)"
+  },
+  "cursor": {
+    "push_branch": "mergecraft_push_branch",
+    "cli_docs": "Cursor MCP tools: <server>_<tool> (types.py format_mcp_tool_ref)"
+  },
+  "gemini": {
+    "push_branch": "mcp_mergecraft_push_branch",
+    "cli_docs": "Gemini CLI MCP tools: mcp_<server>_<tool> (types.py format_mcp_tool_ref)"
+  }
+}
