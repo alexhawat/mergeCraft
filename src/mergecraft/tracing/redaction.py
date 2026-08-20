@@ -235,7 +235,7 @@ def redact_tool_payload(payload: Any) -> str:
     elif isinstance(payload, (dict, list)):
         try:
             text = json.dumps(payload, default=str)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):  # fmt: skip
             text = str(payload)
     elif isinstance(payload, bytes):
         text = payload.decode("utf-8", errors="replace")

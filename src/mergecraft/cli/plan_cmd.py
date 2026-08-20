@@ -7,10 +7,13 @@ import tempfile
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.cli.profiles import ReviewProfile, resolve_profile
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.mcp.shared import REVIEWER_ALLOWED_TOOL_CLASSES
@@ -23,8 +26,6 @@ from mergecraft.utils.agent_resolve import (
 from mergecraft.utils.offline_diff import materialize_diff
 from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.source_resolve import SourceResolverSpec, resolve_workspace
-
-console = Console()
 
 
 def _git_changed_files(repo_root: Path) -> list[str]:
@@ -155,7 +156,7 @@ def run(
         resolve_profile(profile)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
     with apply_profile_env(resolve_profile(profile)):
         report = build_plan_report(cwd=cwd, profile_name=profile, model_override=model)

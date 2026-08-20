@@ -203,7 +203,7 @@ def load_feedback_store(store_path: Path) -> FeedbackStore:
                     pr_number=item.get("pr_number"),
                     recorded_at=ts,
                 )
-            except KeyError, ValueError, ValidationError:
+            except (KeyError, ValueError, ValidationError):  # fmt: skip
                 continue
     return FeedbackStore(entries=entries)
 

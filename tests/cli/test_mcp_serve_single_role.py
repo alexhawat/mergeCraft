@@ -63,24 +63,21 @@ def _push_branch_call() -> dict[str, object]:
     }
 
 
-def _is_successful_orchestrator_push(status_code: int, body: object) -> bool:
-    """True when ``/mcp`` found the orchestrator ``push_branch`` tool.
-
-    Schema rejection (``-32602``) still means the tool was mounted. Unknown
-    tool (``-32601``), HTTP 404, or an empty toolset are the D14 outcomes.
-    """
+def _assert_push_branch_not_on_orchestrator_endpoint(status_code: int, body: object) -> None:
+    """D14: authenticated ``/mcp`` must not expose orchestrator ``push_branch``."""
     if status_code == 404:
-        return False
-    if not isinstance(body, dict):
-        return False
+        return
+    assert isinstance(body, dict), (
+        f"/mcp must return 404 or JSON-RPC -32601, got status={status_code} body={body!r}"
+    )
     error = body.get("error")
-    if isinstance(error, dict) and error.get("code") == -32601:
-        return False
-    if status_code == 200 and "result" in body:
-        return True
-    if isinstance(error, dict) and error.get("code") == -32602:
-        return True
-    return status_code == 200 and error is None
+    assert isinstance(error, dict), (
+        f"/mcp must return 404 or JSON-RPC -32601, got status={status_code} body={body!r}"
+    )
+    assert error.get("code") == -32601, (
+        f"/mcp must return 404 or JSON-RPC -32601 (unknown tool), not mount push_branch: "
+        f"status={status_code} body={body!r}"
+    )
 
 
 def test_reviewer_role_mcp_post_push_branch_is_not_orchestrator_invocation(
@@ -88,23 +85,25 @@ def test_reviewer_role_mcp_post_push_branch_is_not_orchestrator_invocation(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """W11.3: reviewer-role process does not expose orchestrator ``push_branch`` at ``/mcp``."""
-    from mergecraft.cli.mcp_serve import build_mcp_app_for_role
+    from mergecraft.cli.mcp_serve import build_mcp_app_from_ctx, build_mcp_tool_context
 
     _init_git_repo(tmp_path)
     _write_config(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    client = TestClient(build_mcp_app_for_role(cwd=tmp_path, role="reviewer"))
-    response = client.post(MCP_ENDPOINT, json=_push_branch_call())
+    ctx = build_mcp_tool_context(cwd=tmp_path)
+    client = TestClient(build_mcp_app_from_ctx("reviewer", ctx))
+    response = client.post(
+        MCP_ENDPOINT,
+        headers={"Authorization": f"Bearer {ctx.mcp_auth_token}"},
+        json=_push_branch_call(),
+    )
     body: object
     try:
         body = response.json()
     except ValueError:
         body = response.text
-    assert not _is_successful_orchestrator_push(response.status_code, body), (
-        f"reviewer-role /mcp invoked orchestrator push_branch: "
-        f"status={response.status_code} body={body!r}"
-    )
+    _assert_push_branch_not_on_orchestrator_endpoint(response.status_code, body)
 
 
 def test_verifier_role_mcp_post_push_branch_is_not_orchestrator_invocation(
@@ -112,20 +111,22 @@ def test_verifier_role_mcp_post_push_branch_is_not_orchestrator_invocation(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """W11.3 edge: verifier-role process is the same D14 single-role mount."""
-    from mergecraft.cli.mcp_serve import build_mcp_app_for_role
+    from mergecraft.cli.mcp_serve import build_mcp_app_from_ctx, build_mcp_tool_context
 
     _init_git_repo(tmp_path)
     _write_config(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    client = TestClient(build_mcp_app_for_role(cwd=tmp_path, role="verifier"))
-    response = client.post(MCP_ENDPOINT, json=_push_branch_call())
+    ctx = build_mcp_tool_context(cwd=tmp_path)
+    client = TestClient(build_mcp_app_from_ctx("verifier", ctx))
+    response = client.post(
+        MCP_ENDPOINT,
+        headers={"Authorization": f"Bearer {ctx.mcp_auth_token}"},
+        json=_push_branch_call(),
+    )
     body: object
     try:
         body = response.json()
     except ValueError:
         body = response.text
-    assert not _is_successful_orchestrator_push(response.status_code, body), (
-        f"verifier-role /mcp invoked orchestrator push_branch: "
-        f"status={response.status_code} body={body!r}"
-    )
+    _assert_push_branch_not_on_orchestrator_endpoint(response.status_code, body)

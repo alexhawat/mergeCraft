@@ -96,7 +96,7 @@ def git_repo_root(start: str | None = None) -> Path | None:
             text=True,
             timeout=5,
         )
-    except OSError, subprocess.SubprocessError:
+    except (OSError, subprocess.SubprocessError):  # fmt: skip
         return None
     top = completed.stdout.strip()
     if completed.returncode != 0 or not top:

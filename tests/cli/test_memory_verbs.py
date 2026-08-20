@@ -43,7 +43,7 @@ def test_list_show_forget_export_import(tmp_path: Path) -> None:
 
     list_result = runner.invoke(app, ["memory", "list", "--repo", str(repo), "--json"])
     assert list_result.exit_code == 0, list_result.stdout
-    listed = json.loads(list_result.stdout)
+    listed = json.loads(list_result.stdout)["entries"]
     assert listed
 
     memory_id = listed[0]["id"]
@@ -72,7 +72,7 @@ def test_list_show_forget_export_import(tmp_path: Path) -> None:
     assert forget_result.exit_code == 0, forget_result.stdout
     after_forget = runner.invoke(app, ["memory", "list", "--repo", str(repo), "--json"])
     assert after_forget.exit_code == 0, after_forget.stdout
-    remaining = json.loads(after_forget.stdout)
+    remaining = json.loads(after_forget.stdout)["entries"]
     assert all(entry["id"] != memory_id for entry in remaining)
 
 
@@ -155,7 +155,7 @@ def test_forget_removes_legacy_flat_learnings_bullet(tmp_path: Path) -> None:
 
     list_result = runner.invoke(app, ["memory", "list", "--repo", str(repo), "--json"])
     assert list_result.exit_code == 0, list_result.stdout
-    listed = json.loads(list_result.stdout)
+    listed = json.loads(list_result.stdout)["entries"]
     drop_id = next(entry["id"] for entry in listed if "drop this stale note" in entry["text"])
 
     forget_result = runner.invoke(app, ["memory", "forget", drop_id, "--repo", str(repo)])

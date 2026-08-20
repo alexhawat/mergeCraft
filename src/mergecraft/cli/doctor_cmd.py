@@ -6,15 +6,18 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING
 
 import typer
 import yaml
 from pydantic import ValidationError
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+)
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
 from mergecraft.mcp.ports import port_available, read_env_port
 from mergecraft.models import MODEL_ALIASES
@@ -23,7 +26,6 @@ from mergecraft.utils.agent_resolve import has_credentials_for_slug
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-console = Console()
 
 _SECRET_ENV_KEYS = (
     "OPENAI_API_KEY",
@@ -45,11 +47,6 @@ class ProbeResult:
     status: str
     detail: str
     hard_failure: bool = False
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
 
 
 def _git_probe(cwd: Path) -> ProbeResult:
@@ -175,7 +172,7 @@ def run(cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root to di
     results = run_doctor_probes(root)
     console.print(render_doctor_table(results))
     if any(row.hard_failure for row in results):
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def assert_output_contains_no_secrets(text: str) -> None:

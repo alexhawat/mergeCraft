@@ -187,7 +187,7 @@ def _build_runtime_context(
             ).strip()
             or "(clean)"
         )
-    except OSError, subprocess.CalledProcessError:
+    except (OSError, subprocess.CalledProcessError):  # fmt: skip
         git_status = None
 
     data: dict[str, Any] = {

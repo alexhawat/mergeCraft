@@ -10,12 +10,16 @@ before it is trusted with an automation trigger.
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Annotated, Any
 
 import typer
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+    CLI_USAGE_EXIT_CODE,
+)
+from mergecraft.cli.global_surface import emit_cli_json, get_cli_globals, wants_json_output
 from mergecraft.findings.select import (
     DEFAULT_LABEL,
     CarryoverFinding,
@@ -37,7 +41,6 @@ app = typer.Typer(
     help="Inspect and carry forward review findings a merge would otherwise bury.",
     no_args_is_help=True,
 )
-console = Console(stderr=True)
 
 _REPO_HELP = "Repository as owner/name. Defaults to $GITHUB_REPOSITORY."
 _RESOLVED_HELP = "Include threads the author already resolved."
@@ -53,7 +56,7 @@ def _resolve_repo(repo: str | None) -> tuple[str, str]:
         ctx = parse_repo_context(repo)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(2) from exc
+        raise typer.Exit(CLI_USAGE_EXIT_CODE) from exc
     return ctx.owner, ctx.name
 
 
@@ -63,7 +66,7 @@ def _client() -> GitHubClient:
         return GitHubClient(get_job_token())
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(2) from exc
+        raise typer.Exit(CLI_USAGE_EXIT_CODE) from exc
 
 
 def _finding_payload(finding: CarryoverFinding) -> dict[str, Any]:
@@ -91,12 +94,20 @@ def _render_markdown(findings: list[CarryoverFinding], *, pull_number: int) -> s
 
 @app.command("export")
 def export(
+    ctx: typer.Context,
     pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
     repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
     output_format: Annotated[
-        str,
-        typer.Option("--format", help="Output format: json or markdown."),
-    ] = "markdown",
+        str | None,
+        typer.Option(
+            "--output-format",
+            help=(
+                "Export payload format: json or markdown (default: markdown). "
+                "Root --format json emits JSON when this flag is omitted; "
+                "explicit --output-format markdown always renders markdown."
+            ),
+        ),
+    ] = None,
     include_resolved: Annotated[
         bool, typer.Option("--include-resolved", help=_RESOLVED_HELP)
     ] = False,
@@ -105,9 +116,14 @@ def export(
     ] = False,
 ) -> None:
     """Print the findings a merge would bury. Never writes anything."""
-    if output_format not in {"json", "markdown"}:
-        console.print("[red]--format must be 'json' or 'markdown'[/red]")
-        raise typer.Exit(2)
+    if output_format is not None and output_format not in {"json", "markdown"}:
+        console.print("[red]--output-format must be 'json' or 'markdown'[/red]")
+        raise typer.Exit(CLI_USAGE_EXIT_CODE)
+    emit_json = (
+        output_format == "json"
+        if output_format is not None
+        else get_cli_globals(ctx).format == "json"
+    )
     owner, name = _resolve_repo(repo)
 
     async def _run() -> list[CarryoverFinding]:
@@ -130,16 +146,13 @@ def export(
             await client.aclose()
 
     findings = asyncio.run(_run())
-    if output_format == "json":
-        typer.echo(
-            json.dumps(
-                {
-                    "pull_number": pr,
-                    "count": len(findings),
-                    "findings": [_finding_payload(f) for f in findings],
-                },
-                indent=2,
-            )
+    if emit_json:
+        emit_cli_json(
+            {
+                "pull_number": pr,
+                "count": len(findings),
+                "findings": [_finding_payload(f) for f in findings],
+            }
         )
         return
     typer.echo(_render_markdown(findings, pull_number=pr))
@@ -163,6 +176,7 @@ def _print_plan(plan: CarryoverPlan) -> None:
 
 @app.command("carryover")
 def carryover(
+    ctx: typer.Context,
     pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
     repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
     label: Annotated[
@@ -212,26 +226,19 @@ def carryover(
         plan, outcome = asyncio.run(_run())
     except ValueError as exc:  # truncated read — filing it would drop findings
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
-    if json_output:
-        typer.echo(
-            json.dumps(
-                {
-                    "applied": outcome is not None,
-                    "pull_number": plan.pull_number,
-                    "truncated": plan.truncated,
-                    "to_file": [_finding_payload(f) for f in plan.to_file],
-                    "already_filed": [_finding_payload(f) for f in plan.already_filed],
-                    "filed": [
-                        i.model_dump(mode="json") for i in (outcome.filed if outcome else [])
-                    ],
-                    "failed": [
-                        f.model_dump(mode="json") for f in (outcome.failed if outcome else [])
-                    ],
-                },
-                indent=2,
-            )
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(
+            {
+                "applied": outcome is not None,
+                "pull_number": plan.pull_number,
+                "truncated": plan.truncated,
+                "to_file": [_finding_payload(f) for f in plan.to_file],
+                "already_filed": [_finding_payload(f) for f in plan.already_filed],
+                "filed": [i.model_dump(mode="json") for i in (outcome.filed if outcome else [])],
+                "failed": [f.model_dump(mode="json") for f in (outcome.failed if outcome else [])],
+            }
         )
     elif outcome is None:
         _print_plan(plan)
@@ -251,7 +258,7 @@ def carryover(
     # triggered the sweep does not fire again, so an unfiled finding is lost
     # unless the run is visibly red.
     if outcome is not None and outcome.failed:
-        raise typer.Exit(1)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 __all__ = ["app"]

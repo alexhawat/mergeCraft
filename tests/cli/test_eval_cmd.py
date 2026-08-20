@@ -17,6 +17,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE, CLI_FAILED_EXIT_CODE
 from mergecraft.evals.store import list_cases, load_case
 
 runner = CliRunner()
@@ -173,8 +174,8 @@ def test_eval_list_default_lists_every_case(tmp_path: Path) -> None:
     _add_synthetic(tmp_path, case_id="synthetic-002")
     result = runner.invoke(app, ["eval", "list", "--bank", str(tmp_path)])
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "synthetic-001" in result.stdout
-    assert "synthetic-002" in result.stdout
+    assert "synthetic-001" in (result.stdout + result.stderr)
+    assert "synthetic-002" in (result.stdout + result.stderr)
 
 
 def test_eval_list_json_emits_structured_payload(tmp_path: Path) -> None:
@@ -183,11 +184,13 @@ def test_eval_list_json_emits_structured_payload(tmp_path: Path) -> None:
     result = runner.invoke(app, ["eval", "list", "--bank", str(tmp_path), "--json"])
     assert result.exit_code == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
-    assert isinstance(payload, list)
-    assert len(payload) == 1
-    assert payload[0]["id"] == "synthetic-001"
-    assert payload[0]["expected_decision"] == "block"
-    assert payload[0]["provenance"]["trust_tier"] == "trusted"
+    assert payload["schema_version"]
+    cases = payload["cases"]
+    assert isinstance(cases, list)
+    assert len(cases) == 1
+    assert cases[0]["id"] == "synthetic-001"
+    assert cases[0]["expected_decision"] == "block"
+    assert cases[0]["provenance"]["trust_tier"] == "trusted"
 
 
 def test_eval_list_filters_by_category(tmp_path: Path) -> None:
@@ -206,8 +209,9 @@ def test_eval_list_filters_by_category(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "synthetic-001" in result.stdout
-    assert "synthetic-002" not in result.stdout
+    output = result.stdout + result.stderr
+    assert "synthetic-001" in output
+    assert "synthetic-002" not in output
 
 
 def test_eval_list_filters_by_category_rejected(tmp_path: Path) -> None:
@@ -219,8 +223,9 @@ def test_eval_list_filters_by_category_rejected(tmp_path: Path) -> None:
         ["eval", "list", "--bank", str(tmp_path), "--category", "rejected"],
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "synthetic-rej" in result.stdout
-    assert "synthetic-001" not in result.stdout
+    output = result.stdout + result.stderr
+    assert "synthetic-rej" in output
+    assert "synthetic-001" not in output
 
 
 def test_eval_list_filters_by_category_reverted(tmp_path: Path) -> None:
@@ -238,10 +243,11 @@ def test_eval_list_filters_by_category_reverted(tmp_path: Path) -> None:
         ["eval", "list", "--bank", str(tmp_path), "--category", "reverted"],
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "synthetic-rev" in result.stdout
+    output = result.stdout + result.stderr
+    assert "synthetic-rev" in output
     # Sibling categories stay invisible.
-    assert "synthetic-rej" not in result.stdout
-    assert "synthetic-001" not in result.stdout
+    assert "synthetic-rej" not in output
+    assert "synthetic-001" not in output
 
 
 def test_eval_list_distinguishes_rejected_and_reverted(tmp_path: Path) -> None:
@@ -255,7 +261,7 @@ def test_eval_list_distinguishes_rejected_and_reverted(tmp_path: Path) -> None:
     )
     assert rej_result.exit_code == 0, rej_result.stdout + rej_result.stderr
     rej_payload = json.loads(rej_result.stdout)
-    assert {c["id"] for c in rej_payload} == {"synthetic-rej"}
+    assert {c["id"] for c in rej_payload["cases"]} == {"synthetic-rej"}
 
     rev_result = runner.invoke(
         app,
@@ -263,7 +269,7 @@ def test_eval_list_distinguishes_rejected_and_reverted(tmp_path: Path) -> None:
     )
     assert rev_result.exit_code == 0, rev_result.stdout + rev_result.stderr
     rev_payload = json.loads(rev_result.stdout)
-    assert {c["id"] for c in rev_payload} == {"synthetic-rev"}
+    assert {c["id"] for c in rev_payload["cases"]} == {"synthetic-rev"}
 
 
 def test_eval_list_filters_by_id_prefix(tmp_path: Path) -> None:
@@ -281,14 +287,14 @@ def test_eval_list_filters_by_id_prefix(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "synthetic-001" in result.stdout
+    assert "synthetic-001" in (result.stdout + result.stderr)
 
 
 def test_eval_list_surfaces_message_when_empty(tmp_path: Path) -> None:
     """``mergecraft eval list`` prints a friendly message when the bank is empty."""
     result = runner.invoke(app, ["eval", "list", "--bank", str(tmp_path)])
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "no cases" in result.stdout.lower()
+    assert "no cases" in (result.stdout + result.stderr).lower()
 
 
 def test_eval_list_rejects_invalid_since_timestamp(tmp_path: Path) -> None:
@@ -319,11 +325,11 @@ def test_eval_replay_passes_when_verdicts_match(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "passed" in result.stdout
+    assert "passed" in (result.stdout + result.stderr)
 
 
-def test_eval_replay_exits_2_on_regression(tmp_path: Path) -> None:
-    """``mergecraft eval replay`` exits 2 when the verdict drifts."""
+def test_eval_replay_exits_12_on_regression(tmp_path: Path) -> None:
+    """``mergecraft eval replay`` exits 12 when the verdict drifts."""
     _add_synthetic(tmp_path, case_id="synthetic-001")
     result = runner.invoke(
         app,
@@ -337,8 +343,8 @@ def test_eval_replay_exits_2_on_regression(tmp_path: Path) -> None:
             str(tmp_path),
         ],
     )
-    assert result.exit_code == 2
-    assert "regression" in result.stdout.lower()
+    assert result.exit_code == CLI_FAILED_EXIT_CODE
+    assert "regression" in (result.stdout + result.stderr).lower()
 
 
 def test_eval_replay_reports_blocked_without_current_decision(tmp_path: Path) -> None:
@@ -349,16 +355,16 @@ def test_eval_replay_reports_blocked_without_current_decision(tmp_path: Path) ->
         ["eval", "replay", "synthetic-001", "--bank", str(tmp_path)],
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "blocked" in result.stdout.lower()
+    assert "blocked" in (result.stdout + result.stderr).lower()
 
 
 def test_eval_replay_reports_missing_case(tmp_path: Path) -> None:
-    """``mergecraft eval replay <missing>`` exits 1."""
+    """``mergecraft eval replay <missing>`` exits with a configuration error."""
     result = runner.invoke(
         app,
         ["eval", "replay", "synthetic-missing", "--bank", str(tmp_path)],
     )
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
 
 
 # ── promote (W12.1) ────────────────────────────────────────────────────
@@ -434,7 +440,7 @@ def test_eval_promote_refuses_overwrite_by_default(tmp_path: Path) -> None:
 
 
 def test_eval_promote_reports_missing_case(tmp_path: Path) -> None:
-    """``mergecraft eval promote <missing>`` exits 1."""
+    """``mergecraft eval promote <missing>`` exits with a configuration error."""
     target_dir = tmp_path / "permanent"
     result = runner.invoke(
         app,
@@ -448,7 +454,7 @@ def test_eval_promote_reports_missing_case(tmp_path: Path) -> None:
             str(target_dir),
         ],
     )
-    assert result.exit_code == 1
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
 
 
 def test_eval_replay_json_emits_structured_diff(tmp_path: Path) -> None:
@@ -469,6 +475,7 @@ def test_eval_replay_json_emits_structured_diff(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
+    assert payload["schema_version"]
     assert payload["case_id"] == "synthetic-001"
     assert payload["status"] == "passed"
     assert payload["expected_decision"] == "block"
@@ -506,7 +513,7 @@ def test_eval_add_list_replay_round_trip(tmp_path: Path) -> None:
     list_result = runner.invoke(app, ["eval", "list", "--bank", str(tmp_path), "--json"])
     assert list_result.exit_code == 0, list_result.stdout + list_result.stderr
     payload = json.loads(list_result.stdout)
-    assert any(c["id"] == "synthetic-e2e" for c in payload)
+    assert any(c["id"] == "synthetic-e2e" for c in payload["cases"])
 
     replay_result = runner.invoke(
         app,
@@ -521,7 +528,7 @@ def test_eval_add_list_replay_round_trip(tmp_path: Path) -> None:
         ],
     )
     assert replay_result.exit_code == 0, replay_result.stdout + replay_result.stderr
-    assert "passed" in replay_result.stdout
+    assert "passed" in (replay_result.stdout + replay_result.stderr)
 
 
 # ── root help ──────────────────────────────────────────────────────────

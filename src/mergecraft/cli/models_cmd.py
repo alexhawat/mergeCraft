@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING
 
 import typer
 import yaml
-from rich.console import Console
 
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
 from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import MODEL_ALIASES
@@ -26,12 +27,6 @@ app = typer.Typer(
     help="Inspect and configure ordered model preferences.",
     no_args_is_help=True,
 )
-console = Console()
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
 
 
 def _configured_model_slugs(settings: RepoSettings) -> list[str]:
@@ -53,7 +48,7 @@ def _load_config_dict(path: Path) -> dict[str, object]:
     if loaded is None:
         return {}
     if not isinstance(loaded, dict):
-        _bail(f"config must be a mapping: {path}")
+        cli_bail(f"config must be a mapping: {path}")
     return loaded
 
 
@@ -100,11 +95,11 @@ def set_cmd(
 ) -> None:
     """Write an ordered ``models:`` list to ``.mergecraft/config.yaml``."""
     if not slugs:
-        _bail("provide at least one model slug")
+        cli_bail("provide at least one model slug")
 
     cleaned = [slug.strip() for slug in slugs if slug.strip()]
     if not cleaned:
-        _bail("provide at least one non-empty model slug")
+        cli_bail("provide at least one non-empty model slug")
 
     repo_root = cwd.resolve()
     config_path = _write_models_config(cwd=repo_root, slugs=cleaned)

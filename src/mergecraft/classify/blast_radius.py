@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict, cast
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict
+from typing_extensions import TypedDict
 
 Lane = Literal["low", "medium", "high"]
 AutoMergeLane = Literal["eligible", "assisted", "human_review", "forbidden"]

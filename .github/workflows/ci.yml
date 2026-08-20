@@ -18,26 +18,35 @@ concurrency:
 
 jobs:
   toolchain:
-    name: Verify (toolchain)
+    name: Verify (toolchain py${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
       - name: Lockfile check
         run: make lockcheck
 
   test:
-    name: Verify (tests ${{ matrix.group }}/2)
+    name: Verify (tests py${{ matrix.python }} ${{ matrix.group }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        python: ["3.11", "3.14"]
         group: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
       - name: Unit tests (shard ${{ matrix.group }} of 2)
         env:
           MERGECRAFT_TEST_SPLITS: "2"
@@ -45,31 +54,49 @@ jobs:
         run: make test
 
   static:
-    name: Verify (static + build)
+    name: Verify (static + build py${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
       - name: Static, typecheck, build tier
         run: make ci-static
 
   security:
-    name: Verify (security audit)
+    name: Verify (security audit py${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
       - name: bandit + pip-audit (OSV.dev)
         run: make security
 
   integration:
-    name: Verify (integration)
+    name: Verify (integration py${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
       - name: Integration suite (self-skips without live secrets)
         run: make test-integration

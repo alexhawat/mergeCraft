@@ -4,23 +4,19 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import NoReturn
 
 import typer
 import yaml
 from pydantic import ValidationError
-from rich.console import Console
 from rich.table import Table
 
 from mergecraft.cli.config_precedence import explain_setting, resolve_setting
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import (
+    CLI_SUCCESS_EXIT_CODE,
+)
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
-
-console = Console()
-
-
-def _bail(msg: str, *, code: int = 1) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(code)
 
 
 def _config_path(cwd: Path) -> Path | None:
@@ -47,7 +43,7 @@ def config_show(
     try:
         value, layer = resolve_setting(key, cwd=root, cli_model=model)
     except KeyError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
     table = Table(title=f"mergecraft config show {key}", show_header=True, header_style="bold")
     table.add_column("field", style="cyan")
     table.add_column("value")
@@ -66,7 +62,7 @@ def config_explain(
     try:
         explained = explain_setting(key, cwd=root, cli_model=model)
     except KeyError as exc:
-        _bail(str(exc))
+        cli_bail(str(exc))
     table = Table(title=f"mergecraft config explain {key}", show_header=True, header_style="bold")
     table.add_column("layer", style="cyan")
     table.add_column("value")
@@ -90,20 +86,20 @@ def config_validate(
     config_path = config or _config_path(root)
     if config_path is None or not config_path.is_file():
         console.print("[green]ok[/green] — no config file (defaults apply)")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     try:
         loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
-        _bail(f"config parse error: {exc}")
+        cli_bail(f"config parse error: {exc}")
     if loaded is None:
         console.print(f"[green]ok[/green] — empty config at {config_path}")
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not isinstance(loaded, dict):
-        _bail(f"config root must be a mapping: {config_path}")
+        cli_bail(f"config root must be a mapping: {config_path}")
     try:
         RepoSettings.model_validate(loaded)
     except ValidationError as exc:
-        _bail(f"config validation failed: {exc}")
+        cli_bail(f"config validation failed: {exc}")
     console.print(f"[green]ok[/green] — {config_path}")
 
 

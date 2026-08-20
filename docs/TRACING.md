@@ -37,7 +37,7 @@ mergecraft auth logfire
 mergecraft config tracing
 
 # 4. ship a trace
-mergecraft diff-review --tracing --tracing-to logfire
+mergecraft review --tracing --tracing-to logfire
 ```
 
 `mergecraft auth logfire` accepts `--scope local|github|both` (default
@@ -460,7 +460,7 @@ truth.
 
 ## One trace per run (T3)
 
-One `mergecraft diff-review` run emits one Logfire trace. Every span
+One `mergecraft review` run emits one Logfire trace. Every span
 emitted by the run — `mergecraft.run`, `mergecraft.prep`,
 `mergecraft.publish`, `mergecraft.analyzers.pipeline`, `analyzer.run`,
 `agent.attempt`, `llm.call`, `tool.call`, plus the future `provider.call`
@@ -620,7 +620,7 @@ so the secret never appears in the workflow file.
 ## CLI surface (W8.4 / W7.6)
 
 ```text
-mergecraft diff-review --tracing|--no-tracing [--tracing-to <shorthand>] \
+mergecraft review --tracing|--no-tracing [--tracing-to <shorthand>] \
                        [--trace-dir <path>] [--logfire-token <token>] \
                        [--otel-endpoint <url>]
 mergecraft config tracing     # render resolved state with token redacted

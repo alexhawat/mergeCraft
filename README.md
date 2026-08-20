@@ -14,7 +14,7 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 [![CodeQL](https://github.com/alexhawat/mergeCraft/actions/workflows/codeql.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/codeql.yml)
 [![Docker](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml/badge.svg)](https://github.com/alexhawat/mergeCraft/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](pyproject.toml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
 
 [Get started](#-get-started-in-3-steps) ·
 [Features](#-features) ·
@@ -123,19 +123,21 @@ into a comment changes nothing. Details:
 
 ## 🚀 Get started in 3 steps
 
-> **Requirements:** **Python 3.14+** (hard requirement for `uv tool install` — see
-> [pyproject.toml](pyproject.toml)), [uv](https://docs.astral.sh/uv/), an
+> **Requirements:** **Python 3.11+**, [uv](https://docs.astral.sh/uv/), an
 > authenticated [GitHub CLI](https://cli.github.com), and one provider credential.
-> **Without Python 3.14**, use the [Docker Action](#example-1--auto-review-every-pr)
-> (`alexhawat/mergeCraft@…`) — the container image ships a compatible runtime; no
-> local Python install needed ([`docs/distribution.md`](docs/distribution.md)).
+> Install from git with `uv tool install` (PyPI is not published yet). For a
+> pinned runtime without managing Python versions, use the
+> [Docker Action](#example-1--auto-review-every-pr) (`alexhawat/mergeCraft@…`) —
+> the container image ships a compatible runtime; no local Python install needed
+> ([`docs/distribution.md`](docs/distribution.md)).
 > **SCM:** mergeCraft 0.1.0 supports **GitHub** repositories only. GitLab support is
 > planned via the `ScmProvider` abstraction.
 
 **1. Install and scaffold** (in the repo you want reviewed):
 
 ```bash
-uv tool install "git+https://github.com/alexhawat/mergeCraft@v0.1.0"
+uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
@@ -206,16 +208,23 @@ mergecraft review --staged                               # staged changes only
 mergecraft review --diff changes.patch --dry-run         # inspect the prompt, no LLM call
 gh pr diff 42 > /tmp/pr-42.diff && mergecraft review --diff /tmp/pr-42.diff
 mergecraft review --json findings.json                 # machine-readable Finding[] for scoring
-mergecraft review --format sarif --output report.sarif.json
-mergecraft review --format jsonl --output stream.jsonl
+mergecraft review --output-format sarif --output report.sarif.json
+mergecraft review --output-format jsonl --output stream.jsonl
 mergecraft review --agent                              # JSONL agent protocol on stdout
+mergecraft review 2> review.md                         # human text is on stderr (D14)
 ```
+
+Human-readable review text (default mode) is written to **stderr** so stdout stays free
+for `--agent` JSONL and other machine payloads. Redirecting stdout (`mergecraft review > review.md`)
+captures nothing useful — use `2>` instead (`mergecraft review 2> review.md`). Structured
+findings still go to `--json` / `--output` paths as documented above. Root `--format json`
+selects JSON output when `--output-format` is omitted (same pattern as `findings export`).
 
 Process exit codes: `0` clean pass; `10` non-blocking findings; `11` blocking severities;
 `12` review failed (no findings); `20` inconclusive; `30` configuration error; `40` infra error;
-`50` timed out.
+`50` timed out; `2` usage / invalid CLI input. Full table: [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md).
 
-`diff-review` is a hidden alias of `review` (Harbor and existing scripts keep working).
+`diff-review` remains a hidden deprecated alias of `review` (one stderr warning per invocation).
 
 **Auth precedence for private clones:** `--token` → `GH_TOKEN` / `GITHUB_TOKEN` →
 `gh auth token` → anonymous (public repos only). Cloned third-party repositories
@@ -617,7 +626,6 @@ of them for its full flag set):
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
 | `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
 | `mergecraft context inspect` | Report sources, scope, provenance citations, and token totals. |
-| `mergecraft diff-review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |

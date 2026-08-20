@@ -13,8 +13,8 @@ inline comment.
 
 ```bash
 # Read-only. Print what a merge would bury.
-mergecraft findings export --pr 161 --format markdown
-mergecraft findings export --pr 161 --format json
+mergecraft findings export --pr 161 --output-format markdown
+mergecraft findings export --pr 161 --output-format json
 
 # Dry run: print the issues that would be filed.
 mergecraft findings carryover --pr 161

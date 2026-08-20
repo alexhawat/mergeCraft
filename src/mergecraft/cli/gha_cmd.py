@@ -7,23 +7,23 @@ import json
 import os
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import typer
 from loguru import logger
-from rich.console import Console
 
 from mergecraft.analyzers.redact import redact_secrets
-
-if TYPE_CHECKING:
-    from mergecraft.run_outcome import RunOutcome
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
+    RunOutcome,
+    error_code_for_outcome,
+)
 
 app = typer.Typer(
     help="Run the GitHub Action runtime flow.",
     invoke_without_command=True,
     no_args_is_help=False,
 )
-console = Console(stderr=True)
 
 STATE_TOKEN = "token"
 _STATE_ENV = "STATE_token"
@@ -32,7 +32,7 @@ _STATE_ENV = "STATE_token"
 def _set_failed(message: str) -> None:
     console.print(f"::error::{message}")
     logger.error("{}", message)
-    raise typer.Exit(1)
+    raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
 
 def _save_state(name: str, value: str) -> None:
@@ -83,8 +83,6 @@ def _structured_failure_result(outcome: RunOutcome, message: str) -> str:
     (``analyzers.redact.redact_secrets``) before it ever reaches the output
     file, which GitHub echoes back into logs.
     """
-    from mergecraft.run_outcome import error_code_for_outcome
-
     payload = {
         "outcome": outcome.value,
         "error": {
@@ -112,7 +110,7 @@ def _write_evidence_packet_output(packet_path: str) -> None:
 
 
 async def _run_main() -> None:
-    from mergecraft.main import RunOutcome, main
+    from mergecraft.main import main
 
     result = await main()
     if result.evidence_packet_path:

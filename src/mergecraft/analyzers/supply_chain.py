@@ -138,7 +138,7 @@ def _package_names_from_trivy(raw: str) -> dict[str, str]:
         from mergecraft.analyzers.parsers.trivy_json import loads_trivy_object
 
         payload = loads_trivy_object(raw)
-    except json.JSONDecodeError, ValueError:
+    except (json.JSONDecodeError, ValueError):  # fmt: skip
         return mapping
     for result in payload.get("Results") or []:
         if not isinstance(result, dict):

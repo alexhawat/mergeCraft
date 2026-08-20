@@ -22,31 +22,31 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
+from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import (
+    CLI_SUCCESS_EXIT_CODE,
+)
 from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.tracing.redaction import redact_attrs
 from mergecraft.tracing.sinks import read_jsonl_events
 
+if TYPE_CHECKING:
+    from rich.console import Console
+
 app = typer.Typer(
     help="Trace inspection commands — show resolved config and read back local traces.",
     no_args_is_help=True,
 )
-console = Console()
 
 
 _TOKEN_REDACTED_MARKER = "***"
 _REDACTION_INDICATORS = ("redact", "***")
-
-
-def _bail(msg: str) -> NoReturn:
-    console.print(f"[red]{msg}[/red]")
-    raise typer.Exit(1)
 
 
 def _is_redacted(value: Any) -> bool:
@@ -275,7 +275,7 @@ def traces_callback(
         return
     if run_id is None:
         console.print(ctx.get_help())
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     traces_show(run_id=run_id, trace_dir=trace_dir)
 
 

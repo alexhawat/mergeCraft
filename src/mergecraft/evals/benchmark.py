@@ -393,7 +393,7 @@ def _git_head_sha() -> str:
             text=True,
         )
         return out.strip()
-    except OSError, subprocess.CalledProcessError:
+    except (OSError, subprocess.CalledProcessError):  # fmt: skip
         return "unknown"
 
 
@@ -406,7 +406,7 @@ def _git_corpus_commit() -> str:
             text=True,
         )
         return out.strip()
-    except OSError, subprocess.CalledProcessError:
+    except (OSError, subprocess.CalledProcessError):  # fmt: skip
         return _git_head_sha()
 
 

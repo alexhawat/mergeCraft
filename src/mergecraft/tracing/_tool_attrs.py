@@ -86,7 +86,7 @@ def _safe_json_bytes(value: Any) -> int:
     """Return the JSON-encoded byte count of ``value`` (best-effort)."""
     try:
         return len(json.dumps(value, default=str))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):  # fmt: skip
         return len(str(value))
 
 

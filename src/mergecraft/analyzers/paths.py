@@ -15,7 +15,7 @@ def safe_repo_relative_path(repo_root: Path, rel: str) -> Path | None:
     root = repo_root.resolve()
     try:
         candidate = (root / rel).resolve()
-    except OSError, ValueError:
+    except (OSError, ValueError):  # fmt: skip
         return None
     if candidate == root or root in candidate.parents:
         return candidate

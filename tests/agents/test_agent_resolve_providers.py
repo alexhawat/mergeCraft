@@ -103,7 +103,7 @@ def test_resolve_runtime_agent_never_returns_opencode_for_provider_models(
 
     try:
         agent = resolve_runtime_agent(model=model)
-    except ValueError, RuntimeError:
+    except (ValueError, RuntimeError):
         return
 
     assert agent.name != "opencode", (

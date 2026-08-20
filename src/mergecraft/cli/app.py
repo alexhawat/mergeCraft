@@ -5,9 +5,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from mergecraft.cli.exits import (
+    CLI_SUCCESS_EXIT_CODE,
+)
+
+# Typer 0.25+: explicit ``--show-completion bash|zsh|fish`` (shellingham is unreliable
+# in CI and non-interactive shells). Must be set before the Typer() constructor runs.
+os.environ.setdefault("_TYPER_COMPLETE_TEST_DISABLE_SHELL_DETECTION", "1")
+
 import typer
 from dotenv import load_dotenv
-from rich.console import Console
 
 from mergecraft import __version__
 from mergecraft.cli import (
@@ -35,15 +42,21 @@ from mergecraft.cli import (
     tracing_logfire_cmd,
     watch_cmd,
 )
+from mergecraft.cli.global_surface import (
+    ColorMode,
+    OutputFormat,
+    apply_global_cli_options,
+    validate_log_level_option,
+)
+from mergecraft.cli.typer_group import MergecraftTyperGroup
 
 app = typer.Typer(
     name="mergecraft",
     help="Standalone BYOK GitHub Action runtime for coding agents (mergeCraft).",
     no_args_is_help=True,
-    add_completion=False,
     rich_markup_mode="rich",
+    cls=MergecraftTyperGroup,
 )
-console = Console(stderr=True)
 
 app.add_typer(agents_cmd.app, name="agents")
 app.add_typer(lens_cmd.app, name="lens")
@@ -86,13 +99,50 @@ def _root(
         help="Show version and exit.",
         is_eager=True,
     ),
+    output_format: OutputFormat = typer.Option(
+        "table",
+        "--format",
+        help="Default output format for machine-readable subcommands.",
+        case_sensitive=False,
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress informational Loguru records.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Enable DEBUG Loguru records.",
+    ),
+    log_level: str | None = typer.Option(
+        None,
+        "--log-level",
+        help="Explicit Loguru level (TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL).",
+        callback=validate_log_level_option,
+    ),
+    color: ColorMode = typer.Option(
+        "auto",
+        "--color",
+        help="Colour policy for Rich/Typer chrome: auto, always, or never.",
+        case_sensitive=False,
+    ),
 ) -> None:
+    apply_global_cli_options(
+        ctx,
+        output_format=output_format,
+        quiet=quiet,
+        verbose=verbose,
+        log_level=log_level,
+        color=color,
+    )
     if version:
         typer.echo(__version__)
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
-        raise typer.Exit(0)
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
 
 
 @app.command("version")

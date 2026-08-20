@@ -68,8 +68,9 @@ def test_mergecraft_models_list_renders_minimax_row_without_credentials(
     result = runner.invoke(app, ["models", "list"])
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert MINIMAX_SLUG in result.stdout, (
-        f"expected {MINIMAX_SLUG!r} in mergecraft models list output; got: {result.stdout!r}"
+    output = result.stdout + result.stderr
+    assert MINIMAX_SLUG in output, (
+        f"expected {MINIMAX_SLUG!r} in mergecraft models list output; got: {output!r}"
     )
 
 
@@ -91,10 +92,11 @@ def test_mergecraft_models_list_renders_minimax_row_with_credentials(
     result = runner.invoke(app, ["models", "list"])
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert MINIMAX_SLUG in result.stdout
+    output = result.stdout + result.stderr
+    assert MINIMAX_SLUG in output
 
     minimax_row = next(
-        (line for line in result.stdout.splitlines() if line.lstrip().startswith(MINIMAX_SLUG)),
+        (line for line in output.splitlines() if line.lstrip().startswith(MINIMAX_SLUG)),
         None,
     )
     assert minimax_row is not None, f"no row found for {MINIMAX_SLUG!r}"
@@ -122,9 +124,8 @@ def test_mergecraft_models_list_minimax_row_does_not_leak_api_key(
     result = runner.invoke(app, ["models", "list"])
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert sentinel not in result.stdout, (
-        "mergecraft models list leaked the api key value into stdout"
-    )
+    output = result.stdout + result.stderr
+    assert sentinel not in output, "mergecraft models list leaked the api key value into CLI output"
 
 
 # ── structural / collection smoke (always green) ─────────────────────────────

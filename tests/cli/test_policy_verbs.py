@@ -71,7 +71,7 @@ def test_policy_test_runs_should_trigger_and_should_not_fixtures(
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    output = result.stdout.lower()
+    output = (result.stdout + result.stderr).lower()
     assert "should-trigger" in output
     assert "should-not" in output
     assert "pass" in output or "trigger" in output
@@ -100,7 +100,7 @@ def test_policy_explain_names_the_source_of_each_effective_rule(
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    output = result.stdout.lower()
+    output = (result.stdout + result.stderr).lower()
     assert "should-trigger" in output
     assert "source" in output or "layer" in output or "org" in output or "repo" in output
 
@@ -129,4 +129,4 @@ def test_policy_lint_validates_exceptions_yaml(
     result = runner.invoke(app, ["policy", "lint"])
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "exception" in result.stdout.lower()
+    assert "exception" in (result.stdout + result.stderr).lower()

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,11 +62,11 @@ def test_eval_bench_resolves_model_from_config_only(
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "No model configured" not in result.stdout
+    assert "No model configured" not in (result.stdout + result.stderr)
     # Empty bank/corpus: structural section still populates (0 cases), and
     # detection honestly reports it has nothing to detect on — model
     # resolution itself must not be the reason.
-    assert "no patch-bearing cases" in result.stdout
+    assert "no patch-bearing cases" in (result.stdout + result.stderr)
 
 
 def test_eval_bench_errors_clearly_when_no_model_configured(
@@ -91,8 +92,8 @@ def test_eval_bench_errors_clearly_when_no_model_configured(
         ],
     )
 
-    assert result.exit_code == 1
-    assert "No model configured" in result.stdout
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
+    assert "No model configured" in (result.stdout + result.stderr)
 
 
 def test_eval_bench_explicit_model_flag_wins_over_config(
@@ -122,4 +123,4 @@ def test_eval_bench_explicit_model_flag_wins_over_config(
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "No model configured" not in result.stdout
+    assert "No model configured" not in (result.stdout + result.stderr)

@@ -162,11 +162,30 @@ def test_model_params_from_mapping_ignores_non_finite_int_fields() -> None:
     assert params == ModelParams()
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"temperature": float("nan"), "top_p": float("inf")},
+        {"temperature": "nan", "top_p": "inf"},
+    ],
+    ids=["float_nan_inf", "string_nan_inf"],
+)
+def test_model_params_from_mapping_ignores_non_finite_float_fields(
+    raw: dict[str, object],
+) -> None:
+    """Non-finite temperature/top_p degrade to omitted knobs (#348, D15)."""
+    from mergecraft.tracing.genai import ModelParams, model_params_from_mapping
+
+    params = model_params_from_mapping(raw)
+    assert params == ModelParams()
+
+
 __all__ = [
     "test_agent_attempt_attrs",
     "test_cli_argv_redacted",
     "test_cost_attrs_from_usage_carries_dual_names",
     "test_llm_call_cost_attrs",
+    "test_model_params_from_mapping_ignores_non_finite_float_fields",
     "test_model_params_from_mapping_ignores_non_finite_int_fields",
     "test_span_duration_nonzero",
     "test_tool_call_attrs",
