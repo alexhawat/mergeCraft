@@ -29,8 +29,6 @@ from typing import Any
 
 import pytest
 
-pytest_plugins = ["tests.tracing.streaming.conftest"]
-
 
 @dataclass(slots=True)
 class CapturedSink:
