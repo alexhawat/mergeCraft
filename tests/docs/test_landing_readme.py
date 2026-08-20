@@ -161,7 +161,7 @@ def test_landing_omits_broken_demo_image() -> None:
 
 def test_landing_has_numbered_install() -> None:
     text = _readme_text()
-    region = _section_body(text, r".*Install")
+    region = _section_body(text, r"Install\b")
     assert region is not None, "README needs an Install section with numbered steps (RD2.2)"
     numbered = re.search(r"(?:^|\n)\s*1\.\s+", region)
     assert numbered, "Install section must use ordered steps"

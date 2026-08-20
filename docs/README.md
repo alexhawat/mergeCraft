@@ -35,6 +35,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [supply-chain](docs/supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
 | [workflows](docs/workflows.md) | consumer | Workflow examples 2–6, trust tiers, and pull_request_target placement gotchas. |
 | [evals README](evals/README.md) | satellite | Eval bank vs ReviewBench — what each mechanism measures and how to run gates. |
+| [llms-full.txt](llms-full.txt) | consumer | Concatenated LLM bundle of core consumer and contributor docs (generated). |
 | [llms.txt](llms.txt) | consumer | Curated documentation map for LLM agents (llms.txt convention). |
 | [SKILL](skills/mergecraft/SKILL.md) | consumer | Agent-Skills consumer skill — install checklist, CLI reference, troubleshooting. |
 

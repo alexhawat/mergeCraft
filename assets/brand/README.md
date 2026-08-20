@@ -1,5 +1,9 @@
 # mergeCraft brand assets
 
+Brand SVG inventory and regeneration commands for logo assets.
+
+**Audience:** satellite (scoped README for one directory)
+
 Production SVGs built from the concepts in `.ignorelocal/styles/`. Every glyph is an
 **outlined vector path** — no `<text>`, no webfont, no external request. They render
 identically in GitHub READMEs, `<img>` tags, Figma, and print.
@@ -90,3 +94,9 @@ script together, and confirm the rebuild is still byte-identical before committi
 Inter Tight is licensed under the [SIL Open Font License 1.1](https://openfontlicense.org/).
 The OFL permits embedding outlined glyphs in artwork like these logos; the font binary
 itself is not redistributed here (hence the gitignored cache).
+
+## See also
+
+- [docs/assets/README.md](../../docs/assets/README.md) — demo capture path (operator-owned)
+- [assets/diagrams/README.md](../diagrams/README.md) — architecture hero SVGs
+- [Landing README](../../README.md) — brand lockup on the product page

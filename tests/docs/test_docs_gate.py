@@ -213,7 +213,6 @@ def test_unpinned_install_line_is_the_documented_form() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after RD4.2", strict=False)
 def test_llms_full_matches_generator(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """``scripts/gen_llms_full.py --check`` exits 0; a scratch mutation fails."""
     module = _load_gen_llms_full()
@@ -248,7 +247,6 @@ def test_llms_full_matches_generator(tmp_path: Path, capsys: pytest.CaptureFixtu
     )
 
 
-@pytest.mark.xfail(reason="green after RD4.2", strict=False)
 def test_llms_full_includes_agents_and_readme() -> None:
     """``llms-full.txt`` concatenates README and AGENTS with file headers."""
     text = _read(LLMS_FULL)
@@ -280,7 +278,6 @@ def test_manifest_see_also_links_resolve() -> None:
     assert not broken, "surface doc links must resolve:\n" + "\n".join(broken)
 
 
-@pytest.mark.xfail(reason="green after RD4.2", strict=False)
 def test_satellite_readmes_have_purpose_line() -> None:
     """Satellite/contributor READMEs carry a template purpose line in the first 20 lines."""
     missing: list[str] = []
@@ -304,7 +301,6 @@ def test_satellite_readmes_have_purpose_line() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after RD4.2", strict=False)
 def test_llms_check_and_docs_check_in_ci_steps() -> None:
     """Makefile exposes ``llms-check`` and folds it into ``docs-check`` / ``CI_STEPS``."""
     makefile = read_text("Makefile")

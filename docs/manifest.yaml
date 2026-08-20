@@ -25,6 +25,12 @@ pages:
     generator: null
     purpose: Curated documentation map for LLM agents (llms.txt convention).
 
+  - path: llms-full.txt
+    audience: consumer
+    template: generated-ref
+    generator: llms-full
+    purpose: Concatenated LLM bundle of core consumer and contributor docs (generated).
+
   - path: docs/README.md
     audience: contributor
     template: contributor

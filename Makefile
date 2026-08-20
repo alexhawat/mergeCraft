@@ -15,7 +15,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
-	examples example-workflows-check docs docs-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
+	examples example-workflows-check docs docs-check llms llms-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check
@@ -144,11 +144,17 @@ examples: ## Render example workflow YAML from templates
 example-workflows-check: ## Fail when committed example workflows drift from templates
 	$(UV) run python scripts/render_example_workflows.py --check
 
-docs: ## Regenerate generated doc pages (CLI, action ref, docs index)
+docs: ## Regenerate generated doc pages (CLI, action ref, docs index, llms-full)
 	$(UV) run python scripts/gen_docs.py
 
-docs-check: ## Fail when generated docs drift
+docs-check: llms-check ## Fail when generated docs drift
 	$(UV) run python scripts/gen_docs.py --check
+
+llms: ## Regenerate llms-full.txt concatenation
+	$(UV) run python scripts/gen_llms_full.py
+
+llms-check: ## Fail when llms-full.txt drifts
+	$(UV) run python scripts/gen_llms_full.py --check
 
 diagrams: ## Regenerate architecture SVGs from D2 source (requires d2 on PATH)
 	@command -v d2 >/dev/null 2>&1 || { echo "d2 not found — install from https://d2lang.com" >&2; exit 1; }
