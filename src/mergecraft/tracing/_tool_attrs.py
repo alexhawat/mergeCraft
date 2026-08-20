@@ -171,12 +171,14 @@ def enrich_tool_response(
         span.set_attribute("gen_ai.tool.output", redact_tool_payload(message))
         return
 
-    # D9 / #296: classify ToolResult.is_error (or any mapping key "isError" /
-    # "is_error") as an error span even when no Python exception was raised.
-    # JSON-RPC is unchanged; the agent still receives the ToolResult.
-    _output_is_error = getattr(output, "is_error", None)
-    if _output_is_error is None and isinstance(output, dict):
-        _output_is_error = output.get("isError") or output.get("is_error")
+    # D9 / #296: classify ToolResult.is_error (or dict fallbacks) as error span.
+    from mergecraft.mcp.shared import ToolResult
+
+    _output_is_error = isinstance(output, ToolResult) and output.is_error
+    if not _output_is_error and isinstance(output, dict):
+        _output_is_error = bool(output.get("isError") or output.get("is_error"))
+    if not _output_is_error and output is not None:
+        _output_is_error = bool(getattr(output, "is_error", False))
     if _output_is_error:
         span.set_attribute("tool.exit_code", "error")
         span.set_status("error", "ToolResult.is_error=True")

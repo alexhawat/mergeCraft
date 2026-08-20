@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -11,22 +10,6 @@ import pytest
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-
-@pytest.fixture(autouse=True)
-def _reset_process_tracer_cache() -> Iterator[None]:
-    """Reset the process-wide Tracer cache introduced in W4 (#292).
-
-    Each test that creates a ``MemorySink`` or ``_RaisingSink`` and then
-    exercises the emit path via ``run_with_model_chain`` must see spans on
-    *its own* sink, not on a cached tracer from a sibling test.  Autouse
-    ensures this without requiring every test function to import the seam.
-    """
-    from mergecraft.tracing.tracer import reset_process_tracer_cache
-
-    reset_process_tracer_cache()
-    yield
-    reset_process_tracer_cache()
 
 
 @pytest.fixture

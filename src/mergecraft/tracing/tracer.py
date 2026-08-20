@@ -421,8 +421,34 @@ def reset_process_tracer_cache() -> None:
     _PROCESS_TRACING_FINGERPRINT = None
 
 
-def _pin_trace_id() -> str:
-    """Mint and pin ``MERGECRAFT_TRACE_ID`` once per process run (#292 / D9)."""
+def resolve_trace_id(*, pin: bool = False) -> str:
+    """Resolve the per-run trace identifier (Logfire / OTel ``trace_id``).
+
+    One ``trace_id`` is shared by every span emitted by a single
+    ``mergecraft diff-review`` run; Logfire (and any OTel backend) groups
+    those spans under one trace. The precedence mirrors the existing
+    session-id resolver (D7 / T3.2):
+
+    1. ``MERGECRAFT_TRACE_ID`` — explicit per-run override.
+    2. ``MERGECRAFT_TRACE_SESSION_ID`` — alias preserving the
+       pre-#137 contract so existing pipelines keep working.
+    3. ``GITHUB_RUN_ID`` — the Actions run id, monotonic and unique.
+    4. ``uuid.uuid4().hex`` — local fallback when no env vars are set.
+
+    When ``pin`` is true and ``MERGECRAFT_TRACE_ID`` is unset, the resolved
+    value is written to ``os.environ`` so MCP-style repeated
+    ``get_tracer_from_settings`` calls share one id (#292).
+
+    Args:
+        pin: Persist the resolved id in ``MERGECRAFT_TRACE_ID`` when minting.
+
+    Returns:
+        str: 32-hex (uuid4) trace identifier, or the resolved env value.
+
+    Examples:
+        >>> bool(resolve_trace_id())
+        True
+    """
     existing = os.environ.get("MERGECRAFT_TRACE_ID")
     if existing:
         return existing
@@ -431,7 +457,8 @@ def _pin_trace_id() -> str:
         or os.environ.get("GITHUB_RUN_ID")
         or uuid.uuid4().hex
     )
-    os.environ["MERGECRAFT_TRACE_ID"] = minted
+    if pin:
+        os.environ["MERGECRAFT_TRACE_ID"] = minted
     return minted
 
 
@@ -737,35 +764,6 @@ def resolve_session_id() -> str:
     )
 
 
-def resolve_trace_id() -> str:
-    """Resolve the per-run trace identifier (Logfire / OTel ``trace_id``).
-
-    One ``trace_id`` is shared by every span emitted by a single
-    ``mergecraft diff-review`` run; Logfire (and any OTel backend) groups
-    those spans under one trace. The precedence mirrors the existing
-    session-id resolver (D7 / T3.2):
-
-    1. ``MERGECRAFT_TRACE_ID`` — explicit per-run override.
-    2. ``MERGECRAFT_TRACE_SESSION_ID`` — alias preserving the
-       pre-#137 contract so existing pipelines keep working.
-    3. ``GITHUB_RUN_ID`` — the Actions run id, monotonic and unique.
-    4. ``uuid.uuid4().hex`` — local fallback when no env vars are set.
-
-    Returns:
-        str: 32-hex (uuid4) trace identifier, or the resolved env value.
-
-    Examples:
-        >>> bool(resolve_trace_id())
-        True
-    """
-    return (
-        os.environ.get("MERGECRAFT_TRACE_ID")
-        or os.environ.get("MERGECRAFT_TRACE_SESSION_ID")
-        or os.environ.get("GITHUB_RUN_ID")
-        or uuid.uuid4().hex
-    )
-
-
 def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     """Build the enabled tracer for ``settings`` or return the null path.
 
@@ -809,7 +807,7 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     correlation = resolve_correlation_from_env()
     session_id = resolve_session_id()
     run_id = str(correlation.get("run_id") or session_id)
-    trace_id = _pin_trace_id()
+    trace_id = resolve_trace_id(pin=True)
     tier = os.environ.get("MERGECRAFT_TRUST_TIER") or "balanced"
     tracer = Tracer(
         sink=sink,

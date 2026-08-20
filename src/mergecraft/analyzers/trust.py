@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 — used at runtime by ReviewSource / build_review_source
 from typing import TYPE_CHECKING, Any, Literal
@@ -11,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.utils.secrets import filter_env, is_sensitive_env_name
+from mergecraft.utils.source_resolve import resolve_git_common_dir
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest, TrustTier
@@ -68,32 +68,6 @@ class ReviewSource:
     invocation_root: Path
 
 
-def _git_common_dir(path: Path) -> str | None:
-    """Return the resolved ``git rev-parse --git-common-dir`` for *path*.
-
-    Returns ``None`` when *path* is not inside a git repo or the command fails.
-    The common-dir is shared by all linked worktrees of the same repository,
-    so comparing two paths' common-dirs detects the D10 same-repo relationship
-    (#294).
-    """
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
-            cwd=path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        raw = result.stdout.strip()
-        if not raw:
-            return None
-        # Resolve relative to the repo path, not the process cwd.
-        # Primary repos emit ".git" (relative); worktrees emit an absolute path.
-        return str((path / raw).resolve())
-    except subprocess.CalledProcessError, OSError:
-        return None
-
-
 def build_review_source(
     *,
     cwd: Path,
@@ -123,9 +97,9 @@ def build_review_source(
             invocation_root=resolved_root,
         )
     # D10 / #294: detect a linked worktree of the same repo.
-    cwd_common = _git_common_dir(resolved_cwd)
-    root_common = _git_common_dir(resolved_root)
-    if cwd_common and root_common and cwd_common == root_common:
+    cwd_common = resolve_git_common_dir(resolved_cwd)
+    root_common = resolve_git_common_dir(resolved_root)
+    if cwd_common is not None and root_common is not None and cwd_common == root_common:
         return ReviewSource(
             kind="local_worktree",
             path=resolved_cwd,
