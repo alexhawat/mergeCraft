@@ -8,6 +8,8 @@ Pins ``request_attrs(..., params=)`` from gateway ``extra_options`` and
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -17,6 +19,14 @@ from tests.agents.conftest import make_agent_run_context
 
 from mergecraft.agents.opencode import _prompt_session, build_security_config
 from mergecraft.tracing.content import ContentCapture
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_PINNED_OPENCODE = _REPO_ROOT / "docker" / "agent-clis" / "node_modules" / ".bin" / "opencode"
+
+
+def _pinned_opencode_cli() -> Path | None:
+    return _PINNED_OPENCODE if _PINNED_OPENCODE.is_file() else None
+
 
 _INPUT = 100
 _OUTPUT = 7
@@ -123,7 +133,50 @@ def test_opencode_provider_config_forwards_extra_options(
     config = json.loads(build_security_config(ctx, "nous/deepseek-v4-flash"))
     provider = config["provider"]["nous"]
     assert provider["options"]["max_tokens"] == 4096
-    assert provider["models"]["deepseek-v4-flash"]["limit"] == {"output": 4096}
+    assert "limit" not in provider["models"]["deepseek-v4-flash"]
+
+
+def test_opencode_model_limit_requires_context_and_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OpenCode 1.18.x rejects partial ``limit`` objects — emit both or omit."""
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://inference.example/v1")
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS",
+        '{"max_tokens": 4096, "context_limit": 128000}',
+    )
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="nous/deepseek-v4-flash")
+    config = json.loads(build_security_config(ctx, "nous/deepseek-v4-flash"))
+    model_entry = config["provider"]["nous"]["models"]["deepseek-v4-flash"]
+    assert model_entry["limit"] == {"context": 128_000, "output": 4096}
+
+
+@pytest.mark.skipif(_pinned_opencode_cli() is None, reason="pinned opencode CLI not installed")
+def test_opencode_security_config_validates_against_pinned_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Generated harness config must load under the pinned OpenCode CLI schema."""
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://inference.example/v1")
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "test-key")
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS", '{"max_tokens": 4096}')
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="nous/deepseek-v4-flash")
+    config_path = tmp_path / "opencode.json"
+    config_path.write_text(build_security_config(ctx, "nous/deepseek-v4-flash"))
+
+    cli = _pinned_opencode_cli()
+    assert cli is not None
+    env = {**os.environ, "OPENCODE_CONFIG": str(config_path)}
+    result = subprocess.run(
+        [str(cli), "debug", "config"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_resolve_model_params_from_singleton_extra_options_env(

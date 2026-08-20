@@ -81,6 +81,18 @@ def _api_key_from_env(api_key_env: str) -> str:
     return os.environ.get(api_key_env, "").strip()
 
 
+def _positive_int(value: object) -> int | None:
+    """Return a positive integer from a wire value, or ``None`` when absent/invalid."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float) and value.is_integer():
+        as_int = int(value)
+        return as_int if as_int > 0 else None
+    return None
+
+
 def _opencode_provider_options(config: ProviderConfig) -> dict[str, object]:
     """Build OpenCode provider ``options`` including gateway ``extra_options`` (#295)."""
     options: dict[str, object] = {
@@ -92,12 +104,28 @@ def _opencode_provider_options(config: ProviderConfig) -> dict[str, object]:
     return options
 
 
+def _opencode_model_context_limit(config: ProviderConfig) -> int | None:
+    """Resolve an authoritative context window for OpenCode ``limit.context``."""
+    if config.context_limit is not None and config.context_limit > 0:
+        return config.context_limit
+    for key in ("context_limit", "context"):
+        resolved = _positive_int(config.extra_options.get(key))
+        if resolved is not None:
+            return resolved
+    return None
+
+
 def _opencode_model_entry(model_id: str, config: ProviderConfig) -> dict[str, object]:
-    """Build one OpenCode model table entry, embedding output limits when set."""
+    """Build one OpenCode model table entry.
+
+    OpenCode 1.18.x requires both ``limit.context`` and ``limit.output`` when a
+    ``limit`` object is present; emit it only when both values are known.
+    """
     entry: dict[str, object] = {"name": model_id}
-    max_tokens = config.extra_options.get("max_tokens")
-    if isinstance(max_tokens, int) and max_tokens > 0:
-        entry["limit"] = {"output": max_tokens}
+    max_tokens = _positive_int(config.extra_options.get("max_tokens"))
+    context = _opencode_model_context_limit(config)
+    if max_tokens is not None and context is not None:
+        entry["limit"] = {"context": context, "output": max_tokens}
     return entry
 
 
