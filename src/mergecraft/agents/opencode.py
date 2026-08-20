@@ -316,9 +316,9 @@ async def _prompt_session(
             base_url=base_url, session_id=session_id, text=text, model=model
         )
     model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
-    model_params = resolve_model_params_for_model(resolved_model or model_slug)
     with tracer.start_span("llm.call") as span:
         try:
+            model_params = resolve_model_params_for_model(resolved_model or model_slug)
             for key, value in request_attrs(model=model_slug, params=model_params).items():
                 span.set_attribute(key, value)
             if capture_policy is not None:

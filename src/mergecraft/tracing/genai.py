@@ -43,6 +43,7 @@ degrades to a missing row, never an exception onto the review path.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -73,6 +74,8 @@ def _optional_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
         return int(value)
     if isinstance(value, str):
         try:

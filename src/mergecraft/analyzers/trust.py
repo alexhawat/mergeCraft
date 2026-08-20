@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.utils.secrets import filter_env, is_sensitive_env_name
-from mergecraft.utils.source_resolve import resolve_git_common_dir
+from mergecraft.utils.source_resolve import is_registered_git_worktree, resolve_git_common_dir
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest, TrustTier
@@ -99,7 +99,12 @@ def build_review_source(
     # D10 / #294: detect a linked worktree of the same repo.
     cwd_common = resolve_git_common_dir(resolved_cwd)
     root_common = resolve_git_common_dir(resolved_root)
-    if cwd_common is not None and root_common is not None and cwd_common == root_common:
+    if (
+        cwd_common is not None
+        and root_common is not None
+        and cwd_common == root_common
+        and is_registered_git_worktree(resolved_cwd)
+    ):
         return ReviewSource(
             kind="local_worktree",
             path=resolved_cwd,

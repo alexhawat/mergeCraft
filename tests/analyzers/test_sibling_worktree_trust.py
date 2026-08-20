@@ -132,3 +132,14 @@ def test_local_cwd_is_trusted(tmp_path: Path) -> None:
     primary, _sibling = _setup_repo_with_worktree(tmp_path)
     tier = _derive_trust(cwd=primary, invocation_root=primary)
     assert tier == "trusted"
+
+
+def test_forged_gitfile_matching_common_dir_is_untrusted(tmp_path: Path) -> None:
+    """A forged ``.git`` file must not inherit sibling-worktree trust (#294)."""
+    primary, _sibling = _setup_repo_with_worktree(tmp_path)
+    forged = tmp_path / "forged"
+    forged.mkdir()
+    (forged / ".git").write_text(f"gitdir: {primary / '.git'}\n", encoding="utf-8")
+
+    tier = _derive_trust(cwd=forged, invocation_root=primary)
+    assert tier == "untrusted", "forged .git file must not be promoted to trusted"
