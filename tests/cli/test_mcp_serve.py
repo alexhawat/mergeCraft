@@ -80,7 +80,6 @@ def test_serves_the_toolset_for_a_named_role(tmp_path: Path, monkeypatch: Monkey
         MCP_REVIEWER_ENDPOINT,
         headers={"Authorization": f"Bearer {ctx.mcp_auth_token}"},
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        headers=_auth_headers(),
     )
     assert response.status_code == 200
     names = [entry["name"] for entry in response.json()["result"]["tools"]]
@@ -104,7 +103,6 @@ def test_served_toolset_honours_tool_classes(tmp_path: Path, monkeypatch: Monkey
         MCP_REVIEWER_ENDPOINT,
         headers=auth,
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        headers=_auth_headers(),
     ).json()["result"]["tools"]
     names = {entry["name"] for entry in listed}
     assert "push_branch" not in names
@@ -119,7 +117,6 @@ def test_served_toolset_honours_tool_classes(tmp_path: Path, monkeypatch: Monkey
             "method": "tools/call",
             "params": {"name": "push_branch", "arguments": {}},
         },
-        headers=_auth_headers(),
     ).json()
     assert "error" in rejected
 
