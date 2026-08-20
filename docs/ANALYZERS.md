@@ -13,7 +13,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `bandit` | security | python | auto | repo-native | trusted | — | — |
 | `basedpyright` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `biome` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
-| `blinter` | lint | batch | disabled | managed | trusted | — | requires non-Linux runner — Windows batch lint not supported on Linux (C6) |
+| `blinter` | lint | batch | auto | managed | trusted | — | requires non-Linux runner — Windows batch lint not supported on Linux (C6) |
 | `brakeman` | security | ruby | auto | repo-native | trusted | — | — |
 | `buf` | contract | — | auto | managed | untrusted | — | — |
 | `bundler-audit` | vuln | ruby | auto | repo-native | trusted | — | — |
@@ -27,10 +27,10 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `cppcheck` | lint | c, cpp | auto | managed | trusted | — | — |
 | `detekt` | lint | kotlin | auto | repo-native | trusted | — | — |
 | `dotenv-linter` | lint | — | disabled | managed | trusted | — | Values never printed in findings (D8). |
-| `ember-template-lint` | lint | ember | disabled | repo-native | trusted | — | — |
+| `ember-template-lint` | lint | ember | auto | repo-native | trusted | — | — |
 | `eslint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `flake8` | lint | python | disabled | repo-native | trusted | python-lint | Legacy opt-in — disabled by default; enable via config override. |
-| `fortitude` | lint | fortran | disabled | managed | trusted | — | manifest-only — Fortitude not bundled on Linux runners (C6 out of scope) |
+| `fortitude` | lint | fortran | auto | managed | trusted | — | manifest-only — Fortitude not bundled on Linux runners (C6 out of scope) |
 | `golangci-lint` | lint | go | auto | managed | trusted | go-lint | — |
 | `govulncheck` | vuln | go | auto | repo-native | trusted | — | — |
 | `hadolint` | lint | docker | auto | managed | untrusted | — | — |
@@ -39,7 +39,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `jscpd` | quality | javascript, typescript, python | auto | repo-native | trusted | — | — |
 | `knip` | quality | javascript, typescript | auto | repo-native | trusted | — | — |
 | `languagetool` | lint | text | disabled | container | trusted | — | manifest-only — LanguageTool runtime not bundled on Linux runners (C6 out of scope) |
-| `luacheck` | lint | lua | disabled | repo-native | trusted | — | — |
+| `luacheck` | lint | lua | auto | repo-native | trusted | — | — |
 | `markdownlint` | lint | markdown | auto | repo-native | trusted | — | — |
 | `mypy` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `oasdiff` | contract | — | auto | managed | untrusted | — | — |
@@ -51,17 +51,17 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `phpstan` | lint | php | auto | repo-native | trusted | — | No phpstan.neon/neon.dist → runs at --level=0 (D12). |
 | `pmd` | lint | java | auto | managed | trusted | — | — |
 | `presidio` | security | — | disabled | container | trusted | — | Container-only; high-confidence entity types only. |
-| `prisma-lint` | lint | prisma | disabled | repo-native | trusted | — | — |
-| `psscriptanalyzer` | lint | powershell | disabled | managed | trusted | — | requires non-Linux runner — Windows/macOS only (C6 out of scope) |
+| `prisma-lint` | lint | prisma | auto | repo-native | trusted | — | — |
+| `psscriptanalyzer` | lint | powershell | auto | managed | trusted | — | requires non-Linux runner — Windows/macOS only (C6 out of scope) |
 | `pylint` | lint | python | disabled | managed | trusted | python-lint | Legacy opt-in — disabled by default; enable via config override. |
 | `pyright` | lint | python | auto | repo-native | trusted | python-typecheck | — |
-| `regal` | lint | rego | disabled | managed | trusted | — | — |
+| `regal` | lint | rego | auto | managed | trusted | — | — |
 | `rubocop` | lint | ruby | auto | repo-native | trusted | ruby-lint | — |
 | `ruff` | lint | python | auto | repo-native | trusted | python-lint | — |
 | `semgrep` | security | python, javascript, typescript, go, java, ruby, rust, yaml | enabled | managed | untrusted | pattern-scanner | — |
 | `shellcheck` | lint | shell | auto | managed | untrusted | — | — |
-| `shopify-theme-check` | lint | liquid | disabled | repo-native | trusted | — | manifest-only — Shopify Theme Check not bundled on Linux runners (C6 out of scope) |
-| `smarty-lint` | lint | smarty | disabled | repo-native | trusted | — | manifest-only — Smarty Lint not bundled on Linux runners (C6 out of scope) |
+| `shopify-theme-check` | lint | liquid | auto | repo-native | trusted | — | manifest-only — Shopify Theme Check not bundled on Linux runners (C6 out of scope) |
+| `smarty-lint` | lint | smarty | auto | repo-native | trusted | — | manifest-only — Smarty Lint not bundled on Linux runners (C6 out of scope) *.tpl extension is ambiguous (Go templates, Terraform, Smarty) — enable only when .smarty-lint.json confirms Smarty intent. |
 | `sqlfluff` | lint | sql | auto | managed | trusted | — | Dialect is mandatory — skip when repo declares none. |
 | `squawk` | migration | — | auto | managed | untrusted | — | — |
 | `stylelint` | lint | css | auto | repo-native | trusted | — | — |

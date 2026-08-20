@@ -187,6 +187,37 @@ def _repo_native_plan(
                 argv_list.append("--level=0")
             argv = tuple(argv_list)
 
+    if manifest.id == "prisma-lint":
+        repo_root_resolved = repo_root.resolve()
+        prisma_config_names = (
+            ".prismalintrc",
+            ".prismalintrc.json",
+            ".prismalintrc.yaml",
+            ".prismalintrc.yml",
+            "prismalint.config.js",
+        )
+        has_prisma_config = any(
+            (repo_root_resolved / name).is_file() for name in prisma_config_names
+        )
+        if not has_prisma_config:
+            fallback_config_note = (
+                "@catalog:prisma-lint-default-rules.yml — conservative fallback ruleset"
+            )
+            version_note = _format_version_note(
+                manifest,
+                repo_tool_version=state.tool_version,
+                config_note=fallback_config_note,
+            )
+            return AnalyzerPlan(
+                manifest_id=manifest.id,
+                mode="repo-native",
+                argv=argv,
+                cwd=repo_root,
+                timeout_s=manifest.timeout_s,
+                version_note=version_note,
+                config_note=fallback_config_note,
+            )
+
     version_note = _format_version_note(
         manifest, repo_tool_version=state.tool_version, config_note=state.config_note
     )

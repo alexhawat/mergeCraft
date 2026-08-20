@@ -11,8 +11,8 @@ command:
 - '{files}'
 scope: diff
 parser: sarif
-supports_fix: false
-default_enabled: false
+supports_fix: true
+default_enabled: auto
 version: 6.0.0
 runtime: repo-native
 timeout_s: 120

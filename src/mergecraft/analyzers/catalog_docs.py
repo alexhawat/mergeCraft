@@ -427,6 +427,11 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             notes.append("Legacy opt-in — disabled by default; enable via config override.")
         if manifest.id in ("phpcs", "phpmd"):
             notes.append("Legacy opt-in — disabled by default; phpstan is the default PHP signal.")
+        if manifest.id == "smarty-lint":
+            notes.append(
+                "*.tpl extension is ambiguous (Go templates, Terraform, Smarty) — "
+                "enable only when .smarty-lint.json confirms Smarty intent."
+            )
         note_text = " ".join(notes) if notes else "—"
         lines.append(
             f"| `{manifest.id}` | {manifest.category} | {languages} | "

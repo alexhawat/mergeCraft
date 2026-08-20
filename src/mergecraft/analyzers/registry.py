@@ -11,9 +11,11 @@ from loguru import logger
 from mergecraft.analyzers.detect import (
     detect_js_linter_intent,
     has_basedpyright_config,
+    has_ember_template_lint_config,
     has_mypy_config,
     has_pyright_config,
     has_ruff_config,
+    has_shopify_theme_config,
     manifest_config_present,
 )
 from mergecraft.analyzers.manifest import (
@@ -114,6 +116,10 @@ def _auto_manifest_enabled(manifest: AnalyzerManifest, repo_root: Path) -> bool:
         return intent == manifest.id
     if manifest.id == "ast-grep":
         return has_astgrep_config(repo_root)
+    if manifest.id == "shopify-theme-check":
+        return has_shopify_theme_config(repo_root)
+    if manifest.id == "ember-template-lint":
+        return has_ember_template_lint_config(repo_root)
     return manifest_config_present(manifest.id, repo_root)
 
 

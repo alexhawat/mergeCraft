@@ -193,6 +193,40 @@ def detect_js_linter_intent(repo_root: Path) -> JsLinterIntent | None:
     return winner
 
 
+def has_shopify_theme_config(repo_root: Path) -> bool:
+    """Gate shopify-theme-check auto-enable on .theme-check.yml or theme layout dirs.
+
+    Returns True when the repo has an explicit ``.theme-check.yml`` config, or when
+    the canonical Shopify theme layout (sections/, templates/, snippets/ directories)
+    is present — indicating a Shopify theme project even without a config file.
+    """
+    repo_root = repo_root.resolve()
+    if (repo_root / ".theme-check.yml").is_file():
+        return True
+    return (
+        (repo_root / "sections").is_dir()
+        and (repo_root / "templates").is_dir()
+        and (repo_root / "snippets").is_dir()
+    )
+
+
+def has_ember_template_lint_config(repo_root: Path) -> bool:
+    """Gate ember-template-lint auto-enable on ember-cli-build.js or ember-source dep.
+
+    Returns True when the repo has ``ember-cli-build.js`` (the canonical Ember CLI
+    entry point) or when ``ember-source`` appears as a dependency in ``package.json``.
+    """
+    repo_root = repo_root.resolve()
+    if (repo_root / "ember-cli-build.js").is_file():
+        return True
+    payload = _package_json(repo_root)
+    for section in ("dependencies", "devDependencies", "optionalDependencies"):
+        deps = payload.get(section)
+        if isinstance(deps, dict) and "ember-source" in deps:
+            return True
+    return False
+
+
 def manifest_config_present(manifest_id: str, repo_root: Path) -> bool:
     """Return whether the repo declares configuration for a language-gate analyzer."""
     checks = {
@@ -393,12 +427,14 @@ __all__ = [
     "find_repo_binary",
     "has_basedpyright_config",
     "has_biome_config",
+    "has_ember_template_lint_config",
     "has_eslint_config",
     "has_mypy_config",
     "has_oxlint_config",
     "has_pyright_config",
     "has_rubocop_config",
     "has_ruff_config",
+    "has_shopify_theme_config",
     "manifest_config_present",
     "resolve_repo_tool",
 ]

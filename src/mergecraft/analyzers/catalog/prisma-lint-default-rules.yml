@@ -1,0 +1,7 @@
+# prisma-lint conservative default fallback ruleset (shipped with mergeCraft)
+# Applied when no repo-level prisma-lint config is found.
+# These rules are intentionally minimal to avoid false positives on first run.
+rules:
+  require-field-type: off
+  forbid-field-name: off
+  require-model-name: off

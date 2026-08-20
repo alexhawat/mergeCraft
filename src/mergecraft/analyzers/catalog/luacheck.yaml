@@ -12,7 +12,7 @@ command:
 scope: diff
 parser: sarif
 supports_fix: false
-default_enabled: false
+default_enabled: auto
 version: 1.2.0
 runtime: repo-native
 timeout_s: 60
