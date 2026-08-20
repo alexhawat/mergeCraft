@@ -13,18 +13,12 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from fastapi.testclient import TestClient
 
 from mergecraft.mcp.server import MCP_ENDPOINT
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
-
-_XFAIL_W12 = pytest.mark.xfail(
-    reason="green after W12: CLI single-role mount",
-    strict=False,
-)
 
 
 def _init_git_repo(tmp_path: Path) -> None:
@@ -89,7 +83,6 @@ def _is_successful_orchestrator_push(status_code: int, body: object) -> bool:
     return status_code == 200 and error is None
 
 
-@_XFAIL_W12
 def test_reviewer_role_mcp_post_push_branch_is_not_orchestrator_invocation(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -114,7 +107,6 @@ def test_reviewer_role_mcp_post_push_branch_is_not_orchestrator_invocation(
     )
 
 
-@_XFAIL_W12
 def test_verifier_role_mcp_post_push_branch_is_not_orchestrator_invocation(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

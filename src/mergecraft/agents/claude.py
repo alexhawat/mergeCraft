@@ -36,6 +36,7 @@ from mergecraft.agents.verifier import (
     VERIFIER_SYSTEM_PROMPT,
     pinned_judge_model,
 )
+from mergecraft.mcp.server import MCP_ENDPOINT, MCP_REVIEWER_ENDPOINT, MCP_VERIFIER_ENDPOINT
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -84,16 +85,36 @@ def _strip_provider_prefix(specifier: str) -> str:
     return specifier[slash + 1 :] if slash > 0 else specifier
 
 
+def _mcp_role_url(base: str, agent_id: str | None) -> str:
+    """Derive the role-specific MCP URL from the base URL and the current agent id.
+
+    Strips any existing role suffix first so this is idempotent when the
+    caller already holds a role URL.
+    """
+    for suffix in (MCP_REVIEWER_ENDPOINT, MCP_VERIFIER_ENDPOINT, MCP_ENDPOINT):
+        if base.endswith(suffix):
+            host = base[: -len(suffix)]
+            break
+    else:
+        host = base
+    if agent_id == VERIFIER_AGENT_NAME:
+        return host + MCP_VERIFIER_ENDPOINT
+    return host + MCP_REVIEWER_ENDPOINT
+
+
 def write_mcp_config(ctx: AgentRunContext) -> str:
     from mergecraft.tracing.signals import current_agent_id
 
     config_dir = Path(ctx.tmpdir) / ".claude"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "mcp.json"
-    server_entry: dict[str, Any] = {"type": "http", "url": ctx.mcp_server_url}
     # D10 (OB4) — forward the dispatch-issued agent id as a header on every
     # MCP call so the server can attribute this agent's tool.call spans.
     agent_id = current_agent_id()
+    server_entry: dict[str, Any] = {
+        "type": "http",
+        "url": _mcp_role_url(ctx.mcp_server_url, agent_id),
+    }
     if agent_id:
         server_entry["headers"] = {"X-MergeCraft-Agent-Id": agent_id}
     config_path.write_text(

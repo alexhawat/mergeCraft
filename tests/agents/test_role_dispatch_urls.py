@@ -16,10 +16,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
-import pytest
 from tests.agents.conftest import make_agent_run_context
 from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
@@ -27,10 +26,8 @@ from mergecraft.agents.shared import AgentResult
 from mergecraft.mcp.server import MCP_ENDPOINT, MCP_REVIEWER_ENDPOINT, MCP_VERIFIER_ENDPOINT
 from mergecraft.types import VERIFIER_AGENT_NAME
 
-_XFAIL_W12 = pytest.mark.xfail(
-    reason="green after W12: role MCP URL dispatch",
-    strict=False,
-)
+if TYPE_CHECKING:
+    import pytest
 
 
 def _assert_role_path(url: str, expected_path: str) -> None:
@@ -41,7 +38,6 @@ def _assert_role_path(url: str, expected_path: str) -> None:
     assert not parsed.path.endswith(MCP_ENDPOINT) or expected_path == MCP_ENDPOINT, url
 
 
-@_XFAIL_W12
 async def test_primary_reviewer_dispatch_url_ends_with_reviewer_endpoint(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -70,7 +66,6 @@ async def test_primary_reviewer_dispatch_url_ends_with_reviewer_endpoint(
     assert not url.endswith("/mcp")
 
 
-@_XFAIL_W12
 def test_verifier_dispatch_url_ends_with_verifier_endpoint(tmp_path: Path) -> None:
     """W11.1: verifier harness MCP config is ``/mcp/verifier``, not orchestrator ``/mcp``.
 

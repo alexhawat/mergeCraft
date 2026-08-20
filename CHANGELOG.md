@@ -197,6 +197,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MCP server exposes those surfaces at `/mcp/reviewer` and `/mcp/verifier`,
   mutating tools stay off both except `checkout_pr` on the reviewer, and
   finding-verdict persistence stays orchestrator-only
+- `AgentRunContext.mcp_server_url` now carries the role endpoint for the primary reviewer (`/mcp/reviewer`); `write_mcp_config` maps the current agent span to the role URL so the Claude verifier connects to `/mcp/verifier`, not the orchestrator surface (#282)
+- `build_mcp_app_for_role` with `role="reviewer"` or `role="verifier"` no longer mounts the orchestrator toolset at `/mcp`; only the role-specific path is active (#282)
 
 ### Removed
 

@@ -160,18 +160,18 @@ def build_mcp_app_for_role(
     trust_override: str | None = None,
 ) -> FastAPI:
     """Stand up an in-process MCP app for tests and tooling."""
-    _parse_role(role)
+    parsed_role = _parse_role(role)
     ctx = build_mcp_tool_context(
         cwd=cwd,
         invocation_root=invocation_root,
         trust_override=trust_override,
     )
-    orchestrator_tools = build_orchestrator_tools(ctx)
-    role_tools = {
-        "reviewer": build_reviewer_tools(ctx),
-        "verifier": build_verifier_tools(ctx),
-    }
-    return create_mcp_app(orchestrator_tools, ctx, role_tools=role_tools)
+    if parsed_role == "orchestrator":
+        orchestrator_tools = build_orchestrator_tools(ctx)
+        return create_mcp_app(orchestrator_tools, ctx)
+    if parsed_role == "reviewer":
+        return create_mcp_app([], ctx, role_tools={"reviewer": build_reviewer_tools(ctx)})
+    return create_mcp_app([], ctx, role_tools={"verifier": build_verifier_tools(ctx)})
 
 
 __all__ = [
