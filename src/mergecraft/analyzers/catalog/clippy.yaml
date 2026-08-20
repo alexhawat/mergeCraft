@@ -12,7 +12,7 @@ command:
 - --message-format=json
 - '{files}'
 scope: diff
-parser: sarif
+parser: rustc_json
 supports_fix: false
 default_enabled: auto
 version: 1.83.0

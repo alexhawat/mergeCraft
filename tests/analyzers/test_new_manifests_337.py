@@ -155,9 +155,10 @@ def test_batch_x_catalog_check_parser_skeleton_exists(tool_id: str) -> None:
     sarif = FIXTURES_DIR / "sarif" / f"{tool_id}-minimal.sarif.json"
     native_json = FIXTURES_DIR / "native" / f"{tool_id}-minimal.json"
     native_jsonl = FIXTURES_DIR / "native" / f"{tool_id}-minimal.jsonl"
-    assert sarif.is_file() or native_json.is_file() or native_jsonl.is_file(), (
-        f"{tool_id} needs a catalog-check parser skeleton under fixtures/sarif or fixtures/native"
-    )
+    native_txt = FIXTURES_DIR / "native" / f"{tool_id}-minimal.txt"
+    assert (
+        sarif.is_file() or native_json.is_file() or native_jsonl.is_file() or native_txt.is_file()
+    ), f"{tool_id} needs a catalog-check parser skeleton under fixtures/sarif or fixtures/native"
 
 
 def test_make_security_bandit_pin_is_present() -> None:

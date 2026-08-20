@@ -7,17 +7,26 @@ from typing import TYPE_CHECKING
 
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.parsers.buf_native import parse_buf_native
+from mergecraft.analyzers.parsers.bundler_audit_json import parse_bundler_audit_json
+from mergecraft.analyzers.parsers.cargo_audit_json import parse_cargo_audit_json
+from mergecraft.analyzers.parsers.cargo_deny_json import parse_cargo_deny_json
 from mergecraft.analyzers.parsers.eslint_json import parse_eslint_json
+from mergecraft.analyzers.parsers.jscpd_json import parse_jscpd_json
+from mergecraft.analyzers.parsers.knip_json import parse_knip_json
 from mergecraft.analyzers.parsers.mypy_json import parse_mypy_json
 from mergecraft.analyzers.parsers.oasdiff_json import parse_oasdiff_json
 from mergecraft.analyzers.parsers.osv_json import parse_osv_json
 from mergecraft.analyzers.parsers.pyright_json import parse_pyright_json
 from mergecraft.analyzers.parsers.ruff_json import parse_ruff_json
+from mergecraft.analyzers.parsers.rustc_json import parse_rustc_json
 from mergecraft.analyzers.parsers.sarif import parse_sarif
 from mergecraft.analyzers.parsers.shellcheck_json import parse_shellcheck_json
+from mergecraft.analyzers.parsers.sqlfluff_json import parse_sqlfluff_json
 from mergecraft.analyzers.parsers.squawk_json import parse_squawk_json
 from mergecraft.analyzers.parsers.trivy_json import parse_trivy_json
 from mergecraft.analyzers.parsers.trufflehog_jsonl import parse_trufflehog_jsonl
+from mergecraft.analyzers.parsers.tsc_pretty import parse_tsc_pretty
+from mergecraft.analyzers.parsers.vulture_text import parse_vulture_text
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,6 +48,15 @@ _PARSERS: dict[str, ParserFn] = {
     "trivy_json": parse_trivy_json,
     "trufflehog_jsonl": parse_trufflehog_jsonl,
     "shellcheck_json": parse_shellcheck_json,
+    "cargo_audit_json": parse_cargo_audit_json,
+    "cargo_deny_json": parse_cargo_deny_json,
+    "vulture_text": parse_vulture_text,
+    "tsc_pretty": parse_tsc_pretty,
+    "knip_json": parse_knip_json,
+    "jscpd_json": parse_jscpd_json,
+    "bundler_audit_json": parse_bundler_audit_json,
+    "sqlfluff_json": parse_sqlfluff_json,
+    "rustc_json": parse_rustc_json,
 }
 
 

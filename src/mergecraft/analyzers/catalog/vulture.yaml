@@ -11,7 +11,7 @@ command:
   - "60"
   - .
 scope: repo
-parser: sarif
+parser: vulture_text
 supports_fix: false
 default_enabled: auto
 version: "2.14"
@@ -19,9 +19,7 @@ runtime: repo-native
 timeout_s: 120
 trust: trusted
 severity_map:
-  error: Major
   warning: Minor
-  note: Trivial
 provenance: {}
 network_allowlist: []
 exclusive_group: null

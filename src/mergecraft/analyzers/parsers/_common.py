@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import unquote, urlparse
 
 from mergecraft.analyzers.manifest import ManifestValidationError
 from mergecraft.review_taxonomy import FINDING_CATEGORIES
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
 _MANIFEST_CATEGORY_TO_TAXONOMY: dict[str, str] = {
@@ -98,6 +101,55 @@ def resolve_repo_relative_path(
     if cleaned.startswith("./"):
         return cleaned[2:]
     return cleaned
+
+
+def try_load_json(raw: str) -> object | None:
+    """Return the first JSON value in ``raw``, or ``None`` when none parse."""
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(raw):
+        if char not in "{[":
+            continue
+        try:
+            payload, _end = decoder.raw_decode(raw, index)
+        except json.JSONDecodeError:
+            continue
+        return cast("object", payload)  # json.JSONDecoder.raw_decode is typed Any
+    stripped = raw.strip()
+    if not stripped:
+        return None
+    try:
+        return cast("object", json.loads(stripped))  # json.loads is typed Any
+    except json.JSONDecodeError:
+        return None
+
+
+def iter_json_objects(raw: str) -> Iterator[dict[str, Any]]:
+    """Yield JSON objects from JSONL (or a single object/array) without raising."""
+    stripped = raw.strip()
+    if not stripped:
+        return
+    yielded = False
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line[0] != "{":
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            yielded = True
+            yield item
+    if yielded:
+        return
+    loaded = try_load_json(stripped)
+    if isinstance(loaded, dict):
+        yield loaded
+        return
+    if isinstance(loaded, list):
+        for item in loaded:
+            if isinstance(item, dict):
+                yield item
 
 
 def coerce_line(value: object, *, default: int = 1) -> int:

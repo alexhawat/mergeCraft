@@ -9,9 +9,9 @@ command:
 - bundle
 - audit
 - --format
-- sarif
+- json
 scope: repo
-parser: sarif
+parser: bundler_audit_json
 supports_fix: false
 default_enabled: auto
 version: "0.9.2"
@@ -21,7 +21,6 @@ trust: trusted
 severity_map:
   error: Major
   warning: Minor
-  note: Trivial
 provenance: {}
 network_allowlist:
 - "https://rubysec.com"

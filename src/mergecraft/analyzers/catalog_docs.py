@@ -44,6 +44,7 @@ def _fixture_candidates(manifest_id: str) -> tuple[Path, ...]:
         _DEFAULT_FIXTURE_ROOT / "sarif" / f"{manifest_id}-minimal.sarif.json",
         _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.json",
         _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.jsonl",
+        _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.txt",
         _DEFAULT_FIXTURE_ROOT / "agentsec" / f"{manifest_id}-minimal.yaml",
     )
 
@@ -63,6 +64,7 @@ def manifest_has_fixture(
             Path("sarif") / f"{manifest.id}-minimal.sarif.json",
             Path("native") / f"{manifest.id}-minimal.json",
             Path("native") / f"{manifest.id}-minimal.jsonl",
+            Path("native") / f"{manifest.id}-minimal.txt",
         )
     )
 

@@ -369,8 +369,33 @@ def run_adapter(
         config_note = plan.config_note or f"ruleset: {ruleset.name} ({ruleset.source})"
         plan = replace(plan, env=augment_pattern_env(dict(plan.env), scratch_dir=scratch_dir))
 
+    if tool_id == "jscpd" and plan.argv:
+        # JsonReporter writes ``<output>/jscpd-report.json`` rather than stdout.
+        plan = replace(
+            plan,
+            argv=(plan.argv[0], "--output", str(scratch_dir), *plan.argv[1:]),
+        )
+
     outcome = run_plan(plan, sandbox_context=sandbox_context)
-    if not outcome.ran or outcome.output_path is None:
+    if not outcome.ran:
+        reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
+        return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
+
+    if outcome.output_path is None and tool_id == "jscpd":
+        report = scratch_dir / "jscpd-report.json"
+        if report.is_file():
+            findings = parse_output(
+                report.read_text(encoding="utf-8"),
+                manifest=manifest,
+                repo_root=repo_root,
+            )
+            return AdapterRunResult(
+                findings=_normalize_paths(findings, repo_root=repo_root),
+                version_note=plan.version_note,
+                config_note=config_note,
+            )
+
+    if outcome.output_path is None:
         reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
@@ -387,6 +412,14 @@ def run_adapter(
         )
         if not findings and outcome.output.strip():
             findings = parse_output(outcome.output, manifest=manifest, repo_root=repo_root)
+        if tool_id == "jscpd" and not findings:
+            report = scratch_dir / "jscpd-report.json"
+            if report.is_file():
+                findings = parse_output(
+                    report.read_text(encoding="utf-8"),
+                    manifest=manifest,
+                    repo_root=repo_root,
+                )
     except (ValueError, KeyError) as exc:
         # Classify the failure: empty output means the analyzer never produced
         # anything (sandbox unavailable outside CI), not that it emitted garbage
