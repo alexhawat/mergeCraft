@@ -425,6 +425,8 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             notes.append("No phpstan.neon/neon.dist → runs at --level=0 (D12).")
         if manifest.id in ("flake8", "pylint"):
             notes.append("Legacy opt-in — disabled by default; enable via config override.")
+        if manifest.id in ("phpcs", "phpmd"):
+            notes.append("Legacy opt-in — disabled by default; phpstan is the default PHP signal.")
         note_text = " ".join(notes) if notes else "—"
         lines.append(
             f"| `{manifest.id}` | {manifest.category} | {languages} | "
