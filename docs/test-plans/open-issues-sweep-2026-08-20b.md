@@ -102,3 +102,43 @@ Authoring wave: **W5** (Batch BC RED) · Implementation: **W6** (#374 parent con
 - ``make lint`` + ``make typecheck`` clean on touched paths
 - Batch BC test xfails (**FAIL**, not XPASS)
 - No ``src/`` edits; D6 honoured
+
+---
+
+## Batch BD (#375)
+
+Authoring wave: **W7** (Batch BD RED) · Implementation: **W8** (#375 usage + system + response.model)
+
+### xfail schedule
+
+| Wave | Test | Marker reason | Status |
+|------|------|---------------|--------|
+| **W8** | `test_opencode_llm_call_stamps_gen_ai_identity_when_usage_reported` | `green after W8: #375 llm.call gen_ai usage + identity (opencode HTTP)` | pending — **FAIL** (no ``gen_ai.system`` on llm.call) |
+| **W8** | `test_opencode_llm_call_marks_usage_unavailable_when_provider_reports_none` | `green after W8: #375 llm.call explicit usage unavailable marker (opencode HTTP)` | pending — **FAIL** (silent omit today) |
+| **W8** | `test_claude_streaming_llm_call_stamps_gen_ai_system_on_llm_span` | `green after W8: #375 llm.call gen_ai.system on llm span (claude stream)` | pending — **FAIL** (``gen_ai.system`` on parent only) |
+| **W8** | `test_model_chain_llm_call_stamps_gen_ai_system_when_usage_reported` | `green after W8: #375 llm.call gen_ai.system on chain-level llm.call` | pending — **FAIL** (no ``gen_ai.system`` on chain llm.call) |
+| **W8** | `test_model_chain_llm_call_marks_usage_unavailable_when_no_usage` | `green after W8: #375 llm.call explicit usage unavailable marker (chain)` | pending — **FAIL** (silent omit today) |
+
+### Contract matrix
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| BD375a | Provider-reported usage → ``gen_ai.usage.input_tokens`` / ``output_tokens`` on ``llm.call`` | integration | happy — OpenCode HTTP + chain | `tests/tracing/instrumentation/test_llm_call_genai_usage_identity.py::test_opencode_llm_call_stamps_gen_ai_identity_when_usage_reported`, `test_model_chain_llm_call_stamps_gen_ai_system_when_usage_reported` |
+| BD375b | ``gen_ai.system`` on the ``llm.call`` span itself (not only ``provider.call`` parent) | integration | happy — OpenCode / Claude stream / chain | same file (all usage-reported tests) |
+| BD375c | ``gen_ai.response.model`` when the provider reports an executed model | integration | happy — Claude stream | `test_claude_streaming_llm_call_stamps_gen_ai_system_on_llm_span` |
+| BD375d | No usage → ``mergecraft.usage.unavailable=True`` (explicit marker, not silent omit) | integration | edge — OpenCode HTTP + chain ``usage=None`` | `test_opencode_llm_call_marks_usage_unavailable_when_provider_reports_none`, `test_model_chain_llm_call_marks_usage_unavailable_when_no_usage` |
+| BD375e | Reuse ``usage_attrs`` / ``response_attrs`` — no second schema (D12) | unit | out of W7 scope — W8 impl | — |
+
+### W7 notes
+
+- **Issue #375:** Logfire grouped queries return NULL for ``gen_ai.system`` / usage on ``llm.call`` because close sites omit them or stamp only on parent spans.
+- **Unavailable marker:** ``mergecraft.usage.unavailable=True`` (convention 6 — no stable OTel GenAI name). Distinguishes "provider reported none" from "not instrumented".
+- **D7/D12:** Batch BD starts after BA (#372) on branch; no 20c #370 economics or ``_optional_float`` edits.
+- **Driver parity:** W8 audits claude / codex / gemini / opencode; W7 pins OpenCode HTTP, Claude stream, and chain-level ``llm.call`` surfaces.
+
+### Acceptance (W7)
+
+- New tests collect with zero import errors
+- ``make lint`` + ``make typecheck`` clean on touched paths
+- All five Batch BD tests xfail (**FAIL**, not XPASS)
+- No ``src/`` edits; D6 honoured
