@@ -481,37 +481,21 @@ def test_second_tier_and_non_catalog_depth_are_not_added(tool_id: str) -> None:
 # --- W17 #325-#327 Make / Markdown / Terraform ---
 
 
-@pytest.mark.xfail(
-    reason="green after W17: checkmake default_enabled auto (#325)",
-    strict=False,
-)
 def test_checkmake_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("checkmake")
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W17: checkmake auto on Makefile (#325)",
-    strict=False,
-)
 def test_checkmake_auto_enables_on_makefile() -> None:
     repo = BATCH_Y_FIXTURES / "make"
     assert "checkmake" in _enabled_ids(repo, ["Makefile"])
 
 
-@pytest.mark.xfail(
-    reason="green after W17: markdownlint default_enabled auto (#326)",
-    strict=False,
-)
 def test_markdownlint_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("markdownlint")
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W17: markdownlint auto on *.md (#326)",
-    strict=False,
-)
 def test_markdownlint_auto_enables_on_markdown_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "markdown"
     assert "markdownlint" in _enabled_ids(repo, ["README.md"])
@@ -525,38 +509,22 @@ def test_tflint_and_checkov_already_detect_tf() -> None:
     assert registry.filter_changed_files_for_manifest(checkov, ["main.tf"]) == ["main.tf"]
 
 
-@pytest.mark.xfail(
-    reason="green after W17: tflint default_enabled auto (#327)",
-    strict=False,
-)
 def test_tflint_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("tflint")
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W17: checkov default_enabled auto (#327)",
-    strict=False,
-)
 def test_checkov_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("checkov")
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W17: tflint auto on *.tf (#327)",
-    strict=False,
-)
 def test_tflint_auto_enables_on_terraform_fixture() -> None:
     """Both IaC tools must auto-enable; split `iac-scanner` if it collapses them."""
     repo = BATCH_Y_FIXTURES / "terraform"
     assert "tflint" in _enabled_ids(repo, ["main.tf"])
 
 
-@pytest.mark.xfail(
-    reason="green after W17: checkov auto on *.tf (#327)",
-    strict=False,
-)
 def test_checkov_auto_enables_on_terraform_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "terraform"
     assert "checkov" in _enabled_ids(repo, ["main.tf"])
