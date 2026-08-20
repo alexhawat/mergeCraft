@@ -55,8 +55,8 @@ def _advisory_finding(
         confidence=map_confidence(None),
         message=title,
         path=path,
-        start_line=1,
-        end_line=1,
+        start_line=None,
+        end_line=None,
         source="analyzer",
         evidence=evidence,
     )

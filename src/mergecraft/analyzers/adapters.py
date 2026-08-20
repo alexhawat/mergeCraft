@@ -396,6 +396,14 @@ def run_adapter(
             outcome = replace(outcome, output_path=str(report))
 
     if outcome.output_path is None:
+        # Empty stdout after a real run is a clean pass (tsc --noEmit, clippy
+        # with no diagnostics). Only a never-executed plan is unavailable.
+        if outcome.exit_code == 0 or outcome.status == "passed":
+            return AdapterRunResult(
+                findings=[],
+                version_note=plan.version_note,
+                config_note=config_note,
+            )
         reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
