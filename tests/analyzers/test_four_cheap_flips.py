@@ -10,10 +10,6 @@ from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, import_module
 
 FOUR_CHEAP_FLIPS: tuple[str, ...] = ("golangci-lint", "clippy", "rubocop", "phpstan")
 BATCH_W_FIXTURES = FIXTURES_DIR / "batch-w"
-_XFAIL_AUTO = pytest.mark.xfail(
-    reason="green after W2: four cheap flips default_enabled auto",
-    strict=False,
-)
 
 # W1.1 language markers. A wrong detect block fails here before the W2 flip.
 _LANGUAGE_DETECT_PATHS: tuple[tuple[str, str], ...] = (
@@ -111,14 +107,12 @@ def test_four_cheap_flips_declare_timeout(tool_id: str) -> None:
     assert manifest.timeout_s > 0
 
 
-@_XFAIL_AUTO
 @pytest.mark.parametrize("tool_id", FOUR_CHEAP_FLIPS)
 def test_four_cheap_flips_default_enabled_auto(tool_id: str) -> None:
     manifest = _registry().get_manifest(tool_id)
     assert manifest.default_enabled == "auto"
 
 
-@_XFAIL_AUTO
 @pytest.mark.parametrize(("tool_id", "repo", "changed"), _AUTO_DETECT_CASES)
 def test_four_cheap_flips_auto_enables_on_language_markers(
     tool_id: str, repo: Path, changed: list[str]
@@ -133,14 +127,12 @@ def test_empty_changed_files_do_not_enable_four_cheap_flips() -> None:
 
 
 @pytest.mark.parametrize("config_name", _RUBOCOP_CONFIG_NAMES)
-@_XFAIL_AUTO
 def test_rubocop_auto_fires_when_config_is_present(tmp_path: Path, config_name: str) -> None:
     (tmp_path / config_name).write_text("AllCops:\n  NewCops: enable\n", encoding="utf-8")
     (tmp_path / "hello.rb").write_text("puts 1\n", encoding="utf-8")
     assert "rubocop" in _enabled_ids(tmp_path, ["hello.rb"])
 
 
-@_XFAIL_AUTO
 def test_rubocop_auto_fires_when_gemfile_declares_rubocop(tmp_path: Path) -> None:
     (tmp_path / "Gemfile").write_text(
         'source "https://rubygems.org"\n\ngem "rubocop"\n',
@@ -182,7 +174,6 @@ def test_phpstan_neon_globs_match_before_flip() -> None:
         assert registry.filter_changed_files_for_manifest(manifest, [changed]) == [changed]
 
 
-@pytest.mark.xfail(reason="green after W2: phpstan --level=0 without neon (D12)", strict=False)
 def test_phpstan_without_neon_runs_at_level_zero(tmp_path: Path) -> None:
     resolve = import_module("mergecraft.analyzers.resolve")
     (tmp_path / "composer.json").write_text("{}\n", encoding="utf-8")
