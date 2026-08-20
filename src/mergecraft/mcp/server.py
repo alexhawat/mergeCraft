@@ -75,6 +75,7 @@ from mergecraft.mcp.select_mode import select_mode_tool
 from mergecraft.mcp.shared import (
     PRIMARY_MUTATING_ALLOWLIST,
     PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES,
+    READONLY_MUTATING_ALLOWLIST,
     VERIFIER_ALLOWED_TOOL_CLASSES,
     JsonSchema,
     ToolClass,
@@ -165,10 +166,13 @@ def _filter_tools_by_class(
     tools: list[ToolSpec],
     allowed: frozenset[ToolClass],
     *,
-    mutating_allowlist: frozenset[str] | None = None,
+    mutating_allowlist: frozenset[str] = READONLY_MUTATING_ALLOWLIST,
 ) -> list[ToolSpec]:
-    kwargs = {} if mutating_allowlist is None else {"mutating_allowlist": mutating_allowlist}
-    filtered = [spec for spec in tools if admits_readonly_role(spec, allowed, **kwargs)]
+    filtered = [
+        spec
+        for spec in tools
+        if admits_readonly_role(spec, allowed, mutating_allowlist=mutating_allowlist)
+    ]
     if not filtered:
         msg = "class filter yielded an empty toolset"
         raise RuntimeError(msg)
@@ -640,6 +644,9 @@ def create_mcp_app(
     ``role_tools`` mounts extra class-filtered surfaces at ``{MCP_ENDPOINT}/{role}``
     (the reviewer lives at ``MCP_REVIEWER_ENDPOINT``, the verifier at
     ``MCP_VERIFIER_ENDPOINT``). The primary endpoint stays the orchestrator set.
+
+    When ``tools`` is empty or ``None``, the ``/mcp`` primary endpoint is omitted
+    and only ``/health`` and any ``role_tools`` routes are registered.
     """
     app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.1.0")
 

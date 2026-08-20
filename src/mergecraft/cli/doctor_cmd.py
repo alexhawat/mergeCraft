@@ -16,7 +16,7 @@ from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
-from mergecraft.mcp.server import _port_available
+from mergecraft.mcp.server import _port_available, _read_env_port
 from mergecraft.models import MODEL_ALIASES
 from mergecraft.utils.agent_resolve import has_credentials_for_slug
 
@@ -127,14 +127,11 @@ def _config_probe(cwd: Path) -> ProbeResult:
 
 
 def _mcp_probe() -> ProbeResult:
-    env_port_raw = os.environ.get("MERGECRAFT_MCP_PORT")
-    if env_port_raw:
-        try:
-            port = int(env_port_raw)
-        except ValueError:
-            return ProbeResult(
-                "mcp", "warn", f"MERGECRAFT_MCP_PORT={env_port_raw!r} is not a valid integer"
-            )
+    try:
+        port = _read_env_port()
+    except ValueError as exc:
+        return ProbeResult("mcp", "warn", str(exc))
+    if port is not None:
         if _port_available(port):
             return ProbeResult("mcp", "ok", f"MERGECRAFT_MCP_PORT={port} is available")
         return ProbeResult("mcp", "warn", f"MERGECRAFT_MCP_PORT={port} is already in use")

@@ -28,7 +28,7 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
-    mcp_auth_headers,
+    mcp_http_server_entry,
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import (
@@ -37,7 +37,6 @@ from mergecraft.agents.verifier import (
     VERIFIER_SYSTEM_PROMPT,
     pinned_judge_model,
 )
-from mergecraft.mcp.endpoints import mcp_role_url as _mcp_role_url
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -70,9 +69,8 @@ if TYPE_CHECKING:
     from mergecraft.tracing.tracer import Tracer
 
 CLAUDE_EXEC_TOOLS = ("Bash", "Monitor", "REPL", "Workflow")
-CLAUDE_DISALLOWED_TOOLS = ",".join(
-    [*CLAUDE_EXEC_TOOLS, *[f"Agent({t})" for t in CLAUDE_EXEC_TOOLS]]
-)
+CLAUDE_EXEC_TOOL_DENY_RULES = [*CLAUDE_EXEC_TOOLS, *[f"Agent({t})" for t in CLAUDE_EXEC_TOOLS]]
+CLAUDE_DISALLOWED_TOOLS = ",".join(CLAUDE_EXEC_TOOL_DENY_RULES)
 # O4 (OB3) — the effort level passed as ``--effort`` is the one request
 # parameter the claude harness exposes; the constant keeps the CLI flag and
 # the span attribute (``mergecraft.reasoning_effort``) from drifting apart.
@@ -93,15 +91,7 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     # D10 (OB4) — forward the dispatch-issued agent id as a header on every
     # MCP call so the server can attribute this agent's tool.call spans.
     agent_id = current_agent_id()
-    server_entry: dict[str, Any] = {
-        "type": "http",
-        "url": _mcp_role_url(ctx.mcp_server_url, agent_id),
-    }
-    headers: dict[str, str] = {**mcp_auth_headers(ctx)}
-    if agent_id:
-        headers["X-MergeCraft-Agent-Id"] = agent_id
-    if headers:
-        server_entry["headers"] = headers
+    server_entry = mcp_http_server_entry(ctx, agent_id)
     config_path.write_text(
         json.dumps(
             {

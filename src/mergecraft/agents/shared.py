@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 from loguru import logger
 
+from mergecraft.mcp.endpoints import mcp_role_url as _mcp_role_url
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
 
@@ -202,6 +204,24 @@ def mcp_auth_headers(ctx: AgentRunContext) -> dict[str, str]:
     if ctx.mcp_auth_token:
         return {"Authorization": f"Bearer {ctx.mcp_auth_token}"}
     return {}
+
+
+def mcp_http_server_entry(ctx: AgentRunContext, agent_id: str | None) -> dict[str, Any]:
+    """Build the ``type: http`` MCP server entry for agent drivers (D10/OB4).
+
+    Merges auth headers with the optional agent-id attribution header and
+    attaches the role-specific URL derived from ``ctx.mcp_server_url``.
+    """
+    entry: dict[str, Any] = {
+        "type": "http",
+        "url": _mcp_role_url(ctx.mcp_server_url, agent_id),
+    }
+    headers: dict[str, str] = {**mcp_auth_headers(ctx)}
+    if agent_id:
+        headers["X-MergeCraft-Agent-Id"] = agent_id
+    if headers:
+        entry["headers"] = headers
+    return entry
 
 
 def payload_shell_mode(ctx: AgentRunContext) -> str:
