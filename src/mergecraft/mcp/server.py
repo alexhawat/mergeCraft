@@ -62,8 +62,8 @@ from mergecraft.mcp.ports import (
     MCP_HOST as MCP_HOST,
 )
 from mergecraft.mcp.ports import (
-    _port_available,
-    _select_port,
+    port_available,
+    select_port,
 )
 from mergecraft.mcp.pr import (
     close_pull_request_tool,
@@ -195,9 +195,8 @@ def build_reviewer_tools(
     the default procedure), and ``report_progress`` (no-action path).
     REVIEW_WRITE class is shared by several tools so class membership alone would
     leak review-write tools to the reviewer; the named allowlist stays the sole
-    gate for D9 publication.  Subagents call ``_filter_tools_by_class`` with the
-    default ``READONLY_MUTATING_ALLOWLIST`` so they remain denied publication
-    regardless of class.
+    gate for D9 publication.  Subagents are denied publication via
+    ``gates.subagent_denied_tool_names`` regardless of class.
     """
     return _filter_tools_by_class(
         build_orchestrator_tools(ctx, output_schema),
@@ -686,7 +685,7 @@ def start_mcp_http_server(
         role_tools={"reviewer": reviewer_tools, "verifier": verifier_tools},
         auth_token=run_token,
     )
-    port = _select_port()
+    port = select_port()
     http_config = uvicorn.Config(
         app,
         host=MCP_HOST,
@@ -701,7 +700,7 @@ def start_mcp_http_server(
         if getattr(server, "started", False):
             break
         # uvicorn sets started after startup; also probe the port
-        if not _port_available(port):
+        if not port_available(port):
             # port is in use by our server (or something) — good enough after thread start
             try:
                 with socket.create_connection((MCP_HOST, port), timeout=0.1):

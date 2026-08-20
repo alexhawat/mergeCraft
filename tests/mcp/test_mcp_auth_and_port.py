@@ -1,11 +1,10 @@
-"""#283 / D15: per-run bearer (or Unix socket) + unguessable loopback port.
+"""#283 / D15: per-run bearer + unguessable loopback port.
 
-``tools/call`` and ``tools/list`` currently accept unauthenticated loopback
-POSTs. Port allocation is ``MCP_PORT_START + randint(0, 49)`` (then a 100-wide
-scan). W14 issues a per-run secret at MCP startup, rejects unauthenticated
-``tools/list`` + ``tools/call`` (HTTP 401 or JSON-RPC ``-32600``), keeps
-loopback, and replaces the 3764-band scan with ``bind(0)`` or
-``secrets.randbelow`` over the ephemeral range.
+``tools/call`` and ``tools/list`` require a per-run Bearer token (D15).
+W14 issues the token at MCP startup, rejects unauthenticated ``tools/list``
+and ``tools/call`` (HTTP 401 or JSON-RPC ``-32600``), keeps loopback, and
+uses ``bind(0)`` (or ``secrets.randbelow`` over the ephemeral range) instead
+of a fixed-base scan.
 
 ``/health`` may stay unauthenticated. ``x-mergecraft-agent-id`` is
 tracing-only — it is **not** the credential. ``MERGECRAFT_MCP_PORT`` stays.
@@ -28,10 +27,10 @@ from mergecraft.mcp.context import (
     ResolvedPayload,
     ToolContext,
 )
+from mergecraft.mcp.ports import select_port
 from mergecraft.mcp.server import (
     MCP_ENDPOINT,
     MCP_HOST,
-    _select_port,
     start_mcp_http_server,
 )
 from mergecraft.mcp.tool_state import init_tool_state
@@ -176,7 +175,7 @@ def test_health_stays_unauthenticated(tmp_path: Path) -> None:
 
 def test_select_port_is_not_3764_plus_fifty_wide_scan() -> None:
     """W11.4: allocator is not ``3764 + offset ∈ [0, 49]``."""
-    src = inspect.getsource(_select_port)
+    src = inspect.getsource(select_port)
     assert "randint(0, 49)" not in src
     assert "randrange(50)" not in src
     uses_ephemeral = (
@@ -186,7 +185,7 @@ def test_select_port_is_not_3764_plus_fifty_wide_scan() -> None:
         or "randbelow" in src
     )
     assert uses_ephemeral, (
-        "_select_port must use bind(0) or secrets.randbelow over the ephemeral "
+        "select_port must use bind(0) or secrets.randbelow over the ephemeral "
         f"range; source was:\n{src}"
     )
     assert "MCP_PORT_START" not in src or "MERGECRAFT_MCP_PORT" in src
@@ -196,11 +195,11 @@ def test_mergecraft_mcp_port_override_still_honored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """D15 control: explicit ``MERGECRAFT_MCP_PORT`` still wins when free."""
-    from mergecraft.mcp import server as server_mod
+    import mergecraft.mcp.ports as ports_mod
 
     monkeypatch.setenv("MERGECRAFT_MCP_PORT", "41234")
-    monkeypatch.setattr(server_mod, "_port_available", lambda _port: True)
-    assert _select_port() == 41234
+    monkeypatch.setattr(ports_mod, "port_available", lambda _port: True)
+    assert select_port() == 41234
 
 
 def test_started_server_port_is_loopback_and_not_the_3764_band(tmp_path: Path) -> None:
@@ -212,7 +211,7 @@ def test_started_server_port_is_loopback_and_not_the_3764_band(tmp_path: Path) -
         assert parsed.hostname == MCP_HOST
         assert parsed.port is not None
         band = set(range(3764, 3764 + 50))
-        src = inspect.getsource(_select_port)
+        src = inspect.getsource(select_port)
         if "randint(0, 49)" in src:
             pytest.fail("port allocator still scans 3764 + offset in [0, 49]")
         # bind(0) may coincidentally land in-band; the source pin above is the

@@ -16,7 +16,7 @@ from mergecraft.cli.mcp_serve import (
 )
 from mergecraft.cli.profiles import apply_profile_env, resolve_profile
 from mergecraft.config.settings import parse_cli_trust_override
-from mergecraft.mcp.ports import MCP_HOST, _read_env_port, _select_port
+from mergecraft.mcp.ports import MCP_HOST, read_env_port, select_port
 
 app = typer.Typer(
     name="mcp",
@@ -118,7 +118,7 @@ def serve_cmd(
         except ValueError as exc:
             _bail(str(exc))
 
-        listen_port = port if port is not None else _read_env_port() or _select_port()
+        listen_port = port if port is not None else read_env_port() or select_port()
         endpoint = _role_endpoint(
             role.strip().lower()  # type: ignore[arg-type]  # — role.strip().lower() is str; callee expects Literal["orchestrator","reviewer","verifier"]
             if role.strip().lower() in {"orchestrator", "reviewer", "verifier"}
