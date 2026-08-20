@@ -37,6 +37,14 @@ _BIOME_CONFIG_NAMES = ("biome.json", "biome.jsonc")
 _OXLINT_CONFIG_NAMES = (".oxlintrc.json", "oxlint.json")
 _RUBOCOP_CONFIG_NAMES = (".rubocop.yml", ".rubocop.yaml", ".rubocop.yml.dist")
 _RUBOCOP_GEM_RE = re.compile(r"""gem\s+["']rubocop["']""")
+_PHPSTAN_NEON_NAMES = ("phpstan.neon", "phpstan.neon.dist")
+_PRISMA_LINT_CONFIG_NAMES = (
+    ".prismalintrc",
+    ".prismalintrc.json",
+    ".prismalintrc.yaml",
+    ".prismalintrc.yml",
+    "prismalint.config.js",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +133,18 @@ def has_rubocop_config(repo_root: Path) -> bool:
     if gemfile.is_file():
         return bool(_RUBOCOP_GEM_RE.search(_read_text(gemfile)))
     return False
+
+
+def has_phpstan_config(repo_root: Path) -> bool:
+    """Return True when a phpstan.neon or phpstan.neon.dist config file is present."""
+    repo_root = repo_root.resolve()
+    return any((repo_root / name).is_file() for name in _PHPSTAN_NEON_NAMES)
+
+
+def has_prisma_lint_config(repo_root: Path) -> bool:
+    """Return True when a project-level prisma-lint config file is present."""
+    repo_root = repo_root.resolve()
+    return any((repo_root / name).is_file() for name in _PRISMA_LINT_CONFIG_NAMES)
 
 
 def _package_json(repo_root: Path) -> dict[str, object]:
@@ -219,12 +239,7 @@ def has_ember_template_lint_config(repo_root: Path) -> bool:
     repo_root = repo_root.resolve()
     if (repo_root / "ember-cli-build.js").is_file():
         return True
-    payload = _package_json(repo_root)
-    for section in ("dependencies", "devDependencies", "optionalDependencies"):
-        deps = payload.get(section)
-        if isinstance(deps, dict) and "ember-source" in deps:
-            return True
-    return False
+    return _dependency_mentions_tool(repo_root, "ember-source")
 
 
 def manifest_config_present(manifest_id: str, repo_root: Path) -> bool:
@@ -238,6 +253,8 @@ def manifest_config_present(manifest_id: str, repo_root: Path) -> bool:
         "biome": has_biome_config,
         "oxlint": has_oxlint_config,
         "rubocop": has_rubocop_config,
+        "shopify-theme-check": has_shopify_theme_config,
+        "ember-template-lint": has_ember_template_lint_config,
     }
     check = checks.get(manifest_id)
     if check is None:
@@ -431,6 +448,8 @@ __all__ = [
     "has_eslint_config",
     "has_mypy_config",
     "has_oxlint_config",
+    "has_phpstan_config",
+    "has_prisma_lint_config",
     "has_pyright_config",
     "has_rubocop_config",
     "has_ruff_config",

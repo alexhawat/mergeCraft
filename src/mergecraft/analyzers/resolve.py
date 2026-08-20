@@ -7,7 +7,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from mergecraft.analyzers.detect import _eslint_command_prefix, resolve_repo_tool
+from mergecraft.analyzers.detect import (
+    _eslint_command_prefix,
+    has_phpstan_config,
+    has_prisma_lint_config,
+    resolve_repo_tool,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -158,6 +163,39 @@ def _detect_repo_tool_state(
     )
 
 
+_PRISMA_LINT_FALLBACK_NOTE = (
+    "@catalog:prisma-lint-default-rules.yml — conservative fallback ruleset"
+)
+
+
+def _apply_config_absent_patches(
+    manifest_id: str, repo_root: Path, argv: tuple[str, ...]
+) -> tuple[tuple[str, ...], str | None]:
+    """Return (patched_argv, override_config_note) for tools with config-presence defaults.
+
+    Returns the original argv and ``None`` when no patch applies or the tool's
+    config is present.  The override_config_note replaces ``state.config_note``
+    only when a non-``None`` value is returned.
+    """
+    if manifest_id == "phpstan" and not has_phpstan_config(repo_root):
+        argv_list = list(argv)
+        if FILES_TOKEN in argv_list:
+            argv_list.insert(argv_list.index(FILES_TOKEN), "--level=0")
+        else:
+            argv_list.append("--level=0")
+        return tuple(argv_list), None
+    if manifest_id == "prisma-lint" and not has_prisma_lint_config(repo_root):
+        fallback = str(_CATALOG_DIR / "prisma-lint-default-rules.yml")
+        argv_list = list(argv)
+        if FILES_TOKEN in argv_list:
+            idx = argv_list.index(FILES_TOKEN)
+            argv_list[idx:idx] = ["--config", fallback]
+        else:
+            argv_list.extend(["--config", fallback])
+        return tuple(argv_list), _PRISMA_LINT_FALLBACK_NOTE
+    return argv, None
+
+
 def _repo_native_plan(
     manifest: AnalyzerManifest, repo_root: Path, state: _RepoToolState
 ) -> AnalyzerPlan | None:
@@ -174,52 +212,11 @@ def _repo_native_plan(
     elif state.tool_path and argv and argv[0] == _repo_tool_binary(manifest):
         argv = (state.tool_path, *argv[1:])
 
-    if manifest.id == "phpstan":
-        repo_root_resolved = repo_root.resolve()
-        neon_present = (repo_root_resolved / "phpstan.neon").is_file() or (
-            repo_root_resolved / "phpstan.neon.dist"
-        ).is_file()
-        if not neon_present:
-            argv_list = list(argv)
-            if FILES_TOKEN in argv_list:
-                argv_list.insert(argv_list.index(FILES_TOKEN), "--level=0")
-            else:
-                argv_list.append("--level=0")
-            argv = tuple(argv_list)
-
-    if manifest.id == "prisma-lint":
-        repo_root_resolved = repo_root.resolve()
-        prisma_config_names = (
-            ".prismalintrc",
-            ".prismalintrc.json",
-            ".prismalintrc.yaml",
-            ".prismalintrc.yml",
-            "prismalint.config.js",
-        )
-        has_prisma_config = any(
-            (repo_root_resolved / name).is_file() for name in prisma_config_names
-        )
-        if not has_prisma_config:
-            fallback_config_note = (
-                "@catalog:prisma-lint-default-rules.yml — conservative fallback ruleset"
-            )
-            version_note = _format_version_note(
-                manifest,
-                repo_tool_version=state.tool_version,
-                config_note=fallback_config_note,
-            )
-            return AnalyzerPlan(
-                manifest_id=manifest.id,
-                mode="repo-native",
-                argv=argv,
-                cwd=repo_root,
-                timeout_s=manifest.timeout_s,
-                version_note=version_note,
-                config_note=fallback_config_note,
-            )
+    argv, patch_note = _apply_config_absent_patches(manifest.id, repo_root, argv)
+    config_note = patch_note if patch_note is not None else state.config_note
 
     version_note = _format_version_note(
-        manifest, repo_tool_version=state.tool_version, config_note=state.config_note
+        manifest, repo_tool_version=state.tool_version, config_note=config_note
     )
     return AnalyzerPlan(
         manifest_id=manifest.id,
@@ -228,7 +225,7 @@ def _repo_native_plan(
         cwd=repo_root,
         timeout_s=manifest.timeout_s,
         version_note=version_note,
-        config_note=state.config_note,
+        config_note=config_note,
     )
 
 
