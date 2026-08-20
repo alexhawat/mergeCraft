@@ -83,21 +83,6 @@ def _declared_unavailable_plan(manifest: AnalyzerManifest) -> AnalyzerPlan | Non
     )
 
 
-def _rubocop_config_gate(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
-    """D11: skip rubocop when no RuboCop config is detected in the repo."""
-    if manifest.id != "rubocop":
-        return None
-    from mergecraft.analyzers.detect import has_rubocop_config
-
-    if not has_rubocop_config(repo_root):
-        return AnalyzerPlan(
-            manifest_id=manifest.id,
-            mode="skip",
-            reason="skipped rubocop: no RuboCop config detected (D11 — unavailable without config)",
-        )
-    return None
-
-
 def _agentsec_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
     """Per-source resolver: the ``agentsec`` special-case (mergeCraft's native engine)."""
     if manifest.id != "agentsec":
@@ -308,10 +293,6 @@ def resolve_analyzer(
         repo_has_tool = False
 
     plan = _declared_unavailable_plan(manifest)
-    if plan is not None:
-        return plan
-
-    plan = _rubocop_config_gate(manifest, repo_root)
     if plan is not None:
         return plan
 
