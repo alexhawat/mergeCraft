@@ -384,19 +384,11 @@ def test_swiftlint_auto_enables_on_swift_fixture() -> None:
 # --- W14 #312 Java (D13 infer stays false) ---
 
 
-@pytest.mark.xfail(
-    reason="green after W14: pmd default_enabled auto (#312)",
-    strict=False,
-)
 def test_pmd_default_enabled_auto() -> None:
     manifest = _registry().get_manifest("pmd")
     assert manifest.default_enabled == "auto"
 
 
-@pytest.mark.xfail(
-    reason="green after W14: pmd auto on *.java (#312)",
-    strict=False,
-)
 def test_pmd_auto_enables_on_java_fixture() -> None:
     repo = BATCH_Y_FIXTURES / "java"
     assert "pmd" in _enabled_ids(repo, ["Hello.java", "pom.xml"])

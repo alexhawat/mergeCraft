@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19e-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19e` @ `wave/open-issues-sweep-2026-08-19e`
 Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337) · **W7** (Batch Y RED — #309-#327 leftovers)
-Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl); **W10 recon** un-xfail brakeman auto+Rails + bundler-audit catalog (`b5165e9` impl); **W12 recon** un-xfail cppcheck auto (`ce31bee6` impl); **W13 recon** un-xfail detekt + swiftlint auto (`88b348ca` impl)
+Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); **W4 recon** un-xfail `tsc`/`bandit`/`jscpd`; **W5 recon** un-xfail `govulncheck`/`cargo-audit`/`cargo-deny`/`typos`; **W6.2 recon** un-xfail `knip`/`vulture` (all #337 new-manifest xfails gone); **W8 recon** un-xfail D16 no-config mypy + osv-scanner `uv.lock` (`c77469e` impl); **W9 recon** un-xfail D17 biome-over-eslint + biome/eslint `supports_fix` (`10dda8d` impl); **W10 recon** un-xfail brakeman auto+Rails + bundler-audit catalog (`b5165e9` impl); **W12 recon** un-xfail cppcheck auto (`ce31bee6` impl); **W13 recon** un-xfail detekt + swiftlint auto (`88b348ca` impl); **W14 recon** un-xfail pmd auto (`5174cedd` impl)
 
 W7 pins leftover A-tier acceptances for #309-#327. Do **not** re-add tsc/bandit/jscpd/govulncheck/cargo-audit/cargo-deny/typos/knip/vulture (D10). Do **not** re-flip golangci-lint/clippy/rubocop/phpstan (D7). File: `tests/analyzers/test_a_tier_residuals.py` + `tests/analyzers/fixtures/batch-y/`. All cross-wave markers are `strict=False`.
 
@@ -219,7 +219,7 @@ Deferred (must **not** appear — D9 / #337 second tier): `roslyn`, `roslyn-anal
 
 ## Batch Y xfail schedule (W7 — RED until W8-W17)
 
-File: `tests/analyzers/test_a_tier_residuals.py`. **18** remaining `strict=False` xfails after W13 recon (was 22). **0** XPASS for W13. W11 has **0** xfails (phpcs/phpmd stay false).
+File: `tests/analyzers/test_a_tier_residuals.py`. **16** remaining `strict=False` xfails after W14 recon (was 18). **0** XPASS for W14. W11 has **0** xfails (phpcs/phpmd stay false).
 
 | Wave | xfail count | Marker reason prefix |
 |------|-------------|----------------------|
@@ -229,7 +229,7 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **18** remaining `strict=False
 | **W11** | 0 | phpcs/phpmd remain false (already green; phpstan is enough) |
 | **W12** | 0 | `green after W12:` cppcheck auto (SAST path; not Semgrep `languages:`) — **green** after W12 recon |
 | **W13** | 0 | `green after W13:` detekt + swiftlint auto — **green** after W13 recon |
-| **W14** | 2 | `green after W14:` pmd auto |
+| **W14** | 0 | `green after W14:` pmd auto — **green** after W14 recon |
 | **W15** | 6 | `green after W15:` sqlfluff + stylelint + htmlhint auto |
 | **W16** | 2 | `green after W16:` yamllint auto |
 | **W17** | 8 | `green after W17:` checkmake + markdownlint + tflint + checkov auto |
@@ -272,7 +272,7 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **18** remaining `strict=False
 | Wave | RED | Already green (do not xfail) |
 |------|-----|------------------------------|
 | W13 | — | **green** after W13 recon: detekt auto + `*.kt`; swiftlint auto + `*.swift` |
-| W14 | pmd auto + `*.java` | **D13** infer stays `false`; Java SAST via Semgrep `languages: java` |
+| W14 | — | **green** after W14 recon: pmd auto + `*.java`; **D13** infer stays `false`; Java SAST via Semgrep `languages: java` |
 | W15 | sqlfluff / stylelint / htmlhint auto | HTML a11y gap: no axe/pa11y/html-validate catalog row (document, do not add) |
 | W16 | yamllint auto | shellcheck auto; hadolint auto; do not add shfmt/dockle (D9 / catalog-rows-only) |
 | W17 | checkmake / markdownlint / tflint / checkov auto | languagetool stays false; tflint+checkov already detect `*.tf`. `iac-scanner` exclusive_group currently collapses both; W17 must split it or both-enable (finding-level dedup) so both auto tests pass |
@@ -293,7 +293,7 @@ File: `tests/analyzers/test_a_tier_residuals.py`. **18** remaining `strict=False
 | Y11 | phpcs/phpmd stay false; phpstan signal | integration | happy | `test_phpcs_remains_false_even_with_phpcs_xml`, `test_phpmd_remains_false`, `test_phpstan_is_enough_default_php_signal` | **green** |
 | Y12 | cppcheck auto; clang-tidy opt-in | integration | happy | `test_cppcheck_default_enabled_auto`, `test_clang_tidy_stays_opt_in` | **green** after W12 recon |
 | Y13 | detekt + swiftlint auto | integration | happy | `test_detekt_*`, `test_swiftlint_*` | **green** after W13 recon |
-| Y14 | pmd auto; infer false (D13) | unit | happy | `test_pmd_default_enabled_auto`, `test_infer_stays_false` | xfail / **green** |
+| Y14 | pmd auto; infer false (D13) | unit | happy | `test_pmd_default_enabled_auto`, `test_infer_stays_false` | **green** after W14 recon |
 | Y15 | sqlfluff/stylelint/htmlhint auto; a11y gap | unit | happy | `test_sqlfluff_*`, `test_html_a11y_catalog_gap_no_axe_or_pa11y` | xfail / **green** |
 | Y16 | yamllint auto; shell/docker already on | unit | happy | `test_yamllint_*`, `test_shellcheck_already_auto` | xfail / **green** |
 | Y17 | checkmake/markdownlint/tflint/checkov auto | integration | happy | `test_checkmake_*`, `test_tflint_*`, `test_checkov_*` | xfail W17 |
@@ -344,5 +344,13 @@ Batch Y fixture trees: `tests/analyzers/fixtures/batch-y/` (`python-noconfig`, `
 - Removed 4 `green after W13:` xfails from `tests/analyzers/test_a_tier_residuals.py`
 - W13 assertions are real passes: `test_detekt_default_enabled_auto`, `test_detekt_auto_enables_on_kotlin_fixture`, `test_swiftlint_default_enabled_auto`, `test_swiftlint_auto_enables_on_swift_fixture`
 - W14–W17 xfails remain (`strict=False`); 0 XPASS for W13. W14 reminder: 2 xfails — pmd `auto`; infer stays false (D13)
+- `make lint` + `make typecheck` pass
+- No product/source edits (`src/` untouched)
+
+## Acceptance (W14 recon)
+
+- Removed 2 `green after W14:` xfails from `tests/analyzers/test_a_tier_residuals.py`
+- W14 assertions are real passes: `test_pmd_default_enabled_auto`, `test_pmd_auto_enables_on_java_fixture`
+- W15–W17 xfails remain (`strict=False`); 0 XPASS for W14. W15 reminder: 6 xfails — sqlfluff / stylelint / htmlhint `auto`
 - `make lint` + `make typecheck` pass
 - No product/source edits (`src/` untouched)
