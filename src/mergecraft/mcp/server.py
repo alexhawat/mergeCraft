@@ -567,7 +567,8 @@ def _register_mcp_route(
         # /health stays unauthenticated; x-mergecraft-agent-id is tracing-only.
         if auth_token:
             raw_auth = request.headers.get("Authorization") or ""
-            if raw_auth != f"Bearer {auth_token}":
+            # Use compare_digest to prevent timing-based token oracle attacks.
+            if not secrets.compare_digest(raw_auth.encode(), f"Bearer {auth_token}".encode()):
                 return JSONResponse(
                     {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Unauthorized"}},
                     status_code=401,
