@@ -2,18 +2,24 @@
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-19e-wave-plan.md`
 Worktree: `../mergecraft-open-issues-sweep-19e` @ `wave/open-issues-sweep-2026-08-19e`
-Authoring wave: **W1** (Batch W RED — #338 four cheap flips)
-Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`)
+Authoring waves: **W1** (Batch W RED — #338) · **W3** (Batch X RED — #337)
+Reconciliation: **W2.3** un-xfail after W2 (`533dfd4`); W4–W6 un-xfail Batch X after each impl wave
 
 W1 pinned detect + catalog-check fixtures for `golangci-lint`, `clippy`, `rubocop`,
 and `phpstan` (D7). W2 greened `default_enabled: auto` and applied D11 / D12 / D19.
-W2.3 removed the W1.1 `green after W2` xfail markers. Do **not** author Batch X/Y/Z
-fixtures here (W3 / W7 / W18).
+W2.3 removed the W1.1 `green after W2` xfail markers.
 
-All remaining cross-wave xfails (none in this file after W2.3) use `strict=False`.
+W3 pins **#337 new manifests** (D10) minus C# / F-tier second list (D9). Fixture
+skeletons live under `tests/analyzers/fixtures/batch-x/` plus
+`tests/analyzers/fixtures/sarif/<id>-minimal.sarif.json`. Catalog YAML is **W4–W6**
+— do not add it in W3.
+
+All remaining cross-wave xfails use `strict=False`.
 Do not use `strict=True` (`xfail_strict = true` in `pyproject.toml`).
 
 ## xfail schedule
+
+### Batch W (historical — green after W2.3)
 
 | Wave | Test | Marker reason | Status |
 |------|------|---------------|--------|
@@ -25,8 +31,24 @@ Do not use `strict=True` (`xfail_strict = true` in `pyproject.toml`).
 
 No W2-scope xfails remain in `tests/analyzers/test_four_cheap_flips.py`.
 
-Detect-glob tests were never xfailed. W2 added `go.mod` / `Gemfile` / `composer.json`
-to the matching `detect.files` blocks.
+### Batch X (W3 — RED until W4 / W5 / W6)
+
+File: `tests/analyzers/test_new_manifests_337.py`. Parametrized catalog/import/detect/auto
+tests carry `@pytest.mark.xfail(..., strict=False)` tagged `green after W4|W5|W6`.
+
+| Wave | Ids | Marker reason prefix | Status after W3 |
+|------|-----|----------------------|-----------------|
+| **W4** | `tsc`, `bandit`, `jscpd` | `green after W4: <id> catalog manifest (#337)` | **xfail** |
+| **W4** | `tsc` command/scope | `green after W4: tsc --noEmit whole-program catalog (#337)` | **xfail** |
+| **W4** | `bandit` version | `green after W4: bandit reuses make security pin (#337)` | **xfail** |
+| **W4** | `jscpd` D14 | `green after W4: jscpd scope repo + diff-line attribution (D14)` | **xfail** |
+| **W4** | `tsc` diff-filter | `green after W4: tsc whole-program + diff-filter (#337)` | **xfail** |
+| **W5** | `govulncheck`, `cargo-audit`, `cargo-deny`, `typos` | `green after W5: <id> catalog manifest (#337)` | **xfail** |
+| **W5** | cargo pair | `green after W5: cargo-audit vs cargo-deny are distinct ids (#337)` | **xfail** |
+| **W6** | `knip`, `vulture` | `green after W6: <id> catalog manifest (#337)` | **xfail** |
+
+`#337` §6 names **both** `cargo-audit` (category `vuln`) and `cargo-deny`
+(category `license`). W3 pins both ids. Do not collapse them.
 
 ## Contract matrix
 
@@ -48,7 +70,7 @@ Language fixture trees (not catalog-check parser fixtures):
 - `tests/analyzers/fixtures/batch-w/ruby/` — `Gemfile`, `hello.rb`, `.rubocop.yml`
 - `tests/analyzers/fixtures/batch-w/php/` — `composer.json`, `hello.php`, `phpstan.neon`
 
-### D15 — catalog-check-shaped parser fixtures
+### D15 — catalog-check-shaped parser fixtures (Batch W)
 
 Existing SARIF fixtures already satisfy `make catalog-check`. W1 pins they stay.
 
@@ -83,7 +105,7 @@ Do not invent a mergeCraft neon. ANALYZERS.md note is W2.2 (`make catalog-check`
 | D12b | No neon → argv includes `--level=0` | integration | happy | `test_phpstan_without_neon_runs_at_level_zero` |
 | D12c | Neon present → do not force `--level=0` | integration | control | `test_phpstan_with_neon_does_not_force_level_zero` |
 
-### D19 — timeout + unavailable toolchain
+### D19 — timeout + unavailable toolchain (Batch W)
 
 Use existing `analyzers/budget.py` (inline cap) and `manifest.timeout_s` /
 `run_plan` skip → `unavailable`. No new budget system.
@@ -102,22 +124,90 @@ Use existing `analyzers/budget.py` (inline cap) and `manifest.timeout_s` /
 | W2a | Four manifests `default_enabled == "auto"` | unit | happy | `test_four_cheap_flips_default_enabled_auto` |
 | W2b | `detect_enabled` includes each tool on its language markers | integration | happy | `test_four_cheap_flips_auto_enables_on_language_markers` |
 
+### W3.1 — #337 new manifests (D9 / D10 / D14 / D15 / D19)
+
+Primary file: `tests/analyzers/test_new_manifests_337.py`.
+
+| # | Contract | Layer | Scenario | Primary test | After W3 |
+|---|----------|-------|----------|--------------|----------|
+| X1 | Catalog YAML exists / `get_manifest` importable | unit | happy | `test_new_manifest_catalog_yaml_exists`, `test_new_manifest_is_importable` | **xfail** W4–W6 |
+| X2 | `default_enabled == "auto"` | unit | happy | `test_new_manifest_default_enabled_auto` | **xfail** W4–W6 |
+| X3 | Category per #337 | unit | happy | `test_new_manifest_category` | **xfail** W4–W6 |
+| X4 | Detect globs (see table below) | unit | happy | `test_new_manifest_detect_globs` | **xfail** W4–W6 |
+| X5 | `detect_enabled` on fixture markers | integration | happy | `test_new_manifest_auto_enables_on_detect_markers` | **xfail** W4–W6 |
+| X6 | Empty changed files do not enable new ids | unit | edge | `test_empty_changed_files_do_not_enable_new_manifests` | **green** |
+| X7 | README.md does not enable (except typos/jscpd) | unit | edge | `test_unrelated_readme_does_not_match_before_manifest` | **green** |
+| X8 | D9: no C# / Roslyn / second-tier ids | unit | error | `test_deferred_tools_are_not_in_catalog` | **green** |
+| X9 | Parser skeleton under `sarif/` or `native/` | unit | happy | `test_batch_x_catalog_check_parser_skeleton_exists` | **green** |
+| X10 | Detect fixture tree per id | unit | happy | `test_batch_x_detect_fixture_skeleton_exists` | **green** |
+| X11 | D15 `manifest_has_fixture` after YAML lands | unit | happy | `test_new_manifest_has_catalog_check_parser_fixture` | **xfail** W4–W6 |
+| X12 | `timeout_s > 0` | unit | happy | `test_new_manifest_declares_timeout` | **xfail** W4–W6 |
+| X13 | Missing toolchain → skip / `unavailable` (D19) | integration | error | `test_new_manifest_reports_unavailable_when_toolchain_absent` | **xfail** W4–W6 |
+| X14 | Findings honor inline budget (D19) | unit | edge | `test_new_manifest_findings_honor_inline_budget` (all nine ids, 27 findings) | **green** |
+| X15 | `tsc --noEmit`; `scope: repo`; category `lint` | unit | happy | `test_tsc_command_is_no_emit_whole_program` | **xfail** W4 |
+| X16 | `tsc` whole-program + diff-filter | unit | edge | `test_tsc_diff_filter_keeps_only_changed_lines` | **xfail** W4 |
+| X17 | `bandit` version == `bandit[toml]` pin in `pyproject.toml` (`1.9.4`); category `security` | unit | happy | `test_bandit_version_reuses_make_security_pin`, `test_make_security_bandit_pin_is_present` | pin **green**; version **xfail** W4 |
+| X18 | D14: `jscpd` `scope: repo` | unit | happy | `test_jscpd_scope_is_repo` | **xfail** W4 |
+| X19 | D14: drop pre-existing clones off the diff | unit | edge | `test_jscpd_drops_preexisting_clones_off_the_diff` | **xfail** W4 |
+| X20 | `cargo-audit` (`vuln`) ≠ `cargo-deny` (`license`) | unit | happy | `test_cargo_audit_and_deny_are_distinct_catalog_ids` | **xfail** W5 |
+
+Detect globs W4 must satisfy (`tsc` / `bandit` / `jscpd`):
+
+| id | `detect.files` must match | `category` | `default_enabled` | extra |
+|----|---------------------------|------------|-------------------|-------|
+| `tsc` | `tsconfig.json`, `*.ts` (`src/index.ts`), `*.tsx` (`src/index.tsx`) | `lint` | `auto` | `command` contains `--noEmit`; `scope: repo`; diff-filter results |
+| `bandit` | `*.py` (`hello.py`) | `security` | `auto` | `command[0] == "bandit"`; `version` == pyproject `bandit[toml]==1.9.4` |
+| `jscpd` | `src/clone-a.js`, `src/index.ts`, `hello.py` | `quality` | `auto` | `scope: repo`; findings attributed to **diff lines** only (D14) |
+
+Detect globs W5 / W6 (not W4):
+
+| id | Wave | must match | category |
+|----|------|------------|----------|
+| `govulncheck` | W5 | `go.mod`, `*.go` | `vuln` |
+| `cargo-audit` | W5 | `Cargo.toml`, `Cargo.lock` | `vuln` |
+| `cargo-deny` | W5 | `Cargo.toml`, `Cargo.lock`, `deny.toml` | `license` |
+| `typos` | W5 | `hello.py`, `README.md` | `lint` |
+| `knip` | W6 | `package.json`, `src/index.ts`, `src/index.js` | `quality` |
+| `vulture` | W6 | `*.py` | `quality` |
+
+Batch X fixture trees:
+
+- `tests/analyzers/fixtures/batch-x/tsc/` — `tsconfig.json`, `src/index.ts`
+- `tests/analyzers/fixtures/batch-x/bandit/` — `hello.py`
+- `tests/analyzers/fixtures/batch-x/jscpd/` — `src/clone-a.js`, `src/clone-b.js` (identical clones)
+- `tests/analyzers/fixtures/batch-x/govulncheck/` — `go.mod`, `hello.go`
+- `tests/analyzers/fixtures/batch-x/cargo-audit/` — `Cargo.toml`, `Cargo.lock`
+- `tests/analyzers/fixtures/batch-x/cargo-deny/` — `Cargo.toml`, `Cargo.lock`, `deny.toml`
+- `tests/analyzers/fixtures/batch-x/typos/` — `hello.py`, `README.md`
+- `tests/analyzers/fixtures/batch-x/knip/` — `package.json`, `src/index.ts`
+- `tests/analyzers/fixtures/batch-x/vulture/` — `hello.py`
+
+Parser skeletons: `tests/analyzers/fixtures/sarif/<id>-minimal.sarif.json` for each of the nine ids.
+
+Deferred (must **not** appear — D9 / #337 second tier): `roslyn`, `roslyn-analyzers`,
+`csharp`, `c-sharp`, `dotnet-format`, `dotnet_format`, `credo`, `dart-analyze`,
+`dart_analyze`, `scalafix`, `shfmt`, `nbqa`, `lizard`, `atlas`.
+
 ## Already green vs RED
 
-| Class | Status after W2.3 |
-|-------|-------------------|
-| Detect globs (`*.go`, `*.rs`, `Cargo.toml`, `*.rb`, `.rubocop.yml`, `*.php`, `phpstan.neon`, `go.mod`, `Gemfile`, `composer.json`) | **green** |
-| `default_enabled: auto` + auto `detect_enabled` | **green** |
-| D11 with-config enablement | **green** |
-| D11 without-config (skip/`unavailable`, not a dump) | **green** (1 skip on D11d when binary/config absent — expected) |
-| D12 `--level=0` without neon | **green** |
-| D12 neon present / neon detect globs | **green** |
-| D15 SARIF fixtures / D19 timeout + unavailable | **green** |
+| Class | Status after W2.3 / W3 |
+|-------|------------------------|
+| Detect globs (`*.go`, `*.rs`, `Cargo.toml`, `*.rb`, `.rubocop.yml`, `*.php`, `phpstan.neon`, `go.mod`, `Gemfile`, `composer.json`) | **green** (Batch W) |
+| `default_enabled: auto` + auto `detect_enabled` (four cheap flips) | **green** |
+| D11 / D12 / D15 SARIF / D19 for the four | **green** |
+| Batch X fixture skeletons + SARIF skeletons | **green** (W3) |
+| D9 deferred ids absent | **green** (W3) |
+| Empty changed files do not enable #337 ids | **green** (W3; stays green after YAML) |
+| #337 catalog YAML / import / auto / category / detect | **xfail** until matching W4–W6 |
+| D14 jscpd `scope: repo` + diff-line filter | **xfail** until W4 |
+| `tsc --noEmit` + `scope: repo` | **xfail** until W4 |
+| `bandit` version == make-security pin | **xfail** until W4 |
 
-## Acceptance (W2.3)
+## Acceptance (W3)
 
-- W2 `green after W2` xfail markers removed from `tests/analyzers/test_four_cheap_flips.py`
-- `make lint` + `make typecheck` pass
-- Diagnostic pytest: real passes, no XPASS, D11d remains skip/`unavailable` (not a fail)
+- W3.1 failing catalog-check / import pins for the nine ids (eight #337 rows; cargo pair is two ids)
+- `strict=False` xfails tagged `green after W4` / `W5` / `W6`
+- No C# / Roslyn / second-tier pins as present tools
+- `make lint` + `make typecheck` pass; collection clean
 - No product/source edits (`src/` untouched)
-- No Batch X/Y/Z fixtures
+- No Batch Y/Z fixtures
