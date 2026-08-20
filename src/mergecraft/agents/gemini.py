@@ -114,8 +114,13 @@ def write_mcp_config(
     from mergecraft.tracing.signals import current_agent_id
 
     agent_id = current_agent_id()
+    headers: dict[str, str] = {}
     if agent_id:
-        server_config["headers"] = {"X-MergeCraft-Agent-Id": agent_id}
+        headers["X-MergeCraft-Agent-Id"] = agent_id
+    if ctx.mcp_auth_token:
+        headers["Authorization"] = f"Bearer {ctx.mcp_auth_token}"
+    if headers:
+        server_config["headers"] = headers
     excluded_tools = [str(name) for name in ctx.subagent_denied_tools]
     if excluded_tools:
         server_config["excludeTools"] = excluded_tools

@@ -771,6 +771,7 @@ async def _run_agent_review(
         run_ctx = AgentRunContext(
             payload=payload,
             mcp_server_url=mcp_url,
+            mcp_auth_token=tool_context.mcp_auth_token,
             tmpdir=str(tmpdir),
             subagent_denied_tools=subagent_denied_tool_names(tool_context, output_schema),
             instructions=instructions,

@@ -9,7 +9,6 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -112,10 +111,6 @@ def test_never_prints_a_credential_value(tmp_path: Path, monkeypatch: MonkeyPatc
     assert "auth" in output.lower()
 
 
-@pytest.mark.xfail(
-    reason="green after W14: per-run MCP token and unguessable port",
-    strict=False,
-)
 def test_doctor_mcp_probe_does_not_treat_3764_as_the_mcp_port(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

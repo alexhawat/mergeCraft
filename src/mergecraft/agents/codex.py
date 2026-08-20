@@ -462,17 +462,19 @@ def _add_custom_provider_tables(config: TomlTable) -> None:
 
 
 def _add_mcp_server_table(config: TomlTable, ctx: AgentRunContext) -> None:
-    # D10 (OB4) — per-agent attribution for codex is NOT wired: a TOML
-    # ``http_headers`` key for codex MCP servers is not part of the config
-    # surface this driver has verified, and an unverified config key could
-    # fail codex's parse and break the review. The ``MERGECRAFT_AGENT_ID``
-    # env handoff via ``spawn_agent_cli`` identifies the subprocess as a
-    # whole, but the MCP server attributes tool calls from the request
-    # header — so codex ``tool.call`` spans carry no per-agent id. Recorded
-    # as a known D10 gap, not papered over.
+    # D16 — Codex does not support an ``http_headers`` config key (unverified
+    # and an unrecognised key could fail codex's TOML parse and break the
+    # review). Instead of inventing HTTP headers, expose the MCP server over a
+    # Unix-domain socket. The socket is 0600 so only the creating process and
+    # processes running as the same OS user can connect — that peer-credential
+    # boundary replaces the bearer token for this driver. The HTTP loopback
+    # endpoint (for other agents) remains the canonical ``mcp_server_url``.
+    from pathlib import Path
+
+    socket_path = str(Path(ctx.tmpdir) / "mergecraft-mcp.sock")
     config["mcp_servers"] = {
         MERGECRAFT_MCP_NAME: {
-            "url": ctx.mcp_server_url,
+            "socket_path": socket_path,
             # Without this, every tool call is auto-cancelled in CI. Codex
             # auto-approves an MCP call only when the permission profile grants
             # full disk write access (codex_mcp::mcp_permission_prompt_is_auto_approved),

@@ -111,13 +111,14 @@ def _build_mcp_servers(ctx: AgentRunContext) -> list[dict[str, Any]]:
             ctx.mcp_server_url,
         )
         return []
-    return [
-        {
-            "name": MERGECRAFT_MCP_NAME,
-            "type": "sse",
-            "url": ctx.mcp_server_url,
-        }
-    ]
+    server_entry: dict[str, Any] = {
+        "name": MERGECRAFT_MCP_NAME,
+        "type": "sse",
+        "url": ctx.mcp_server_url,
+    }
+    if ctx.mcp_auth_token:
+        server_entry["headers"] = {"Authorization": f"Bearer {ctx.mcp_auth_token}"}
+    return [server_entry]
 
 
 def _is_terminal_status(status: str) -> bool:

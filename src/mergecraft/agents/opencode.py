@@ -184,6 +184,11 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
                 "type": "remote",
                 "url": ctx.mcp_server_url,
                 "timeout": 300_000,
+                **(
+                    {"headers": {"Authorization": f"Bearer {ctx.mcp_auth_token}"}}
+                    if ctx.mcp_auth_token
+                    else {}
+                ),
             }
         },
         "agent": agent_block,

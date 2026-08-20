@@ -15,11 +15,6 @@ from pathlib import Path
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
-_XFAIL_W14 = pytest.mark.xfail(
-    reason="green after W14: per-run MCP token and unguessable port",
-    strict=False,
-)
-
 
 def _load_codex_module():
     try:
@@ -48,7 +43,6 @@ def test_codex_mcp_config_does_not_invent_http_headers(tmp_path: Path) -> None:
     assert "Authorization" not in server_block
 
 
-@_XFAIL_W14
 def test_codex_mcp_config_uses_unix_domain_socket(tmp_path: Path) -> None:
     """W11.4 Codex case: Unix-domain socket (or Codex-documented equivalent), plus token/peercred."""
     codex_module = _load_codex_module()

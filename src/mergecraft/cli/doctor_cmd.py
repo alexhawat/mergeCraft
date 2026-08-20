@@ -128,8 +128,10 @@ def _config_probe(cwd: Path) -> ProbeResult:
 
 def _mcp_probe() -> ProbeResult:
     if _port_available(MCP_PORT_START):
-        return ProbeResult("mcp", "ok", f"port {MCP_PORT_START} available")
-    return ProbeResult("mcp", "warn", f"port {MCP_PORT_START} in use")
+        return ProbeResult(
+            "mcp", "ok", "ephemeral port (bind(0)); MCP_PORT_START available as override"
+        )
+    return ProbeResult("mcp", "warn", "ephemeral port (bind(0)); MCP_PORT_START in use")
 
 
 def run_doctor_probes(cwd: Path) -> list[ProbeResult]:

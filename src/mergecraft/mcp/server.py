@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import random
+import secrets
 import socket
 from math import isfinite
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -242,13 +242,15 @@ def _select_port() -> int:
     requested = _read_env_port()
     if requested is not None and _port_available(requested):
         return requested
-    offset0 = random.randint(0, 49)
-    for offset in range(MCP_PORT_ATTEMPTS):
-        port = MCP_PORT_START + offset0 + offset
-        if _port_available(port):
-            return port
-    msg = f"could not find available mcp port starting at {MCP_PORT_START}"
-    raise RuntimeError(msg)
+    # Let the OS allocate an ephemeral port by binding to 0, then release it.
+    # A concurrent process could claim the port in the brief window between
+    # release and uvicorn's bind, but this is orders of magnitude safer than
+    # the old 50-wide scan from a fixed base (which was both predictable and
+    # racy in the same way).
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((MCP_HOST, 0))
+        return sock.getsockname()[1]
 
 
 def _tool_result_to_rpc(result: ToolResult | Any) -> dict[str, Any]:
@@ -451,6 +453,7 @@ def _register_mcp_route(
     path: str,
     tools: list[ToolSpec],
     tool_ctx: ToolContext | None,
+    auth_token: str | None = None,
 ) -> None:
     """Mount one JSON-RPC MCP endpoint with a fixed tool surface."""
     by_name = {t.name: t for t in tools}
@@ -566,6 +569,23 @@ def _register_mcp_route(
                 status_code=400,
             )
         items = body if isinstance(body, list) else [body]
+        # D15 — per-run bearer token: tools/list and tools/call require
+        # Authorization: Bearer <token> when a token was issued at startup.
+        # /health stays unauthenticated; x-mergecraft-agent-id is tracing-only.
+        if auth_token:
+            _GUARDED_METHODS = frozenset({"tools/list", "tools/call"})
+            needs_auth = any(
+                item.get("method") in _GUARDED_METHODS
+                for item in items
+                if isinstance(item, dict) and "id" in item
+            )
+            if needs_auth:
+                raw_auth = request.headers.get("Authorization") or ""
+                if raw_auth != f"Bearer {auth_token}":
+                    return JSONResponse(
+                        {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Unauthorized"}},
+                        status_code=401,
+                    )
         # D10 (OB4) — the dispatch-issued agent id, forwarded by the agent
         # CLI's MCP client config as a header on every call.
         calling_agent_id = request.headers.get("x-mergecraft-agent-id") or None
@@ -595,6 +615,7 @@ def create_mcp_app(
     ctx: ToolContext | None = None,
     *,
     role_tools: dict[str, list[ToolSpec]] | None = None,
+    auth_token: str | None = None,
 ) -> FastAPI:
     """Build the MCP app.
 
@@ -612,9 +633,9 @@ def create_mcp_app(
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    _register_mcp_route(app, MCP_ENDPOINT, tools, ctx)
+    _register_mcp_route(app, MCP_ENDPOINT, tools, ctx, auth_token)
     for role, role_tool_list in (role_tools or {}).items():
-        _register_mcp_route(app, f"{MCP_ENDPOINT}/{role}", role_tool_list, ctx)
+        _register_mcp_route(app, f"{MCP_ENDPOINT}/{role}", role_tool_list, ctx, auth_token)
     return app
 
 
@@ -637,6 +658,14 @@ def start_mcp_http_server(
 
     Returns ``(url, stop)`` where ``stop`` is an idempotent disposer.
     """
+    import threading
+    import time
+
+    # D15 — issue a per-run secret at startup; every request to tools/list
+    # or tools/call must present it as ``Authorization: Bearer <token>``.
+    run_token = secrets.token_hex(32)
+    ctx.mcp_auth_token = run_token
+
     tools = build_orchestrator_tools(ctx, output_schema)
     reviewer_tools = build_reviewer_tools(ctx, output_schema)
     verifier_tools = build_verifier_tools(ctx, output_schema)
@@ -644,6 +673,7 @@ def start_mcp_http_server(
         tools,
         ctx,
         role_tools={"reviewer": reviewer_tools, "verifier": verifier_tools},
+        auth_token=run_token,
     )
     port = _select_port()
     config = uvicorn.Config(
@@ -660,8 +690,6 @@ def start_mcp_http_server(
         asyncio.set_event_loop(loop)
         loop.run_until_complete(server.serve())
 
-    import threading
-
     thread = threading.Thread(target=_run, name="mergecraft-mcp", daemon=True)
     thread.start()
 
@@ -677,9 +705,45 @@ def start_mcp_http_server(
                     break
             except OSError:
                 pass
-        import time
-
         time.sleep(0.05)
+
+    # D16 — also start a unix-domain socket listener for Codex (which cannot
+    # send HTTP headers). The socket is 0600, so only the creating process
+    # (and processes running as the same user) can connect — that is the
+    # peer-credential equivalent of the bearer token.
+    uds_path = os.path.join(ctx.tmpdir, "mergecraft-mcp.sock") if ctx.tmpdir else ""
+    uds_server: uvicorn.Server | None = None
+    uds_thread: threading.Thread | None = None
+    if uds_path:
+        uds_config = uvicorn.Config(
+            app,
+            uds=uds_path,
+            log_level="warning",
+            access_log=False,
+        )
+        uds_server = uvicorn.Server(uds_config)
+        uds_loop = asyncio.new_event_loop()
+
+        def _run_uds() -> None:
+            asyncio.set_event_loop(uds_loop)
+            try:
+                uds_loop.run_until_complete(uds_server.serve())
+            except OSError as exc:
+                logger.debug(
+                    "unix socket MCP listener failed (path too long or unavailable): {}", exc
+                )
+
+        uds_thread = threading.Thread(target=_run_uds, name="mergecraft-mcp-uds", daemon=True)
+        uds_thread.start()
+        # Brief wait for the unix socket to appear
+        for _ in range(20):
+            if os.path.exists(uds_path):
+                break
+            time.sleep(0.05)
+        try:
+            os.chmod(uds_path, 0o600)
+        except OSError:
+            pass
 
     url = f"http://{MCP_HOST}:{port}{MCP_ENDPOINT}"
     ctx.mcp_server_url = url
@@ -700,5 +764,14 @@ def start_mcp_http_server(
             logger.warning("background-process kill scheduling failed: {}", exc)
         server.should_exit = True
         thread.join(timeout=5)
+        if uds_server is not None:
+            uds_server.should_exit = True
+        if uds_thread is not None:
+            uds_thread.join(timeout=5)
+        if uds_path and os.path.exists(uds_path):
+            try:
+                os.unlink(uds_path)
+            except OSError:
+                pass
 
     return url, stop

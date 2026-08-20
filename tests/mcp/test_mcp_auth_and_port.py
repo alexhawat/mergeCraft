@@ -42,11 +42,6 @@ from mergecraft.utils.github import GitHubClient
 if TYPE_CHECKING:
     from pathlib import Path
 
-_XFAIL_W14 = pytest.mark.xfail(
-    reason="green after W14: per-run MCP token and unguessable port",
-    strict=False,
-)
-
 _LIST_PAYLOAD = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
 _CALL_PAYLOAD = {
     "jsonrpc": "2.0",
@@ -121,7 +116,6 @@ def _is_tools_list_ok(status: int, body: dict[str, Any]) -> bool:
     return isinstance(result, dict) and isinstance(result.get("tools"), list)
 
 
-@_XFAIL_W14
 def test_tools_list_and_call_require_per_run_token(tmp_path: Path) -> None:
     """W11.4: unauthenticated ``tools/list`` + ``tools/call`` fail; token succeeds."""
     ctx = _tool_ctx(tmp_path)
@@ -181,7 +175,6 @@ def test_health_stays_unauthenticated(tmp_path: Path) -> None:
         stop()
 
 
-@_XFAIL_W14
 def test_select_port_is_not_3764_plus_fifty_wide_scan() -> None:
     """W11.4: allocator is not ``3764 + offset ∈ [0, 49]``."""
     src = inspect.getsource(_select_port)
@@ -211,7 +204,6 @@ def test_mergecraft_mcp_port_override_still_honored(
     assert _select_port() == 41234
 
 
-@_XFAIL_W14
 def test_started_server_port_is_loopback_and_not_the_3764_band(tmp_path: Path) -> None:
     """Live pin: returned URL stays loopback; port is not chosen from the 50-wide 3764 scan."""
     ctx = _tool_ctx(tmp_path)

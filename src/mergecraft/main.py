@@ -978,6 +978,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
     ctx.run_ctx = AgentRunContext(
         payload=payload,
         mcp_server_url=_reviewer_mcp_url,
+        mcp_auth_token=tool_context.mcp_auth_token,
         tmpdir=tmpdir,
         subagent_denied_tools=subagent_denied,
         verifier_denied_tools=verifier_denied,

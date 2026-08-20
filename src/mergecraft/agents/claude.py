@@ -115,8 +115,13 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
         "type": "http",
         "url": _mcp_role_url(ctx.mcp_server_url, agent_id),
     }
+    headers: dict[str, str] = {}
     if agent_id:
-        server_entry["headers"] = {"X-MergeCraft-Agent-Id": agent_id}
+        headers["X-MergeCraft-Agent-Id"] = agent_id
+    if ctx.mcp_auth_token:
+        headers["Authorization"] = f"Bearer {ctx.mcp_auth_token}"
+    if headers:
+        server_entry["headers"] = headers
     config_path.write_text(
         json.dumps(
             {
