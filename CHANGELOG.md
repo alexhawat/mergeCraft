@@ -7,43 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
-
-
-- `mergecraft mcp serve` now mints a per-serve Bearer token and requires it on every MCP request; unauthenticated `tools/list` and `tools/call` are rejected with HTTP 401 / JSON-RPC `-32600` (#345). `build_mcp_tool_context` mints the token via `secrets.token_hex(32)`, stores it as `ctx.mcp_auth_token`, and passes it as `auth_token=` into `create_mcp_app`; the token is printed to stderr as `MERGECRAFT_MCP_BEARER=<token>` at startup.
-
 ### Added
-
 
 - Python 3.11 install floor (#343, option A): `requires-python` lowered to `>=3.11`; mypy/Pyright target 3.11; CI matrix runs on 3.11 and 3.14. README and `docs/distribution.md` install copy use stock `uv` from git (PyPI not published); Docker remains for pinned runtimes. Parenthesized the last PEP 758 site in `analyzers/detect.py` for the 3.11 compile gate; `harbor` extra gated to Python >=3.12.
 - Python 3.11 floor ADR (#343, option A): `docs/dev/python-version-floor.md` records parenthesize-now / binary-later (D8). PEP 758 multi-type `except` handlers under `src/mergecraft/` are parenthesized (44 sites / 27 files).
-
 - JS/TS lint: `biome` and `eslint` declare `supports_fix: true`; the JS-lint exclusive group (`js-lint`) now resolves the winner by config-file presence alone — `biome.json`/`biome.jsonc` beats any eslint config; eslint config beats any oxlint config — package-script and dependency signals are only consulted when no config file is found (D17, #310)
 - `mypy` is now the default type checker for Python repos with no explicit type-checker config: auto-enabled when neither `pyrightconfig.json` nor `[tool.pyright]`/`[tool.basedpyright]` is present (D16, #309)
 - `osv-scanner` detect globs now include `uv.lock`, so repos using uv's lock file trigger vulnerability scanning without pip-audit (#309)
 - docs: `flake8` and `pylint` catalog entries note they are legacy opt-in; enabled via config override only (#309)
-
 - Catalog manifests for `knip` (JS/TS unused exports/dependencies, `scope: repo`, `category: quality`) and `vulture` (Python dead code, `scope: repo`, `category: quality`) (#337)
-
 - Catalog manifests for `govulncheck` (Go vulnerability scan, `scope: repo`, network allowlist `vuln.go.dev`), `cargo-audit` (Rust advisory vulnerability scan, `category: vuln`), `cargo-deny` (Rust license/advisory check, `category: license`), and `typos` (universal typo checker, `scope: repo`, `supports_fix: true`) (#337)
-
 - Catalog manifests for `tsc` (TypeScript whole-program lint, `scope: repo`, `--noEmit`), `bandit` (Python security, version pinned to `make security` pin `1.9.4`), and `jscpd` (copy-paste detection, `scope: repo`, diff-line attribution via existing `filter_to_diff` pipeline — pre-existing clones off the diff are dropped) (#337)
-
 - Flip `golangci-lint`, `clippy`, `rubocop`, `phpstan` to `default_enabled: auto`; adds `go.mod`, `Gemfile`, `composer.json` to their detect globs; RuboCop gates on config presence (D11 — silent without `.rubocop.yml`/`Gemfile gem`); PHPStan injects `--level=0` when no `phpstan.neon` is found (D12) (#338)
-
 - `detekt` flipped to `default_enabled: auto`; activates on any `*.kt` or `*.kts` change, or when `detekt.yml` is detected — provides the default Kotlin lint path (#317)
 - `swiftlint` flipped to `default_enabled: auto`; activates on any `*.swift` change or when `.swiftlint.yml` is detected — provides the default Swift lint path (#318); reports `unavailable` on Linux runners (requires macOS, `declared_unavailable`)
-
 - `sqlfluff` flipped to `default_enabled: auto`; activates on any `*.sql` change or `.sqlfluff` config presence — skips silently when no SQL dialect is declared (#319)
 - `stylelint` flipped to `default_enabled: auto`; activates on any `*.css`/`*.scss` change or `stylelint.config.js`/`.stylelintrc.json` presence — provides the default CSS lint path (#320)
 - `htmlhint` flipped to `default_enabled: auto`; activates on any `*.html` change or `.htmlhintrc` presence — provides the default HTML lint path (#321)
-
 - `yamllint` flipped to `default_enabled: auto`; activates on any `*.yaml` or `*.yml` change or `.yamllint` config presence — provides the default YAML lint path (#323); `shellcheck` and `hadolint` were already `auto` (#322, #324)
-
 - `checkmake` flipped to `default_enabled: auto`; activates on any `Makefile`, `makefile`, or `*.mk` change — provides the default Make lint path (#325)
 - `markdownlint` flipped to `default_enabled: auto`; activates on any `*.md` change or `.markdownlint.json`/`.markdownlint.yaml` presence — provides the default Markdown lint path (#326)
 - `tflint` and `checkov` both flipped to `default_enabled: auto`; activate on any `*.tf` or `*.tfvars` change; the shared `iac-scanner` exclusive group was removed (split to `exclusive_group: null`) so both tools run concurrently — `tflint` provides Terraform lint, `checkov` provides IaC security scanning (#327)
-
 - `luacheck` flipped to `default_enabled: auto`; activates on any `*.lua` change or `.luacheckrc` presence — provides the default Lua lint path (#328)
 - `fortitude` flipped to `default_enabled: auto`; activates on Fortran files (`*.f90`, `*.f95`, `*.F90`, `*.f03`, `*.f`, `*.for`) or `.fortitude.toml` — provides the default Fortran lint path (#329)
 - `regal` flipped to `default_enabled: auto`; activates on any `*.rego` change — provides the default Rego/OPA policy lint path (#330)
@@ -53,14 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `smarty-lint` flipped to `default_enabled: auto`; `ANALYZERS.md` notes that `*.tpl` is ambiguous (Go templates, Terraform) — enable only when `.smarty-lint.json` confirms Smarty intent (#334)
 - `ember-template-lint` flipped to `default_enabled: auto`, sets `supports_fix: true`; gates on `ember-cli-build.js` or `ember-source` in `package.json` — bare `*.hbs` files do not trigger it (#335)
 - `prisma-lint` flipped to `default_enabled: auto`; ships a conservative fallback ruleset (`prisma-lint-default-rules.yml`) and sets `config_note` referencing it when no repo-level prisma-lint config is found — avoids inert no-op runs (#336)
-
 - `cppcheck` flipped to `default_enabled: auto`; activates on any `*.c`, `*.cpp`, `*.h`, or `*.hpp` change — provides the default C/C++ SAST path (#315); `clang-tidy` remains `default_enabled: false` (requires `compile_commands.json`, C4)
 - `pmd` flipped to `default_enabled: auto`; activates on any `*.java` change or `pmd.ruleset.xml` presence — provides the default Java lint path (#312); `infer` remains `default_enabled: false` (requires compilation database, C4)
-
 - `phpcs` and `phpmd` remain `default_enabled: false`; catalog entries note they are legacy opt-in — `phpstan` (auto) is the default PHP signal (#316)
 - `brakeman` flipped to `default_enabled: auto` with tight Rails detection — only activates on Rails marker files (`config/application.rb`, `config/routes.rb`), never on plain Ruby repos (#313)
 - New catalog manifest for `bundler-audit` (Ruby gem vulnerability audit, `category: vuln`, `scope: repo`, detects on `Gemfile.lock`) (#313)
-
 - `scripts/check_type_ignores.py` fails when a `type: ignore` or `cast(` in allowed `src/mergecraft/` lacks a one-line reason (#275); wired into `make lint`
 - `scripts/check_xpass.py` fails when unexpected pytest xpasses remain on the allowed test tree (#276)
 - xpass ratchet now runs as a `pytest_sessionfinish` conftest hook inside the coverage-gate pytest session — no standalone log file or extra CI step (#276)
@@ -145,9 +126,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Global CLI surface (#342): root `--format {table,json}`, `--quiet` / `--verbose` / `--log-level`, and `--color {auto,always,never}` honour `NO_COLOR`, `FORCE_COLOR`, and non-TTY sinks; JSON payloads carry `schema_version`; `review` is the documented command and `diff-review` is a hidden deprecated alias (one stderr line per invocation).
 - CLI exit-code contract (#341): every exit under `src/mergecraft/cli/` routes through named constants (`mergecraft.cli.exits` / `RunOutcome` helpers); usage errors exit `2`. See [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md). **Breaking:** scripts that branched on exit code `1` for generic CLI failures must follow the new table (most former `1` paths now exit `30`).
 - Shell completion for the `mergecraft` CLI: `mergecraft --install-completion` (bash/zsh/fish) and `mergecraft --show-completion` (#340). CLI status and Rich chrome now go through shared stderr consoles; machine-readable `--json` payloads stay on stdout only.
+- Dependabot now batches patch and minor bumps into one grouped PR per ecosystem (pip, github-actions, docker, and the `docker/agent-clis` npm lockfile), with security updates in their own group and majors still opened individually; `open-pull-requests-limit: 5` caps each ecosystem
+- `mergecraft review` skips PRs authored by `dependabot[bot]`: the gate failed closed on every version bump (the reviewer posted no `mergecraft-approval` check-run, so the enforce step's fail-closed branch blocked the PR). Both jobs are conditionally skipped rather than untriggered, so a rule requiring `mergecraft review` still reports. `changelog-preview` is deliberately left running — it already passes on bot PRs, and skipping a reusable-workflow caller would report under the bare caller job id rather than the two-part `changelog-preview / preview` check name. CI, CodeQL, the security-audit Verify job, and SHA pinning still gate these PRs
+- `.github/agents/dependency-pr-manager.md` — dry-run-first sweep agent for the dependency-PR queue: classifies each bot PR into auto / review / blocked / suspicious lanes, diff-audits that a bump touches only its manifest and lockfile, and writes a per-major review brief instead of merging majors blind
+- `mergecraft review --help` now states that no flags are required and includes full example commands for local worktrees, GitHub branches, and present or past PRs
+- Stale pytest `xfail(strict=False)` markers that were already passing are now real tests; remaining allowed-tree xfails are strict (#276)
+- Changed: `gates.terminal_verdict` now defaults to `enforce`; missing terminal verdict reports `inconclusive`. Operators can still set `shadow`
+- Changed: `create_pull_request_review` now records through the same validator as `submit_review_verdict`; GitHub posting is an internal publisher, not an agent tool
 
 ### Fixed
-
 
 - `bandit` now uses built-in `--format json` instead of the optional SARIF extra, so auto-enabled Python security coverage still runs on plain Bandit
 - `bundler-audit` now runs the gem CLI (`bundler-audit check --format json`) instead of `bundle audit`, so Ruby lockfile audits actually execute
@@ -156,16 +143,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bundler-audit` and `cargo-deny` findings no longer fake a line-1 GitHub anchor when the tool did not report a line; crate/gem coordinates stay in the message
 - `clippy` now runs as `cargo clippy --message-format=json` (package/workspace) instead of passing PR paths as cargo args, so auto-enabled Clippy keeps rustc JSON findings
 - Auto-enabled analyzers whose stdout is not SARIF now keep findings: `cargo-audit` (`--json`), `cargo-deny` (`--format json`), `vulture` (line text), `tsc` (`--pretty false`), `knip` (`--reporter json`), `jscpd` (`--reporters json`), `bundler-audit` (`--format json`), `sqlfluff` (`--format json`), and `clippy` (`--message-format=json`); `typos` 1.32.0 already emits SARIF and stays on `parser: sarif` (Thermos Finding 1)
-
 - `phpstan`: command changed from `--error-format=json` to `--error-format=sarif` so the output aligns with `parser: sarif`; previously the JSON output caused `parse_sarif()` to raise `ValueError` and silently drop all findings (Thermos Finding 1, #338)
 - `brakeman`: command changed from `-o brakeman.sarif` (writes to file) to `-o -` (stdout) so the SARIF output is captured by the adapter; `parser: sarif` is unchanged (Thermos Finding 1, #338)
-
 - MCP HTTP server now issues a separate bearer token for the orchestrator ``/mcp`` route; reviewer/verifier harnesses keep ``ToolContext.mcp_auth_token`` for their role endpoints (#349)
 - OpenCode gateway ``extra_options`` generation knobs (temperature, ``top_p``, ``max_tokens`` when a context window is known) are applied through provider model ``limit`` / ``options`` and the primary ``build`` agent config instead of being copied into ``provider.options``; ``llm.call`` tracing stamps only params the config path actually applies (#295, #349)
 - `tracing/genai`: `_optional_float` now rejects non-finite float values (`NaN`, `Inf`) and their string representations (`"nan"`, `"inf"`), matching the existing behaviour of `_optional_int`; invalid temperature/top_p degrade to omitted knobs instead of propagating the sentinel value (#348)
 - OpenCode ``llm.call`` spans now carry ``ModelParams`` request knobs (``gen_ai.request.max_tokens``, temperature, and siblings) resolved from gateway ``extra_options`` env vars (``MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS``, indexed ``…_<N>``, or per-provider ``MERGECRAFT_PROVIDER_EXTRA_OPTIONS``) including named presets when only ``NOUS_API_KEY`` / ``TOKENHUB_API_KEY`` are set (#295)
 - OpenCode HTTP ``llm.call`` usage attrs omit unset counters instead of zero-filling ``gen_ai.usage.*`` when the session response reports output tokens only (#297)
-
 - `mcp/server`: `submit_review_verdict` (`TERMINAL_PROTOCOL`), `verify_agent_findings` (`VERIFICATION`), and `record_finding_verdict` (`REVIEW_WRITE` + `mutates=True`) were absent from the primary `/mcp/reviewer` surface — the playbook's C6 "verify then publish" loop could not execute. `TERMINAL_PROTOCOL` and `VERIFICATION` are added to `PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES`; `record_finding_verdict` is added to `PRIMARY_MUTATING_ALLOWLIST`. Subagents keep `REVIEWER_ALLOWED_TOOL_CLASSES` (none of the three classes) and `READONLY_MUTATING_ALLOWLIST`, so they remain denied all three tools. Verifier still has no `record_finding_verdict` and no `terminal-protocol` tools
 - `agents/claude`: `write_mcp_config` wrote a single MCP server entry pointing to `/mcp/reviewer` (derived from the orchestrator's `current_agent_id()` at `_run` start). Verifier subagents inherited that config and called `/mcp/reviewer` instead of `/mcp/verifier`. `write_mcp_config` now always writes two entries — `MERGECRAFT_MCP_NAME` → `/mcp/reviewer` and `MERGECRAFT_VERIFIER_MCP_NAME` → `/mcp/verifier` — without using `current_agent_id()`, so the verifier surface is available to subagents from the moment the orchestrator launches; `test_role_dispatch_urls.py` now tests the production call path rather than a fake `agent_run_span`
 - `tracing/exporters`: `_setup_tracer_provider` no longer stacks a duplicate `BatchSpanProcessor` / OTLP exporter on every `OTLPSink` construction — when a real `TracerProvider` already exists and the same endpoint is already registered, the function reuses the existing processor pair instead of appending another one, eliminating the ~29× duplicate OTLP rows per span observed in production (#293)
@@ -246,19 +230,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_create_env_block`) — every `action.yml` input is `required: false`, and
   the comment claiming otherwise was wrong
 
-### Changed
-
-- Dependabot now batches patch and minor bumps into one grouped PR per ecosystem (pip, github-actions, docker, and the `docker/agent-clis` npm lockfile), with security updates in their own group and majors still opened individually; `open-pull-requests-limit: 5` caps each ecosystem
-- `mergecraft review` skips PRs authored by `dependabot[bot]`: the gate failed closed on every version bump (the reviewer posted no `mergecraft-approval` check-run, so the enforce step's fail-closed branch blocked the PR). Both jobs are conditionally skipped rather than untriggered, so a rule requiring `mergecraft review` still reports. `changelog-preview` is deliberately left running — it already passes on bot PRs, and skipping a reusable-workflow caller would report under the bare caller job id rather than the two-part `changelog-preview / preview` check name. CI, CodeQL, the security-audit Verify job, and SHA pinning still gate these PRs
-- `.github/agents/dependency-pr-manager.md` — dry-run-first sweep agent for the dependency-PR queue: classifies each bot PR into auto / review / blocked / suspicious lanes, diff-audits that a bump touches only its manifest and lockfile, and writes a per-major review brief instead of merging majors blind
-
-- `mergecraft review --help` now states that no flags are required and includes full example commands for local worktrees, GitHub branches, and present or past PRs
-- Stale pytest `xfail(strict=False)` markers that were already passing are now real tests; remaining allowed-tree xfails are strict (#276)
-- Changed: `gates.terminal_verdict` now defaults to `enforce`; missing terminal verdict reports `inconclusive`. Operators can still set `shadow`
-- Changed: `create_pull_request_review` now records through the same validator as `submit_review_verdict`; GitHub posting is an internal publisher, not an agent tool
-
 ### Security
 
+- `mergecraft mcp serve` now mints a per-serve Bearer token and requires it on every MCP request; unauthenticated `tools/list` and `tools/call` are rejected with HTTP 401 / JSON-RPC `-32600` (#345). `build_mcp_tool_context` mints the token via `secrets.token_hex(32)`, stores it as `ctx.mcp_auth_token`, and passes it as `auth_token=` into `create_mcp_app`; the token is printed to stderr as `MERGECRAFT_MCP_BEARER=<token>` at startup.
 - `mcp/server`: primary `/mcp/reviewer` now admits session tools `set_output`, `select_mode`, and `report_progress` via `PRIMARY_MUTATING_ALLOWLIST`; routing the primary agent to `/mcp/reviewer` no longer drops tools required by the Action output schema, the mode-selection playbook (Step 1), and the no-action path. Repo mutations (`push_branch`, `commit_changes`, etc.) and review-write tools not in the allowlist (`resolve_review_thread`) stay off the reviewer surface; subagents continue to use the narrower `READONLY_MUTATING_ALLOWLIST`
 - docs: `SECURITY.md` secret-stripping claim narrowed to the agent subprocess (`build_agent_env` / `filter_env`) and the sandboxed `shell` tool (`resolve_env`); `_run_git` inherits the process environment and is not covered by the filter (#286)
 - Untrusted PR trees no longer receive a `shell` tool when PID-namespace isolation is unavailable (#287)
