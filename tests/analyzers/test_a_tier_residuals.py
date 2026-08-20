@@ -281,6 +281,37 @@ def test_bundler_audit_has_catalog_check_parser_fixture() -> None:
     assert docs.manifest_has_fixture(manifest, fixture_root=FIXTURES_DIR)
 
 
+def test_bundler_audit_command_is_gem_cli_not_bundle_audit(tmp_path: Path) -> None:
+    """bundler-audit 0.9.2 ships ``bundler-audit check --format json``, not ``bundle audit``."""
+    registry = _registry()
+    resolve = import_module("mergecraft.analyzers.resolve")
+    execution = import_module("mergecraft.analyzers.execution")
+    manifest = registry.get_manifest("bundler-audit")
+    assert manifest.command[0] == "bundler-audit"
+    assert manifest.command == ["bundler-audit", "check", "--format", "json"]
+    (tmp_path / "Gemfile.lock").write_text("GEM\n", encoding="utf-8")
+    plan = resolve.AnalyzerPlan(
+        manifest_id="bundler-audit",
+        mode="repo-native",
+        argv=tuple(manifest.command),
+        cwd=tmp_path,
+    )
+    final = execution.finalize_plan(
+        plan,
+        manifest=manifest,
+        repo_root=tmp_path,
+        changed_files=["Gemfile.lock"],
+        tier="trusted",
+    )
+    argv = [str(arg) for arg in final.argv]
+    assert argv[0] == "bundler-audit"
+    assert argv[0] != "bundle"
+    assert "--format" in argv
+    assert "json" in argv
+    assert not (len(argv) >= 2 and argv[0] == "bundle" and argv[1] == "audit")
+    assert argv == ["bundler-audit", "check", "--format", "json"]
+
+
 def test_osv_scanner_already_covers_gemfile_lock() -> None:
     registry = _registry()
     manifest = registry.get_manifest("osv-scanner")
@@ -565,6 +596,36 @@ def test_tflint_auto_enables_on_terraform_fixture() -> None:
     """Both IaC tools must auto-enable; split `iac-scanner` if it collapses them."""
     repo = BATCH_Y_FIXTURES / "terraform"
     assert "tflint" in _enabled_ids(repo, ["main.tf"])
+
+
+def test_tflint_command_is_workspace_not_file_list(tmp_path: Path) -> None:
+    """TFLint 0.54 rejects positional files; pipeline ``scope: diff`` still filters findings."""
+    registry = _registry()
+    resolve = import_module("mergecraft.analyzers.resolve")
+    execution = import_module("mergecraft.analyzers.execution")
+    manifest = registry.get_manifest("tflint")
+    assert "{files}" not in manifest.command
+    assert manifest.detect.lint_files is None
+    assert manifest.command == ["tflint", "--format", "sarif"]
+    (tmp_path / "main.tf").write_text('resource "null_resource" "x" {}\n', encoding="utf-8")
+    (tmp_path / ".tflint.hcl").write_text("config {}\n", encoding="utf-8")
+    plan = resolve.AnalyzerPlan(
+        manifest_id="tflint",
+        mode="repo-native",
+        argv=tuple(manifest.command),
+        cwd=tmp_path,
+    )
+    final = execution.finalize_plan(
+        plan,
+        manifest=manifest,
+        repo_root=tmp_path,
+        changed_files=["main.tf", ".tflint.hcl"],
+        tier="trusted",
+    )
+    argv = [str(arg) for arg in final.argv]
+    assert argv == ["tflint", "--format", "sarif"]
+    assert "{files}" not in argv
+    assert not any(arg.endswith(("main.tf", ".tflint.hcl", ".tf")) for arg in argv)
 
 
 def test_checkov_auto_enables_on_terraform_fixture() -> None:

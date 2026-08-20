@@ -10,7 +10,6 @@ command:
 - tflint
 - --format
 - sarif
-- '{files}'
 scope: diff
 parser: sarif
 supports_fix: false

@@ -6,8 +6,8 @@ detect:
   files:
   - Gemfile.lock
 command:
-- bundle
-- audit
+- bundler-audit
+- check
 - --format
 - json
 scope: repo
