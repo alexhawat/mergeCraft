@@ -277,3 +277,4 @@ W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` cle
 - Collection clean; current-state pins **PASS**; wiring pins **XFAIL** (`strict=False`); **no XPASS**
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W9 not started
+- W8 commit: `ba8f6f4d`
