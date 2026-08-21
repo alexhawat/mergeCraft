@@ -40,7 +40,7 @@ a locality-matched baseline (`mergecraft.evals.scoring.score_findings`):
 
 | Metric | Meaning |
 |--------|---------|
-| Blocker precision | Fraction of Critical-severity findings that hit a baseline issue. Vacuous `1.0` when the run reported no blockers |
+| Blocker precision | Fraction of Critical-severity findings that hit a baseline issue. `None` when the run reported no blockers — not published, never a fabricated number |
 | Severity accuracy | Fraction of matches whose severity agrees with the baseline |
 | Duplicate rate | Fraction of findings that repeat an earlier overlapping finding |
 | Unsupported-finding rate | Fraction of findings that did not hit the baseline (unadjudicated on an open-world corpus) |
