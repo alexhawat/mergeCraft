@@ -136,6 +136,17 @@ def review_linked_repos(
         roots=discover_linked_repo_roots(repo_root=repo_root, manifest=manifest),
         grant=grant,
     )
+    pinned_roots: dict[str, Path] = {}
+    for entry in manifest.repos:
+        root = roots.get(entry.name)
+        if root is None:
+            continue
+        try:
+            _require_head_matches_pin(root, entry.commit)
+        except ValueError:
+            continue
+        pinned_roots[entry.name] = root
+    roots = pinned_roots
 
     producer_entry = manifest.entry_for(producer) if producer else None
     producers = (producer_entry,) if producer_entry is not None else manifest.repos
@@ -145,10 +156,6 @@ def review_linked_repos(
     for entry in producers:
         root = roots.get(entry.name)
         if root is None:
-            continue
-        try:
-            _require_head_matches_pin(root, entry.commit)
-        except ValueError:
             continue
         cache_key = (entry.name, entry.commit)
         if cache_key not in index_cache:

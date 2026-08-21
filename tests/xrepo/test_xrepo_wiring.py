@@ -211,3 +211,30 @@ def test_mismatched_head_is_not_reported_as_pinned_sha(tmp_path: Path) -> None:
     )
     review = review_linked_repos(repo_root=primary, producer="acme/api-contracts")
     assert all(finding.impact.changed_contract.commit != pin for finding in review.findings)
+
+
+def test_mismatched_consumer_head_is_not_scanned(tmp_path: Path) -> None:
+    """A matching producer pin still skips a consumer whose HEAD drifted."""
+    from mergecraft.xrepo.review import review_linked_repos
+
+    primary = tmp_path / "primary"
+    contracts = tmp_path / "api-contracts"
+    consumer = tmp_path / "web-client"
+    primary.mkdir()
+    pin = write_contract_fixture_repo(contracts)
+    consumer_commit = write_cross_repo_consumer_fixture(
+        contracts_root=contracts,
+        consumer_root=consumer,
+        contracts_commit=pin,
+    )
+    (consumer / "drift.txt").write_text("HEAD moved\n", encoding="utf-8")
+    git_commit_all(consumer)
+    write_linked_repos_manifest(
+        primary,
+        repos=[
+            {"owner": "acme", "name": "api-contracts", "commit": pin},
+            {"owner": "acme", "name": "web-client", "commit": consumer_commit},
+        ],
+    )
+    review = review_linked_repos(repo_root=primary, producer="acme/api-contracts")
+    assert all("web-client" not in finding.impact.repo for finding in review.findings)
