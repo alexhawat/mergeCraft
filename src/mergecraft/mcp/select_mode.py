@@ -51,10 +51,7 @@ def select_mode_tool(ctx: ToolContext):
             and ctx.tool_state.existing_plan_comment_id
         ):
             result["previousPlanBody"] = ctx.tool_state.previous_plan_body
-        if (
-            selected.name in {"Review", "IncrementalReview", "Task"}
-            and ctx.tool_state.summary_file_path
-        ):
+        if selected.name in {"Review", "IncrementalReview"} and ctx.tool_state.summary_file_path:
             result["summaryFilePath"] = ctx.tool_state.summary_file_path
         return result
 

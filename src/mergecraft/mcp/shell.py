@@ -18,7 +18,6 @@ from loguru import logger
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import BackgroundProcess, primary_repo_state
-from mergecraft.modes import refuse_review_only_mutation
 from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import resolve_env
 from mergecraft.utils.workspace import (
@@ -338,10 +337,6 @@ def primary_repo_state_dir_safe(fallback: str) -> str:
 
 def shell_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        refuse_review_only_mutation(
-            ctx.tool_state.selected_mode,
-            action="edit the workspace via shell",
-        )
         command = str(params["command"])
         if _is_git_command(command):
             msg = (
@@ -426,6 +421,7 @@ def shell_tool(ctx: ToolContext):
     return tool(
         name="shell",
         tool_class=ToolClass.SHELL,
+        mutates=True,
         timeout_ms=120_000,
         description=(
             f"Execute shell commands securely. Environment is filtered to remove API "

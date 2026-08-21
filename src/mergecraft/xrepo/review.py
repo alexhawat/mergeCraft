@@ -15,11 +15,9 @@ from mergecraft.xrepo.blast_radius import (
 )
 from mergecraft.xrepo.contract_index import ContractIndex, index_contracts
 from mergecraft.xrepo.linked_repos import (
-    LinkedRepoAccessError,
     LinkedRepoEntry,
     LinkedReposManifest,
     RunGrant,
-    load_linked_repo_content,
     parse_manifest,
 )
 
@@ -80,30 +78,6 @@ def _authorized_roots(
     return {name: path for name, path in roots.items() if grant.is_authorized(name)}
 
 
-def _load_authorized_content(
-    *,
-    manifest: LinkedReposManifest,
-    grant: RunGrant,
-    repo_roots: dict[str, Path],
-) -> None:
-    """Touch each granted checkout so unauthorized reads fail on the review path."""
-    for entry in manifest.repos:
-        if entry.name not in repo_roots:
-            continue
-        try:
-            load_linked_repo_content(
-                manifest=manifest,
-                repo=entry.slug,
-                grant=grant,
-                repo_roots=repo_roots,
-                relative_path="README.md",
-            )
-        except FileNotFoundError:
-            continue
-        except LinkedRepoAccessError:
-            raise
-
-
 def _changed_from_index(*, repo: str, commit: str, index: ContractIndex) -> list[ChangedContract]:
     surfaces = (*index.openapi, *index.graphql, *index.protobuf, *index.exports)
     return [
@@ -143,7 +117,6 @@ def review_linked_repos(
         roots=discover_linked_repo_roots(repo_root=repo_root, manifest=manifest),
         grant=grant,
     )
-    _load_authorized_content(manifest=manifest, grant=grant, repo_roots=roots)
 
     producer_entry = manifest.entry_for(producer) if producer else None
     producers = (producer_entry,) if producer_entry is not None else manifest.repos

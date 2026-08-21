@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,13 +14,14 @@ import yaml
 from pydantic import ValidationError
 from rich.table import Table
 
-from mergecraft import __version__
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
+from mergecraft.config.compat import migrate_config
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
+from mergecraft.evidence.run_manifest import runtime_tool_stamp
 from mergecraft.mcp.ports import port_available, read_env_port
 from mergecraft.models import MODEL_ALIASES
 from mergecraft.utils.agent_resolve import has_credentials_for_slug
@@ -128,8 +128,8 @@ def _config_probe(cwd: Path) -> ProbeResult:
     if not isinstance(loaded, dict):
         return ProbeResult("config", "fail", "config root must be a mapping", hard_failure=True)
     try:
-        RepoSettings.model_validate(loaded)
-    except ValidationError as exc:
+        RepoSettings.model_validate(migrate_config(loaded))
+    except (TypeError, ValueError, ValidationError) as exc:
         return ProbeResult("config", "fail", f"validation error: {exc}", hard_failure=True)
     return ProbeResult("config", "ok", str(config_path))
 
@@ -161,14 +161,7 @@ def run_doctor_probes(cwd: Path) -> list[ProbeResult]:
 
 def runtime_tool_versions() -> dict[str, Any]:
     """Return runtime and tool versions for run manifests and doctor probes."""
-    catalog = load_catalog()
-    tools: dict[str, str] = {"mergecraft": __version__}
-    tools.update({item.id: item.version for item in catalog})
-    return {
-        "python": sys.version.split()[0],
-        "runtime": f"CPython {sys.version_info.major}.{sys.version_info.minor}",
-        "tools": tools,
-    }
+    return runtime_tool_stamp()
 
 
 def verify_agent_cli_provenance(agent_clis_dir: Path) -> AgentCliProvenance:

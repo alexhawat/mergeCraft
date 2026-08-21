@@ -12,16 +12,9 @@ import typer
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
-from mergecraft.xrepo.linked_repos import (
-    RunGrant,
-    load_linked_repo_content,
-    parse_manifest,
-)
 from mergecraft.xrepo.review import (
-    MANIFEST_REL,
     XrepoFinding,
     XrepoReview,
-    discover_linked_repo_roots,
     review_linked_repos,
 )
 
@@ -66,34 +59,6 @@ def _render_report(review: XrepoReview) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _enforce_pinned_authorized_repos(*, repo_root: Path) -> None:
-    """SHA-pin and authorization boundary on the CLI/review path (#353)."""
-    manifest_path = repo_root / MANIFEST_REL
-    if not manifest_path.is_file():
-        return
-    manifest = parse_manifest(manifest_path)
-    grant = RunGrant(
-        authorized_repos=frozenset(
-            {entry.name.lower() for entry in manifest.repos}
-            | {entry.slug.lower() for entry in manifest.repos}
-        )
-    )
-    roots = discover_linked_repo_roots(repo_root=repo_root, manifest=manifest)
-    for entry in manifest.repos:
-        if entry.name not in roots:
-            continue
-        try:
-            load_linked_repo_content(
-                manifest=manifest,
-                repo=entry.slug,
-                grant=grant,
-                repo_roots=roots,
-                relative_path="README.md",
-            )
-        except FileNotFoundError:
-            continue
-
-
 def _finding_payload(finding: XrepoFinding) -> dict[str, object]:
     impact = finding.impact
     changed = impact.changed_contract
@@ -129,7 +94,6 @@ def explain_cmd(
 ) -> None:
     """Explain a cross-repo finding, or report producer/consumer contract breakage."""
     root = repo_root.expanduser().resolve()
-    _enforce_pinned_authorized_repos(repo_root=root)
     review = review_linked_repos(repo_root=root, producer=producer)
     if finding_id is not None:
         match = next((item for item in review.findings if item.finding_id == finding_id), None)

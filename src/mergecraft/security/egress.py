@@ -15,6 +15,7 @@ Exports:
 from __future__ import annotations
 
 import ipaddress
+import socket
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -47,13 +48,20 @@ class SsrfBlockedError(PermissionError):
 
 @dataclass(frozen=True, slots=True)
 class VulnerabilityGateReport:
-    """Outcome of a named vulnerability gate, distinct from ``make security``."""
+    """Outcome of a named vulnerability gate, distinct from ``make security``.
+
+    ``passed`` is False when the named tool did not run (fail-closed, not a
+    fake scan pass).
+    """
 
     name: str
     passed: bool
     command: str
+    ran: bool = False
 
     def __str__(self) -> str:
+        if not self.ran:
+            return f"{self.name} not_run: {self.command}"
         status = "passed" if self.passed else "failed"
         return f"{self.name} {status}: {self.command}"
 
@@ -73,10 +81,68 @@ def allow_egress(host: str, *, allowlist: frozenset[str] | None = None) -> bool:
 
 
 def _ip_from_host(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    stripped = host.strip("[]")
     try:
-        return ipaddress.ip_address(host)
+        return ipaddress.ip_address(stripped)
     except ValueError:
-        return None
+        pass
+    if stripped.isdigit():
+        try:
+            return ipaddress.IPv4Address(int(stripped))
+        except (ValueError, OverflowError):
+            return None
+    lowered = stripped.casefold()
+    if lowered.startswith("0x"):
+        try:
+            return ipaddress.IPv4Address(int(lowered, 16))
+        except (ValueError, OverflowError):
+            return None
+    parts = stripped.split(".")
+    if parts and all(part.isdigit() for part in parts) and 1 <= len(parts) <= 4:
+        try:
+            packed = socket.inet_aton(stripped)
+        except OSError:
+            return None
+        return ipaddress.IPv4Address(packed)
+    return None
+
+
+def _blocked_address(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> str | None:
+    mapped = address.ipv4_mapped if isinstance(address, ipaddress.IPv6Address) else None
+    check = mapped if mapped is not None else address
+    if check.is_loopback:
+        return "ssrf: blocked loopback address"
+    if check.is_link_local:
+        return "ssrf: blocked link-local / metadata address"
+    if check.is_private or check.is_reserved or check.is_multicast:
+        return "ssrf: blocked non-public address"
+    if check == ipaddress.ip_address("169.254.169.254"):
+        return "ssrf: blocked metadata address"
+    return None
+
+
+def _resolve_host_addresses(host: str) -> tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]:
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except (OSError, socket.gaierror) as exc:
+        msg = f"ssrf: DNS resolve failed for {host!r} (fail-closed)"
+        raise SsrfBlockedError(msg) from exc
+    addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        raw = sockaddr[0]
+        try:
+            addresses.append(ipaddress.ip_address(raw))
+        except ValueError:
+            continue
+    if not addresses:
+        msg = f"ssrf: DNS resolve failed for {host!r} (fail-closed)"
+        raise SsrfBlockedError(msg)
+    return tuple(addresses)
 
 
 def _ssrf_reason(host: str, scheme: str) -> str | None:
@@ -91,21 +157,20 @@ def _ssrf_reason(host: str, scheme: str) -> str | None:
     if host in _METADATA_HOSTS:
         return "ssrf: blocked metadata host"
     address = _ip_from_host(host)
-    if address is None:
-        return None
-    if address.is_loopback:
-        return "ssrf: blocked loopback address"
-    if address.is_link_local:
-        return "ssrf: blocked link-local / metadata address"
-    if address.is_private or address.is_reserved or address.is_multicast:
-        return "ssrf: blocked non-public address"
+    if address is not None:
+        return _blocked_address(address)
+    for resolved in _resolve_host_addresses(host):
+        reason = _blocked_address(resolved)
+        if reason is not None:
+            return reason
     return None
 
 
 def guard_external_url(url: str) -> str:
-    """Refuse SSRF targets (loopback, link-local, metadata, file:).
+    """Refuse SSRF targets (loopback, link-local, metadata, file:, odd IP forms).
 
-    Returns the original URL when it is acceptable for external retrieval.
+    DNS that fails to resolve is blocked (fail-closed). Returns the original
+    URL when it is acceptable for external retrieval.
     """
     parsed = urlparse(url)
     scheme = (parsed.scheme or "").casefold()
@@ -119,18 +184,20 @@ def guard_external_url(url: str) -> str:
 
 
 def dependency_vulnerability_gate() -> VulnerabilityGateReport:
-    """Named dependency advisory gate (pip-audit / OSV), invocable without I/O."""
+    """Named dependency advisory gate. Does not report a pass without running."""
     return VulnerabilityGateReport(
         name="dependency-osv",
-        passed=True,
+        passed=False,
+        ran=False,
         command="uv run pip-audit --vulnerability-service=osv",
     )
 
 
 def container_image_vulnerability_gate() -> VulnerabilityGateReport:
-    """Image scan gate (Trivy HIGH/CRITICAL). Not an alias of Bandit/pip-audit."""
+    """Image scan gate (Trivy). Does not report a pass without running."""
     return VulnerabilityGateReport(
         name="container-image-trivy",
-        passed=True,
+        passed=False,
+        ran=False,
         command="trivy image --severity HIGH,CRITICAL --ignore-unfixed",
     )

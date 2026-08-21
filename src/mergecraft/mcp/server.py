@@ -88,6 +88,8 @@ from mergecraft.mcp.shared import (
     ToolResult,
     ToolSpec,
     admits_readonly_role,
+    bind_selected_mode,
+    reset_selected_mode,
 )
 from mergecraft.mcp.shell import detect_sandbox_method, kill_background_tool, shell_tool
 from mergecraft.mcp.static_checks import run_static_checks_tool
@@ -506,6 +508,8 @@ def _register_mcp_route(
                 call_attrs["mergecraft.agent.id"] = agent_id
             with tracer.start_span("tool.call", attrs_source=lambda: dict(call_attrs)) as _span:
                 enrich_tool_request(_span, arguments=arguments)
+                mode = tool_ctx.tool_state.selected_mode if tool_ctx is not None else None
+                mode_token = bind_selected_mode(mode)
                 try:
                     result = await tool.execute(arguments)
                 except Exception as exc:
@@ -513,6 +517,8 @@ def _register_mcp_route(
                     enrich_tool_response(_span, output=None, error=exc)
                     _record_trajectory(tool_ctx, name, arguments, ok=False, error=str(exc))
                     raise
+                finally:
+                    reset_selected_mode(mode_token)
                 enrich_tool_response(_span, output=result)
                 _record_trajectory(tool_ctx, name, arguments, ok=True, result=result)
                 # T1 / D5 — known-verb tools also emit a verb-specific child

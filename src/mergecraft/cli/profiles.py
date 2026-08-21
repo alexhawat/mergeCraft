@@ -295,11 +295,10 @@ def apply_profile_env(
     if profile is None:
         yield
         return
-    target = dict(env if env is not None else os.environ)
+    lookup = env if env is not None else os.environ
     previous: dict[str, str | None] = {}
     for key, value in profile_env_overrides(profile).items():
-        previous[key] = target.get(key)
-        target[key] = value
+        previous[key] = lookup.get(key)
         os.environ[key] = value
     try:
         yield

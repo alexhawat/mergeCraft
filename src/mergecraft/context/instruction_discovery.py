@@ -58,15 +58,11 @@ def discover_instruction_paths(
     return paths
 
 
-def hash_injected_instructions(sources: Mapping[str, str]) -> str:
-    """Return a hex digest of injected instruction bytes for the run manifest."""
-    digest = hashlib.sha256()
-    for key in sorted(sources):
-        digest.update(key.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(sources[key].encode("utf-8"))
-        digest.update(b"\0")
-    return digest.hexdigest()
+def hash_injected_instructions(sources: Mapping[str, str]) -> dict[str, str]:
+    """Return per-source SHA-256 hex digests for the run manifest mapping."""
+    return {
+        key: hashlib.sha256(sources[key].encode("utf-8")).hexdigest() for key in sorted(sources)
+    }
 
 
 def resolve_instruction_conflicts(

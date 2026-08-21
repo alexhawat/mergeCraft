@@ -34,13 +34,18 @@ BenchKind = Literal["regression", "monorepo"]
 _CHEAP_MODEL: Final[str] = "anthropic/claude-haiku-4-5"
 _DEFAULT_MODEL: Final[str] = "anthropic/claude-sonnet"
 
-_metrics: dict[str, Any] = {
-    "tokens_by_agent": {},
-    "cache_hits": 0,
-    "cache_misses": 0,
-}
 
-_evidence_by_id: dict[str, dict[str, str]] = {}
+class _PerfState:
+    """Process-local perf counters and evidence cache (not shared across workers)."""
+
+    def __init__(self) -> None:
+        self.tokens_by_agent: dict[str, int] = {}
+        self.cache_hits: int = 0
+        self.cache_misses: int = 0
+        self.evidence_by_id: dict[str, dict[str, str]] = {}
+
+
+_state = _PerfState()
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,9 +75,9 @@ class ReviewContextCache:
         """Record a cache hit or miss for ``perf_metrics``."""
         mapping = getattr(self, key, None)
         if mapping is None:
-            _metrics["cache_misses"] = int(_metrics["cache_misses"]) + 1
+            _state.cache_misses += 1
             return default
-        _metrics["cache_hits"] = int(_metrics["cache_hits"]) + 1
+        _state.cache_hits += 1
         return mapping
 
 
@@ -120,14 +125,14 @@ def shared_evidence_payload(*, agent: str, evidence_id: str) -> dict[str, str]:
         A payload whose ``fingerprint`` is stable for the same ``evidence_id``.
     """
     del agent  # fingerprint is evidence-keyed, not per-agent
-    cached = _evidence_by_id.get(evidence_id)
+    cached = _state.evidence_by_id.get(evidence_id)
     if cached is not None:
-        _metrics["cache_hits"] = int(_metrics["cache_hits"]) + 1
+        _state.cache_hits += 1
         return cached
     fingerprint = sha256(evidence_id.encode("utf-8")).hexdigest()
     payload = {"evidence_id": evidence_id, "fingerprint": fingerprint}
-    _evidence_by_id[evidence_id] = payload
-    _metrics["cache_misses"] = int(_metrics["cache_misses"]) + 1
+    _state.evidence_by_id[evidence_id] = payload
+    _state.cache_misses += 1
     return payload
 
 
@@ -155,30 +160,18 @@ def route_specialist(*, remaining_usd: float, remaining_ms: int) -> SpecialistRo
 
 def record_agent_tokens(agent: str, tokens: int) -> None:
     """Accumulate per-agent token accounting for ``perf_metrics``."""
-    by_agent = _metrics["tokens_by_agent"]
-    if not isinstance(by_agent, dict):
-        by_agent = {}
-        _metrics["tokens_by_agent"] = by_agent
-    by_agent[agent] = int(by_agent.get(agent, 0)) + tokens
+    _state.tokens_by_agent[agent] = int(_state.tokens_by_agent.get(agent, 0)) + tokens
 
 
 def perf_metrics() -> dict[str, Any]:
     """Snapshot of per-agent tokens and cache hit/miss counters."""
-    tokens = _metrics["tokens_by_agent"]
     return {
-        "tokens_by_agent": dict(tokens) if isinstance(tokens, dict) else {},
-        "cache_hits": int(_metrics["cache_hits"]),
-        "cache_misses": int(_metrics["cache_misses"]),
+        "tokens_by_agent": dict(_state.tokens_by_agent),
+        "cache_hits": _state.cache_hits,
+        "cache_misses": _state.cache_misses,
     }
 
 
 def run_perf_regression_benchmark(*, kind: BenchKind = "regression") -> dict[str, str]:
-    """Keyless regression or large-monorepo bench — no published cost/latency numbers.
-
-    Args:
-        kind: ``regression`` or ``monorepo``.
-
-    Returns:
-        A status payload without measured USD, p95, precision, or recall.
-    """
-    return {"status": "passed", "kind": kind}
+    """Keyless regression or large-monorepo bench — no published numbers, not a pass."""
+    return {"status": "not_run", "kind": kind}

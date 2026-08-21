@@ -25,6 +25,7 @@ Exports:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Final
 
 from loguru import logger
@@ -141,17 +142,19 @@ class ProviderHealth:
 
 
 class ProviderBreaker:
-    """Open after ``trip()``; cooldown delays re-entry until reset."""
+    """Open after ``trip()``; ``allow()`` is False until ``cooldown_s`` elapses."""
 
     def __init__(self, provider: str, cooldown_s: float) -> None:
         self.provider = provider
         self.cooldown_s = cooldown_s
         self.cooldown = cooldown_s
         self._open = False
+        self._opened_at: float | None = None
 
     def trip(self) -> None:
         """Open the circuit and start cooldown."""
         self._open = True
+        self._opened_at = monotonic()
         logger.warning(
             "provider circuit breaker open for {provider}; cooldown_s={cooldown}",
             provider=self.provider,
@@ -159,8 +162,17 @@ class ProviderBreaker:
         )
 
     def allow(self) -> bool:
-        """Return False while the circuit is open (cooldown in effect)."""
-        return not self._open
+        """Return False while the circuit is open and cooldown has not elapsed."""
+        if not self._open:
+            return True
+        opened = self._opened_at
+        if opened is None:
+            return False
+        if monotonic() - opened >= self.cooldown_s:
+            self._open = False
+            self._opened_at = None
+            return True
+        return False
 
 
 def capability_catalog() -> list[dict[str, Any]]:

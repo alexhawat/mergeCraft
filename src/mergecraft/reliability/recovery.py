@@ -21,9 +21,12 @@ from __future__ import annotations
 import os
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 from loguru import logger
+
+from mergecraft.utils.process_group import kill_all_active_process_groups
 
 CLEANUP_FAILURE_MODES: Final[frozenset[str]] = frozenset(
     {
@@ -36,8 +39,27 @@ CLEANUP_FAILURE_MODES: Final[frozenset[str]] = frozenset(
 )
 
 _GIANT_FILE_BUDGET: Final[int] = 1_000_000
-_publish_lock = threading.Lock()
-_published_reviews: set[str] = set()
+
+
+class _PublishedReviewStore:
+    """Process-local publication idempotency set (not shared across workers)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._ids: set[str] = set()
+
+    def publish_once(self, review_id: str) -> bool:
+        if not review_id.strip():
+            msg = "missing review id"
+            raise ValueError(msg)
+        with self._lock:
+            if review_id in self._ids:
+                return False
+            self._ids.add(review_id)
+            return True
+
+
+_published_reviews = _PublishedReviewStore()
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,12 +92,12 @@ def on_provider_outage(stage: str) -> RecoveryOutcome:
 def recover_corrupt_cache(path: str) -> RecoveryOutcome:
     """Rebuild a corrupt local cache rather than failing fatally.
 
-    Args:
-        path: Cache location; need not exist (tests pass a sentinel).
-
-    Returns:
-        Outcome with ``rebuilt`` true.
+    Missing paths are not reported as rebuilt.
     """
+    target = Path(path)
+    if not path.strip() or not target.exists():
+        logger.info("Cache path {} is absent; not rebuilt", path)
+        return RecoveryOutcome(rebuilt=False, status="skipped")
     logger.info("Rebuilding corrupt local cache at {}", path)
     return RecoveryOutcome(rebuilt=True, status="degraded")
 
@@ -128,11 +150,10 @@ def publish_review_idempotent(*, review_id: str, body: str) -> RecoveryOutcome:
     on inbound delivery adapters.
     """
     _ = body
-    with _publish_lock:
-        if review_id in _published_reviews:
-            return RecoveryOutcome(duplicate=True, status="completed")
-        _published_reviews.add(review_id)
+    first = _published_reviews.publish_once(review_id)
+    if first:
         return RecoveryOutcome(duplicate=False, status="completed")
+    return RecoveryOutcome(duplicate=True, status="completed")
 
 
 def resume_review(run_id: str) -> RecoveryOutcome:
@@ -160,4 +181,5 @@ def cleanup_on_failure(mode: str) -> RecoveryOutcome:
     if mode not in CLEANUP_FAILURE_MODES:
         raise ValueError(f"unknown cleanup failure mode: {mode}")
     logger.debug("Cleanup after failure mode {}", mode)
+    kill_all_active_process_groups()
     return RecoveryOutcome(cleaned=True, status="degraded")

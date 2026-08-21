@@ -106,15 +106,22 @@ def is_write_capable_mode_name(name: str) -> bool:
 
 
 def refuse_review_only_mutation(selected_mode: str | None, *, action: str) -> None:
-    """Raise when a Review / IncrementalReview run attempts a mutating action.
+    """Raise unless a write-capable mode is selected (default-deny).
+
+    Unset ``selected_mode`` (orchestrator before ``select_mode``) is treated
+    as review-only. Production has no write-capable modes registered.
 
     Args:
         selected_mode: The mode currently selected for the run, if any.
         action: Short description of the refused verb (must name it).
     """
-    if selected_mode in REVIEWER_SHAPED_MODE_NAMES:
-        msg = f"review-only: {action} is not allowed in {selected_mode} mode"
+    if selected_mode is not None and is_write_capable_mode_name(selected_mode):
+        return
+    if selected_mode is None:
+        msg = f"review-only: {action} is not allowed until a write-capable mode is selected"
         raise RuntimeError(msg)
+    msg = f"review-only: {action} is not allowed in {selected_mode} mode"
+    raise RuntimeError(msg)
 
 
 _T_CALL_RE = re.compile(r"\$\{t\(\"([^\"]+)\"\)\}")

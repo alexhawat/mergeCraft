@@ -150,28 +150,15 @@ def search_cmd(
     """Search retrieved review context for a query."""
     if not query.strip():
         cli_bail("search query is required", code=CLI_USAGE_EXIT_CODE)
-    retrieval = lazy_retrieve(query=query, tools_allowed=("search",))
-    hits: list[tuple[str, float]] = []
     root = repo_root.expanduser().resolve()
-    if root.is_dir():
-        for path in sorted(root.rglob("*")):
-            if not path.is_file() or path.suffix.casefold() not in {".py", ".md", ".txt"}:
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            score = score_relevance(query=query, item={"text": text})
-            if score > 0:
-                hits.append((str(path.relative_to(root)), score))
-    hits.sort(key=lambda item: item[1], reverse=True)
-    if not hits:
-        if retrieval:
-            typer.echo(f"No indexed hits for {query!r}.")
-        else:
-            cli_bail("search is not available", code=CLI_USAGE_EXIT_CODE)
+    retrieval = lazy_retrieve(query=query, tools_allowed=("search",), repo_root=root)
+    if retrieval.omitted:
+        cli_bail("search is not available", code=CLI_USAGE_EXIT_CODE)
+    if not retrieval.items:
+        typer.echo(f"No indexed hits for {query!r}.")
         return
-    for rel, score in hits[:20]:
+    for rel in retrieval.items:
+        score = score_relevance(query=query, item={"text": rel})
         typer.echo(f"{score:.3f}\t{rel}")
 
 

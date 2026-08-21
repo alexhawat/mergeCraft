@@ -277,8 +277,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Mutating MCP tools other than review-session verbs (`select_mode`, checkout, review publication) are refused unless a write-capable mode is selected, including before mode selection (#350)
+- GitLab webhook `X-Gitlab-Token` is compared as a shared secret, not an HMAC of the body; missing delivery ids fail closed instead of accepting anonymous (#361)
+- External URL retrieval also blocks decimal, hex, and short IPv4 forms, IPv6-mapped loopback, and DNS that resolves to loopback, link-local, or metadata; DNS failure is fail-closed (#362)
+- Dependency and container-image vulnerability gates no longer report a pass without running a scanner (#362)
 - Network egress is allow-listed (`allow_egress`), external retrieval refuses SSRF targets (loopback, link-local metadata, `file:`), dependency and container-image vulnerability gates are invocable and the image gate is not `make security`, public comments redact secret tokens, and `docs/THREAT-MODEL.md` ties those controls to `tests/security/test_cd_egress.py` plus an independent security review before a stable release (#362)
-- GitHub and GitLab webhook deliveries now require a matching HMAC, reject stale or reused deliveries, and process each delivery id once; a provider 429 is retried instead of dropped, and webhook adapters still cannot commit, push, or edit (#361)
+- GitHub webhook deliveries require a matching HMAC; GitLab uses shared-secret `X-Gitlab-Token`; stale or reused deliveries are rejected and each delivery id is processed once; a provider 429 is retried instead of dropped, and webhook adapters still cannot commit, push, or edit (#361)
 - `SECURITY.md` states the review-only guarantee: identify, investigate, verify, explain, prioritize, and suggest; no source edits, applied fixes, commits, pushes, or code-changing pull requests (#350)
 - Review runs are review-only: `Fix`, `Build`, `Task`, `AddressReviews`, and `ResolveConflicts` are no longer selectable, and a Review or IncrementalReview run cannot edit the workspace, commit, push, or open a code-changing PR. Illustrative diffs stay GitHub suggestion comments (#350)
 - `mergecraft mcp serve` now mints a per-serve Bearer token and requires it on every MCP request; unauthenticated `tools/list` and `tools/call` are rejected with HTTP 401 / JSON-RPC `-32600` (#345). `build_mcp_tool_context` mints the token via `secrets.token_hex(32)`, stores it as `ctx.mcp_auth_token`, and passes it as `auth_token=` into `create_mcp_app`; the token is printed to stderr as `MERGECRAFT_MCP_BEARER=<token>` at startup.

@@ -111,13 +111,18 @@ class FalsePositiveMemory:
         return stamp - first > timedelta(days=self.ttl_days)
 
     def matches(self, *, path: str, message: str) -> bool:
-        """Return whether ``path``/``message`` fall in this store's scope."""
-        if self.is_expired():
+        """Return whether ``path``/``message`` match a recorded suppression rule.
+
+        An empty rule list never suppresses. Scope glob alone is not a match.
+        """
+        if self.is_expired() or not self._rules:
             return False
         for pattern, path_scope, _recorded in self._rules:
+            if not pattern:
+                continue
             if fnmatch(path, path_scope) and pattern.lower() in message.lower():
                 return True
-        return fnmatch(path, self.scope)
+        return False
 
 
 class OrganizationMemoryBackend(ABC):
@@ -268,18 +273,36 @@ def detect_over_suppression(
     return OverSuppressionReport(is_over_suppressed=ratio > _OVER_SUPPRESSION_RATIO)
 
 
-def evaluate_memory_effectiveness() -> MemoryEffectivenessReport:
-    """Prove memory raises precision without reducing recall on a held-out set.
-
-    Baseline: 8 true positives, 2 false positives, 0 false negatives.
-    With FP memory: one false positive is suppressed, true positives unchanged.
-    """
-    baseline_tp, baseline_fp, baseline_fn = 8, 2, 0
-    memory_tp, memory_fp, memory_fn = 8, 1, 0
-    baseline_precision = baseline_tp / (baseline_tp + baseline_fp)
-    memory_precision = memory_tp / (memory_tp + memory_fp)
-    baseline_recall = baseline_tp / (baseline_tp + baseline_fn)
-    memory_recall = memory_tp / (memory_tp + memory_fn)
+def evaluate_memory_effectiveness(
+    *,
+    baseline_true_positives: int | None = None,
+    baseline_false_positives: int | None = None,
+    baseline_false_negatives: int | None = None,
+    memory_true_positives: int | None = None,
+    memory_false_positives: int | None = None,
+    memory_false_negatives: int | None = None,
+) -> MemoryEffectivenessReport:
+    """Precision/recall deltas from labeled counts; zeros when no corpus is given."""
+    required = (
+        baseline_true_positives,
+        baseline_false_positives,
+        baseline_false_negatives,
+        memory_true_positives,
+        memory_false_positives,
+        memory_false_negatives,
+    )
+    if any(value is None for value in required):
+        return MemoryEffectivenessReport(precision_delta=0.0, recall_delta=0.0)
+    b_tp = int(baseline_true_positives or 0)
+    b_fp = int(baseline_false_positives or 0)
+    b_fn = int(baseline_false_negatives or 0)
+    m_tp = int(memory_true_positives or 0)
+    m_fp = int(memory_false_positives or 0)
+    m_fn = int(memory_false_negatives or 0)
+    baseline_precision = b_tp / (b_tp + b_fp) if (b_tp + b_fp) else 0.0
+    memory_precision = m_tp / (m_tp + m_fp) if (m_tp + m_fp) else 0.0
+    baseline_recall = b_tp / (b_tp + b_fn) if (b_tp + b_fn) else 0.0
+    memory_recall = m_tp / (m_tp + m_fn) if (m_tp + m_fn) else 0.0
     return MemoryEffectivenessReport(
         precision_delta=memory_precision - baseline_precision,
         recall_delta=memory_recall - baseline_recall,

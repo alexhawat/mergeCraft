@@ -119,12 +119,14 @@ def run_fixtures_cmd(
             failures.append(f"{fixture_path.name}: fixture must be a mapping")
             continue
         fixture_path_value = str(raw.get("path", ""))
+        fixture_symbol = raw.get("symbol")
         context = ScopeContext(
             org="",
             repo="",
             branch="",
             path=fixture_path_value,
             language="",
+            symbol=str(fixture_symbol) if fixture_symbol else None,
         )
         effective = resolve_effective_rules(rules, context=context)
         matched = [entry.rule.id for entry in effective]
@@ -158,6 +160,11 @@ def explain_cmd(
     repo: str = typer.Option("", "--repo", help="Repository name for scope resolution."),
     branch: str = typer.Option("main", "--branch", help="Branch name for scope resolution."),
     language: str = typer.Option("", "--language", help="Language id for scope resolution."),
+    symbol: str | None = typer.Option(
+        None,
+        "--symbol",
+        help="Optional symbol name so symbol-scoped rules can match.",
+    ),
     cwd: Path = typer.Option(
         Path("."),
         "--cwd",
@@ -176,6 +183,7 @@ def explain_cmd(
         branch=branch,
         path=path,
         language=language,
+        symbol=symbol,
     )
     _print_effective(resolve_effective_rules(rules, context=context))
 

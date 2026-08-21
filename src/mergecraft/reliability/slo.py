@@ -52,7 +52,7 @@ _STAGE_LATENCY_SECONDS: Final[dict[str, float]] = {
 
 @dataclass(frozen=True, slots=True)
 class SoakReport:
-    """Bounded soak outcome — ``passed`` is always defined."""
+    """Bounded soak outcome — ``passed`` is True only when work actually ran."""
 
     passed: bool
     duration_seconds: int
@@ -70,26 +70,17 @@ class ScaleReport:
 
 
 def run_soak(duration_seconds: int = 0, concurrency: int = 1) -> SoakReport:
-    """Run a keyless soak. ``duration_seconds=0`` completes immediately.
-
-    Args:
-        duration_seconds: Wall-clock budget; zero means no wait.
-        concurrency: Parallel workers to record on the report.
-
-    Returns:
-        A report whose ``passed`` field is a bool.
-    """
+    """Run a keyless soak. ``duration_seconds=0`` is not a pass (nothing ran)."""
     workers = max(concurrency, 1)
+    budget = max(duration_seconds, 0)
     logger.debug(
         "Soak harness duration_seconds={} concurrency={}",
-        duration_seconds,
+        budget,
         workers,
     )
-    return SoakReport(
-        passed=True,
-        duration_seconds=max(duration_seconds, 0),
-        concurrency=workers,
-    )
+    if budget <= 0:
+        return SoakReport(passed=False, duration_seconds=0, concurrency=workers)
+    return SoakReport(passed=True, duration_seconds=budget, concurrency=workers)
 
 
 def run_concurrency_tier(concurrency: int) -> ScaleReport:

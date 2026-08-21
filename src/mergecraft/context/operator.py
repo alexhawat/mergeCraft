@@ -25,8 +25,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
+from mergecraft.context.repo_paths import git_ls_tree_paths, git_show_text
+from mergecraft.context.symbol_index import index_symbols
+from mergecraft.utils.bounded_text import read_bounded_text
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
+    from pathlib import Path
 
 _CONTROLLED_TOOLS: Final[frozenset[str]] = frozenset({"search", "explain"})
 
@@ -88,14 +93,42 @@ def lazy_retrieve(
     *,
     query: str,
     tools_allowed: Iterable[str] = (),
+    repo_root: Path | None = None,
 ) -> LazyRetrieval:
-    """Retrieve lazily through controlled tools; omit when none are allowed."""
+    """Retrieve lazily through controlled tools; omit when none are allowed.
+
+    Does not echo the query as a fake hit. Search uses the symbol index over
+    git-tracked paths when ``repo_root`` is provided.
+    """
     allowed = frozenset(tools_allowed) & _CONTROLLED_TOOLS
-    if not allowed:
+    if not allowed or not query.strip():
         return LazyRetrieval(items=(), omitted=True)
-    if not query.strip():
+    if "search" not in allowed or repo_root is None:
         return LazyRetrieval(items=(), omitted=True)
-    return LazyRetrieval(items=(query.strip(),), omitted=False)
+    hits = _search_indexed(repo_root=repo_root, query=query.strip())
+    return LazyRetrieval(items=tuple(hits), omitted=False)
+
+
+def _search_indexed(*, repo_root: Path, query: str) -> list[str]:
+    needle = query.casefold()
+    tokens = {part.casefold() for part in query.split() if part}
+    hits: list[str] = []
+    for rel_path in git_ls_tree_paths(repo_root, "HEAD"):
+        source = git_show_text(repo_root, "HEAD", rel_path)
+        if source is None:
+            source = read_bounded_text(repo_root / rel_path) or ""
+        indexed = index_symbols(
+            repo_root=repo_root,
+            rel_path=rel_path,
+            blob_sha=rel_path,
+            source=source,
+        )
+        names = {symbol.name.casefold() for symbol in indexed.symbols}
+        if needle in source.casefold() or names & tokens:
+            hits.append(rel_path)
+        if len(hits) >= 20:
+            break
+    return hits
 
 
 def report_omissions(
@@ -122,9 +155,20 @@ def downgrade_for_omissions(outcome: str, *, omitted: Sequence[str] | object) ->
     return outcome
 
 
-def evaluate_retrieval_quality() -> RetrievalQualityReport:
-    """Return a retrieval-quality score that does not grade model quality."""
-    return RetrievalQualityReport(retrieval_score=0.75, model_quality=None)
+def evaluate_retrieval_quality(
+    *,
+    query: str = "",
+    retrieved: Sequence[str] | None = None,
+) -> RetrievalQualityReport:
+    """Score overlap between ``query`` and retrieved items; 0.0 with no corpus."""
+    items = tuple(retrieved or ())
+    if not query.strip() or not items:
+        return RetrievalQualityReport(retrieval_score=0.0, model_quality=None)
+    scores = [score_relevance(query=query, item={"text": item}) for item in items]
+    return RetrievalQualityReport(
+        retrieval_score=sum(scores) / len(scores),
+        model_quality=None,
+    )
 
 
 def _tokens(text: str) -> set[str]:

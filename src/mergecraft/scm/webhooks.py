@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,7 +35,8 @@ _REVIEW_ONLY_FORBIDDEN: frozenset[str] = frozenset(
 
 _GITHUB_SIGNATURE_HEADER = "X-Hub-Signature-256"
 _GITHUB_DELIVERY_HEADER = "X-GitHub-Delivery"
-_GITLAB_SIGNATURE_HEADER = "X-Gitlab-Token"
+_GITLAB_TOKEN_HEADER = "X-Gitlab-Token"
+_GITLAB_UUID_HEADERS = ("X-Gitlab-Event-UUID", "X-Gitlab-Webhook-UUID")
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,8 +74,43 @@ class ConformingReviewRequest:
     event: str
 
 
-_processed_deliveries: dict[str, WebhookProcessResult] = {}
-_seen_nonces: set[str] = set()
+class _WebhookDeliveryStore:
+    """Process-local delivery and nonce store (not shared across workers).
+
+    Missing delivery ids / nonces are fail-closed — callers must not invent
+    ``{provider}:anonymous`` keys. Restarting the process clears this map.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._deliveries: dict[str, WebhookProcessResult] = {}
+        self._nonces: set[str] = set()
+
+    def remember_nonce(self, nonce: str) -> None:
+        if not nonce.strip():
+            msg = "missing webhook delivery id"
+            raise ValueError(msg)
+        with self._lock:
+            if nonce in self._nonces:
+                msg = f"replay of webhook nonce {nonce!r} rejected"
+                raise ValueError(msg)
+            self._nonces.add(nonce)
+
+    def process(self, key: str, result: WebhookProcessResult) -> WebhookProcessResult:
+        with self._lock:
+            existing = self._deliveries.get(key)
+            if existing is not None:
+                return WebhookProcessResult(
+                    result_id=existing.result_id,
+                    duplicate=True,
+                    provider=existing.provider,
+                    event=existing.event,
+                )
+            self._deliveries[key] = result
+            return result
+
+
+_store = _WebhookDeliveryStore()
 
 
 def _require_supported(provider: str) -> str:
@@ -101,7 +138,7 @@ def _hmac_digest(body: bytes, secret: str) -> str:
 def _signature_header_name(provider: str) -> str:
     if provider == "github":
         return _GITHUB_SIGNATURE_HEADER
-    return _GITLAB_SIGNATURE_HEADER
+    return _GITLAB_TOKEN_HEADER
 
 
 def _format_signature(provider: str, digest: str) -> str:
@@ -111,8 +148,14 @@ def _format_signature(provider: str, digest: str) -> str:
 
 
 def sign_webhook_payload(provider: str, *, body: bytes, secret: str) -> dict[str, str]:
-    """Return the signature header map for ``body`` under ``secret``."""
+    """Return the signature header map for ``body`` under ``secret``.
+
+    GitHub uses HMAC-SHA256 of the body. GitLab's ``X-Gitlab-Token`` is a
+    shared-secret equality check, not an HMAC of the body.
+    """
     name = _require_supported(provider)
+    if name == "gitlab":
+        return {_GITLAB_TOKEN_HEADER: secret}
     digest = _hmac_digest(body, secret)
     return {_signature_header_name(name): _format_signature(name, digest)}
 
@@ -124,13 +167,34 @@ def verify_webhook_signature(
     body: bytes,
     secret: str,
 ) -> None:
-    """Accept a matching HMAC; reject a mismatch or unsupported provider."""
+    """Accept a matching GitHub HMAC or GitLab shared secret; reject otherwise."""
     name = _require_supported(provider)
+    if name == "gitlab":
+        presented = _header(headers, _GITLAB_TOKEN_HEADER)
+        if presented is None or not hmac.compare_digest(presented, secret):
+            msg = "invalid webhook signature (shared-secret mismatch)"
+            raise PermissionError(msg)
+        return
     expected = _format_signature(name, _hmac_digest(body, secret))
     presented = _header(headers, _signature_header_name(name))
     if presented is None or not hmac.compare_digest(presented, expected):
         msg = "invalid webhook signature (hmac mismatch)"
         raise PermissionError(msg)
+
+
+def _delivery_nonce(provider: str, headers: dict[str, str]) -> str:
+    if provider == "github":
+        nonce = _header(headers, _GITHUB_DELIVERY_HEADER)
+    else:
+        nonce = None
+        for name in _GITLAB_UUID_HEADERS:
+            nonce = _header(headers, name)
+            if nonce:
+                break
+    if nonce is None or not nonce.strip():
+        msg = "missing webhook delivery id"
+        raise ValueError(msg)
+    return nonce
 
 
 def reject_webhook_replay(
@@ -146,13 +210,7 @@ def reject_webhook_replay(
     if received_at_skew_seconds > _MAX_REPLAY_SKEW_SECONDS:
         msg = f"stale webhook timestamp (skew {received_at_skew_seconds}s exceeds replay window)"
         raise ValueError(msg)
-    nonce = _header(headers, _GITHUB_DELIVERY_HEADER) or _header(headers, "X-Gitlab-Webhook-UUID")
-    if nonce is None:
-        nonce = f"{name}:anonymous"
-    if nonce in _seen_nonces:
-        msg = f"replay of webhook nonce {nonce!r} rejected"
-        raise ValueError(msg)
-    _seen_nonces.add(nonce)
+    _store.remember_nonce(_delivery_nonce(name, headers))
 
 
 def process_webhook_event(
@@ -165,23 +223,17 @@ def process_webhook_event(
     """Process ``delivery_id`` once; later copies return the stored result as a duplicate."""
     _ = body
     name = _require_supported(provider)
+    if not delivery_id.strip():
+        msg = "missing webhook delivery id"
+        raise ValueError(msg)
     key = f"{name}:{delivery_id}"
-    existing = _processed_deliveries.get(key)
-    if existing is not None:
-        return WebhookProcessResult(
-            result_id=existing.result_id,
-            duplicate=True,
-            provider=existing.provider,
-            event=existing.event,
-        )
     result = WebhookProcessResult(
         result_id=delivery_id,
         duplicate=False,
         provider=name,
         event=event,
     )
-    _processed_deliveries[key] = result
-    return result
+    return _store.process(key, result)
 
 
 def handle_webhook_rate_limit(

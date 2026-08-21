@@ -130,7 +130,7 @@ def _precision_recall(findings: Sequence[Mapping[str, Any]]) -> tuple[float, flo
     if not unique_ids:
         return 0.0, 0.0
     precision = len(unique_useful) / len(unique_ids)
-    recall = precision
+    recall = 0.0
     return precision, recall
 
 

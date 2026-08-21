@@ -34,6 +34,8 @@ from mergecraft.review_taxonomy import FINDING_CONFIDENCES, FINDING_SEVERITIES
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from mergecraft.analyzers.finding import Finding
+
 DISMISSAL_REASON_CODES: Final[frozenset[str]] = frozenset(
     {
         "false_positive",
@@ -95,7 +97,7 @@ def _confidence_rank(confidence: str) -> int:
         return len(FINDING_CONFIDENCES)
 
 
-def score_materiality(finding: Any) -> int:
+def score_materiality(finding: Finding) -> int:
     """Return a higher score for higher-impact findings.
 
     Security and other operational categories outrank style commentary of the
@@ -114,7 +116,7 @@ def score_materiality(finding: Any) -> int:
     return severity_points + category_points
 
 
-def prioritize_findings(findings: Sequence[Any]) -> list[Any]:
+def prioritize_findings(findings: Sequence[Finding]) -> list[Finding]:
     """Return ``findings`` ordered by materiality, highest first.
 
     Args:

@@ -30,6 +30,18 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def runtime_tool_stamp() -> dict[str, Any]:
+    """Runtime and analyzer-catalog versions for manifests and ``mergecraft doctor``."""
+    catalog = load_catalog()
+    tools: dict[str, str] = {"mergecraft": __version__}
+    tools.update({item.id: item.version for item in catalog})
+    return {
+        "python": sys.version.split()[0],
+        "runtime": f"CPython {sys.version_info.major}.{sys.version_info.minor}",
+        "tools": tools,
+    }
+
+
 def build_run_manifest(
     *,
     cwd: Path,
@@ -60,8 +72,7 @@ def build_run_manifest(
     injected = dict(instruction_hashes) if instruction_hashes else {}
     if injected:
         hashes["instructions"] = injected
-    tools: dict[str, str] = {"mergecraft": __version__}
-    tools.update({item.id: item.version for item in load_catalog()})
+    stamp = runtime_tool_stamp()
     manifest: dict[str, Any] = {
         "agent_id": agent_id,
         "model_version": model,
@@ -72,9 +83,9 @@ def build_run_manifest(
         "config_hash": config_hash,
         "policy_hash": policy_hash,
         "hashes": hashes,
-        "python": sys.version.split()[0],
-        "runtime": f"CPython {sys.version_info.major}.{sys.version_info.minor}",
-        "tools": tools,
+        "python": stamp["python"],
+        "runtime": stamp["runtime"],
+        "tools": stamp["tools"],
     }
     if injected:
         manifest["instruction_hashes"] = injected
@@ -155,4 +166,5 @@ __all__ = [
     "apply_local_telemetry_defaults",
     "build_run_manifest",
     "resolve_local_telemetry_defaults",
+    "runtime_tool_stamp",
 ]
