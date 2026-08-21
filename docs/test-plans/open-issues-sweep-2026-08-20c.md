@@ -316,6 +316,7 @@ W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` cle
 - Kept W10 dismissal pin `test_dismissal_feeds_evaluation_not_durable_memory`
   (single dismissal still must not write durable memory).
 - W13.1 impl: `727b437a`.
+- W13 recon: `8d9c6dea`.
 
 ## Acceptance (W13 recon)
 
