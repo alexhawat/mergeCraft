@@ -12,6 +12,8 @@ removed after 45/45 XPASS on `c32b2eae`. W8.2 (`tests/release/`) and W10.2
 (`tests/evals/`) xfails left in place. No assertion edits; no leftover
 enterprise xfail. `tests/enterprise/`: 46 passed, 0 fail, 0 xfail.
 
+**Escalation (2026-08-21):** `test_proxy.py` records monkeypatch undo for unset `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` so `apply_enterprise_proxy` cannot leak `proxy.example` into later tests (`--randomly-seed=424242`).
+
 D17: new CLI tests live under `tests/enterprise/`, not `tests/cli/`. No
 `mergecraft.cli.app` imports. D10: `test_no_eval_scores_on_landing_readme`
 stays green; this suite mirrors it and never asserts scores belong on README.
@@ -102,7 +104,7 @@ Do not hand-edit `docs/compatibility-matrix.md` into the six-axis matrix.
 
 | # | Contract | Layer | Scenario | Primary test |
 | --- | --- | --- | --- | --- |
-| DB381a | Enterprise proxy | unit | happy/edge/error | `test_apply_enterprise_proxy_sets_https_proxy`, `test_apply_enterprise_proxy_honours_no_proxy`, `test_invalid_proxy_url_raises` |
+| DB381a | Enterprise proxy | unit | happy/edge/error | `test_apply_enterprise_proxy_sets_https_proxy`, `test_apply_enterprise_proxy_honours_no_proxy`, `test_invalid_proxy_url_raises`, `test_apply_enterprise_proxy_undo_clears_example_https_proxy` (coverage-gate: `delenv` of unset `HTTPS_PROXY` recorded no undo; `apply_enterprise_proxy` leaked `proxy.example` into later tests) |
 | DB381b | Custom CA | unit | happy/error | `test_load_custom_ca_returns_ssl_context`, `test_load_custom_ca_missing_file_raises`, `test_load_custom_ca_rejects_invalid_pem` |
 | DB381c | Offline install | unit | happy/error | `test_offline_install_plan_uses_python_311_floor`, `test_offline_install_rejects_standalone_binary_request` |
 | DB381d | Telemetry on/opt-out/off | unit | happy/edge/error | `tests/enterprise/test_telemetry.py` |

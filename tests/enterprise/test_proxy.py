@@ -9,29 +9,52 @@ import os
 
 import pytest
 
+_PROXY_ENV = (
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+)
+
+_EXAMPLE_PROXY = "http://proxy.example:8080"
+
+
+@pytest.fixture(autouse=True)
+def _record_proxy_env_undo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure monkeypatch undoes proxy env even when vars were unset.
+
+    ``delenv(..., raising=False)`` on a missing key records no undo, so
+    ``apply_enterprise_proxy`` would otherwise leak ``HTTPS_PROXY`` into
+    later tests (coverage-gate / ``--randomly-seed=424242``).
+    """
+    for name in _PROXY_ENV:
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name, raising=False)
+
 
 def test_apply_enterprise_proxy_sets_https_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Happy: applying a proxy config exports HTTPS_PROXY for outbound HTTPS."""
+    monkeypatch.setenv("HTTPS_PROXY", "")
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.setenv("https_proxy", "")
     monkeypatch.delenv("https_proxy", raising=False)
     from mergecraft.enterprise.proxy import ProxyConfig, apply_enterprise_proxy
 
-    apply_enterprise_proxy(ProxyConfig(https_proxy="http://proxy.example:8080"))
+    apply_enterprise_proxy(ProxyConfig(https_proxy=_EXAMPLE_PROXY))
     exported = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-    assert exported == "http://proxy.example:8080"
+    assert exported == _EXAMPLE_PROXY
 
 
 def test_apply_enterprise_proxy_honours_no_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Edge: empty no_proxy is accepted; a host list is exported as NO_PROXY."""
-    monkeypatch.delenv("HTTPS_PROXY", raising=False)
-    monkeypatch.delenv("https_proxy", raising=False)
+    monkeypatch.setenv("NO_PROXY", "")
     monkeypatch.delenv("NO_PROXY", raising=False)
     from mergecraft.enterprise.proxy import ProxyConfig, apply_enterprise_proxy
 
-    apply_enterprise_proxy(ProxyConfig(https_proxy="http://proxy.example:8080", no_proxy=""))
-    apply_enterprise_proxy(
-        ProxyConfig(https_proxy="http://proxy.example:8080", no_proxy="localhost,.internal")
-    )
+    apply_enterprise_proxy(ProxyConfig(https_proxy=_EXAMPLE_PROXY, no_proxy=""))
+    apply_enterprise_proxy(ProxyConfig(https_proxy=_EXAMPLE_PROXY, no_proxy="localhost,.internal"))
     exported = os.environ.get("NO_PROXY") or os.environ.get("no_proxy")
     assert "localhost" in (exported or "")
 
@@ -43,3 +66,16 @@ def test_invalid_proxy_url_raises(bad: str) -> None:
 
     with pytest.raises(ValueError, match="proxy"):
         apply_enterprise_proxy(ProxyConfig(https_proxy=bad))
+
+
+def test_apply_enterprise_proxy_undo_clears_example_https_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: monkeypatch undo must drop the example HTTPS_PROXY host."""
+    from mergecraft.enterprise.proxy import ProxyConfig, apply_enterprise_proxy
+
+    apply_enterprise_proxy(ProxyConfig(https_proxy=_EXAMPLE_PROXY))
+    assert (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")) == _EXAMPLE_PROXY
+    monkeypatch.undo()
+    leaked = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
+    assert "proxy.example" not in leaked
