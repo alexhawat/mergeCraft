@@ -34,11 +34,6 @@ _CLI_SRC = _REPO_ROOT / "src" / "mergecraft" / "cli"
 _REMAINING_ROOT_VERBS = ("explain", "ask", "replay")
 _RUN_SUBCOMMANDS = ("inspect", "diff")
 
-_XFAIL_W3 = pytest.mark.xfail(
-    reason="green after W3: remaining #377 verbs",
-    strict=False,
-)
-
 
 def _plain(text: str) -> str:
     return _ANSI.sub("", text)
@@ -102,10 +97,9 @@ def test_unknown_root_verb_is_still_usage_exit() -> None:
     assert result.exit_code == CLI_USAGE_EXIT_CODE, combined
 
 
-# ── Remaining #377 verbs (xfail until W3) ─────────────────────────────────────
+# ── Remaining #377 verbs (GREEN after W3) ─────────────────────────────────────
 
 
-@_XFAIL_W3
 @pytest.mark.parametrize("verb", _REMAINING_ROOT_VERBS)
 def test_remaining_root_verb_is_registered(verb: str) -> None:
     """Happy: ``explain`` / ``ask`` / ``replay`` are root commands."""
@@ -115,14 +109,12 @@ def test_remaining_root_verb_is_registered(verb: str) -> None:
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, combined
 
 
-@_XFAIL_W3
 @pytest.mark.parametrize("verb", _REMAINING_ROOT_VERBS)
 def test_root_help_lists_remaining_verb(verb: str) -> None:
     """Happy: root ``--help`` advertises each remaining root verb as a command name."""
     assert verb in _root_help_command_names(_root_help())
 
 
-@_XFAIL_W3
 def test_run_typer_exposes_inspect_and_diff() -> None:
     """Happy: ``mergecraft run inspect`` and ``run diff`` are registered (not ``analyzers run``)."""
     assert "run" in _root_group_names()
@@ -136,7 +128,6 @@ def test_run_typer_exposes_inspect_and_diff() -> None:
         assert sub_help.exit_code == CLI_SUCCESS_EXIT_CODE, combined
 
 
-@_XFAIL_W3
 @pytest.mark.parametrize("verb", _REMAINING_ROOT_VERBS)
 def test_remaining_verb_json_payload_carries_schema_version(verb: str) -> None:
     """Happy: D11 — JSON payloads use global ``--format json`` + ``schema_version``."""
@@ -148,7 +139,6 @@ def test_remaining_verb_json_payload_carries_schema_version(verb: str) -> None:
     assert payload["schema_version"] == CLI_JSON_SCHEMA_VERSION
 
 
-@_XFAIL_W3
 @pytest.mark.parametrize("sub", _RUN_SUBCOMMANDS)
 def test_run_subcommand_json_payload_carries_schema_version(sub: str) -> None:
     """Happy: D11 — ``run inspect`` / ``run diff`` JSON uses ``schema_version``."""
@@ -160,7 +150,6 @@ def test_run_subcommand_json_payload_carries_schema_version(sub: str) -> None:
     assert payload["schema_version"] == CLI_JSON_SCHEMA_VERSION
 
 
-@_XFAIL_W3
 @pytest.mark.parametrize(
     ("module_name", "relative"),
     [
@@ -186,7 +175,6 @@ def test_remaining_verb_module_uses_d11_surface(module_name: str, relative: str)
     assert callable(getattr(module, "run", None)) or hasattr(module, "app")
 
 
-@_XFAIL_W3
 def test_remaining_verbs_are_not_the_config_or_analyzers_homonyms() -> None:
     """Edge: root ``explain`` / ``run`` are distinct from ``config explain`` and ``analyzers run``."""
     names = _root_help_command_names(_root_help())

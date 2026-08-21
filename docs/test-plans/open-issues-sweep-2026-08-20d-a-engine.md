@@ -2,7 +2,7 @@
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-20d-a-engine-wave-plan.md`
 Worktree: `.ignorelocal/worktrees/open-issues-sweep-2026-08-20d-a-engine` @ `wave/20d-a-engine`
-Authoring wave: **W2** (DA RED) · Implementation: **W3–W6**
+Authoring wave: **W2** (DA RED) · Implementation: **W3–W6** · W3 xfail markers removed after remaining #377 verbs landed.
 
 W9 (#383 capability / adversarial tests) is **out of scope** for this suite — do
 not name a module `adversarial.py`. D13 write/Fix pins belong to W9. D16: nothing
@@ -12,9 +12,9 @@ under `skills/`.
 
 All cross-wave markers use `@pytest.mark.xfail(..., strict=False)`.
 
-| Wave | Tests | Marker reason | Status at W2 |
-|------|-------|---------------|--------------|
-| **W3** | remaining #377 verbs (not `describe` / `capabilities`) | `green after W3: remaining #377 verbs` | XFAIL |
+| Wave | Tests | Marker reason | Status |
+|------|-------|---------------|--------|
+| **W3** | remaining #377 verbs (not `describe` / `capabilities`) | markers removed after W3 | GREEN |
 | **W4** | first-finding stream, resume, result cache, cancel cleanup, goldens | `green after W4: first-finding stream / cache / resume / goldens` | XFAIL |
 | **W5** | negotiate / retryable mismatch / budgets / D12 adapter | `green after W5: protocol negotiation / D12 reconcile` | XFAIL |
 | **W6** | `ReviewSnapshot` type + CLI / Action / SCM conformance | `green after W6: ReviewSnapshot conformance` | XFAIL |
