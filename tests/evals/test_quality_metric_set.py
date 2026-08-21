@@ -95,4 +95,5 @@ def test_severity_accuracy_is_independent_of_blocker_precision() -> None:
         time_to_first_useful_finding_ms=5.0,
     )
     assert metrics.severity_accuracy < 1.0
-    assert metrics.blocker_precision is not None
+    # No Critical findings were reported, so blocker precision is honestly empty.
+    assert metrics.blocker_precision is None

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import typer
 
+from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.enterprise.audit import export_audit_log
 
 app = typer.Typer(
@@ -29,4 +31,9 @@ def export(
     ),
 ) -> None:
     """Export the audit log as a JSON array."""
+    if format.strip().casefold() != "json":
+        cli_bail(
+            f"unsupported audit export format {format!r}; only 'json' is supported",
+            code=CLI_USAGE_EXIT_CODE,
+        )
     typer.echo(export_audit_log([]))

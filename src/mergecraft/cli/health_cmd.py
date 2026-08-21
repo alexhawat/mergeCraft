@@ -17,8 +17,18 @@ app = typer.Typer(
 __all__ = ["app"]
 
 
+def _emit() -> None:
+    typer.echo(json.dumps(health_payload()))
+
+
 @app.callback(invoke_without_command=True)
-def run(ctx: typer.Context) -> None:
-    """Emit JSON health status for the running mergeCraft installation."""
+def _callback(ctx: typer.Context) -> None:
+    """Emit JSON health status when invoked with no subcommand."""
     if ctx.invoked_subcommand is None:
-        typer.echo(json.dumps(health_payload()))
+        _emit()
+
+
+@app.command("run")
+def run() -> None:
+    """Emit JSON health status for the running mergeCraft installation."""
+    _emit()

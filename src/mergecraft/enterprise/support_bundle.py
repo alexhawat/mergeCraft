@@ -3,42 +3,38 @@
 Distinct from ``mergecraft.reliability.diagnostic_bundle``.
 
 Exports:
-    write_support_bundle: Write a gzipped tar archive, redacting secrets.
+    write_support_bundle: Write a tar archive, redacting secrets.
 """
 
 from __future__ import annotations
 
 import io
-import re
 import sys
 import tarfile
 from pathlib import Path
+from typing import Literal
+
+from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.reliability.diagnostic_bundle import write_diagnostic_bundle
 
 __all__ = [
     "write_support_bundle",
 ]
 
-_ARCHIVE_SUFFIXES = {".tgz", ".tar.gz", ".tar"}
 
-_SECRET_PATTERNS = [
-    # API-key-style tokens (sk-..., ghp_..., etc.)
-    re.compile(r"(?i)(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36,}|xox[baprs]-[^\s]+)"),
-    # Bearer tokens
-    re.compile(r"(?i)Bearer\s+[A-Za-z0-9._\-]{10,}"),
-    # Generic key=value secrets
-    re.compile(r"(?i)(password|token|secret|api[_-]?key)\s*=\s*\S+"),
-]
-
-
-def _redact(text: str) -> str:
-    """Replace secret material in *text* with ``[REDACTED]``."""
-    for pattern in _SECRET_PATTERNS:
-        text = pattern.sub("[REDACTED]", text)
-    return text
+def _archive_mode(destination: Path) -> Literal["w", "w:gz"]:
+    """Return tarfile open mode from *destination* suffix (``.tar`` is uncompressed)."""
+    suffix_lower = "".join(destination.suffixes).lower()
+    if destination.suffix.lower() == ".tgz" or suffix_lower.endswith(".tar.gz"):
+        return "w:gz"
+    if destination.suffix.lower() == ".tar":
+        return "w"
+    msg = f"bundle destination must be a .tgz / .tar.gz / .tar archive, got: {destination.name!r}"
+    raise ValueError(msg)
 
 
 def write_support_bundle(destination: Path, *, extra_text: str = "") -> str:
-    """Write a gzipped tar support bundle to *destination*, redacting secrets.
+    """Write a support bundle to *destination*, redacting secrets.
 
     Args:
         destination: Output path.  Must end with ``.tgz``, ``.tar.gz``, or
@@ -52,29 +48,21 @@ def write_support_bundle(destination: Path, *, extra_text: str = "") -> str:
         ValueError: When *destination* does not have a recognised archive suffix.
     """
     dest = Path(destination)
-    suffix_lower = "".join(dest.suffixes).lower()
-    if dest.suffix.lower() not in {".tgz", ".tar"} and not suffix_lower.endswith(".tar.gz"):
-        msg = f"bundle destination must be a .tgz / .tar.gz archive, got: {dest.name!r}"
-        raise ValueError(msg)
-
+    mode = _archive_mode(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     python_info = f"python: {sys.version}\nplatform: {sys.platform}\n"
-    extra_redacted = _redact(extra_text) if extra_text else ""
+    payload = python_info
+    if extra_text:
+        payload += "\n# Extra info\n" + extra_text + "\n"
 
-    manifest = "# mergeCraft support bundle\n" + python_info
-    if extra_redacted:
-        manifest += "\n# Extra info\n" + extra_redacted + "\n"
+    if mode == "w:gz":
+        write_diagnostic_bundle(dest, extra_text=payload)
+        return str(dest)
 
-    with tarfile.open(dest, "w:gz") as archive:
-        _add_text(archive, "manifest.txt", manifest)
-
-    return str(dest)
-
-
-def _add_text(archive: tarfile.TarFile, name: str, content: str) -> None:
-    """Add *content* as a text file named *name* to *archive*."""
-    encoded = content.encode("utf-8")
-    info = tarfile.TarInfo(name=name)
+    encoded = redact_secrets(payload).encode("utf-8")
+    info = tarfile.TarInfo(name="diagnostics.txt")
     info.size = len(encoded)
-    archive.addfile(info, io.BytesIO(encoded))
+    with tarfile.open(dest, "w") as archive:
+        archive.addfile(info, io.BytesIO(encoded))
+    return str(dest)

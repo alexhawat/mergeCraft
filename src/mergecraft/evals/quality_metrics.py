@@ -39,7 +39,7 @@ class QualityMetrics(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    blocker_precision: float
+    blocker_precision: float | None
     severity_accuracy: float
     duplicate_rate: float
     unsupported_finding_rate: float
@@ -88,8 +88,10 @@ def compute_quality_metrics(
 ) -> QualityMetrics:
     """Score findings against a baseline and attach latency/cost.
 
-    Empty findings yield ``0.0`` rates (honest-zero). An empty latency sample
-    raises ``ValueError`` — a P50/P95 over nothing is never a fabricated 0.0.
+    Empty findings yield ``0.0`` rates (honest-zero). ``blocker_precision``
+    stays ``None`` when the score report has no blocker findings (never a
+    fabricated 1.0). An empty latency sample raises ``ValueError`` — a
+    P50/P95 over nothing is never a fabricated 0.0.
 
     Args:
         findings: Reported review findings.
@@ -121,7 +123,7 @@ def compute_quality_metrics(
         else len(scored.unmatched_finding_indexes) / scored.total_reported
     )
     return QualityMetrics(
-        blocker_precision=(1.0 if scored.blocker_precision is None else scored.blocker_precision),
+        blocker_precision=scored.blocker_precision,
         severity_accuracy=scored.severity_agreement,
         duplicate_rate=scored.duplicate_rate,
         unsupported_finding_rate=unsupported,

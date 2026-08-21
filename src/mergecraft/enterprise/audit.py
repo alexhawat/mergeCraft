@@ -18,6 +18,11 @@ __all__ = [
 ]
 
 
+def _dump_records(records: list[dict[str, Any]]) -> str:
+    """Serialise *records* as a JSON array (empty list → ``"[]"``)."""
+    return json.dumps(records, default=str)
+
+
 def export_audit_log(events: list[dict[str, Any]]) -> str:
     """Return *events* serialised as a JSON array.
 
@@ -27,7 +32,7 @@ def export_audit_log(events: list[dict[str, Any]]) -> str:
     Returns:
         A JSON string; an empty list produces ``"[]"``, never ``"null"``.
     """
-    return json.dumps(events, default=str)
+    return _dump_records(events)
 
 
 def export_usage(records: list[dict[str, Any]]) -> str:
@@ -40,7 +45,7 @@ def export_usage(records: list[dict[str, Any]]) -> str:
     Returns:
         A JSON string; an empty list produces ``"[]"``.
     """
-    return json.dumps(records, default=str)
+    return _dump_records(records)
 
 
 def explain_blocking_decision(artifact: dict[str, Any]) -> str:

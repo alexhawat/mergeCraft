@@ -5,9 +5,9 @@ in **separate directories**. Adversarial corpora stay in
 :mod:`mergecraft.evals.adversarial` / :mod:`mergecraft.evals.adversarial_corpora`
 and are not mixed in here.
 
-No I/O at import time: on-disk paths are constants; catalog rows are packaged
-in this module. Call :func:`cases_for_kind` / :func:`golden_languages` to
-inspect them.
+No I/O at import time: on-disk paths are constants. Call
+:func:`cases_for_kind` / :func:`golden_languages` / :func:`golden_cases` to
+load JSON from those directories (the canonical catalog).
 
 Exports:
     GOLDEN_CATEGORIES: Defect classes the golden corpus must cover.
@@ -21,6 +21,7 @@ Exports:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Final, Literal
 
@@ -85,6 +86,8 @@ BENCHMARK_CASE_KINDS: Final[frozenset[str]] = frozenset(
 GOLDEN_CORPUS_DIR: Final[Path] = Path("evals/cases/golden")
 MUTATION_CORPUS_DIR: Final[Path] = Path("evals/cases/mutation")
 
+_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
+
 
 class CorpusCase(BaseModel):
     """One labelled golden, mutation, or extra-kind benchmark row."""
@@ -104,164 +107,29 @@ class CorpusCase(BaseModel):
     notes: str = ""
 
 
-_GOLDEN_CASES: Final[tuple[CorpusCase, ...]] = (
-    CorpusCase(
-        id="golden-python-fastapi-correctness-001",
-        title="Optional nested config dereference without a null guard",
-        language="python",
-        framework="fastapi",
-        category="correctness",
-        kind="historical_pr",
-        source="human",
-        path="app/settings.py",
-        start_line=44,
-        end_line=48,
-        notes="Human-reviewed historical PR; Python/FastAPI.",
-    ),
-    CorpusCase(
-        id="golden-typescript-express-security-001",
-        title="Unparameterized SQL concatenated from a request query",
-        language="typescript",
-        framework="express",
-        category="security",
-        kind="historical_pr",
-        source="human",
-        path="src/routes/search.ts",
-        start_line=18,
-        end_line=26,
-        notes="Human-reviewed historical PR; TypeScript/Express.",
-    ),
-    CorpusCase(
-        id="golden-go-chi-api-breakage-001",
-        title="Exported handler signature drop breaks downstream clients",
-        language="go",
-        framework="chi",
-        category="api_breakage",
-        kind="xrepo",
-        source="human",
-        path="pkg/api/handlers.go",
-        start_line=90,
-        end_line=110,
-        notes="Cross-repo consumer still pins the old signature.",
-    ),
-    CorpusCase(
-        id="golden-rust-tokio-concurrency-001",
-        title="Shared HashMap mutated across tasks without a lock",
-        language="rust",
-        framework="tokio",
-        category="concurrency",
-        kind="historical_pr",
-        source="human",
-        path="src/cache.rs",
-        start_line=55,
-        end_line=80,
-        notes="Human-reviewed concurrency defect.",
-    ),
-    CorpusCase(
-        id="golden-python-django-migration-001",
-        title="Destructive column drop without a expand/contract step",
-        language="python",
-        framework="django",
-        category="migration",
-        kind="historical_pr",
-        source="human",
-        path="app/migrations/0042_drop_legacy_slug.py",
-        start_line=1,
-        end_line=24,
-        notes="Human-reviewed migration failure.",
-    ),
-    CorpusCase(
-        id="golden-java-spring-performance-001",
-        title="N+1 repository call inside a request mapping",
-        language="java",
-        framework="spring",
-        category="performance",
-        kind="large_pr",
-        source="human",
-        path="src/main/java/com/example/OrderService.java",
-        start_line=120,
-        end_line=160,
-        notes="Large-PR performance regression case.",
-    ),
-    CorpusCase(
-        id="golden-javascript-npm-dependency-001",
-        title="Direct dependency pin removed while lockfile still resolves it",
-        language="javascript",
-        framework="npm",
-        category="dependency",
-        kind="historical_pr",
-        source="human",
-        path="package.json",
-        start_line=12,
-        end_line=40,
-        notes="Human-reviewed dependency issue.",
-    ),
-    CorpusCase(
-        id="golden-ruby-rails-clean-001",
-        title="Docs-only README wording with no behavioural diff",
-        language="ruby",
-        framework="rails",
-        category="clean",
-        kind="incremental_review",
-        source="human",
-        path="README.md",
-        start_line=1,
-        end_line=12,
-        notes="Clean PR — expected empty blocker set.",
-    ),
-    CorpusCase(
-        id="golden-python-requirements-001",
-        title="Ticket requires authz check that the diff never adds",
-        language="python",
-        framework="fastapi",
-        category="correctness",
-        kind="requirements",
-        source="human",
-        path="docs/tickets/AUTHZ-19.md",
-        start_line=1,
-        end_line=30,
-        notes="Requirements-to-diff mismatch.",
-    ),
-)
+def _resolved_dir(declared: Path) -> Path:
+    """Prefer *declared* when it exists (cwd), else the checkout-relative path."""
+    if declared.is_dir():
+        return declared
+    return _REPO_ROOT / declared
 
-_MUTATION_CASES: Final[tuple[CorpusCase, ...]] = (
-    CorpusCase(
-        id="mutation-python-off-by-one-001",
-        title="Synthetic off-by-one on a slice bound",
-        language="python",
-        framework="stdlib",
-        category="correctness",
-        kind="historical_pr",
-        source="synthetic",
-        path="src/window.py",
-        start_line=10,
-        end_line=12,
-        notes="Mutation corpus — not mixed into golden/.",
-    ),
-    CorpusCase(
-        id="mutation-go-nil-deref-001",
-        title="Synthetic nil pointer dereference",
-        language="go",
-        framework="stdlib",
-        category="correctness",
-        kind="historical_pr",
-        source="synthetic",
-        path="internal/ptr.go",
-        start_line=8,
-        end_line=14,
-        notes="Mutation corpus — not mixed into golden/.",
-    ),
-)
 
-_KIND_INDEX: Final[dict[str, tuple[CorpusCase, ...]]] = {
-    kind: tuple(case for case in _GOLDEN_CASES if case.kind == kind)
-    for kind in sorted(BENCHMARK_CASE_KINDS)
-}
+def _load_cases(declared: Path) -> tuple[CorpusCase, ...]:
+    """Load every ``*.json`` row under *declared* (canonical on-disk catalog)."""
+    directory = _resolved_dir(declared)
+    if not directory.is_dir():
+        msg = f"corpus directory does not exist: {declared}"
+        raise FileNotFoundError(msg)
+    cases: list[CorpusCase] = []
+    for path in sorted(directory.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        cases.append(CorpusCase.model_validate(payload))
+    return tuple(cases)
 
 
 def golden_languages() -> frozenset[str]:
     """Return the languages represented in the human-reviewed golden corpus."""
-    return frozenset(case.language for case in _GOLDEN_CASES)
+    return frozenset(case.language for case in golden_cases())
 
 
 def cases_for_kind(kind: str) -> tuple[CorpusCase, ...]:
@@ -281,14 +149,14 @@ def cases_for_kind(kind: str) -> tuple[CorpusCase, ...]:
     if key not in BENCHMARK_CASE_KINDS:
         msg = f"unknown corpus kind: {kind}"
         raise ValueError(msg)
-    return _KIND_INDEX[key]
+    return tuple(case for case in golden_cases() if case.kind == key)
 
 
 def mutation_cases() -> tuple[CorpusCase, ...]:
     """Return the synthetic mutation corpus (separate from golden)."""
-    return _MUTATION_CASES
+    return _load_cases(MUTATION_CORPUS_DIR)
 
 
 def golden_cases() -> tuple[CorpusCase, ...]:
     """Return the human-reviewed golden corpus."""
-    return _GOLDEN_CASES
+    return _load_cases(GOLDEN_CORPUS_DIR)

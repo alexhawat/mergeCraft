@@ -1,6 +1,6 @@
 """Data-residency controls for enterprise deployments (#381).
 
-Distinct from ``mergecraft.agents.provider_health.enforce_residency`` (#371).
+Wraps ``mergecraft.agents.provider_health.enforce_residency`` (#371).
 
 Exports:
     DataResidencyPolicy: Pydantic model declaring allowed regions.
@@ -10,6 +10,8 @@ Exports:
 from __future__ import annotations
 
 from pydantic import BaseModel
+
+from mergecraft.agents.provider_health import enforce_residency
 
 __all__ = [
     "DataResidencyPolicy",
@@ -39,9 +41,4 @@ def enforce_data_residency(*, region: str, policy: DataResidencyPolicy) -> None:
         PermissionError: When *region* is not in ``policy.allowed`` (fail closed
             on an empty allow-list).
     """
-    if region not in policy.allowed:
-        msg = (
-            f"data-residency policy violation: region {region!r} is not in "
-            f"the allowed list {list(policy.allowed)}"
-        )
-        raise PermissionError(msg)
+    enforce_residency(region=region, allowed=policy.allowed)
