@@ -87,7 +87,7 @@ __all__ = [
 
 # Bumped when the verifier's system prompt or dispatch brief changes shape, so
 # an archived verdict can be read against the contract that produced it.
-VERIFIER_JUDGE_VERSION: Final[str] = "1.0.0"
+VERIFIER_JUDGE_VERSION: Final[str] = "1.1.0"
 
 # Bumped whenever VERIFIER_RUBRIC changes. Verdicts carry it so a rubric edit
 # never silently reinterprets old judgements.
@@ -137,7 +137,9 @@ VERIFIER_SYSTEM_PROMPT = (
     "- Return exactly one of: **confirm** (with a one-paragraph explanation), "
     "**downgrade** (with new severity and reason), or **drop** (with a reason the "
     "orchestrator can record as a withdrawn finding).\n"
-    "- Treat the finding as a hypothesis until you have read the code.\n\n"
+    "- Treat the finding as a hypothesis until you have read the code.\n"
+    "- Actively search for reasons the finding may be wrong (falsification-first); "
+    "do not confirm from narrative alone.\n\n"
     f"RUBRIC v{VERIFIER_RUBRIC_VERSION} — answer each with yes/no and cite the code "
     "you read. Do not score style, tone, or verbosity:\n"
     + "".join(f"- **{key}** — {text}\n" for key, text in VERIFIER_RUBRIC)

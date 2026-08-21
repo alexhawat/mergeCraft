@@ -22,6 +22,7 @@ from mergecraft.cli import (
     diff_review_cmd,
     doctor_cmd,
     eval_cmd,
+    evidence_cmd,
     findings_cmd,
     gha_cmd,
     init_cmd,
@@ -103,6 +104,7 @@ app.add_typer(memory_cmd.app, name="memory")
 app.add_typer(policy_cmd.app, name="policy")
 app.add_typer(requirements_cmd.app, name="requirements")
 app.add_typer(xrepo_cmd.app, name="xrepo")
+app.add_typer(evidence_cmd.app, name="evidence")
 app.add_typer(findings_cmd.app, name="findings")
 app.add_typer(eval_cmd.app, name="eval")
 # W8.4 — ``mergecraft config tracing`` + ``mergecraft traces <run-id>``.
