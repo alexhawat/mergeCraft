@@ -506,7 +506,7 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - Deleted W14 current-state pins: `test_soak_and_slo_modules_do_not_exist_yet`, `test_process_group_cleanup_already_ships`.
 - Left W19–W20 xfails in place.
 - W18 impl: `e8985169`.
-- W18 recon: *(filled after commit)*.
+- W18 recon: `8e3d7753`.
 
 ## Acceptance (W18 recon)
 
