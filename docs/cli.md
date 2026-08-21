@@ -21,6 +21,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft analyzers list` | List catalog analyzers and whether they would enable here. |
 | `mergecraft analyzers lock` | Write or refresh `.mergecraft/analyzers.lock` for managed tools. |
 | `mergecraft analyzers run <analyzer-id>` | Execute one analyzer against the working tree. |
+| `mergecraft ask` | Answer a question about the tree, optionally scoped to a file line. |
 | `mergecraft auth claude` | Save a Claude Code OAuth token as CLAUDE_CODE_OAUTH_TOKEN. |
 | `mergecraft auth codex` | Mint a Codex subscription credential and save it as CODEX_AUTH_JSON. |
 | `mergecraft auth cursor` | Save a Cursor API key as CURSOR_API_KEY. |
@@ -52,6 +53,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft eval score <actual> <expected>` | Score review findings against a frozen benchmark baseline. |
 | `mergecraft evidence show <finding-id>` | Show the evidence packet for a finding. |
 | `mergecraft evidence verify <finding-id>` | Replay verification for a finding's evidence packet (not an approval). |
+| `mergecraft explain` | Explain a stored finding or the current working-tree change. |
 | `mergecraft findings carryover --pr N` | File one issue per unresolved mergeCraft finding. Dry run unless `--apply`. |
 | `mergecraft findings export --pr N` | Print the findings a merge would bury. Never writes anything. |
 | `mergecraft gha token` | Acquire a GitHub App installation token, or revoke it with `--post`. |
@@ -84,9 +86,12 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft policy simulate` | Simulate a proposed rule against past PRs. |
 | `mergecraft policy test --fixtures FIXTURES` | Run should-trigger and should-not policy fixtures. |
 | `mergecraft profile recommend --risk RISK` | Print the review profile auto-selected from `--risk`. |
+| `mergecraft replay` | Replay a stored review run from local traces (read-only). |
 | `mergecraft requirements explain <requirement-id>` | Explain one requirement by id; unknown ids are an error. |
 | `mergecraft requirements inspect` | List ingested requirements and their states. |
 | `mergecraft review` | Review a local git diff offline (no GitHub Action / PR posting). |
+| `mergecraft run diff` | Compare two stored review runs by event kind. |
+| `mergecraft run inspect` | Inspect a stored review run (or list known run ids). |
 | `mergecraft traces show <run-id>` | Read back the local JSONL traces for the given run id (re-redacts on render). |
 | `mergecraft tracing logfire disable` | Disable Logfire tracing by removing the token + project locally and on GitHub. |
 | `mergecraft tracing logfire enable` | Enable Logfire tracing by writing the token + project locally and on GitHub. |
