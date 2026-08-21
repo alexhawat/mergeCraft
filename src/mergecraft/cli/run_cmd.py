@@ -8,13 +8,13 @@ Exports: ``app``
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 import typer
 from rich.table import Table
 
+from mergecraft.cli import trace_jsonl
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
@@ -25,13 +25,6 @@ app = typer.Typer(
     help="Inspect and compare stored review runs (not analyzer execution).",
     no_args_is_help=True,
 )
-
-
-def _trace_dir() -> Path:
-    env_dir = os.environ.get("MERGECRAFT_TRACE_DIR")
-    if env_dir:
-        return Path(env_dir)
-    return Path(".mergecraft/traces")
 
 
 def _load_events(trace_dir: Path) -> list[dict[str, Any]]:
@@ -83,7 +76,7 @@ def inspect_cmd(
     ),
 ) -> None:
     """Inspect a stored review run (or list known run ids)."""
-    target = trace_dir if trace_dir is not None else _trace_dir()
+    target = trace_dir if trace_dir is not None else trace_jsonl.default_trace_dir()
     events = _load_events(target)
     sessions = _sessions(events)
     chosen = run_id or (sessions[-1] if sessions else None)
@@ -116,7 +109,7 @@ def diff_cmd(
     ),
 ) -> None:
     """Compare two stored review runs by event kind."""
-    target = trace_dir if trace_dir is not None else _trace_dir()
+    target = trace_dir if trace_dir is not None else trace_jsonl.default_trace_dir()
     events = _load_events(target)
     sessions = _sessions(events)
     left = run_a

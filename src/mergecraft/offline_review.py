@@ -40,7 +40,11 @@ from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RunOutcome
-from mergecraft.utils.agent_resolve import resolve_model, resolve_runtime_agent
+from mergecraft.utils.agent_resolve import (
+    resolve_effective_model_slug,
+    resolve_model,
+    resolve_runtime_agent,
+)
 from mergecraft.utils.fence import Fence, render_untrusted
 from mergecraft.utils.github import GitHubClient
 from mergecraft.utils.instructions import resolve_instructions
@@ -67,6 +71,7 @@ from mergecraft.utils.source_resolve import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from mergecraft.review.engine import ReviewEngine
     from mergecraft.tracing.review_context import ReviewContext
     from mergecraft.utils.source_resolve import ResolvedWorkspace
 
@@ -434,7 +439,7 @@ async def run_offline_diff_review(
     source_spec: SourceResolverSpec | None = None,
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
-    resume: bool = False,
+    engine: ReviewEngine | None = None,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
     spec = source_spec or SourceResolverSpec(cwd=cwd, invocation_root=invocation_root or cwd)
@@ -477,7 +482,7 @@ async def run_offline_diff_review(
             cloned=cloned,
             on_finding=on_finding,
             use_cache=use_cache,
-            resume=resume,
+            engine=engine,
         )
 
 
@@ -533,6 +538,7 @@ async def _run_offline_diff_review(
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
     resume: bool = False,
+    engine: ReviewEngine | None = None,
 ) -> OfflineReviewResult:
     """Body of :func:`run_offline_diff_review`, run under the bound review context."""
     cwd = cwd.resolve()
@@ -562,15 +568,27 @@ async def _run_offline_diff_review(
     scope_reduction: ScopeReduction | None = None
 
     out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
-    try:
-        materialization = materialize_resolved_diff(
+    from mergecraft.review.engine import run_from_snapshot
+    from mergecraft.review.snapshot import canonical_review_snapshot
+    from mergecraft.utils.process_group import kill_all_active_process_groups
+
+    runner = engine or run_from_snapshot(canonical_review_snapshot(entry="cli", source=str(cwd)))
+    runner.set_on_timeout(lambda _name: kill_all_active_process_groups())
+    read_cache = use_cache or resume
+    materialization: DiffMaterialization | None = None
+    cache_key: str | None = None
+    from_cache = False
+
+    async def _materialize() -> DiffMaterialization:
+        nonlocal materialization, scope_reduction
+        built = materialize_resolved_diff(
             workspace,
             spec=spec,
             out_dir=out_dir,
             diff_file=diff_file,
         )
         if trust_tier == "untrusted":
-            diff_text = materialization.path.read_text(encoding="utf-8")
+            diff_text = built.path.read_text(encoding="utf-8")
             paths = [
                 line.split()[3].removeprefix("b/")
                 for line in diff_text.splitlines()
@@ -579,35 +597,35 @@ async def _run_offline_diff_review(
             kept = filter_confined_paths(cwd, paths)
             if kept != paths:
                 filtered = _filter_diff_to_paths(diff_text, kept)
-                materialization.path.write_text(filtered, encoding="utf-8")
-                materialization = DiffMaterialization(
-                    path=materialization.path,
-                    base_ref=materialization.base_ref,
+                built.path.write_text(filtered, encoding="utf-8")
+                built = DiffMaterialization(
+                    path=built.path,
+                    base_ref=built.base_ref,
                     line_count=0 if not filtered.strip() else filtered.count("\n"),
                     empty=not filtered.strip(),
                 )
-        diff_text = materialization.path.read_text(encoding="utf-8")
+        diff_text = built.path.read_text(encoding="utf-8")
         reduced_text, scope_reduction = apply_diff_line_budget(
             diff_text,
             max_lines=run_bounds.max_diff_lines,
         )
         if scope_reduction is not None:
-            materialization.path.write_text(reduced_text, encoding="utf-8")
-            materialization = DiffMaterialization(
-                path=materialization.path,
-                base_ref=materialization.base_ref,
+            built.path.write_text(reduced_text, encoding="utf-8")
+            built = DiffMaterialization(
+                path=built.path,
+                base_ref=built.base_ref,
                 line_count=scope_reduction.kept_lines,
                 empty=not reduced_text.strip(),
             )
-    except BudgetExhausted as exc:
-        return _offline_failure(
-            error=str(exc),
-            outcome=budget_exhaustion_outcome(exc),
-        )
-    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
-        return _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc))
+        materialization = built
+        return built
 
-    try:
+    async def _analyze() -> None:
+        _ = settings.analyzers.enabled
+
+    async def _review() -> OfflineReviewResult:
+        nonlocal cache_key, from_cache
+        assert materialization is not None
         if materialization.empty:
             if json_path is not None:
                 try:
@@ -644,16 +662,16 @@ async def _run_offline_diff_review(
                 scope_reduction=scope_reduction,
             )
 
-        cache_key: str | None = None
-        if use_cache or resume:
+        if read_cache:
             from mergecraft.utils.review_result_cache import (
                 cache_key_for_diff_path,
                 load_review_result,
             )
 
+            cache_model = resolve_model(slug=model) or resolve_effective_model_slug(settings)
             cache_key = cache_key_for_diff_path(
                 materialization.path,
-                model=model,
+                model=cache_model,
                 trust_tier=trust_tier,
                 prompt_extra=prompt_extra,
                 json_mode=json_path is not None,
@@ -663,14 +681,10 @@ async def _run_offline_diff_review(
             if cached is not None:
                 if cached.diff_path is None:
                     cached.diff_path = str(materialization.path)
-                return _finish_offline_result(
-                    cached,
-                    json_path=json_path,
-                    scope_reduction=scope_reduction,
-                    cache_key=None,
-                )
+                from_cache = True
+                return cached
 
-        result = await _run_agent_review(
+        return await _run_agent_review(
             cwd=cwd,
             materialization=materialization,
             prompt=prompt,
@@ -682,12 +696,45 @@ async def _run_offline_diff_review(
             run_bounds=run_bounds,
             on_finding=on_finding,
         )
+
+    async def _publish(result: OfflineReviewResult) -> OfflineReviewResult:
+        if result.empty_diff or dry_run:
+            return result
+        store_key = None if from_cache else cache_key
         return _finish_offline_result(
             result,
             json_path=json_path,
             scope_reduction=scope_reduction,
-            cache_key=cache_key,
+            cache_key=store_key,
         )
+
+    try:
+        try:
+            staged = await runner.run(
+                materialize=_materialize,
+                analyze=_analyze,
+                review=_review,
+                publish=_publish,
+            )
+            output = staged.output
+            if isinstance(output, OfflineReviewResult):
+                return output
+            return _offline_failure(
+                error="review engine returned no result",
+                outcome=RunOutcome.infra_error,
+            )
+        except TimeoutError:
+            return _offline_failure(
+                error="review timed out",
+                outcome=RunOutcome.timed_out,
+            )
+        except BudgetExhausted as exc:
+            return _offline_failure(
+                error=str(exc),
+                outcome=budget_exhaustion_outcome(exc),
+            )
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+            return _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc))
     finally:
         # Restore the operator's ``.env`` tracing vars so the ``diff-review``
         # overrides never leak into the caller's environment.

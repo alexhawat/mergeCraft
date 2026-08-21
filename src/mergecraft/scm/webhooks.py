@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from mergecraft.review.snapshot import ReviewSnapshot
+    from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, ReviewStageSpec
 
 SUPPORTED_WEBHOOK_PROVIDERS: frozenset[str] = frozenset({"github", "gitlab"})
 
@@ -76,7 +76,8 @@ class ConformingReviewRequest:
     provider: str
     event: str
     snapshot: ReviewSnapshot
-    stages: tuple[dict[str, object], ...] = ()
+    stages: tuple[ReviewStageSpec, ...] = ()
+    stages_ran: tuple[ReviewStageName, ...] = ()
 
 
 class _WebhookDeliveryStore:
@@ -298,12 +299,26 @@ def conforming_review_request(
         source=name,
     )
     engine = run_from_snapshot(snapshot)
+
+    async def _noop() -> None:
+        return None
+
+    async def _publish(_review: object) -> None:
+        return None
+
+    staged = engine.run_sync(
+        materialize=_noop,
+        analyze=_noop,
+        review=_noop,
+        publish=_publish,
+    )
     return ConformingReviewRequest(
         mode=engine.snapshot.mode,
         provider=name,
         event=event,
         snapshot=engine.snapshot,
-        stages=engine.stages,
+        stages=staged.stages,
+        stages_ran=staged.stages_ran,
     )
 
 

@@ -24,7 +24,7 @@ from mergecraft.offline_review import (
     parse_offline_review_findings,
     run_offline_diff_review,
 )
-from mergecraft.review.engine import run_from_snapshot
+from mergecraft.review.engine import ReviewEngine, run_from_snapshot
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.utils.log import configure_logging
 from mergecraft.utils.source_resolve import SourceResolverSpec
@@ -166,33 +166,21 @@ def cleanup_review_subprocesses() -> None:
 
 def _start_agent_protocol() -> AgentProtocolStream:
     from mergecraft.cli.agent_protocol import (
-        AGENT_PROTOCOL_VERSION,
-        VERSION_FIELD_ALIASES,
         ProtocolNegotiationError,
+        accepted_protocol_versions,
         negotiate_protocol,
+        protocol_budget_payload,
     )
-    from mergecraft.cli.global_surface import CLI_JSON_SCHEMA_VERSION
 
     try:
-        selected = negotiate_protocol(
-            accepted=(
-                AGENT_PROTOCOL_VERSION,
-                CLI_JSON_SCHEMA_VERSION,
-                *VERSION_FIELD_ALIASES,
-            )
-        )
+        selected = negotiate_protocol(accepted=accepted_protocol_versions())
     except ProtocolNegotiationError as exc:
         _exit_with_message(
             str(exc),
             cli_exit_code_for_review(RunOutcome.configuration_error),
         )
-    if selected not in {AGENT_PROTOCOL_VERSION, CLI_JSON_SCHEMA_VERSION}:
-        _exit_with_message(
-            f"unsupported protocol version: {selected}",
-            cli_exit_code_for_review(RunOutcome.configuration_error),
-        )
     stream = AgentProtocolStream()
-    stream.run_started()
+    stream.run_started(negotiated=selected, **protocol_budget_payload())
     stream.phase("materialize")
     stream.phase("review")
     return stream
@@ -425,7 +413,7 @@ def run(
         "--use-cache/--no-use-cache",
         help=(
             "Read and write the local review result cache for this diff "
-            "(distinct from the `mergecraft cache` typer)."
+            "(same policy as --resume; distinct from the `mergecraft cache` typer)."
         ),
         rich_help_panel=_PANEL_OUTPUT,
     ),
@@ -532,7 +520,7 @@ def run(
         source=str(root),
         replay_key=str(diff) if diff is not None else None,
     )
-    engine = run_from_snapshot(snapshot)
+    engine: ReviewEngine = run_from_snapshot(snapshot)
 
     stream: AgentProtocolStream | None = None
     seen: set[str] = set()
@@ -544,11 +532,12 @@ def run(
             return
         notify_findings(stream.finding, [finding], seen=seen)
 
+    read_cache = use_cache or resume
+
     try:
         try:
             result = asyncio.run(
-                engine.run(
-                    run_offline_diff_review,
+                run_offline_diff_review(
                     cwd=root,
                     base=base,
                     diff_file=diff,
@@ -562,11 +551,12 @@ def run(
                     trust_override=trust_override,
                     source_spec=source_spec,
                     on_finding=_on_finding if agent_mode else None,
-                    use_cache=use_cache or resume,
-                    resume=resume,
+                    use_cache=read_cache,
+                    engine=engine,
                 )
             )
         except TimeoutError:
+            cleanup_review_subprocesses()
             result = OfflineReviewResult(
                 success=False,
                 error="review timed out",

@@ -7,24 +7,17 @@ Exports: ``run``
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 import typer
 from rich.table import Table
 
+from mergecraft.cli import trace_jsonl
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.cli.trace_jsonl import load_trace_jsonl_events
-
-
-def _trace_dir() -> Path:
-    env_dir = os.environ.get("MERGECRAFT_TRACE_DIR")
-    if env_dir:
-        return Path(env_dir)
-    return Path(".mergecraft/traces")
 
 
 def _payload(*, run_id: str | None, events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -65,7 +58,7 @@ def run(
     ),
 ) -> None:
     """Replay a stored review run from local traces (read-only)."""
-    target = trace_dir if trace_dir is not None else _trace_dir()
+    target = trace_dir if trace_dir is not None else trace_jsonl.default_trace_dir()
     events = load_trace_jsonl_events(target)
     payload = _payload(run_id=run_id, events=events)
     if wants_json_output(ctx, json_flag=False):

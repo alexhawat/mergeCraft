@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Offline `--use-cache` / `--resume` store only after structured-output finalize and re-validate on hit; cache keys include trust tier, `--prompt`, and related review inputs; `--resume` reads that cache and does not call a no-op checkpoint stub (#378)
-- CLI, Action, and SCM run `ReviewSnapshot` stage timeouts instead of discarding a no-op admit; `replay` / `run inspect` / `run diff` share `read_jsonl_events`; `--agent` calls `negotiate_protocol` on the D12 adapter (#379, #380)
+- CLI, Action, and SCM share one four-stage review engine (materialize / analyze / review / publish) with per-stage timeouts recorded after each stage; Action review uses the 1h payload deadline (not a 10m overlay); `--resume` is an alias of `--use-cache`; `--agent` negotiates `MERGECRAFT_AGENT_PROTOCOL` and stamps protocol budgets (#378, #379, #380)
 - Eval methodology: blocker precision is `None` (unpublished) when a run reports no blockers, and severity accuracy is `None` when there are no locality matches — never a vacuous 1.0
 - Landing README redesigned as a REACH-style product page (outline B): problem/solution
   cards, D2 architecture hero, numbered install, and jump-nav. Long-form install,

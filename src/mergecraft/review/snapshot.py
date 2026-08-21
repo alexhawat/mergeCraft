@@ -16,10 +16,10 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-# D12: both fields survive (CLI JSON 1.0.0, agent JSONL 1). Do not import the
-# CLI constants here — review must not depend on cli/.
-_SNAPSHOT_SCHEMA_VERSION = "1.0.0"
-_SNAPSHOT_PROTOCOL_VERSION = "1"
+# D12: both fields survive (CLI JSON 1.0.0, agent JSONL 1). CLI aliases these;
+# review must not import cli/.
+REVIEW_SCHEMA_VERSION = "1.0.0"
+REVIEW_PROTOCOL_VERSION = "1"
 
 ReviewEntry = Literal["cli", "action", "scm"]
 ReviewStageName = Literal["materialize", "analyze", "review", "publish"]
@@ -31,10 +31,11 @@ CANONICAL_STAGE_NAMES: tuple[ReviewStageName, ...] = (
     "publish",
 )
 
+# Align with Action setup (10m), analyzer_run (10m), and payload agent (1h).
 DEFAULT_STAGE_TIMEOUTS_MS: dict[ReviewStageName, int] = {
-    "materialize": 120_000,
-    "analyze": 300_000,
-    "review": 600_000,
+    "materialize": 600_000,
+    "analyze": 600_000,
+    "review": 3_600_000,
     "publish": 120_000,
 }
 
@@ -61,8 +62,8 @@ class ReviewSnapshot(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: str = _SNAPSHOT_SCHEMA_VERSION
-    protocol_version: str = _SNAPSHOT_PROTOCOL_VERSION
+    schema_version: str = REVIEW_SCHEMA_VERSION
+    protocol_version: str = REVIEW_PROTOCOL_VERSION
     entry: ReviewEntry
     mode: str = "Review"
     stages: tuple[ReviewStageSpec, ...]

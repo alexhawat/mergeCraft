@@ -87,6 +87,7 @@ from mergecraft.utils.payload import (
 )
 from mergecraft.utils.privilege import prepare_workspace_for_agent
 from mergecraft.utils.process_group import (
+    kill_all_active_process_groups,
     kill_process_group,
     register_process_group,
     unregister_process_group,
@@ -1209,8 +1210,6 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
             )
         except TimeoutError:
             agent_task.cancel()
-            from mergecraft.utils.process_group import kill_all_active_process_groups
-
             kill_all_active_process_groups()
             msg = f"agent run timed out after {ctx.timeout_raw or '1h'}"
             raise _AgentTimeoutError(msg) from None
@@ -1243,6 +1242,11 @@ async def _execute_agent(ctx: RunContext) -> AgentResult:
     """
     await _assemble_model_chain(ctx)
     await _build_run_tool_context(ctx)
+    return await _run_review_after_analyze(ctx)
+
+
+async def _run_review_after_analyze(ctx: RunContext) -> AgentResult:
+    """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
     await _run_setup_script_phase(ctx)
 
@@ -1470,11 +1474,10 @@ def _action_review_context() -> ReviewContext:
 
 
 async def main() -> MainResult:
-    """Run the mergecraft action flow using local ``.mergecraft/config.yaml``.
-
-    Orchestrates the four G4.2 phases — ``_setup_run`` → ``_resolve_credentials``
-    → ``_execute_agent`` → ``_finalize`` — over a single shared :class:`RunContext`.
-    The ``try``/``except``/``else``/``finally`` below is the same completion
+    """Orchestrates the four engine stages — materialize (setup + credentials),
+    analyze (model chain + tool context), review (setup script + payload-timed
+    agent), publish (finalize) — over a single shared :class:`RunContext`.
+    The ``try``/``except``/``finally`` below is the same completion
     contract ``main()`` always had: every exit path (success, agent failure,
     timeout, the ``inconclusive`` setup-script short-circuit, or an
     unclassified exception) reaches cleanup, and every path except the two
@@ -1510,13 +1513,38 @@ async def main() -> MainResult:
     # span closed in this process (and, via the exported review env, every
     # spawned agent CLI) carries the same ``review.id``.
     with bind_review_context(_action_review_context()):
+
+        async def materialize() -> None:
+            nonlocal ctx
+            ctx = await _setup_run(ctx)
+            ctx = await _resolve_credentials(ctx)
+
+        async def analyze() -> None:
+            await _assemble_model_chain(ctx)
+            await _build_run_tool_context(ctx)
+
+        async def review() -> AgentResult:
+            return await _run_review_after_analyze(ctx)
+
+        async def publish(agent_result: AgentResult) -> MainResult:
+            return await _finalize(ctx, agent_result)
+
         try:
-            ctx = await asyncio.wait_for(_setup_run(ctx), timeout=engine.timeout_s("materialize"))
-            ctx = await asyncio.wait_for(
-                _resolve_credentials(ctx), timeout=engine.timeout_s("analyze")
+            staged = await engine.run(
+                materialize=materialize,
+                analyze=analyze,
+                review=review,
+                publish=publish,
+                timeouts={"review": None},
+                on_timeout=lambda _name: kill_all_active_process_groups(),
             )
-            agent_result = await asyncio.wait_for(
-                _execute_agent(ctx), timeout=engine.timeout_s("review")
+            output = staged.output
+            if isinstance(output, MainResult):
+                return output
+            return MainResult(
+                success=False,
+                error="review engine returned no result",
+                outcome=RunOutcome.infra_error,
             )
         except _ShortCircuit as short_circuit:
             return short_circuit.result
@@ -1524,6 +1552,8 @@ async def main() -> MainResult:
             error_message = str(error) if error else "unknown error occurred"
             logger.error("{}", error_message)
             error_outcome = _classify_error_outcome(error)
+            if isinstance(error, (TimeoutError, asyncio.TimeoutError, _AgentTimeoutError)):
+                kill_all_active_process_groups()
             if ctx.tool_context:
                 try:
                     await persist_learnings(ctx.tool_context)
@@ -1536,10 +1566,6 @@ async def main() -> MainResult:
                 except Exception as cleanup_exc:
                     logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
             return MainResult(success=False, error=error_message, outcome=error_outcome)
-        else:
-            return await asyncio.wait_for(
-                _finalize(ctx, agent_result), timeout=engine.timeout_s("publish")
-            )
         finally:
             if ctx.stop_mcp is not None:
                 with contextlib.suppress(Exception):

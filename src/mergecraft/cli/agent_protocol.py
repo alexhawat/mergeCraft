@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, TextIO
 
 from mergecraft.cli.global_surface import CLI_JSON_SCHEMA_VERSION
-
-AGENT_PROTOCOL_VERSION = "1"
-
-# Reusable CLI golden for file 8 RV5 — JSONL agent events, not a second console split (D11).
-FIRST_FINDING_GOLDEN_RELPATH = "tests/cli/goldens/review_first_finding.jsonl"
+from mergecraft.review.snapshot import REVIEW_PROTOCOL_VERSION as AGENT_PROTOCOL_VERSION
 
 # D12: CLI JSON keeps ``schema_version``; agent JSONL keeps ``protocol_version``.
 # Both fields survive; they name the same generation via this adapter.
@@ -74,6 +71,29 @@ def negotiate_protocol(*, accepted: Sequence[str]) -> str:
     if AGENT_PROTOCOL_VERSION in overlap:
         return AGENT_PROTOCOL_VERSION
     return CLI_JSON_SCHEMA_VERSION
+
+
+def accepted_protocol_versions(
+    env: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Consumer protocol offer: ``MERGECRAFT_AGENT_PROTOCOL`` or version ``1``."""
+    environ = os.environ if env is None else env
+    raw = environ.get("MERGECRAFT_AGENT_PROTOCOL", "").strip()
+    if not raw:
+        return (AGENT_PROTOCOL_VERSION,)
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def protocol_budget_payload() -> dict[str, int | float]:
+    """Named budget fields stamped on ``run_started``."""
+    from mergecraft.utils.run_bounds import resolve_run_bounds
+
+    bounds = resolve_run_bounds()
+    return {
+        "token_budget": bounds.token_budget,
+        "cost_budget_usd": bounds.cost_budget_usd,
+        "tool_call_budget": bounds.tool_call_budget,
+    }
 
 
 def _base_event(event: str, **payload: Any) -> dict[str, Any]:
@@ -145,13 +165,14 @@ def notify_findings(
 
 __all__ = [
     "AGENT_PROTOCOL_VERSION",
-    "FIRST_FINDING_GOLDEN_RELPATH",
     "PROTOCOL_BUDGET_FIELDS",
     "VERSION_FIELD_ALIASES",
     "AgentProtocolStream",
     "ProtocolNegotiationError",
+    "accepted_protocol_versions",
     "finding_event_key",
     "format_event_line",
     "negotiate_protocol",
     "notify_findings",
+    "protocol_budget_payload",
 ]
