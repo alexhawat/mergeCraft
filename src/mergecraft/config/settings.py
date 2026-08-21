@@ -529,6 +529,15 @@ def apply_trust_tier_to_repo_settings(
                 stripped_checks.append(check)
         updates["static_checks"] = stripped_checks
 
+    ent = settings.enterprise
+    if ent.https_proxy or ent.no_proxy or ent.ca_file:
+        drops["enterprise.network"] = (
+            f"dropped enterprise proxy/CA on untrusted tier ({source_label})"
+        )
+        updates["enterprise"] = ent.model_copy(
+            update={"https_proxy": "", "no_proxy": "", "ca_file": None}
+        )
+
     if not updates:
         return settings, drops
 
@@ -744,9 +753,6 @@ def load_repo_settings(
             raw = migrate_config(loaded)
 
     settings = _merge_settings(raw)
-    from mergecraft.enterprise.runtime import bind_enterprise_from_settings
-
-    bind_enterprise_from_settings(settings)
 
     if not load_learnings_files:
         return settings

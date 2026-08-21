@@ -788,7 +788,7 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     # overrides are set.
     from mergecraft.enterprise.runtime import bind_enterprise_from_settings
 
-    bind_enterprise_from_settings(settings)
+    bind_enterprise_from_settings(settings, apply_network=False)
     active_tracing = resolve_active_tracing(config=settings.tracing)
     if not active_tracing.enabled:
         return NullTracer()

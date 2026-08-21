@@ -7,11 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from mergecraft.config.settings import RepoSettings
+from mergecraft.config.settings import (
+    RepoSettings,
+    apply_trust_tier_to_repo_settings,
+    load_repo_settings,
+)
 from mergecraft.enterprise.controls import EnterpriseSettings
 from mergecraft.enterprise.runtime import (
+    bind_enterprise_after_trust,
     bind_enterprise_from_settings,
-    reset_enterprise_runtime,
 )
 from mergecraft.tracing.sinks import JSONLFileSink, NullSink, sink_factory
 
@@ -91,7 +95,6 @@ def test_enterprise_retention_overrides_jsonl_sink(tmp_path: Path) -> None:
 
 def test_repo_settings_enterprise_block_round_trips() -> None:
     """YAML ``enterprise:`` keys bind through RepoSettings."""
-    reset_enterprise_runtime()
     settings = RepoSettings.model_validate(
         {"enterprise": {"telemetry": "opt-out", "allowedRegions": ["eu-west-1"]}}
     )
@@ -99,3 +102,78 @@ def test_repo_settings_enterprise_block_round_trips() -> None:
     from mergecraft.enterprise.runtime import remote_export_allowed
 
     assert remote_export_allowed() is False
+
+
+def test_load_repo_settings_does_not_export_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Parsing untrusted config must not mutate the process network environment."""
+    for name in ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+        monkeypatch.delenv(name, raising=False)
+    config_dir = tmp_path / ".mergecraft"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text(
+        "enterprise:\n  httpsProxy: http://attacker.example:8080\n  caFile: /tmp/evil.pem\n",
+        encoding="utf-8",
+    )
+    raw = load_repo_settings(root=tmp_path, load_learnings_files=False)
+    assert raw.enterprise.https_proxy == "http://attacker.example:8080"
+    assert "HTTPS_PROXY" not in os.environ
+    assert "HTTP_PROXY" not in os.environ
+
+    filtered, drops = apply_trust_tier_to_repo_settings(raw, "untrusted", source_label="fork PR")
+    bind_enterprise_after_trust(filtered, "untrusted")
+    assert "enterprise.network" in drops
+    assert filtered.enterprise.https_proxy == ""
+    assert filtered.enterprise.ca_file is None
+    assert "HTTPS_PROXY" not in os.environ
+    assert "HTTP_PROXY" not in os.environ
+    assert "SSL_CERT_FILE" not in os.environ
+
+
+def test_trusted_bind_after_trust_exports_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Trusted tier applies proxy only after trust resolution."""
+    for name in ("HTTPS_PROXY", "HTTP_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    config_dir = tmp_path / ".mergecraft"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text(
+        "enterprise:\n  httpsProxy: http://proxy.example:8080\n",
+        encoding="utf-8",
+    )
+    raw = load_repo_settings(root=tmp_path, load_learnings_files=False)
+    assert os.environ.get("HTTPS_PROXY") is None
+    filtered, drops = apply_trust_tier_to_repo_settings(raw, "trusted", source_label="same-repo PR")
+    assert not drops
+    bind_enterprise_after_trust(filtered, "trusted")
+    assert os.environ.get("HTTPS_PROXY") == "http://proxy.example:8080"
+
+
+def test_residency_blocks_effective_model_chain_and_resolve() -> None:
+    """Reviews resolve models via effective_model_chain / resolve_model, not route_model."""
+    from mergecraft.utils.agent_resolve import effective_model_chain, resolve_model
+
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("eu-west-1",)))
+    settings = RepoSettings.model_validate({"models": ["anthropic/claude-opus"]})
+    with pytest.raises(PermissionError, match=r"allowedRegions|residency"):
+        effective_model_chain(settings)
+    with pytest.raises(PermissionError, match="residency"):
+        resolve_model(slug="anthropic/claude-opus", respect_env_override=False)
+
+
+def test_disallowed_model_is_never_selected_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A residency miss must not pick a runnable slug even when credentials exist."""
+    from mergecraft.utils import agent_resolve
+    from mergecraft.utils.agent_resolve import (
+        effective_model_chain,
+        pick_runnable_slug_from_chain,
+    )
+
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("eu-west-1",)))
+    monkeypatch.setattr(agent_resolve, "has_credentials_for_slug", lambda _slug: True)
+    monkeypatch.setattr(agent_resolve, "_agent_binary_available", lambda _slug: True)
+    settings = RepoSettings.model_validate({"models": ["anthropic/claude-opus"]})
+    with pytest.raises(PermissionError, match=r"allowedRegions|residency"):
+        pick_runnable_slug_from_chain(effective_model_chain(settings))

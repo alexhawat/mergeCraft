@@ -1,15 +1,17 @@
 """Bind and enforce enterprise controls against a live review process (#381).
 
-Call :func:`bind_enterprise_from_settings` when repo settings are loaded or
-a tracer is constructed. Bound state is process-local (a :class:`ContextVar`)
-so tests can isolate it.
+Call :func:`bind_enterprise_after_trust` after trust-tier resolution — never
+during YAML parse. Bound state is process-local (a :class:`ContextVar`) so
+tests can isolate it.
 
 Exports:
     bind_enterprise_from_settings: Apply proxy, CA, telemetry, residency, retention.
+    bind_enterprise_after_trust: Bind after trust; skip network mutations when untrusted.
     current_enterprise_settings: Return the bound block (or inert defaults).
     remote_export_allowed: Whether Logfire/OTLP export may run.
     effective_retention_days: Optional enterprise override for JSONL retention.
     enforce_routed_model_residency: Fail closed when a routed model is out of region.
+    agent_network_env: Proxy/CA vars to copy into provider subprocess env.
     reset_enterprise_runtime: Clear bound state (tests).
 """
 
@@ -33,6 +35,8 @@ if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
 
 __all__ = [
+    "agent_network_env",
+    "bind_enterprise_after_trust",
     "bind_enterprise_from_settings",
     "current_enterprise_settings",
     "effective_retention_days",
@@ -40,6 +44,14 @@ __all__ = [
     "remote_export_allowed",
     "reset_enterprise_runtime",
 ]
+
+_AGENT_NETWORK_ENV: tuple[str, ...] = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+)
 
 _BOUND: ContextVar[EnterpriseSettings | None] = ContextVar(
     "mergecraft_enterprise_settings",
@@ -58,12 +70,18 @@ def reset_enterprise_runtime() -> None:
     _BOUND.set(None)
 
 
-def bind_enterprise_from_settings(settings: RepoSettings | EnterpriseSettings) -> None:
-    """Bind *settings* and apply proxy / CA side effects to this process.
+def bind_enterprise_from_settings(
+    settings: RepoSettings | EnterpriseSettings,
+    *,
+    apply_network: bool = True,
+) -> None:
+    """Bind *settings* and optionally apply proxy / CA side effects.
 
     Args:
         settings: A :class:`RepoSettings` (uses its ``enterprise`` field) or an
             :class:`EnterpriseSettings` block directly.
+        apply_network: When ``False``, bind telemetry/residency/retention only.
+            Proxy and CA must not be applied from untrusted repo config.
     """
     block = (
         settings
@@ -71,6 +89,8 @@ def bind_enterprise_from_settings(settings: RepoSettings | EnterpriseSettings) -
         else getattr(settings, "enterprise", EnterpriseSettings())
     )
     _BOUND.set(block)
+    if not apply_network:
+        return
     if block.https_proxy:
         apply_enterprise_proxy(ProxyConfig(https_proxy=block.https_proxy, no_proxy=block.no_proxy))
     if block.ca_file:
@@ -78,6 +98,28 @@ def bind_enterprise_from_settings(settings: RepoSettings | EnterpriseSettings) -
         load_custom_ca(ca_path)
         os.environ["SSL_CERT_FILE"] = str(ca_path)
         os.environ["REQUESTS_CA_BUNDLE"] = str(ca_path)
+
+
+def bind_enterprise_after_trust(settings: RepoSettings, tier: str) -> None:
+    """Bind enterprise controls after trust resolution.
+
+    Untrusted checkouts never mutate ``HTTPS_PROXY`` / CA env vars.
+    """
+    bind_enterprise_from_settings(settings, apply_network=(tier == "trusted"))
+
+
+def agent_network_env() -> dict[str, str]:
+    """Return bound proxy/CA variables present on the parent process.
+
+    :func:`mergecraft.utils.secrets.build_agent_env` default-denies these
+    names; callers must copy the mapping into each provider child env.
+    """
+    exported: dict[str, str] = {}
+    for key in _AGENT_NETWORK_ENV:
+        value = os.environ.get(key, "").strip()
+        if value:
+            exported[key] = value
+    return exported
 
 
 def remote_export_allowed() -> bool:
