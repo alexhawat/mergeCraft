@@ -7,16 +7,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
+from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from tests.support.cc_batch import invoke, load_module, plain, require_callable, require_registered
 from tests.support.dead_package_wiring import SRC_ROOT
-
-_W11 = pytest.mark.xfail(
-    reason="green after W11: context search/explain/budgets (#356)",
-    strict=False,
-)
 
 
 def test_retrieval_half_already_ships_under_context() -> None:
@@ -31,19 +24,6 @@ def test_retrieval_half_already_ships_under_context() -> None:
         assert (SRC_ROOT / "context" / name).is_file()
 
 
-def test_context_search_is_currently_a_usage_error() -> None:
-    """W8 current state: ``context search`` is not registered."""
-    result = invoke("context", "search", "--help")
-    assert result.exit_code == CLI_USAGE_EXIT_CODE, plain(result.stdout + result.stderr)
-
-
-def test_context_explain_is_currently_a_usage_error() -> None:
-    """W8 current state: ``context explain`` is not registered."""
-    result = invoke("context", "explain", "--help")
-    assert result.exit_code == CLI_USAGE_EXIT_CODE, plain(result.stdout + result.stderr)
-
-
-@_W11
 def test_context_search_help_is_registered() -> None:
     """#356 — ``mergecraft context search`` exists."""
     result = require_registered("context", "search", "--help", label="mergecraft context search")
@@ -51,7 +31,6 @@ def test_context_search_help_is_registered() -> None:
     assert "search" in help_text
 
 
-@_W11
 def test_context_explain_help_is_registered() -> None:
     """#356 — ``mergecraft context explain`` exists."""
     result = require_registered("context", "explain", "--help", label="mergecraft context explain")
@@ -59,7 +38,6 @@ def test_context_explain_help_is_registered() -> None:
     assert "explain" in help_text
 
 
-@_W11
 def test_context_search_unknown_query_is_an_error(tmp_path: Path) -> None:
     """Error: empty/unknown search query is non-success."""
     require_registered("context", "search", "--help", label="mergecraft context search")
@@ -68,7 +46,6 @@ def test_context_search_unknown_query_is_an_error(tmp_path: Path) -> None:
     assert result.exit_code != CLI_SUCCESS_EXIT_CODE, combined
 
 
-@_W11
 def test_context_relevance_scoring() -> None:
     """#356 — retrieved items carry a relevance score."""
     module = load_module("mergecraft.context.operator")
@@ -78,7 +55,6 @@ def test_context_relevance_scoring() -> None:
     assert high > low
 
 
-@_W11
 def test_context_budget_allocation_per_specialist() -> None:
     """#356 — context budgets are allocated per specialist."""
     module = load_module("mergecraft.context.operator")
@@ -88,7 +64,6 @@ def test_context_budget_allocation_per_specialist() -> None:
     assert sum(int(value) for value in budgets.values()) <= 8000
 
 
-@_W11
 def test_lazy_context_retrieval_goes_through_controlled_tools() -> None:
     """#356 — lazy retrieval is tool-gated, not a bulk dump."""
     module = load_module("mergecraft.context.operator")
@@ -99,7 +74,6 @@ def test_lazy_context_retrieval_goes_through_controlled_tools() -> None:
     assert not denied or getattr(denied, "omitted", False)
 
 
-@_W11
 def test_context_omission_reporting_downgrades_the_outcome() -> None:
     """#356 — omitted scope is recorded and the outcome is downgraded."""
     module = load_module("mergecraft.context.operator")
@@ -118,7 +92,6 @@ def test_context_omission_reporting_downgrades_the_outcome() -> None:
     assert str(outcome) != "proven"
 
 
-@_W11
 def test_context_retrieval_quality_is_benchmarked_separately_from_models() -> None:
     """#356 — retrieval quality benchmark does not score the LLM."""
     module = load_module("mergecraft.context.operator")

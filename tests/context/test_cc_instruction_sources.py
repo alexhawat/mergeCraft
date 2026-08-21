@@ -18,26 +18,10 @@ from tests.context.support import (
     section_text,
 )
 from tests.support.cc_batch import load_module, require_callable
-from tests.support.dead_package_wiring import SRC_ROOT
-
-_W11 = pytest.mark.xfail(
-    reason="green after W11: instruction sources + external files (#357)",
-    strict=False,
-)
 
 _UNTRUSTED_MARKER = "UNTRUSTED_GEMINI_MUST_NOT_ENTER_INSTRUCTIONS"
 
 
-def test_discovery_currently_omits_gemini_copilot_and_windsurf() -> None:
-    """W8 current state: only CLAUDE.md / AGENTS.md / SKILL.md plus Cursor rules."""
-    source = (SRC_ROOT / "context" / "instruction_discovery.py").read_text(encoding="utf-8")
-    assert "CLAUDE.md" in source
-    assert "GEMINI.md" not in source
-    assert "copilot-instructions" not in source
-    assert "windsurf" not in source.casefold()
-
-
-@_W11
 def test_discovers_gemini_copilot_windsurf_and_custom_list(tmp_path: Path) -> None:
     """#357 — GEMINI.md, Copilot instructions, Windsurf rules, configurable extras."""
     repo = tmp_path / "repo"
@@ -63,7 +47,6 @@ def test_discovers_gemini_copilot_windsurf_and_custom_list(tmp_path: Path) -> No
     assert "TEAM.md" in joined
 
 
-@_W11
 def test_skill_md_remains_a_controlled_context_source(tmp_path: Path) -> None:
     """#357 — SKILL.md stays a controlled context source."""
     repo = tmp_path / "repo"
@@ -78,7 +61,6 @@ def test_skill_md_remains_a_controlled_context_source(tmp_path: Path) -> None:
     assert any(path.endswith("SKILL.md") for path in paths)
 
 
-@_W11
 def test_injected_instructions_are_hashed_into_the_run_manifest(tmp_path: Path) -> None:
     """#357 — injected instruction bytes are hashed into the run manifest."""
     module = load_module("mergecraft.context.instruction_discovery")
@@ -99,7 +81,6 @@ def test_injected_instructions_are_hashed_into_the_run_manifest(tmp_path: Path) 
     assert hashes
 
 
-@_W11
 def test_competing_instruction_sources_are_resolved() -> None:
     """#357 — competing instruction sources record a winner and a conflict."""
     module = load_module("mergecraft.context.instruction_discovery")
@@ -116,7 +97,6 @@ def test_competing_instruction_sources_are_resolved() -> None:
     assert conflicts
 
 
-@_W11
 def test_untrusted_gemini_renders_through_the_nonce_fence(tmp_path: Path) -> None:
     """#357 — untrusted instruction files are data, never merged into the bundle."""
     repo = tmp_path / "repo"
@@ -139,7 +119,6 @@ def test_untrusted_gemini_renders_through_the_nonce_fence(tmp_path: Path) -> Non
     assert any(_UNTRUSTED_MARKER in block for block in fenced_blocks(prompt))
 
 
-@_W11
 def test_external_context_files_enforce_type_size_trust_and_provenance(tmp_path: Path) -> None:
     """#357 — external context files have type/size/trust/provenance limits."""
     module = load_module("mergecraft.context.external_files")

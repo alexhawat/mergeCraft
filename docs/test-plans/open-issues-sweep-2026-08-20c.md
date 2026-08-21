@@ -223,11 +223,11 @@ After each impl wave, recon **deletes** matching W8 current-state usage-error pi
 |------|-------|---------------|--------|
 | **W9** | `tests/evidence/test_cc_verifier_states.py` (10) + `tests/cli/test_evidence_cmd.py` (5) | `green after W9: evidence states + CLI (#354)` | **PASS** — un-xfailed W9 recon |
 | **W10** | `tests/findings/test_cc_materiality.py` (7) | `green after W10: materiality / calibration / dismissal (#355)` | **PASS** — un-xfailed W10 recon |
-| **W11** | `tests/context/test_cc_search_explain.py` (8) + `tests/context/test_cc_instruction_sources.py` (6) | `green after W11: context search/explain/budgets (#356)` / `instruction sources + external files (#357)` | XFAIL |
+| **W11** | `tests/context/test_cc_search_explain.py` (8) + `tests/context/test_cc_instruction_sources.py` (6) | `green after W11: context search/explain/budgets (#356)` / `instruction sources + external files (#357)` | **PASS** — un-xfailed W11 recon |
 | **W12** | `tests/policy/test_cc_lifecycle.py` (7) + `tests/policy/test_cc_packs.py` (4) | `green after W12: policy lifecycle back half (#358)` / `policy packs (#359)` | XFAIL |
 | **W13** | `tests/memory/test_cc_validation.py` (9) | `green after W13: memory validation / org / effectiveness (#360)` | XFAIL |
 
-Current-state **PASS** (not xfailed; recon deletes the usage-error rows after the matching impl wave): D14 `decide_approval` only in `agents/gates.py`; D10 root-callback pin; shipped retrieval/dedup/policy front-half files; CLI usage-error for `evidence`, `context search|explain`, `policy effective|simulate`, `memory validate`.
+Current-state **PASS** (not xfailed; recon deletes the usage-error rows after the matching impl wave): D14 `decide_approval` only in `agents/gates.py`; D10 root-callback pin; shipped retrieval/dedup/policy front-half files; CLI usage-error for `policy effective|simulate`, `memory validate`. `evidence` and `context search|explain` usage-error pins deleted after W9 / W11.
 
 W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` clean.
 
@@ -268,6 +268,25 @@ W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` cle
 - W11–W13 still **XFAIL** (`strict=False`)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W11 not started
+
+## Recon notes (W11)
+
+- Un-xfailed every `green after W11` marker in `tests/context/test_cc_search_explain.py`
+  (8) and `tests/context/test_cc_instruction_sources.py` (6) (14 XPASS → real PASS).
+- Help pins already use `"search"` / `"explain"` in stripped help text (Rich tables).
+- Deleted W8 current-state pins: `test_context_search_is_currently_a_usage_error`,
+  `test_context_explain_is_currently_a_usage_error`,
+  `test_discovery_currently_omits_gemini_copilot_and_windsurf`.
+- Left W12–W13 xfails in place. Retrieval-half current-state pin kept (#356 out of scope).
+- W11.1 impl: `e03a7aec`.
+
+## Acceptance (W11 recon)
+
+- W11 context pins **PASS** (no leftover xfail, no XPASS)
+- W8 `#356/#357` current-state pins gone
+- W12–W13 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W12 not started
 
 ## Contract matrix (W8)
 
