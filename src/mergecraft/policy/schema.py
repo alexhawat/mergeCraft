@@ -27,6 +27,7 @@ class RuleScope(BaseModel):
     branch: str | None = None
     path: str | None = None
     language: str | None = None
+    symbol: str | None = None
 
 
 class RuleEvidence(BaseModel):

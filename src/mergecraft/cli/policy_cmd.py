@@ -1,8 +1,9 @@
-"""``mergecraft policy`` — lint, test, and explain policy-as-code rules (DG5)."""
+"""``mergecraft policy`` — lint, test, explain, effective, and simulate (DG5, #358)."""
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import typer
 import yaml
@@ -13,12 +14,14 @@ from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
 from mergecraft.policy.exceptions import PolicyException, parse_exceptions_document
-from mergecraft.policy.schema import PolicyConfigError, PolicyRule, parse_rules_document
-from mergecraft.policy.scoping import ScopeContext, resolve_effective_rules
+from mergecraft.policy.lifecycle import simulate_rule
+from mergecraft.policy.packs import load_shipped_pack_rules
+from mergecraft.policy.schema import PolicyConfigError, PolicyRule, parse_rule, parse_rules_document
+from mergecraft.policy.scoping import EffectiveRule, ScopeContext, resolve_effective_rules
 
 app = typer.Typer(
     name="policy",
-    help="Lint, test, and explain versioned policy-as-code rules.",
+    help="Lint, test, explain, and simulate versioned policy-as-code rules.",
     no_args_is_help=True,
 )
 
@@ -30,7 +33,7 @@ def _policy_dir(repo: Path) -> Path:
 def _load_policy_rules(repo: Path) -> list[PolicyRule]:
     rules_path = _policy_dir(repo) / "rules.yaml"
     if not rules_path.is_file():
-        cli_bail(f"policy rules file not found: {rules_path}")
+        return load_shipped_pack_rules()
     try:
         return parse_rules_document(rules_path.read_text(encoding="utf-8"))
     except PolicyConfigError as exc:
@@ -174,7 +177,84 @@ def explain_cmd(
         path=path,
         language=language,
     )
-    effective = resolve_effective_rules(rules, context=context)
+    _print_effective(resolve_effective_rules(rules, context=context))
+
+
+@app.command("effective")
+def effective_cmd(
+    path: str = typer.Option(
+        ".", "--path", help="File path to resolve the effective rule set for."
+    ),
+    org: str = typer.Option("", "--org", help="Organization slug for scope resolution."),
+    repo: str = typer.Option("", "--repo", help="Repository name for scope resolution."),
+    branch: str = typer.Option("main", "--branch", help="Branch name for scope resolution."),
+    language: str = typer.Option("", "--language", help="Language id for scope resolution."),
+    symbol: str | None = typer.Option(
+        None,
+        "--symbol",
+        help="Optional symbol name so the source of every effective rule can include symbol scope.",
+    ),
+    cwd: Path = typer.Option(
+        Path("."),
+        "--cwd",
+        help="Repository root containing ``.mergecraft/policy/``.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+    ),
+) -> None:
+    """Show the effective policy set and the source of every rule."""
+    repo_root = cwd.resolve()
+    rules = _load_policy_rules(repo_root)
+    context = ScopeContext(
+        org=org,
+        repo=repo,
+        branch=branch,
+        path=path,
+        language=language,
+        symbol=symbol,
+    )
+    _print_effective(resolve_effective_rules(rules, context=context))
+
+
+@app.command("simulate")
+def simulate_cmd(
+    rule: Path = typer.Option(
+        ...,
+        "--rule",
+        help="Proposed rule YAML to simulate against past PRs before enabling it.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+    ),
+    past_prs: Path = typer.Option(
+        ...,
+        "--past-prs",
+        help="YAML or JSON list of past PRs (number, paths, optional would_trigger).",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+    ),
+) -> None:
+    """Simulate a proposed rule against past PRs."""
+    try:
+        proposed = parse_rule(rule.read_text(encoding="utf-8"))
+    except PolicyConfigError as exc:
+        cli_bail(str(exc))
+    loaded = yaml.safe_load(past_prs.read_text(encoding="utf-8"))
+    if not isinstance(loaded, list):
+        cli_bail("past PRs document must be a list")
+    past: list[dict[str, Any]] = [item for item in loaded if isinstance(item, dict)]
+    report = simulate_rule(rule=proposed, past_prs=past)
+    if not report.triggered:
+        console.print("(no past PRs would trigger)")
+        return
+    console.print(f"simulate triggered on {len(report.triggered)} past PR(s):")
+    for number in report.triggered:
+        console.print(f"- #{number}")
+
+
+def _print_effective(effective: list[EffectiveRule]) -> None:
     if not effective:
         console.print("(no effective rules)")
         return

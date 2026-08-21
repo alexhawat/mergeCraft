@@ -1,0 +1,9 @@
+rules:
+  - id: security.no-hardcoded-secrets
+    owner: mergecraft-security
+    version: 1
+    rationale: Secrets committed to source are a credential-leak risk.
+    severity: Major
+    enforcement: blocking
+    scope:
+      path: "src/**"

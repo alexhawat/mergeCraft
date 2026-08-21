@@ -1,4 +1,4 @@
-"""Policy scope resolution — deterministic inheritance org → repo → path (DG5)."""
+"""Policy scope resolution — deterministic inheritance org → repo → path → symbol."""
 
 from __future__ import annotations
 
@@ -8,13 +8,14 @@ from typing import Literal
 
 from mergecraft.policy.schema import PolicyRule, RuleScope  # noqa: TC001
 
-SourceLayer = Literal["org", "repo", "path", "global"]
+SourceLayer = Literal["org", "repo", "path", "symbol", "global"]
 
 _LAYER_ORDER: dict[SourceLayer, int] = {
     "global": 0,
     "org": 1,
     "repo": 2,
     "path": 3,
+    "symbol": 4,
 }
 
 
@@ -27,6 +28,7 @@ class ScopeContext:
     branch: str
     path: str
     language: str
+    symbol: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +47,8 @@ class EffectiveRule:
 def _source_layer(scope: RuleScope | None) -> SourceLayer:
     if scope is None:
         return "global"
+    if scope.symbol is not None:
+        return "symbol"
     if scope.path is not None:
         return "path"
     if scope.repo is not None:
@@ -65,7 +69,13 @@ def _scope_matches(scope: RuleScope | None, context: ScopeContext) -> bool:
         return False
     if scope.language is not None and scope.language != context.language:
         return False
-    return scope.path is None or fnmatch.fnmatch(context.path, scope.path)
+    if scope.path is not None and not fnmatch.fnmatch(context.path, scope.path):
+        return False
+    if scope.symbol is None:
+        return True
+    if context.symbol is None:
+        return False
+    return fnmatch.fnmatch(context.symbol, scope.symbol)
 
 
 def resolve_effective_rules(
@@ -76,7 +86,7 @@ def resolve_effective_rules(
     """Return rules whose scope matches ``context``, ordered by inheritance depth.
 
     When multiple rules share the same ``id``, the deepest matching scope wins
-    (org → repo → path).
+    (org → repo → path → symbol).
     """
     effective = [
         EffectiveRule(rule=rule, source_layer=_source_layer(rule.scope))

@@ -1,0 +1,9 @@
+rules:
+  - id: testing.behavior-coverage-for-src
+    owner: mergecraft-quality
+    version: 1
+    rationale: Source changes need a matching should-fail-then-pass test.
+    severity: Minor
+    enforcement: advisory
+    scope:
+      path: "src/**"
