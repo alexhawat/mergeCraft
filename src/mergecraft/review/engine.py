@@ -1,8 +1,10 @@
 """Shared four-stage review runner over one ``ReviewSnapshot`` (#380).
 
 Exports:
+    HookReviewRun: Adapter from four callables onto :class:`ReviewRun`.
     ReviewEngine: Stage machine for materialize / analyze / review / publish.
     ReviewEngineResult: Snapshot plus stages that actually completed.
+    ReviewRun: Protocol implemented by Action and offline drivers.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from typing import Generic, Protocol, TypeVar, cast
 
 from mergecraft.review.snapshot import (
     ReviewSnapshot,
@@ -22,6 +25,9 @@ PublishHook = Callable[..., Awaitable[object]]
 TimeoutMap = Mapping[ReviewStageName, float]
 OnTimeout = Callable[[ReviewStageName], None]
 
+T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
+
 
 class _TimeoutUnset:
     """Sentinel: derive the stage budget from the snapshot / overrides map."""
@@ -30,18 +36,60 @@ class _TimeoutUnset:
 _TIMEOUT_UNSET = _TimeoutUnset()
 
 
+class ReviewRun(Protocol[T_co]):
+    """Stage driver for one engine run — methods, not closed-over callbacks."""
+
+    async def materialize(self) -> object: ...
+
+    async def analyze(self) -> object: ...
+
+    async def review(self) -> object: ...
+
+    async def publish(self, review_out: object) -> T_co: ...
+
+
+@dataclass(slots=True)
+class HookReviewRun(Generic[T]):
+    """Wrap four stage callables as a :class:`ReviewRun` (unit-test helper)."""
+
+    materialize_hook: StageHook
+    analyze_hook: StageHook
+    review_hook: StageHook
+    publish_hook: PublishHook
+
+    async def materialize(self) -> object:
+        return await self.materialize_hook()
+
+    async def analyze(self) -> object:
+        return await self.analyze_hook()
+
+    async def review(self) -> object:
+        return await self.review_hook()
+
+    async def publish(self, review_out: object) -> T:
+        # publish_hook is untyped Callable[..., Awaitable[object]]
+        return cast("T", await self.publish_hook(review_out))
+
+
 @dataclass(frozen=True, slots=True)
-class ReviewEngineResult:
+class ReviewEngineResult(Generic[T]):
     """Outcome of one engine run — ``stages_ran`` is recorded after each stage."""
 
     snapshot: ReviewSnapshot
     stages: tuple[ReviewStageSpec, ...]
     stages_ran: tuple[ReviewStageName, ...]
-    output: object | None = None
+    output: T | None = None
+
+    def published_or(self, missing: T) -> T:
+        """Return publish output, or ``missing`` when the stage produced none."""
+        output = self.output
+        if output is None:
+            return missing
+        return output
 
 
 @dataclass(slots=True)
-class ReviewEngine:
+class ReviewEngine(Generic[T]):
     """Execute the canonical review stages with per-stage timeouts."""
 
     snapshot: ReviewSnapshot
@@ -108,7 +156,7 @@ class ReviewEngine:
         self._ran.append(name)
         return value
 
-    def result(self, output: object | None = None) -> ReviewEngineResult:
+    def result(self, output: T | None = None) -> ReviewEngineResult[T]:
         """Snapshot the stages that have completed so far."""
         return ReviewEngineResult(
             snapshot=self.snapshot,
@@ -117,32 +165,67 @@ class ReviewEngine:
             output=output,
         )
 
+    def _resolve_driver(
+        self,
+        driver: ReviewRun[T] | None,
+        *,
+        materialize: StageHook | None,
+        analyze: StageHook | None,
+        review: StageHook | None,
+        publish: PublishHook | None,
+    ) -> ReviewRun[T]:
+        if driver is not None:
+            return driver
+        if materialize is None or analyze is None or review is None or publish is None:
+            raise TypeError(
+                "ReviewEngine.run requires a ReviewRun driver or "
+                "materialize/analyze/review/publish hooks"
+            )
+        return HookReviewRun(
+            materialize_hook=materialize,
+            analyze_hook=analyze,
+            review_hook=review,
+            publish_hook=publish,
+        )
+
     async def run(
         self,
+        driver: ReviewRun[T] | None = None,
+        /,
         *,
-        materialize: StageHook,
-        analyze: StageHook,
-        review: StageHook,
-        publish: PublishHook,
+        materialize: StageHook | None = None,
+        analyze: StageHook | None = None,
+        review: StageHook | None = None,
+        publish: PublishHook | None = None,
         timeouts: TimeoutMap | None = None,
         on_timeout: OnTimeout | None = None,
-    ) -> ReviewEngineResult:
+    ) -> ReviewEngineResult[T]:
         """Run materialize → analyze → review → publish in order."""
+        resolved = self._resolve_driver(
+            driver,
+            materialize=materialize,
+            analyze=analyze,
+            review=review,
+            publish=publish,
+        )
         self._ran.clear()
         if on_timeout is not None:
             self._on_timeout = on_timeout
-        await self.run_stage("materialize", materialize, timeouts=timeouts)
-        await self.run_stage("analyze", analyze, timeouts=timeouts)
-        review_out = await self.run_stage("review", review, timeouts=timeouts)
+        await self.run_stage("materialize", resolved.materialize, timeouts=timeouts)
+        await self.run_stage("analyze", resolved.analyze, timeouts=timeouts)
+        review_out = await self.run_stage("review", resolved.review, timeouts=timeouts)
 
-        async def _publish() -> object:
-            return await publish(review_out)
+        async def _publish() -> T:
+            return await resolved.publish(review_out)
 
         output = await self.run_stage("publish", _publish, timeouts=timeouts)
-        return self.result(output)
+        # publish stage returns T; run_stage is typed object
+        return self.result(cast("T", output))
 
 
 __all__ = [
+    "HookReviewRun",
     "ReviewEngine",
     "ReviewEngineResult",
+    "ReviewRun",
 ]

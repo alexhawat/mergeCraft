@@ -19,6 +19,7 @@ from typer.testing import CliRunner
 from mergecraft.cli.app import app
 from mergecraft.offline_review import OfflineReviewResult
 from mergecraft.review import ReviewEngine, ReviewEngineResult
+from mergecraft.review.engine import HookReviewRun
 from mergecraft.review.snapshot import (
     CANONICAL_STAGE_NAMES,
     DEFAULT_STAGE_TIMEOUTS_MS,
@@ -50,6 +51,30 @@ async def _publish_echo(payload: object) -> object:
     return payload
 
 
+class _OrderTap:
+    """Wrap a positional ``ReviewRun`` so each stage appends to ``order``."""
+
+    def __init__(self, inner: object, order: list[str]) -> None:
+        self._inner = inner
+        self._order = order
+
+    async def materialize(self) -> object:
+        self._order.append("materialize")
+        return await self._inner.materialize()  # type: ignore[union-attr]
+
+    async def analyze(self) -> object:
+        self._order.append("analyze")
+        return await self._inner.analyze()  # type: ignore[union-attr]
+
+    async def review(self) -> object:
+        self._order.append("review")
+        return await self._inner.review()  # type: ignore[union-attr]
+
+    async def publish(self, review_out: object) -> object:
+        self._order.append("publish")
+        return await self._inner.publish(review_out)  # type: ignore[union-attr]
+
+
 # ── Constructor + canonical timeouts ──────────────────────────────────────────
 
 
@@ -77,9 +102,17 @@ def test_review_package_reexports_engine_types() -> None:
 
     assert review_pkg.ReviewEngine is ReviewEngine
     assert review_pkg.ReviewEngineResult is ReviewEngineResult
+    assert review_pkg.HookReviewRun is HookReviewRun
     assert "run_from_snapshot" not in review_pkg.__all__
     assert not hasattr(review_pkg, "run_from_snapshot")
     assert not hasattr(engine_mod, "run_from_snapshot")
+
+
+def test_changed_paths_from_unified_diff_is_not_on_offline_stages() -> None:
+    """Unit: path extraction lives on ``changed_paths_in_diff``, not a deleted helper."""
+    import mergecraft.review.offline_stages as offline_stages
+
+    assert not hasattr(offline_stages, "changed_paths_from_unified_diff")
 
 
 def test_canonical_snapshot_records_review_timeout_as_data_not_engine_enforced() -> None:
@@ -172,6 +205,46 @@ async def test_engine_run_executes_four_hooks_in_order() -> None:
     assert order == list(CANONICAL_STAGE_NAMES)
     assert result.stages_ran == CANONICAL_STAGE_NAMES
     assert result.output == "published"
+    assert result.published_or("missing") == "published"
+
+
+@pytest.mark.asyncio
+async def test_engine_run_accepts_positional_hook_driver() -> None:
+    """Happy: production-style ``run(driver)`` wraps four hooks as ``HookReviewRun``."""
+    engine = ReviewEngine(snapshot=_short_snapshot())
+    order: list[str] = []
+
+    async def materialize() -> None:
+        order.append("materialize")
+
+    async def analyze() -> None:
+        order.append("analyze")
+
+    async def review() -> str:
+        order.append("review")
+        return "reviewed"
+
+    async def publish(payload: object) -> str:
+        order.append("publish")
+        assert payload == "reviewed"
+        return "published"
+
+    driver: HookReviewRun[str] = HookReviewRun(
+        materialize_hook=materialize,
+        analyze_hook=analyze,
+        review_hook=review,
+        publish_hook=publish,
+    )
+    result = await engine.run(driver)
+    assert order == list(CANONICAL_STAGE_NAMES)
+    assert result.output == "published"
+    assert result.published_or("missing") == "published"
+
+
+def test_published_or_returns_missing_when_output_is_none() -> None:
+    """Edge: ``published_or`` substitutes when publish never produced a value."""
+    engine = ReviewEngine(snapshot=_short_snapshot())
+    assert engine.result().published_or("fallback") == "fallback"
 
 
 @pytest.mark.asyncio
@@ -305,7 +378,9 @@ def test_cli_review_timeout_cleans_up_subprocesses(
 
     monkeypatch.setattr(diff_review_cmd, "run_offline_diff_review", boom)
 
-    async def boom_run(self: ReviewEngine, **_kwargs: Any) -> ReviewEngineResult:
+    async def boom_run(
+        self: ReviewEngine, driver: object | None = None, /, **_kwargs: Any
+    ) -> ReviewEngineResult:
         raise TimeoutError
 
     monkeypatch.setattr(ReviewEngine, "run", boom_run)
@@ -329,7 +404,9 @@ def test_scm_conforming_request_runs_engine_and_exposes_stage_specs(
     """Integration: SCM maps identity onto a snapshot; engine is not fake-run."""
     runs: list[str] = []
 
-    async def boom_run(self: ReviewEngine, **_kwargs: Any) -> ReviewEngineResult:
+    async def boom_run(
+        self: ReviewEngine, driver: object | None = None, /, **_kwargs: Any
+    ) -> ReviewEngineResult:
         runs.append("run")
         raise AssertionError("conforming_review_request must not run the engine")
 
@@ -349,7 +426,12 @@ def test_cli_review_drives_engine_run(tmp_path: Path, monkeypatch: pytest.Monkey
     order: list[str] = []
     original = ReviewEngine.run
 
-    async def wrapped(self: ReviewEngine, **kwargs: Any) -> ReviewEngineResult:
+    async def wrapped(
+        self: ReviewEngine, driver: object | None = None, /, **kwargs: Any
+    ) -> ReviewEngineResult:
+        if driver is not None:
+            return await original(self, _OrderTap(driver, order), **kwargs)
+
         def _tap(name: str, hook: Any) -> Any:
             if name == "publish":
 
@@ -436,12 +518,14 @@ async def test_action_main_calls_engine_run(
     timeout_overlays: list[object] = []
     original = ReviewEngine.run
 
-    async def wrapped(self: ReviewEngine, **kwargs: Any) -> ReviewEngineResult:
+    async def wrapped(
+        self: ReviewEngine, driver: object | None = None, /, **kwargs: Any
+    ) -> ReviewEngineResult:
         calls.append("run")
         timeout_overlays.append(kwargs.get("timeouts", _MISSING))
         timeouts = kwargs.get("timeouts")
         assert "timeouts" not in kwargs or timeouts is None or "review" not in (timeouts or {})
-        return await original(self, **kwargs)
+        return await original(self, driver, **kwargs)
 
     monkeypatch.setattr(ReviewEngine, "run", wrapped)
     rec = await run_main_for_test(
@@ -494,6 +578,47 @@ async def test_skip_agent_publish_is_owned_by_finalize(
     assert publish_stacks, "engine publish must still call _publish"
     assert all("_run_review_after_analyze" not in stack for stack in publish_stacks)
     assert any("_finalize" in stack for stack in publish_stacks)
+
+
+@pytest.mark.asyncio
+async def test_skip_agent_review_returns_skip_agent_review_not_dummy_agent_result(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Error: skip-agent is ``SkipAgentReview``, not ``AgentResult(success=True, error=...)``."""
+    import mergecraft.main as main_mod
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.main import SkipAgentReview
+    from tests.support.run_main_harness import run_main_for_test
+
+    captured: list[object] = []
+    orig = main_mod._run_review_after_analyze
+
+    async def wrap_review(ctx: object) -> object:
+        out = await orig(ctx)
+        captured.append(out)
+        return out
+
+    monkeypatch.setattr(main_mod, "_run_review_after_analyze", wrap_review)
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(setup_script="./broken-setup.sh"),
+        event_name="workflow_dispatch",
+        event_payload={"action": "workflow_dispatch"},
+        setup_script_rc=1,
+    )
+    assert rec.raised is None, rec.raised
+    assert rec.result is not None
+    assert rec.result.outcome is RunOutcome.inconclusive
+    assert captured, "review stage must return a skip-agent sentinel"
+    skip_out = captured[0]
+    assert isinstance(skip_out, SkipAgentReview)
+    assert skip_out.reason
+    assert type(skip_out) is not AgentResult
+    dummy_error = getattr(skip_out, "error", None)
+    dummy_success = getattr(skip_out, "success", None)
+    assert not (dummy_success is True and dummy_error is not None)
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +21,7 @@ from mergecraft.analyzers.trust import (
     derive_source_trust_tier,
 )
 from mergecraft.config import load_repo_settings
+from mergecraft.mcp.checkout import changed_paths_in_diff
 from mergecraft.review.offline_agent import run_offline_agent_review
 from mergecraft.review.offline_result import (
     OfflineReviewResult as OfflineReviewResult,
@@ -28,13 +30,13 @@ from mergecraft.review.offline_result import (
     _offline_error_outcome,
     _offline_failure,
 )
-from mergecraft.review.offline_stages import changed_paths_from_unified_diff
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.agent_resolve import resolve_model
 from mergecraft.utils.fence import Fence, render_untrusted
 from mergecraft.utils.offline_diff import DiffMaterialization, summarize_diff
 from mergecraft.utils.run_bounds import (
     BudgetExhausted,
+    RunBounds,
     ScopeReduction,
     apply_diff_line_budget,
     budget_exhaustion_outcome,
@@ -120,26 +122,32 @@ def build_offline_review_prompt(
     )
 
 
+def _iter_diff_file_blocks(diff_text: str) -> list[str]:
+    """Split a unified diff into per-file hunks (each starts with ``diff --git``)."""
+    blocks: list[str] = []
+    current: list[str] = []
+    for line in diff_text.splitlines(keepends=True):
+        if line.startswith("diff --git ") and current:
+            blocks.append("".join(current))
+            current = [line]
+            continue
+        if current or line.startswith("diff --git "):
+            current.append(line)
+    if current:
+        blocks.append("".join(current))
+    return blocks
+
+
 def _filter_diff_to_paths(diff_text: str, kept_paths: list[str]) -> str:
     """Keep only diff hunks for paths in ``kept_paths`` (D7 containment)."""
     if not kept_paths:
         return ""
     keep = set(kept_paths)
     blocks: list[str] = []
-    current: list[str] = []
-    current_path: str | None = None
-    for line in diff_text.splitlines(keepends=True):
-        if line.startswith("diff --git "):
-            if current and current_path in keep:
-                blocks.append("".join(current))
-            parsed = changed_paths_from_unified_diff(line)
-            current_path = parsed[0] if parsed else None
-            current = [line]
-            continue
-        if current:
-            current.append(line)
-    if current and current_path in keep:
-        blocks.append("".join(current))
+    for block in _iter_diff_file_blocks(diff_text):
+        paths = changed_paths_in_diff(block)
+        if paths and paths[0] in keep:
+            blocks.append(block)
     return "".join(blocks)
 
 
@@ -317,7 +325,7 @@ async def run_offline_diff_review(
     source_spec: SourceResolverSpec | None = None,
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
-    engine: ReviewEngine | None = None,
+    engine: ReviewEngine[OfflineReviewResult] | None = None,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
     spec = source_spec or SourceResolverSpec(cwd=cwd, invocation_root=invocation_root or cwd)
@@ -397,6 +405,167 @@ def _offline_review_context(
     )
 
 
+@dataclass(slots=True)
+class _OfflineDiffReviewRun:
+    """Typed stage driver for one offline CLI review (no closed-over locals)."""
+
+    cwd: Path
+    workspace: ResolvedWorkspace
+    spec: SourceResolverSpec
+    out_dir: Path
+    diff_file: Path | None
+    trust_tier: str
+    run_bounds: RunBounds
+    analyzers_enabled: bool
+    json_path: Path | None
+    prompt_extra: str | None
+    dry_run: bool
+    model: str | None
+    evidence_packet_path: Path | None
+    on_finding: Callable[[dict[str, Any]], None] | None
+    read_cache: bool
+    materialization: DiffMaterialization | None = None
+    scope_reduction: ScopeReduction | None = None
+    cache_key: str | None = None
+    from_cache: bool = False
+
+    async def materialize(self) -> DiffMaterialization:
+        built = materialize_resolved_diff(
+            self.workspace,
+            spec=self.spec,
+            out_dir=self.out_dir,
+            diff_file=self.diff_file,
+        )
+        if self.trust_tier == "untrusted":
+            diff_text = built.path.read_text(encoding="utf-8")
+            paths = changed_paths_in_diff(diff_text)
+            kept = filter_confined_paths(self.cwd, paths)
+            if kept != paths:
+                filtered = _filter_diff_to_paths(diff_text, kept)
+                built.path.write_text(filtered, encoding="utf-8")
+                built = DiffMaterialization(
+                    path=built.path,
+                    base_ref=built.base_ref,
+                    line_count=0 if not filtered.strip() else filtered.count("\n"),
+                    empty=not filtered.strip(),
+                )
+        diff_text = built.path.read_text(encoding="utf-8")
+        reduced_text, self.scope_reduction = apply_diff_line_budget(
+            diff_text,
+            max_lines=self.run_bounds.max_diff_lines,
+        )
+        if self.scope_reduction is not None:
+            built.path.write_text(reduced_text, encoding="utf-8")
+            built = DiffMaterialization(
+                path=built.path,
+                base_ref=built.base_ref,
+                line_count=self.scope_reduction.kept_lines,
+                empty=not reduced_text.strip(),
+            )
+        self.materialization = built
+        return built
+
+    async def analyze(self) -> None:
+        assert self.materialization is not None
+        from mergecraft.review.offline_stages import run_offline_analyze
+
+        await run_offline_analyze(
+            cwd=self.cwd,
+            materialization=self.materialization,
+            trust_tier=self.trust_tier,
+            analyzers_enabled=self.analyzers_enabled,
+        )
+
+    async def review(self) -> OfflineReviewResult:
+        assert self.materialization is not None
+        if self.materialization.empty:
+            if self.json_path is not None:
+                try:
+                    write_findings_json(self.json_path, [])
+                except OSError as exc:
+                    return _offline_failure(
+                        error=f"failed to write findings JSON: {exc}",
+                        outcome=RunOutcome.configuration_error,
+                    )
+            return OfflineReviewResult(
+                success=True,
+                output="no changes to review (empty diff).",
+                diff_path=str(self.materialization.path),
+                empty_diff=True,
+                outcome=outcome_with_scope_reduction(RunOutcome.passed, self.scope_reduction),
+                scope_reduction=self.scope_reduction,
+            )
+
+        output_schema = findings_output_schema() if self.json_path is not None else None
+        prompt = build_offline_review_prompt(
+            diff_path=self.materialization.path,
+            base_ref=self.materialization.base_ref,
+            extra=self.prompt_extra,
+            json_mode=output_schema is not None,
+        )
+
+        if self.dry_run:
+            return OfflineReviewResult(
+                success=True,
+                output=prompt,
+                diff_path=str(self.materialization.path),
+                empty_diff=False,
+                outcome=outcome_with_scope_reduction(RunOutcome.passed, self.scope_reduction),
+                scope_reduction=self.scope_reduction,
+            )
+
+        resolved_model = resolve_model(slug=self.model)
+        if self.read_cache:
+            from mergecraft.utils.review_result_cache import (
+                cache_key_for_diff_path,
+                load_review_result,
+            )
+
+            self.cache_key = cache_key_for_diff_path(
+                self.materialization.path,
+                model=resolved_model,
+                trust_tier=self.trust_tier,
+                prompt_extra=self.prompt_extra,
+                json_mode=self.json_path is not None,
+                base_ref=self.materialization.base_ref,
+            )
+            cached = load_review_result(self.cache_key)
+            if cached is not None:
+                if cached.diff_path is None:
+                    cached.diff_path = str(self.materialization.path)
+                self.from_cache = True
+                return cached
+
+        return await run_offline_agent_review(
+            cwd=self.cwd,
+            materialization=self.materialization,
+            prompt=prompt,
+            model=resolved_model,
+            tmpdir=self.out_dir,
+            output_schema=output_schema,
+            evidence_packet_path=self.evidence_packet_path,
+            trust_tier=self.trust_tier,
+            run_bounds=self.run_bounds,
+            on_finding=self.on_finding,
+        )
+
+    async def publish(self, review_out: object) -> OfflineReviewResult:
+        if not isinstance(review_out, OfflineReviewResult):
+            return _offline_failure(
+                error="review engine returned no result",
+                outcome=RunOutcome.infra_error,
+            )
+        if review_out.empty_diff or self.dry_run:
+            return review_out
+        store_key = None if self.from_cache else self.cache_key
+        return _finish_offline_result(
+            review_out,
+            json_path=self.json_path,
+            scope_reduction=self.scope_reduction,
+            cache_key=store_key,
+        )
+
+
 async def _run_offline_diff_review(
     *,
     cwd: Path,
@@ -415,7 +584,7 @@ async def _run_offline_diff_review(
     cloned: bool = False,
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
-    engine: ReviewEngine | None = None,
+    engine: ReviewEngine[OfflineReviewResult] | None = None,
 ) -> OfflineReviewResult:
     """Body of :func:`run_offline_diff_review`, run under the bound review context."""
     cwd = cwd.resolve()
@@ -442,169 +611,42 @@ async def _run_offline_diff_review(
     trust_env_previous = apply_cli_trust_tier_env(trust_tier)
     settings = load_repo_settings(root=cwd, load_learnings_files=False)
     run_bounds = resolve_run_bounds(settings=settings)
-    scope_reduction: ScopeReduction | None = None
 
     out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
     from mergecraft.review.engine import ReviewEngine
     from mergecraft.review.snapshot import canonical_review_snapshot
     from mergecraft.utils.process_group import kill_all_active_process_groups
 
-    runner = engine or ReviewEngine(
+    runner: ReviewEngine[OfflineReviewResult] = engine or ReviewEngine(
         snapshot=canonical_review_snapshot(entry="cli", source=str(cwd))
     )
     runner.set_on_timeout(lambda _name: kill_all_active_process_groups())
-    read_cache = use_cache
-    materialization: DiffMaterialization | None = None
-    cache_key: str | None = None
-    from_cache = False
-
-    async def _materialize() -> DiffMaterialization:
-        nonlocal materialization, scope_reduction
-        built = materialize_resolved_diff(
-            workspace,
-            spec=spec,
-            out_dir=out_dir,
-            diff_file=diff_file,
-        )
-        if trust_tier == "untrusted":
-            diff_text = built.path.read_text(encoding="utf-8")
-            paths = changed_paths_from_unified_diff(diff_text)
-            kept = filter_confined_paths(cwd, paths)
-            if kept != paths:
-                filtered = _filter_diff_to_paths(diff_text, kept)
-                built.path.write_text(filtered, encoding="utf-8")
-                built = DiffMaterialization(
-                    path=built.path,
-                    base_ref=built.base_ref,
-                    line_count=0 if not filtered.strip() else filtered.count("\n"),
-                    empty=not filtered.strip(),
-                )
-        diff_text = built.path.read_text(encoding="utf-8")
-        reduced_text, scope_reduction = apply_diff_line_budget(
-            diff_text,
-            max_lines=run_bounds.max_diff_lines,
-        )
-        if scope_reduction is not None:
-            built.path.write_text(reduced_text, encoding="utf-8")
-            built = DiffMaterialization(
-                path=built.path,
-                base_ref=built.base_ref,
-                line_count=scope_reduction.kept_lines,
-                empty=not reduced_text.strip(),
-            )
-        materialization = built
-        return built
-
-    async def _analyze() -> None:
-        assert materialization is not None
-        from mergecraft.review.offline_stages import run_offline_analyze
-
-        await run_offline_analyze(
-            cwd=cwd,
-            materialization=materialization,
-            trust_tier=trust_tier,
-            analyzers_enabled=settings.analyzers.enabled,
-        )
-
-    async def _review() -> OfflineReviewResult:
-        nonlocal cache_key, from_cache
-        assert materialization is not None
-        if materialization.empty:
-            if json_path is not None:
-                try:
-                    write_findings_json(json_path, [])
-                except OSError as exc:
-                    return _offline_failure(
-                        error=f"failed to write findings JSON: {exc}",
-                        outcome=RunOutcome.configuration_error,
-                    )
-            return OfflineReviewResult(
-                success=True,
-                output="no changes to review (empty diff).",
-                diff_path=str(materialization.path),
-                empty_diff=True,
-                outcome=outcome_with_scope_reduction(RunOutcome.passed, scope_reduction),
-                scope_reduction=scope_reduction,
-            )
-
-        output_schema = findings_output_schema() if json_path is not None else None
-        prompt = build_offline_review_prompt(
-            diff_path=materialization.path,
-            base_ref=materialization.base_ref,
-            extra=prompt_extra,
-            json_mode=output_schema is not None,
-        )
-
-        if dry_run:
-            return OfflineReviewResult(
-                success=True,
-                output=prompt,
-                diff_path=str(materialization.path),
-                empty_diff=False,
-                outcome=outcome_with_scope_reduction(RunOutcome.passed, scope_reduction),
-                scope_reduction=scope_reduction,
-            )
-
-        resolved_model = resolve_model(slug=model)
-        if read_cache:
-            from mergecraft.utils.review_result_cache import (
-                cache_key_for_diff_path,
-                load_review_result,
-            )
-
-            cache_key = cache_key_for_diff_path(
-                materialization.path,
-                model=resolved_model,
-                trust_tier=trust_tier,
-                prompt_extra=prompt_extra,
-                json_mode=json_path is not None,
-                base_ref=materialization.base_ref,
-            )
-            cached = load_review_result(cache_key)
-            if cached is not None:
-                if cached.diff_path is None:
-                    cached.diff_path = str(materialization.path)
-                from_cache = True
-                return cached
-
-        return await run_offline_agent_review(
-            cwd=cwd,
-            materialization=materialization,
-            prompt=prompt,
-            model=resolved_model,
-            tmpdir=out_dir,
-            output_schema=output_schema,
-            evidence_packet_path=evidence_packet_path,
-            trust_tier=trust_tier,
-            run_bounds=run_bounds,
-            on_finding=on_finding,
-        )
-
-    async def _publish(result: OfflineReviewResult) -> OfflineReviewResult:
-        if result.empty_diff or dry_run:
-            return result
-        store_key = None if from_cache else cache_key
-        return _finish_offline_result(
-            result,
-            json_path=json_path,
-            scope_reduction=scope_reduction,
-            cache_key=store_key,
-        )
+    driver = _OfflineDiffReviewRun(
+        cwd=cwd,
+        workspace=workspace,
+        spec=spec,
+        out_dir=out_dir,
+        diff_file=diff_file,
+        trust_tier=trust_tier,
+        run_bounds=run_bounds,
+        analyzers_enabled=settings.analyzers.enabled,
+        json_path=json_path,
+        prompt_extra=prompt_extra,
+        dry_run=dry_run,
+        model=model,
+        evidence_packet_path=evidence_packet_path,
+        on_finding=on_finding,
+        read_cache=use_cache,
+    )
 
     try:
         try:
-            staged = await runner.run(
-                materialize=_materialize,
-                analyze=_analyze,
-                review=_review,
-                publish=_publish,
-            )
-            output = staged.output
-            if isinstance(output, OfflineReviewResult):
-                return output
-            return _offline_failure(
-                error="review engine returned no result",
-                outcome=RunOutcome.infra_error,
+            staged = await runner.run(driver)
+            return staged.published_or(
+                _offline_failure(
+                    error="review engine returned no result",
+                    outcome=RunOutcome.infra_error,
+                )
             )
         except TimeoutError:
             return _offline_failure(

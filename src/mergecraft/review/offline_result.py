@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
     from mergecraft.mcp.context import ToolContext
     from mergecraft.utils.offline_diff import DiffMaterialization
+    from mergecraft.utils.run_bounds import ScopeReduction
 
 
 @dataclass(slots=True)
@@ -38,7 +39,7 @@ class OfflineReviewResult:
     # when no packet was produced (dry run, empty diff, emission failure).
     evidence_packet_path: str | None = None
     outcome: RunOutcome | None = None
-    scope_reduction: object | None = None
+    scope_reduction: ScopeReduction | None = None
 
 
 def _offline_failure(

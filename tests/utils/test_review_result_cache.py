@@ -137,7 +137,7 @@ def test_store_then_load_round_trip_includes_structured_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Happy: a successful store persists ``structured_output`` for cache hits."""
-    from mergecraft.offline_review import OfflineReviewResult
+    from mergecraft.review.offline_result import OfflineReviewResult
 
     _isolate_cache(tmp_path, monkeypatch)
     key = review_result_cache_key(_DIFF, model="m", json_mode=True)
@@ -154,3 +154,98 @@ def test_store_then_load_round_trip_includes_structured_output(
     assert loaded.success is True
     assert loaded.structured_output == '{"findings":[]}'
     assert loaded.outcome is RunOutcome.passed
+    assert loaded.scope_reduction is None
+
+
+def test_store_then_load_round_trip_persists_scope_reduction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy: cached results keep ``ScopeReduction`` fields."""
+    from mergecraft.review.offline_result import OfflineReviewResult
+    from mergecraft.utils.run_bounds import ScopeReduction
+
+    _isolate_cache(tmp_path, monkeypatch)
+    key = review_result_cache_key(_DIFF, model="m")
+    reduction = ScopeReduction(
+        original_lines=400,
+        kept_lines=120,
+        omitted_paths=["vendor/huge.py"],
+        reason="max_diff_lines",
+    )
+    stored = OfflineReviewResult(
+        success=True,
+        output="review body",
+        structured_output='{"findings":[]}',
+        diff_path="x.diff",
+        outcome=RunOutcome.passed,
+        scope_reduction=reduction,
+    )
+    store_review_result(key, stored)
+    loaded = load_review_result(key)
+    assert loaded is not None
+    assert loaded.scope_reduction is not None
+    assert loaded.scope_reduction.original_lines == 400
+    assert loaded.scope_reduction.kept_lines == 120
+    assert loaded.scope_reduction.omitted_paths == ["vendor/huge.py"]
+    assert loaded.scope_reduction.reason == "max_diff_lines"
+
+
+@pytest.mark.parametrize(
+    "scope_reduction",
+    [
+        "not-an-object",
+        {"original_lines": "400", "kept_lines": 1, "omitted_paths": [], "reason": "x"},
+        {"original_lines": 1, "kept_lines": 1, "omitted_paths": [1], "reason": "x"},
+        {"original_lines": 1, "kept_lines": 1, "omitted_paths": [], "reason": None},
+    ],
+)
+def test_invalid_scope_reduction_is_a_cache_miss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scope_reduction: object,
+) -> None:
+    """Error: corrupt ``scope_reduction`` JSON is a miss, not a crash."""
+    _isolate_cache(tmp_path, monkeypatch)
+    key = review_result_cache_key(_DIFF, model="m")
+    payload = {
+        "success": True,
+        "output": "ok",
+        "error": None,
+        "diff_path": "x.diff",
+        "empty_diff": False,
+        "structured_output": None,
+        "evidence_packet_path": None,
+        "outcome": "passed",
+        "scope_reduction": scope_reduction,
+    }
+    cache = open_run_cache(root=tmp_path / "run-cache", max_bytes=1_000_000)
+    cache.put(key, json.dumps(payload).encode("utf-8"))
+    assert load_review_result(key) is None
+
+
+def test_legacy_payload_without_scope_reduction_loads_other_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Edge: missing ``scope_reduction`` key does not drop other cached fields."""
+    _isolate_cache(tmp_path, monkeypatch)
+    key = review_result_cache_key(_DIFF, model="m")
+    payload = {
+        "success": True,
+        "output": "legacy review",
+        "error": None,
+        "diff_path": "legacy.diff",
+        "empty_diff": False,
+        "structured_output": '{"findings":[]}',
+        "evidence_packet_path": "/tmp/legacy-packet.json",
+        "outcome": "passed",
+    }
+    cache = open_run_cache(root=tmp_path / "run-cache", max_bytes=1_000_000)
+    cache.put(key, json.dumps(payload).encode("utf-8"))
+    loaded = load_review_result(key)
+    assert loaded is not None
+    assert loaded.output == "legacy review"
+    assert loaded.diff_path == "legacy.diff"
+    assert loaded.structured_output == '{"findings":[]}'
+    assert loaded.evidence_packet_path == "/tmp/legacy-packet.json"
+    assert loaded.outcome is RunOutcome.passed
+    assert loaded.scope_reduction is None

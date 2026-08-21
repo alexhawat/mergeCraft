@@ -194,6 +194,33 @@ class RunContext:
     budget_tracker: Any = None
     budget_exhaustion: Any = None
 
+    async def materialize(self) -> None:
+        await _setup_run(self)
+        await _resolve_credentials(self)
+
+    async def analyze(self) -> None:
+        await _assemble_model_chain(self)
+        await _build_run_tool_context(self)
+
+    async def review(self) -> AgentResult | SkipAgentReview:
+        return await _run_review_after_analyze(self)
+
+    async def publish(self, review_out: object) -> MainResult:
+        if isinstance(review_out, (AgentResult, SkipAgentReview)):
+            return await _finalize(self, review_out)
+        return MainResult(
+            success=False,
+            error="review engine returned no result",
+            outcome=RunOutcome.infra_error,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SkipAgentReview:
+    """Review-stage outcome when setup-script policy skips the agent loop."""
+
+    reason: str
+
 
 def _first_runnable_in_chain(chain: list[str]) -> str:
     """Harness-patchable one-arg facade over :func:`pick_runnable_slug_from_chain`.
@@ -1205,7 +1232,7 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
-async def _run_review_after_analyze(ctx: RunContext) -> AgentResult:
+async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
     await _run_setup_script_phase(ctx)
@@ -1240,13 +1267,13 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult:
             skip_reason,
         )
         # Engine publish (``_finalize``) owns completion; do not publish here.
-        return AgentResult(success=True, error=skip_reason)
+        return SkipAgentReview(reason=skip_reason)
 
     await _prepare_agent_dispatch(ctx)
     return await _dispatch_agent_with_deadline(ctx)
 
 
-async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
+async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> MainResult:
     """Phase 4 — post-run, publish, outcome mapping (G4.2)."""
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
@@ -1256,11 +1283,15 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
     tool_state = ctx.tool_state
     settings = ctx.settings
 
-    if ctx.run_ctx is not None:
-        try:
-            result = await finalize_agent_result(ctx.run_ctx, result)
-        except Exception as exc:
-            logger.debug("post-run finalize skipped: {}", exc)
+    if isinstance(result, SkipAgentReview):
+        agent_result = AgentResult(success=True)
+    else:
+        agent_result = result
+        if ctx.run_ctx is not None:
+            try:
+                agent_result = await finalize_agent_result(ctx.run_ctx, agent_result)
+            except Exception as exc:
+                logger.debug("post-run finalize skipped: {}", exc)
 
     # D3/W5.2 + W6.1 + S1/D5/D10 — a completed run is ``passed`` / ``failed``,
     # ``inconclusive`` when review-relevant dependency prep failed OR a
@@ -1294,7 +1325,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         failure_reason = str(ctx.budget_tracker.last_exhausted)
     else:
         outcome, failure_reason = _classify_outcome(
-            result=result,
+            result=agent_result,
             setup_reason=setup_reason,
             setup_policy=settings.setup_failure_policy,
             prep_reason=prep_reason,
@@ -1303,7 +1334,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
             final_summary_written=tool_state.final_summary_written,
         )
     verdict_publish = _verdict_protocol_publish(
-        result=result,
+        result=agent_result,
         mode=tool_state.selected_mode,
         setup_reason=setup_reason,
         setup_policy=settings.setup_failure_policy,
@@ -1339,7 +1370,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
             from mergecraft.tracing import get_tracer_from_settings
             from mergecraft.tracing.signals import emit_verdict
 
-            fallback_reason = (result.metadata or {}).get("fallback_reason")
+            fallback_reason = (agent_result.metadata or {}).get("fallback_reason")
             published_count = len(submission.findings)
             emit_verdict(
                 get_tracer_from_settings(settings),
@@ -1356,13 +1387,13 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
     if outcome is not RunOutcome.passed:
         return MainResult(
             success=False,
-            error=failure_reason or result.error or "agent execution failed",
+            error=failure_reason or agent_result.error or "agent execution failed",
             evidence_packet_path=packet_path,
             outcome=outcome,
             verdict_diagnostic=verdict_diagnostic_code,
         )
 
-    output = tool_state.output or result.output
+    output = tool_state.output or agent_result.output
     return MainResult(
         success=True,
         output=output,
@@ -1437,7 +1468,7 @@ async def main() -> MainResult:
         source=os.environ.get("GITHUB_REPOSITORY") or None,
         replay_key=os.environ.get("GITHUB_SHA") or None,
     )
-    engine = ReviewEngine(snapshot=snapshot)
+    engine: ReviewEngine[MainResult] = ReviewEngine(snapshot=snapshot)
     ensure_github_workspace_registered()
     workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
     if workspace:
@@ -1460,37 +1491,17 @@ async def main() -> MainResult:
     # span closed in this process (and, via the exported review env, every
     # spawned agent CLI) carries the same ``review.id``.
     with bind_review_context(_action_review_context()):
-
-        async def materialize() -> None:
-            nonlocal ctx
-            ctx = await _setup_run(ctx)
-            ctx = await _resolve_credentials(ctx)
-
-        async def analyze() -> None:
-            await _assemble_model_chain(ctx)
-            await _build_run_tool_context(ctx)
-
-        async def review() -> AgentResult:
-            return await _run_review_after_analyze(ctx)
-
-        async def publish(agent_result: AgentResult) -> MainResult:
-            return await _finalize(ctx, agent_result)
-
         try:
             staged = await engine.run(
-                materialize=materialize,
-                analyze=analyze,
-                review=review,
-                publish=publish,
+                ctx,
                 on_timeout=lambda _name: kill_all_active_process_groups(),
             )
-            output = staged.output
-            if isinstance(output, MainResult):
-                return output
-            return MainResult(
-                success=False,
-                error="review engine returned no result",
-                outcome=RunOutcome.infra_error,
+            return staged.published_or(
+                MainResult(
+                    success=False,
+                    error="review engine returned no result",
+                    outcome=RunOutcome.infra_error,
+                )
             )
         except Exception as error:
             error_message = str(error) if error else "unknown error occurred"

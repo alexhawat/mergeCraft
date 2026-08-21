@@ -6,9 +6,9 @@ import hashlib
 import json
 from typing import TYPE_CHECKING
 
-from mergecraft.offline_review import OfflineReviewResult
+from mergecraft.review.offline_result import OfflineReviewResult
 from mergecraft.run_outcome import RunOutcome
-from mergecraft.utils.run_bounds import resolve_run_bounds
+from mergecraft.utils.run_bounds import ScopeReduction, resolve_run_bounds
 from mergecraft.utils.run_cache import RunCache, default_cache_root, open_run_cache
 
 if TYPE_CHECKING:
@@ -47,6 +47,42 @@ def _open_result_cache() -> RunCache:
     return open_run_cache(root=default_cache_root(), max_bytes=bounds.cache_max_bytes)
 
 
+def _scope_reduction_payload(reduction: ScopeReduction | None) -> dict[str, object] | None:
+    if reduction is None:
+        return None
+    return {
+        "original_lines": reduction.original_lines,
+        "kept_lines": reduction.kept_lines,
+        "omitted_paths": list(reduction.omitted_paths),
+        "reason": reduction.reason,
+    }
+
+
+def _load_scope_reduction(raw: object) -> ScopeReduction | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("scope_reduction must be an object")
+    original_lines = raw.get("original_lines")
+    kept_lines = raw.get("kept_lines")
+    omitted_paths = raw.get("omitted_paths")
+    reason = raw.get("reason")
+    if (
+        not isinstance(original_lines, int)
+        or not isinstance(kept_lines, int)
+        or not isinstance(reason, str)
+        or not isinstance(omitted_paths, list)
+        or any(not isinstance(path, str) for path in omitted_paths)
+    ):
+        raise ValueError("scope_reduction fields are invalid")
+    return ScopeReduction(
+        original_lines=original_lines,
+        kept_lines=kept_lines,
+        omitted_paths=list(omitted_paths),
+        reason=reason,
+    )
+
+
 def load_review_result(key: str) -> OfflineReviewResult | None:
     """Load a previously cached review result, or ``None`` on miss/corrupt."""
     cache = _open_result_cache()
@@ -70,6 +106,10 @@ def load_review_result(key: str) -> OfflineReviewResult | None:
             return None
     else:
         return None
+    try:
+        scope_reduction = _load_scope_reduction(payload.get("scope_reduction"))
+    except ValueError:
+        return None
     return OfflineReviewResult(
         success=bool(payload.get("success")),
         output=payload.get("output") if isinstance(payload.get("output"), str) else None,
@@ -87,6 +127,7 @@ def load_review_result(key: str) -> OfflineReviewResult | None:
             else None
         ),
         outcome=outcome,
+        scope_reduction=scope_reduction,
     )
 
 
@@ -101,6 +142,7 @@ def store_review_result(key: str, result: OfflineReviewResult) -> None:
         "structured_output": result.structured_output,
         "evidence_packet_path": result.evidence_packet_path,
         "outcome": result.outcome.value if result.outcome is not None else None,
+        "scope_reduction": _scope_reduction_payload(result.scope_reduction),
     }
     cache = _open_result_cache()
     cache.put(key, json.dumps(payload, ensure_ascii=False).encode("utf-8"))

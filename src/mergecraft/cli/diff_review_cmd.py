@@ -501,7 +501,7 @@ def run(
         source=str(root),
         replay_key=str(diff) if diff is not None else None,
     )
-    engine = ReviewEngine(snapshot=snapshot)
+    engine: ReviewEngine[OfflineReviewResult] = ReviewEngine(snapshot=snapshot)
 
     stream: AgentProtocolStream | None = None
     seen: set[str] = set()

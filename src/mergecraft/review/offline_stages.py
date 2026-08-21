@@ -7,6 +7,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Literal
 
 from mergecraft.analyzers.pipeline import run_analyzer_pipeline
+from mergecraft.mcp.checkout import changed_paths_in_diff
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -14,15 +15,6 @@ if TYPE_CHECKING:
     from mergecraft.utils.offline_diff import DiffMaterialization
 
 TrustTier = Literal["trusted", "untrusted"]
-
-
-def changed_paths_from_unified_diff(diff_text: str) -> list[str]:
-    """Return ``b/`` paths from ``diff --git`` headers."""
-    paths: list[str] = []
-    for line in diff_text.splitlines():
-        if line.startswith("diff --git ") and len(line.split()) >= 4:
-            paths.append(line.split()[3].removeprefix("b/"))
-    return paths
 
 
 def _as_trust_tier(raw: str) -> TrustTier:
@@ -45,7 +37,7 @@ async def run_offline_analyze(
     pipeline = partial(
         run_analyzer_pipeline,
         repo_root=cwd,
-        changed_files=changed_paths_from_unified_diff(diff_text),
+        changed_files=changed_paths_in_diff(diff_text),
         tier=_as_trust_tier(trust_tier),
         diff_text=diff_text,
         offline=True,

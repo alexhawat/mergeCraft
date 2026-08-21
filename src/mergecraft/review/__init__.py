@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from mergecraft.review.engine import ReviewEngine, ReviewEngineResult
+from mergecraft.review.engine import (
+    HookReviewRun,
+    ReviewEngine,
+    ReviewEngineResult,
+    ReviewRun,
+)
 from mergecraft.review.lens_routing import (
     LENS_ROUTING_STEP4_NOTE,
     LensRoutingDecision,
@@ -18,10 +23,12 @@ from mergecraft.review.snapshot import (
 
 __all__ = [
     "LENS_ROUTING_STEP4_NOTE",
+    "HookReviewRun",
     "LensRoutingDecision",
     "LensRoutingEntry",
     "ReviewEngine",
     "ReviewEngineResult",
+    "ReviewRun",
     "ReviewSnapshot",
     "ReviewStageSpec",
     "canonical_review_snapshot",
