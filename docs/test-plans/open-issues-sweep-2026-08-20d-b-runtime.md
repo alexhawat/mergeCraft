@@ -7,10 +7,10 @@ Authoring waves: **W7.1** (#381), **W8.1** (#382), **W10.1** (#384)
 Implementation waves (do not edit these tests): W7.2, W8.2, W10.2.
 Recon after each impl wave removes the matching non-strict `xfail` markers.
 
-**W7.2 recon (2026-08-21):** all `tests/enterprise/` `green after W7.2` markers
+**W7.2 recon (2026-08-21, `99847292`):** all `tests/enterprise/` `green after W7.2` markers
 removed after 45/45 XPASS on `c32b2eae`. W8.2 (`tests/release/`) and W10.2
 (`tests/evals/`) xfails left in place. No assertion edits; no leftover
-enterprise xfail.
+enterprise xfail. `tests/enterprise/`: 46 passed, 0 fail, 0 xfail.
 
 D17: new CLI tests live under `tests/enterprise/`, not `tests/cli/`. No
 `mergecraft.cli.app` imports. D10: `test_no_eval_scores_on_landing_readme`
