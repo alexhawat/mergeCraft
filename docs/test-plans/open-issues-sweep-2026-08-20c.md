@@ -664,6 +664,7 @@ Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility
 - Deleted W21 current-state pin: `test_specialist_economics_module_does_not_exist_yet`.
 - Left W25 xfails in place. D6/D11 exporter and lens-routing pins kept.
 - W24 impl: `87ccff83`.
+- W24 recon: `fcd928a4`.
 
 ## Acceptance (W24 recon)
 
