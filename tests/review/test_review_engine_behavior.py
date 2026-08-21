@@ -333,12 +333,7 @@ def test_scm_conforming_request_runs_engine_and_exposes_stage_specs(
         runs.append("run")
         raise AssertionError("conforming_review_request must not run the engine")
 
-    def boom_sync(self: ReviewEngine, **_kwargs: Any) -> ReviewEngineResult:
-        runs.append("run_sync")
-        raise AssertionError("conforming_review_request must not run_sync no-ops")
-
     monkeypatch.setattr(ReviewEngine, "run", boom_run)
-    monkeypatch.setattr(ReviewEngine, "run_sync", boom_sync)
     request = conforming_review_request("github", event="pull_request", body={})
     assert request.snapshot.entry == "scm"
     assert isinstance(request.snapshot, ReviewSnapshot)

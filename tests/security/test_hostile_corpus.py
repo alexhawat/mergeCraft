@@ -254,7 +254,7 @@ async def test_review_still_produces_a_usable_verdict_on_the_hostile_repo(
             diff_path=str(materialization.path),
         )
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", fake_run_agent_review)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", fake_run_agent_review)
 
     result = await run_offline_diff_review(
         cwd=hostile_repo,

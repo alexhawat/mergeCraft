@@ -145,7 +145,7 @@ def test_json_format_matches_existing_findings_schema(
             diff_path=str(materialization.path),
         )
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", fake_run_agent_review)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", fake_run_agent_review)
     json_out = tmp_path / "findings.json"
     result = runner.invoke(
         app,

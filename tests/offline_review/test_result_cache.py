@@ -214,7 +214,7 @@ async def test_offline_run_does_not_cache_empty_structured_output(
             outcome=RunOutcome.passed,
         )
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_empty)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_empty)
 
     workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
     spec = SourceResolverSpec(cwd=repo, invocation_root=repo)
@@ -239,7 +239,7 @@ async def test_offline_run_does_not_cache_empty_structured_output(
             outcome=RunOutcome.infra_error,
         )
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_must_not_be_skipped)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_must_not_be_skipped)
     second = await offline_mod._run_offline_diff_review(
         cwd=repo,
         workspace=workspace,
@@ -283,7 +283,7 @@ async def test_offline_cache_hit_rewrites_findings_json(
             outcome=RunOutcome.passed,
         )
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_ok)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_ok)
 
     workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
     spec = SourceResolverSpec(cwd=repo, invocation_root=repo)
@@ -304,7 +304,7 @@ async def test_offline_cache_hit_rewrites_findings_json(
     async def _agent_must_not_run(**kwargs: object) -> OfflineReviewResult:
         raise AssertionError("cache hit must not re-run the agent")
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_must_not_run)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_must_not_run)
     second_path = tmp_path / "from-cache.json"
     second = await offline_mod._run_offline_diff_review(
         cwd=repo,
@@ -348,7 +348,7 @@ def _capture_cache_and_agent(
             outcome=RunOutcome.passed,
         )
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_ok)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_ok)
     return hashed, agent_models
 
 
@@ -405,7 +405,7 @@ async def test_cache_key_hashes_none_when_resolve_model_returns_none(
             outcome=RunOutcome.passed,
         )
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_ok)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_ok)
     workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
     spec = SourceResolverSpec(cwd=repo, invocation_root=repo)
     await offline_mod._run_offline_diff_review(
@@ -473,7 +473,7 @@ async def test_cache_key_and_agent_share_resolved_model_slug(
             outcome=RunOutcome.passed,
         )
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_ok)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_ok)
     workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
     spec = SourceResolverSpec(cwd=repo, invocation_root=repo)
     await offline_mod._run_offline_diff_review(
@@ -532,7 +532,7 @@ async def test_resolved_model_cache_keys_do_not_collide(
             outcome=RunOutcome.passed,
         )
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_ok)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_ok)
     workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
     spec = SourceResolverSpec(cwd=repo, invocation_root=repo)
 

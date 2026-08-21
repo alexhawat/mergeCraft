@@ -166,7 +166,7 @@ def _install_fake_agent_review(
             diff_path=str(materialization.path),
         )
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", fake_run_agent_review)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", fake_run_agent_review)
 
 
 @pytest.mark.parametrize(

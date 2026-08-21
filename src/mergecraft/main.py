@@ -1133,13 +1133,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         ):
             return await attempt_agent.run(attempt_ctx)
 
-    # Named ``_execute_agent`` deliberately — same name as the top-level
-    # phase function that calls this one, shadowed locally. A pre-G4 test
-    # (``tests/config/test_setup_script_timeout.py::test_setup_timeout_is_deducted_from_the_run_budget``)
-    # identifies the ``asyncio.wait_for``-wrapped task by this exact
-    # coroutine name via ``cr_code.co_name`` introspection, so the inner
-    # closure keeps the name the pre-G4.2 code already used here.
-    async def _execute_agent() -> tuple[str | None, AgentResult]:
+    async def _dispatch_selected_agent() -> tuple[str | None, AgentResult]:
         if use_model_chain:
             winning_slug, chain_result = await run_with_model_chain(
                 settings=settings,
@@ -1161,7 +1155,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         ):
             return selected_slug, await agent.run(run_ctx)
 
-    agent_task = asyncio.create_task(_execute_agent())
+    agent_task = asyncio.create_task(_dispatch_selected_agent())
 
     # S1 / F6 — deduct the setup-script elapsed time from the agent
     # deadline. A slow setup must NOT silently extend the total run

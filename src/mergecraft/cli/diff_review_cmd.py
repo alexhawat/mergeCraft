@@ -134,22 +134,6 @@ def _resolve_outcome(result: OfflineReviewResult) -> RunOutcome:
     return RunOutcome.passed if result.success else RunOutcome.failed
 
 
-def _needs_structured_output(
-    *,
-    json_output: Path | None,
-    output_format: OutputFormat,
-) -> bool:
-    # The agent's structured findings are read for two reasons: (a) writing
-    # --json/--format json/jsonl/sarif, (b) computing the CC1 exit codes
-    # 10/11 (which key off the parsed findings list). Default text ``review``
-    # therefore *also* requests structured findings — the temp file is
-    # cleaned up at end of run — so a CI script running `review` and
-    # blocking on exit 10/11 sees the contract applied uniformly. PR #242
-    # review findings ``3f363546e98dad517048b8b9`` and
-    # ``7a3cdf5ef1994610113e8e37``.
-    return True
-
-
 def _write_jsonl_findings(path: Path, findings: Sequence[Finding]) -> None:
     lines: list[str] = []
     for row in findings:
@@ -477,8 +461,7 @@ def run(
     if otel_endpoint is not None:
         tracing_cli.extend(["--otel-endpoint", otel_endpoint])
 
-    # The CLI always asks the agent for structured findings (see
-    # ``_needs_structured_output`` — always True now). Precedence of the
+    # The CLI always asks the agent for structured findings. Precedence of the
     # structured sink path:
     # 1. ``--json PATH`` if supplied — that is the canonical findings file.
     # 2. ``--output PATH`` for ``--output-format json|jsonl|sarif`` — the writer is

@@ -141,28 +141,6 @@ class ReviewEngine:
         output = await self.run_stage("publish", _publish, timeouts=timeouts)
         return self.result(output)
 
-    def run_sync(
-        self,
-        *,
-        materialize: StageHook,
-        analyze: StageHook,
-        review: StageHook,
-        publish: PublishHook,
-        timeouts: TimeoutMap | None = None,
-        on_timeout: OnTimeout | None = None,
-    ) -> ReviewEngineResult:
-        """Synchronous wrapper for SCM and other non-async callers."""
-        return asyncio.run(
-            self.run(
-                materialize=materialize,
-                analyze=analyze,
-                review=review,
-                publish=publish,
-                timeouts=timeouts,
-                on_timeout=on_timeout,
-            )
-        )
-
 
 __all__ = [
     "ReviewEngine",

@@ -23,7 +23,7 @@ from mergecraft.mcp.endpoints import mcp_role_url
 from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
-from mergecraft.offline_review import (
+from mergecraft.review.offline_result import (
     OfflineReviewResult,
     _emit_offline_packet,
     _offline_error_outcome,
