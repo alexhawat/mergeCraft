@@ -538,7 +538,7 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - Inverted W14 current-state pins: dropped `latency_budget_ms`-must-be-absent from `test_profile_token_cost_and_tool_budgets_already_exist`; dropped module-must-not-exist from `test_w20_does_not_publish_measured_cost_or_latency_numbers` (kept D10 + no published numbers).
 - No leftover CD xfails. CDF not started.
 - W20 impl: `46209fd2`.
-- W20 recon: pending commit SHA.
+- W20 recon: `a46727de`.
 
 ## Acceptance (W20 recon)
 
