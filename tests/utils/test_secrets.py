@@ -161,3 +161,27 @@ def test_build_agent_env_opencode_keeps_no_provider_key(
     assert "OPENAI_API_KEY" not in env
     assert "GITHUB_TOKEN" not in env
     assert "PATH" in env
+
+
+@pytest.mark.parametrize("agent_id", ["claude", "codex", "gemini", "opencode"])
+def test_build_agent_env_propagates_bound_proxy_and_ca(
+    agent_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Provider children receive enterprise proxy/CA that filter_env would drop."""
+    clear_env_allowlist()
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "localhost")
+    monkeypatch.setenv("SSL_CERT_FILE", "/tmp/enterprise-ca.pem")
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/tmp/enterprise-ca.pem")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+
+    env = build_agent_env(agent_id)
+    assert env["HTTPS_PROXY"] == "http://proxy.example:8080"
+    assert env["HTTP_PROXY"] == "http://proxy.example:8080"
+    assert env["NO_PROXY"] == "localhost"
+    assert env["SSL_CERT_FILE"] == "/tmp/enterprise-ca.pem"
+    assert env["REQUESTS_CA_BUNDLE"] == "/tmp/enterprise-ca.pem"

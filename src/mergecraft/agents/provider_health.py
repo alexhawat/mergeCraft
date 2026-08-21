@@ -192,10 +192,15 @@ def route_model(*, specialist: str, risk: str) -> str:
     """
     key = (str(specialist), str(risk))
     if key in _ROUTE_TABLE:
-        return _ROUTE_TABLE[key]
-    if str(risk) == "high":
-        return "anthropic/claude-opus"
-    return "anthropic/claude-haiku"
+        chosen = _ROUTE_TABLE[key]
+    elif str(risk) == "high":
+        chosen = "anthropic/claude-opus"
+    else:
+        chosen = "anthropic/claude-haiku"
+    from mergecraft.enterprise.runtime import enforce_routed_model_residency
+
+    enforce_routed_model_residency(chosen)
+    return chosen
 
 
 def verifier_judge_models() -> dict[str, str]:

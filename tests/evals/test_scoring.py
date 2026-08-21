@@ -122,6 +122,7 @@ def test_empty_baseline_scores_as_vacuously_complete() -> None:
 
     assert report.recall == 1.0
     assert report.precision == 1.0
+    assert report.severity_agreement is None
 
 
 def test_normalize_severity_passes_unknown_grades_through() -> None:

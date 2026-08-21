@@ -49,6 +49,7 @@ class ModelDef(BaseModel):
     routing: ModelRouting | None = None
     subagent_model: str | None = None
     hidden: bool = False
+    data_residency: str | None = None
 
 
 class ProviderConfig(BaseModel):
@@ -58,6 +59,7 @@ class ProviderConfig(BaseModel):
     env_vars: tuple[str, ...]
     managed_credentials: tuple[str, ...] = ()
     models: dict[str, ModelDef]
+    data_residency: str | None = None
 
 
 def _provider(config: ProviderConfig) -> ProviderConfig:
@@ -69,6 +71,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="Anthropic",
             env_vars=("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"),
+            data_residency="us-east-1",
             models={
                 "claude-fable": ModelDef(
                     display_name="Claude Fable",
@@ -101,6 +104,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
             display_name="OpenAI",
             env_vars=("OPENAI_API_KEY",),
             managed_credentials=("CODEX_AUTH_JSON",),
+            data_residency="us-east-1",
             models={
                 "gpt": ModelDef(
                     display_name="GPT Sol",
@@ -156,6 +160,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="Google",
             env_vars=("GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"),
+            data_residency="us-east-1",
             models={
                 "gemini-pro": ModelDef(
                     display_name="Gemini Pro",
@@ -175,6 +180,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="xAI",
             env_vars=("XAI_API_KEY",),
+            data_residency="us-east-1",
             models={
                 "grok": ModelDef(
                     display_name="Grok",
@@ -201,6 +207,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="DeepSeek",
             env_vars=("DEEPSEEK_API_KEY",),
+            data_residency="cn-north-1",
             models={
                 "deepseek-pro": ModelDef(
                     display_name="DeepSeek Pro",
@@ -232,6 +239,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="Moonshot AI",
             env_vars=("MOONSHOT_API_KEY",),
+            data_residency="cn-north-1",
             models={
                 "kimi-k2": ModelDef(
                     display_name="Kimi K2",
@@ -377,6 +385,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="Amazon Bedrock",
             env_vars=("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION", "BEDROCK_MODEL_ID"),
+            data_residency="us-east-1",
             models={
                 "byok": ModelDef(
                     display_name="Amazon Bedrock",
@@ -395,6 +404,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
                 "VERTEX_LOCATION",
                 "VERTEX_MODEL_ID",
             ),
+            data_residency="eu-west-1",
             models={
                 "byok": ModelDef(
                     display_name="Google Vertex AI",
@@ -636,6 +646,25 @@ def get_model_managed_credentials(slug: str) -> list[str]:
     if provider_config is None:
         return []
     return list(provider_config.managed_credentials)
+
+
+def lookup_model_data_residency(model_id: str) -> str | None:
+    """Return the PROVIDERS ``data_residency`` for *model_id*, if known.
+
+    Matches ``provider/slug``, the model slug, ``resolve``, and
+    ``open_router_resolve``. Unknown ids return ``None`` (fail closed).
+    """
+    needle = model_id.strip()
+    if not needle:
+        return None
+    for provider_key, config in PROVIDERS.items():
+        for slug, defn in config.models.items():
+            names = {f"{provider_key}/{slug}", defn.resolve, slug}
+            if defn.open_router_resolve:
+                names.add(defn.open_router_resolve)
+            if needle in names:
+                return defn.data_residency or config.data_residency
+    return None
 
 
 # ── derived flat list ──────────────────────────────────────────────────────────

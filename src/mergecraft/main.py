@@ -550,6 +550,9 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
         source_label=f"{event_name} event",
     )
     ctx.settings = settings
+    from mergecraft.enterprise.runtime import bind_enterprise_after_trust
+
+    bind_enterprise_after_trust(settings, trust_tier)
     if drops:
         for reason in drops.values():
             logger.warning("» {}", reason)

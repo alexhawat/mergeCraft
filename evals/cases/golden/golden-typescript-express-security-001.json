@@ -1,0 +1,12 @@
+{
+  "id": "golden-typescript-express-security-001",
+  "title": "Unparameterized SQL concatenated from a request query",
+  "language": "typescript",
+  "framework": "express",
+  "category": "security",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "src/routes/search.ts",
+  "start_line": 18,
+  "end_line": 26
+}

@@ -21,6 +21,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft analyzers list` | List catalog analyzers and whether they would enable here. |
 | `mergecraft analyzers lock` | Write or refresh `.mergecraft/analyzers.lock` for managed tools. |
 | `mergecraft analyzers run <analyzer-id>` | Execute one analyzer against the working tree. |
+| `mergecraft audit export` | Export the audit log as a JSON array. |
 | `mergecraft auth claude` | Save a Claude Code OAuth token as CLAUDE_CODE_OAUTH_TOKEN. |
 | `mergecraft auth codex` | Mint a Codex subscription credential and save it as CODEX_AUTH_JSON. |
 | `mergecraft auth cursor` | Save a Cursor API key as CURSOR_API_KEY. |
@@ -55,6 +56,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft findings carryover --pr N` | File one issue per unresolved mergeCraft finding. Dry run unless `--apply`. |
 | `mergecraft findings export --pr N` | Print the findings a merge would bury. Never writes anything. |
 | `mergecraft gha token` | Acquire a GitHub App installation token, or revoke it with `--post`. |
+| `mergecraft health run` | Emit JSON health status for the running mergeCraft installation. |
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` and an example workflow (local, no API). |
 | `mergecraft learnings active` | List only the active (promoted) learning entries. |
 | `mergecraft learnings influence` | List active + staging learning entries with their provenance. |
@@ -87,6 +89,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft requirements explain <requirement-id>` | Explain one requirement by id; unknown ids are an error. |
 | `mergecraft requirements inspect` | List ingested requirements and their states. |
 | `mergecraft review` | Review a local git diff offline (no GitHub Action / PR posting). |
+| `mergecraft support-bundle write` | Write a support bundle archive to OUTPUT. |
 | `mergecraft traces show <run-id>` | Read back the local JSONL traces for the given run id (re-redacts on render). |
 | `mergecraft tracing logfire disable` | Disable Logfire tracing by removing the token + project locally and on GitHub. |
 | `mergecraft tracing logfire enable` | Enable Logfire tracing by writing the token + project locally and on GitHub. |

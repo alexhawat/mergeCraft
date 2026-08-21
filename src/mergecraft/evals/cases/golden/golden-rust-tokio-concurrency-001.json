@@ -1,0 +1,12 @@
+{
+  "id": "golden-rust-tokio-concurrency-001",
+  "title": "Shared HashMap mutated across tasks without a lock",
+  "language": "rust",
+  "framework": "tokio",
+  "category": "concurrency",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "src/cache.rs",
+  "start_line": 55,
+  "end_line": 80
+}

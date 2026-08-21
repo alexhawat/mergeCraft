@@ -332,8 +332,8 @@ def effective_model_chain(
         # supplied — to the first configured entry. The configured tail
         # is dropped; this is the explicit opt-out from chain behaviour.
         if head:
-            return [head]
-        return chain[:1] if chain else []
+            return _filter_chain_for_residency([head])
+        return _filter_chain_for_residency(chain[:1] if chain else [])
 
     if head:
         # Chain-preserving: head first, then the configured tail minus the
@@ -342,7 +342,33 @@ def effective_model_chain(
         tail = [entry for entry in chain if entry != head]
         chain = [head, *tail]
 
-    return chain[:_MAX_FALLBACK_DEPTH]
+    return _filter_chain_for_residency(chain[:_MAX_FALLBACK_DEPTH])
+
+
+def _filter_chain_for_residency(chain: list[str]) -> list[str]:
+    """Drop chain entries outside the bound residency allow-list.
+
+    Raises:
+        PermissionError: Every remaining slug is outside the allow-list.
+    """
+    from mergecraft.enterprise.runtime import (
+        current_enterprise_settings,
+        enforce_routed_model_residency,
+    )
+
+    if not chain or not current_enterprise_settings().allowed_regions:
+        return chain
+    allowed: list[str] = []
+    for slug in chain:
+        try:
+            enforce_routed_model_residency(slug)
+        except PermissionError:
+            continue
+        allowed.append(slug)
+    if not allowed:
+        msg = "no model in the chain is permitted by enterprise.allowedRegions"
+        raise PermissionError(msg)
+    return allowed
 
 
 def pick_runnable_slug_from_chain(
@@ -629,6 +655,9 @@ async def run_with_model_chain(
             attempts += 1
             _prepare_chain_attempt(tool_state, chain_index)
             logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
+            from mergecraft.enterprise.runtime import enforce_routed_model_residency
+
+            enforce_routed_model_residency(slug)
 
             resolved_harness = resolve_harness(settings, slug)
             attempt_attrs = {
@@ -1092,10 +1121,12 @@ def resolve_model(*, slug: str | None = None, respect_env_override: bool = True)
     if respect_env_override:
         env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
         if env_model:
+            _enforce_resolved_model_residency(env_model)
             return _resolve_slug(env_model) or env_model
 
     cleaned = (slug or "").strip()
     if cleaned:
+        _enforce_resolved_model_residency(cleaned)
         resolved = _resolve_slug(cleaned)
         if resolved:
             return resolved
@@ -1107,6 +1138,12 @@ def resolve_model(*, slug: str | None = None, respect_env_override: bool = True)
             return cleaned
         logger.warning('» unknown model slug "{}" — agent will auto-select', cleaned)
     return None
+
+
+def _enforce_resolved_model_residency(model_id: str) -> None:
+    from mergecraft.enterprise.runtime import enforce_routed_model_residency
+
+    enforce_routed_model_residency(model_id)
 
 
 def resolve_runtime_agent(

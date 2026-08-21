@@ -1,0 +1,12 @@
+{
+  "id": "golden-python-django-migration-001",
+  "title": "Destructive column drop without a expand/contract step",
+  "language": "python",
+  "framework": "django",
+  "category": "migration",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "app/migrations/0042_drop_legacy_slug.py",
+  "start_line": 1,
+  "end_line": 24
+}

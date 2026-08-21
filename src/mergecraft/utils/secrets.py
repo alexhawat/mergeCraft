@@ -246,6 +246,9 @@ def build_agent_env(agent_id: str, extras: dict[str, str] | None = None) -> dict
                 env[key] = raw
     if extras:
         env.update(extras)
+    from mergecraft.enterprise.runtime import agent_network_env
+
+    env.update(agent_network_env())
     return env
 
 

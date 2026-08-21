@@ -118,6 +118,7 @@ class JSONLFileSink:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(event.model_dump()) + "\n")
+            self.purge_expired()
         except OSError as exc:
             logger.warning("trace sink JSONLFileSink write failed: {}", exc)
 
@@ -233,7 +234,17 @@ def sink_factory(tracing_settings: Any) -> Any:
         sink_type = getattr(entry, "type", None)
         if sink_type == "jsonl_file":
             raw_path = getattr(entry, "path", None) or _DEFAULT_LOCAL_TRACES_PATH
-            children.append(JSONLFileSink(Path(raw_path)))
+            jsonl_sink = JSONLFileSink(Path(raw_path))
+            from mergecraft.enterprise.runtime import effective_retention_days
+
+            enterprise_days = effective_retention_days()
+            if enterprise_days is not None:
+                jsonl_sink.retention_days = enterprise_days
+            else:
+                jsonl_sink.retention_days = int(
+                    getattr(tracing_settings, "retention_days", jsonl_sink.retention_days)
+                )
+            children.append(jsonl_sink)
             continue
         if sink_type == "memory":
             children.append(MemorySink())
@@ -242,6 +253,10 @@ def sink_factory(tracing_settings: Any) -> Any:
             # W8 / D6 — delegated to the lazy exporters module. The module
             # degrades to ``NullSink`` with a clear warning when the
             # ``[tracing]`` extra is uninstalled (convention 5).
+            from mergecraft.enterprise.runtime import remote_export_allowed
+
+            if not remote_export_allowed():
+                continue
             from mergecraft.tracing.exporters import build_remote_sink
 
             children.append(build_remote_sink(entry))
