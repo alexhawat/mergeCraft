@@ -192,3 +192,15 @@ pages:
     template: satellite
     generator: null
     purpose: Eval bank vs ReviewBench — what each mechanism measures and how to run gates.
+
+  - path: docs/support-matrix.md
+    audience: consumer
+    template: generated-ref
+    generator: support-matrix
+    purpose: Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models.
+
+  - path: docs/release-process.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Release candidates, soak periods, changelog, and per-release migration notes.

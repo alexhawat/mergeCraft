@@ -9,15 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
-
-_W82 = pytest.mark.xfail(
-    reason="green after W8.2: generated six-axis support matrix (#382)",
-    strict=False,
-)
 
 _SUPPORT_MATRIX_PATH = "docs/support-matrix.md"
 _GENERATOR = "support-matrix"
@@ -61,7 +55,6 @@ def test_compatibility_matrix_stays_ungenerated_contributor_notes() -> None:
     )
 
 
-@_W82
 def test_support_matrix_registered_in_manifest_as_generated() -> None:
     """Happy: the six-axis page is a manifest row with a non-null RD1 generator."""
     row = next(
@@ -73,7 +66,6 @@ def test_support_matrix_registered_in_manifest_as_generated() -> None:
     assert row.get("generator") not in (None, "null", "")
 
 
-@_W82
 def test_gen_docs_dispatches_support_matrix_generator() -> None:
     """Integration: ``scripts/gen_docs.py`` invokes the support-matrix generator."""
     text = read_text("scripts/gen_docs.py")
@@ -81,7 +73,6 @@ def test_gen_docs_dispatches_support_matrix_generator() -> None:
     assert "gen_reference_docs" in text
 
 
-@_W82
 def test_generated_support_matrix_covers_six_axes() -> None:
     """Happy: generated page names OS, SCM, languages, analyzers, providers, models."""
     path = REPO_ROOT / _SUPPORT_MATRIX_PATH
@@ -91,7 +82,6 @@ def test_generated_support_matrix_covers_six_axes() -> None:
     assert not missing, f"{_SUPPORT_MATRIX_PATH} missing axes: {missing}"
 
 
-@_W82
 def test_support_matrix_header_marks_generated_not_hand_edited() -> None:
     """Edge: the generated page must not be a hand-maintained table."""
     text = (REPO_ROOT / _SUPPORT_MATRIX_PATH).read_text(encoding="utf-8")
@@ -100,7 +90,6 @@ def test_support_matrix_header_marks_generated_not_hand_edited() -> None:
     assert "do not edit" in collapsed or "do not hand" in collapsed
 
 
-@_W82
 def test_docs_check_covers_support_matrix_via_gen_docs() -> None:
     """Functional: ``make docs-check`` already runs ``scripts/gen_docs.py --check``."""
     makefile = read_text("Makefile")

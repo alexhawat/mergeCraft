@@ -5,8 +5,9 @@ Module: scripts.gen_docs
 Depends: scripts.gen_reference_docs, scripts.gen_docs_index
 
 Runs reference-doc splicing (``docs/cli.md``, ``docs/action-reference.md``),
-manifest-driven index generation (``docs/README.md``), and the ``llms-full.txt``
-bundle. ``make docs`` / ``make docs-check`` call this entry point.
+manifest-driven index generation (``docs/README.md``), the ``llms-full.txt``
+bundle, and the six-axis support matrix (``docs/support-matrix.md``).
+``make docs`` / ``make docs-check`` call this entry point.
 
 Exports:
     main — regenerate (default) or ``--check`` all generated docs pages.
@@ -73,7 +74,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Regenerate (default) or ``--check`` CLI/action reference pages and the docs index."""
+    """Regenerate (default) or ``--check`` all generated doc pages including the support matrix."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check",
@@ -86,11 +87,15 @@ def main(argv: list[str] | None = None) -> int:
     reference = _load_module("gen_reference_docs", REPO_ROOT / "scripts" / "gen_reference_docs.py")
     index = _load_module("gen_docs_index", REPO_ROOT / "scripts" / "gen_docs_index.py")
     llms_full = _load_module("gen_llms_full", REPO_ROOT / "scripts" / "gen_llms_full.py")
+    support_matrix = _load_module(
+        "gen_support_matrix", REPO_ROOT / "scripts" / "gen_support_matrix.py"
+    )
 
     for label, module in (
         ("reference docs", reference),
         ("docs index", index),
         ("llms-full bundle", llms_full),
+        ("support matrix", support_matrix),
     ):
         exit_code = module.main(check_args)
         if exit_code != 0:

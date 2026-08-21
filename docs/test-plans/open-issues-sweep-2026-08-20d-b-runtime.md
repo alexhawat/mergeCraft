@@ -12,6 +12,12 @@ removed after 45/45 XPASS on `c32b2eae`. W8.2 (`tests/release/`) and W10.2
 (`tests/evals/`) xfails left in place. No assertion edits; no leftover
 enterprise xfail. `tests/enterprise/`: 46 passed, 0 fail, 0 xfail.
 
+**W8.2 recon (2026-08-21, `80b6b728`):** all `tests/release/` `green after W8.2`
+markers removed after 12/12 XPASS on `2376589e`. W7.2 enterprise markers
+already gone; W10.2 (`tests/evals/`) xfails left in place. No assertion
+edits; no leftover release xfail. `tests/release/`: 15 passed, 0 fail,
+0 xfail. DCF.1 may run on this branch.
+
 **Escalation (2026-08-21):** `test_proxy.py` records monkeypatch undo for unset `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` so `apply_enterprise_proxy` cannot leak `proxy.example` into later tests (`--randomly-seed=424242`).
 
 D17: new CLI tests live under `tests/enterprise/`, not `tests/cli/`. No
@@ -36,9 +42,9 @@ All cross-wave markers use `@pytest.mark.xfail(..., strict=False)`.
 | **W7.2** | `tests/enterprise/test_policy_memory_distribution.py` | `green after W7.2: org policy/memory without dashboard (#381)` | GREEN — markers removed |
 | **W7.2** | `tests/enterprise/test_retention_diagnostics.py` | `green after W7.2: retention and operational diagnostics (#381)` | GREEN — markers removed |
 | **W7.2** | `tests/enterprise/test_cli_verbs.py` | `green after W7.2: enterprise CLI verbs (#381)` | GREEN — markers removed |
-| **W8.2** | `tests/release/test_support_matrix.py` (xfails only) | `green after W8.2: generated six-axis support matrix (#382)` | RED @ W8.1 |
-| **W8.2** | `tests/release/test_rc_soak_docs.py` | `green after W8.2: RC/soak process doc (#382)` | RED @ W8.1 |
-| **W8.2** | `tests/release/test_security_response.py` (xfails only) | `green after W8.2: security-response / vulnerability-disclosure (#382)` | RED @ W8.1 |
+| **W8.2** | `tests/release/test_support_matrix.py` (xfails only) | `green after W8.2: generated six-axis support matrix (#382)` | GREEN — markers removed |
+| **W8.2** | `tests/release/test_rc_soak_docs.py` | `green after W8.2: RC/soak process doc (#382)` | GREEN — markers removed |
+| **W8.2** | `tests/release/test_security_response.py` (xfails only) | `green after W8.2: security-response / vulnerability-disclosure (#382)` | GREEN — markers removed |
 | **W10.2** | `tests/evals/test_quality_metric_set.py` | `green after W10.2: eval quality metric set (#384)` | RED @ W10.1 |
 | **W10.2** | `tests/evals/test_ablation_harness.py` | `green after W10.2: eval ablation harness (#384)` | RED @ W10.1 |
 | **W10.2** | `tests/evals/test_golden_corpus_expansion.py` | `green after W10.2: eval corpora expansion (#384)` | RED @ W10.1 |
