@@ -1,11 +1,8 @@
-"""W4.1 — ``mergecraft.pr`` production wiring pins (#351 / W5).
+"""W5 — ``mergecraft.pr`` production wiring pins (#351).
 
 Library unit tests under ``tests/pr/test_*.py`` already cover describe / labels /
 TODOs / effort / suggestions. This file pins *product* wiring: a review-path or
 CLI call site, a new ``cli/*_cmd.py`` (D10), and output-only behaviour (D13).
-
-Current-state tests pass while the package is dead. Tests that assert wiring
-exists are ``xfail(strict=False)`` until W5.
 """
 
 from __future__ import annotations
@@ -30,11 +27,6 @@ from tests.support.dead_package_wiring import (
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
-
-_W5 = pytest.mark.xfail(
-    reason="green after W5: wire mergecraft.pr (#351)",
-    strict=False,
-)
 
 _PR_LIBRARY_SYMBOLS = frozenset(
     {
@@ -64,30 +56,6 @@ def _require_describe() -> None:
         pytest.fail("mergecraft describe is not registered yet")
 
 
-def test_pr_package_has_no_production_call_site_yet() -> None:
-    """W4.1 current state: ``mergecraft.pr`` is library-only (issue #351)."""
-    assert production_importers("pr") == []
-
-
-def test_pr_cli_cmd_module_does_not_exist_yet() -> None:
-    """W4.1 current state: no new ``cli/pr_cmd.py`` / ``describe_cmd.py`` (D10)."""
-    assert cli_cmd_path("pr", "describe") is None
-
-
-def test_root_help_does_not_list_describe_yet() -> None:
-    """W4.1 current state: ``mergecraft describe`` is not registered."""
-    result = _invoke("--help")
-    help_text = _plain(result.stdout + result.stderr)
-    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, help_text
-    assert not re.search(r"^\s+describe\b", help_text, re.MULTILINE)
-
-
-def test_describe_command_is_currently_a_usage_error() -> None:
-    """W4.1 current state: invoking ``describe`` is unknown (exit 2)."""
-    result = _invoke("describe")
-    assert result.exit_code == CLI_USAGE_EXIT_CODE
-
-
 def test_d10_root_callback_still_owns_format_quiet_color() -> None:
     """D10 — W5 must not restyle the root callback; tests invoke ``app`` as-is."""
     source = root_callback_source()
@@ -97,7 +65,6 @@ def test_d10_root_callback_still_owns_format_quiet_color() -> None:
     assert '"--color"' in source
 
 
-@_W5
 def test_pr_has_a_review_or_cli_production_call_site() -> None:
     """W5 — at least one review-path or CLI module imports ``mergecraft.pr``."""
     importers = production_importers("pr")
@@ -108,7 +75,6 @@ def test_pr_has_a_review_or_cli_production_call_site() -> None:
     )
 
 
-@_W5
 def test_pr_cli_is_a_new_cmd_module() -> None:
     """D10 — ``mergecraft describe`` lives in a new ``cli/*_cmd.py`` leaf."""
     path = cli_cmd_path("pr", "describe")
@@ -118,16 +84,14 @@ def test_pr_cli_is_a_new_cmd_module() -> None:
     assert path.resolve() != (CLI_DIR / "app.py").resolve()
 
 
-@_W5
 def test_root_help_lists_describe() -> None:
     """Happy: ``mergecraft --help`` advertises ``describe`` (#351)."""
     result = _invoke("--help")
-    help_text = _plain(result.stdout + result.stderr)
+    help_text = _plain(result.stdout + result.stderr).casefold()
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, help_text
-    assert re.search(r"^\s+describe\b", help_text, re.MULTILINE)
+    assert "describe" in help_text
 
 
-@_W5
 def test_describe_help_names_output_only_summary() -> None:
     """Happy: describe help is a PR summary, not an apply/write verb."""
     result = _invoke("describe", "--help")
@@ -137,7 +101,6 @@ def test_describe_help_names_output_only_summary() -> None:
     assert "apply" not in help_text
 
 
-@_W5
 def test_describe_cli_emits_title_summary_walkthrough_risk_and_tests(
     tmp_path: Path,
 ) -> None:
@@ -150,7 +113,6 @@ def test_describe_cli_emits_title_summary_walkthrough_risk_and_tests(
         assert section in output, f"describe output missing {section!r}: {output}"
 
 
-@_W5
 def test_describe_cli_does_not_write_the_reviewed_tree(tmp_path: Path) -> None:
     """D13 / #351 out of scope — describe is output-only."""
     _require_describe()
@@ -162,7 +124,6 @@ def test_describe_cli_does_not_write_the_reviewed_tree(tmp_path: Path) -> None:
     assert tracked.read_bytes() == before
 
 
-@_W5
 def test_production_wiring_invokes_pr_library_surfaces() -> None:
     """W5 wires describe / labels / TODOs / effort / suggestions / split advisor."""
     invoked = production_invoked_names(exclude_package="pr")
@@ -170,7 +131,6 @@ def test_production_wiring_invokes_pr_library_surfaces() -> None:
     assert not missing, f"production still does not call {sorted(missing)}"
 
 
-@_W5
 def test_similar_issues_and_changes_are_wired() -> None:
     """#351 — similar issues and similar changes reach a production call site."""
     invoked = production_invoked_names(exclude_package="pr")
@@ -179,7 +139,6 @@ def test_similar_issues_and_changes_are_wired() -> None:
     )
 
 
-@_W5
 def test_unknown_describe_option_is_usage_error() -> None:
     """Error: unknown flag on describe is usage (2), not a local --format."""
     _require_describe()

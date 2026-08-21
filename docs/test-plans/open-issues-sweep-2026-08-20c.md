@@ -102,11 +102,11 @@ After each impl wave, recon **deletes** the matching W4.1 current-state "unwired
 
 | Wave | Tests | Marker reason | Status |
 |------|-------|---------------|--------|
-| **W5** | `tests/pr/test_pr_wiring.py` (9) | `green after W5: wire mergecraft.pr (#351)` | **XFAIL** |
+| **W5** | `tests/pr/test_pr_wiring.py` (8 wiring + D10 pins) | `green after W5: wire mergecraft.pr (#351)` | **PASS** — un-xfailed W5 recon |
 | **W6** | `tests/requirements/test_requirements_wiring.py` (13, incl. 3 ingest sources) | `green after W6: wire mergecraft.requirements (#352)` | **XFAIL** |
 | **W7** | `tests/xrepo/test_xrepo_wiring.py` (8) | `green after W7: wire mergecraft.xrepo (#353)` | **XFAIL** |
 
-W5 xfails: `test_pr_has_a_review_or_cli_production_call_site`, `test_pr_cli_is_a_new_cmd_module`, `test_root_help_lists_describe`, `test_describe_help_names_output_only_summary`, `test_describe_cli_emits_title_summary_walkthrough_risk_and_tests`, `test_describe_cli_does_not_write_the_reviewed_tree`, `test_production_wiring_invokes_pr_library_surfaces`, `test_similar_issues_and_changes_are_wired`, `test_unknown_describe_option_is_usage_error`.
+W5 wiring tests (un-xfailed W5 recon): `test_pr_has_a_review_or_cli_production_call_site`, `test_pr_cli_is_a_new_cmd_module`, `test_root_help_lists_describe`, `test_describe_help_names_output_only_summary`, `test_describe_cli_emits_title_summary_walkthrough_risk_and_tests`, `test_describe_cli_does_not_write_the_reviewed_tree`, `test_production_wiring_invokes_pr_library_surfaces`, `test_similar_issues_and_changes_are_wired`, `test_unknown_describe_option_is_usage_error`.
 
 W6 xfails: `test_requirements_has_a_review_or_cli_production_call_site`, `test_requirements_cli_is_a_new_cmd_module`, `test_root_help_lists_requirements`, `test_requirements_inspect_help_is_registered`, `test_requirements_explain_help_is_registered`, `test_ingest_fences_external_requirement_text_with_nonce`, `test_requirement_states_are_the_five_named_outcomes`, `test_ingest_accepts_named_requirement_sources[*]`, `test_inspect_cli_lists_states`, `test_explain_unknown_requirement_id_is_an_error`, `test_policy_may_require_requirements_evidence`.
 
@@ -116,9 +116,9 @@ W7 xfails: `test_xrepo_has_a_review_or_cli_production_call_site`, `test_xrepo_cl
 
 | # | Contract | Layer | Scenario | Primary test |
 |---|----------|-------|----------|--------------|
-| CB351a | `mergecraft.pr` has no production importer yet | unit | current | `test_pr_package_has_no_production_call_site_yet` |
-| CB351b | No `cli/pr_cmd.py` / `describe_cmd.py` yet | unit | current | `test_pr_cli_cmd_module_does_not_exist_yet` |
-| CB351c | `describe` absent from root help / usage-exit | functional | current | `test_root_help_does_not_list_describe_yet`, `test_describe_command_is_currently_a_usage_error` |
+| CB351a | `mergecraft.pr` has no production importer yet | unit | current | **deleted W5 recon** (`test_pr_package_has_no_production_call_site_yet`) |
+| CB351b | No `cli/pr_cmd.py` / `describe_cmd.py` yet | unit | current | **deleted W5 recon** (`test_pr_cli_cmd_module_does_not_exist_yet`) |
+| CB351c | `describe` absent from root help / usage-exit | functional | current | **deleted W5 recon** (`test_root_help_does_not_list_describe_yet`, `test_describe_command_is_currently_a_usage_error`) |
 | CB351d | D10 root callback still owns `--format` / `--quiet` / `--color` | unit | happy | `test_d10_root_callback_still_owns_format_quiet_color`, `test_w5_does_not_fold_describe_into_root_callback` |
 | CB351e | Review path or CLI imports `mergecraft.pr` | integration | happy | `test_pr_has_a_review_or_cli_production_call_site` |
 | CB351f | New `cli/*_cmd.py` (not `app.py`) | unit | happy | `test_pr_cli_is_a_new_cmd_module` |
@@ -149,3 +149,19 @@ W7 xfails: `test_xrepo_has_a_review_or_cli_production_call_site`, `test_xrepo_cl
 - Collection clean; current-state pins **PASS**; wiring-exists pins **XFAIL** (`strict=False`); **no XPASS**
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W5 not started
+
+## Recon notes (W5)
+
+- Un-xfailed every `green after W5: wire mergecraft.pr (#351)` marker in `tests/pr/test_pr_wiring.py` (8 XPASS → real PASS).
+- `test_root_help_lists_describe` now matches capabilities (`"describe" in help_text` after ANSI strip + casefold). Rich help is `│ describe`, so `^\s+describe\b` never matched.
+- Deleted W4.1 current-state pins: `test_pr_package_has_no_production_call_site_yet`, `test_pr_cli_cmd_module_does_not_exist_yet`, `test_describe_command_is_currently_a_usage_error`, plus `test_root_help_does_not_list_describe_yet` (same regex would false-pass against Rich tables).
+- Left W6/W7 xfails in place. D10 root-callback pins kept.
+- W5.1 impl: `17b0ed2e`.
+
+## Acceptance (W5 recon)
+
+- W5 wiring pins **PASS** (no leftover xfail, no XPASS)
+- W4.1 `#351` current-state pins gone
+- W6/W7 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W6 not started
