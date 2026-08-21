@@ -12,11 +12,6 @@ import math
 
 import pytest
 
-_W102 = pytest.mark.xfail(
-    reason="green after W10.2: eval quality metric set (#384)",
-    strict=False,
-)
-
 _REQUIRED_FIELDS = (
     "blocker_precision",
     "severity_accuracy",
@@ -30,7 +25,6 @@ _REQUIRED_FIELDS = (
 )
 
 
-@_W102
 def test_quality_metrics_expose_required_fields() -> None:
     """Happy: the metric set includes every #384 measurement."""
     from mergecraft.evals.quality_metrics import QualityMetrics, compute_quality_metrics
@@ -47,7 +41,6 @@ def test_quality_metrics_expose_required_fields() -> None:
         assert hasattr(metrics, field_name), f"QualityMetrics missing {field_name}"
 
 
-@_W102
 def test_quality_metrics_empty_findings_are_zero_not_nan() -> None:
     """Edge: empty findings yield 0.0 rates, never NaN (honest-zero, not fabricated recall)."""
     from mergecraft.evals.quality_metrics import compute_quality_metrics
@@ -69,7 +62,6 @@ def test_quality_metrics_empty_findings_are_zero_not_nan() -> None:
         assert not math.isnan(value)
 
 
-@_W102
 def test_quality_metrics_reject_empty_latency_sample() -> None:
     """Error: a latency summary over nothing raises ValueError (never a fake 0.0)."""
     from mergecraft.evals.quality_metrics import compute_quality_metrics
@@ -84,11 +76,9 @@ def test_quality_metrics_reject_empty_latency_sample() -> None:
         )
 
 
-@_W102
 def test_severity_accuracy_is_independent_of_blocker_precision() -> None:
     """Happy: severity accuracy can move independently of blocker precision."""
     from mergecraft.evals.quality_metrics import compute_quality_metrics
-
     from mergecraft.evals.scoring import BaselineIssue, ReportedFinding
 
     issues = [

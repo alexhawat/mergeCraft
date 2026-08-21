@@ -18,6 +18,11 @@ already gone; W10.2 (`tests/evals/`) xfails left in place. No assertion
 edits; no leftover release xfail. `tests/release/`: 15 passed, 0 fail,
 0 xfail. DCF.1 may run on this branch.
 
+**W10.2 recon (2026-08-21, impl `3ff1bb39`):** all `tests/evals/` `green after W10.2`
+markers removed after 18/18 XPASS. D10 README pins kept passing; no scores asserted
+on README; #140 not closed. I001 in `test_quality_metric_set.py` (blank line between
+same-block imports from W10.1) fixed — import grouping only, no assertion edits.
+
 **Escalation (2026-08-21):** `test_proxy.py` records monkeypatch undo for unset `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` so `apply_enterprise_proxy` cannot leak `proxy.example` into later tests (`--randomly-seed=424242`).
 
 D17: new CLI tests live under `tests/enterprise/`, not `tests/cli/`. No
@@ -45,10 +50,10 @@ All cross-wave markers use `@pytest.mark.xfail(..., strict=False)`.
 | **W8.2** | `tests/release/test_support_matrix.py` (xfails only) | `green after W8.2: generated six-axis support matrix (#382)` | GREEN — markers removed |
 | **W8.2** | `tests/release/test_rc_soak_docs.py` | `green after W8.2: RC/soak process doc (#382)` | GREEN — markers removed |
 | **W8.2** | `tests/release/test_security_response.py` (xfails only) | `green after W8.2: security-response / vulnerability-disclosure (#382)` | GREEN — markers removed |
-| **W10.2** | `tests/evals/test_quality_metric_set.py` | `green after W10.2: eval quality metric set (#384)` | RED @ W10.1 |
-| **W10.2** | `tests/evals/test_ablation_harness.py` | `green after W10.2: eval ablation harness (#384)` | RED @ W10.1 |
-| **W10.2** | `tests/evals/test_golden_corpus_expansion.py` | `green after W10.2: eval corpora expansion (#384)` | RED @ W10.1 |
-| **W10.2** | `tests/evals/test_eval_methodology_docs.py` (xfails only) | `green after W10.2: published eval methodology page (#384)` | RED @ W10.1 |
+| **W10.2** | `tests/evals/test_quality_metric_set.py` | `green after W10.2: eval quality metric set (#384)` | GREEN — markers removed |
+| **W10.2** | `tests/evals/test_ablation_harness.py` | `green after W10.2: eval ablation harness (#384)` | GREEN — markers removed |
+| **W10.2** | `tests/evals/test_golden_corpus_expansion.py` | `green after W10.2: eval corpora expansion (#384)` | GREEN — markers removed |
+| **W10.2** | `tests/evals/test_eval_methodology_docs.py` (xfails only) | `green after W10.2: published eval methodology page (#384)` | GREEN — markers removed |
 
 GREEN (no xfail) — must stay passing through impl:
 

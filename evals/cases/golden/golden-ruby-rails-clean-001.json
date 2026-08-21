@@ -1,0 +1,12 @@
+{
+  "id": "golden-ruby-rails-clean-001",
+  "title": "Docs-only README wording with no behavioural diff",
+  "language": "ruby",
+  "framework": "rails",
+  "category": "clean",
+  "kind": "incremental_review",
+  "source": "human",
+  "path": "README.md",
+  "start_line": 1,
+  "end_line": 12
+}
