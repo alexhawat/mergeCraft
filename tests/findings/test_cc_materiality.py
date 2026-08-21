@@ -117,7 +117,7 @@ def test_dismissal_feeds_evaluation_not_durable_memory(tmp_path: Path) -> None:
 
 
 def test_precision_regression_gate_targets_blocker_precision_above_95() -> None:
-    """#355 — release-wired precision gate; blocker precision > 95% on the corpus."""
+    """#355 — CI smoke-check: blocker scoring stays callable above 95% on the synthetic corpus."""
     module = load_module("mergecraft.findings.materiality")
     report = require_callable(module, "evaluate_blocker_precision_corpus")()
     precision = getattr(report, "blocker_precision", None)

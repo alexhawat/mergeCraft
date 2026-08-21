@@ -21,7 +21,7 @@ Exports:
         record_dismissal — Store a reason-coded dismissal for evaluation.
         dismissal_eval_records — Serialize dismissals as eval signals.
         dismissal_to_memory — Persist only with repeated evidence (#360).
-        evaluate_blocker_precision_corpus — Release-wired precision gate.
+        evaluate_blocker_precision_corpus — CI smoke check that blocker scoring runs.
 """
 
 from __future__ import annotations
@@ -306,11 +306,11 @@ def dismissal_to_memory(
 
 
 def evaluate_blocker_precision_corpus() -> BlockerPrecisionReport:
-    """Score blocker-band precision on the validated corpus.
+    """Smoke-check that blocker scoring is callable on a synthetic corpus.
 
-    The corpus is true Critical findings that match ground truth one-for-one
-    so production blocker precision stays above 95%. The gate is wired into
-    releases because this function is what the CI precision test calls.
+    The unit suite (``make ci``) invokes this so a regression in the scoring
+    path fails CI. The corpus is constructed in-process to be one-for-one; this
+    is not a labeled eval-bank precision measurement.
 
     Returns:
         Report with ``blocker_precision`` and ``wired_into_releases``.

@@ -7,6 +7,7 @@ approval path. CLI pins live in ``tests/cli/test_evidence_cmd.py``.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from mergecraft.analyzers.finding import make_finding
@@ -156,3 +157,15 @@ def test_verifier_failure_cannot_silently_promote_a_finding() -> None:
     state = getattr(result, "state", result)
     assert str(state) in {"unverified", "inconclusive", "disproven"}
     assert str(state) != "proven"
+
+
+def test_lookup_finding_packet_rejects_path_traversal(tmp_path: Path) -> None:
+    """finding_id must not escape ``.mergecraft/evidence/``."""
+    module = load_module("mergecraft.evidence.audit")
+    lookup = require_callable(module, "lookup_finding_packet")
+    evidence = tmp_path / ".mergecraft" / "evidence"
+    evidence.mkdir(parents=True)
+    (tmp_path / "secret.json").write_text('{"finding_id": "secret"}\n', encoding="utf-8")
+    (evidence / "ok.json").write_text('{"finding_id": "ok"}\n', encoding="utf-8")
+    assert lookup("../../secret", repo_root=tmp_path) is None
+    assert lookup("ok", repo_root=tmp_path) is not None

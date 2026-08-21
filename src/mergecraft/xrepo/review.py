@@ -14,7 +14,7 @@ from mergecraft.xrepo.blast_radius import (
     CrossRepoImpact,
     resolve_cross_repo_dependents,
 )
-from mergecraft.xrepo.contract_index import ContractIndex, index_contracts
+from mergecraft.xrepo.contract_index import ContractIndex, index_contracts_at_commit
 from mergecraft.xrepo.linked_repos import (
     LinkedRepoEntry,
     LinkedReposManifest,
@@ -43,15 +43,15 @@ class XrepoReview:
 
 
 def _is_safe_sibling_name(name: str) -> bool:
-    """Reject absolute paths, separators, and ``..`` in a manifest directory name."""
+    """Reject anything that is not a single directory component under the sibling parent."""
     if not name or name in {".", ".."}:
+        return False
+    if "/" in name or "\\" in name:
         return False
     path = Path(name)
     if path.is_absolute() or path.anchor:
         return False
-    return all(
-        part not in {"", ".", ".."} and "/" not in part and "\\" not in part for part in path.parts
-    )
+    return path.parts == (name,)
 
 
 def discover_linked_repo_roots(
@@ -110,24 +110,33 @@ def _changed_from_index(*, repo: str, commit: str, index: ContractIndex) -> list
     ]
 
 
-def _require_head_matches_pin(repo_root: Path, commit_sha: str) -> None:
-    """Fail closed when the sibling checkout HEAD is not the pinned SHA."""
+def _rev_parse_commit(repo_root: Path, rev: str) -> str:
     completed = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        ["git", "-C", str(repo_root), "rev-parse", "--verify", f"{rev}^{{commit}}"],
         capture_output=True,
         check=False,
         text=True,
     )
-    head = completed.stdout.strip()
-    pin = commit_sha.strip()
-    if completed.returncode != 0 or not head:
-        msg = f"could not read HEAD in {repo_root}"
+    sha = completed.stdout.strip()
+    if completed.returncode != 0 or not sha:
+        msg = f"could not resolve {rev!r} in {repo_root}"
         raise ValueError(msg)
-    if head != pin and not head.startswith(pin) and not pin.startswith(head):
+    return sha
+
+
+def _require_head_matches_pin(repo_root: Path, commit_sha: str) -> None:
+    """Fail closed when the sibling checkout is not the pinned commit object."""
+    pin = commit_sha.strip()
+    if not pin:
+        msg = f"empty pinned commit for {repo_root}"
+        raise ValueError(msg)
+    head = _rev_parse_commit(repo_root, "HEAD")
+    resolved_pin = _rev_parse_commit(repo_root, pin)
+    if head != resolved_pin:
         msg = f"linked repo HEAD {head} does not match pinned {pin}"
         raise ValueError(msg)
     dirty = subprocess.run(
-        ["git", "-C", str(repo_root), "status", "--porcelain"],
+        ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=all"],
         capture_output=True,
         check=False,
         text=True,
@@ -185,7 +194,9 @@ def review_linked_repos(
             continue
         cache_key = (entry.name, entry.commit)
         if cache_key not in index_cache:
-            index_cache[cache_key] = index_contracts(repo_root=root, commit_sha=entry.commit)
+            index_cache[cache_key] = index_contracts_at_commit(
+                repo_root=root, commit_sha=entry.commit
+            )
         changed.extend(
             _changed_from_index(repo=entry.slug, commit=entry.commit, index=index_cache[cache_key])
         )
@@ -194,6 +205,7 @@ def review_linked_repos(
         changed_contracts=changed,
         manifest=manifest,
         repo_roots=roots,
+        at_pinned_commit=True,
     )
     findings = tuple(
         XrepoFinding(finding_id=f"XR-{index:03d}", impact=impact)

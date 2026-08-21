@@ -31,10 +31,8 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatch
-from typing import TYPE_CHECKING, Any, Final, Literal
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
+from typing import Any, Final, Literal
 
 VerifierState = Literal[
     "proven",
@@ -358,6 +356,15 @@ def apply_verifier_outcome(
     return VerifierStateOutcome(state=safe, reason="verifier did not name a state")
 
 
+def _is_safe_packet_stem(finding_id: str) -> bool:
+    """Reject empty, ``..``, and any separator so ids cannot escape evidence_dir."""
+    if not finding_id or finding_id in {".", ".."}:
+        return False
+    if "/" in finding_id or "\\" in finding_id:
+        return False
+    return Path(finding_id).parts == (finding_id,)
+
+
 def lookup_finding_packet(finding_id: str, *, repo_root: Path) -> dict[str, Any] | None:
     """Load a stored evidence packet for ``finding_id``, or None if missing.
 
@@ -368,10 +375,20 @@ def lookup_finding_packet(finding_id: str, *, repo_root: Path) -> dict[str, Any]
     Returns:
         Packet mapping, or None when the finding is unknown.
     """
+    if not _is_safe_packet_stem(finding_id):
+        return None
     evidence_dir = repo_root / ".mergecraft" / "evidence"
+    try:
+        evidence_root = evidence_dir.resolve()
+    except OSError:
+        return None
     direct = evidence_dir / f"{finding_id}.json"
-    if direct.is_file():
-        loaded = json.loads(direct.read_text(encoding="utf-8"))
+    try:
+        resolved = direct.resolve()
+    except OSError:
+        resolved = None
+    if resolved is not None and resolved.is_file() and resolved.is_relative_to(evidence_root):
+        loaded = json.loads(resolved.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             return loaded
     if not evidence_dir.is_dir():
