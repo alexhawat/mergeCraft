@@ -14,28 +14,12 @@ from tests.support.ce_batch import (
     CAPABILITY_DIMENSIONS,
     PROVIDER_HEALTH_MODULE,
     TRACING_EXPORTERS,
-    green_after,
-    module_exists,
     require_callable,
     require_module,
-    src_mentions,
 )
 from tests.support.dead_package_wiring import SRC_ROOT
 
 from mergecraft.utils.retry_policy import is_transient_http_error
-
-_W25 = green_after("W25", "provider health, cooldown, degradation, residency, routing eval (#371)")
-
-
-def test_provider_health_module_does_not_exist_yet() -> None:
-    """W21 current state — no provider health / cooldown surface."""
-    assert module_exists(PROVIDER_HEALTH_MODULE) is False
-
-
-def test_src_has_no_cooldown_or_residency_yet() -> None:
-    """W21 current state — issue #371 grep: no cooldown/residency in src."""
-    assert src_mentions("cooldown") == []
-    assert src_mentions("residency") == []
 
 
 def test_retry_policy_already_classifies_retryable_failures() -> None:
@@ -59,7 +43,6 @@ def test_w25_does_not_publish_measured_cost_per_review() -> None:
         assert "cost per review" not in text
 
 
-@_W25
 def test_capability_catalog_tracks_named_dimensions() -> None:
     """Happy: catalog entries expose context, reasoning, tools, structured IO, cost, latency, residency."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -71,7 +54,6 @@ def test_capability_catalog_tracks_named_dimensions() -> None:
     assert not missing, payload
 
 
-@_W25
 def test_require_prefer_fallback_semantics() -> None:
     """Happy: require / prefer / fallback are distinct routing intents."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -79,7 +61,6 @@ def test_require_prefer_fallback_semantics() -> None:
     assert intents == frozenset({"require", "prefer", "fallback"})
 
 
-@_W25
 def test_route_model_per_specialist_and_risk() -> None:
     """Happy: routing is per specialist and per risk level."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -91,7 +72,6 @@ def test_route_model_per_specialist_and_risk() -> None:
     assert high != low or route(specialist="tests", risk="high") != high
 
 
-@_W25
 def test_heterogeneous_verifier_and_judge_models() -> None:
     """Happy: verifier and judge may use different models."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -102,7 +82,6 @@ def test_heterogeneous_verifier_and_judge_models() -> None:
     assert payload["verifier"] != payload["judge"]
 
 
-@_W25
 def test_provider_health_records_failures() -> None:
     """Happy: health tracking records a provider failure."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -116,7 +95,6 @@ def test_provider_health_records_failures() -> None:
     assert payload.get("failures", 0) >= 1 or payload.get("unhealthy") is True
 
 
-@_W25
 def test_retries_are_bounded_and_retryable_only() -> None:
     """Error: non-retryable failures are not retried; retryable ones are bounded."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -127,7 +105,6 @@ def test_retries_are_bounded_and_retryable_only() -> None:
         decide(failure="rate_limit", attempt=99)
 
 
-@_W25
 def test_circuit_breaker_and_cooldown() -> None:
     """Happy: circuit breaker opens and cooldown delays re-entry."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -141,7 +118,6 @@ def test_circuit_breaker_and_cooldown() -> None:
     assert cooldown == 30
 
 
-@_W25
 def test_degrade_when_non_required_provider_unavailable() -> None:
     """Happy: a non-required provider outage degrades instead of failing the run."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -151,7 +127,6 @@ def test_degrade_when_non_required_provider_unavailable() -> None:
     assert str(status) in {"degraded", "fallback", "partial", "inconclusive"}
 
 
-@_W25
 def test_required_model_is_never_silently_substituted() -> None:
     """Error: a policy-required model is never swapped in silence (type + message)."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -160,7 +135,6 @@ def test_required_model_is_never_silently_substituted() -> None:
         resolve(required="anthropic/claude-sonnet", available=("openai/gpt-5.3-codex",))
 
 
-@_W25
 def test_run_manifest_records_provider_model_and_hashes() -> None:
     """Happy: run manifests record exact provider/model versions and hashes."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -179,7 +153,6 @@ def test_run_manifest_records_provider_model_and_hashes() -> None:
         assert key in data
 
 
-@_W25
 def test_per_provider_budget_enforcement() -> None:
     """Error: exceeding a per-provider budget fails closed (type + message)."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -188,7 +161,6 @@ def test_per_provider_budget_enforcement() -> None:
         enforce(provider="anthropic", spent_usd=10_000.0, limit_usd=1.0)
 
 
-@_W25
 def test_routing_eval_rejects_cheaper_but_worse_quality() -> None:
     """Happy: cheaper routing that harms review quality fails the eval."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -205,7 +177,6 @@ def test_routing_eval_rejects_cheaper_but_worse_quality() -> None:
     assert passed is False
 
 
-@_W25
 def test_residency_policy_blocks_disallowed_region() -> None:
     """Error: residency policy refuses a disallowed region (type + message)."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -214,7 +185,6 @@ def test_residency_policy_blocks_disallowed_region() -> None:
         check(region="us-east-1", allowed=("eu-central-1",))
 
 
-@_W25
 def test_nightly_smoke_callable_is_registered() -> None:
     """Happy: live-provider nightly smoke is a named callable (drift detection)."""
     module = require_module(PROVIDER_HEALTH_MODULE)
@@ -223,7 +193,6 @@ def test_nightly_smoke_callable_is_registered() -> None:
 
 
 @pytest.mark.skipif(os.environ.get("MERGECRAFT_LIVE_E2E") != "1", reason="skipped: no live gate")
-@_W25
 def test_live_provider_smoke_runs_when_gated() -> None:
     """Functional: nightly smoke executes only under ``MERGECRAFT_LIVE_E2E=1``."""
     module = require_module(PROVIDER_HEALTH_MODULE)

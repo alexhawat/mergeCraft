@@ -567,9 +567,9 @@ After each impl wave, recon **deletes** the matching W21 current-state pins and 
 | **W22** | `tests/config/test_ce_schema.py` (10) | `green after W22: config schema version, migrations, deprecations (#368)` | PASS after W22 recon |
 | **W23** | `tests/cli/test_ce_profiles.py` (15 collected / 14 functions) | `green after W23: remaining profiles + risk-based select; additive CLI (#369 / D10)` | PASS after W23 recon |
 | **W24** | `tests/agents/test_ce_economics.py` (8) | `green after W24: specialist economics consume gen_ai.usage.* on llm.call (#370 / D11)` | PASS after W24 recon |
-| **W25** | `tests/agents/test_ce_providers.py` (14 + 1 live skip) | `green after W25: provider health, cooldown, degradation, residency, routing eval (#371)` | XFAIL until W25 |
+| **W25** | `tests/agents/test_ce_providers.py` (14 + 1 live skip) | `green after W25: provider health, cooldown, degradation, residency, routing eval (#371)` | **PASS** — un-xfailed W25 recon |
 
-Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error / unversioned rows after the matching impl wave): D10 root-callback pins; eight named profiles (W23); `profile recommend` registered (missing `--risk` is usage 2); token/cost/tool/latency budgets; `budget_exhaustion_outcome` never `passed`; CLI JSON + agent protocol versions (not negotiation); `gen_ai.usage.*` substrate; lens routing file; retry-policy classifier; no cooldown/residency in src; tracing exporters untouched. (`test_specialist_economics_module_does_not_exist_yet` deleted W24 recon.)
+Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error / unversioned rows after the matching impl wave): D10 root-callback pins; eight named profiles (W23); `profile recommend` registered (missing `--risk` is usage 2); token/cost/tool/latency budgets; `budget_exhaustion_outcome` never `passed`; CLI JSON + agent protocol versions (not negotiation); `gen_ai.usage.*` substrate; lens routing file; retry-policy classifier; tracing exporters untouched. (`test_specialist_economics_module_does_not_exist_yet` deleted W24 recon. `test_provider_health_module_does_not_exist_yet` + `test_src_has_no_cooldown_or_residency_yet` deleted W25 recon.)
 
 W21 run: **20 passed / 47 xfailed / 1 skipped (no live gate) / 0 XPASS**. `make lint` + `make typecheck` clean.
 
@@ -605,7 +605,7 @@ W21 run: **20 passed / 47 xfailed / 1 skipped (no live gate) / 0 XPASS**. `make 
 | CE370e | Consume `gen_ai.usage.*` | unit | happy | `test_economics_consumes_gen_ai_usage_attrs` |
 | CE370f | Low-value prune + breaker + degrade | unit | happy/error | `test_zero_value_specialists_*`, `test_per_agent_circuit_breaker_*`, `test_per_agent_degradation_*` |
 | CE370g | No exporter import | unit | happy | `test_economics_does_not_import_tracing_exporters` |
-| CE371a | Health module / cooldown / residency absent | unit | current | `test_provider_health_module_does_not_exist_yet`, `test_src_has_no_cooldown_or_residency_yet` |
+| CE371a | Health module / cooldown / residency absent | unit | current | deleted in W25 recon (`test_provider_health_module_does_not_exist_yet`, `test_src_has_no_cooldown_or_residency_yet`) |
 | CE371b | Retry substrate + no published cost | unit | current | `test_retry_policy_already_classifies_retryable_failures`, `test_w25_does_not_publish_measured_cost_per_review` |
 | CE371c | Capability catalog + require/prefer/fallback | unit | happy | `test_capability_catalog_*`, `test_require_prefer_fallback_semantics` |
 | CE371d | Route per specialist/risk; heterogeneous judge | unit | happy | `test_route_model_per_specialist_and_risk`, `test_heterogeneous_verifier_and_judge_models` |
@@ -673,3 +673,20 @@ Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility
 - W25 still **XFAIL** (`strict=False`)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W25 not started
+
+## Recon notes (W25)
+
+- Un-xfailed every `green after W25: provider health, cooldown, degradation, residency, routing eval (#371)` marker in `tests/agents/test_ce_providers.py` (14 XPASS → real PASS).
+- Deleted W21 current-state pins: `test_provider_health_module_does_not_exist_yet`, `test_src_has_no_cooldown_or_residency_yet`.
+- Kept `test_live_provider_smoke_runs_when_gated` skip when `MERGECRAFT_LIVE_E2E` is unset (`skipped: no live gate`).
+- D6 exporter pin kept. No leftover CE xfails.
+- W25 impl: `231aa4c4`.
+- W25 recon: pending commit SHA.
+
+## Acceptance (W25 recon)
+
+- W25 provider-health pins **PASS** (no leftover xfail, no XPASS)
+- W21 `#371` module-absent / no-cooldown-or-residency pins gone
+- Live smoke **skipped: no live gate** (`MERGECRAFT_LIVE_E2E` unset)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; CEF not started
