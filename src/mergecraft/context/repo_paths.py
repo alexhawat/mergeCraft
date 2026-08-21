@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import time
 from pathlib import Path  # noqa: TC003 — used at runtime for repo traversal
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 
 from loguru import logger
 
@@ -69,15 +70,88 @@ def git_ls_tree_paths(
     return sorted(paths)
 
 
-def git_show_text(repo_root: Path, tree_sha: str, rel_path: str) -> str | None:
+def _read_exactly(stream: IO[bytes], size: int) -> bytes | None:
+    """Read ``size`` bytes from a binary stream, or ``None`` on short read."""
+    buf = bytearray()
+    remaining = size
+    while remaining > 0:
+        chunk = stream.read(remaining)
+        if not chunk:
+            return None
+        buf.extend(chunk)
+        remaining -= len(chunk)
+    return bytes(buf)
+
+
+def _git_show_text_bounded(repo_root: Path, spec: str, max_bytes: int) -> str | None:
+    """Return blob text at ``spec`` without buffering more than ``max_bytes``.
+
+    Uses ``git cat-file --batch`` so the size is known from the header before
+    any payload is retained. Oversized blobs are dropped by killing the helper
+    rather than reading the object into memory.
+    """
+    try:
+        proc = subprocess.Popen(
+            ["git", "cat-file", "--batch"],
+            cwd=repo_root,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+    try:
+        if proc.stdin is None or proc.stdout is None:
+            return None
+        proc.stdin.write(f"{spec}\n".encode())
+        proc.stdin.close()
+        header = proc.stdout.readline()
+        if not header or b" missing" in header:
+            return None
+        parts = header.split()
+        if len(parts) < 3:
+            return None
+        try:
+            size = int(parts[-1])
+        except ValueError:
+            return None
+        if size > max_bytes:
+            return None
+        raw = _read_exactly(proc.stdout, size)
+        if raw is None:
+            return None
+        proc.stdout.read(1)
+        if b"\x00" in raw:
+            return None
+        return raw.decode("utf-8", errors="replace")
+    finally:
+        proc.kill()
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            proc.wait(timeout=5)
+
+
+def git_show_text(
+    repo_root: Path,
+    tree_sha: str,
+    rel_path: str,
+    *,
+    max_bytes: int | None = None,
+) -> str | None:
     """Return file text at ``tree_sha:rel_path``, or ``None`` when absent or binary.
 
     Reads bytes and decodes with replacement so a PNG or other non-UTF-8 blob
     cannot raise ``UnicodeDecodeError`` and abort a whole tree walk.
+
+    When ``max_bytes`` is set, the blob size is taken from ``git cat-file
+    --batch`` and payloads larger than the cap are skipped without buffering
+    the object.
     """
+    spec = f"{tree_sha}:{rel_path}"
+    if max_bytes is not None:
+        return _git_show_text_bounded(repo_root, spec, max_bytes)
     try:
         completed = subprocess.run(
-            ["git", "show", f"{tree_sha}:{rel_path}"],
+            ["git", "show", spec],
             cwd=repo_root,
             capture_output=True,
             check=False,

@@ -9,6 +9,7 @@ from pathlib import Path  # noqa: TC003 — used at runtime for consumer travers
 from mergecraft.context.repo_paths import git_ls_tree_paths, git_show_text
 from mergecraft.utils.bounded_text import (
     MAX_CONSUMER_HAYSTACK_BYTES,
+    MAX_INDEX_TEXT_BYTES,
     iter_indexable_files,
     read_bounded_text,
 )
@@ -72,7 +73,7 @@ def _haystack_from_commit(consumer_root: Path, commit_sha: str) -> str:
     haystack_parts: list[str] = []
     total_bytes = 0
     for rel in git_ls_tree_paths(consumer_root, commit_sha):
-        text = git_show_text(consumer_root, commit_sha, rel)
+        text = git_show_text(consumer_root, commit_sha, rel, max_bytes=MAX_INDEX_TEXT_BYTES)
         if text is None:
             continue
         encoded = text.encode("utf-8", errors="replace")

@@ -152,8 +152,8 @@ def index_contracts_at_commit(*, repo_root: Path, commit_sha: str) -> ContractIn
     """Index contract surfaces from the pinned git object, not the working tree."""
     surfaces: list[ContractSurface] = []
     for rel in git_ls_tree_paths(repo_root, commit_sha):
-        text = git_show_text(repo_root, commit_sha, rel)
-        if text is None or len(text.encode("utf-8", errors="replace")) > MAX_INDEX_TEXT_BYTES:
+        text = git_show_text(repo_root, commit_sha, rel, max_bytes=MAX_INDEX_TEXT_BYTES)
+        if text is None:
             continue
         surfaces.extend(_surfaces_for_text(rel=rel, text=text, commit_sha=commit_sha))
     return _collect_index(commit_sha, surfaces)
