@@ -1,0 +1,9 @@
+rules:
+  - id: deps.pin-and-audit
+    owner: mergecraft-supply-chain
+    version: 1
+    rationale: Dependency bumps must keep exact pins and stay audit-clean.
+    severity: Minor
+    enforcement: warning
+    scope:
+      path: "src/**"

@@ -11,13 +11,16 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
+import sys
 from typing import TYPE_CHECKING, Any
 
 from mergecraft import __version__
+from mergecraft.analyzers.registry import load_catalog
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, default_settings
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 _REMOTE_SINKS = frozenset({"logfire", "otel"})
@@ -25,6 +28,18 @@ _REMOTE_SINKS = frozenset({"logfire", "otel"})
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def runtime_tool_stamp() -> dict[str, Any]:
+    """Runtime and analyzer-catalog versions for manifests and ``mergecraft doctor``."""
+    catalog = load_catalog()
+    tools: dict[str, str] = {"mergecraft": __version__}
+    tools.update({item.id: item.version for item in catalog})
+    return {
+        "python": sys.version.split()[0],
+        "runtime": f"CPython {sys.version_info.major}.{sys.version_info.minor}",
+        "tools": tools,
+    }
 
 
 def build_run_manifest(
@@ -35,6 +50,7 @@ def build_run_manifest(
     prompt_text: str,
     config_path: Path | None = None,
     policy_text: str | None = None,
+    instruction_hashes: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Return manifest metadata merged into evidence packets and run records."""
     resolved_config = config_path
@@ -48,7 +64,16 @@ def build_run_manifest(
     prompt_hash = _sha256(prompt_text)
     config_hash = _sha256(config_body)
     policy_hash = _sha256(policy)
-    return {
+    hashes: dict[str, Any] = {
+        "prompt": prompt_hash,
+        "config": config_hash,
+        "policy": policy_hash,
+    }
+    injected = dict(instruction_hashes) if instruction_hashes else {}
+    if injected:
+        hashes["instructions"] = injected
+    stamp = runtime_tool_stamp()
+    manifest: dict[str, Any] = {
         "agent_id": agent_id,
         "model_version": model,
         "model_versions": {"requested": model, "executed": model},
@@ -57,12 +82,14 @@ def build_run_manifest(
         "prompt_hash": prompt_hash,
         "config_hash": config_hash,
         "policy_hash": policy_hash,
-        "hashes": {
-            "prompt": prompt_hash,
-            "config": config_hash,
-            "policy": policy_hash,
-        },
+        "hashes": hashes,
+        "python": stamp["python"],
+        "runtime": stamp["runtime"],
+        "tools": stamp["tools"],
     }
+    if injected:
+        manifest["instruction_hashes"] = injected
+    return manifest
 
 
 def resolve_local_telemetry_defaults(
@@ -139,4 +166,5 @@ __all__ = [
     "apply_local_telemetry_defaults",
     "build_run_manifest",
     "resolve_local_telemetry_defaults",
+    "runtime_tool_stamp",
 ]

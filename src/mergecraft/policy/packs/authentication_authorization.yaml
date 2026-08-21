@@ -1,0 +1,9 @@
+rules:
+  - id: authz.no-unauthenticated-handlers
+    owner: mergecraft-security
+    version: 1
+    rationale: New handlers must declare authentication and authorization.
+    severity: Critical
+    enforcement: blocking
+    scope:
+      path: "src/**"

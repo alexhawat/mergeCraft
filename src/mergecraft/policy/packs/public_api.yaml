@@ -1,0 +1,12 @@
+rules:
+  - id: public-api.breaking-change-requires-evidence
+    owner: mergecraft-api
+    version: 1
+    rationale: Public contract changes need an evidence packet before merge.
+    severity: Major
+    enforcement: required
+    scope:
+      path: "src/**"
+    evidence:
+      required:
+        - contract_schema

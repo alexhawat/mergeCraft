@@ -116,7 +116,7 @@ def test_mutates_flag_marks_state_changing_tools(tool_ctx: ToolContext) -> None:
     assert tools["push_branch"].mutates is True
     assert tools["get_issue"].mutates is False
     assert tools["git"].mutates is False
-    assert tools["shell"].mutates is False
+    assert tools["shell"].mutates is True
 
 
 def test_start_mcp_http_server_returns_url(tool_ctx: ToolContext) -> None:

@@ -6,8 +6,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 — used at runtime for consumer traversal
 
+from mergecraft.context.repo_paths import git_ls_tree_paths, git_show_text
 from mergecraft.utils.bounded_text import (
     MAX_CONSUMER_HAYSTACK_BYTES,
+    MAX_INDEX_TEXT_BYTES,
     iter_indexable_files,
     read_bounded_text,
 )
@@ -52,15 +54,7 @@ def _operation_tokens(operation_id: str) -> set[str]:
     return tokens
 
 
-def _consumer_refs_contract(
-    *,
-    consumer_root: Path,
-    contract_repo: str,
-    contract_commit: str,
-    contract_path: str,
-    operation_id: str | None,
-) -> str | None:
-    """Return a human reason when the consumer references the contract."""
+def _haystack_from_worktree(consumer_root: Path) -> str:
     haystack_parts: list[str] = []
     total_bytes = 0
     for path in iter_indexable_files(consumer_root):
@@ -72,7 +66,39 @@ def _consumer_refs_contract(
             break
         haystack_parts.append(text)
         total_bytes += len(encoded)
-    haystack = "\n".join(haystack_parts).lower()
+    return "\n".join(haystack_parts).lower()
+
+
+def _haystack_from_commit(consumer_root: Path, commit_sha: str) -> str:
+    haystack_parts: list[str] = []
+    total_bytes = 0
+    for rel in git_ls_tree_paths(consumer_root, commit_sha):
+        text = git_show_text(consumer_root, commit_sha, rel, max_bytes=MAX_INDEX_TEXT_BYTES)
+        if text is None:
+            continue
+        encoded = text.encode("utf-8", errors="replace")
+        if total_bytes + len(encoded) > MAX_CONSUMER_HAYSTACK_BYTES:
+            break
+        haystack_parts.append(text)
+        total_bytes += len(encoded)
+    return "\n".join(haystack_parts).lower()
+
+
+def _consumer_refs_contract(
+    *,
+    consumer_root: Path,
+    contract_repo: str,
+    contract_commit: str,
+    contract_path: str,
+    operation_id: str | None,
+    consumer_commit: str | None = None,
+) -> str | None:
+    """Return a human reason when the consumer references the contract."""
+    haystack = (
+        _haystack_from_commit(consumer_root, consumer_commit)
+        if consumer_commit
+        else _haystack_from_worktree(consumer_root)
+    )
     repo_tail = contract_repo.rsplit("/", 1)[-1].lower()
     if contract_commit.lower() not in haystack and repo_tail not in haystack:
         return None
@@ -96,6 +122,7 @@ def resolve_cross_repo_dependents(
     changed_contracts: list[ChangedContract],
     manifest: LinkedReposManifest,
     repo_roots: dict[str, Path],
+    at_pinned_commit: bool = False,
 ) -> list[CrossRepoImpact]:
     """Resolve linked repos that depend on changed contract surfaces."""
     impacts: list[CrossRepoImpact] = []
@@ -113,6 +140,7 @@ def resolve_cross_repo_dependents(
                 contract_commit=changed.commit,
                 contract_path=changed.path,
                 operation_id=changed.operation_id,
+                consumer_commit=entry.commit if at_pinned_commit else None,
             )
             if reason is None:
                 continue

@@ -15,6 +15,7 @@ import pytest
 
 from mergecraft.mcp.shell import shell_tool
 from tests.security.conftest import PUSH_MODES, SHELL_MODES
+from tests.support.tool_context import write_capable_mcp_mode
 
 SECRET_VALUE = "ghs_hunter2_secret"
 ASKPASS_VALUE = "/private/mergecraft/git-askpass.sh"
@@ -44,7 +45,14 @@ async def test_shell_env_scraping_yields_no_credentials(make_tool_ctx, push: str
     ctx = make_tool_ctx(shell="restricted", push=push)
     tool = shell_tool(ctx)
     for probe in ("env", "printenv", "set"):
-        result = await tool.execute({"command": probe, "description": "env scrape attempt"})
+        denied = await tool.execute({"command": probe, "description": "env scrape attempt"})
+        assert denied.is_error
+        denied_text = denied.content[0]["text"]
+        assert "review-only" in denied_text
+        assert SECRET_VALUE not in denied_text
+        assert "hunter2" not in denied_text
+        with write_capable_mcp_mode():
+            result = await tool.execute({"command": probe, "description": "env scrape attempt"})
         assert not result.is_error
         text = result.content[0]["text"]
         assert SECRET_VALUE not in text, f"{probe} leaked a token value"
@@ -59,9 +67,16 @@ async def test_shell_cannot_dereference_askpass_variable(make_tool_ctx, push: st
     """W4.3 — ``$GIT_ASKPASS`` is unset inside the restricted shell."""
     ctx = make_tool_ctx(shell="restricted", push=push)
     tool = shell_tool(ctx)
-    result = await tool.execute(
+    denied = await tool.execute(
         {"command": 'echo "ASKPASS=[$GIT_ASKPASS]"', "description": "askpass deref attempt"}
     )
+    assert denied.is_error
+    assert "review-only" in denied.content[0]["text"]
+    assert ASKPASS_VALUE not in denied.content[0]["text"]
+    with write_capable_mcp_mode():
+        result = await tool.execute(
+            {"command": 'echo "ASKPASS=[$GIT_ASKPASS]"', "description": "askpass deref attempt"}
+        )
     assert not result.is_error
     assert "ASKPASS=[]" in result.content[0]["text"], result.content
     assert ASKPASS_VALUE not in result.content[0]["text"]
@@ -73,9 +88,16 @@ async def test_shell_cannot_read_token_by_name(make_tool_ctx, push: str) -> None
     """W4.3 — direct ``$GITHUB_TOKEN`` dereference comes back empty."""
     ctx = make_tool_ctx(shell="restricted", push=push)
     tool = shell_tool(ctx)
-    result = await tool.execute(
+    denied = await tool.execute(
         {"command": 'echo "TOK=[${GITHUB_TOKEN:-empty}]"', "description": "token deref attempt"}
     )
+    assert denied.is_error
+    assert "review-only" in denied.content[0]["text"]
+    assert SECRET_VALUE not in denied.content[0]["text"]
+    with write_capable_mcp_mode():
+        result = await tool.execute(
+            {"command": 'echo "TOK=[${GITHUB_TOKEN:-empty}]"', "description": "token deref attempt"}
+        )
     assert not result.is_error
     assert "TOK=[empty]" in result.content[0]["text"], result.content
     assert SECRET_VALUE not in result.content[0]["text"]
@@ -125,9 +147,16 @@ async def test_matrix_cell_blocks_credential_exfiltration(
     if shell == "restricted":
         assert "shell" in names
         tool = shell_tool(ctx)
-        result = await tool.execute(
+        denied = await tool.execute(
             {"command": "printenv", "description": "matrix cell env scrape"}
         )
+        assert denied.is_error
+        assert "review-only" in denied.content[0]["text"]
+        assert SECRET_VALUE not in denied.content[0]["text"]
+        with write_capable_mcp_mode():
+            result = await tool.execute(
+                {"command": "printenv", "description": "matrix cell env scrape"}
+            )
         assert not result.is_error
         text = result.content[0]["text"]
         assert SECRET_VALUE not in text

@@ -1,0 +1,715 @@
+# Open issues sweep 2026-08-20c — Batch CA test plan (#350)
+
+Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-20c-wave-plan.md`
+Worktree: `../mergecraft-open-issues-sweep-2026-08-20c` @ `wave/open-issues-sweep-2026-08-20c`
+Authoring wave: **W1** (Batch CA RED) · Implementation: **W2.1** (`a2c76fd9`) · Recon: **W2.2**
+W3.1 impl: `16a01b47` · W3 recon: un-xfail `capabilities` + `SECURITY.md` pins
+
+Issue #350 out of scope (honoured — no tests): MCP Bearer/auth-header gaps (#345/#346); trust tiers / privilege drop (`analyzers/trust.py`, `utils/privilege.py`).
+
+## xfail schedule
+
+All cross-wave markers use `@pytest.mark.xfail(..., strict=False)`.
+
+| Wave | Test | Marker reason | Status |
+|------|------|---------------|--------|
+| **W2** | `test_production_registry_excludes_write_capable_modes` | `green after W2: review-only production boundary (#350)` | **PASS** — un-xfailed W2.2 |
+| **W2** | `test_compute_modes_excludes_write_capable_modes` | same | **PASS** — un-xfailed W2.2 |
+| **W2** | `test_static_modes_export_excludes_write_capable_modes` | same | **PASS** — un-xfailed W2.2 |
+| **W2** | `test_select_mode_rejects_write_capable_names[*]` | same | **PASS** — un-xfailed W2.2 (5 names) |
+| **W2** | `test_custom_config_cannot_reenable_write_capable_fix` | same (D12) | **PASS** — un-xfailed W2.2 |
+| **W2** | `test_reviewer_shaped_run_cannot_edit_tracked_file[*]` | same | **PASS** — un-xfailed W2.2 |
+| **W2** | `test_reviewer_shaped_run_cannot_git_commit[*]` | same | **PASS** — un-xfailed W2.2 |
+| **W2** | `test_reviewer_shaped_run_cannot_git_push[*]` | same | **PASS** — un-xfailed W2.2 |
+| **W2** | `test_reviewer_shaped_run_cannot_open_code_changing_pr[*]` | same | **PASS** — un-xfailed W2.2 |
+| **W3** | `tests/cli/test_capabilities_cmd.py` (11 tests) | `green after W3: mergecraft capabilities manifest (#350 / D10)` | **PASS** — un-xfailed W3 recon |
+| **W3** | `tests/test_security_md_review_only.py` (3 tests) | `green after W3: SECURITY.md review-only guarantee (D9 / #350)` | **PASS** — un-xfailed W3 recon |
+
+W1.1 current-state pins (CA350a / still-accepts `select_mode`) **deleted** in W2.2.
+
+## Contract matrix
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| CA350b | `_MODE_DEFS` is review-only (D12) | unit | happy | `tests/modes/test_review_only_boundary.py::test_production_registry_excludes_write_capable_modes` |
+| CA350c | `compute_modes` / `modes` leak no write names | unit | happy | `test_compute_modes_excludes_write_capable_modes`, `test_static_modes_export_excludes_write_capable_modes` |
+| CA350d | `select_mode` rejects write-capable names | integration | error | `test_select_mode_rejects_write_capable_names` |
+| CA350e | Empty/unknown `select_mode` is existing behaviour (not this file) | — | — | existing `select_mode` tests if any |
+| CA350f | Repo config cannot re-enable `Fix` (D12) | integration | error | `test_custom_config_cannot_reenable_write_capable_fix` |
+| CA350g | Reviewer-shaped run cannot edit a tracked file | functional | error + edge (file unchanged) | `test_reviewer_shaped_run_cannot_edit_tracked_file` |
+| CA350h | Reviewer-shaped run cannot `git commit` (`commit_changes`) | functional | error | `test_reviewer_shaped_run_cannot_git_commit` |
+| CA350i | Reviewer-shaped run cannot `git push` (`push_branch`) | functional | error | `test_reviewer_shaped_run_cannot_git_push` |
+| CA350j | Reviewer-shaped run cannot open a code-changing PR | functional | error | `test_reviewer_shaped_run_cannot_open_code_changing_pr` |
+| CA350k | `git` MCP tool still does not forward `commit` | unit | already green | `test_git_mcp_tool_does_not_forward_commit` |
+| CA350l | Write-mode modules remain importable (D12) | unit | happy | `test_write_mode_modules_remain_importable_as_negative_fixtures` |
+| CA350m | Production catalog names are Review / IncrementalReview / Plan | unit | happy | `tests/test_modes.py::EXPECTED_MODE_NAMES` / `test_compute_modes_returns_all_built_ins` |
+| CA350n | New `cli/capabilities_cmd.py` with `run` + `capabilities_manifest()` | unit | happy | `tests/cli/test_capabilities_cmd.py::test_capabilities_module_is_a_new_cli_file`, `test_capabilities_module_exports_run_and_manifest` |
+| CA350o | `mergecraft capabilities` in root help; default table is review-only | functional | happy | `test_root_help_lists_capabilities_command`, `test_capabilities_help_describes_manifest`, `test_capabilities_table_states_review_only` |
+| CA350p | Global `--format json` emits schema_versioned review-only manifest | functional | happy | `test_capabilities_json_uses_global_format_flag` |
+| CA350q | Manifest allowed/forbidden sets; no write mode names | functional | edge | `test_capabilities_json_forbidden_covers_write_surface`, `test_capabilities_json_allowed_is_review_verbs_only`, `test_capabilities_json_modes_exclude_write_capable_names` |
+| CA350r | Extra argv / unknown option → usage exit 2 | functional | error | `test_capabilities_rejects_unexpected_positional`, `test_capabilities_unknown_option_is_usage_error` |
+| CA350s | `SECURITY.md` states review-only guarantee (D9) | unit | happy | `tests/test_security_md_review_only.py::test_security_md_states_review_only_guarantee` |
+| CA350t | `SECURITY.md` forbids edit/commit/push/code-changing PR | unit | happy | `test_security_md_forbids_source_edits_commits_pushes_and_code_changing_prs` |
+| CA350u | `SECURITY.md` allows identify/investigate/verify/explain/prioritize/suggest | unit | happy | `test_security_md_allows_identify_investigate_verify_explain_prioritize_suggest` |
+
+Write-capable names under test: `Build`, `AddressReviews`, `Fix`, `ResolveConflicts`, `Task`.
+Reviewer-shaped modes: `Review`, `IncrementalReview`.
+Production modes: `Review`, `IncrementalReview`, `Plan`.
+
+Error contract for W2 negatives: `ToolResult.is_error is True` and the message contains **`review-only`** (plus `commit` / `push` where those verbs apply). `create_pull_request` must not call `scm.post`. `commit_changes` / `push_branch` must not invoke `_run_git` with those verbs.
+
+## Recon notes (W2.2)
+
+- Un-xfailed every `green after W2` marker in `tests/modes/test_review_only_boundary.py`.
+- Deleted W1.1 still-registered / still-accepts pins (CA350a).
+- Kept D12 import fixture (`modes/Fix.py` and siblings remain importable).
+- Updated `tests/test_modes.py` `EXPECTED_MODE_NAMES` to Review / IncrementalReview / Plan. Write-mode prompt pins (`Build` signed-commits, `ResolveConflicts`, `AddressReviews` withdrawn heading, `mergecraft-reviewer` on Build) render unregistered templates via `_expand_template` so D12 modules stay covered without being in the production catalog.
+
+## Acceptance (W2.2)
+
+- W2 negatives **PASS** (no leftover xfail, no XPASS)
+- W1.1 still-registered pins gone
+- `make lint` + `make typecheck` clean
+- No `src/` edits; no CHANGELOG (Unreleased Security bullet already in `a2c76fd9`)
+
+## W3 recon (`mergecraft capabilities` + SECURITY.md)
+
+- Un-xfailed every `green after W3` marker in `tests/cli/test_capabilities_cmd.py`
+  and `tests/test_security_md_review_only.py` (14 tests).
+- W3.1 (`16a01b47`) already added `capabilities_cmd.py`, additive
+  `app.command("capabilities")`, and the `SECURITY.md` review-only guarantee.
+- CAF not started.
+
+## Acceptance (W3 recon)
+
+- W3 pins **PASS** (no leftover xfail, no XPASS)
+- `make lint` + `make typecheck` clean
+- No `src/` or `SECURITY.md` edits; CAF not marked
+
+---
+
+# Batch CB — wire dead packages (#351–#353)
+
+Authoring wave: **W4** (Batch CB RED) · Implementation: **W5** `#351 pr` · **W6** `#352 requirements` · **W7** `#353 xrepo`
+
+Helper: `tests/support/dead_package_wiring.py` (runtime import scan; `TYPE_CHECKING` and package-internal imports do not count).
+
+Out of scope (D8 — no tests): P12–P31 / #377–#385. D6 — no README / `docs/cli.md` / `AGENTS.md` / file 7 / 20b product files.
+
+After each impl wave, recon **deletes** the matching W4.1 current-state "unwired" pins and **un-xfails** `green after W5|W6|W7` markers (`strict=False`).
+
+## xfail schedule (W4)
+
+| Wave | Tests | Marker reason | Status |
+|------|-------|---------------|--------|
+| **W5** | `tests/pr/test_pr_wiring.py` (8 wiring + D10 pins) | `green after W5: wire mergecraft.pr (#351)` | **PASS** — un-xfailed W5 recon |
+| **W6** | `tests/requirements/test_requirements_wiring.py` (12 wiring + D14 pin) | `green after W6: wire mergecraft.requirements (#352)` | **PASS** — un-xfailed W6 recon |
+| **W7** | `tests/xrepo/test_xrepo_wiring.py` (8 wiring pins) | `green after W7: wire mergecraft.xrepo (#353)` | **PASS** — un-xfailed W7 recon |
+
+W5 wiring tests (un-xfailed W5 recon): `test_pr_has_a_review_or_cli_production_call_site`, `test_pr_cli_is_a_new_cmd_module`, `test_root_help_lists_describe`, `test_describe_help_names_output_only_summary`, `test_describe_cli_emits_title_summary_walkthrough_risk_and_tests`, `test_describe_cli_does_not_write_the_reviewed_tree`, `test_production_wiring_invokes_pr_library_surfaces`, `test_similar_issues_and_changes_are_wired`, `test_unknown_describe_option_is_usage_error`.
+
+W6 wiring tests (un-xfailed W6 recon): `test_requirements_has_a_review_or_cli_production_call_site`, `test_requirements_cli_is_a_new_cmd_module`, `test_root_help_lists_requirements`, `test_requirements_inspect_help_is_registered`, `test_requirements_explain_help_is_registered`, `test_ingest_fences_external_requirement_text_with_nonce`, `test_requirement_states_are_the_five_named_outcomes`, `test_ingest_accepts_named_requirement_sources[*]`, `test_inspect_cli_lists_states`, `test_explain_unknown_requirement_id_is_an_error`, `test_policy_may_require_requirements_evidence`.
+
+W7 wiring tests (un-xfailed W7 recon): `test_xrepo_has_a_review_or_cli_production_call_site`, `test_xrepo_cli_is_a_new_cmd_module`, `test_root_help_lists_xrepo`, `test_xrepo_explain_help_is_registered`, `test_review_path_uses_sha_pinned_linked_repos`, `test_unauthorized_linked_repo_is_blocked_on_the_review_path`, `test_explain_unknown_finding_id_is_an_error`, `test_multi_service_fixture_reports_producer_consumer_breakage`.
+
+## Contract matrix (W4)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| CB351a | `mergecraft.pr` has no production importer yet | unit | current | **deleted W5 recon** (`test_pr_package_has_no_production_call_site_yet`) |
+| CB351b | No `cli/pr_cmd.py` / `describe_cmd.py` yet | unit | current | **deleted W5 recon** (`test_pr_cli_cmd_module_does_not_exist_yet`) |
+| CB351c | `describe` absent from root help / usage-exit | functional | current | **deleted W5 recon** (`test_root_help_does_not_list_describe_yet`, `test_describe_command_is_currently_a_usage_error`) |
+| CB351d | D10 root callback still owns `--format` / `--quiet` / `--color` | unit | happy | `test_d10_root_callback_still_owns_format_quiet_color`, `test_w5_does_not_fold_describe_into_root_callback` |
+| CB351e | Review path or CLI imports `mergecraft.pr` | integration | happy | `test_pr_has_a_review_or_cli_production_call_site` |
+| CB351f | New `cli/*_cmd.py` (not `app.py`) | unit | happy | `test_pr_cli_is_a_new_cmd_module` |
+| CB351g | `mergecraft describe` help + sections | functional | happy | `test_root_help_lists_describe`, `test_describe_help_names_output_only_summary`, `test_describe_cli_emits_title_summary_walkthrough_risk_and_tests` |
+| CB351h | Describe is output-only (D13) | functional | edge | `test_describe_cli_does_not_write_the_reviewed_tree` |
+| CB351i | Library surfaces invoked from production | integration | happy | `test_production_wiring_invokes_pr_library_surfaces` |
+| CB351j | Similar issues / similar changes wired | integration | happy | `test_similar_issues_and_changes_are_wired` |
+| CB351k | Unknown describe flag → usage 2 | functional | error | `test_unknown_describe_option_is_usage_error` |
+| CB352a | `mergecraft.requirements` unwired | unit | current | **deleted W6 recon** (`test_requirements_package_has_no_production_call_site_yet`) |
+| CB352b | No `cli/requirements_cmd.py` / command | functional | current | **deleted W6 recon** (`test_requirements_cli_cmd_module_does_not_exist_yet`, `test_root_help_does_not_list_requirements_yet`, `test_requirements_command_is_currently_a_usage_error`) |
+| CB352c | Review/CLI import + new cmd module | integration | happy | `test_requirements_has_a_review_or_cli_production_call_site`, `test_requirements_cli_is_a_new_cmd_module` |
+| CB352d | `requirements inspect` / `explain` | functional | happy | `test_root_help_lists_requirements`, `test_requirements_inspect_help_is_registered`, `test_requirements_explain_help_is_registered`, `test_inspect_cli_lists_states` |
+| CB352e | Ingest + nonce fence | integration | happy | `test_ingest_fences_external_requirement_text_with_nonce`, `test_ingest_accepts_named_requirement_sources` |
+| CB352f | Five requirement states | unit | happy | `test_requirement_states_are_the_five_named_outcomes` |
+| CB352g | Unknown requirement id | functional | error | `test_explain_unknown_requirement_id_is_an_error` |
+| CB352h | D14: `decide_approval` remains the only gate | unit | current | `test_decide_approval_is_the_only_approval_gate` |
+| CB352i | Policy may require requirements evidence | integration | happy | `test_policy_may_require_requirements_evidence` |
+| CB353a | `mergecraft.xrepo` unwired | unit | current | **deleted W7 recon** (`test_xrepo_package_has_no_production_call_site_yet`) |
+| CB353b | No `cli/xrepo_cmd.py` / command | functional | current | **deleted W7 recon** (`test_xrepo_cli_cmd_module_does_not_exist_yet`, `test_root_help_does_not_list_xrepo_yet`, `test_xrepo_command_is_currently_a_usage_error`) |
+| CB353c | Review/CLI import + new cmd module | integration | happy | `test_xrepo_has_a_review_or_cli_production_call_site`, `test_xrepo_cli_is_a_new_cmd_module` |
+| CB353d | `xrepo explain` | functional | happy / error | `test_root_help_lists_xrepo`, `test_xrepo_explain_help_is_registered`, `test_explain_unknown_finding_id_is_an_error` |
+| CB353e | SHA-pinned linked repos on review path | integration | happy | `test_review_path_uses_sha_pinned_linked_repos` |
+| CB353f | Authorization boundary (`LinkedRepoAccessError`) | integration | error | `test_unauthorized_linked_repo_is_blocked_on_the_review_path` |
+| CB353g | Multi-service producer/consumer breakage fixture | functional | happy | `test_multi_service_fixture_reports_producer_consumer_breakage` |
+
+## Acceptance (W4)
+
+- Collection clean; current-state pins **PASS**; wiring-exists pins **XFAIL** (`strict=False`); **no XPASS**
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W5 not started
+
+## Recon notes (W5)
+
+- Un-xfailed every `green after W5: wire mergecraft.pr (#351)` marker in `tests/pr/test_pr_wiring.py` (8 XPASS → real PASS).
+- `test_root_help_lists_describe` now matches capabilities (`"describe" in help_text` after ANSI strip + casefold). Rich help is `│ describe`, so `^\s+describe\b` never matched.
+- Deleted W4.1 current-state pins: `test_pr_package_has_no_production_call_site_yet`, `test_pr_cli_cmd_module_does_not_exist_yet`, `test_describe_command_is_currently_a_usage_error`, plus `test_root_help_does_not_list_describe_yet` (same regex would false-pass against Rich tables).
+- Left W6/W7 xfails in place. D10 root-callback pins kept.
+- W5.1 impl: `17b0ed2e`.
+
+## Acceptance (W5 recon)
+
+- W5 wiring pins **PASS** (no leftover xfail, no XPASS)
+- W4.1 `#351` current-state pins gone
+- W6/W7 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W6 not started
+
+## Recon notes (W6)
+
+- Un-xfailed every `green after W6: wire mergecraft.requirements (#352)` marker in `tests/requirements/test_requirements_wiring.py` (12 XPASS → real PASS; parametrize ingest sources counted in that 12).
+- `test_root_help_lists_requirements` now matches describe (`"requirements" in help_text` after ANSI strip + casefold). Rich help is `│ requirements`, so `^\s+requirements\b` never matched.
+- Deleted W4.1 current-state pins: `test_requirements_package_has_no_production_call_site_yet`, `test_requirements_cli_cmd_module_does_not_exist_yet`, `test_root_help_does_not_list_requirements_yet`, `test_requirements_command_is_currently_a_usage_error`.
+- Left W7 xfails in place. D14 `decide_approval` pin kept.
+- W6.1 impl: `d5771791`.
+
+## Acceptance (W6 recon)
+
+- W6 wiring pins **PASS** (no leftover xfail, no XPASS)
+- W4.1 `#352` current-state pins gone
+- W7 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W7 not started
+
+## Recon notes (W7)
+
+- Un-xfailed every `green after W7: wire mergecraft.xrepo (#353)` marker in `tests/xrepo/test_xrepo_wiring.py` (7 XPASS + 1 help-regex XFAIL → real PASS).
+- `test_root_help_lists_xrepo` now matches requirements (`"xrepo" in help_text` after ANSI strip + casefold). Rich help is `│ xrepo`, so `^\s+xrepo\b` never matched.
+- Deleted W4.1 current-state pins: `test_xrepo_package_has_no_production_call_site_yet`, `test_xrepo_cli_cmd_module_does_not_exist_yet`, `test_root_help_does_not_list_xrepo_yet`, `test_xrepo_command_is_currently_a_usage_error`.
+- W7.1 impl: `c5a26137`.
+
+## Acceptance (W7 recon)
+
+- W7 wiring pins **PASS** (no leftover xfail, no XPASS)
+- W4.1 `#353` current-state pins gone
+- CB pr/requirements/xrepo wiring tests **PASS**
+- `make lint` + `make typecheck` clean
+- No `src/` edits; CBF not started
+
+---
+
+# Batch CC — evidence through memory (#354–#360)
+
+Authoring wave: **W8** (Batch CC RED) · Implementation: **W9** `#354` · **W10** `#355` · **W11** `#356+#357` · **W12** `#358+#359` · **W13** `#360`
+
+Helper: `tests/support/cc_batch.py`.
+
+Out of scope honoured (no extra tests): D8 P12–P31 / #377–#385; D6 file 7 / 20b; #354 second `decide_approval()`; #355 rebuild of dedup/causality; #355→memory until W13; #356 retrieval half already shipped; #357 authoring mergeCraft AGENTS.md; #358 schema/enforcement already shipped; #359 engine widening; #360 producing dismissal codes.
+
+Canonical impl modules the RED suite pins (W9–W13):
+
+- W9: `mergecraft.evidence.audit`, `mergecraft.cli.evidence_cmd` (new `cli/*_cmd.py`, D10)
+- W10: `mergecraft.findings.materiality`
+- W11: `mergecraft.context.operator`, `instruction_discovery` extras, `mergecraft.context.external_files`
+- W12: `mergecraft.policy.lifecycle`, `mergecraft.policy.packs` + `src/mergecraft/policy/packs/*.yaml`
+- W13: `mergecraft.memory`
+
+After each impl wave, recon **deletes** matching W8 current-state usage-error pins and **un-xfails** `green after W9|W10|W11|W12|W13` markers (`strict=False`).
+
+## xfail schedule (W8)
+
+| Wave | Tests | Marker reason | Status |
+|------|-------|---------------|--------|
+| **W9** | `tests/evidence/test_cc_verifier_states.py` (10) + `tests/cli/test_evidence_cmd.py` (5) | `green after W9: evidence states + CLI (#354)` | **PASS** — un-xfailed W9 recon |
+| **W10** | `tests/findings/test_cc_materiality.py` (7) | `green after W10: materiality / calibration / dismissal (#355)` | **PASS** — un-xfailed W10 recon |
+| **W11** | `tests/context/test_cc_search_explain.py` (8) + `tests/context/test_cc_instruction_sources.py` (6) | `green after W11: context search/explain/budgets (#356)` / `instruction sources + external files (#357)` | **PASS** — un-xfailed W11 recon |
+| **W12** | `tests/policy/test_cc_lifecycle.py` (7) + `tests/policy/test_cc_packs.py` (4) | `green after W12: policy lifecycle back half (#358)` / `policy packs (#359)` | **PASS** — un-xfailed W12 recon |
+| **W13** | `tests/memory/test_cc_validation.py` (9) | `green after W13: memory validation / org / effectiveness (#360)` | **PASS** — un-xfailed W13 recon |
+
+Current-state **PASS** (not xfailed; recon deletes the usage-error rows after the matching impl wave): D14 `decide_approval` only in `agents/gates.py`; D10 root-callback pin; shipped retrieval/dedup/policy front-half files. `evidence`, `context search|explain`, `policy effective|simulate`, and `memory validate` usage-error pins deleted after W9 / W11 / W12 / W13.
+
+W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` clean.
+
+## Recon notes (W9)
+
+- Un-xfailed every `green after W9: evidence states + CLI (#354)` marker in
+  `tests/evidence/test_cc_verifier_states.py` (10) and `tests/cli/test_evidence_cmd.py` (5)
+  (15 XPASS → real PASS).
+- `test_root_help_lists_evidence` already matches W5/W6 (`"evidence" in help_text` after
+  ANSI strip + casefold). Rich help is `│ evidence`.
+- Deleted W8 current-state pin `test_evidence_command_is_currently_a_usage_error`
+  (evidence is registered; the usage-error pin failed after W9.1).
+- Left W10–W13 xfails in place. D14 `decide_approval` and D10 root-callback pins kept.
+- W9.1 impl: `b086c292`.
+
+## Acceptance (W9 recon)
+
+- W9 evidence pins **PASS** (no leftover xfail, no XPASS)
+- W8 `#354` current-state usage-error pin gone
+- W10–W13 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W10 not started
+
+## Recon notes (W10)
+
+- Un-xfailed every `green after W10: materiality / calibration / dismissal (#355)` marker in
+  `tests/findings/test_cc_materiality.py` (7 XPASS → real PASS).
+- Kept `test_dedup_and_causality_modules_remain_the_shipped_precision_half` (out-of-scope
+  current-state pin; #355 must not rebuild dedup/causality).
+- No W8 usage-error pin for materiality (none existed).
+- Left W11–W13 xfails in place.
+- W10.1 impl: `b2cb86c0`.
+- W10 recon: `43e55f84`.
+
+## Acceptance (W10 recon)
+
+- W10 materiality pins **PASS** (no leftover xfail, no XPASS)
+- W11–W13 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W11 not started
+
+## Recon notes (W11)
+
+- Un-xfailed every `green after W11` marker in `tests/context/test_cc_search_explain.py`
+  (8) and `tests/context/test_cc_instruction_sources.py` (6) (14 XPASS → real PASS).
+- Help pins already use `"search"` / `"explain"` in stripped help text (Rich tables).
+- Deleted W8 current-state pins: `test_context_search_is_currently_a_usage_error`,
+  `test_context_explain_is_currently_a_usage_error`,
+  `test_discovery_currently_omits_gemini_copilot_and_windsurf`.
+- Left W12–W13 xfails in place. Retrieval-half current-state pin kept (#356 out of scope).
+- W11.1 impl: `e03a7aec`.
+- W11 recon: `733d73c6`.
+
+## Acceptance (W11 recon)
+
+- W11 context pins **PASS** (no leftover xfail, no XPASS)
+- W8 `#356/#357` current-state pins gone
+- W12–W13 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W12 not started
+
+## Recon notes (W12)
+
+- Un-xfailed every `green after W12` marker in `tests/policy/test_cc_lifecycle.py`
+  (7) and `tests/policy/test_cc_packs.py` (4) (11 XPASS → real PASS).
+- Deleted W8 current-state pins: `test_policy_effective_is_currently_a_usage_error`,
+  `test_policy_simulate_is_currently_a_usage_error`.
+- Left W13 xfails in place (`tests/memory/test_cc_validation.py`).
+- W12.1 impl: `19318055`.
+- W12 recon: `65760a24`.
+
+## Acceptance (W12 recon)
+
+- W12 policy pins **PASS** (no leftover xfail, no XPASS)
+- W8 `#358/#359` current-state usage-error pins gone
+- W13 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W13 not started
+
+## Recon notes (W13)
+
+- Un-xfailed every `green after W13: memory validation / org / effectiveness (#360)`
+  marker in `tests/memory/test_cc_validation.py` (9 XPASS → real PASS).
+- Deleted W8 current-state pin `test_memory_validate_is_currently_a_usage_error`
+  (`memory validate` is registered; the usage-error pin failed after W13.1).
+- Kept W10 dismissal pin `test_dismissal_feeds_evaluation_not_durable_memory`
+  (single dismissal still must not write durable memory).
+- W13.1 impl: `727b437a`.
+- W13 recon: `8d9c6dea`.
+
+## Acceptance (W13 recon)
+
+- W13 memory pins **PASS** (no leftover xfail, no XPASS)
+- W8 `#360` current-state usage-error pin gone
+- `make lint` + `make typecheck` clean
+- No `src/` edits; CCF not started
+
+## Contract matrix (W8)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| CC354a | Six verifier states | unit | happy | `test_verifier_states_are_the_six_named_outcomes` |
+| CC354b | Major/Critical require packets | unit | happy | `test_medium_high_critical_findings_require_an_evidence_packet` |
+| CC354c | Packet evidence kinds | unit | happy | `test_evidence_packet_supports_the_named_kinds` |
+| CC354d | Unverified does not block unless policy | unit | edge | `test_unverified_findings_do_not_block_unless_policy_permits` |
+| CC354e | Falsification-first rubric | unit | happy | `test_falsification_first_rubric_is_wired` |
+| CC354f | Freshness / hash / completeness | unit | happy | `test_evidence_freshness_provenance_hash_and_completeness_scoring` |
+| CC354g | Tool vs LLM contradiction | unit | happy | `test_contradiction_detection_between_tools_and_llm` |
+| CC354h | Verification replay | unit | happy | `test_verification_replay_is_deterministic` |
+| CC354i | Policy evidence by severity/path/change/rule | integration | error | `test_policy_evidence_requirements_cover_severity_path_change_type_and_rule` |
+| CC354j | Verifier failure cannot promote | unit | error | `test_verifier_failure_cannot_silently_promote_a_finding` |
+| CC354k | D14 no second approval path | unit | current | `test_decide_approval_remains_the_only_approval_path` |
+| CC354l | New `evidence_cmd.py` + show/verify | functional | happy/error | `tests/cli/test_evidence_cmd.py` |
+| CC354m | JSON export / D10 root callback | functional | happy | `test_evidence_show_json_is_exportable`, `test_w9_does_not_fold_evidence_into_root_callback` |
+| CC355a | Materiality + high-impact over style | unit | happy | `test_materiality_scoring_ranks_security_above_style` |
+| CC355b | Benchmark-calibrated confidence | unit | happy | `test_confidence_is_calibrated_from_benchmark_outcomes` |
+| CC355c | Budgets by severity/category/file/review | unit | edge | `test_finding_budgets_cover_severity_category_file_and_review` |
+| CC355d | Publication + blocking thresholds | unit | happy | `test_publication_and_blocking_thresholds_are_configurable` |
+| CC355e | Dismissal reason codes | unit | happy | `test_dismissal_reason_codes_are_a_closed_set` |
+| CC355f | Dismissal → eval, not memory | integration | edge | `test_dismissal_feeds_evaluation_not_durable_memory` |
+| CC355g | Blocker precision > 95% gate | integration | happy | `test_precision_regression_gate_targets_blocker_precision_above_95` |
+| CC356a | `context search` / `explain` | functional | happy/error | `tests/context/test_cc_search_explain.py` |
+| CC356b | Relevance, specialist budgets, lazy tools | unit | happy | `test_context_relevance_scoring`, `test_context_budget_allocation_per_specialist`, `test_lazy_context_retrieval_goes_through_controlled_tools` |
+| CC356c | Omission downgrade | unit | edge | `test_context_omission_reporting_downgrades_the_outcome` |
+| CC356d | Retrieval quality ≠ model quality | integration | happy | `test_context_retrieval_quality_is_benchmarked_separately_from_models` |
+| CC357a | GEMINI / Copilot / Windsurf / custom | integration | happy | `test_discovers_gemini_copilot_windsurf_and_custom_list` |
+| CC357b | Instruction hashes + conflicts | unit | happy | `test_injected_instructions_are_hashed_into_the_run_manifest`, `test_competing_instruction_sources_are_resolved` |
+| CC357c | Untrusted GEMINI fenced | functional | error | `test_untrusted_gemini_renders_through_the_nonce_fence` |
+| CC357d | External files type/size/trust/provenance | unit | error | `test_external_context_files_enforce_type_size_trust_and_provenance` |
+| CC358a | `policy effective` / `simulate` | functional | happy | `tests/policy/test_cc_lifecycle.py` |
+| CC358b | Symbol scope + conflicts + metrics + audit | unit | happy/error | `test_policy_resolution_stays_deterministic_at_symbol_scope`, `test_conflicting_policies_are_detected`, `test_policy_metrics_include_trigger_fp_waiver_and_blocking_rates`, `test_policy_audit_artifacts_are_emitted` |
+| CC359a | Seven packs + identity fields | integration | happy | `tests/policy/test_cc_packs.py` |
+| CC359b | Fixtures via `policy test`; no schema widen | functional | happy | `test_pack_fixtures_are_runnable_by_policy_test`, `test_packs_do_not_widen_the_policy_schema` |
+| CC360a | `memory validate` | functional | happy/error | `test_memory_validate_help_is_registered`, `test_memory_validate_rejects_a_corrupt_store` |
+| CC360b | Historical validation; no one-shot durable memory | unit | error | `test_historical_validation_is_required_before_activation`, `test_one_reviewer_action_does_not_silently_create_durable_memory` |
+| CC360c | Kinds + FP over-suppression + org backend | unit | happy/edge | `test_memory_kinds_are_separated`, `test_false_positive_memory_has_expiry_scope_and_over_suppression_guard`, `test_organization_memory_backend_is_pluggable` |
+| CC360d | Effectiveness; consume dismissal codes | integration | happy | `test_memory_effectiveness_improves_precision_without_reducing_recall`, `test_w13_consumes_dismissal_codes_it_does_not_define_them` |
+
+## Acceptance (W8)
+
+- Collection clean; current-state pins **PASS**; wiring pins **XFAIL** (`strict=False`); **no XPASS**
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W9 not started
+- W8 commit: `ba8f6f4d`
+
+---
+
+# Batch CD — hardening (#361–#367)
+
+Authoring wave: **W14** (Batch CD RED) · Implementation: **W15** `#361` · **W16** `#362` · **W17** `#363` · **W18** `#364+#365` · **W19** `#366` · **W20** `#367`
+
+Helper: `tests/support/cd_batch.py`.
+
+Out of scope honoured (no extra tests): D8 P12–P31 / #377–#385; D6 file 7 / 20b; new SCM providers; `ci/providers/gitlab.py`; MCP auth (#345/#346); review-only boundary (#350); #140 precision/recall numbers (D15 — do not close #140); SBOM/signing/attestation (already shipped); publishing measured cost/latency numbers.
+
+Canonical impl modules the RED suite pins (W15–W20):
+
+- W15: `mergecraft.scm.webhooks`
+- W16: `mergecraft.security.egress`, `mergecraft.security.public_comments`, `docs/THREAT-MODEL.md`
+- W17: `mergecraft.evals.adversarial_corpora` (D15 — not #140 gate metrics)
+- W18: `mergecraft.reliability.slo`, `chaos`, `recovery`, `diagnostic_bundle`
+- W19: `--supply-chain` on `cli/doctor_cmd.py` (D16 — do not restyle `cli/consoles.py`)
+- W20: `mergecraft.perf.budgets` + `ReviewProfile.latency_budget_ms`
+
+After each impl wave, recon **deletes** matching W14 current-state pins and **un-xfails** `green after W15|W16|W17|W18|W19|W20` markers (`strict=False`).
+
+## xfail schedule (W14)
+
+| Wave | Tests | Marker reason | Status |
+|------|-------|---------------|--------|
+| **W15** | `tests/scm/test_cd_webhooks.py` (11) | `green after W15: webhook security, idempotency, provider conformance (#361)` | **PASS** — un-xfailed W15 recon |
+| **W16** | `tests/security/test_cd_egress.py` (10) | `green after W16: egress, SSRF, vuln gates, threat model; no secrets in public comments (#362)` | **PASS** — un-xfailed W16 recon |
+| **W17** | `tests/evals/test_cd_adversarial_corpora.py` (5) | `green after W17: adversarial corpora wired into eval gate (#363 / D15)` | **PASS** — un-xfailed W17 recon |
+| **W18** | `tests/reliability/test_cd_soak_slos.py` (7) + `tests/reliability/test_cd_degradation.py` (13) | `green after W18: soak/SLOs + degradation/recovery/redacted bundles (#364/#365)` | **PASS** — un-xfailed W18 recon |
+| **W19** | `tests/cli/test_cd_doctor_supply_chain.py` (6) | `green after W19: doctor --supply-chain + provenance (#366 / D16)` | **PASS** — un-xfailed W19 recon |
+| **W20** | `tests/perf/test_cd_budgets.py` (13) | `green after W20: latency/cost budgets, compression, early stop, regression bench (#367)` | **PASS** — un-xfailed W20 recon |
+
+Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error rows after the matching impl wave): D10 root-callback pins; D16 consoles.py; D14 `decide_approval` only in `agents/gates.py`; shipped token/cost/tool budgets (latency-absent assertion dropped W20 recon); #140 gate metrics leftover; `make security`; CI GitLab log adapter. (`doctor --supply-chain` usage-error pin deleted W19 recon. Perf module-absent assertion dropped W20 recon; no-published-numbers pin kept.)
+
+W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` clean.
+
+## Contract matrix (W14)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| CD361a | Webhook module missing | unit | current | **deleted W15 recon** (`test_webhook_handler_module_does_not_exist_yet`) |
+| CD361b | GitHub + GitLab only; Bitbucket rejected | unit | error | `test_webhook_module_covers_github_and_gitlab_only` |
+| CD361c | Signature verify / reject | unit | happy/error | `test_webhook_signature_verification_*` |
+| CD361d | Replay protection | unit | error | `test_webhook_replay_protection_rejects_stale_or_reused_delivery` |
+| CD361e | Idempotent delivery id | integration | edge | `test_webhook_event_processing_is_idempotent_on_delivery_id` |
+| CD361f | Rate-limit retryable | unit | edge | `test_webhook_rate_limit_is_handled_without_dropping_the_event` |
+| CD361g | Permissions + conformance | integration | happy | `test_provider_permission_checks_are_asserted_per_adapter`, `test_provider_conformance_uses_identical_review_semantics` |
+| CD361h | Review-only cannot bypass | functional | error | `test_scm_adapters_cannot_bypass_review_only_restrictions` |
+| CD361i | CI GitLab logs out of scope | unit | current | `test_ci_gitlab_log_adapter_is_not_an_scm_webhook_surface` |
+| CD362a | Egress allow-list + SSRF | unit | happy/error | `tests/security/test_cd_egress.py` |
+| CD362b | Dep + image vuln gates ≠ `make security` | unit | happy | `test_dependency_vulnerability_gate_is_invocable`, `test_container_image_vulnerability_gate_is_distinct_from_make_security` |
+| CD362c | Threat-model doc tied to tests | functional | happy | `test_threat_model_document_is_tied_to_executable_tests` |
+| CD362d | No secrets in public comments | functional | error | `test_public_comments_never_include_secret_material` |
+| CD362e | MCP auth / second approval out of scope | unit | current | `test_w16_does_not_touch_mcp_auth_or_a_second_approval_path` |
+| CD363a | Three corpora, separate from human bank | integration | happy/edge | `test_three_adversarial_corpora_are_named_and_non_empty`, `test_adversarial_corpora_stay_out_of_the_human_reference_bank` |
+| CD363b | `eval gate` blocks adversarial regression | functional | error | `test_eval_gate_fails_the_release_on_an_adversarial_regression` |
+| CD363c | CLI path/URL untrusted | unit | happy | `test_cli_source_path_is_treated_as_attacker_controlled_input` |
+| CD363d | D15 no #140 numbers | unit | current + happy | `test_issue_140_gate_metrics_remain_the_published_numbers`, `test_adversarial_gate_does_not_publish_precision_recall_numbers` |
+| CD363e | Seeds not yet eval-gate corpora | unit | current | **deleted W17 recon** (`test_existing_adversarial_seeds_are_not_eval_gate_corpora`) |
+| CD364a | Failure injection, soak, concurrency, scale | unit | happy/edge | `tests/reliability/test_cd_soak_slos.py` |
+| CD364b | Per-stage latency, taxonomy, four SLOs | unit | happy | `test_per_stage_latency_metrics_are_structured`, `test_error_taxonomy_is_a_closed_set`, `test_production_slos_cover_the_four_named_targets` |
+| CD365a | Outage / cache / disk / memory / giant repo | unit | happy/error | `tests/reliability/test_cd_degradation.py` |
+| CD365b | Idempotent SCM publish (not webhook transport) | integration | happy | `test_scm_publication_is_idempotent_without_using_webhook_transport` |
+| CD365c | Resume + redacted bundle + cleanup modes | functional | happy/error | `test_execution_is_resumable_where_correctness_permits`, `test_diagnostic_bundle_redacts_secrets`, `test_cleanup_runs_on_timeout_cancel_and_crashes` |
+| CD366a | `doctor --supply-chain` usage-error today | functional | current | **deleted W19 recon** (`test_doctor_supply_chain_flag_is_currently_a_usage_error`) |
+| CD366b | D16 consoles + D10 doctor module | unit | current | `test_d16_does_not_restyle_shared_console`, `test_w19_does_not_fold_supply_chain_into_root_callback` |
+| CD366c | Provenance / reproducibility / analyzer pin | functional | happy | remaining `test_cd_doctor_supply_chain.py` |
+| CD367a | Token/cost/tool budgets exist | unit | current | `test_profile_token_cost_and_tool_budgets_already_exist` (latency-absent assertion dropped W20 recon) |
+| CD367b | Latency + cost ceiling + routing + cache + early stop | unit | happy/error | `tests/perf/test_cd_budgets.py` |
+| CD367c | No published measured numbers | unit | current/edge | `test_w20_does_not_publish_measured_cost_or_latency_numbers` (module-absent assertion dropped W20 recon), `test_performance_regression_and_monorepo_benchmarks_exist` |
+
+## Acceptance (W14)
+
+- Collection clean; current-state pins **PASS**; wiring pins **XFAIL** (`strict=False`); **no XPASS**
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W15 not started
+- W14 commit: `3e812e5c`
+
+## Recon notes (W15)
+
+- Un-xfailed every `green after W15: webhook security, idempotency, provider conformance (#361)` marker in `tests/scm/test_cd_webhooks.py` (11 XPASS → real PASS, including parametrized GitHub/GitLab signature verify).
+- Deleted W14 current-state pin: `test_webhook_handler_module_does_not_exist_yet`.
+- Left W16–W20 xfails in place. D10 root-callback pin and CI GitLab log-adapter pin kept.
+- W15 impl: `13b86c39`.
+- W15 recon: `a8dbdc9e`.
+
+## Acceptance (W15 recon)
+
+- W15 webhook pins **PASS** (no leftover xfail, no XPASS)
+- W14 `#361` current-state pin gone
+- W16–W20 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W16 not started
+
+## Recon notes (W16)
+
+- Un-xfailed every `green after W16: egress, SSRF, vuln gates, threat model; no secrets in public comments (#362)` marker in `tests/security/test_cd_egress.py` (10 XPASS → real PASS, including 5 parametrized SSRF URLs).
+- Deleted W14 current-state pin: `test_egress_and_ssrf_module_does_not_exist_yet`.
+- Left W17–W20 xfails in place. D10/D14 MCP-auth pin and `make security` pin kept.
+- W16 impl: `2f142694`.
+- W16 recon: `81a83716`.
+
+## Acceptance (W16 recon)
+
+- W16 egress/SSRF/vuln/threat-model pins **PASS** (no leftover xfail, no XPASS)
+- W14 `#362` current-state pin gone
+- W17–W20 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W17 not started
+
+## Recon notes (W17)
+
+- Un-xfailed every `green after W17: adversarial corpora wired into eval gate (#363 / D15)` marker in `tests/evals/test_cd_adversarial_corpora.py` (5 XPASS → real PASS).
+- Deleted W14 current-state pin: `test_existing_adversarial_seeds_are_not_eval_gate_corpora`.
+- Kept D15 `#140` current-state pin: `test_issue_140_gate_metrics_remain_the_published_numbers`.
+- Left W18–W20 xfails in place.
+- W17 impl: `53335b41`.
+- W17 recon: `327a465f`.
+
+## Acceptance (W17 recon)
+
+- W17 adversarial corpora pins **PASS** (no leftover xfail, no XPASS)
+- W14 `#363` current-state pin gone; `#140` metrics pin kept
+- W18–W20 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W18 not started
+
+## Recon notes (W18)
+
+- Un-xfailed every `green after W18: soak/SLOs + degradation/recovery/redacted bundles (#364/#365)` marker in `tests/reliability/test_cd_soak_slos.py` (7) and `tests/reliability/test_cd_degradation.py` (13 including 5 cleanup modes) (20 XPASS → real PASS).
+- Deleted W14 current-state pins: `test_soak_and_slo_modules_do_not_exist_yet`, `test_process_group_cleanup_already_ships`.
+- Left W19–W20 xfails in place.
+- W18 impl: `e8985169`.
+- W18 recon: `8e3d7753`.
+
+## Acceptance (W18 recon)
+
+- W18 soak/SLO + degradation/recovery/bundle pins **PASS** (no leftover xfail, no XPASS)
+- W14 `#364`/`#365` current-state pins gone
+- W19–W20 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W19 not started
+
+## Recon notes (W19)
+
+- Un-xfailed every `green after W19: doctor --supply-chain + provenance (#366 / D16)` marker in `tests/cli/test_cd_doctor_supply_chain.py` (6 XPASS → real PASS).
+- Deleted W14 current-state pin: `test_doctor_supply_chain_flag_is_currently_a_usage_error`.
+- Left W20 xfails in place. D16 consoles.py pin and D10 doctor-option pin kept.
+- W19 impl: `8cc88ce6`.
+- W19 recon: `f958c546`.
+
+## Acceptance (W19 recon)
+
+- W19 doctor `--supply-chain` pins **PASS** (no leftover xfail, no XPASS)
+- W14 `#366` current-state pin gone
+- W20 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W20 not started
+
+## Recon notes (W20)
+
+- Un-xfailed every `green after W20: latency/cost budgets, compression, early stop, regression bench (#367)` marker in `tests/perf/test_cd_budgets.py` (13 XPASS → real PASS, including 3 parametrized profiles).
+- Inverted W14 current-state pins: dropped `latency_budget_ms`-must-be-absent from `test_profile_token_cost_and_tool_budgets_already_exist`; dropped module-must-not-exist from `test_w20_does_not_publish_measured_cost_or_latency_numbers` (kept D10 + no published numbers).
+- No leftover CD xfails. CDF not started.
+- W20 impl: `46209fd2`.
+- W20 recon: `a46727de`.
+
+## Acceptance (W20 recon)
+
+- W20 perf/budget pins **PASS** (no leftover xfail, no XPASS)
+- W14 `#367` latency-absent and module-absent assertions gone; no-published-numbers pin kept
+- No leftover CD xfails
+- `make lint` + `make typecheck` clean
+- No `src/` edits; CDF not started
+
+---
+
+# Batch CE — platform (#368–#371)
+
+Authoring wave: **W21** (Batch CE RED) · Implementation: **W22** `#368` · **W23** `#369` · **W24** `#370` · **W25** `#371`
+
+Helper: `tests/support/ce_batch.py` (`green_after(..., strict=False)`).
+
+Out of scope (honoured — no implementation tests): agent-protocol capability/version negotiation (#368); token/cost/tool-call budget mechanism and latency budgets (#369 / already shipped); lens registry and risk-based routing (#370); per-specialist value measurement and published cost-per-review (#371). D6: no file 7 / `tracing/exporters.py`. D8: P12–P31 / #377–#385. D10: additive CLI only. D11: consume `gen_ai.usage.*` on `llm.call`; do not re-instrument exporters.
+
+After each impl wave, recon **deletes** the matching W21 current-state pins and **un-xfails** `green after W22|W23|W24|W25` markers (`strict=False`).
+
+## xfail schedule (W21)
+
+| Wave | Tests | Marker reason | Status |
+|------|-------|---------------|--------|
+| **W22** | `tests/config/test_ce_schema.py` (10) | `green after W22: config schema version, migrations, deprecations (#368)` | PASS after W22 recon |
+| **W23** | `tests/cli/test_ce_profiles.py` (15 collected / 14 functions) | `green after W23: remaining profiles + risk-based select; additive CLI (#369 / D10)` | PASS after W23 recon |
+| **W24** | `tests/agents/test_ce_economics.py` (8) | `green after W24: specialist economics consume gen_ai.usage.* on llm.call (#370 / D11)` | PASS after W24 recon |
+| **W25** | `tests/agents/test_ce_providers.py` (14 + 1 live skip) | `green after W25: provider health, cooldown, degradation, residency, routing eval (#371)` | **PASS** — un-xfailed W25 recon |
+
+Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error / unversioned rows after the matching impl wave): D10 root-callback pins; eight named profiles (W23); `profile recommend` registered (missing `--risk` is usage 2); token/cost/tool/latency budgets; `budget_exhaustion_outcome` never `passed`; CLI JSON + agent protocol versions (not negotiation); `gen_ai.usage.*` substrate; lens routing file; retry-policy classifier; tracing exporters untouched. (`test_specialist_economics_module_does_not_exist_yet` deleted W24 recon. `test_provider_health_module_does_not_exist_yet` + `test_src_has_no_cooldown_or_residency_yet` deleted W25 recon.)
+
+W21 run: **20 passed / 47 xfailed / 1 skipped (no live gate) / 0 XPASS**. `make lint` + `make typecheck` clean.
+
+## Contract matrix (W21)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| CE368a | `RepoSettings` unversioned | unit | current | deleted in W22 recon (`test_repo_settings_has_no_schema_version_yet`) |
+| CE368b | Compat module missing | unit | current | deleted in W22 recon (`test_config_compat_module_does_not_exist_yet`) |
+| CE368c | No protocol capability negotiation | unit | current | `test_agent_protocol_does_not_negotiate_capabilities` |
+| CE368d | D10 root callback | unit | current | `test_w22_does_not_edit_root_callback` |
+| CE368e | CLI JSON + agent protocol versions already ship | unit | current | `test_cli_json_schema_version_already_ships`, `test_agent_protocol_version_already_ships` |
+| CE368f | Config schema versioned | unit | happy | `test_config_schema_is_versioned` |
+| CE368g | Migrate unversioned YAML | integration | happy | `test_load_migrates_unversioned_yaml` |
+| CE368h | Migrate idempotent / unknown version | unit | edge/error | `test_migrate_config_is_idempotent_on_current_version`, `test_unknown_schema_version_is_a_configuration_error` |
+| CE368i | Deprecation warning | unit | happy | `test_deprecated_key_emits_warning_before_break` |
+| CE368j | Upgrade preserves models | unit | happy | `test_upgrade_from_previous_schema_preserves_models` |
+| CE368k | Compat policy + LTS | unit | happy | `test_backward_compat_policy_names_supported_range`, `test_lts_expectations_are_declared` |
+| CE368l | Published CLI + agent protocol contracts | unit | happy | `test_stable_cli_contract_is_published`, `test_stable_agent_protocol_contract_is_published` |
+| CE369a | Only fast/deep/security ship | unit | current | deleted in W23 recon (`test_shipped_profiles_are_fast_deep_security_only`) |
+| CE369b | `profile recommend` registered; missing `--risk` is usage 2 | functional | happy/error | `test_profile_recommend_is_registered_and_requires_risk` |
+| CE369c | Budgets / latency out of scope | unit | current | `test_profile_token_cost_and_tool_budgets_remain_out_of_scope` |
+| CE369d | Exhaustion never passed | unit | current | `test_budget_exhaustion_never_returns_passed` |
+| CE369e | Eight profiles + hyphen aliases | unit | happy/edge | `test_eight_named_profiles_are_registered`, `test_hyphenated_cli_aliases_map_to_canonical_names` |
+| CE369f | Unknown profile / risk | unit | error | `test_unknown_profile_names_the_full_set`, `test_unknown_risk_is_an_error` |
+| CE369g | Risk select + CLI/policy override | unit | happy | `test_select_profile_from_risk_*`, `test_cli_profile_overrides_*`, `test_policy_profile_overrides_risk_selection` |
+| CE369h | Additive `profile_cmd` (D10) | functional | happy | `test_profile_cli_is_a_new_cmd_module`, `test_root_help_lists_profile`, `test_profile_recommend_*` |
+| CE369i | Profile budget exhaustion | unit | happy | `test_budget_exhaustion_is_partial_or_inconclusive_never_clean` |
+| CE370a | Economics module missing | unit | current | deleted in W24 recon (`test_specialist_economics_module_does_not_exist_yet`) |
+| CE370b | D6/D11 exporters + usage substrate | unit | current | `test_w24_does_not_edit_tracing_exporters`, `test_usage_attrs_already_exist_on_llm_call_path` |
+| CE370c | Lens routing out of scope | unit | current | `test_lens_routing_remains_the_routing_surface` |
+| CE370d | Unique useful findings / metrics | unit | happy/edge | `test_unique_useful_findings_*`, `test_agent_metrics_*`, `test_empty_metrics_list_*` |
+| CE370e | Consume `gen_ai.usage.*` | unit | happy | `test_economics_consumes_gen_ai_usage_attrs` |
+| CE370f | Low-value prune + breaker + degrade | unit | happy/error | `test_zero_value_specialists_*`, `test_per_agent_circuit_breaker_*`, `test_per_agent_degradation_*` |
+| CE370g | No exporter import | unit | happy | `test_economics_does_not_import_tracing_exporters` |
+| CE371a | Health module / cooldown / residency absent | unit | current | deleted in W25 recon (`test_provider_health_module_does_not_exist_yet`, `test_src_has_no_cooldown_or_residency_yet`) |
+| CE371b | Retry substrate + no published cost | unit | current | `test_retry_policy_already_classifies_retryable_failures`, `test_w25_does_not_publish_measured_cost_per_review` |
+| CE371c | Capability catalog + require/prefer/fallback | unit | happy | `test_capability_catalog_*`, `test_require_prefer_fallback_semantics` |
+| CE371d | Route per specialist/risk; heterogeneous judge | unit | happy | `test_route_model_per_specialist_and_risk`, `test_heterogeneous_verifier_and_judge_models` |
+| CE371e | Health, bounded retry, cooldown | unit | happy/error | `test_provider_health_records_failures`, `test_retries_are_bounded_*`, `test_circuit_breaker_and_cooldown` |
+| CE371f | Degrade vs never silent substitute | unit | happy/error | `test_degrade_when_non_required_provider_unavailable`, `test_required_model_is_never_silently_substituted` |
+| CE371g | Manifest stamp + provider budget | unit | happy/error | `test_run_manifest_records_provider_model_and_hashes`, `test_per_provider_budget_enforcement` |
+| CE371h | Routing eval + residency | unit | happy/error | `test_routing_eval_rejects_cheaper_but_worse_quality`, `test_residency_policy_blocks_disallowed_region` |
+| CE371i | Nightly smoke | functional | happy + skip | `test_nightly_smoke_callable_is_registered`, `test_live_provider_smoke_runs_when_gated` |
+
+Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility`, `migration`, `monorepo`, `cross_repo` (CLI aliases `api-compatibility`, `cross-repo`). Precedence: CLI > policy > risk.
+
+## Acceptance (W21)
+
+- Collection clean; current-state pins **PASS**; wiring pins **XFAIL** (`strict=False`); **no XPASS**
+- Live smoke **skipped: no live gate** (`MERGECRAFT_LIVE_E2E` unset)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W22 not started
+- W21 commit: `932347cc`
+
+## Recon notes (W22)
+
+- Un-xfailed every `green after W22: config schema version, migrations, deprecations (#368)` marker in `tests/config/test_ce_schema.py` (10 XPASS → real PASS).
+- Deleted W21 current-state pins: `test_repo_settings_has_no_schema_version_yet`, `test_config_compat_module_does_not_exist_yet`.
+- Left W23–W25 xfails in place. D8/D10 pins kept.
+- W22 impl: `a2a3af4c`.
+- W22 recon: `d7b83127`.
+
+## Acceptance (W22 recon)
+
+- W22 schema/migration/deprecation pins **PASS** (no leftover xfail, no XPASS)
+- W21 `#368` unversioned / module-absent pins gone
+- W23–W25 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W23 not started
+
+## Recon notes (W23)
+
+- Un-xfailed every `green after W23: remaining profiles + risk-based select; additive CLI (#369 / D10)` marker in `tests/cli/test_ce_profiles.py` (15 XPASS → real PASS).
+- Deleted W21 current-state pin: `test_shipped_profiles_are_fast_deep_security_only` (and unused `SHIPPED_PROFILE_NAMES` helper).
+- Replaced `test_profile_recommend_is_currently_a_usage_error` with `test_profile_recommend_is_registered_and_requires_risk` (help succeeds; missing `--risk` stays usage 2).
+- Left W24–W25 xfails in place. D8/D10 pins kept.
+- W23 impl: `ead3cb2b`.
+- W23 recon: `802f3d23`.
+
+## Acceptance (W23 recon)
+
+- W23 profile/risk/CLI pins **PASS** (no leftover xfail, no XPASS)
+- W21 `#369` shipped-only pin gone; recommend command is registered
+- W24–W25 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W24 not started
+
+## Recon notes (W24)
+
+- Un-xfailed every `green after W24: specialist economics consume gen_ai.usage.* on llm.call (#370 / D11)` marker in `tests/agents/test_ce_economics.py` (8 XPASS → real PASS).
+- Deleted W21 current-state pin: `test_specialist_economics_module_does_not_exist_yet`.
+- Left W25 xfails in place. D6/D11 exporter and lens-routing pins kept.
+- W24 impl: `87ccff83`.
+- W24 recon: `fcd928a4`.
+
+## Acceptance (W24 recon)
+
+- W24 specialist-economics pins **PASS** (no leftover xfail, no XPASS)
+- W21 `#370` module-absent pin gone
+- W25 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W25 not started
+
+## Recon notes (W25)
+
+- Un-xfailed every `green after W25: provider health, cooldown, degradation, residency, routing eval (#371)` marker in `tests/agents/test_ce_providers.py` (14 XPASS → real PASS).
+- Deleted W21 current-state pins: `test_provider_health_module_does_not_exist_yet`, `test_src_has_no_cooldown_or_residency_yet`.
+- Kept `test_live_provider_smoke_runs_when_gated` skip when `MERGECRAFT_LIVE_E2E` is unset (`skipped: no live gate`).
+- D6 exporter pin kept. No leftover CE xfails.
+- W25 impl: `231aa4c4`.
+- W25 recon: `ab506f34`.
+
+## Acceptance (W25 recon)
+
+- W25 provider-health pins **PASS** (no leftover xfail, no XPASS)
+- W21 `#371` module-absent / no-cooldown-or-residency pins gone
+- Live smoke **skipped: no live gate** (`MERGECRAFT_LIVE_E2E` unset)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; CEF not started
+
+## Thermos recon (test-creator)
+
+Product SHA `91b3d96f`. Tests retargeted to honest contracts; security properties kept.
+
+| Contract | Tests |
+|----------|--------|
+| Instruction hashes are a per-source mapping | `tests/context/test_cc_instruction_sources.py::test_injected_instructions_are_hashed_into_the_run_manifest` |
+| Memory effectiveness zeros without corpus; labeled counts compute deltas | `tests/memory/test_cc_validation.py` |
+| Empty FP patterns do not match every path | `test_false_positive_memory_empty_rules_do_not_match_every_path` |
+| Lazy retrieve omits without tools/root; no query echo | `tests/context/test_cc_search_explain.py::test_lazy_context_retrieval_goes_through_controlled_tools` |
+| Review-only default-deny when mode is None; inner guards after `Fix` | git/shell/credential/containment/push-matrix |
+| Missing cache path is not rebuilt | `tests/reliability/test_cd_degradation.py` |
+| GitLab token equality; missing delivery id fail-closed | `tests/scm/test_cd_webhooks.py` |
+| SSRF decimal/hex/short IPv4 + mapped IPv6 | `tests/security/test_cd_egress.py` |
+| Vuln gates `passed=False` when not run | `test_cd_egress` |
+| Soak `duration_seconds=0` → `passed=False` | `test_cd_soak_slos` |
+| Perf bench `status=not_run` | `test_cd_budgets` |
+| ProviderBreaker cooldown elapses on monotonic | `test_ce_providers` |
+| Doctor `migrate_config` unknown version | `tests/cli/test_doctor.py` |
+| Policy CLI `--symbol` | `test_cc_lifecycle` / `test_policy_verbs` |
+
+Rationale: Thermos product changes were honest (not test stubs). Do not weaken fail-closed / review-only / SSRF / GitLab token tests.

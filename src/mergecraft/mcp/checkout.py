@@ -319,6 +319,21 @@ def checkout_pr_tool(ctx: ToolContext):
         except Exception as imp_err:
             logger.info("impact extraction soft-failed: {}", imp_err)
 
+        try:
+            from mergecraft.review.linked_repos import (
+                attach_linked_repo_review,
+                operator_authorized_linked_repos,
+            )
+
+            linked = attach_linked_repo_review(
+                Path(cwd),
+                authorized_repos=operator_authorized_linked_repos(),
+            )
+            if linked is not None:
+                result.update(linked)
+        except Exception as xrepo_err:
+            logger.info("linked-repo review soft-failed: {}", xrepo_err)
+
         logger.info("checked out PR #{} -> {}", pull_number, local_branch)
         ctx.tool_state.review_phase = "ESTABLISH_SCOPE"
         from mergecraft.mcp.verdict import ReviewPhase, stamp_review_phase_on_active_span

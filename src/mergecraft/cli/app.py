@@ -15,11 +15,14 @@ from mergecraft.cli import (
     analyzers_cmd,
     auth_cmd,
     cache_cmd,
+    capabilities_cmd,
     config_surface_cmd,
     context_cmd,
+    describe_cmd,
     diff_review_cmd,
     doctor_cmd,
     eval_cmd,
+    evidence_cmd,
     findings_cmd,
     gha_cmd,
     init_cmd,
@@ -31,9 +34,12 @@ from mergecraft.cli import (
     pipeline_cmd,
     plan_cmd,
     policy_cmd,
+    profile_cmd,
+    requirements_cmd,
     tracing_cmd,
     tracing_logfire_cmd,
     watch_cmd,
+    xrepo_cmd,
 )
 from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
@@ -88,6 +94,8 @@ app.add_typer(analyzers_cmd.app, name="analyzers")
 app.command("init")(init_cmd.run)
 app.command("watch")(watch_cmd.run)
 app.command("doctor")(doctor_cmd.run)
+app.command("capabilities")(capabilities_cmd.run)
+app.command("describe")(describe_cmd.run)
 app.command("plan")(plan_cmd.run)
 app.command("review")(diff_review_cmd.run)
 app.command("diff-review", hidden=True)(diff_review_cmd.run)
@@ -95,6 +103,10 @@ app.add_typer(gha_cmd.app, name="gha")
 app.add_typer(learnings_cmd.app, name="learnings")
 app.add_typer(memory_cmd.app, name="memory")
 app.add_typer(policy_cmd.app, name="policy")
+app.add_typer(profile_cmd.app, name="profile")
+app.add_typer(requirements_cmd.app, name="requirements")
+app.add_typer(xrepo_cmd.app, name="xrepo")
+app.add_typer(evidence_cmd.app, name="evidence")
 app.add_typer(findings_cmd.app, name="findings")
 app.add_typer(eval_cmd.app, name="eval")
 # W8.4 — ``mergecraft config tracing`` + ``mergecraft traces <run-id>``.
