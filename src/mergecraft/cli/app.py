@@ -14,6 +14,7 @@ from mergecraft.cli import (
     agents_cmd,
     analyzers_cmd,
     ask_cmd,
+    audit_cmd,
     auth_cmd,
     cache_cmd,
     capabilities_cmd,
@@ -27,6 +28,7 @@ from mergecraft.cli import (
     explain_cmd,
     findings_cmd,
     gha_cmd,
+    health_cmd,
     init_cmd,
     learnings_cmd,
     lens_cmd,
@@ -40,6 +42,7 @@ from mergecraft.cli import (
     replay_cmd,
     requirements_cmd,
     run_cmd,
+    support_bundle_cmd,
     tracing_cmd,
     tracing_logfire_cmd,
     watch_cmd,
@@ -125,6 +128,9 @@ app.add_typer(tracing_cmd.config_app, name="config")
 app.add_typer(tracing_cmd.app, name="traces")
 # W8.6 — ``mergecraft tracing logfire enable|disable`` (sevn symmetry).
 tracing_logfire_cmd.register(app)
+app.add_typer(health_cmd.app, name="health")
+app.add_typer(audit_cmd.app, name="audit")
+app.add_typer(support_bundle_cmd.app, name="support-bundle")
 
 
 @app.callback(invoke_without_command=True)

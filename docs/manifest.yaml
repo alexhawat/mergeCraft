@@ -198,3 +198,21 @@ pages:
     template: consumer
     generator: null
     purpose: Reference workflow for an external coding agent looping with mergecraft review --agent.
+
+  - path: docs/support-matrix.md
+    audience: consumer
+    template: generated-ref
+    generator: support-matrix
+    purpose: Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models.
+
+  - path: docs/release-process.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Release candidates, soak periods, changelog, and per-release migration notes.
+
+  - path: docs/eval-methodology.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: "Eval quality metrics, ablation dimensions, and corpus methodology (#384). Never README; issue 140 owns precision/recall/F1 publication."

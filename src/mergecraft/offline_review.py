@@ -743,6 +743,9 @@ async def _run_agent_review(
             trust_tier,
             source_label="CLI offline review",
         )
+        from mergecraft.enterprise.runtime import bind_enterprise_after_trust
+
+        bind_enterprise_after_trust(settings, trust_tier)
         setup_script_skip_reason = ""
         if drops:
             for reason in drops.values():

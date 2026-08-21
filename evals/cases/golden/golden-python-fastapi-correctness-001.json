@@ -1,0 +1,12 @@
+{
+  "id": "golden-python-fastapi-correctness-001",
+  "title": "Optional nested config dereference without a null guard",
+  "language": "python",
+  "framework": "fastapi",
+  "category": "correctness",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "app/settings.py",
+  "start_line": 44,
+  "end_line": 48
+}

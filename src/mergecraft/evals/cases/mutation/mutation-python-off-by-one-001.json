@@ -1,0 +1,12 @@
+{
+  "id": "mutation-python-off-by-one-001",
+  "title": "Synthetic off-by-one on a slice bound",
+  "language": "python",
+  "framework": "stdlib",
+  "category": "correctness",
+  "kind": "historical_pr",
+  "source": "synthetic",
+  "path": "src/window.py",
+  "start_line": 10,
+  "end_line": 12
+}

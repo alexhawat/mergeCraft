@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Eval methodology: blocker precision is `None` (unpublished) when a run reports no blockers, and severity accuracy is `None` when there are no locality matches — never a vacuous 1.0
 - Landing README redesigned as a REACH-style product page (outline B): problem/solution
   cards, D2 architecture hero, numbered install, and jump-nav. Long-form install,
   authentication, and workflow essays moved to `docs/install.md`,
@@ -21,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mergecraft explain`, `ask`, and `replay` plus `run inspect` / `run diff` print output-only change, line Q&A, and stored-run views (#377)
 - `mergecraft review --agent` negotiates protocol version against CLI JSON `schema_version` (both fields kept, aliased), reports retryable mismatches, and names token/cost/tool-call budgets (#379)
 - `mergecraft review --agent` streams the first finding before the verdict; `--use-cache` and `--resume` reuse a local result cache; cancelling a review cleans up child processes (#378)
+- Generated six-axis support matrix (`docs/support-matrix.md`), RC/soak release process (`docs/release-process.md`), and a security-response plus coordinated vulnerability-disclosure path in `SECURITY.md` (#382)
+- Eval methodology (#384): quality metric set (`mergecraft.evals.quality_metrics`), ablation harness (`mergecraft.evals.ablation`), expanded human-reviewed golden corpus plus a separate synthetic mutation corpus (`mergecraft.evals.corpora`), and a `docs/eval-methodology.md` page registered in `docs/manifest.yaml`. Scores stay off the landing README; #140 still owns publishing precision/recall/F1.
+- Enterprise runtime (`mergecraft.enterprise`): offline/self-hosted install plan citing the Python 3.11 floor, HTTP(S) proxy with `HTTPS_PROXY`/`NO_PROXY` export, custom CA certificate loading via `ssl.SSLContext`, data-residency allow-list enforcement, configurable telemetry with on/opt-out/off modes, support bundles with secret redaction, audit-log and usage/cost export, blocking-decision explainability, trace-retention policy with privacy-aware log mode, operational diagnostics, organisation policy/memory distribution without a dashboard. New CLI verbs: `mergecraft health`, `mergecraft audit export`, `mergecraft support-bundle`. (#381)
 - Agent install surfaces: `AGENTS.md`, consumer skill (`skills/mergecraft/SKILL.md`),
   Claude plugin manifests (`.claude-plugin/`), slash commands (`commands/`),
   GitHub Copilot instructions (`.github/copilot-instructions.md`), curated
