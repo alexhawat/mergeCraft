@@ -10,22 +10,11 @@ from tests.support.cd_batch import (
     CHAOS_MODULE,
     PRODUCTION_SLO_NAMES,
     SLO_MODULE,
-    green_after,
-    module_exists,
     require_callable,
     require_module,
 )
 
-_W18 = green_after("W18", "soak/SLOs + degradation/recovery/redacted bundles (#364/#365)")
 
-
-def test_soak_and_slo_modules_do_not_exist_yet() -> None:
-    """W14 current state — structural reliability shipped; soak/SLOs did not."""
-    assert module_exists(SLO_MODULE) is False
-    assert module_exists(CHAOS_MODULE) is False
-
-
-@_W18
 def test_failure_injection_harness_covers_named_faults() -> None:
     """Happy: failure injection can cut a provider, analyzer, and disk."""
     module = require_module(CHAOS_MODULE)
@@ -35,7 +24,6 @@ def test_failure_injection_harness_covers_named_faults() -> None:
         assert token is not None
 
 
-@_W18
 def test_soak_harness_is_invocable_without_a_live_gateway() -> None:
     """Happy: soak runner is keyless and bounded (no live gate required)."""
     module = require_module(SLO_MODULE)
@@ -47,7 +35,6 @@ def test_soak_harness_is_invocable_without_a_live_gateway() -> None:
     assert passed is True or passed is False
 
 
-@_W18
 def test_high_concurrency_tier_is_named() -> None:
     """Edge: concurrency tier exists as a first-class scale test."""
     module = require_module(SLO_MODULE)
@@ -56,7 +43,6 @@ def test_high_concurrency_tier_is_named() -> None:
     assert getattr(report, "concurrency", None) == 32 or report.get("concurrency") == 32
 
 
-@_W18
 def test_monorepo_and_large_pr_scale_tiers_exist() -> None:
     """Happy: monorepo and 50k-line PR tiers are distinct."""
     module = require_module(SLO_MODULE)
@@ -69,7 +55,6 @@ def test_monorepo_and_large_pr_scale_tiers_exist() -> None:
     assert lines == 50_000
 
 
-@_W18
 def test_per_stage_latency_metrics_are_structured() -> None:
     """Happy: tracing exposes per-stage latency for the review pipeline."""
     module = require_module(SLO_MODULE)
@@ -80,7 +65,6 @@ def test_per_stage_latency_metrics_are_structured() -> None:
         assert "review" in lowered
 
 
-@_W18
 def test_error_taxonomy_is_a_closed_set() -> None:
     """Happy: reliability errors map into a named taxonomy."""
     module = require_module(SLO_MODULE)
@@ -90,7 +74,6 @@ def test_error_taxonomy_is_a_closed_set() -> None:
         assert "provider_outage" in taxonomy
 
 
-@_W18
 def test_production_slos_cover_the_four_named_targets() -> None:
     """Happy: completion, time-to-first-finding, total latency, publication."""
     module = require_module(SLO_MODULE)

@@ -13,24 +13,11 @@ from tests.support.cd_batch import (
     BUNDLE_MODULE,
     CLEANUP_FAILURE_MODES,
     RECOVERY_MODULE,
-    green_after,
-    module_exists,
     require_callable,
     require_module,
 )
-from tests.support.dead_package_wiring import SRC_ROOT
-
-_W18 = green_after("W18", "soak/SLOs + degradation/recovery/redacted bundles (#364/#365)")
 
 
-def test_process_group_cleanup_already_ships() -> None:
-    """#365 current state — process-group cleanup exists; recovery story does not."""
-    assert (SRC_ROOT / "utils" / "process_group.py").is_file()
-    assert module_exists(RECOVERY_MODULE) is False
-    assert module_exists(BUNDLE_MODULE) is False
-
-
-@_W18
 def test_provider_outage_degrades_instead_of_crashing() -> None:
     """Happy: a mid-review provider outage yields a degraded outcome, not a crash."""
     module = require_module(RECOVERY_MODULE)
@@ -40,7 +27,6 @@ def test_provider_outage_degrades_instead_of_crashing() -> None:
     assert status in {"degraded", "unavailable", "retry"}
 
 
-@_W18
 def test_local_cache_corruption_is_recoverable() -> None:
     """Error: corrupt cache is rebuilt rather than fatal."""
     module = require_module(RECOVERY_MODULE)
@@ -52,7 +38,6 @@ def test_local_cache_corruption_is_recoverable() -> None:
     assert rebuilt is True
 
 
-@_W18
 def test_disk_space_and_resource_preflight_fail_closed() -> None:
     """Error: insufficient disk fails closed with a named message."""
     module = require_module(RECOVERY_MODULE)
@@ -64,7 +49,6 @@ def test_disk_space_and_resource_preflight_fail_closed() -> None:
         preflight(free_bytes=0, memory_limit_bytes=1)
 
 
-@_W18
 def test_memory_limits_are_honoured_where_deployment_permits() -> None:
     """Edge: a configured memory limit is exposed on the recovery surface."""
     module = require_module(RECOVERY_MODULE)
@@ -73,7 +57,6 @@ def test_memory_limits_are_honoured_where_deployment_permits() -> None:
     assert limits >= 0
 
 
-@_W18
 def test_giant_repositories_are_handled_gracefully() -> None:
     """Happy: oversized repos degrade with a skip/partial rather than OOM."""
     module = require_module(RECOVERY_MODULE)
@@ -83,7 +66,6 @@ def test_giant_repositories_are_handled_gracefully() -> None:
     assert status in {"degraded", "skipped", "partial", "budget_exceeded"}
 
 
-@_W18
 def test_scm_publication_is_idempotent_without_using_webhook_transport() -> None:
     """Happy: duplicate publication is suppressed at the SCM layer (#361 owns webhooks)."""
     module = require_module(RECOVERY_MODULE)
@@ -98,7 +80,6 @@ def test_scm_publication_is_idempotent_without_using_webhook_transport() -> None
     assert "webhook" not in source.casefold() or "transport" not in source.casefold()
 
 
-@_W18
 def test_execution_is_resumable_where_correctness_permits() -> None:
     """Happy: a checkpointed run can resume."""
     module = require_module(RECOVERY_MODULE)
@@ -108,7 +89,6 @@ def test_execution_is_resumable_where_correctness_permits() -> None:
     assert status in {"resumed", "completed", "checkpointed"}
 
 
-@_W18
 def test_diagnostic_bundle_redacts_secrets(tmp_path: Path) -> None:
     """Error: automatic bundles never contain secret material."""
     module = require_module(BUNDLE_MODULE)
@@ -120,7 +100,6 @@ def test_diagnostic_bundle_redacts_secrets(tmp_path: Path) -> None:
     assert secret.encode("utf-8") not in data
 
 
-@_W18
 @pytest.mark.parametrize("mode", sorted(CLEANUP_FAILURE_MODES))
 def test_cleanup_runs_on_timeout_cancel_and_crashes(mode: str) -> None:
     """Happy: cleanup is invoked for each named failure mode."""
