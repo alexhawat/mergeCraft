@@ -175,7 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Evidence image uploads, issue comments, and PR label tools work on review-only runs again
 - Linked-repo contract breakage is included in ordinary PR checkout, not only `mergecraft xrepo explain`
-- Incoming GitHub and GitLab webhooks are authenticated and replay-protected before the event is processed
+- Incoming GitHub and GitLab webhooks fail closed without a configured secret, and stale HTTP `Date` values are rejected as replays before the event is processed
 - Untrusted download and clone URLs are SSRF-checked, and binary downloads pin DNS to the validated addresses
 - `bandit` now uses built-in `--format json` instead of the optional SARIF extra, so auto-enabled Python security coverage still runs on plain Bandit
 - `bundler-audit` now runs the gem CLI (`bundler-audit check --format json`) instead of `bundle audit`, so Ruby lockfile audits actually execute

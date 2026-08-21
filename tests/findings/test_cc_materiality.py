@@ -124,3 +124,23 @@ def test_precision_regression_gate_targets_blocker_precision_above_95() -> None:
     assert precision is not None
     assert float(precision) > 0.95
     assert getattr(report, "wired_into_releases", True) is True
+
+
+def test_precision_pipeline_orders_findings_by_materiality() -> None:
+    """Publication path ranks security findings above style commentary (#355)."""
+    from mergecraft.findings.precision_pipeline import apply_precision_pipeline
+
+    security = make_finding(
+        category="Security & Privacy",
+        severity="Major",
+        message="token logged",
+        fingerprint="sec-pipe",
+    )
+    style = make_finding(
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        message="rename local",
+        fingerprint="style-pipe",
+    )
+    ordered = apply_precision_pipeline([style, security], dedupe=False)
+    assert ordered[0].fingerprint == security.fingerprint

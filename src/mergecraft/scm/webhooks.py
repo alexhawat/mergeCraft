@@ -10,6 +10,7 @@ Exports:
     reject_webhook_replay: Reject stale timestamps and reused nonces.
     sign_webhook_payload: Produce provider signature headers for a body.
     verify_webhook_signature: Timing-safe HMAC check for a supported provider.
+    webhook_timestamp_skew_seconds: Measure replay skew from the HTTP Date header.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ import hashlib
 import hmac
 import threading
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 SUPPORTED_WEBHOOK_PROVIDERS: frozenset[str] = frozenset({"github", "gitlab"})
@@ -160,6 +163,28 @@ def sign_webhook_payload(provider: str, *, body: bytes, secret: str) -> dict[str
     return {_signature_header_name(name): _format_signature(name, digest)}
 
 
+def webhook_timestamp_skew_seconds(headers: dict[str, str]) -> int:
+    """Return absolute seconds between the HTTP ``Date`` header and now.
+
+    GitHub and GitLab deliveries do not carry a dedicated signed timestamp
+    header; the HTTP ``Date`` is the replay window the ingress can measure.
+    Missing or unparsable ``Date`` fails closed.
+    """
+    raw = _header(headers, "Date")
+    if raw is None or not raw.strip():
+        msg = "missing webhook timestamp"
+        raise ValueError(msg)
+    try:
+        sent = parsedate_to_datetime(raw)
+    except (TypeError, ValueError) as exc:
+        msg = "invalid webhook timestamp"
+        raise ValueError(msg) from exc
+    if sent.tzinfo is None:
+        sent = sent.replace(tzinfo=UTC)
+    now = datetime.now(UTC)
+    return int(abs((now - sent).total_seconds()))
+
+
 def verify_webhook_signature(
     provider: str,
     *,
@@ -168,6 +193,9 @@ def verify_webhook_signature(
     secret: str,
 ) -> None:
     """Accept a matching GitHub HMAC or GitLab shared secret; reject otherwise."""
+    if not secret.strip():
+        msg = "missing webhook secret"
+        raise PermissionError(msg)
     name = _require_supported(provider)
     if name == "gitlab":
         presented = _header(headers, _GITLAB_TOKEN_HEADER)
@@ -307,4 +335,5 @@ __all__ = [
     "verify_webhook_signature",
     "webhook_delivery_id",
     "webhook_event_name",
+    "webhook_timestamp_skew_seconds",
 ]

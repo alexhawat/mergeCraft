@@ -1,4 +1,4 @@
-"""DG1 precision pipeline — compose dedup, rubric, and causality."""
+"""DG1 precision pipeline — compose dedup, rubric, causality, and materiality."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Literal
 
 from mergecraft.findings.causality import apply_causality_policy
 from mergecraft.findings.dedup import dedupe_findings
+from mergecraft.findings.materiality import prioritize_findings
 from mergecraft.findings.severity_rubric import apply_severity_rubric
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ def apply_precision_pipeline(
             repo_root=repo_root,
             trust_tier=trust_tier,
         )
-    return adjusted
+    return list(prioritize_findings(adjusted))
 
 
 __all__ = ["apply_precision_pipeline"]

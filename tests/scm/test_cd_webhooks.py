@@ -7,9 +7,12 @@ adapter.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from tests.ci.workflow_support import REPO_ROOT
 from tests.support.cd_batch import (
     SUPPORTED_WEBHOOK_PROVIDERS,
@@ -19,6 +22,11 @@ from tests.support.cd_batch import (
     require_module,
 )
 from tests.support.dead_package_wiring import SRC_ROOT
+
+
+def _http_date(*, stale_seconds: int = 0) -> str:
+    sent = datetime.now(UTC) - timedelta(seconds=stale_seconds)
+    return format_datetime(sent, usegmt=True)
 
 
 def test_ci_gitlab_log_adapter_is_not_an_scm_webhook_surface() -> None:
@@ -76,6 +84,19 @@ def test_webhook_signature_verification_rejects_a_bad_hmac() -> None:
             body=b'{"ok":true}',
             secret="test-secret",
         )
+
+
+def test_webhook_signature_verification_rejects_an_empty_secret() -> None:
+    """Error: a blank/whitespace secret fails closed, even if HMAC would match."""
+    module = require_module(WEBHOOK_MODULE)
+    verify = require_callable(module, "verify_webhook_signature")
+    signed = require_callable(module, "sign_webhook_payload")(
+        "github", body=b'{"ok":true}', secret=""
+    )
+    with pytest.raises(PermissionError, match=r"missing webhook secret"):
+        verify("github", headers=signed, body=b'{"ok":true}', secret="")
+    with pytest.raises(PermissionError, match=r"missing webhook secret"):
+        verify("gitlab", headers={"X-Gitlab-Token": ""}, body=b"{}", secret="  ")
 
 
 def test_gitlab_webhook_token_is_shared_secret_equality_not_hmac() -> None:
@@ -237,7 +258,12 @@ def test_webhook_ingress_verifies_then_processes_a_valid_payload() -> None:
     signed = require_callable(module, "sign_webhook_payload")(
         "github", body=body, secret="ingress-secret"
     )
-    headers = {**signed, "X-GitHub-Delivery": "ing-valid-1", "X-GitHub-Event": "pull_request"}
+    headers = {
+        **signed,
+        "X-GitHub-Delivery": "ing-valid-1",
+        "X-GitHub-Event": "pull_request",
+        "Date": _http_date(),
+    }
     first = accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
     assert first.duplicate is False
     with pytest.raises(
@@ -245,6 +271,102 @@ def test_webhook_ingress_verifies_then_processes_a_valid_payload() -> None:
         match=r"replay|timestamp|nonce|stale",
     ):
         accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
+
+
+def test_webhook_ingress_rejects_a_stale_http_date() -> None:
+    """Error: ingress measures replay skew from HTTP Date, not a default of 0."""
+    from mergecraft.scm.ingress import accept_webhook
+
+    module = require_module(WEBHOOK_MODULE)
+    body = b'{"action":"opened"}'
+    signed = require_callable(module, "sign_webhook_payload")(
+        "github", body=body, secret="ingress-secret"
+    )
+    headers = {
+        **signed,
+        "X-GitHub-Delivery": "ing-stale-date-1",
+        "X-GitHub-Event": "pull_request",
+        "Date": _http_date(stale_seconds=86_400),
+    }
+    with pytest.raises(
+        (ValueError, PermissionError, RuntimeError),
+        match=r"replay|timestamp|nonce|stale",
+    ):
+        accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
+
+
+def test_http_webhook_route_rejects_empty_secret_for_github_and_gitlab(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP /webhooks/{provider} fails closed when MERGECRAFT_WEBHOOK_SECRET is unset."""
+    from mergecraft.mcp.server import create_mcp_app
+    from mergecraft.scm.webhooks import sign_webhook_payload
+
+    monkeypatch.delenv("MERGECRAFT_WEBHOOK_SECRET", raising=False)
+    client = TestClient(create_mcp_app([]))
+    body = b'{"ok":true}'
+    github_hmac = sign_webhook_payload("github", body=body, secret="")
+    github = client.post(
+        "/webhooks/github",
+        content=body,
+        headers={
+            **github_hmac,
+            "X-GitHub-Delivery": "http-empty-secret-gh",
+            "X-GitHub-Event": "ping",
+            "Date": _http_date(),
+        },
+    )
+    assert github.status_code == 401
+    assert "secret" in github.json()["error"].casefold()
+    gitlab = client.post(
+        "/webhooks/gitlab",
+        content=body,
+        headers={
+            "X-Gitlab-Token": "",
+            "X-Gitlab-Event-UUID": "http-empty-secret-gl",
+            "X-Gitlab-Event": "Push Hook",
+            "Date": _http_date(),
+        },
+    )
+    assert gitlab.status_code == 401
+    assert "secret" in gitlab.json()["error"].casefold()
+
+
+def test_http_webhook_route_accepts_signed_github_and_gitlab_deliveries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP /webhooks/{provider} authenticates both providers when a secret is set."""
+    from mergecraft.mcp.server import create_mcp_app
+    from mergecraft.scm.webhooks import sign_webhook_payload
+
+    secret = "route-secret"
+    monkeypatch.setenv("MERGECRAFT_WEBHOOK_SECRET", secret)
+    client = TestClient(create_mcp_app([]))
+    body = b'{"ok":true}'
+    github = client.post(
+        "/webhooks/github",
+        content=body,
+        headers={
+            **sign_webhook_payload("github", body=body, secret=secret),
+            "X-GitHub-Delivery": "http-ok-gh",
+            "X-GitHub-Event": "ping",
+            "Date": _http_date(),
+        },
+    )
+    assert github.status_code == 200
+    assert github.json()["duplicate"] is False
+    gitlab = client.post(
+        "/webhooks/gitlab",
+        content=body,
+        headers={
+            **sign_webhook_payload("gitlab", body=body, secret=secret),
+            "X-Gitlab-Event-UUID": "http-ok-gl",
+            "X-Gitlab-Event": "Push Hook",
+            "Date": _http_date(),
+        },
+    )
+    assert gitlab.status_code == 200
+    assert gitlab.json()["duplicate"] is False
 
 
 def test_webhook_module_does_not_import_ci_gitlab_log_adapter() -> None:
