@@ -70,20 +70,26 @@ def git_ls_tree_paths(
 
 
 def git_show_text(repo_root: Path, tree_sha: str, rel_path: str) -> str | None:
-    """Return file text at ``tree_sha:rel_path``, or ``None`` when absent."""
+    """Return file text at ``tree_sha:rel_path``, or ``None`` when absent or binary.
+
+    Reads bytes and decodes with replacement so a PNG or other non-UTF-8 blob
+    cannot raise ``UnicodeDecodeError`` and abort a whole tree walk.
+    """
     try:
         completed = subprocess.run(
             ["git", "show", f"{tree_sha}:{rel_path}"],
             cwd=repo_root,
             capture_output=True,
-            text=True,
             check=False,
         )
     except OSError:
         return None
     if completed.returncode != 0:
         return None
-    return completed.stdout
+    raw = completed.stdout
+    if b"\x00" in raw:
+        return None
+    return raw.decode("utf-8", errors="replace")
 
 
 def git_blob_sha(repo_root: Path, tree_sha: str, rel_path: str) -> str:

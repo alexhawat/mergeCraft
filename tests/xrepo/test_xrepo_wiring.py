@@ -360,3 +360,62 @@ def test_ignored_worktree_file_is_not_indexed_as_pinned_sha(tmp_path: Path) -> N
     assert all(
         finding.impact.changed_contract.operation_id != "sneakyOp" for finding in review.findings
     )
+
+
+_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + bytes(range(256))
+
+
+def test_tracked_binary_blob_does_not_suppress_producer_findings(tmp_path: Path) -> None:
+    """A committed PNG in the producer must not wipe linked-repo findings."""
+    from mergecraft.xrepo.review import review_linked_repos
+
+    primary = tmp_path / "primary"
+    contracts = tmp_path / "api-contracts"
+    consumer = tmp_path / "web-client"
+    primary.mkdir()
+    write_contract_fixture_repo(contracts)
+    (contracts / "logo.png").write_bytes(_PNG_BYTES)
+    pin = git_commit_all(contracts)
+    consumer_commit = write_cross_repo_consumer_fixture(
+        contracts_root=contracts,
+        consumer_root=consumer,
+        contracts_commit=pin,
+    )
+    write_linked_repos_manifest(
+        primary,
+        repos=[
+            {"owner": "acme", "name": "api-contracts", "commit": pin},
+            {"owner": "acme", "name": "web-client", "commit": consumer_commit},
+        ],
+    )
+    review = review_linked_repos(repo_root=primary, producer="acme/api-contracts")
+    assert review.findings
+    assert any("web-client" in finding.impact.repo for finding in review.findings)
+
+
+def test_tracked_binary_blob_does_not_suppress_consumer_findings(tmp_path: Path) -> None:
+    """A committed PNG in the consumer must not wipe linked-repo findings."""
+    from mergecraft.xrepo.review import review_linked_repos
+
+    primary = tmp_path / "primary"
+    contracts = tmp_path / "api-contracts"
+    consumer = tmp_path / "web-client"
+    primary.mkdir()
+    pin = write_contract_fixture_repo(contracts)
+    write_cross_repo_consumer_fixture(
+        contracts_root=contracts,
+        consumer_root=consumer,
+        contracts_commit=pin,
+    )
+    (consumer / "logo.png").write_bytes(_PNG_BYTES)
+    consumer_commit = git_commit_all(consumer)
+    write_linked_repos_manifest(
+        primary,
+        repos=[
+            {"owner": "acme", "name": "api-contracts", "commit": pin},
+            {"owner": "acme", "name": "web-client", "commit": consumer_commit},
+        ],
+    )
+    review = review_linked_repos(repo_root=primary, producer="acme/api-contracts")
+    assert review.findings
+    assert any("web-client" in finding.impact.repo for finding in review.findings)
