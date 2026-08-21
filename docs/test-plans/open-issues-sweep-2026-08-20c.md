@@ -472,7 +472,7 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - Deleted W14 current-state pin: `test_egress_and_ssrf_module_does_not_exist_yet`.
 - Left W17–W20 xfails in place. D10/D14 MCP-auth pin and `make security` pin kept.
 - W16 impl: `2f142694`.
-- W16 recon: pending commit.
+- W16 recon: `81a83716`.
 
 ## Acceptance (W16 recon)
 
