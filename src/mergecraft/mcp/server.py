@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import secrets
 import socket
 import threading
@@ -88,6 +89,8 @@ from mergecraft.mcp.shared import (
     ToolResult,
     ToolSpec,
     admits_readonly_role,
+    bind_selected_mode,
+    reset_selected_mode,
 )
 from mergecraft.mcp.shell import detect_sandbox_method, kill_background_tool, shell_tool
 from mergecraft.mcp.static_checks import run_static_checks_tool
@@ -98,6 +101,7 @@ from mergecraft.mcp.verification import (
     verify_agent_findings_tool,
 )
 from mergecraft.mcp.xrepo import checkout_repo_tool, list_repos_tool
+from mergecraft.scm.ingress import accept_webhook
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -506,6 +510,8 @@ def _register_mcp_route(
                 call_attrs["mergecraft.agent.id"] = agent_id
             with tracer.start_span("tool.call", attrs_source=lambda: dict(call_attrs)) as _span:
                 enrich_tool_request(_span, arguments=arguments)
+                mode = tool_ctx.tool_state.selected_mode if tool_ctx is not None else None
+                mode_token = bind_selected_mode(mode)
                 try:
                     result = await tool.execute(arguments)
                 except Exception as exc:
@@ -513,6 +519,8 @@ def _register_mcp_route(
                     enrich_tool_response(_span, output=None, error=exc)
                     _record_trajectory(tool_ctx, name, arguments, ok=False, error=str(exc))
                     raise
+                finally:
+                    reset_selected_mode(mode_token)
                 enrich_tool_response(_span, output=result)
                 _record_trajectory(tool_ctx, name, arguments, ok=True, result=result)
                 # T1 / D5 — known-verb tools also emit a verb-specific child
@@ -624,6 +632,26 @@ def create_mcp_app(
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/webhooks/{provider}")
+    async def inbound_webhook(provider: str, request: Request) -> JSONResponse:
+        secret = os.environ.get("MERGECRAFT_WEBHOOK_SECRET", "")
+        body = await request.body()
+        headers = {key: value for key, value in request.headers.items()}
+        try:
+            result = accept_webhook(provider, headers=headers, body=body, secret=secret)
+        except PermissionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=401)
+        except (ValueError, json.JSONDecodeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(
+            {
+                "result_id": result.result_id,
+                "duplicate": result.duplicate,
+                "provider": result.provider,
+                "event": result.event,
+            }
+        )
 
     primary_token = orchestrator_auth_token if orchestrator_auth_token is not None else auth_token
     if tools:

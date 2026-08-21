@@ -1314,4 +1314,4 @@ full record behind that summary.
 - **Catalog C6:** P1–P3 long-tail manifests (35 tools), generated ``docs/ANALYZERS.md`` with
   CI ``catalog-check`` gate, ``docs/CONTRIBUTING-ANALYZERS.md``, and ``mergecraft analyzers``
   CLI (list/detect/run/explain/export/lock).
-- Initial mergeCraft snapshot from pullfrog-py (history-free rebrand).
+- Initial mergeCraft snapshot (history-free).

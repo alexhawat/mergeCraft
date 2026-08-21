@@ -1,5 +1,9 @@
 # Contributing
 
+Contributor setup, make targets, and PR expectations for mergeCraft itself.
+
+**Audience:** contributor
+
 ## Setup
 
 ```bash
@@ -154,3 +158,9 @@ gh attestation verify \
 
 SBOM and Trivy SARIF reports are attached to the CI/CD run as the
 `image-scan-reports` artifact.
+
+## See also
+
+- [docs/README.md](docs/README.md) — generated documentation index
+- [REVIEW-CHECKS.md](REVIEW-CHECKS.md) — review checks mergeCraft applies on PRs
+- [Landing README](README.md) — consumer install and feature overview

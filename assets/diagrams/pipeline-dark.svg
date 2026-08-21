@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 210" role="img" aria-label="mergeCraft review pipeline">
+  <rect width="920" height="210" fill="#181513"/>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#5fb1f7"/>
+    </marker>
+  </defs>
+  <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#ece7e1">
+    <rect x="8" y="58" width="88" height="44" rx="6" fill="#2a7fc6" stroke="#5fb1f7"/>
+    <text x="52" y="84" text-anchor="middle" fill="#fbf9f6" font-weight="600">PR event</text>
+    <rect x="118" y="58" width="88" height="44" rx="6" fill="#252220" stroke="#5fb1f7"/>
+    <text x="162" y="84" text-anchor="middle">Trust tier</text>
+    <rect x="228" y="58" width="88" height="44" rx="6" fill="#252220" stroke="#5fb1f7"/>
+    <text x="272" y="84" text-anchor="middle">Analyzers</text>
+    <rect x="338" y="58" width="96" height="44" rx="6" fill="#252220" stroke="#5fb1f7"/>
+    <text x="386" y="84" text-anchor="middle">Review agent</text>
+    <rect x="456" y="58" width="88" height="44" rx="6" fill="#252220" stroke="#ff3b3b"/>
+    <text x="500" y="84" text-anchor="middle" fill="#ff3b3b" font-weight="600">Verifier</text>
+    <rect x="566" y="58" width="104" height="44" rx="6" fill="#252220" stroke="#5fb1f7"/>
+    <text x="618" y="84" text-anchor="middle" font-weight="600">Typed findings</text>
+    <line x1="96" y1="80" x2="114" y2="80" stroke="#5fb1f7" stroke-width="2" marker-end="url(#arrow)"/>
+    <line x1="206" y1="80" x2="224" y2="80" stroke="#5fb1f7" stroke-width="2" marker-end="url(#arrow)"/>
+    <line x1="316" y1="80" x2="334" y2="80" stroke="#5fb1f7" stroke-width="2" marker-end="url(#arrow)"/>
+    <line x1="434" y1="80" x2="452" y2="80" stroke="#5fb1f7" stroke-width="2" marker-end="url(#arrow)"/>
+    <line x1="544" y1="80" x2="562" y2="80" stroke="#5fb1f7" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="566" y="142" width="104" height="36" rx="6" fill="#252220" stroke="#5fb1f7"/>
+    <text x="618" y="164" text-anchor="middle">Approval status</text>
+    <rect x="688" y="142" width="104" height="36" rx="6" fill="#252220" stroke="#5fb1f7"/>
+    <text x="740" y="164" text-anchor="middle">Inline comments</text>
+    <rect x="810" y="142" width="96" height="36" rx="6" fill="#252220" stroke="#5fb1f7"/>
+    <text x="858" y="164" text-anchor="middle">SARIF (opt-in)</text>
+    <line x1="618" y1="102" x2="618" y2="138" stroke="#5fb1f7" stroke-width="2" marker-end="url(#arrow)"/>
+    <line x1="650" y1="102" x2="740" y2="138" stroke="#5fb1f7" stroke-width="2" marker-end="url(#arrow)"/>
+    <line x1="670" y1="102" x2="858" y2="138" stroke="#5fb1f7" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+</svg>

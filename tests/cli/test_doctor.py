@@ -90,6 +90,27 @@ def test_exits_nonzero_on_a_hard_failure(tmp_path: Path, monkeypatch: MonkeyPatc
     assert "config" in output.lower(), output
 
 
+def test_doctor_rejects_unknown_schema_version_via_migrate_config(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Doctor validates config through ``migrate_config`` (unknown versions fail closed)."""
+    _init_git_repo(tmp_path)
+    cfg_dir = tmp_path / ".mergecraft"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text("schema_version: '999.0.0'\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["doctor"],
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    output = _plain(result.stdout + result.stderr)
+    assert result.exit_code != 0, output
+    assert "schema" in output.lower() or "validation" in output.lower()
+
+
 def test_never_prints_a_credential_value(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Doctor reports auth presence but never echoes credential material."""
     _init_git_repo(tmp_path)

@@ -1,7 +1,7 @@
 # Review doctrine
 
-Reasoning extracted from pullfrog-py history (`review_checks.py`, `review_taxonomy.py`,
-`mcp/static_checks.py`, `REVIEW-CHECKS.md`) before the mergeCraft snapshot. W2 and W5
+Review-check reasoning from `review_checks.py`, `review_taxonomy.py`,
+`mcp/static_checks.py`, and `REVIEW-CHECKS.md`. W2 and W5
 build on these decisions — they are not recoverable from code alone.
 
 ## Mechanical gates vs findings
@@ -101,8 +101,7 @@ config names; on a pull request those are commands the PR author controls. Offli
 
 ## Provenance
 
-Harvested from pullfrog-py `origin/main` commits `bff76e7` (feat/review-triage-and-mechanical-gates)
-and `31441ce` (fix/static-check-availability-and-shell-gate), PR #20.
+Recorded from the review-triage and mechanical-gates work (PR #20).
 
 ## Green is evidence, not proof (#41, W2)
 
@@ -338,4 +337,4 @@ See also [`REVIEW-CHECKS.md`](../REVIEW-CHECKS.md#terminal-verdict-vs-structural
 
 ## Provenance
 
-(Harvested from pullfrog-py commits; see the heading above for sources.)
+(See the heading above for sources.)

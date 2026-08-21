@@ -11,9 +11,9 @@
 # Edits land first here (and any future `MERGECRAFT_REF` Makefile rule in this
 # repo, when added), then mirror to the sevn copy.
 #
-# Replaces the upstream pullfrog/pullfrog action AND CodeRabbit. Auto-reviews PRs
-# on open / ready / new commits, posting inline comments + a summary as
-# github-actions[bot], plus opt-in `mergecraft` / `mergecraft-approval` check-runs.
+# Auto-reviews PRs on open / ready / new commits, posting inline comments
+# plus a summary as github-actions[bot], and opt-in `mergecraft` /
+# `mergecraft-approval` check-runs.
 # The enforce step below fails the job unless `mergecraft-approval` is a
 # confirmed "success" (outstanding feedback, no check posted at all, and an
 # unreachable check-runs API after retries all fail closed — see that step).

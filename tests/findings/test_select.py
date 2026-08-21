@@ -128,10 +128,10 @@ def test_empty_thread_is_skipped() -> None:
     assert carryover_findings([{"threadId": "T9", "comments": []}]) == []
 
 
-def test_strip_marker_tolerates_the_legacy_prefix() -> None:
-    legacy = "Body text.\n\n<!-- pullfrog-finding:v1:abc123 -->"
+def test_strip_marker_removes_the_finding_prefix() -> None:
+    stamped = "Body text.\n\n<!-- mergecraft-finding:v1:abc123 -->"
 
-    assert strip_marker(legacy) == "Body text."
+    assert strip_marker(stamped) == "Body text."
 
 
 def test_issue_title_names_the_pr_and_the_anchor() -> None:

@@ -251,6 +251,11 @@ def sink_factory(tracing_settings: Any) -> Any:
 
     if not children:
         return NullSink()
+    from mergecraft.tracing.exporters import dedupe_otlp_sinks
+
+    children = dedupe_otlp_sinks(children)
+    if not children:
+        return NullSink()
     resolved = RedactingSink(MultiSink(children))
     _PENDING_SINK.set(resolved)
     return resolved

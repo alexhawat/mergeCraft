@@ -80,6 +80,7 @@ dev = [
 packages = ["src/mergecraft"]
 artifacts = [
     "src/mergecraft/skills/**/*.md",
+    "src/mergecraft/policy/packs/**/*.yaml",
 ]
 
 [tool.hatch.build.targets.sdist]

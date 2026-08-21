@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 # body was suppressed) at least one finding marker. Reviews from humans and other
 # bots carry neither, and their commit ids must never be mistaken for "the head
 # mergeCraft last reviewed".
-_MERGECRAFT_REVIEW_MARKERS = ("*via mergecraft*", "mergecraft-finding:v1:", "pullfrog-finding:v1:")
+_MERGECRAFT_REVIEW_MARKERS = ("*via mergecraft*", "mergecraft-finding:v1:")
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<to>.+)$", re.MULTILINE)
@@ -318,6 +318,21 @@ def checkout_pr_tool(ctx: ToolContext):
                         )
         except Exception as imp_err:
             logger.info("impact extraction soft-failed: {}", imp_err)
+
+        try:
+            from mergecraft.review.linked_repos import (
+                attach_linked_repo_review,
+                operator_authorized_linked_repos,
+            )
+
+            linked = attach_linked_repo_review(
+                Path(cwd),
+                authorized_repos=operator_authorized_linked_repos(),
+            )
+            if linked is not None:
+                result.update(linked)
+        except Exception as xrepo_err:
+            logger.info("linked-repo review soft-failed: {}", xrepo_err)
 
         logger.info("checked out PR #{} -> {}", pull_number, local_branch)
         ctx.tool_state.review_phase = "ESTABLISH_SCOPE"

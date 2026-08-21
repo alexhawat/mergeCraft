@@ -1,4 +1,4 @@
-"""``mergecraft context`` — inspect retrieved review context."""
+"""``mergecraft context`` — inspect, search, and explain retrieved review context."""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ import typer
 from rich.table import Table
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.context.change_graph import ChangedSymbol, resolve_change_graph
+from mergecraft.context.operator import lazy_retrieve, score_relevance
 from mergecraft.context.provenance import ContextItem, inspect_context
 from mergecraft.context.repo_paths import git_blob_sha, git_show_text
 from mergecraft.context.symbol_index import index_symbols
@@ -135,4 +138,57 @@ def inspect_cmd(
     console.print(f"\n[bold]Token total[/bold]: {report.total_tokens}")
 
 
-__all__ = ["app", "inspect_cmd"]
+@app.command("search")
+def search_cmd(
+    query: str = typer.Argument(help="Search query over retrieved review context."),
+    repo_root: Path = typer.Option(
+        Path("."),
+        "--repo-root",
+        help="Repository root to search (output-only).",
+    ),
+) -> None:
+    """Search retrieved review context for a query."""
+    if not query.strip():
+        cli_bail("search query is required", code=CLI_USAGE_EXIT_CODE)
+    root = repo_root.expanduser().resolve()
+    retrieval = lazy_retrieve(query=query, tools_allowed=("search",), repo_root=root)
+    if retrieval.omitted:
+        cli_bail("search is not available", code=CLI_USAGE_EXIT_CODE)
+    if not retrieval.items:
+        typer.echo(f"No indexed hits for {query!r}.")
+        return
+    for rel in retrieval.items:
+        score = score_relevance(query=query, item={"text": rel})
+        typer.echo(f"{score:.3f}\t{rel}")
+
+
+@app.command("explain")
+def explain_cmd(
+    query: str = typer.Argument(
+        default="",
+        help="Optional symbol or path to explain.",
+    ),
+    repo_root: Path = typer.Option(
+        Path("."),
+        "--repo-root",
+        help="Repository root to explain (output-only).",
+    ),
+) -> None:
+    """Explain why retrieved context was selected for a review."""
+    root = repo_root.expanduser().resolve()
+    scope = query.strip() or str(root)
+    typer.echo(
+        "\n".join(
+            [
+                "# Context explain",
+                "",
+                f"Scope: {scope}",
+                "Retrieval is tool-gated (search) with per-specialist budgets.",
+                "Omitted scope downgrades the evidence outcome.",
+                "",
+            ]
+        )
+    )
+
+
+__all__ = ["app", "explain_cmd", "inspect_cmd", "search_cmd"]

@@ -14,6 +14,7 @@ from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
+from mergecraft.security.egress import SsrfBlockedError, guard_external_url
 from mergecraft.utils.git_setup import git_env_for_token, scrub_clone_credentials
 from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff
 from mergecraft.utils.workspace import register_workspace_root
@@ -89,6 +90,11 @@ def validate_clone_url(url: str) -> None:
     if host and host not in ALLOWED_HOSTS:
         msg = f"host not allowlisted: {host!r}"
         raise CloneUrlError(msg)
+    if scheme in {"http", "https"}:
+        try:
+            guard_external_url(url if "://" in url else f"https://{url}")
+        except SsrfBlockedError as exc:
+            raise CloneUrlError(str(exc)) from exc
 
 
 def _run_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:

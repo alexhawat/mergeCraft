@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable, Mapping
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Final, Literal
@@ -82,11 +83,48 @@ PRIMARY_MUTATING_ALLOWLIST: Final[frozenset[str]] = READONLY_MUTATING_ALLOWLIST 
         "set_output",
         "select_mode",
         "report_progress",
-        # C6: primary must be able to persist verifier verdicts (REVIEW_WRITE + mutates=True).
+        # C6: primary must persist verifier verdicts (REVIEW_WRITE + mutates).
         # Subagents keep READONLY_MUTATING_ALLOWLIST so they remain denied this write.
         "record_finding_verdict",
     }
 )
+# Session tools that must run in review-only (including before select_mode).
+# Publication and labeling do not edit the reviewed tree; they stay available
+# after write-capable modes were dropped from the production registry.
+# Every other mutates=True tool is default-denied unless a write-capable mode
+# is selected (none are registered in production).
+_REVIEW_SESSION_MUTATIONS: Final[frozenset[str]] = PRIMARY_MUTATING_ALLOWLIST | frozenset(
+    {
+        "upload_file",
+        "add_labels",
+        "remove_labels",
+        "create_issue_comment",
+    }
+)
+
+_selected_mode_var: ContextVar[str | None] = ContextVar(
+    "mergecraft_mcp_selected_mode", default=None
+)
+
+
+def bind_selected_mode(mode: str | None) -> Token[str | None]:
+    """Bind the run's selected mode for mutating-tool gates (MCP request scope)."""
+    return _selected_mode_var.set(mode)
+
+
+def reset_selected_mode(token: Token[str | None]) -> None:
+    """Restore the selected-mode binding from :func:`bind_selected_mode`."""
+    _selected_mode_var.reset(token)
+
+
+def guard_mutating_tool(tool_name: str, *, selected_mode: str | None = None) -> None:
+    """Refuse tree/repo mutations unless a write-capable mode is selected."""
+    if tool_name in _REVIEW_SESSION_MUTATIONS:
+        return
+    from mergecraft.modes import refuse_review_only_mutation
+
+    mode = selected_mode if selected_mode is not None else _selected_mode_var.get()
+    refuse_review_only_mutation(mode, action=tool_name)
 
 
 def repository_mutation_class_for_push(
@@ -170,11 +208,23 @@ def tool(
     annotations: dict[str, Any] | None = None,
     timeout_ms: int | None = None,
 ) -> ToolSpec:
+    handler = execute
+    if mutates:
+        inner = execute
+
+        async def _gated(params: Mapping[str, Any]) -> Any:
+            try:
+                guard_mutating_tool(name)
+            except Exception as error:
+                return handle_tool_error(error)
+            return await inner(params)
+
+        handler = _gated
     return ToolSpec(
         name=name,
         description=description,
         input_schema=input_schema,
-        execute=execute,
+        execute=handler,
         tool_class=tool_class,
         mutates=mutates,
         annotations=annotations or {},
@@ -204,7 +254,11 @@ def get_http_status(err: object) -> int | None:
 
 
 def execute(fn: ToolBody, tool_name: str | None = None) -> ToolHandler:
-    """Wrap a tool body with success/error ToolResult handling."""
+    """Wrap a tool body with success/error ToolResult handling.
+
+    Mutation gating is applied once in :func:`tool` via ``guard_mutating_tool``.
+    Callers must not pass ``mutates`` here.
+    """
 
     async def _fn(params: Mapping[str, Any]) -> ToolResult:
         try:

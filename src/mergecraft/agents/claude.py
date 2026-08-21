@@ -47,6 +47,7 @@ from mergecraft.tracing.genai import (
     output_messages_attrs,
     request_attrs,
     resolve_capture_policy,
+    response_attrs,
     thinking_attrs,
 )
 from mergecraft.tracing.redaction import redact_tool_payload
@@ -337,6 +338,7 @@ def _claude_stream_event_handler(
     tracer: Tracer | None,
     parent_span_id: str | None,
     model_id: str,
+    resolved_model: str | None = None,
     capture_policy: ContentCapture | None = None,
 ) -> tuple[Any, Callable[[], None]]:
     """Build a per-event handler that emits ``tool.call`` / ``llm.call`` spans.
@@ -417,8 +419,11 @@ def _claude_stream_event_handler(
                     int(usage_payload.get("output_tokens") or 0),
                 )
                 span.set_attribute("gen_ai.operation.name", "chat")
-                span.set_attribute("gen_ai.request.model", model_id)
-                span.set_attribute("gen_ai.response.model", model_id)
+                span.set_attribute("gen_ai.system", "anthropic")
+                tracing_model = resolved_model or model_id
+                span.set_attribute("gen_ai.request.model", tracing_model)
+                for key, value in response_attrs(model=tracing_model).items():
+                    span.set_attribute(key, value)
                 # O4 (OB3) — the one request knob the claude harness
                 # exposes: the effort level mergeCraft itself passes as
                 # ``--effort``. No stable OTel name → mergecraft.*.
@@ -827,6 +832,7 @@ def _run_claude_once(
         tracer=tracer,
         parent_span_id=None,
         model_id=model or "default",
+        resolved_model=ctx.resolved_model,
         capture_policy=capture_policy,
     )
 

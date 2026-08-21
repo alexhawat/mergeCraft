@@ -22,7 +22,7 @@ import mergecraft.mcp.git as git_mod
 from mergecraft.mcp.server import build_orchestrator_tools
 from tests.security.conftest import PUSH_MODES, SHELL_MODES
 from tests.support.run_main_harness import FakeGitHubClient
-from tests.support.tool_context import github_client_from_ctx
+from tests.support.tool_context import github_client_from_ctx, write_capable_mcp_mode
 
 CELL_IDS = [f"shell-{s}__push-{p}" for s in SHELL_MODES for p in PUSH_MODES]
 CELLS = [(s, p) for s in SHELL_MODES for p in PUSH_MODES]
@@ -97,7 +97,8 @@ async def test_push_branch_fail_closed_when_push_disabled(
     """W4.2 — ``push=disabled`` refuses the push *before* any git invocation."""
     ctx = make_tool_ctx(shell=shell, push=push)
     tools = {t.name: t for t in build_orchestrator_tools(ctx)}
-    result = await tools["push_branch"].execute({"branchName": "feature-x"})
+    with write_capable_mcp_mode():
+        result = await tools["push_branch"].execute({"branchName": "feature-x"})
     if push == "disabled":
         assert result.is_error, f"push_branch succeeded under push=disabled ({CELL_IDS})"
         assert "disabled" in result.content[0]["text"]
@@ -118,7 +119,8 @@ async def test_push_branch_to_default_branch_blocked_when_restricted(
 
     primary_repo_state(ctx.tool_state).default_branch = "main"
     tools = {t.name: t for t in build_orchestrator_tools(ctx)}
-    result = await tools["push_branch"].execute({"branchName": "main"})
+    with write_capable_mcp_mode():
+        result = await tools["push_branch"].execute({"branchName": "main"})
     assert result.is_error, "push to default branch allowed under push=restricted"
     assert "default branch" in result.content[0]["text"]
     assert not recording_git.push_attempts()
@@ -131,7 +133,8 @@ async def test_push_tags_fail_closed_when_push_disabled(
     """W4.2 — tag pushes are pushes."""
     ctx = make_tool_ctx(shell=shell, push="disabled")
     tools = {t.name: t for t in build_orchestrator_tools(ctx)}
-    result = await tools["push_tags"].execute({"tags": ["v9.9.9"]})
+    with write_capable_mcp_mode():
+        result = await tools["push_tags"].execute({"tags": ["v9.9.9"]})
     assert result.is_error, "push_tags succeeded under push=disabled"
     assert not recording_git.push_attempts()
 
@@ -147,7 +150,8 @@ async def test_delete_remote_branch_fail_closed_when_push_disabled(
     """
     ctx = make_tool_ctx(shell=shell, push="disabled")
     tools = {t.name: t for t in build_orchestrator_tools(ctx)}
-    result = await tools["delete_branch"].execute({"branchName": "feature-x", "remote": True})
+    with write_capable_mcp_mode():
+        result = await tools["delete_branch"].execute({"branchName": "feature-x", "remote": True})
     assert result.is_error, "remote delete_branch executed a push under push=disabled"
     assert not recording_git.push_attempts(), "delete push argv reached git despite policy"
 
@@ -162,7 +166,8 @@ async def test_delete_remote_default_branch_blocked_when_restricted(
     ctx = make_tool_ctx(shell=shell, push="restricted")
     primary_repo_state(ctx.tool_state).default_branch = "main"
     tools = {t.name: t for t in build_orchestrator_tools(ctx)}
-    result = await tools["delete_branch"].execute({"branchName": "main", "remote": True})
+    with write_capable_mcp_mode():
+        result = await tools["delete_branch"].execute({"branchName": "main", "remote": True})
     assert result.is_error, "remote delete of default branch allowed under push=restricted"
     assert not recording_git.push_attempts()
 
@@ -181,7 +186,8 @@ async def test_commit_changes_does_not_mutate_remote_ref_when_push_disabled(
     ctx = make_tool_ctx(shell=shell, push="disabled", signed_commits=True)
     tools = {t.name: t for t in build_orchestrator_tools(ctx)}
     commit = tools["commit_changes"]
-    await commit.execute({"message": "attempt remote mutation"})
+    with write_capable_mcp_mode():
+        await commit.execute({"message": "attempt remote mutation"})
     github: FakeGitHubClient = github_client_from_ctx(ctx)  # type: ignore[assignment]
     ref_mutations = [c for c in github.calls if c[0] == "patch" and "git/refs" in str(c[1])]
     assert not ref_mutations, f"API ref mutation attempted under push=disabled: {ref_mutations}"
@@ -200,7 +206,8 @@ async def test_commit_changes_does_not_mutate_default_branch_when_restricted(
     ctx = make_tool_ctx(shell=shell, push="restricted", signed_commits=True)
     primary_repo_state(ctx.tool_state).default_branch = "main"
     tools = {t.name: t for t in build_orchestrator_tools(ctx)}
-    await tools["commit_changes"].execute({"message": "attempt default-branch mutation"})
+    with write_capable_mcp_mode():
+        await tools["commit_changes"].execute({"message": "attempt default-branch mutation"})
     github: FakeGitHubClient = github_client_from_ctx(ctx)  # type: ignore[assignment]
     ref_mutations = [c for c in github.calls if c[0] == "patch" and "git/refs" in str(c[1])]
     assert not ref_mutations, (
@@ -214,6 +221,7 @@ async def test_local_delete_branch_still_allowed_when_push_disabled(
     """W4.2 edge — local branch deletion is not a push and stays available."""
     ctx = make_tool_ctx(shell="restricted", push="disabled")
     tools = {t.name: t for t in build_orchestrator_tools(ctx)}
-    result = await tools["delete_branch"].execute({"branchName": "old", "remote": False})
+    with write_capable_mcp_mode():
+        result = await tools["delete_branch"].execute({"branchName": "old", "remote": False})
     assert not result.is_error, result.content
     assert recording_git.calls[-1][:2] == ["branch", "-D"]

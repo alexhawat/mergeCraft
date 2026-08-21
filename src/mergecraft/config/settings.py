@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from mergecraft.classify import RuleSet
+from mergecraft.config.compat import CONFIG_SCHEMA_VERSION, migrate_config
 from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 
 AccountPlan = Literal["none", "payg"]
@@ -384,6 +385,7 @@ class RepoSettings(BaseModel):
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
+    schema_version: str = Field(default=CONFIG_SCHEMA_VERSION, alias="schemaVersion")
     # HA3 / D11 — explicit harness selection. When unset, ``utils/agent_resolve``
     # infers the runtime from the model slug (today's behaviour).
     harness: Literal["opencode", "codex", "claude", "gemini", "cursor"] | None = None
@@ -737,7 +739,7 @@ def load_repo_settings(
             msg = f"config must be a mapping, got {type(loaded).__name__}: {config_path}"
             raise ValueError(msg)
         else:
-            raw = loaded
+            raw = migrate_config(loaded)
 
     settings = _merge_settings(raw)
 

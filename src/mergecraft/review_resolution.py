@@ -21,7 +21,7 @@ import re
 from typing import Any, Final
 
 _FINDING_MARKER_RE: Final[re.Pattern[str]] = re.compile(
-    r"<!-- (?:pullfrog|mergecraft)-finding:v1:([0-9a-f]+) -->"
+    r"<!-- mergecraft-finding:v1:([0-9a-f]+) -->"
 )
 _FOOTER_MARKER: Final[str] = "*via mergecraft*"
 

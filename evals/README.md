@@ -1,5 +1,9 @@
 # mergeCraft evals
 
+Eval bank vs ReviewBench — what each mechanism measures and how to run gates.
+
+**Audience:** satellite (scoped README for one directory)
+
 ReviewBench-style benchmark infrastructure for mergecraft PR reviews.
 
 ## Two mechanisms, two jobs
@@ -174,3 +178,9 @@ The agent installs mergecraft with `uv tool install git+https://github.com/alexh
 
 Structured JSON output requires Batch A (`--json` on `diff-review`) — see
 [mergeCraft#30](https://github.com/alexhawat/mergeCraft/issues/30).
+
+## See also
+
+- [docs/eval-bank.md](../docs/eval-bank.md) — eval bank layout and CI gate semantics
+- [docs/README.md](../docs/README.md) — generated documentation index
+- [Landing README](../README.md) — consumer install and feature overview

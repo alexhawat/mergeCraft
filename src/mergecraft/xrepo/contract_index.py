@@ -5,9 +5,14 @@ from __future__ import annotations
 import ast
 import re
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003 — used at runtime for contract traversal
+from pathlib import Path
 
-from mergecraft.utils.bounded_text import iter_indexable_files, read_bounded_text
+from mergecraft.context.repo_paths import git_ls_tree_paths, git_show_text
+from mergecraft.utils.bounded_text import (
+    MAX_INDEX_TEXT_BYTES,
+    iter_indexable_files,
+    read_bounded_text,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,11 +54,7 @@ def _read_contract_text(path: Path) -> str | None:
     return read_bounded_text(path)
 
 
-def _index_openapi(path: Path, *, root: Path, commit_sha: str) -> list[ContractSurface]:
-    rel = _rel(path, root)
-    text = _read_contract_text(path)
-    if text is None:
-        return []
+def _index_openapi_text(rel: str, text: str, commit_sha: str) -> list[ContractSurface]:
     symbols = _OPERATION_ID_RE.findall(text)
     if symbols:
         return [
@@ -63,11 +64,7 @@ def _index_openapi(path: Path, *, root: Path, commit_sha: str) -> list[ContractS
     return [ContractSurface(path=rel, commit_sha=commit_sha, kind="openapi")]
 
 
-def _index_graphql(path: Path, *, root: Path, commit_sha: str) -> list[ContractSurface]:
-    rel = _rel(path, root)
-    text = _read_contract_text(path)
-    if text is None:
-        return []
+def _index_graphql_text(rel: str, text: str, commit_sha: str) -> list[ContractSurface]:
     symbols = _GRAPHQL_TYPE_RE.findall(text)
     if symbols:
         return [
@@ -77,11 +74,7 @@ def _index_graphql(path: Path, *, root: Path, commit_sha: str) -> list[ContractS
     return [ContractSurface(path=rel, commit_sha=commit_sha, kind="graphql")]
 
 
-def _index_protobuf(path: Path, *, root: Path, commit_sha: str) -> list[ContractSurface]:
-    rel = _rel(path, root)
-    text = _read_contract_text(path)
-    if text is None:
-        return []
+def _index_protobuf_text(rel: str, text: str, commit_sha: str) -> list[ContractSurface]:
     symbols = _PROTO_SERVICE_RE.findall(text)
     if symbols:
         return [
@@ -91,11 +84,7 @@ def _index_protobuf(path: Path, *, root: Path, commit_sha: str) -> list[Contract
     return [ContractSurface(path=rel, commit_sha=commit_sha, kind="protobuf")]
 
 
-def _index_exports(path: Path, *, root: Path, commit_sha: str) -> list[ContractSurface]:
-    rel = _rel(path, root)
-    text = _read_contract_text(path)
-    if text is None:
-        return []
+def _index_exports_text(rel: str, text: str, commit_sha: str) -> list[ContractSurface]:
     symbols: list[str] = []
     try:
         tree = ast.parse(text)
@@ -118,31 +107,61 @@ def _index_exports(path: Path, *, root: Path, commit_sha: str) -> list[ContractS
     ]
 
 
-def index_contracts(*, repo_root: Path, commit_sha: str) -> ContractIndex:
-    """Index OpenAPI, GraphQL, protobuf, and Python export surfaces."""
-    openapi: list[ContractSurface] = []
-    graphql: list[ContractSurface] = []
-    protobuf: list[ContractSurface] = []
-    exports: list[ContractSurface] = []
+def _surfaces_for_text(*, rel: str, text: str, commit_sha: str) -> list[ContractSurface]:
+    name = Path(rel).name.lower()
+    parts = Path(rel).parts
+    if name in _OPENAPI_GLOBS:
+        return _index_openapi_text(rel, text, commit_sha)
+    if name in _GRAPHQL_GLOBS:
+        return _index_graphql_text(rel, text, commit_sha)
+    if name.endswith(_PROTO_GLOBS[0]):
+        return _index_protobuf_text(rel, text, commit_sha)
+    if name == _EXPORT_INIT_GLOB and "src" in parts:
+        return _index_exports_text(rel, text, commit_sha)
+    return []
 
-    for path in iter_indexable_files(repo_root):
-        name = path.name.lower()
-        if name in _OPENAPI_GLOBS:
-            openapi.extend(_index_openapi(path, root=repo_root, commit_sha=commit_sha))
-        elif name in _GRAPHQL_GLOBS:
-            graphql.extend(_index_graphql(path, root=repo_root, commit_sha=commit_sha))
-        elif name.endswith(_PROTO_GLOBS[0]):
-            protobuf.extend(_index_protobuf(path, root=repo_root, commit_sha=commit_sha))
-        elif name == _EXPORT_INIT_GLOB and "src" in path.parts:
-            exports.extend(_index_exports(path, root=repo_root, commit_sha=commit_sha))
 
+def _collect_index(commit_sha: str, surfaces: list[ContractSurface]) -> ContractIndex:
+    openapi = tuple(item for item in surfaces if item.kind == "openapi")
+    graphql = tuple(item for item in surfaces if item.kind == "graphql")
+    protobuf = tuple(item for item in surfaces if item.kind == "protobuf")
+    exports = tuple(item for item in surfaces if item.kind == "export")
     return ContractIndex(
         commit_sha=commit_sha,
-        openapi=tuple(openapi),
-        graphql=tuple(graphql),
-        protobuf=tuple(protobuf),
-        exports=tuple(exports),
+        openapi=openapi,
+        graphql=graphql,
+        protobuf=protobuf,
+        exports=exports,
     )
 
 
-__all__ = ["ContractIndex", "ContractSurface", "index_contracts"]
+def index_contracts(*, repo_root: Path, commit_sha: str) -> ContractIndex:
+    """Index OpenAPI, GraphQL, protobuf, and Python export surfaces on disk."""
+    surfaces: list[ContractSurface] = []
+    for path in iter_indexable_files(repo_root):
+        text = _read_contract_text(path)
+        if text is None:
+            continue
+        surfaces.extend(
+            _surfaces_for_text(rel=_rel(path, repo_root), text=text, commit_sha=commit_sha)
+        )
+    return _collect_index(commit_sha, surfaces)
+
+
+def index_contracts_at_commit(*, repo_root: Path, commit_sha: str) -> ContractIndex:
+    """Index contract surfaces from the pinned git object, not the working tree."""
+    surfaces: list[ContractSurface] = []
+    for rel in git_ls_tree_paths(repo_root, commit_sha):
+        text = git_show_text(repo_root, commit_sha, rel, max_bytes=MAX_INDEX_TEXT_BYTES)
+        if text is None:
+            continue
+        surfaces.extend(_surfaces_for_text(rel=rel, text=text, commit_sha=commit_sha))
+    return _collect_index(commit_sha, surfaces)
+
+
+__all__ = [
+    "ContractIndex",
+    "ContractSurface",
+    "index_contracts",
+    "index_contracts_at_commit",
+]

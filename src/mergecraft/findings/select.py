@@ -30,9 +30,7 @@ from mergecraft.review_taxonomy import (
     finding_fingerprint,
 )
 
-_MARKER_RE: Final[re.Pattern[str]] = re.compile(
-    r"<!-- (?:pullfrog|mergecraft)-finding:v1:[0-9a-f]+ -->"
-)
+_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"<!-- mergecraft-finding:v1:[0-9a-f]+ -->")
 # The dedupe key is scoped to the pull request, not just the finding. A finding
 # reintroduced by a later PR is a regression and deserves its own issue; keying
 # on the fingerprint alone would let a long-closed issue silently suppress it.

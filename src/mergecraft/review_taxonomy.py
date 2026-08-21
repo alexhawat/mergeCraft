@@ -54,7 +54,7 @@ WITHDRAWN_FINDINGS_HEADING: Final[str] = "## Withdrawn review findings (known no
 
 FINDING_MARKER_PREFIX: Final[str] = "<!-- mergecraft-finding:v1:"
 
-_MARKER_RE = re.compile(r"<!-- (?:pullfrog|mergecraft)-finding:v1:[0-9a-f]+ -->")  # S6
+_MARKER_RE = re.compile(r"<!-- mergecraft-finding:v1:[0-9a-f]+ -->")  # S6
 _WHITESPACE_RE = re.compile(r"\s+")
 
 

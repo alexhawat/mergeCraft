@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import pytest
+from tests.support.tool_context import write_capable_mcp_mode
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -997,12 +998,17 @@ class _PatchRecordingGitHub(GitHubClient):
 async def test_commit_changes_push_policy_skip_reports_pushed_false(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The policy-skip path already carries the honest `pushed` key."""
+    """Review-only default-deny when no mode; honest ``pushed`` after write mode."""
     recorder = _CommitGitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
 
     ctx = _ctx(tmp_path, push="disabled")
-    result = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
+    denied = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
+    assert denied.is_error is True
+    assert "review-only" in denied.content[0]["text"]
+
+    with write_capable_mcp_mode():
+        result = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
     assert result.is_error is False, result.content[0]["text"]
     payload = json.loads(result.content[0]["text"])
     assert payload["pushed"] is False
@@ -1017,7 +1023,13 @@ async def test_commit_changes_always_reports_pushed_and_never_patches_ref(
 
     github = _PatchRecordingGitHub()
     ctx = _ctx(tmp_path, push="enabled", github=github)
-    result = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
+    denied = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
+    assert denied.is_error is True
+    assert "review-only" in denied.content[0]["text"]
+    assert github.patch_calls == []
+
+    with write_capable_mcp_mode():
+        result = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
     assert result.is_error is False, result.content[0]["text"]
     payload = json.loads(result.content[0]["text"])
     assert isinstance(payload["pushed"], bool)

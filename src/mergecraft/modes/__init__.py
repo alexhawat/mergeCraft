@@ -70,18 +70,58 @@ class Mode(BaseModel):
     version: str = ""
 
 
-# Build the legacy ``_MODE_DEFS`` shape from the per-mode modules so the
-# rest of the renderer is unchanged from the pre-split monolith.
+# Write-capable built-ins stay importable as negative fixtures (D12 / #350)
+# but are not registered for production review.
+WRITE_CAPABLE_MODE_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        Build.NAME,
+        AddressReviews.NAME,
+        Fix.NAME,
+        ResolveConflicts.NAME,
+        Task.NAME,
+    }
+)
+_WRITE_CAPABLE_MODE_NAMES_CF: Final[frozenset[str]] = frozenset(
+    name.casefold() for name in WRITE_CAPABLE_MODE_NAMES
+)
+REVIEWER_SHAPED_MODE_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        Review.NAME,
+        IncrementalReview.NAME,
+    }
+)
+
+# Production registry is review-only (#350). Write-capable modules remain
+# on disk and importable; they are not listed here.
 _MODE_DEFS: Final[list[tuple[str, str, str]]] = [
-    (Build.NAME, Build.DESCRIPTION, Build.TEMPLATE),
-    (AddressReviews.NAME, AddressReviews.DESCRIPTION, AddressReviews.TEMPLATE),
     (Review.NAME, Review.DESCRIPTION, Review.TEMPLATE),
     (IncrementalReview.NAME, IncrementalReview.DESCRIPTION, IncrementalReview.TEMPLATE),
     (Plan.NAME, Plan.DESCRIPTION, Plan.TEMPLATE),
-    (Fix.NAME, Fix.DESCRIPTION, Fix.TEMPLATE),
-    (ResolveConflicts.NAME, ResolveConflicts.DESCRIPTION, ResolveConflicts.TEMPLATE),
-    (Task.NAME, Task.DESCRIPTION, Task.TEMPLATE),
 ]
+
+
+def is_write_capable_mode_name(name: str) -> bool:
+    """Return True when ``name`` matches a write-capable built-in (case-insensitive)."""
+    return name.casefold() in _WRITE_CAPABLE_MODE_NAMES_CF
+
+
+def refuse_review_only_mutation(selected_mode: str | None, *, action: str) -> None:
+    """Raise unless a write-capable mode is selected (default-deny).
+
+    Unset ``selected_mode`` (orchestrator before ``select_mode``) is treated
+    as review-only. Production has no write-capable modes registered.
+
+    Args:
+        selected_mode: The mode currently selected for the run, if any.
+        action: Short description of the refused verb (must name it).
+    """
+    if selected_mode is not None and is_write_capable_mode_name(selected_mode):
+        return
+    if selected_mode is None:
+        msg = f"review-only: {action} is not allowed until a write-capable mode is selected"
+        raise RuntimeError(msg)
+    msg = f"review-only: {action} is not allowed in {selected_mode} mode"
+    raise RuntimeError(msg)
 
 
 _T_CALL_RE = re.compile(r"\$\{t\(\"([^\"]+)\"\)\}")
@@ -234,6 +274,8 @@ def _custom_modes(defs: Sequence[ModeDefinition]) -> list[Mode]:
     """
     out: list[Mode] = []
     for d in defs:
+        if is_write_capable_mode_name(d.name) or is_write_capable_mode_name(d.id):
+            continue
         prompt = d.prompt or None
         version = compute_prompt_version(prompt) if prompt else ""
         out.append(Mode(name=d.name, description=d.description, prompt=prompt, version=version))
@@ -255,11 +297,15 @@ NON_COMMITTING_MODES: frozenset[str] = frozenset(
 __all__ = [
     "NON_COMMITTING_MODES",
     "PR_SUMMARY_FORMAT",
+    "REVIEWER_SHAPED_MODE_NAMES",
+    "WRITE_CAPABLE_MODE_NAMES",
     "_MODE_DEFS",
     "Mode",
     "_custom_modes",
     "compute_modes",
     "compute_prompt_version",
+    "is_write_capable_mode_name",
     "modes",
     "prompt_version_for",
+    "refuse_review_only_mutation",
 ]

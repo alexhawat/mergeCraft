@@ -712,9 +712,10 @@ def test_hardened_example_documents_the_flag_without_enabling_it() -> None:
 
 
 def test_readme_documents_the_permission_and_the_flag() -> None:
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    assert "sarif_upload" in readme
-    assert "security-events: write" in readme
+    """RD2 moved SARIF opt-in off the landing README; pin the generated I/O page."""
+    action_ref = (REPO_ROOT / "docs" / "action-reference.md").read_text(encoding="utf-8")
+    assert "sarif_upload" in action_ref
+    assert "security-events: write" in action_ref
 
 
 def test_analyzers_doc_is_generated_with_the_sarif_section() -> None:

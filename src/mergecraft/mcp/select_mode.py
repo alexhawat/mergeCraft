@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.modes import is_write_capable_mode_name
 from mergecraft.types import format_mcp_tool_ref
 
 if TYPE_CHECKING:
@@ -21,15 +22,16 @@ def select_mode_tool(ctx: ToolContext):
                 )
             }
         mode_name = str(params["mode"])
+        selectable = [m for m in ctx.modes if not is_write_capable_mode_name(m.name)]
         selected = next(
-            (m for m in ctx.modes if m.name.lower() == mode_name.lower()),
+            (m for m in selectable if m.name.lower() == mode_name.lower()),
             None,
         )
         if selected is None:
             return {
                 "error": f'mode "{mode_name}" not found',
                 "availableModes": [
-                    {"name": m.name, "description": m.description} for m in ctx.modes
+                    {"name": m.name, "description": m.description} for m in selectable
                 ],
             }
         ctx.tool_state.selected_mode = selected.name
@@ -49,10 +51,7 @@ def select_mode_tool(ctx: ToolContext):
             and ctx.tool_state.existing_plan_comment_id
         ):
             result["previousPlanBody"] = ctx.tool_state.previous_plan_body
-        if (
-            selected.name in {"Review", "IncrementalReview", "Task"}
-            and ctx.tool_state.summary_file_path
-        ):
+        if selected.name in {"Review", "IncrementalReview"} and ctx.tool_state.summary_file_path:
             result["summaryFilePath"] = ctx.tool_state.summary_file_path
         return result
 

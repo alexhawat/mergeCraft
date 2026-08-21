@@ -1,4 +1,4 @@
-"""``mergecraft memory`` — repo-scoped memory lifecycle verbs (DG7)."""
+"""``mergecraft memory`` — repo-scoped memory lifecycle verbs (DG7, #360)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from loguru import logger
 
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.memory.store import MemoryStoreError, validate_memory_store
 from mergecraft.utils.learnings import repo_memory_paths
 from mergecraft.utils.memory import (
     FeedbackOutcome,
@@ -74,6 +75,27 @@ def list_cmd(
             typer.echo("(no entries)")
         for entry in payload:
             typer.echo(f"- {entry['id']}: {entry['text']}")
+    sys.stdout.flush()
+
+
+@app.command("validate")
+def validate_cmd(
+    repo: Path = typer.Option(
+        Path("."),
+        "--repo",
+        "-r",
+        help="Repository whose memory store should be validated.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+    ),
+) -> None:
+    """Validate the repo memory document for structure, staleness, and conflicts."""
+    try:
+        report = validate_memory_store(repo)
+    except MemoryStoreError as exc:
+        cli_bail(str(exc))
+    typer.echo(f"valid stale={len(report.stale_ids)} conflicts={len(report.conflict_ids)}")
     sys.stdout.flush()
 
 

@@ -10,7 +10,11 @@ from typing import Final
 from mergecraft.modes import (
     NON_COMMITTING_MODES,
     PR_SUMMARY_FORMAT,
+    AddressReviews,
+    Build,
     Mode,
+    ResolveConflicts,
+    _expand_template,
     compute_modes,
     modes,
 )
@@ -24,18 +28,41 @@ from mergecraft.review_taxonomy import (
     VERIFY_FIRST_PREAMBLE,
     WITHDRAWN_FINDINGS_HEADING,
 )
-from mergecraft.types import format_mcp_tool_ref
+from mergecraft.types import AgentId, format_mcp_tool_ref
 
+# Production registry after #350 / W2 — write-capable names stay importable (D12).
 EXPECTED_MODE_NAMES = [
-    "Build",
-    "AddressReviews",
     "Review",
     "IncrementalReview",
     "Plan",
-    "Fix",
-    "ResolveConflicts",
-    "Task",
 ]
+
+
+def _render_unregistered(template: str, agent_id: AgentId, *, signed_commits: bool = False) -> str:
+    """Expand a D12 unregistered write-mode template with the production renderer."""
+
+    def t(tool_name: str) -> str:
+        return format_mcp_tool_ref(agent_id, tool_name)
+
+    if signed_commits:
+        commit_step = (
+            f"commit via `{t('commit_changes')}` — it lands a GitHub-signed commit "
+            "directly on the remote branch (no push step)"
+        )
+        finalize_step = (
+            f"confirm a clean working tree (`git status`) — your `{t('commit_changes')}` "
+            "calls already landed the work on the remote"
+        )
+    else:
+        commit_step = 'commit locally via shell (`git add . && git commit -m "..."`)'
+        finalize_step = f"confirm a clean working tree, then push via `{t('push_branch')}`"
+    return _expand_template(
+        template,
+        t=t,
+        commit_step=commit_step,
+        finalize_step=finalize_step,
+        signed_commits=signed_commits,
+    )
 
 
 def test_compute_modes_returns_all_built_ins() -> None:
@@ -51,33 +78,33 @@ def test_static_modes_match_opencode_default() -> None:
 
 
 def test_claude_tool_refs_use_mcp_prefix() -> None:
-    build = compute_modes("claude")[0]
-    assert "mcp__mergecraft__checkout_pr" in (build.prompt or "")
-    assert "mcp__mergecraft__push_branch" in (build.prompt or "")
-    assert "mergecraft_checkout_pr" not in (build.prompt or "")
+    review = next(m for m in compute_modes("claude") if m.name == "Review")
+    assert "mcp__mergecraft__checkout_pr" in (review.prompt or "")
+    assert "mergecraft_checkout_pr" not in (review.prompt or "")
+    build = _render_unregistered(Build.TEMPLATE, "claude")
+    assert "mcp__mergecraft__push_branch" in build
+    assert "mergecraft_push_branch" not in build
 
 
 def test_opencode_tool_refs_use_underscore() -> None:
-    build = compute_modes("opencode")[0]
-    assert "mergecraft_checkout_pr" in (build.prompt or "")
-    assert "mcp__mergecraft__" not in (build.prompt or "")
+    review = next(m for m in compute_modes("opencode") if m.name == "Review")
+    assert "mergecraft_checkout_pr" in (review.prompt or "")
+    assert "mcp__mergecraft__" not in (review.prompt or "")
 
 
 def test_signed_commits_swaps_commit_and_push_flow() -> None:
-    unsigned = next(m for m in compute_modes("opencode", signed_commits=False) if m.name == "Build")
-    signed = next(m for m in compute_modes("opencode", signed_commits=True) if m.name == "Build")
-    assert "git add . && git commit" in (unsigned.prompt or "")
-    assert "mergecraft_push_branch" in (unsigned.prompt or "")
-    assert "mergecraft_commit_changes" in (signed.prompt or "")
-    assert "no push step" in (signed.prompt or "")
+    unsigned = _render_unregistered(Build.TEMPLATE, "opencode", signed_commits=False)
+    signed = _render_unregistered(Build.TEMPLATE, "opencode", signed_commits=True)
+    assert "git add . && git commit" in unsigned
+    assert "mergecraft_push_branch" in unsigned
+    assert "mergecraft_commit_changes" in signed
+    assert "no push step" in signed
 
 
 def test_resolve_conflicts_signed_commits_uses_no_commit_merge() -> None:
-    rc = next(
-        m for m in compute_modes("claude", signed_commits=True) if m.name == "ResolveConflicts"
-    )
-    assert "git merge --no-commit origin/<base_branch>" in (rc.prompt or "")
-    assert "mcp__mergecraft__commit_changes" in (rc.prompt or "")
+    rc = _render_unregistered(ResolveConflicts.TEMPLATE, "claude", signed_commits=True)
+    assert "git merge --no-commit origin/<base_branch>" in rc
+    assert "mcp__mergecraft__commit_changes" in rc
 
 
 def test_non_committing_modes() -> None:
@@ -170,7 +197,7 @@ def test_review_modes_run_static_checks_and_read_withdrawn_findings() -> None:
 
 
 def test_address_reviews_records_withdrawn_findings() -> None:
-    prompt = next(m for m in modes if m.name == "AddressReviews").prompt or ""
+    prompt = _render_unregistered(AddressReviews.TEMPLATE, "opencode")
     assert WITHDRAWN_FINDINGS_HEADING in prompt
 
 
@@ -196,9 +223,9 @@ def test_review_mode_has_privilege_drop_ordering_lens() -> None:
 
 
 def test_mergecraft_reviewer_subagent_referenced() -> None:
-    build = next(m for m in modes if m.name == "Build")
+    build = _render_unregistered(Build.TEMPLATE, "opencode")
     review = next(m for m in modes if m.name == "Review")
-    assert "mergecraft-reviewer" in (build.prompt or "")
+    assert "mergecraft-reviewer" in build
     assert "mergecraft-reviewer" in (review.prompt or "")
 
 
@@ -390,11 +417,11 @@ def test_publish_span_attrs_none_mode_yields_no_mode_attrs() -> None:
 
 
 def test_all_modes_still_resolve_by_name() -> None:
-    """Regression pin: the names ``compute_modes`` returns are unchanged.
+    """Regression pin: production ``compute_modes`` names stay review-only (#350).
 
     The split relocates the per-mode modules; this test guards the public
     surface (``compute_modes``, ``_custom_modes``, ``modes``) against an
-    accidental rename.
+    accidental rename or a write-capable name leaking back into the registry.
     """
     result = compute_modes("opencode")
     assert [m.name for m in result] == EXPECTED_MODE_NAMES
@@ -425,10 +452,9 @@ def test_mode_prompt_text_is_byte_identical_after_split() -> None:
     snapshot = _load_pre_split_snapshot()
     current = {m.name: (m.description, m.prompt) for m in compute_modes("opencode")}
 
-    assert set(snapshot) == set(current), (
-        f"snapshot modes {set(snapshot) - set(current)} missing, "
-        f"current modes {set(current) - set(snapshot)} extra"
-    )
+    assert set(current) == set(EXPECTED_MODE_NAMES)
+    missing = set(EXPECTED_MODE_NAMES) - set(snapshot)
+    assert not missing, f"snapshot missing production modes: {sorted(missing)}"
 
     terminal_markers = {
         "Review": (_REVIEW_TERMINAL_START, _REVIEW_TERMINAL_KEEP),
@@ -484,4 +510,5 @@ def test_custom_modes_from_config_still_merge() -> None:
     # Built-ins still resolve alongside the custom mode.
     combined_names = [m.name for m in (*compute_modes("opencode"), *custom)]
     assert "MyMode" in combined_names
-    assert "Build" in combined_names
+    assert "Review" in combined_names
+    assert "Build" not in combined_names

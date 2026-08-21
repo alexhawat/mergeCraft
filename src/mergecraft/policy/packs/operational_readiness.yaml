@@ -1,0 +1,9 @@
+rules:
+  - id: ops.health-and-rollback
+    owner: mergecraft-sre
+    version: 1
+    rationale: Service changes must keep health checks and a rollback path.
+    severity: Major
+    enforcement: required
+    scope:
+      path: "src/**"

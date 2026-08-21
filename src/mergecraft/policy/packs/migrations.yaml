@@ -1,0 +1,9 @@
+rules:
+  - id: migrations.expand-contract
+    owner: mergecraft-data
+    version: 1
+    rationale: Schema migrations must stay expand/contract compatible.
+    severity: Major
+    enforcement: warning
+    scope:
+      path: "**/migrations/**"

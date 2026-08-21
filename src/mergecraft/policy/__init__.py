@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 from mergecraft.policy.enforcement import EnforcementMode, EnforcementResult, evaluate_enforcement
-from mergecraft.policy.evidence import EvidenceOutcome, evaluate_rule_evidence
+from mergecraft.policy.evidence import (
+    REQUIREMENTS_EVIDENCE_KEY,
+    XREPO_EVIDENCE_KEY,
+    EvidenceOutcome,
+    evaluate_rule_evidence,
+    requirements_evidence_required,
+    xrepo_review_required,
+)
 from mergecraft.policy.exceptions import PolicyException, exception_applies, parse_exception
 from mergecraft.policy.schema import PolicyConfigError, PolicyRule, parse_rule, parse_rules_document
 from mergecraft.policy.scoping import EffectiveRule, ScopeContext, resolve_effective_rules
 
 __all__ = [
+    "REQUIREMENTS_EVIDENCE_KEY",
+    "XREPO_EVIDENCE_KEY",
     "EffectiveRule",
     "EnforcementMode",
     "EnforcementResult",
@@ -23,5 +32,7 @@ __all__ = [
     "parse_exception",
     "parse_rule",
     "parse_rules_document",
+    "requirements_evidence_required",
     "resolve_effective_rules",
+    "xrepo_review_required",
 ]

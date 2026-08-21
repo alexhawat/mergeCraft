@@ -290,7 +290,7 @@ def withdrawn_fingerprints(learnings_text: str) -> frozenset[str]:
         section = section[: next_heading.start()]
     fingerprints: set[str] = set()
     for match in re.finditer(
-        r"<!-- (?:pullfrog|mergecraft)-finding:v1:([0-9a-f]{24}) -->",
+        r"<!-- mergecraft-finding:v1:([0-9a-f]{24}) -->",
         section,
     ):
         fingerprints.add(match.group(1))

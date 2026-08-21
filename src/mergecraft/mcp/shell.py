@@ -421,6 +421,7 @@ def shell_tool(ctx: ToolContext):
     return tool(
         name="shell",
         tool_class=ToolClass.SHELL,
+        mutates=True,
         timeout_ms=120_000,
         description=(
             f"Execute shell commands securely. Environment is filtered to remove API "
