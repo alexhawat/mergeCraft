@@ -40,7 +40,7 @@ class QualityMetrics(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     blocker_precision: float | None
-    severity_accuracy: float
+    severity_accuracy: float | None
     duplicate_rate: float
     unsupported_finding_rate: float
     contradiction_rate: float
@@ -89,9 +89,10 @@ def compute_quality_metrics(
     """Score findings against a baseline and attach latency/cost.
 
     Empty findings yield ``0.0`` rates (honest-zero). ``blocker_precision``
-    stays ``None`` when the score report has no blocker findings (never a
-    fabricated 1.0). An empty latency sample raises ``ValueError`` — a
-    P50/P95 over nothing is never a fabricated 0.0.
+    stays ``None`` when the score report has no blocker findings, and
+    ``severity_accuracy`` stays ``None`` when there are no locality matches
+    (never a fabricated 1.0). An empty latency sample raises ``ValueError``
+    — a P50/P95 over nothing is never a fabricated 0.0.
 
     Args:
         findings: Reported review findings.

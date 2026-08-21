@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Eval methodology: blocker precision is `None` (unpublished) when a run reports no blockers, not a vacuous 1.0
+- Eval methodology: blocker precision is `None` (unpublished) when a run reports no blockers, and severity accuracy is `None` when there are no locality matches — never a vacuous 1.0
 - Landing README redesigned as a REACH-style product page (outline B): problem/solution
   cards, D2 architecture hero, numbered install, and jump-nav. Long-form install,
   authentication, and workflow essays moved to `docs/install.md`,

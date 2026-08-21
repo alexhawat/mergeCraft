@@ -60,6 +60,8 @@ def test_quality_metrics_empty_findings_are_zero_not_nan() -> None:
         value = getattr(metrics, field_name)
         assert value == 0.0
         assert not math.isnan(value)
+    # No locality matches → unpublished, never a fabricated 1.0.
+    assert metrics.severity_accuracy is None
 
 
 def test_quality_metrics_reject_empty_latency_sample() -> None:
@@ -97,3 +99,24 @@ def test_severity_accuracy_is_independent_of_blocker_precision() -> None:
     assert metrics.severity_accuracy < 1.0
     # No Critical findings were reported, so blocker precision is honestly empty.
     assert metrics.blocker_precision is None
+
+
+def test_severity_accuracy_is_none_without_locality_matches() -> None:
+    """Edge: unmatched findings are not a fabricated perfect severity score."""
+    from mergecraft.evals.quality_metrics import compute_quality_metrics
+    from mergecraft.evals.scoring import BaselineIssue, ReportedFinding
+
+    issues = [
+        BaselineIssue(id="a", path="src/a.py", start_line=10, end_line=12, severity="Critical"),
+    ]
+    findings = [
+        ReportedFinding(path="src/a.py", start_line=800, end_line=801, severity="Critical"),
+    ]
+    metrics = compute_quality_metrics(
+        findings=findings,
+        baseline=issues,
+        latencies_ms=(5.0,),
+        cost_usd=0.1,
+        time_to_first_useful_finding_ms=None,
+    )
+    assert metrics.severity_accuracy is None

@@ -41,7 +41,7 @@ a locality-matched baseline (`mergecraft.evals.scoring.score_findings`):
 | Metric | Meaning |
 |--------|---------|
 | Blocker precision | Fraction of Critical-severity findings that hit a baseline issue. `None` when the run reported no blockers — not published, never a fabricated number |
-| Severity accuracy | Fraction of matches whose severity agrees with the baseline |
+| Severity accuracy | Fraction of locality matches whose severity agrees with the baseline. `None` when there are no matches (including zero findings) — not published, never a fabricated 1.0 |
 | Duplicate rate | Fraction of findings that repeat an earlier overlapping finding |
 | Unsupported-finding rate | Fraction of findings that did not hit the baseline (unadjudicated on an open-world corpus) |
 | Contradiction rate | Fraction of findings that overlap an earlier finding at a different severity |
@@ -49,7 +49,8 @@ a locality-matched baseline (`mergecraft.evals.scoring.score_findings`):
 | P50 / P95 latency | Percentile review latency; an empty sample is an error, never a fabricated `0.0` |
 | Cost per review | USD attributed to the review |
 
-Empty findings yield `0.0` rates (honest-zero), never NaN.
+Empty findings yield `0.0` rates (honest-zero), never NaN. Blocker precision
+and severity accuracy stay `None` when there is nothing to score.
 
 Release *targets* (not yet measured here): blocker precision above 95%, a
 materially higher recall than a strong single-agent baseline, a low duplicate
