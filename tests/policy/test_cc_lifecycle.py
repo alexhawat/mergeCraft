@@ -10,16 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.policy.schema import parse_rule
 from mergecraft.policy.scoping import ScopeContext, resolve_effective_rules
-from tests.support.cc_batch import invoke, load_module, plain, require_callable, require_registered
+from tests.support.cc_batch import load_module, plain, require_callable, require_registered
 from tests.support.dead_package_wiring import SRC_ROOT
-
-_W12 = pytest.mark.xfail(
-    reason="green after W12: policy lifecycle back half (#358)",
-    strict=False,
-)
 
 
 def test_policy_front_half_already_ships() -> None:
@@ -28,19 +22,6 @@ def test_policy_front_half_already_ships() -> None:
         assert (SRC_ROOT / "policy" / name).is_file()
 
 
-def test_policy_effective_is_currently_a_usage_error() -> None:
-    """W8 current state: ``policy effective`` is not registered."""
-    result = invoke("policy", "effective", "--help")
-    assert result.exit_code == CLI_USAGE_EXIT_CODE, plain(result.stdout + result.stderr)
-
-
-def test_policy_simulate_is_currently_a_usage_error() -> None:
-    """W8 current state: ``policy simulate`` is not registered."""
-    result = invoke("policy", "simulate", "--help")
-    assert result.exit_code == CLI_USAGE_EXIT_CODE, plain(result.stdout + result.stderr)
-
-
-@_W12
 def test_policy_effective_help_names_source_of_every_rule() -> None:
     """#358 — ``mergecraft policy effective`` shows the resolved set and each source."""
     result = require_registered(
@@ -50,7 +31,6 @@ def test_policy_effective_help_names_source_of_every_rule() -> None:
     assert "source" in help_text or "effective" in help_text
 
 
-@_W12
 def test_policy_simulate_help_is_registered() -> None:
     """#358 — ``mergecraft policy simulate`` exists."""
     result = require_registered("policy", "simulate", "--help", label="mergecraft policy simulate")
@@ -58,7 +38,6 @@ def test_policy_simulate_help_is_registered() -> None:
     assert "simulate" in help_text or "past" in help_text or "pr" in help_text
 
 
-@_W12
 def test_policy_resolution_stays_deterministic_at_symbol_scope() -> None:
     """#358 — hierarchy extends to symbol scope; same inputs → same winners."""
     module = load_module("mergecraft.policy.lifecycle")
@@ -111,7 +90,6 @@ scope:
     assert winner.source_layer in {"symbol", "path"}
 
 
-@_W12
 def test_conflicting_policies_are_detected() -> None:
     """#358 — conflicting policies are surfaced instead of silently merged."""
     module = load_module("mergecraft.policy.lifecycle")
@@ -125,7 +103,6 @@ def test_conflicting_policies_are_detected() -> None:
     assert conflicts
 
 
-@_W12
 def test_policy_simulate_runs_a_proposed_rule_against_past_prs() -> None:
     """#358 — simulate a proposed rule against past PRs before enabling it."""
     module = load_module("mergecraft.policy.lifecycle")
@@ -140,7 +117,6 @@ def test_policy_simulate_runs_a_proposed_rule_against_past_prs() -> None:
     assert triggered
 
 
-@_W12
 def test_policy_audit_artifacts_are_emitted(tmp_path: Path) -> None:
     """#358 — policy audit artifacts are produced."""
     module = load_module("mergecraft.policy.lifecycle")
@@ -150,7 +126,6 @@ def test_policy_audit_artifacts_are_emitted(tmp_path: Path) -> None:
     assert Path(path).is_file() or isinstance(artifact, dict)
 
 
-@_W12
 def test_policy_metrics_include_trigger_fp_waiver_and_blocking_rates() -> None:
     """#358 — trigger, false-positive, waiver, and blocking rates."""
     module = load_module("mergecraft.policy.lifecycle")

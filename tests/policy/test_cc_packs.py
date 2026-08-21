@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -16,15 +15,9 @@ from mergecraft.policy.schema import PolicyRule, parse_rules_document
 from tests.support.cc_batch import POLICY_PACK_IDS, load_module, require_callable
 from tests.support.dead_package_wiring import SRC_ROOT
 
-_W12 = pytest.mark.xfail(
-    reason="green after W12: policy packs (#359)",
-    strict=False,
-)
-
 _PACKS_DIR = SRC_ROOT / "policy" / "packs"
 
 
-@_W12
 def test_shipped_policy_packs_cover_the_named_domains() -> None:
     """#359 — security, public API, migrations, deps, authz, testing, ops."""
     module = load_module("mergecraft.policy.packs")
@@ -37,7 +30,6 @@ def test_shipped_policy_packs_cover_the_named_domains() -> None:
         assert rules
 
 
-@_W12
 def test_each_pack_rule_carries_stable_identity_fields() -> None:
     """#359 — each rule has id, owner, version, rationale, severity, scope."""
     for pack_id in POLICY_PACK_IDS:
@@ -53,7 +45,6 @@ def test_each_pack_rule_carries_stable_identity_fields() -> None:
             assert rule.scope is not None
 
 
-@_W12
 def test_packs_do_not_widen_the_policy_schema() -> None:
     """#359 out of scope — packs validate as existing ``PolicyRule`` documents."""
     extra_forbid = PolicyRule.model_config.get("extra")
@@ -64,7 +55,6 @@ def test_packs_do_not_widen_the_policy_schema() -> None:
         parse_rules_document(path.read_text(encoding="utf-8"))
 
 
-@_W12
 def test_pack_fixtures_are_runnable_by_policy_test() -> None:
     """#359 — should-trigger / should-not-trigger fixtures run via ``policy test``."""
     module = load_module("mergecraft.policy.packs")
