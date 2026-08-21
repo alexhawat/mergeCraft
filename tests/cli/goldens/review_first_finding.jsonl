@@ -1,0 +1,6 @@
+{"event": "run_started", "protocol_version": "1"}
+{"event": "phase", "protocol_version": "1", "name": "materialize"}
+{"event": "phase", "protocol_version": "1", "name": "review"}
+{"event": "finding", "protocol_version": "1", "finding": {"tool": "mergecraft-agent", "rule_id": "AGENT-378", "category": "Maintainability & Code Quality", "severity": "Minor", "confidence": "likely", "message": "first useful finding", "path": "demo.py", "start_line": 1, "end_line": 1, "source": "agent", "introduced_by_pr": "unknown"}}
+{"event": "verdict", "protocol_version": "1", "outcome": "passed", "exit_code": 10}
+{"event": "run_finished", "protocol_version": "1", "exit_code": 10}

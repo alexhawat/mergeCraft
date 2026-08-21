@@ -16,9 +16,8 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.agent_protocol import AgentProtocolStream
@@ -26,6 +25,9 @@ from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.offline_review import OfflineReviewResult
 from mergecraft.run_outcome import RunOutcome
+
+if TYPE_CHECKING:
+    import pytest
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -37,11 +39,6 @@ _FIRST_FINDING_GOLDEN = _GOLDENS_DIR / "review_first_finding.jsonl"
 
 _SAMPLE_PATCH = (
     "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
-)
-
-_XFAIL_W4 = pytest.mark.xfail(
-    reason="green after W4: first-finding stream / cache / resume / goldens",
-    strict=False,
 )
 
 
@@ -77,7 +74,11 @@ def _install_agent_review(
         try:
             materialization_path = kwargs.get("diff_file")
             diff_path = str(materialization_path) if materialization_path else None
-            payload = json.dumps({"findings": [_finding_dict()]})
+            finding = _finding_dict()
+            callback = kwargs.get("on_finding")
+            if callable(callback):
+                callback(finding)
+            payload = json.dumps({"findings": [finding]})
             return OfflineReviewResult(
                 success=True,
                 output="# Review\n\nOK.",
@@ -106,7 +107,6 @@ def _invoke_agent(tmp_path: Path) -> Any:
     )
 
 
-@_XFAIL_W4
 def test_first_finding_emits_while_review_is_still_running(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -134,7 +134,6 @@ def test_first_finding_emits_while_review_is_still_running(
     assert finding_during_review["value"] is True
 
 
-@_XFAIL_W4
 def test_review_help_documents_resume() -> None:
     """Happy: ``mergecraft review --resume`` is part of the documented review path."""
     result = runner.invoke(app, ["review", "--help"], env=_DUMB_ENV)
@@ -143,7 +142,6 @@ def test_review_help_documents_resume() -> None:
     assert "--resume" in help_text
 
 
-@_XFAIL_W4
 def test_review_help_documents_result_cache_beyond_cache_typer() -> None:
     """Happy: review has a result cache distinct from the ``mergecraft cache`` typer (CC4)."""
     result = runner.invoke(app, ["review", "--help"], env=_DUMB_ENV)
@@ -152,7 +150,6 @@ def test_review_help_documents_result_cache_beyond_cache_typer() -> None:
     assert "--use-cache" in help_text or "result-cache" in help_text or "result cache" in help_text
 
 
-@_XFAIL_W4
 def test_diff_review_cmd_exposes_cancellation_subprocess_cleanup() -> None:
     """Error/edge: cancelling a review cleans up child subprocesses (no leak)."""
     from mergecraft.cli import diff_review_cmd
@@ -161,7 +158,6 @@ def test_diff_review_cmd_exposes_cancellation_subprocess_cleanup() -> None:
     assert callable(cleanup)
 
 
-@_XFAIL_W4
 def test_reusable_cli_golden_for_first_finding_exists() -> None:
     """Functional: reusable CLI golden under ``tests/cli/goldens/`` (file 8 RV5 extends it).
 

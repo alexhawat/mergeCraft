@@ -2,7 +2,7 @@
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-20d-a-engine-wave-plan.md`
 Worktree: `.ignorelocal/worktrees/open-issues-sweep-2026-08-20d-a-engine` @ `wave/20d-a-engine`
-Authoring wave: **W2** (DA RED) · Implementation: **W3–W6** · W3 xfail markers removed after remaining #377 verbs landed.
+Authoring wave: **W2** (DA RED) · Implementation: **W3–W6** · W3 xfail markers removed after remaining #377 verbs landed · W4 xfail markers removed after first-finding stream / cache / resume / goldens landed.
 
 W9 (#383 capability / adversarial tests) is **out of scope** for this suite — do
 not name a module `adversarial.py`. D13 write/Fix pins belong to W9. D16: nothing
@@ -15,7 +15,7 @@ All cross-wave markers use `@pytest.mark.xfail(..., strict=False)`.
 | Wave | Tests | Marker reason | Status |
 |------|-------|---------------|--------|
 | **W3** | remaining #377 verbs (not `describe` / `capabilities`) | markers removed after W3 | GREEN |
-| **W4** | first-finding stream, resume, result cache, cancel cleanup, goldens | `green after W4: first-finding stream / cache / resume / goldens` | XFAIL |
+| **W4** | first-finding stream, resume, result cache, cancel cleanup, goldens | markers removed after W4 | GREEN |
 | **W5** | negotiate / retryable mismatch / budgets / D12 adapter | `green after W5: protocol negotiation / D12 reconcile` | XFAIL |
 | **W6** | `ReviewSnapshot` type + CLI / Action / SCM conformance | `green after W6: ReviewSnapshot conformance` | XFAIL |
 
@@ -59,5 +59,6 @@ Existing greens **not duplicated:** `tests/cli/test_agent_protocol.py` (flat
 `protocol_version` on `--agent` events).
 
 Golden entry point for file 8 RV5: `tests/cli/goldens/review_first_finding.jsonl`
-(not created in W2 — W4 lands it). D11: JSONL CLI/agent output only; no second
-stdout/stderr split.
+(now exists — JSONL agent events via `format_event_line`, finding before verdict,
+no `stdout_stream`/`stderr_stream` keys). D11: JSONL CLI/agent output only; no
+second stdout/stderr split.
