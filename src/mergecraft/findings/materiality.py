@@ -1,8 +1,8 @@
 """Finding materiality, calibrated confidence, budgets, and dismissal (#355).
 
 Does not rebuild dedup, causality, or the severity rubric. Dismissal records
-feed evaluation only — durable memory is #360 / W13. Does not call
-``decide_approval()`` (D14).
+feed evaluation; durable memory is via ``mergecraft.memory`` (#360). Does not
+call ``decide_approval()`` (D14).
 
 Module: mergecraft.findings.materiality
 Depends: dataclasses
@@ -20,7 +20,7 @@ Exports:
         meets_blocking_threshold — Stronger configurable blocking minimums.
         record_dismissal — Store a reason-coded dismissal for evaluation.
         dismissal_eval_records — Serialize dismissals as eval signals.
-        dismissal_to_memory — Refused until W13.
+        dismissal_to_memory — Persist only with repeated evidence (#360).
         evaluate_blocker_precision_corpus — Release-wired precision gate.
 """
 
@@ -285,10 +285,22 @@ def dismissal_to_memory(
     *,
     learnings_path: Any = None,
 ) -> None:
-    """Refuse to persist dismissal into durable memory until W13 (#360)."""
-    del record, learnings_path
-    msg = "dismissal must not become durable memory until W13 (#360 out of scope)"
-    raise PermissionError(msg)
+    """Route a dismissal into memory only when evidence is already repeated.
+
+    A single eval-side dismissal (this call) is not durable; ``ingest_dismissal_signal``
+    with repeated evidence is the #360 path.
+    """
+    del learnings_path
+    from mergecraft.memory import ingest_dismissal_signal
+
+    result = ingest_dismissal_signal(
+        reason_code=record.reason_code,
+        fingerprint=record.fingerprint,
+        evidence_count=1,
+    )
+    if not result.durable:
+        msg = "single dismissal is not durable memory"
+        raise PermissionError(msg)
 
 
 def evaluate_blocker_precision_corpus() -> BlockerPrecisionReport:

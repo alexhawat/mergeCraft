@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added: generated CLI and Action reference pages (`docs/cli.md`,
   `docs/action-reference.md`) plus a docs manifest; `make docs-check`
   replaces landing-README table splices.
+- `mergecraft memory validate` checks the learnings store; learned behaviour needs historical evidence or explicit approval; factual / policy / preference / false-positive memory stay distinct; organization memory is a pluggable backend; effectiveness metrics prove precision rises without losing recall (#360)
 - `mergecraft policy effective` and `simulate` resolve the effective rule set (with the source of every rule, including symbol scope), detect same-scope enforcement conflicts, emit policy audit artifacts, and report trigger / false-positive / waiver / blocking rates (#358)
 - Shipped policy packs for security, public API, migrations, dependency changes, authentication/authorization, testing, and operational readiness; each rule keeps stable identity fields and ships should-trigger / should-not fixtures for `mergecraft policy test` (#359)
 - `mergecraft context search` and `explain` score retrieved context, allocate per-specialist token budgets, fetch lazily through controlled tools, and record omitted scope so the evidence outcome is downgraded; retrieval quality is scored separately from the model (#356)
