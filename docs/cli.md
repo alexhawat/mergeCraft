@@ -46,6 +46,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft eval add` | Add a case to the bank. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval gate` | Check the eval bank's integrity — the CI-safe half of the eval loop. |
+| `mergecraft eval gate` | Check the eval bank's integrity and adversarial corpora — the CI-safe half. |
 | `mergecraft eval list` | List cases in the bank. |
 | `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44, W12.1). |
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
