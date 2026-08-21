@@ -36,6 +36,13 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.tracing.otel_context import (
+    override_span_context,
+    parse_mergecraft_otel_span_id,
+    parse_mergecraft_otel_trace_id,
+    resolve_start_context,
+)
+
 if TYPE_CHECKING:
     from mergecraft.tracing.event import TraceEvent
 
@@ -647,16 +654,26 @@ class OTLPSink:
             # attribute is missing on a future SDK release, the mergecraft
             # attribute fallback still groups the trace.
             otel_trace_id: int | None = None
+            otel_span_id: int | None = None
             if event.trace_id:
-                try:
-                    otel_trace_id = int(event.trace_id[:32], 16)
-                except (TypeError, ValueError):  # fmt: skip
-                    otel_trace_id = None
                 attrs["mergecraft.trace_id"] = event.trace_id
-            span = self._tracer.start_span(name=event.kind, attributes=attrs)
-            if otel_trace_id:
+                otel_trace_id = parse_mergecraft_otel_trace_id(event.trace_id)
+            if event.span_id:
+                otel_span_id = parse_mergecraft_otel_span_id(event.span_id)
+            parent_context: Any | None = None
+            if event.trace_id:
+                parent_context = resolve_start_context(event.trace_id, event.parent_span_id)
+            span = self._tracer.start_span(
+                name=event.kind,
+                attributes=attrs,
+                start_time=event.ts_start_ns,
+                context=parent_context,
+            )
+            if otel_trace_id is not None and otel_span_id is not None:
+                override_span_context(span, otel_trace_id, otel_span_id)
+            elif otel_trace_id is not None:
                 self._override_span_trace_id(span, otel_trace_id)
-            span.end()
+            span.end(end_time=event.ts_end_ns)
         except Exception as exc:
             # Convention 6 — never fail the caller's review on a remote sink.
             if not self._warned:
@@ -677,26 +694,10 @@ class OTLPSink:
         is the structural guarantee.
         """
         try:
-            from opentelemetry.trace import (
-                SpanContext,
-                TraceFlags,
-                TraceState,
-            )
-        except ImportError:
-            return
-        try:
             span_ctx = span.get_span_context()
-            new_ctx = SpanContext(
-                trace_id=trace_id,
-                span_id=span_ctx.span_id,
-                is_remote=False,
-                trace_flags=TraceFlags(TraceFlags.SAMPLED),
-                trace_state=TraceState(),
-            )
-            if hasattr(span, "_context"):
-                span._context = new_ctx
-        except Exception as exc:
-            logger.debug("trace otel sink trace_id override failed: {}", exc)
+        except Exception:
+            return
+        override_span_context(span, trace_id, span_ctx.span_id)
 
     def flush(self) -> None:
         """Best-effort flush; idempotent and never raises (convention 6).
@@ -824,6 +825,32 @@ def _build_otel_sink(entry: Any) -> OTLPSink:
     endpoint = getattr(entry, "endpoint", None)
     headers = getattr(entry, "headers", None) or {}
     return OTLPSink.for_otel(endpoint=endpoint, headers=headers)
+
+
+def _otlp_sink_identity(sink: OTLPSink) -> tuple[str, tuple[tuple[str, str], ...]]:
+    """Return the dedupe key for an :class:`OTLPSink` (endpoint + headers, D11)."""
+    normalized_headers = tuple(sorted((str(k).lower(), str(v)) for k, v in sink.headers.items()))
+    return sink.endpoint, normalized_headers
+
+
+def dedupe_otlp_sinks(children: list[Any]) -> list[Any]:
+    """Collapse duplicate :class:`OTLPSink` instances that share endpoint + headers.
+
+    ``logfire`` and ``otel`` config entries often resolve to the same OTLP
+    destination; without dedupe, :class:`MultiSink` fans one ``TraceEvent`` out
+    to N identical sinks (#372). The #293 processor guard is unchanged — this
+    only trims the sink list at factory time.
+    """
+    deduped: list[Any] = []
+    seen_otlp: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
+    for child in children:
+        if isinstance(child, OTLPSink):
+            identity = _otlp_sink_identity(child)
+            if identity in seen_otlp:
+                continue
+            seen_otlp.add(identity)
+        deduped.append(child)
+    return deduped
 
 
 def build_remote_sink(entry: Any) -> Any:
