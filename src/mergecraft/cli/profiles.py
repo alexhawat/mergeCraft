@@ -23,6 +23,7 @@ class ReviewProfile:
     token_budget: int
     cost_budget_usd: float
     tool_call_budget: int
+    latency_budget_ms: int
 
 
 _PROFILES: Final[dict[ProfileName, ReviewProfile]] = {
@@ -33,6 +34,7 @@ _PROFILES: Final[dict[ProfileName, ReviewProfile]] = {
         token_budget=500_000,
         cost_budget_usd=5.0,
         tool_call_budget=100,
+        latency_budget_ms=120_000,
     ),
     "deep": ReviewProfile(
         name="deep",
@@ -41,6 +43,7 @@ _PROFILES: Final[dict[ProfileName, ReviewProfile]] = {
         token_budget=4_000_000,
         cost_budget_usd=100.0,
         tool_call_budget=1_000,
+        latency_budget_ms=900_000,
     ),
     "security": ReviewProfile(
         name="security",
@@ -49,6 +52,7 @@ _PROFILES: Final[dict[ProfileName, ReviewProfile]] = {
         token_budget=2_000_000,
         cost_budget_usd=25.0,
         tool_call_budget=500,
+        latency_budget_ms=300_000,
     ),
 }
 
@@ -76,6 +80,7 @@ def profile_env_overrides(profile: ReviewProfile) -> dict[str, str]:
         "MERGECRAFT_TOKEN_BUDGET": str(profile.token_budget),
         "MERGECRAFT_COST_BUDGET_USD": str(profile.cost_budget_usd),
         "MERGECRAFT_TOOL_CALL_BUDGET": str(profile.tool_call_budget),
+        "MERGECRAFT_LATENCY_BUDGET_MS": str(profile.latency_budget_ms),
         "MERGECRAFT_PROFILE": profile.name,
     }
 
