@@ -11,9 +11,11 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
+import sys
 from typing import TYPE_CHECKING, Any
 
 from mergecraft import __version__
+from mergecraft.analyzers.registry import load_catalog
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, default_settings
 
@@ -58,6 +60,8 @@ def build_run_manifest(
     injected = dict(instruction_hashes) if instruction_hashes else {}
     if injected:
         hashes["instructions"] = injected
+    tools: dict[str, str] = {"mergecraft": __version__}
+    tools.update({item.id: item.version for item in load_catalog()})
     manifest: dict[str, Any] = {
         "agent_id": agent_id,
         "model_version": model,
@@ -68,6 +72,9 @@ def build_run_manifest(
         "config_hash": config_hash,
         "policy_hash": policy_hash,
         "hashes": hashes,
+        "python": sys.version.split()[0],
+        "runtime": f"CPython {sys.version_info.major}.{sys.version_info.minor}",
+        "tools": tools,
     }
     if injected:
         manifest["instruction_hashes"] = injected

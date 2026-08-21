@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import typer
 import yaml
 from pydantic import ValidationError
 from rich.table import Table
 
+from mergecraft import __version__
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import (
@@ -47,6 +50,14 @@ class ProbeResult:
     status: str
     detail: str
     hard_failure: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AgentCliProvenance:
+    """Outcome of bundled agent-CLI lockfile provenance verification (#366)."""
+
+    verified: bool
+    detail: str = ""
 
 
 def _git_probe(cwd: Path) -> ProbeResult:
@@ -148,9 +159,114 @@ def run_doctor_probes(cwd: Path) -> list[ProbeResult]:
     ]
 
 
-def render_doctor_table(results: Sequence[ProbeResult]) -> Table:
+def runtime_tool_versions() -> dict[str, Any]:
+    """Return runtime and tool versions for run manifests and doctor probes."""
+    catalog = load_catalog()
+    tools: dict[str, str] = {"mergecraft": __version__}
+    tools.update({item.id: item.version for item in catalog})
+    return {
+        "python": sys.version.split()[0],
+        "runtime": f"CPython {sys.version_info.major}.{sys.version_info.minor}",
+        "tools": tools,
+    }
+
+
+def verify_agent_cli_provenance(agent_clis_dir: Path) -> AgentCliProvenance:
+    """Verify ``docker/agent-clis`` lockfile pins and integrity hashes."""
+    pkg_path = agent_clis_dir / "package.json"
+    lock_path = agent_clis_dir / "package-lock.json"
+    if not pkg_path.is_file() or not lock_path.is_file():
+        return AgentCliProvenance(
+            verified=False,
+            detail="missing package.json or package-lock.json",
+        )
+    try:
+        package = json.loads(pkg_path.read_text(encoding="utf-8"))
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return AgentCliProvenance(verified=False, detail=f"parse error: {exc}")
+    if not isinstance(package, dict) or not isinstance(lock, dict):
+        return AgentCliProvenance(verified=False, detail="agent-cli manifests must be objects")
+    deps = package.get("dependencies")
+    packages = lock.get("packages")
+    if not isinstance(deps, dict) or not deps:
+        return AgentCliProvenance(verified=False, detail="package.json has no dependencies")
+    if not isinstance(packages, dict):
+        return AgentCliProvenance(verified=False, detail="package-lock.json has no packages map")
+    missing: list[str] = []
+    for name, pinned in deps.items():
+        entry = packages.get(f"node_modules/{name}")
+        if not isinstance(entry, dict):
+            missing.append(str(name))
+            continue
+        version = str(entry.get("version", ""))
+        integrity = str(entry.get("integrity", "")).strip()
+        if version != str(pinned) or not integrity:
+            missing.append(str(name))
+    if missing:
+        return AgentCliProvenance(
+            verified=False,
+            detail=f"unpinned or unsigned: {', '.join(missing)}",
+        )
+    return AgentCliProvenance(
+        verified=True,
+        detail=f"{len(deps)} agent CLI(s) lockfile-pinned with integrity",
+    )
+
+
+def _reproducibility_probe(cwd: Path) -> ProbeResult:
+    found: list[str] = []
+    if (cwd / "uv.lock").is_file():
+        found.append("uv.lock")
+    agent_lock = cwd / "docker" / "agent-clis" / "package-lock.json"
+    if agent_lock.is_file():
+        found.append("docker/agent-clis/package-lock.json")
+    if found:
+        return ProbeResult("reproducibility", "ok", f"pinned lockfiles: {', '.join(found)}")
+    return ProbeResult("reproducibility", "warn", "no lockfiles in this workspace")
+
+
+def _analyzer_pinning_probe() -> ProbeResult:
+    catalog = load_catalog()
+    total = len(catalog)
+    with_version = sum(1 for item in catalog if item.version.strip())
+    if total and with_version == total:
+        return ProbeResult(
+            "analyzer_pinning",
+            "ok",
+            f"{with_version}/{total} analyzers version-pinned",
+        )
+    return ProbeResult(
+        "analyzer_pinning",
+        "warn",
+        f"{with_version}/{total} analyzers version-pinned",
+    )
+
+
+def run_supply_chain_probes(*, cwd: Path) -> list[ProbeResult]:
+    """Compose supply-chain provenance and pinning probes (#366 / D16)."""
+    root = cwd.resolve()
+    report = verify_agent_cli_provenance(root / "docker" / "agent-clis")
+    versions = runtime_tool_versions()
+    python = str(versions.get("python", ""))
+    tools = versions.get("tools")
+    tool_count = len(tools) if isinstance(tools, dict) else 0
+    provenance_status = "ok" if report.verified else "warn"
+    return [
+        _reproducibility_probe(root),
+        _analyzer_pinning_probe(),
+        ProbeResult("agent_cli_provenance", provenance_status, report.detail),
+        ProbeResult("runtime", "ok", f"python {python}; {tool_count} tools recorded"),
+    ]
+
+
+def render_doctor_table(
+    results: Sequence[ProbeResult],
+    *,
+    title: str = "mergecraft doctor",
+) -> Table:
     """Build the Rich table for doctor output."""
-    table = Table(title="mergecraft doctor", show_header=True, header_style="bold")
+    table = Table(title=title, show_header=True, header_style="bold")
     table.add_column("probe", style="cyan")
     table.add_column("status")
     table.add_column("detail")
@@ -166,11 +282,22 @@ def render_doctor_table(results: Sequence[ProbeResult]) -> Table:
     return table
 
 
-def run(cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root to diagnose.")) -> None:
+def run(
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root to diagnose."),
+    supply_chain: bool = typer.Option(
+        False,
+        "--supply-chain",
+        help="Run supply-chain provenance, pinning, and reproducibility probes.",
+    ),
+) -> None:
     """Diagnose git, providers, analyzers, auth, config, and MCP wiring."""
     root = cwd.resolve()
     results = run_doctor_probes(root)
-    console.print(render_doctor_table(results))
+    title = "mergecraft doctor"
+    if supply_chain:
+        results = [*results, *run_supply_chain_probes(cwd=root)]
+        title = "mergecraft doctor — supply-chain provenance"
+    console.print(render_doctor_table(results, title=title))
     if any(row.hard_failure for row in results):
         raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 
@@ -185,9 +312,13 @@ def assert_output_contains_no_secrets(text: str) -> None:
 
 
 __all__ = [
+    "AgentCliProvenance",
     "ProbeResult",
     "assert_output_contains_no_secrets",
     "render_doctor_table",
     "run",
     "run_doctor_probes",
+    "run_supply_chain_probes",
+    "runtime_tool_versions",
+    "verify_agent_cli_provenance",
 ]
