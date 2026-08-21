@@ -355,7 +355,7 @@ def test_cli_review_drives_engine_run(tmp_path: Path, monkeypatch: pytest.Monkey
     original = ReviewEngine.run
 
     async def wrapped(self: ReviewEngine, **kwargs: Any) -> ReviewEngineResult:
-        async def _tap(name: str, hook: Any) -> Any:
+        def _tap(name: str, hook: Any) -> Any:
             if name == "publish":
 
                 async def _publish(payload: object) -> object:
@@ -470,26 +470,20 @@ async def test_skip_agent_publish_is_owned_by_finalize(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Error: inconclusive skip-agent must not ``_publish`` from the review hook."""
+    import traceback
+
     import mergecraft.main as main_mod
     from mergecraft.config.settings import RepoSettings
     from tests.support.run_main_harness import run_main_for_test
 
-    finalize_started: list[str] = []
-    publish_before_finalize: list[str] = []
+    publish_stacks: list[str] = []
     orig_publish = main_mod._publish
-    orig_finalize = main_mod._finalize
 
     async def wrap_publish(*args: object, **kwargs: object) -> object:
-        if not finalize_started:
-            publish_before_finalize.append("publish")
+        publish_stacks.append("".join(traceback.format_stack()))
         return await orig_publish(*args, **kwargs)
 
-    async def wrap_finalize(*args: object, **kwargs: object) -> object:
-        finalize_started.append("finalize")
-        return await orig_finalize(*args, **kwargs)
-
     monkeypatch.setattr(main_mod, "_publish", wrap_publish)
-    monkeypatch.setattr(main_mod, "_finalize", wrap_finalize)
     rec = await run_main_for_test(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
@@ -502,8 +496,9 @@ async def test_skip_agent_publish_is_owned_by_finalize(
     assert rec.result is not None
     assert rec.result.outcome is RunOutcome.inconclusive
     assert rec.agent_runs == []
-    assert publish_before_finalize == []
-    assert finalize_started == ["finalize"]
+    assert publish_stacks, "engine publish must still call _publish"
+    assert all("_run_review_after_analyze" not in stack for stack in publish_stacks)
+    assert any("_finalize" in stack for stack in publish_stacks)
 
 
 @pytest.mark.asyncio
