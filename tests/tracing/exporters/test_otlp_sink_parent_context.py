@@ -19,8 +19,9 @@ from tests.tracing.exporters.conftest import export_events_via_otlp_sink
 
 _CANARY_ENDPOINT = "http://127.0.0.1:1/canary-374-parent-context"
 _TRACE_ID_HEX = "37400000000000000000000000000001"
-_PARENT_SPAN_ID = "37400000000000000000000000000001"
-_CHILD_SPAN_ID = "37400000000000000000000000000002"
+# First 16 hex chars must differ — OTel span_id is 64-bit (16 hex digits).
+_PARENT_SPAN_ID = "37400000000000010000000000000001"
+_CHILD_SPAN_ID = "37400000000000020000000000000002"
 
 
 @pytest.fixture(autouse=True)

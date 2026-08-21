@@ -656,9 +656,8 @@ class OTLPSink:
             otel_trace_id: int | None = None
             otel_span_id: int | None = None
             if event.trace_id:
+                attrs["mergecraft.trace_id"] = event.trace_id
                 otel_trace_id = parse_mergecraft_otel_trace_id(event.trace_id)
-                if otel_trace_id is not None:
-                    attrs["mergecraft.trace_id"] = event.trace_id
             if event.span_id:
                 otel_span_id = parse_mergecraft_otel_span_id(event.span_id)
             parent_context: Any | None = None
@@ -830,7 +829,7 @@ def _build_otel_sink(entry: Any) -> OTLPSink:
 
 def _otlp_sink_identity(sink: OTLPSink) -> tuple[str, tuple[tuple[str, str], ...]]:
     """Return the dedupe key for an :class:`OTLPSink` (endpoint + headers, D11)."""
-    normalized_headers = tuple(sorted((str(k), str(v)) for k, v in sink.headers.items()))
+    normalized_headers = tuple(sorted((str(k).lower(), str(v)) for k, v in sink.headers.items()))
     return sink.endpoint, normalized_headers
 
 

@@ -85,3 +85,19 @@ def test_otlp_sink_list_does_not_grow_across_writes(
         "each write must export exactly one span after dedupe, "
         f"got per-write counts {per_write_span_counts}"
     )
+
+
+def test_otlp_sink_dedupe_normalizes_header_key_case() -> None:
+    """``Authorization`` and ``authorization`` on the same endpoint dedupe to one sink (#372)."""
+    from mergecraft.tracing.exporters import OTLPSink, dedupe_otlp_sinks
+
+    endpoint = _SHARED_ENDPOINT
+    token = "Bearer test-token-372-header-case"
+    sink_a = OTLPSink(endpoint=endpoint, headers={"Authorization": token})
+    sink_b = OTLPSink(endpoint=endpoint, headers={"authorization": token})
+
+    deduped = dedupe_otlp_sinks([sink_a, sink_b])
+
+    assert len(deduped) == 1, (
+        f"header keys must dedupe case-insensitively; expected 1 OTLPSink, got {len(deduped)}"
+    )
