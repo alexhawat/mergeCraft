@@ -36,6 +36,8 @@ from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import ProgressComment, ToolState, init_tool_state
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
+from mergecraft.review.engine import run_from_snapshot
+from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
 from mergecraft.scm.github import (
@@ -1477,6 +1479,12 @@ async def main() -> MainResult:
     """
     install_loguru_redaction_filter()
     normalize_env()
+    snapshot: ReviewSnapshot = canonical_review_snapshot(
+        entry="action",
+        source=os.environ.get("GITHUB_REPOSITORY") or None,
+        replay_key=os.environ.get("GITHUB_SHA") or None,
+    )
+    run_from_snapshot(snapshot)
     ensure_github_workspace_registered()
     workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
     if workspace:

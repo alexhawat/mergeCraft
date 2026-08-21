@@ -18,7 +18,10 @@ import hashlib
 import hmac
 import threading
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mergecraft.review.snapshot import ReviewSnapshot
 
 SUPPORTED_WEBHOOK_PROVIDERS: frozenset[str] = frozenset({"github", "gitlab"})
 
@@ -72,6 +75,7 @@ class ConformingReviewRequest:
     mode: str
     provider: str
     event: str
+    snapshot: ReviewSnapshot
 
 
 class _WebhookDeliveryStore:
@@ -282,9 +286,23 @@ def conforming_review_request(
     body: dict[str, Any],
 ) -> ConformingReviewRequest:
     """Map GitHub pull_request and GitLab merge-request hooks to the same Review mode."""
+    from mergecraft.review.engine import run_from_snapshot
+    from mergecraft.review.snapshot import canonical_review_snapshot
+
     _ = body
     name = _require_supported(provider)
-    return ConformingReviewRequest(mode="Review", provider=name, event=event)
+    snapshot: ReviewSnapshot = canonical_review_snapshot(
+        entry="scm",
+        mode="Review",
+        source=name,
+    )
+    run_from_snapshot(snapshot)
+    return ConformingReviewRequest(
+        mode="Review",
+        provider=name,
+        event=event,
+        snapshot=snapshot,
+    )
 
 
 def assert_review_only_webhook_capabilities(*, requested_capability: str) -> None:

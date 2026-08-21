@@ -24,6 +24,8 @@ from mergecraft.offline_review import (
     parse_offline_review_findings,
     run_offline_diff_review,
 )
+from mergecraft.review.engine import run_from_snapshot
+from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.utils.log import configure_logging
 from mergecraft.utils.source_resolve import SourceResolverSpec
 
@@ -501,6 +503,13 @@ def run(
     internal_json_sink = json_output is None and not (
         output is not None and effective_output_format in {"json", "jsonl", "sarif"}
     )
+
+    snapshot: ReviewSnapshot = canonical_review_snapshot(
+        entry="cli",
+        source=str(root),
+        replay_key=str(diff) if diff is not None else None,
+    )
+    run_from_snapshot(snapshot)
 
     stream: AgentProtocolStream | None = None
     seen: set[str] = set()
