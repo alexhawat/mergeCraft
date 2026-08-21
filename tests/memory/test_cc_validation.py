@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
+from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from tests.support.cc_batch import (
     MEMORY_KINDS,
     invoke,
@@ -23,23 +23,11 @@ from tests.support.cc_batch import (
     require_registered,
 )
 
-_W13 = pytest.mark.xfail(
-    reason="green after W13: memory validation / org / effectiveness (#360)",
-    strict=False,
-)
-
 
 def _memory_api() -> Any:
     return load_module("mergecraft.memory")
 
 
-def test_memory_validate_is_currently_a_usage_error() -> None:
-    """W8 current state: ``memory validate`` is not registered."""
-    result = invoke("memory", "validate", "--help")
-    assert result.exit_code == CLI_USAGE_EXIT_CODE, plain(result.stdout + result.stderr)
-
-
-@_W13
 def test_memory_validate_help_is_registered() -> None:
     """#360 — ``mergecraft memory validate`` exists."""
     result = require_registered("memory", "validate", "--help", label="mergecraft memory validate")
@@ -47,7 +35,6 @@ def test_memory_validate_help_is_registered() -> None:
     assert "valid" in help_text
 
 
-@_W13
 def test_memory_validate_rejects_a_corrupt_store(tmp_path: Path) -> None:
     """Error: validate exits non-zero on a corrupt memory store."""
     require_registered("memory", "validate", "--help", label="mergecraft memory validate")
@@ -58,7 +45,6 @@ def test_memory_validate_rejects_a_corrupt_store(tmp_path: Path) -> None:
     assert result.exit_code != CLI_SUCCESS_EXIT_CODE, plain(result.stdout + result.stderr)
 
 
-@_W13
 def test_historical_validation_is_required_before_activation() -> None:
     """#360 — learned behaviour is not activated without historical validation."""
     module = _memory_api()
@@ -70,7 +56,6 @@ def test_historical_validation_is_required_before_activation() -> None:
         activate(entry={"id": "one-shot", "text": "ignore style nits"}, evidence_count=1)
 
 
-@_W13
 def test_one_reviewer_action_does_not_silently_create_durable_memory() -> None:
     """#360 — require repeated evidence or explicit approval."""
     module = _memory_api()
@@ -82,7 +67,6 @@ def test_one_reviewer_action_does_not_silently_create_durable_memory() -> None:
     assert durable is False
 
 
-@_W13
 def test_memory_kinds_are_separated() -> None:
     """#354/#360 — factual / policy / preference / FP suppression stay distinct."""
     module = _memory_api()
@@ -90,7 +74,6 @@ def test_memory_kinds_are_separated() -> None:
     assert kinds == MEMORY_KINDS
 
 
-@_W13
 def test_false_positive_memory_has_expiry_scope_and_over_suppression_guard() -> None:
     """#360 — FP memory expires, is scoped, and cannot over-suppress."""
     module = _memory_api()
@@ -104,7 +87,6 @@ def test_false_positive_memory_has_expiry_scope_and_over_suppression_guard() -> 
     assert report.is_over_suppressed is True
 
 
-@_W13
 def test_organization_memory_backend_is_pluggable() -> None:
     """#360 — org memory is a backend beside the local store."""
     module = _memory_api()
@@ -116,7 +98,6 @@ def test_organization_memory_backend_is_pluggable() -> None:
         assert callable(getattr(backend_cls, name, None)) or hasattr(backend_cls, name)
 
 
-@_W13
 def test_memory_effectiveness_improves_precision_without_reducing_recall() -> None:
     """#360 — effectiveness metrics prove precision up, recall not down."""
     module = _memory_api()
@@ -127,7 +108,6 @@ def test_memory_effectiveness_improves_precision_without_reducing_recall() -> No
     assert recall_delta >= 0.0
 
 
-@_W13
 def test_w13_consumes_dismissal_codes_it_does_not_define_them() -> None:
     """#360 out of scope — dismissal reason codes stay in findings/materiality (#355)."""
     module = _memory_api()

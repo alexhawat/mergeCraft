@@ -225,9 +225,9 @@ After each impl wave, recon **deletes** matching W8 current-state usage-error pi
 | **W10** | `tests/findings/test_cc_materiality.py` (7) | `green after W10: materiality / calibration / dismissal (#355)` | **PASS** — un-xfailed W10 recon |
 | **W11** | `tests/context/test_cc_search_explain.py` (8) + `tests/context/test_cc_instruction_sources.py` (6) | `green after W11: context search/explain/budgets (#356)` / `instruction sources + external files (#357)` | **PASS** — un-xfailed W11 recon |
 | **W12** | `tests/policy/test_cc_lifecycle.py` (7) + `tests/policy/test_cc_packs.py` (4) | `green after W12: policy lifecycle back half (#358)` / `policy packs (#359)` | **PASS** — un-xfailed W12 recon |
-| **W13** | `tests/memory/test_cc_validation.py` (9) | `green after W13: memory validation / org / effectiveness (#360)` | XFAIL |
+| **W13** | `tests/memory/test_cc_validation.py` (9) | `green after W13: memory validation / org / effectiveness (#360)` | **PASS** — un-xfailed W13 recon |
 
-Current-state **PASS** (not xfailed; recon deletes the usage-error rows after the matching impl wave): D14 `decide_approval` only in `agents/gates.py`; D10 root-callback pin; shipped retrieval/dedup/policy front-half files; CLI usage-error for `memory validate`. `evidence`, `context search|explain`, and `policy effective|simulate` usage-error pins deleted after W9 / W11 / W12.
+Current-state **PASS** (not xfailed; recon deletes the usage-error rows after the matching impl wave): D14 `decide_approval` only in `agents/gates.py`; D10 root-callback pin; shipped retrieval/dedup/policy front-half files. `evidence`, `context search|explain`, `policy effective|simulate`, and `memory validate` usage-error pins deleted after W9 / W11 / W12 / W13.
 
 W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` clean.
 
@@ -306,6 +306,23 @@ W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` cle
 - W13 still **XFAIL** (`strict=False`)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W13 not started
+
+## Recon notes (W13)
+
+- Un-xfailed every `green after W13: memory validation / org / effectiveness (#360)`
+  marker in `tests/memory/test_cc_validation.py` (9 XPASS → real PASS).
+- Deleted W8 current-state pin `test_memory_validate_is_currently_a_usage_error`
+  (`memory validate` is registered; the usage-error pin failed after W13.1).
+- Kept W10 dismissal pin `test_dismissal_feeds_evaluation_not_durable_memory`
+  (single dismissal still must not write durable memory).
+- W13.1 impl: `727b437a`.
+
+## Acceptance (W13 recon)
+
+- W13 memory pins **PASS** (no leftover xfail, no XPASS)
+- W8 `#360` current-state usage-error pin gone
+- `make lint` + `make typecheck` clean
+- No `src/` edits; CCF not started
 
 ## Contract matrix (W8)
 
