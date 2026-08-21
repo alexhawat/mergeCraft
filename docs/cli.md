@@ -16,7 +16,6 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft agents show <role>` | Show resolved prompt text and MCP tool names for one role. |
 | `mergecraft analyzers detect` | Show analyzers that would run for changed paths in this repo. |
 | `mergecraft analyzers docs` | Regenerate `ANALYZERS.md` from manifests. |
-| `mergecraft analyzers docs` | Regenerate `docs/ANALYZERS.md` from manifests. |
 | `mergecraft analyzers explain <analyzer-id>` | Print manifest fields and notes for one analyzer. |
 | `mergecraft analyzers export <analyzer-id>` | Run one analyzer and export findings as SARIF. |
 | `mergecraft analyzers list` | List catalog analyzers and whether they would enable here. |
@@ -45,7 +44,6 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
-| `mergecraft eval gate` | Check the eval bank's integrity — the CI-safe half of the eval loop. |
 | `mergecraft eval gate` | Check the eval bank's integrity and adversarial corpora — the CI-safe half. |
 | `mergecraft eval list` | List cases in the bank. |
 | `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44, W12.1). |
@@ -96,6 +94,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft tracing logfire wire-workflow` | Wire Logfire tracing into the consumer workflow. |
 | `mergecraft version` | Show the mergeCraft package version. |
 | `mergecraft watch --pr N` | Stream a PR/issue timeline as one JSON line per new event. |
+| `mergecraft xrepo explain` | Explain a cross-repo finding, or report producer/consumer contract breakage. |
 <!-- END:cli-commands -->
 
 The bare `gha` group invocation (no subcommand) is the Docker action's runtime
@@ -108,4 +107,3 @@ itself, so it is described here in prose rather than as its own table row;
 - [Action reference](action-reference.md)
 - [Exit codes](EXIT-CODES.md)
 - [Landing README](../README.md)
-| `mergecraft xrepo explain` | Explain a cross-repo finding, or report producer/consumer contract breakage. |
