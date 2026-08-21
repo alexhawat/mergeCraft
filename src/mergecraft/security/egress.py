@@ -14,10 +14,15 @@ Exports:
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import socket
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 DEFAULT_EGRESS_ALLOWLIST: frozenset[str] = frozenset(
     {
@@ -172,6 +177,20 @@ def guard_external_url(url: str) -> str:
     DNS that fails to resolve is blocked (fail-closed). Returns the original
     URL when it is acceptable for external retrieval.
     """
+    return inspect_external_url(url).url
+
+
+@dataclass(frozen=True, slots=True)
+class GuardedUrl:
+    """An SSRF-checked retrieval URL plus the addresses used to validate it."""
+
+    url: str
+    host: str
+    addresses: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]
+
+
+def inspect_external_url(url: str) -> GuardedUrl:
+    """SSRF-check ``url`` and return the host plus resolved public addresses."""
     parsed = urlparse(url)
     scheme = (parsed.scheme or "").casefold()
     host = _normalize_host(parsed.hostname or "")
@@ -180,7 +199,62 @@ def guard_external_url(url: str) -> str:
         raise SsrfBlockedError(reason)
     if scheme not in {"http", "https"}:
         raise SsrfBlockedError(f"ssrf: blocked scheme {scheme or 'missing'!r}")
-    return url
+    literal = _ip_from_host(host)
+    if literal is not None:
+        addresses: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...] = (literal,)
+    else:
+        addresses = _resolve_host_addresses(host)
+        for resolved in addresses:
+            blocked = _blocked_address(resolved)
+            if blocked is not None:
+                raise SsrfBlockedError(blocked)
+    return GuardedUrl(url=url, host=host, addresses=addresses)
+
+
+@contextlib.contextmanager
+def pin_host_resolution(
+    host: str,
+    addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
+) -> Iterator[None]:
+    """Force ``socket.getaddrinfo`` for ``host`` to the already-validated IPs."""
+    normalized = _normalize_host(host)
+    pinned = tuple(addresses)
+    original = socket.getaddrinfo
+
+    def _pinned(
+        name: str,
+        port: Any,
+        family: int = 0,
+        type: int = 0,
+        proto: int = 0,
+        flags: int = 0,
+    ) -> list[tuple[Any, ...]]:
+        if _normalize_host(str(name)) != normalized:
+            return original(name, port, family, type, proto, flags)
+        port_i = 0
+        if port is not None and str(port).isdigit():
+            port_i = int(port)
+        results: list[tuple[Any, ...]] = []
+        for address in pinned:
+            if isinstance(address, ipaddress.IPv6Address):
+                sock_family = socket.AF_INET6
+                sockaddr: tuple[Any, ...] = (str(address), port_i, 0, 0)
+            else:
+                sock_family = socket.AF_INET
+                sockaddr = (str(address), port_i)
+            if family not in {0, sock_family}:
+                continue
+            results.append((sock_family, type or socket.SOCK_STREAM, proto, "", sockaddr))
+        if not results:
+            msg = f"ssrf: no pinned address for {host!r} (fail-closed)"
+            raise SsrfBlockedError(msg)
+        return results
+
+    socket.getaddrinfo = _pinned  # type: ignore[assignment]  # — stdlib getaddrinfo is overloaded; pin to validated IPs
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = original
 
 
 def dependency_vulnerability_gate() -> VulnerabilityGateReport:

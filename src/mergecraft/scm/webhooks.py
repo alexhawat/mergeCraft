@@ -182,6 +182,20 @@ def verify_webhook_signature(
         raise PermissionError(msg)
 
 
+def webhook_delivery_id(provider: str, headers: dict[str, str]) -> str:
+    """Return the provider delivery nonce, or raise when it is missing."""
+    name = _require_supported(provider)
+    return _delivery_nonce(name, headers)
+
+
+def webhook_event_name(provider: str, headers: dict[str, str]) -> str:
+    """Return the provider event name from headers, or ``unknown``."""
+    name = _require_supported(provider)
+    if name == "github":
+        return _header(headers, "X-GitHub-Event") or "unknown"
+    return _header(headers, "X-Gitlab-Event") or "unknown"
+
+
 def _delivery_nonce(provider: str, headers: dict[str, str]) -> str:
     if provider == "github":
         nonce = _header(headers, _GITHUB_DELIVERY_HEADER)
@@ -291,4 +305,6 @@ __all__ = [
     "reject_webhook_replay",
     "sign_webhook_payload",
     "verify_webhook_signature",
+    "webhook_delivery_id",
+    "webhook_event_name",
 ]

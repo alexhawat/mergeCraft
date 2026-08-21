@@ -13,6 +13,7 @@ from loguru import logger
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.security.egress import guard_external_url
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -70,6 +71,7 @@ def upload_file_tool(ctx: ToolContext):
                 "contentType": content_type,
             }
 
+        guard_external_url(api_base if "://" in api_base else f"https://{api_base}")
         async with httpx.AsyncClient(timeout=60.0) as client:
             signed = await client.post(
                 urljoin(api_base + "/", "api/upload/signed-url"),
@@ -87,6 +89,7 @@ def upload_file_tool(ctx: ToolContext):
             data = signed.json()
             upload_url = data["uploadUrl"]
             public_url = data["publicUrl"]
+            guard_external_url(str(upload_url))
             headers = {
                 "Content-Type": content_type,
                 "Content-Length": str(len(buffer)),

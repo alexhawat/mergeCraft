@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import secrets
 import socket
 import threading
@@ -100,6 +101,7 @@ from mergecraft.mcp.verification import (
     verify_agent_findings_tool,
 )
 from mergecraft.mcp.xrepo import checkout_repo_tool, list_repos_tool
+from mergecraft.scm.ingress import accept_webhook
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -630,6 +632,26 @@ def create_mcp_app(
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/webhooks/{provider}")
+    async def inbound_webhook(provider: str, request: Request) -> JSONResponse:
+        secret = os.environ.get("MERGECRAFT_WEBHOOK_SECRET", "")
+        body = await request.body()
+        headers = {key: value for key, value in request.headers.items()}
+        try:
+            result = accept_webhook(provider, headers=headers, body=body, secret=secret)
+        except PermissionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=401)
+        except (ValueError, json.JSONDecodeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(
+            {
+                "result_id": result.result_id,
+                "duplicate": result.duplicate,
+                "provider": result.provider,
+                "event": result.event,
+            }
+        )
 
     primary_token = orchestrator_auth_token if orchestrator_auth_token is not None else auth_token
     if tools:

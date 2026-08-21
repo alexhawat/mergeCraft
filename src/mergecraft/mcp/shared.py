@@ -89,9 +89,18 @@ PRIMARY_MUTATING_ALLOWLIST: Final[frozenset[str]] = READONLY_MUTATING_ALLOWLIST 
     }
 )
 # Session tools that must run in review-only (including before select_mode).
+# Publication and labeling do not edit the reviewed tree; they stay available
+# after write-capable modes were dropped from the production registry.
 # Every other mutates=True tool is default-denied unless a write-capable mode
 # is selected (none are registered in production).
-_REVIEW_SESSION_MUTATIONS: Final[frozenset[str]] = PRIMARY_MUTATING_ALLOWLIST
+_REVIEW_SESSION_MUTATIONS: Final[frozenset[str]] = PRIMARY_MUTATING_ALLOWLIST | frozenset(
+    {
+        "upload_file",
+        "add_labels",
+        "remove_labels",
+        "create_issue_comment",
+    }
+)
 
 _selected_mode_var: ContextVar[str | None] = ContextVar(
     "mergecraft_mcp_selected_mode", default=None

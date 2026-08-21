@@ -212,6 +212,41 @@ def test_scm_adapters_cannot_bypass_review_only_restrictions() -> None:
         guard(requested_capability="commit")
 
 
+def test_webhook_ingress_rejects_invalid_hmac_before_processing() -> None:
+    """Error: the HTTP ingress refuses a bad signature and does not process."""
+    from mergecraft.scm.ingress import accept_webhook
+
+    with pytest.raises(
+        (ValueError, PermissionError, RuntimeError),
+        match=r"signature|hmac|unauthor",
+    ):
+        accept_webhook(
+            "github",
+            headers={"X-Hub-Signature-256": "sha256=deadbeef", "X-GitHub-Delivery": "ing-1"},
+            body=b'{"ok":true}',
+            secret="test-secret",
+        )
+
+
+def test_webhook_ingress_verifies_then_processes_a_valid_payload() -> None:
+    """Happy: ingress HMAC + replay check then processes the delivery once."""
+    from mergecraft.scm.ingress import accept_webhook
+
+    module = require_module(WEBHOOK_MODULE)
+    body = b'{"action":"opened"}'
+    signed = require_callable(module, "sign_webhook_payload")(
+        "github", body=body, secret="ingress-secret"
+    )
+    headers = {**signed, "X-GitHub-Delivery": "ing-valid-1", "X-GitHub-Event": "pull_request"}
+    first = accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
+    assert first.duplicate is False
+    with pytest.raises(
+        (ValueError, PermissionError, RuntimeError),
+        match=r"replay|timestamp|nonce|stale",
+    ):
+        accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
+
+
 def test_webhook_module_does_not_import_ci_gitlab_log_adapter() -> None:
     """#361 out of scope — webhook code must not import CI GitLab logs."""
     module = require_module(WEBHOOK_MODULE)

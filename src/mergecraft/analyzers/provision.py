@@ -15,10 +15,12 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from loguru import logger
+
+from mergecraft.security.egress import SsrfBlockedError, inspect_external_url, pin_host_resolution
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -66,29 +68,51 @@ def _safe_archive_member_path(dest_dir: Path, member_name: str) -> Path:
 
 
 def _download_pinned_url(url: str, dest: Path) -> None:
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.netloc:
-        msg = f"refusing unpinned or non-https download url: {url!r}"
-        raise ProvisionError(msg)
-    initial_host = parsed.netloc.casefold()
-    allowed_hosts = {
-        initial_host,
-        "objects.githubusercontent.com",
-        "release-assets.githubusercontent.com",
-    }
-    try:
-        with httpx.stream("GET", url, follow_redirects=True, timeout=120.0) as response:
-            final_host = (response.url.host or "").casefold()
-            if response.url.scheme != "https" or final_host not in allowed_hosts:
-                msg = f"refusing redirect from pinned download url {url!r} to {response.url!r}"
-                raise ProvisionError(msg)
-            response.raise_for_status()
-            with dest.open("wb") as handle:
-                for chunk in response.iter_bytes():
-                    handle.write(chunk)
-    except httpx.HTTPError as exc:
-        msg = f"download failed for {url!r}: {exc}"
-        raise ProvisionError(msg) from exc
+    current = url
+    for _ in range(8):
+        parsed = urlparse(current)
+        if parsed.scheme != "https" or not parsed.netloc:
+            msg = f"refusing unpinned or non-https download url: {current!r}"
+            raise ProvisionError(msg)
+        initial_host = parsed.netloc.casefold()
+        allowed_hosts = {
+            initial_host,
+            "objects.githubusercontent.com",
+            "release-assets.githubusercontent.com",
+        }
+        try:
+            guarded = inspect_external_url(current)
+        except SsrfBlockedError as exc:
+            raise ProvisionError(str(exc)) from exc
+        with pin_host_resolution(guarded.host, guarded.addresses):
+            try:
+                with httpx.stream(
+                    "GET", current, follow_redirects=False, timeout=120.0
+                ) as response:
+                    if response.status_code in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("location")
+                        if not location:
+                            msg = f"redirect from pinned download url {current!r} missing Location"
+                            raise ProvisionError(msg)
+                        current = urljoin(current, location)
+                        next_parsed = urlparse(current)
+                        next_host = (next_parsed.hostname or "").casefold()
+                        if next_parsed.scheme != "https" or next_host not in allowed_hosts:
+                            msg = (
+                                f"refusing redirect from pinned download url {url!r} to {current!r}"
+                            )
+                            raise ProvisionError(msg)
+                        continue
+                    response.raise_for_status()
+                    with dest.open("wb") as handle:
+                        for chunk in response.iter_bytes():
+                            handle.write(chunk)
+                    return
+            except httpx.HTTPError as exc:
+                msg = f"download failed for {current!r}: {exc}"
+                raise ProvisionError(msg) from exc
+    msg = f"too many redirects for pinned download url: {url!r}"
+    raise ProvisionError(msg)
 
 
 def _cache_path(cache_dir: Path, manifest_id: str, platform: str, artifact_sha256: str) -> Path:
