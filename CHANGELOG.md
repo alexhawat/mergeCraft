@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added: generated CLI and Action reference pages (`docs/cli.md`,
   `docs/action-reference.md`) plus a docs manifest; `make docs-check`
   replaces landing-README table splices.
+- `mergecraft context search` and `explain` score retrieved context, allocate per-specialist token budgets, fetch lazily through controlled tools, and record omitted scope so the evidence outcome is downgraded; retrieval quality is scored separately from the model (#356)
+- Reviewed-repo instruction discovery now includes `GEMINI.md`, GitHub Copilot instructions, Windsurf rules, `SKILL.md`, and a configurable extra list; injected instruction bytes are hashed into the run manifest, competing sources record a winner, untrusted files stay inside the nonce fence, and `--context` files enforce type, size, trust, and provenance (#357)
 - Review findings are ranked by materiality (security outranks style), confidence is calibrated from benchmark hit rates, and publication/blocking floors plus per-severity, category, file, and review budgets are configurable; dismissals record a closed reason code for evaluation (not durable memory), and a release-wired corpus gate requires blocker precision above 95% (#355)
 - `mergecraft evidence show` and `verify` display and replay a finding's evidence packet (six verifier states, freshness, provenance hash, completeness); unverified findings do not block unless policy allows it, and a failed verifier cannot promote a finding to proven (#354)
 - `mergecraft xrepo explain` reports SHA-pinned linked-repo producer/consumer contract breakage without writing the reviewed tree; policy can require cross-repo review before a public-contract change passes (#353)

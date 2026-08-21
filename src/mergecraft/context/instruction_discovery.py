@@ -1,16 +1,87 @@
-"""Trust-gated discovery of repo instruction and skill files (G9/G10 / D5)."""
+"""Trust-gated discovery of repo instruction and skill files (G9/G10 / D5 / #357).
+
+Discovers CLAUDE.md / AGENTS.md / SKILL.md plus GEMINI.md, Copilot instructions,
+Windsurf rules, Cursor rules, and a configurable extra filename list. Untrusted
+sources render through the nonce fence as data, never into the instruction bundle.
+Does not author mergeCraft's own AGENTS.md / skill (file 7).
+"""
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003 — used at runtime for repo traversal
+import hashlib
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from mergecraft.analyzers.agentsec.skill_manifest import parse_skill_file
 from mergecraft.utils.fence import Fence, render_untrusted
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+    from pathlib import Path
+
 _REPO_INSTRUCTIONS_HEADER = "************* REPO INSTRUCTIONS *************"
 _STANDING_INSTRUCTIONS_HEADER = "************* STANDING INSTRUCTIONS *************"
 _UNTRUSTED_EVIDENCE_HEADER = "************* UNTRUSTED REPO EVIDENCE *************"
-_INSTRUCTION_FILENAMES = frozenset({"CLAUDE.md", "AGENTS.md", "SKILL.md"})
+_INSTRUCTION_FILENAMES = frozenset({"CLAUDE.md", "AGENTS.md", "SKILL.md", "GEMINI.md"})
+_COPILOT_NAME = "copilot-instructions.md"
+_SKIP_DIR_NAMES = frozenset({".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv"})
+_SOURCE_PRIORITY = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    "SKILL.md",
+    "GEMINI.md",
+    _COPILOT_NAME,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class InstructionConflictResult:
+    """Winner plus recorded conflicts among competing instruction sources."""
+
+    winner: str
+    conflicts: tuple[str, ...]
+
+
+def discover_instruction_paths(
+    repo_root: Path,
+    extra_filenames: Sequence[str] = (),
+) -> list[Path]:
+    """Enumerate instruction and skill paths under ``repo_root``."""
+    extras = frozenset(extra_filenames)
+    paths: list[Path] = []
+    for path in sorted(repo_root.rglob("*")):
+        if not path.is_file() or _is_skipped(path, repo_root):
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        if _is_instruction_rel(rel, extras=extras):
+            paths.append(path)
+    return paths
+
+
+def hash_injected_instructions(sources: Mapping[str, str]) -> str:
+    """Return a hex digest of injected instruction bytes for the run manifest."""
+    digest = hashlib.sha256()
+    for key in sorted(sources):
+        digest.update(key.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(sources[key].encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def resolve_instruction_conflicts(
+    sources: Sequence[Mapping[str, str]],
+) -> InstructionConflictResult:
+    """Pick a winner among competing instruction sources and record conflicts."""
+    if not sources:
+        return InstructionConflictResult(winner="", conflicts=())
+    ranked = sorted(sources, key=_source_rank)
+    winner_path = str(ranked[0].get("path", ""))
+    texts = {str(item.get("text", "")) for item in sources}
+    conflicts: tuple[str, ...] = ()
+    if len(texts) > 1:
+        conflicts = tuple(str(item.get("path", "")) for item in ranked[1:])
+    return InstructionConflictResult(winner=winner_path, conflicts=conflicts)
 
 
 def render_review_context(
@@ -28,10 +99,9 @@ def render_review_context(
 
     for rel_path in discovered:
         path = repo_root / rel_path
-        document = parse_skill_file(path, repo_relative=rel_path)
-        if document is None:
+        body = _instruction_body(path, rel_path)
+        if body is None:
             continue
-        body = document.fields.get("body") or document.fields.get("content") or ""
         block = f"### `{rel_path}` @ {commit_sha}\n\n{body.strip()}"
         if trust_tier == "trusted":
             trusted_blocks.append(block)
@@ -71,19 +141,49 @@ def render_review_context(
 
 def _discover_instruction_paths(repo_root: Path) -> list[str]:
     """Enumerate instruction and skill manifest paths under ``repo_root``."""
-    paths: list[str] = []
-    for path in sorted(repo_root.rglob("*")):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(repo_root).as_posix()
-        is_instruction = (
-            path.name in _INSTRUCTION_FILENAMES
-            or (rel.startswith(".cursor/rules/") and path.suffix.casefold() == ".md")
-            or rel.endswith("/SKILL.md")
-        )
-        if is_instruction and parse_skill_file(path, repo_relative=rel) is not None:
-            paths.append(rel)
-    return paths
+    return [
+        path.relative_to(repo_root).as_posix() for path in discover_instruction_paths(repo_root)
+    ]
+
+
+def _instruction_body(path: Path, rel_path: str) -> str | None:
+    document = parse_skill_file(path, repo_relative=rel_path)
+    if document is not None:
+        return document.fields.get("body") or document.fields.get("content") or ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _is_instruction_rel(rel: str, *, extras: frozenset[str]) -> bool:
+    name = rel.rsplit("/", 1)[-1]
+    if name in _INSTRUCTION_FILENAMES or rel.endswith("/SKILL.md"):
+        return True
+    if rel.startswith(".cursor/rules/") and rel.casefold().endswith(".md"):
+        return True
+    if name == _COPILOT_NAME:
+        return True
+    if "/.windsurf/rules/" in f"/{rel}" and rel.casefold().endswith(".md"):
+        return True
+    return name in extras
+
+
+def _is_skipped(path: Path, repo_root: Path) -> bool:
+    try:
+        parts = path.relative_to(repo_root).parts
+    except ValueError:
+        return True
+    return any(part in _SKIP_DIR_NAMES for part in parts)
+
+
+def _source_rank(item: Mapping[str, str]) -> tuple[int, str]:
+    path = str(item.get("path", "")).replace("\\", "/")
+    name = path.rsplit("/", 1)[-1]
+    try:
+        return (_SOURCE_PRIORITY.index(name), path)
+    except ValueError:
+        return (len(_SOURCE_PRIORITY), path)
 
 
 def _field_label(rel_path: str) -> str:
@@ -92,7 +192,19 @@ def _field_label(rel_path: str) -> str:
         return "repo_claude_md"
     if normalized.endswith("SKILL.md"):
         return "repo_skill"
+    if normalized.endswith("GEMINI.md"):
+        return "repo_gemini_md"
+    if normalized.endswith(_COPILOT_NAME):
+        return "repo_copilot"
+    if "/.windsurf/" in f"/{normalized}":
+        return "repo_windsurf"
     return "repo_instruction"
 
 
-__all__ = ["render_review_context"]
+__all__ = [
+    "InstructionConflictResult",
+    "discover_instruction_paths",
+    "hash_injected_instructions",
+    "render_review_context",
+    "resolve_instruction_conflicts",
+]

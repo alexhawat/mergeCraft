@@ -18,6 +18,7 @@ from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, default_settings
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 _REMOTE_SINKS = frozenset({"logfire", "otel"})
@@ -35,6 +36,7 @@ def build_run_manifest(
     prompt_text: str,
     config_path: Path | None = None,
     policy_text: str | None = None,
+    instruction_hashes: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Return manifest metadata merged into evidence packets and run records."""
     resolved_config = config_path
@@ -48,7 +50,15 @@ def build_run_manifest(
     prompt_hash = _sha256(prompt_text)
     config_hash = _sha256(config_body)
     policy_hash = _sha256(policy)
-    return {
+    hashes: dict[str, Any] = {
+        "prompt": prompt_hash,
+        "config": config_hash,
+        "policy": policy_hash,
+    }
+    injected = dict(instruction_hashes) if instruction_hashes else {}
+    if injected:
+        hashes["instructions"] = injected
+    manifest: dict[str, Any] = {
         "agent_id": agent_id,
         "model_version": model,
         "model_versions": {"requested": model, "executed": model},
@@ -57,12 +67,11 @@ def build_run_manifest(
         "prompt_hash": prompt_hash,
         "config_hash": config_hash,
         "policy_hash": policy_hash,
-        "hashes": {
-            "prompt": prompt_hash,
-            "config": config_hash,
-            "policy": policy_hash,
-        },
+        "hashes": hashes,
     }
+    if injected:
+        manifest["instruction_hashes"] = injected
+    return manifest
 
 
 def resolve_local_telemetry_defaults(
