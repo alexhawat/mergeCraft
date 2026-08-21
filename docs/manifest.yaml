@@ -192,3 +192,9 @@ pages:
     template: satellite
     generator: null
     purpose: Eval bank vs ReviewBench — what each mechanism measures and how to run gates.
+
+  - path: docs/eval-methodology.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: "Eval quality metrics, ablation dimensions, and corpus methodology (#384). Never README; issue 140 owns precision/recall/F1 publication."

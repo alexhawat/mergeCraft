@@ -29,6 +29,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [python-version-floor](dev/python-version-floor.md) | contributor | ADR for the Python 3.11 install floor and PEP 758 parenthesize-now strategy. |
 | [distribution](distribution.md) | consumer | How mergeCraft is packaged — PyPI, Docker, and git install paths. |
 | [eval-bank](eval-bank.md) | contributor | Eval bank layout, promotion, and CI gate semantics. |
+| [eval-methodology](eval-methodology.md) | contributor | Eval quality metrics, ablation dimensions, and corpus methodology (#384). Never README; issue 140 owns precision/recall/F1 publication. |
 | [evidence-packet](evidence-packet.md) | contributor | Merge evidence packet schema emitted as the evidence_packet action output. |
 | [findings-carryover](findings-carryover.md) | contributor | Findings carryover and export CLI behaviour for unresolved review items. |
 | [install](install.md) | consumer | Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback. |

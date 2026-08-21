@@ -1,0 +1,12 @@
+{
+  "id": "golden-python-requirements-001",
+  "title": "Ticket requires authz check that the diff never adds",
+  "language": "python",
+  "framework": "fastapi",
+  "category": "correctness",
+  "kind": "requirements",
+  "source": "human",
+  "path": "docs/tickets/AUTHZ-19.md",
+  "start_line": 1,
+  "end_line": 30
+}
