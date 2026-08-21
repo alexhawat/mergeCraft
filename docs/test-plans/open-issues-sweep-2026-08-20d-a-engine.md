@@ -4,9 +4,10 @@ Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-20d-a-engine-wave-plan.
 Worktree: `.ignorelocal/worktrees/open-issues-sweep-2026-08-20d-a-engine` @ `wave/20d-a-engine`
 Authoring wave: **W2** (DA RED) · Implementation: **W3–W6** · W3 xfail markers removed after remaining #377 verbs landed · W4 xfail markers removed after first-finding stream / cache / resume / goldens landed · W5 xfail markers removed after protocol negotiation / D12 adapter landed · W6 xfail markers removed after ReviewSnapshot conformance landed.
 
-**W9 / #383** tests authored 2026-08-21 (Batch DD RED). Do **not** name a module
-`adversarial.py` (D17 — lane B owns `src/mergecraft/evals/adversarial.py`).
-D16: nothing under `skills/`. D13 write/Fix pins live here, not in the DA suite.
+**W9 / #383** tests authored 2026-08-21 (Batch DD RED). W9.1 xfails removed
+after `docs/agent-loop.md` landed. Do **not** name a module `adversarial.py`
+(D17 — lane B owns `src/mergecraft/evals/adversarial.py`). D16: nothing under
+`skills/`. D13 write/Fix pins live here, not in the DA suite.
 
 ## xfail schedule
 
@@ -18,7 +19,7 @@ All cross-wave markers use `@pytest.mark.xfail(..., strict=False)`.
 | **W4** | first-finding stream, resume, result cache, cancel cleanup, goldens | markers removed after W4 | GREEN |
 | **W5** | negotiate / retryable mismatch / budgets / D12 adapter | markers removed after W5 | GREEN |
 | **W6** | `ReviewSnapshot` type + CLI / Action / SCM conformance | markers removed after W6 | GREEN |
-| **W9** | `docs/agent-loop.md` + append-only manifest row | `green after W9` (`strict=False`) | RED until W9.1 |
+| **W9** | `docs/agent-loop.md` + append-only manifest row | markers removed after W9.1 | GREEN |
 | **W9** | agent-mode D13 boundary + thin integrations | no xfail (product already refuses) | GREEN guards |
 
 Green guards (no xfail): D8 inherit `describe` / `capabilities`; unknown verb →
@@ -79,7 +80,7 @@ edit `src/mergecraft/evals/**`, `SECURITY.md`, or `src/mergecraft/cli/app.py`.
 Packaging Codex/Gemini/OpenCode is out of scope (file 8 RV3). Protocol
 negotiation is #379 (already shipped).
 
-### Impl must satisfy (W9.1 — currently xfail)
+### Impl must satisfy (W9.1 — GREEN; markers removed)
 
 `docs/agent-loop.md` must exist (not under `skills/`, not AGENTS.md / README.md).
 Body must:
@@ -101,13 +102,13 @@ lane B also appends) with `path: docs/agent-loop.md` and non-empty
 
 | # | Contract | Layer | Scenario | Primary test | Marker |
 |---|----------|-------|----------|--------------|--------|
-| DD383a | `docs/agent-loop.md` exists under `docs/` | functional | happy | `tests/docs/test_agent_loop.py::test_agent_loop_page_exists_under_docs` | xfail W9 |
-| DD383b | Not skills/ / AGENTS.md / README.md (D16/D6) | functional | edge | `test_agent_loop_is_not_a_skill_or_landing_page` | xfail W9 |
-| DD383c | Five-step loop (change → review → consume findings → decide → review new diff) | functional | happy | `test_agent_loop_describes_the_five_step_loop` | xfail W9 |
-| DD383d | Names `mergecraft review --agent` + five JSONL events | functional | happy | `test_agent_loop_names_review_agent_and_jsonl_events` | xfail W9 |
-| DD383e | Cites EXIT-CODES and named exits 0/10/11/12/20/30/40/50/2 | functional | happy | `test_agent_loop_points_at_exit_codes` | xfail W9 |
-| DD383f | Manifest row `path: docs/agent-loop.md` + audience/template/purpose | functional | happy | `test_manifest_includes_agent_loop_row` | xfail W9 |
-| DD383g | Page cites `protocol_version` and `schema_version` (D12) | functional | edge | `test_agent_loop_cites_d12_version_fields` | xfail W9 |
+| DD383a | `docs/agent-loop.md` exists under `docs/` | functional | happy | `tests/docs/test_agent_loop.py::test_agent_loop_page_exists_under_docs` | GREEN |
+| DD383b | Not skills/ / AGENTS.md / README.md (D16/D6) | functional | edge | `test_agent_loop_is_not_a_skill_or_landing_page` | GREEN |
+| DD383c | Five-step loop (change → review → consume findings → decide → review new diff) | functional | happy | `test_agent_loop_describes_the_five_step_loop` | GREEN |
+| DD383d | Names `mergecraft review --agent` + five JSONL events | functional | happy | `test_agent_loop_names_review_agent_and_jsonl_events` | GREEN |
+| DD383e | Cites EXIT-CODES and named exits 0/10/11/12/20/30/40/50/2 | functional | happy | `test_agent_loop_points_at_exit_codes` | GREEN |
+| DD383f | Manifest row `path: docs/agent-loop.md` + audience/template/purpose | functional | happy | `test_manifest_includes_agent_loop_row` | GREEN |
+| DD383g | Page cites `protocol_version` and `schema_version` (D12) | functional | edge | `test_agent_loop_cites_d12_version_fields` | GREEN |
 | DD383h | Agent JSONL has no write events | unit | happy | `tests/agents/test_capability_boundary.py::test_agent_protocol_stream_methods_are_read_only_events` | GREEN |
 | DD383i | `format_event_line` / source literals exclude write event names | unit | edge | `test_format_event_line_does_not_define_write_events`, `test_agent_protocol_source_has_no_write_event_literals` | GREEN |
 | DD383j | `review --agent` only emits documented event names | functional | happy | `test_review_agent_stream_only_emits_documented_events` | GREEN |
@@ -124,5 +125,5 @@ lane B also appends) with `path: docs/agent-loop.md` and non-empty
 | DD383u | `run_from_snapshot` is agent-agnostic | unit | happy | `test_shared_engine_callable_is_agent_agnostic` | GREEN |
 
 Already-true D13 product refusals (MCP review-only, no write JSONL events, thin
-single review path) ship as **green guards**. Missing loop page + manifest row
-stay **xfail `strict=False`** until W9.1.
+single review path) ship as **green guards**. W9.1 loop page + manifest row
+markers removed after impl (`b821e477`).

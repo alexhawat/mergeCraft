@@ -1,8 +1,7 @@
 """W9 / #383 — agent-loop reference workflow (``docs/agent-loop.md``).
 
 Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-20d-a-engine-wave-plan.md``
-(Batch DD). The page is missing until W9.1; markers are non-strict so they
-xfail rather than fail, and become real passes after impl (not XPASS-strict).
+(Batch DD). W9.1 landed — xfail markers removed.
 
 D16: nothing under ``skills/``. D6: do not treat AGENTS.md / README.md as
 this contract. D12: the page may cite both ``protocol_version`` and
@@ -13,15 +12,9 @@ from __future__ import annotations
 
 import re
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT
-
-_W9 = pytest.mark.xfail(
-    reason="green after W9: docs/agent-loop.md + docs/manifest.yaml row",
-    strict=False,
-)
 
 AGENT_LOOP_RELPATH = "docs/agent-loop.md"
 AGENT_LOOP_DOC = REPO_ROOT / AGENT_LOOP_RELPATH
@@ -59,7 +52,6 @@ def _manifest_pages() -> list[dict[object, object]]:
     return [row for row in pages if isinstance(row, dict)]
 
 
-@_W9
 def test_agent_loop_page_exists_under_docs() -> None:
     """Happy: the loop ships as ``docs/agent-loop.md``, not under ``skills/``."""
     assert AGENT_LOOP_DOC.is_file(), f"missing {AGENT_LOOP_RELPATH}"
@@ -68,7 +60,6 @@ def test_agent_loop_page_exists_under_docs() -> None:
     assert not rel.startswith("skills/"), rel
 
 
-@_W9
 def test_agent_loop_is_not_a_skill_or_landing_page() -> None:
     """Edge: D16 / D6 — the loop must not live in skills/, AGENTS.md, or README.md."""
     assert not (REPO_ROOT / "skills" / "agent-loop.md").is_file()
@@ -81,7 +72,6 @@ def test_agent_loop_is_not_a_skill_or_landing_page() -> None:
     assert skills_loop == [], f"D16: do not create skills/** loop docs: {skills_loop}"
 
 
-@_W9
 def test_agent_loop_describes_the_five_step_loop() -> None:
     """Happy: change → review → consume findings → decide → review the new diff."""
     text = _page_text().casefold()
@@ -91,7 +81,6 @@ def test_agent_loop_describes_the_five_step_loop() -> None:
     assert "consume" in text or "consumes" in text or "finding" in text
 
 
-@_W9
 def test_agent_loop_names_review_agent_and_jsonl_events() -> None:
     """Happy: names ``mergecraft review --agent`` and the five JSONL events."""
     text = _page_text()
@@ -102,7 +91,6 @@ def test_agent_loop_names_review_agent_and_jsonl_events() -> None:
         assert event in text, f"loop page must name JSONL event {event!r}"
 
 
-@_W9
 def test_agent_loop_points_at_exit_codes() -> None:
     """Happy: cites ``docs/EXIT-CODES.md`` (or EXIT-CODES) and named exits."""
     text = _page_text()
@@ -115,7 +103,6 @@ def test_agent_loop_points_at_exit_codes() -> None:
         )
 
 
-@_W9
 def test_manifest_includes_agent_loop_row() -> None:
     """Happy: append-only manifest row for ``docs/agent-loop.md``.
 
@@ -134,7 +121,6 @@ def test_manifest_includes_agent_loop_row() -> None:
         assert value.strip(), f"agent-loop manifest row needs non-empty {field}:"
 
 
-@_W9
 def test_agent_loop_cites_d12_version_fields() -> None:
     """Edge: both ``protocol_version`` and ``schema_version`` survive (D12 adapter)."""
     text = _page_text()
