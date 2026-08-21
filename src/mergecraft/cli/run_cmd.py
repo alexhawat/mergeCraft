@@ -18,6 +18,7 @@ from rich.table import Table
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.cli.trace_jsonl import load_trace_jsonl_events
 
 app = typer.Typer(
     name="run",
@@ -34,24 +35,7 @@ def _trace_dir() -> Path:
 
 
 def _load_events(trace_dir: Path) -> list[dict[str, Any]]:
-    if not trace_dir.is_dir():
-        return []
-    matched: list[dict[str, Any]] = []
-    for jsonl_path in sorted(trace_dir.glob("*.jsonl")):
-        try:
-            raw = jsonl_path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for line in raw.splitlines():
-            if not line.strip():
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(event, dict):
-                matched.append(event)
-    return matched
+    return load_trace_jsonl_events(trace_dir)
 
 
 def _sessions(events: list[dict[str, Any]]) -> list[str]:

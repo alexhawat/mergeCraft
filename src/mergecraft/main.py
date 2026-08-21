@@ -283,7 +283,7 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
     """
     from pydantic import ValidationError
 
-    if isinstance(error, _AgentTimeoutError):
+    if isinstance(error, (_AgentTimeoutError, TimeoutError, asyncio.TimeoutError)):
         return RunOutcome.timed_out
     if isinstance(
         error,
@@ -1487,7 +1487,7 @@ async def main() -> MainResult:
         source=os.environ.get("GITHUB_REPOSITORY") or None,
         replay_key=os.environ.get("GITHUB_SHA") or None,
     )
-    run_from_snapshot(snapshot)
+    engine = run_from_snapshot(snapshot)
     ensure_github_workspace_registered()
     workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
     if workspace:
@@ -1511,9 +1511,13 @@ async def main() -> MainResult:
     # spawned agent CLI) carries the same ``review.id``.
     with bind_review_context(_action_review_context()):
         try:
-            ctx = await _setup_run(ctx)
-            ctx = await _resolve_credentials(ctx)
-            agent_result = await _execute_agent(ctx)
+            ctx = await asyncio.wait_for(_setup_run(ctx), timeout=engine.timeout_s("materialize"))
+            ctx = await asyncio.wait_for(
+                _resolve_credentials(ctx), timeout=engine.timeout_s("analyze")
+            )
+            agent_result = await asyncio.wait_for(
+                _execute_agent(ctx), timeout=engine.timeout_s("review")
+            )
         except _ShortCircuit as short_circuit:
             return short_circuit.result
         except Exception as error:
@@ -1533,7 +1537,9 @@ async def main() -> MainResult:
                     logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
             return MainResult(success=False, error=error_message, outcome=error_outcome)
         else:
-            return await _finalize(ctx, agent_result)
+            return await asyncio.wait_for(
+                _finalize(ctx, agent_result), timeout=engine.timeout_s("publish")
+            )
         finally:
             if ctx.stop_mcp is not None:
                 with contextlib.suppress(Exception):

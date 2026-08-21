@@ -7,7 +7,6 @@ Exports: ``run``
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,7 @@ from rich.table import Table
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.cli.trace_jsonl import load_trace_jsonl_events
 
 
 def _trace_dir() -> Path:
@@ -25,31 +25,6 @@ def _trace_dir() -> Path:
     if env_dir:
         return Path(env_dir)
     return Path(".mergecraft/traces")
-
-
-def _load_events(trace_dir: Path, *, run_id: str | None) -> list[dict[str, Any]]:
-    if not trace_dir.is_dir():
-        return []
-    matched: list[dict[str, Any]] = []
-    for jsonl_path in sorted(trace_dir.glob("*.jsonl")):
-        try:
-            raw = jsonl_path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for line in raw.splitlines():
-            if not line.strip():
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(event, dict):
-                continue
-            session = event.get("session_id")
-            if run_id is not None and session != run_id:
-                continue
-            matched.append(event)
-    return matched
 
 
 def _payload(*, run_id: str | None, events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -91,7 +66,7 @@ def run(
 ) -> None:
     """Replay a stored review run from local traces (read-only)."""
     target = trace_dir if trace_dir is not None else _trace_dir()
-    events = _load_events(target, run_id=run_id)
+    events = load_trace_jsonl_events(target)
     payload = _payload(run_id=run_id, events=events)
     if wants_json_output(ctx, json_flag=False):
         emit_cli_json(payload)

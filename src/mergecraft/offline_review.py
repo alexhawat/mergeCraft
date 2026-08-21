@@ -126,22 +126,6 @@ def parse_offline_review_findings(result: OfflineReviewResult) -> list[Finding]:
         return []
 
 
-def _notify_structured_findings(
-    structured_output: str | None,
-    on_finding: Callable[[dict[str, Any]], None] | None,
-) -> None:
-    """Emit parsed findings to ``on_finding`` while the review coroutine is still running."""
-    if on_finding is None or not structured_output:
-        return
-    try:
-        rows = parse_findings_payload(structured_output)
-    except ValueError:
-        return
-    from mergecraft.cli.agent_protocol import notify_findings
-
-    notify_findings(on_finding, rows)
-
-
 def build_offline_review_prompt(
     *,
     diff_path: Path,
@@ -273,6 +257,29 @@ def _finalize_structured_findings(
         )
 
     return result
+
+
+def _finish_offline_result(
+    result: OfflineReviewResult,
+    *,
+    json_path: Path | None,
+    scope_reduction: ScopeReduction | None,
+    cache_key: str | None,
+) -> OfflineReviewResult:
+    """Apply structured-output finalize, then optionally store the post-finalize payload."""
+    finished = result
+    if json_path is not None:
+        finished = _finalize_structured_findings(result, json_path)
+    if finished.outcome is not None:
+        finished.outcome = outcome_with_scope_reduction(finished.outcome, scope_reduction)
+    elif finished.success:
+        finished.outcome = outcome_with_scope_reduction(RunOutcome.passed, scope_reduction)
+    finished.scope_reduction = scope_reduction
+    if cache_key is not None and finished.success:
+        from mergecraft.utils.review_result_cache import store_review_result
+
+        store_review_result(cache_key, finished)
+    return finished
 
 
 def _offline_change_id(cwd: Path, materialization: DiffMaterialization) -> str:
@@ -637,11 +644,6 @@ async def _run_offline_diff_review(
                 scope_reduction=scope_reduction,
             )
 
-        if resume:
-            from mergecraft.reliability.recovery import resume_review
-
-            resume_review(os.environ.get("MERGECRAFT_REVIEW_ID") or "latest")
-
         cache_key: str | None = None
         if use_cache or resume:
             from mergecraft.utils.review_result_cache import (
@@ -649,13 +651,24 @@ async def _run_offline_diff_review(
                 load_review_result,
             )
 
-            cache_key = cache_key_for_diff_path(materialization.path, model=model)
+            cache_key = cache_key_for_diff_path(
+                materialization.path,
+                model=model,
+                trust_tier=trust_tier,
+                prompt_extra=prompt_extra,
+                json_mode=json_path is not None,
+                base_ref=materialization.base_ref,
+            )
             cached = load_review_result(cache_key)
             if cached is not None:
-                _notify_structured_findings(cached.structured_output, on_finding)
                 if cached.diff_path is None:
                     cached.diff_path = str(materialization.path)
-                return cached
+                return _finish_offline_result(
+                    cached,
+                    json_path=json_path,
+                    scope_reduction=scope_reduction,
+                    cache_key=None,
+                )
 
         result = await _run_agent_review(
             cwd=cwd,
@@ -669,25 +682,12 @@ async def _run_offline_diff_review(
             run_bounds=run_bounds,
             on_finding=on_finding,
         )
-        if cache_key is not None and result.success:
-            from mergecraft.utils.review_result_cache import store_review_result
-
-            store_review_result(cache_key, result)
-        if json_path is None:
-            if result.outcome is not None:
-                result.outcome = outcome_with_scope_reduction(result.outcome, scope_reduction)
-            elif result.success:
-                result.outcome = outcome_with_scope_reduction(RunOutcome.passed, scope_reduction)
-            result.scope_reduction = scope_reduction
-            return result
-
-        finalized = _finalize_structured_findings(result, json_path)
-        if finalized.outcome is not None:
-            finalized.outcome = outcome_with_scope_reduction(finalized.outcome, scope_reduction)
-        elif finalized.success:
-            finalized.outcome = outcome_with_scope_reduction(RunOutcome.passed, scope_reduction)
-        finalized.scope_reduction = scope_reduction
-        return finalized
+        return _finish_offline_result(
+            result,
+            json_path=json_path,
+            scope_reduction=scope_reduction,
+            cache_key=cache_key,
+        )
     finally:
         # Restore the operator's ``.env`` tracing vars so the ``diff-review``
         # overrides never leak into the caller's environment.
@@ -853,7 +853,6 @@ async def _run_agent_review(
             executed_model=resolved_model,
         ):
             result = await agent.run(run_ctx)
-        _notify_structured_findings(tool_state.output, on_finding)
         try:
             record_agent_usage(budget_tracker, result.usage)
         except BudgetExhausted as exc:

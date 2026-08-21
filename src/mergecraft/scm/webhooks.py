@@ -76,6 +76,7 @@ class ConformingReviewRequest:
     provider: str
     event: str
     snapshot: ReviewSnapshot
+    stages: tuple[dict[str, object], ...] = ()
 
 
 class _WebhookDeliveryStore:
@@ -296,12 +297,13 @@ def conforming_review_request(
         mode="Review",
         source=name,
     )
-    run_from_snapshot(snapshot)
+    engine = run_from_snapshot(snapshot)
     return ConformingReviewRequest(
-        mode="Review",
+        mode=engine.snapshot.mode,
         provider=name,
         event=event,
-        snapshot=snapshot,
+        snapshot=engine.snapshot,
+        stages=engine.stages,
     )
 
 

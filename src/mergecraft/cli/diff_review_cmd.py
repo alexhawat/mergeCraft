@@ -14,7 +14,7 @@ import typer
 from loguru import logger
 
 from mergecraft.analyzers.sarif import export_sarif
-from mergecraft.cli.agent_protocol import AgentProtocolStream
+from mergecraft.cli.agent_protocol import AgentProtocolStream, notify_findings
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
 from mergecraft.cli.global_surface import get_cli_globals
@@ -165,6 +165,32 @@ def cleanup_review_subprocesses() -> None:
 
 
 def _start_agent_protocol() -> AgentProtocolStream:
+    from mergecraft.cli.agent_protocol import (
+        AGENT_PROTOCOL_VERSION,
+        VERSION_FIELD_ALIASES,
+        ProtocolNegotiationError,
+        negotiate_protocol,
+    )
+    from mergecraft.cli.global_surface import CLI_JSON_SCHEMA_VERSION
+
+    try:
+        selected = negotiate_protocol(
+            accepted=(
+                AGENT_PROTOCOL_VERSION,
+                CLI_JSON_SCHEMA_VERSION,
+                *VERSION_FIELD_ALIASES,
+            )
+        )
+    except ProtocolNegotiationError as exc:
+        _exit_with_message(
+            str(exc),
+            cli_exit_code_for_review(RunOutcome.configuration_error),
+        )
+    if selected not in {AGENT_PROTOCOL_VERSION, CLI_JSON_SCHEMA_VERSION}:
+        _exit_with_message(
+            f"unsupported protocol version: {selected}",
+            cli_exit_code_for_review(RunOutcome.configuration_error),
+        )
     stream = AgentProtocolStream()
     stream.run_started()
     stream.phase("materialize")
@@ -180,15 +206,11 @@ def _finish_agent_protocol(
     findings: Sequence[Finding],
     seen: set[str],
 ) -> None:
-    from mergecraft.cli.agent_protocol import finding_event_key
-
-    for row in findings:
-        dump = row.model_dump()
-        key = finding_event_key(dump)
-        if key in seen:
-            continue
-        seen.add(key)
-        stream.finding(dump)
+    notify_findings(
+        stream.finding,
+        [row.model_dump() for row in findings],
+        seen=seen,
+    )
     stream.verdict(outcome.value, exit_code)
     stream.run_finished(exit_code)
 
@@ -392,8 +414,9 @@ def run(
         False,
         "--resume",
         help=(
-            "Resume a checkpointed review run where it is safe to continue. "
-            "Uses the local result cache when a matching diff is present."
+            "Reuse a cached review result for this diff when one exists "
+            "(same local result cache as --use-cache). Does not restore a live "
+            "agent checkpoint."
         ),
         rich_help_panel=_PANEL_OUTPUT,
     ),
@@ -509,7 +532,7 @@ def run(
         source=str(root),
         replay_key=str(diff) if diff is not None else None,
     )
-    run_from_snapshot(snapshot)
+    engine = run_from_snapshot(snapshot)
 
     stream: AgentProtocolStream | None = None
     seen: set[str] = set()
@@ -517,20 +540,15 @@ def run(
         stream = _start_agent_protocol()
 
     def _on_finding(finding: dict[str, Any]) -> None:
-        from mergecraft.cli.agent_protocol import finding_event_key
-
         if stream is None:
             return
-        key = finding_event_key(finding)
-        if key in seen:
-            return
-        seen.add(key)
-        stream.finding(finding)
+        notify_findings(stream.finding, [finding], seen=seen)
 
     try:
         try:
             result = asyncio.run(
-                run_offline_diff_review(
+                engine.run(
+                    run_offline_diff_review,
                     cwd=root,
                     base=base,
                     diff_file=diff,
@@ -544,9 +562,15 @@ def run(
                     trust_override=trust_override,
                     source_spec=source_spec,
                     on_finding=_on_finding if agent_mode else None,
-                    use_cache=use_cache,
+                    use_cache=use_cache or resume,
                     resume=resume,
                 )
+            )
+        except TimeoutError:
+            result = OfflineReviewResult(
+                success=False,
+                error="review timed out",
+                outcome=RunOutcome.timed_out,
             )
         except (KeyboardInterrupt, asyncio.CancelledError):
             cleanup_review_subprocesses()

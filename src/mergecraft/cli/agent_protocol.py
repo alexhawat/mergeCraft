@@ -48,9 +48,23 @@ def negotiate_protocol(*, accepted: Sequence[str]) -> str:
     ``schema_version`` ``1.0.0`` (CLI JSON) and ``protocol_version`` ``1``
     (agent JSONL) are equivalent under :data:`VERSION_FIELD_ALIASES`. The
     selected literal is the agent wire version when offered, otherwise the
-    CLI schema literal.
+    CLI schema literal. Field-name tokens from the alias table count as
+    offering that surface's version.
     """
-    overlap = {str(item) for item in accepted} & _SUPPORTED_NEGOTIATION_VERSIONS
+    offered: set[str] = set()
+    for item in accepted:
+        token = str(item)
+        offered.add(token)
+        if token == "schema_version":
+            offered.add(CLI_JSON_SCHEMA_VERSION)
+        elif token == "protocol_version":
+            offered.add(AGENT_PROTOCOL_VERSION)
+        aliased = VERSION_FIELD_ALIASES.get(token)
+        if aliased == "schema_version":
+            offered.add(CLI_JSON_SCHEMA_VERSION)
+        elif aliased == "protocol_version":
+            offered.add(AGENT_PROTOCOL_VERSION)
+    overlap = offered & _SUPPORTED_NEGOTIATION_VERSIONS
     if not overlap:
         raise ProtocolNegotiationError(
             "unsupported protocol version: retry negotiation with "

@@ -59,7 +59,11 @@ def set_output_tool(ctx: ToolContext, output_schema: JsonSchema | None = None):
 
 
 def _notify_set_output_findings(ctx: ToolContext, params: dict[str, Any]) -> None:
-    """Stream findings as soon as ``set_output`` lands, before the agent returns (#378)."""
+    """Stream findings as soon as ``set_output`` lands, before the agent returns (#378).
+
+    Dedup and JSONL formatting stay in the CLI protocol callback installed on
+    ``tool_state.on_finding``. This factory only forwards rows.
+    """
     callback = ctx.tool_state.on_finding
     if callback is None:
         return

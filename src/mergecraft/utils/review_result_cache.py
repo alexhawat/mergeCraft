@@ -17,11 +17,29 @@ if TYPE_CHECKING:
 _KEY_PREFIX = "review-result:"
 
 
-def review_result_cache_key(diff_bytes: bytes, *, model: str | None = None) -> str:
-    """Return a cache key for a materialized review diff."""
-    digest = hashlib.sha256(diff_bytes).hexdigest()
-    model_part = model or ""
-    return f"{_KEY_PREFIX}{digest}:{model_part}"
+def review_result_cache_key(
+    diff_bytes: bytes,
+    *,
+    model: str | None = None,
+    trust_tier: str | None = None,
+    prompt_extra: str | None = None,
+    json_mode: bool = False,
+    base_ref: str | None = None,
+) -> str:
+    """Return a cache key for a materialized review, including inputs that change it."""
+    hasher = hashlib.sha256()
+    hasher.update(diff_bytes)
+    hasher.update(b"\0model=")
+    hasher.update((model or "").encode("utf-8"))
+    hasher.update(b"\0trust=")
+    hasher.update((trust_tier or "").encode("utf-8"))
+    hasher.update(b"\0prompt=")
+    hasher.update((prompt_extra or "").encode("utf-8"))
+    hasher.update(b"\0json=")
+    hasher.update(b"1" if json_mode else b"0")
+    hasher.update(b"\0base=")
+    hasher.update((base_ref or "").encode("utf-8"))
+    return f"{_KEY_PREFIX}{hasher.hexdigest()}"
 
 
 def _open_result_cache() -> RunCache:
@@ -42,7 +60,16 @@ def load_review_result(key: str) -> OfflineReviewResult | None:
     if not isinstance(payload, dict):
         return None
     outcome_raw = payload.get("outcome")
-    outcome = RunOutcome(outcome_raw) if isinstance(outcome_raw, str) else None
+    outcome: RunOutcome | None
+    if outcome_raw is None:
+        outcome = None
+    elif isinstance(outcome_raw, str):
+        try:
+            outcome = RunOutcome(outcome_raw)
+        except ValueError:
+            return None
+    else:
+        return None
     return OfflineReviewResult(
         success=bool(payload.get("success")),
         output=payload.get("output") if isinstance(payload.get("output"), str) else None,
@@ -64,7 +91,7 @@ def load_review_result(key: str) -> OfflineReviewResult | None:
 
 
 def store_review_result(key: str, result: OfflineReviewResult) -> None:
-    """Persist a successful review result for later ``--use-cache`` / ``--resume`` hits."""
+    """Persist a successful post-finalize review result for ``--use-cache`` / ``--resume``."""
     payload = {
         "success": result.success,
         "output": result.output,
@@ -79,9 +106,24 @@ def store_review_result(key: str, result: OfflineReviewResult) -> None:
     cache.put(key, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
 
 
-def cache_key_for_diff_path(path: Path, *, model: str | None = None) -> str:
-    """Hash an on-disk unified diff into a result-cache key."""
-    return review_result_cache_key(path.read_bytes(), model=model)
+def cache_key_for_diff_path(
+    path: Path,
+    *,
+    model: str | None = None,
+    trust_tier: str | None = None,
+    prompt_extra: str | None = None,
+    json_mode: bool = False,
+    base_ref: str | None = None,
+) -> str:
+    """Hash an on-disk unified diff plus review-changing inputs into a result-cache key."""
+    return review_result_cache_key(
+        path.read_bytes(),
+        model=model,
+        trust_tier=trust_tier,
+        prompt_extra=prompt_extra,
+        json_mode=json_mode,
+        base_ref=base_ref,
+    )
 
 
 __all__ = [

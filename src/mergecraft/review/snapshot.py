@@ -12,9 +12,9 @@ Exports:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # D12: both fields survive (CLI JSON 1.0.0, agent JSONL 1). Do not import the
 # CLI constants here — review must not depend on cli/.
@@ -37,6 +37,8 @@ DEFAULT_STAGE_TIMEOUTS_MS: dict[ReviewStageName, int] = {
     "review": 600_000,
     "publish": 120_000,
 }
+
+_ALLOWED_MODES: frozenset[str] = frozenset({"Review", "IncrementalReview"})
 
 
 class ReviewStageSpec(BaseModel):
@@ -66,6 +68,28 @@ class ReviewSnapshot(BaseModel):
     stages: tuple[ReviewStageSpec, ...]
     source: str | None = None
     replay_key: str | None = None
+
+    @model_validator(mode="after")
+    def _enforce_canonical_contract(self) -> Self:
+        if self.mode not in _ALLOWED_MODES:
+            msg = f"unsupported review mode {self.mode!r}"
+            raise ValueError(msg)
+        names = tuple(stage.name for stage in self.stages)
+        if names != CANONICAL_STAGE_NAMES:
+            msg = f"review stages must be {CANONICAL_STAGE_NAMES}, got {names}"
+            raise ValueError(msg)
+        for stage in self.stages:
+            if not stage.observable:
+                msg = f"review stage {stage.name!r} must be observable in the run manifest"
+                raise ValueError(msg)
+        return self
+
+    def timeout_ms_for(self, name: ReviewStageName) -> int:
+        """Return the snapshot timeout for a canonical stage."""
+        for stage in self.stages:
+            if stage.name == name:
+                return stage.timeout_ms
+        raise KeyError(name)
 
 
 def canonical_review_snapshot(
