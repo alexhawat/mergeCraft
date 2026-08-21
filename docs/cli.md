@@ -38,7 +38,9 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft config show <key>` | Show a resolved config value and the precedence layer that supplied it. |
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
 | `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
+| `mergecraft context explain` | Explain why retrieved context was selected for a review. |
 | `mergecraft context inspect` | Report sources, scope, provenance citations, and token totals. |
+| `mergecraft context search <query>` | Search retrieved review context for a query. |
 | `mergecraft describe` | Print a PR title, summary, walkthrough, risk areas, and testing notes. |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
@@ -49,6 +51,8 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
 | `mergecraft eval replay-bank` | Replay the eval bank and write a versioned benchmark result set (#140). |
 | `mergecraft eval score <actual> <expected>` | Score review findings against a frozen benchmark baseline. |
+| `mergecraft evidence show <finding-id>` | Show the evidence packet for a finding. |
+| `mergecraft evidence verify <finding-id>` | Replay verification for a finding's evidence packet (not an approval). |
 | `mergecraft findings carryover --pr N` | File one issue per unresolved mergeCraft finding. Dry run unless `--apply`. |
 | `mergecraft findings export --pr N` | Print the findings a merge would bury. Never writes anything. |
 | `mergecraft gha token` | Acquire a GitHub App installation token, or revoke it with `--post`. |
@@ -67,6 +71,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft memory import <bundle-path>` | Import a memory export bundle into a repository. |
 | `mergecraft memory list` | List active memory entries for a repository. |
 | `mergecraft memory show` | Show one memory entry by id. |
+| `mergecraft memory validate` | Validate the repo memory document for structure, staleness, and conflicts. |
 | `mergecraft models list` | List curated model slugs and whether credentials are detected locally. |
 | `mergecraft models set <slugs>` | Write an ordered `models:` list to `.mergecraft/config.yaml`. |
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |
@@ -74,8 +79,10 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft pipeline lint` | Validate the pipeline file and registry agent references. |
 | `mergecraft pipeline show --diff DIFF` | Preview which pipeline steps would run or skip for a diff. |
 | `mergecraft plan` | Preview model chain, toolset, analyzers, and token estimate without provider calls. |
+| `mergecraft policy effective` | Show the effective policy set and the source of every rule. |
 | `mergecraft policy explain --path PATH` | List effective rules for a path and name each rule's source layer. |
 | `mergecraft policy lint` | Validate policy rule YAML under `.mergecraft/policy/`. |
+| `mergecraft policy simulate` | Simulate a proposed rule against past PRs. |
 | `mergecraft policy test --fixtures FIXTURES` | Run should-trigger and should-not policy fixtures. |
 | `mergecraft requirements explain <requirement-id>` | Explain one requirement by id; unknown ids are an error. |
 | `mergecraft requirements inspect` | List ingested requirements and their states. |
