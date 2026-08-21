@@ -23,7 +23,10 @@ Green guards (no xfail): D8 inherit `describe` / `capabilities`; unknown verb â†
 usage exit 2; dual `schema_version` vs `protocol_version` stamps (aliased, both
 survive); hidden `diff-review` alias. DA379d
 `test_agent_protocol_module_has_no_negotiate_export` **deleted** after
-`negotiate_protocol` landed (current-state negative).
+`negotiate_protocol` landed (current-state negative). DAF recon: deleted
+`tests/config/test_ce_schema.py::test_agent_protocol_does_not_negotiate_capabilities`
+(#368 source-scan that forbade `negotiate` in `agent_protocol.py`); canonical
+pins remain in `tests/cli/test_da_protocol_negotiation.py`.
 
 ## Contract matrix
 
