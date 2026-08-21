@@ -16,6 +16,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft agents show <role>` | Show resolved prompt text and MCP tool names for one role. |
 | `mergecraft analyzers detect` | Show analyzers that would run for changed paths in this repo. |
 | `mergecraft analyzers docs` | Regenerate `ANALYZERS.md` from manifests. |
+| `mergecraft analyzers docs` | Regenerate `docs/ANALYZERS.md` from manifests. |
 | `mergecraft analyzers explain <analyzer-id>` | Print manifest fields and notes for one analyzer. |
 | `mergecraft analyzers export <analyzer-id>` | Run one analyzer and export findings as SARIF. |
 | `mergecraft analyzers list` | List catalog analyzers and whether they would enable here. |
@@ -38,6 +39,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
 | `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
 | `mergecraft context inspect` | Report sources, scope, provenance citations, and token totals. |
+| `mergecraft describe` | Print a PR title, summary, walkthrough, risk areas, and testing notes. |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
@@ -75,6 +77,8 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft policy explain --path PATH` | List effective rules for a path and name each rule's source layer. |
 | `mergecraft policy lint` | Validate policy rule YAML under `.mergecraft/policy/`. |
 | `mergecraft policy test --fixtures FIXTURES` | Run should-trigger and should-not policy fixtures. |
+| `mergecraft requirements explain <requirement-id>` | Explain one requirement by id; unknown ids are an error. |
+| `mergecraft requirements inspect` | List ingested requirements and their states. |
 | `mergecraft review` | Review a local git diff offline (no GitHub Action / PR posting). |
 | `mergecraft traces show <run-id>` | Read back the local JSONL traces for the given run id (re-redacts on render). |
 | `mergecraft tracing logfire disable` | Disable Logfire tracing by removing the token + project locally and on GitHub. |
@@ -95,3 +99,4 @@ itself, so it is described here in prose rather than as its own table row;
 - [Action reference](action-reference.md)
 - [Exit codes](EXIT-CODES.md)
 - [Landing README](../README.md)
+| `mergecraft xrepo explain` | Explain a cross-repo finding, or report producer/consumer contract breakage. |
