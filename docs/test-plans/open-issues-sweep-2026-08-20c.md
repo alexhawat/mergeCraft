@@ -547,3 +547,79 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - No leftover CD xfails
 - `make lint` + `make typecheck` clean
 - No `src/` edits; CDF not started
+
+---
+
+# Batch CE — platform (#368–#371)
+
+Authoring wave: **W21** (Batch CE RED) · Implementation: **W22** `#368` · **W23** `#369` · **W24** `#370` · **W25** `#371`
+
+Helper: `tests/support/ce_batch.py` (`green_after(..., strict=False)`).
+
+Out of scope (honoured — no implementation tests): agent-protocol capability/version negotiation (#368); token/cost/tool-call budget mechanism and latency budgets (#369 / already shipped); lens registry and risk-based routing (#370); per-specialist value measurement and published cost-per-review (#371). D6: no file 7 / `tracing/exporters.py`. D8: P12–P31 / #377–#385. D10: additive CLI only. D11: consume `gen_ai.usage.*` on `llm.call`; do not re-instrument exporters.
+
+After each impl wave, recon **deletes** the matching W21 current-state pins and **un-xfails** `green after W22|W23|W24|W25` markers (`strict=False`).
+
+## xfail schedule (W21)
+
+| Wave | Tests | Marker reason | Status |
+|------|-------|---------------|--------|
+| **W22** | `tests/config/test_ce_schema.py` (10) | `green after W22: config schema version, migrations, deprecations (#368)` | XFAIL until W22 |
+| **W23** | `tests/cli/test_ce_profiles.py` (15 collected / 14 functions) | `green after W23: remaining profiles + risk-based select; additive CLI (#369 / D10)` | XFAIL until W23 |
+| **W24** | `tests/agents/test_ce_economics.py` (8) | `green after W24: specialist economics consume gen_ai.usage.* on llm.call (#370 / D11)` | XFAIL until W24 |
+| **W25** | `tests/agents/test_ce_providers.py` (14 + 1 live skip) | `green after W25: provider health, cooldown, degradation, residency, routing eval (#371)` | XFAIL until W25 |
+
+Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error / unversioned rows after the matching impl wave): D10 root-callback pins; shipped `fast`/`deep`/`security` profiles; token/cost/tool/latency budgets; `budget_exhaustion_outcome` never `passed`; CLI JSON + agent protocol versions (not negotiation); `gen_ai.usage.*` substrate; lens routing file; retry-policy classifier; no cooldown/residency in src; tracing exporters untouched.
+
+W21 run: **20 passed / 47 xfailed / 1 skipped (no live gate) / 0 XPASS**. `make lint` + `make typecheck` clean.
+
+## Contract matrix (W21)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| CE368a | `RepoSettings` unversioned | unit | current | `test_repo_settings_has_no_schema_version_yet` |
+| CE368b | Compat module missing | unit | current | `test_config_compat_module_does_not_exist_yet` |
+| CE368c | No protocol capability negotiation | unit | current | `test_agent_protocol_does_not_negotiate_capabilities` |
+| CE368d | D10 root callback | unit | current | `test_w22_does_not_edit_root_callback` |
+| CE368e | CLI JSON + agent protocol versions already ship | unit | current | `test_cli_json_schema_version_already_ships`, `test_agent_protocol_version_already_ships` |
+| CE368f | Config schema versioned | unit | happy | `test_config_schema_is_versioned` |
+| CE368g | Migrate unversioned YAML | integration | happy | `test_load_migrates_unversioned_yaml` |
+| CE368h | Migrate idempotent / unknown version | unit | edge/error | `test_migrate_config_is_idempotent_on_current_version`, `test_unknown_schema_version_is_a_configuration_error` |
+| CE368i | Deprecation warning | unit | happy | `test_deprecated_key_emits_warning_before_break` |
+| CE368j | Upgrade preserves models | unit | happy | `test_upgrade_from_previous_schema_preserves_models` |
+| CE368k | Compat policy + LTS | unit | happy | `test_backward_compat_policy_names_supported_range`, `test_lts_expectations_are_declared` |
+| CE368l | Published CLI + agent protocol contracts | unit | happy | `test_stable_cli_contract_is_published`, `test_stable_agent_protocol_contract_is_published` |
+| CE369a | Only fast/deep/security ship | unit | current | `test_shipped_profiles_are_fast_deep_security_only` |
+| CE369b | `profile recommend` usage-error | functional | current | `test_profile_recommend_is_currently_a_usage_error` |
+| CE369c | Budgets / latency out of scope | unit | current | `test_profile_token_cost_and_tool_budgets_remain_out_of_scope` |
+| CE369d | Exhaustion never passed | unit | current | `test_budget_exhaustion_never_returns_passed` |
+| CE369e | Eight profiles + hyphen aliases | unit | happy/edge | `test_eight_named_profiles_are_registered`, `test_hyphenated_cli_aliases_map_to_canonical_names` |
+| CE369f | Unknown profile / risk | unit | error | `test_unknown_profile_names_the_full_set`, `test_unknown_risk_is_an_error` |
+| CE369g | Risk select + CLI/policy override | unit | happy | `test_select_profile_from_risk_*`, `test_cli_profile_overrides_*`, `test_policy_profile_overrides_risk_selection` |
+| CE369h | Additive `profile_cmd` (D10) | functional | happy | `test_profile_cli_is_a_new_cmd_module`, `test_root_help_lists_profile`, `test_profile_recommend_*` |
+| CE369i | Profile budget exhaustion | unit | happy | `test_budget_exhaustion_is_partial_or_inconclusive_never_clean` |
+| CE370a | Economics module missing | unit | current | `test_specialist_economics_module_does_not_exist_yet` |
+| CE370b | D6/D11 exporters + usage substrate | unit | current | `test_w24_does_not_edit_tracing_exporters`, `test_usage_attrs_already_exist_on_llm_call_path` |
+| CE370c | Lens routing out of scope | unit | current | `test_lens_routing_remains_the_routing_surface` |
+| CE370d | Unique useful findings / metrics | unit | happy/edge | `test_unique_useful_findings_*`, `test_agent_metrics_*`, `test_empty_metrics_list_*` |
+| CE370e | Consume `gen_ai.usage.*` | unit | happy | `test_economics_consumes_gen_ai_usage_attrs` |
+| CE370f | Low-value prune + breaker + degrade | unit | happy/error | `test_zero_value_specialists_*`, `test_per_agent_circuit_breaker_*`, `test_per_agent_degradation_*` |
+| CE370g | No exporter import | unit | happy | `test_economics_does_not_import_tracing_exporters` |
+| CE371a | Health module / cooldown / residency absent | unit | current | `test_provider_health_module_does_not_exist_yet`, `test_src_has_no_cooldown_or_residency_yet` |
+| CE371b | Retry substrate + no published cost | unit | current | `test_retry_policy_already_classifies_retryable_failures`, `test_w25_does_not_publish_measured_cost_per_review` |
+| CE371c | Capability catalog + require/prefer/fallback | unit | happy | `test_capability_catalog_*`, `test_require_prefer_fallback_semantics` |
+| CE371d | Route per specialist/risk; heterogeneous judge | unit | happy | `test_route_model_per_specialist_and_risk`, `test_heterogeneous_verifier_and_judge_models` |
+| CE371e | Health, bounded retry, cooldown | unit | happy/error | `test_provider_health_records_failures`, `test_retries_are_bounded_*`, `test_circuit_breaker_and_cooldown` |
+| CE371f | Degrade vs never silent substitute | unit | happy/error | `test_degrade_when_non_required_provider_unavailable`, `test_required_model_is_never_silently_substituted` |
+| CE371g | Manifest stamp + provider budget | unit | happy/error | `test_run_manifest_records_provider_model_and_hashes`, `test_per_provider_budget_enforcement` |
+| CE371h | Routing eval + residency | unit | happy/error | `test_routing_eval_rejects_cheaper_but_worse_quality`, `test_residency_policy_blocks_disallowed_region` |
+| CE371i | Nightly smoke | functional | happy + skip | `test_nightly_smoke_callable_is_registered`, `test_live_provider_smoke_runs_when_gated` |
+
+Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility`, `migration`, `monorepo`, `cross_repo` (CLI aliases `api-compatibility`, `cross-repo`). Precedence: CLI > policy > risk.
+
+## Acceptance (W21)
+
+- Collection clean; current-state pins **PASS**; wiring pins **XFAIL** (`strict=False`); **no XPASS**
+- Live smoke **skipped: no live gate** (`MERGECRAFT_LIVE_E2E` unset)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W22 not started
