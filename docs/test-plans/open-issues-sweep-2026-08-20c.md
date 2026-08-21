@@ -490,7 +490,7 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - Kept D15 `#140` current-state pin: `test_issue_140_gate_metrics_remain_the_published_numbers`.
 - Left W18–W20 xfails in place.
 - W17 impl: `53335b41`.
-- W17 recon: pending commit SHA.
+- W17 recon: `327a465f`.
 
 ## Acceptance (W17 recon)
 
