@@ -19,6 +19,7 @@ Exports:
 from __future__ import annotations
 
 import os
+import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,13 +93,27 @@ def on_provider_outage(stage: str) -> RecoveryOutcome:
 def recover_corrupt_cache(path: str) -> RecoveryOutcome:
     """Rebuild a corrupt local cache rather than failing fatally.
 
-    Missing paths are not reported as rebuilt.
+    Missing paths are not reported as rebuilt. ``rebuilt=True`` only after
+    the corrupt artifact is replaced with an empty cache directory.
     """
     target = Path(path)
     if not path.strip() or not target.exists():
         logger.info("Cache path {} is absent; not rebuilt", path)
         return RecoveryOutcome(rebuilt=False, status="skipped")
-    logger.info("Rebuilding corrupt local cache at {}", path)
+    try:
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        elif target.is_dir():
+            shutil.rmtree(target)
+        else:
+            logger.info("Cache path {} is not a file or directory; not rebuilt", path)
+            return RecoveryOutcome(rebuilt=False, status="skipped")
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "index.json").write_text("[]", encoding="utf-8")
+    except OSError as exc:
+        logger.info("Cache rebuild failed for {}: {}", path, exc)
+        return RecoveryOutcome(rebuilt=False, status="failed")
+    logger.info("Rebuilt corrupt local cache at {}", path)
     return RecoveryOutcome(rebuilt=True, status="degraded")
 
 

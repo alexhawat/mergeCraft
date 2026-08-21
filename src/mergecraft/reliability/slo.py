@@ -17,6 +17,7 @@ Exports:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Final
 
@@ -57,6 +58,7 @@ class SoakReport:
     passed: bool
     duration_seconds: int
     concurrency: int
+    ran: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,8 +81,14 @@ def run_soak(duration_seconds: int = 0, concurrency: int = 1) -> SoakReport:
         workers,
     )
     if budget <= 0:
-        return SoakReport(passed=False, duration_seconds=0, concurrency=workers)
-    return SoakReport(passed=True, duration_seconds=budget, concurrency=workers)
+        return SoakReport(passed=False, duration_seconds=0, concurrency=workers, ran=False)
+    deadline = time.monotonic() + float(budget)
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(0.05, remaining))
+    return SoakReport(passed=True, duration_seconds=budget, concurrency=workers, ran=True)
 
 
 def run_concurrency_tier(concurrency: int) -> ScaleReport:

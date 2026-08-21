@@ -83,7 +83,7 @@ PRIMARY_MUTATING_ALLOWLIST: Final[frozenset[str]] = READONLY_MUTATING_ALLOWLIST 
         "set_output",
         "select_mode",
         "report_progress",
-        # C6: primary must be able to persist verifier verdicts (REVIEW_WRITE + mutates=True).
+        # C6: primary must persist verifier verdicts (REVIEW_WRITE + mutates).
         # Subagents keep READONLY_MUTATING_ALLOWLIST so they remain denied this write.
         "record_finding_verdict",
     }
@@ -244,18 +244,15 @@ def get_http_status(err: object) -> int | None:
     return code if isinstance(code, int) else None
 
 
-def execute(fn: ToolBody, tool_name: str | None = None, *, mutates: bool = False) -> ToolHandler:
+def execute(fn: ToolBody, tool_name: str | None = None) -> ToolHandler:
     """Wrap a tool body with success/error ToolResult handling.
 
-    When ``mutates`` is True, refuse unless a write-capable mode is selected
-    (or the tool is a review-session mutation). Prefer passing ``mutates`` on
-    :func:`tool`; that path applies the same gate even when callers omit it here.
+    Mutation gating is applied once in :func:`tool` via ``guard_mutating_tool``.
+    Callers must not pass ``mutates`` here.
     """
 
     async def _fn(params: Mapping[str, Any]) -> ToolResult:
         try:
-            if mutates:
-                guard_mutating_tool(tool_name or "tool")
             result = await fn(params)
             if isinstance(result, Mapping | str):
                 return handle_tool_success(result)

@@ -22,12 +22,11 @@ Exports:
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
-from mergecraft.context.repo_paths import git_ls_tree_paths, git_show_text
-from mergecraft.context.symbol_index import index_symbols
-from mergecraft.utils.bounded_text import read_bounded_text
+from mergecraft.context.repo_paths import is_excluded_repo_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -97,8 +96,8 @@ def lazy_retrieve(
 ) -> LazyRetrieval:
     """Retrieve lazily through controlled tools; omit when none are allowed.
 
-    Does not echo the query as a fake hit. Search uses the symbol index over
-    git-tracked paths when ``repo_root`` is provided.
+    Does not echo the query as a fake hit. Search uses ``git grep`` over
+    tracked paths when ``repo_root`` is provided (no whole-tree ``git show``).
     """
     allowed = frozenset(tools_allowed) & _CONTROLLED_TOOLS
     if not allowed or not query.strip():
@@ -110,22 +109,36 @@ def lazy_retrieve(
 
 
 def _search_indexed(*, repo_root: Path, query: str) -> list[str]:
-    needle = query.casefold()
-    tokens = {part.casefold() for part in query.split() if part}
-    hits: list[str] = []
-    for rel_path in git_ls_tree_paths(repo_root, "HEAD"):
-        source = git_show_text(repo_root, "HEAD", rel_path)
-        if source is None:
-            source = read_bounded_text(repo_root / rel_path) or ""
-        indexed = index_symbols(
-            repo_root=repo_root,
-            rel_path=rel_path,
-            blob_sha=rel_path,
-            source=source,
+    tokens = [part for part in query.split() if part]
+    if not tokens:
+        return []
+    command = ["git", "grep", "-l", "-I", "-i", "-F"]
+    for token in tokens:
+        command.extend(["-e", token])
+    command.append("HEAD")
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
         )
-        names = {symbol.name.casefold() for symbol in indexed.symbols}
-        if needle in source.casefold() or names & tokens:
-            hits.append(rel_path)
+    except (subprocess.TimeoutExpired, OSError):  # fmt: skip
+        return []
+    if completed.returncode not in {0, 1}:
+        return []
+    hits: list[str] = []
+    seen: set[str] = set()
+    for line in completed.stdout.splitlines():
+        rel_path = line
+        if rel_path.startswith("HEAD:"):
+            rel_path = rel_path.removeprefix("HEAD:")
+        if not rel_path or rel_path in seen or is_excluded_repo_path(rel_path):
+            continue
+        seen.add(rel_path)
+        hits.append(rel_path)
         if len(hits) >= 20:
             break
     return hits
