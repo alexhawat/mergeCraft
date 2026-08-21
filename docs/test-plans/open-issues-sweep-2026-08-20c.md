@@ -623,3 +623,4 @@ Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility
 - Live smoke **skipped: no live gate** (`MERGECRAFT_LIVE_E2E` unset)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W22 not started
+- W21 commit: `932347cc`
