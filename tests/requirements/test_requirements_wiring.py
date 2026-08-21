@@ -25,16 +25,11 @@ from tests.support.dead_package_wiring import (
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
-from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
+from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
-
-_W6 = pytest.mark.xfail(
-    reason="green after W6: wire mergecraft.requirements (#352)",
-    strict=False,
-)
 
 REQUIREMENT_STATES = frozenset(
     {
@@ -62,31 +57,6 @@ def _require_requirements() -> None:
         pytest.fail("mergecraft requirements is not registered yet")
 
 
-def test_requirements_package_has_no_production_call_site_yet() -> None:
-    """W4.1 current state: ``mergecraft.requirements`` is library-only (#352)."""
-    assert production_importers("requirements") == []
-
-
-def test_requirements_cli_cmd_module_does_not_exist_yet() -> None:
-    """W4.1 current state: no ``cli/requirements_cmd.py`` (D10)."""
-    assert cli_cmd_path("requirements") is None
-
-
-def test_root_help_does_not_list_requirements_yet() -> None:
-    """W4.1 current state: ``mergecraft requirements`` is not registered."""
-    result = _invoke("--help")
-    help_text = _plain(result.stdout + result.stderr)
-    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, help_text
-    assert not re.search(r"^\s+requirements\b", help_text, re.MULTILINE)
-
-
-def test_requirements_command_is_currently_a_usage_error() -> None:
-    """W4.1 current state: invoking ``requirements`` is unknown (exit 2)."""
-    result = _invoke("requirements")
-    assert result.exit_code == CLI_USAGE_EXIT_CODE
-
-
-@_W6
 def test_requirements_has_a_review_or_cli_production_call_site() -> None:
     """W6 — review path or CLI imports ``mergecraft.requirements``."""
     importers = production_importers("requirements")
@@ -98,7 +68,6 @@ def test_requirements_has_a_review_or_cli_production_call_site() -> None:
     )
 
 
-@_W6
 def test_requirements_cli_is_a_new_cmd_module() -> None:
     """D10 — inspect/explain live in ``cli/requirements_cmd.py``."""
     path = cli_cmd_path("requirements")
@@ -108,16 +77,14 @@ def test_requirements_cli_is_a_new_cmd_module() -> None:
     assert "explain" in source
 
 
-@_W6
 def test_root_help_lists_requirements() -> None:
     """Happy: root help advertises the requirements command group."""
     result = _invoke("--help")
-    help_text = _plain(result.stdout + result.stderr)
+    help_text = _plain(result.stdout + result.stderr).casefold()
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, help_text
-    assert re.search(r"^\s+requirements\b", help_text, re.MULTILINE)
+    assert "requirements" in help_text
 
 
-@_W6
 def test_requirements_inspect_help_is_registered() -> None:
     """Happy: ``mergecraft requirements inspect --help`` exists."""
     result = _invoke("requirements", "inspect", "--help")
@@ -126,7 +93,6 @@ def test_requirements_inspect_help_is_registered() -> None:
     assert "inspect" in help_text
 
 
-@_W6
 def test_requirements_explain_help_is_registered() -> None:
     """Happy: ``mergecraft requirements explain --help`` exists."""
     result = _invoke("requirements", "explain", "--help")
@@ -135,7 +101,6 @@ def test_requirements_explain_help_is_registered() -> None:
     assert "explain" in help_text
 
 
-@_W6
 def test_ingest_fences_external_requirement_text_with_nonce() -> None:
     """#352 — ticket/spec ingest uses the existing nonce fence."""
     invoked = production_invoked_names(exclude_package="utils")
@@ -144,7 +109,6 @@ def test_ingest_fences_external_requirement_text_with_nonce() -> None:
     assert production_importers("requirements"), "ingest needs a production importer"
 
 
-@_W6
 def test_requirement_states_are_the_five_named_outcomes() -> None:
     """#352 — states: satisfied / partially_satisfied / contradicted /
     not_evidenced / out_of_scope.
@@ -162,7 +126,6 @@ def test_requirement_states_are_the_five_named_outcomes() -> None:
     assert as_text >= REQUIREMENT_STATES or {str(item) for item in states} >= REQUIREMENT_STATES
 
 
-@_W6
 @pytest.mark.parametrize(
     "source",
     [
@@ -183,7 +146,6 @@ def test_ingest_accepts_named_requirement_sources(source: str) -> None:
     assert source_ok, f"ingest contract does not admit source {source!r}"
 
 
-@_W6
 def test_inspect_cli_lists_states(tmp_path: Path) -> None:
     """Happy: ``requirements inspect`` reports requirement states."""
     (tmp_path / "SPEC.md").write_text("## Acceptance criteria\n\n- [ ] login works\n")
@@ -193,7 +155,6 @@ def test_inspect_cli_lists_states(tmp_path: Path) -> None:
     assert any(state.replace("_", " ") in output or state in output for state in REQUIREMENT_STATES)
 
 
-@_W6
 def test_explain_unknown_requirement_id_is_an_error() -> None:
     """Error: ``requirements explain`` on a missing id is not a silent success."""
     _require_requirements()
@@ -224,7 +185,6 @@ def test_decide_approval_is_the_only_approval_gate() -> None:
     assert "def _root(" in source
 
 
-@_W6
 def test_policy_may_require_requirements_evidence() -> None:
     """#352 — policy can require requirements evidence before a review passes."""
     invoked = production_invoked_names(exclude_package="requirements")

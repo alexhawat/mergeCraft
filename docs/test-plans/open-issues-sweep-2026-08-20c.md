@@ -103,12 +103,12 @@ After each impl wave, recon **deletes** the matching W4.1 current-state "unwired
 | Wave | Tests | Marker reason | Status |
 |------|-------|---------------|--------|
 | **W5** | `tests/pr/test_pr_wiring.py` (8 wiring + D10 pins) | `green after W5: wire mergecraft.pr (#351)` | **PASS** — un-xfailed W5 recon |
-| **W6** | `tests/requirements/test_requirements_wiring.py` (13, incl. 3 ingest sources) | `green after W6: wire mergecraft.requirements (#352)` | **XFAIL** |
+| **W6** | `tests/requirements/test_requirements_wiring.py` (12 wiring + D14 pin) | `green after W6: wire mergecraft.requirements (#352)` | **PASS** — un-xfailed W6 recon |
 | **W7** | `tests/xrepo/test_xrepo_wiring.py` (8) | `green after W7: wire mergecraft.xrepo (#353)` | **XFAIL** |
 
 W5 wiring tests (un-xfailed W5 recon): `test_pr_has_a_review_or_cli_production_call_site`, `test_pr_cli_is_a_new_cmd_module`, `test_root_help_lists_describe`, `test_describe_help_names_output_only_summary`, `test_describe_cli_emits_title_summary_walkthrough_risk_and_tests`, `test_describe_cli_does_not_write_the_reviewed_tree`, `test_production_wiring_invokes_pr_library_surfaces`, `test_similar_issues_and_changes_are_wired`, `test_unknown_describe_option_is_usage_error`.
 
-W6 xfails: `test_requirements_has_a_review_or_cli_production_call_site`, `test_requirements_cli_is_a_new_cmd_module`, `test_root_help_lists_requirements`, `test_requirements_inspect_help_is_registered`, `test_requirements_explain_help_is_registered`, `test_ingest_fences_external_requirement_text_with_nonce`, `test_requirement_states_are_the_five_named_outcomes`, `test_ingest_accepts_named_requirement_sources[*]`, `test_inspect_cli_lists_states`, `test_explain_unknown_requirement_id_is_an_error`, `test_policy_may_require_requirements_evidence`.
+W6 wiring tests (un-xfailed W6 recon): `test_requirements_has_a_review_or_cli_production_call_site`, `test_requirements_cli_is_a_new_cmd_module`, `test_root_help_lists_requirements`, `test_requirements_inspect_help_is_registered`, `test_requirements_explain_help_is_registered`, `test_ingest_fences_external_requirement_text_with_nonce`, `test_requirement_states_are_the_five_named_outcomes`, `test_ingest_accepts_named_requirement_sources[*]`, `test_inspect_cli_lists_states`, `test_explain_unknown_requirement_id_is_an_error`, `test_policy_may_require_requirements_evidence`.
 
 W7 xfails: `test_xrepo_has_a_review_or_cli_production_call_site`, `test_xrepo_cli_is_a_new_cmd_module`, `test_root_help_lists_xrepo`, `test_xrepo_explain_help_is_registered`, `test_review_path_uses_sha_pinned_linked_repos`, `test_unauthorized_linked_repo_is_blocked_on_the_review_path`, `test_explain_unknown_finding_id_is_an_error`, `test_multi_service_fixture_reports_producer_consumer_breakage`.
 
@@ -127,8 +127,8 @@ W7 xfails: `test_xrepo_has_a_review_or_cli_production_call_site`, `test_xrepo_cl
 | CB351i | Library surfaces invoked from production | integration | happy | `test_production_wiring_invokes_pr_library_surfaces` |
 | CB351j | Similar issues / similar changes wired | integration | happy | `test_similar_issues_and_changes_are_wired` |
 | CB351k | Unknown describe flag → usage 2 | functional | error | `test_unknown_describe_option_is_usage_error` |
-| CB352a | `mergecraft.requirements` unwired | unit | current | `test_requirements_package_has_no_production_call_site_yet` |
-| CB352b | No `cli/requirements_cmd.py` / command | functional | current | `test_requirements_cli_cmd_module_does_not_exist_yet`, `test_root_help_does_not_list_requirements_yet`, `test_requirements_command_is_currently_a_usage_error` |
+| CB352a | `mergecraft.requirements` unwired | unit | current | **deleted W6 recon** (`test_requirements_package_has_no_production_call_site_yet`) |
+| CB352b | No `cli/requirements_cmd.py` / command | functional | current | **deleted W6 recon** (`test_requirements_cli_cmd_module_does_not_exist_yet`, `test_root_help_does_not_list_requirements_yet`, `test_requirements_command_is_currently_a_usage_error`) |
 | CB352c | Review/CLI import + new cmd module | integration | happy | `test_requirements_has_a_review_or_cli_production_call_site`, `test_requirements_cli_is_a_new_cmd_module` |
 | CB352d | `requirements inspect` / `explain` | functional | happy | `test_root_help_lists_requirements`, `test_requirements_inspect_help_is_registered`, `test_requirements_explain_help_is_registered`, `test_inspect_cli_lists_states` |
 | CB352e | Ingest + nonce fence | integration | happy | `test_ingest_fences_external_requirement_text_with_nonce`, `test_ingest_accepts_named_requirement_sources` |
@@ -165,3 +165,19 @@ W7 xfails: `test_xrepo_has_a_review_or_cli_production_call_site`, `test_xrepo_cl
 - W6/W7 still **XFAIL** (`strict=False`)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W6 not started
+
+## Recon notes (W6)
+
+- Un-xfailed every `green after W6: wire mergecraft.requirements (#352)` marker in `tests/requirements/test_requirements_wiring.py` (12 XPASS → real PASS; parametrize ingest sources counted in that 12).
+- `test_root_help_lists_requirements` now matches describe (`"requirements" in help_text` after ANSI strip + casefold). Rich help is `│ requirements`, so `^\s+requirements\b` never matched.
+- Deleted W4.1 current-state pins: `test_requirements_package_has_no_production_call_site_yet`, `test_requirements_cli_cmd_module_does_not_exist_yet`, `test_root_help_does_not_list_requirements_yet`, `test_requirements_command_is_currently_a_usage_error`.
+- Left W7 xfails in place. D14 `decide_approval` pin kept.
+- W6.1 impl: `d5771791`.
+
+## Acceptance (W6 recon)
+
+- W6 wiring pins **PASS** (no leftover xfail, no XPASS)
+- W4.1 `#352` current-state pins gone
+- W7 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W7 not started
