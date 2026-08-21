@@ -400,7 +400,7 @@ After each impl wave, recon **deletes** matching W14 current-state pins and **un
 |------|-------|---------------|--------|
 | **W15** | `tests/scm/test_cd_webhooks.py` (11) | `green after W15: webhook security, idempotency, provider conformance (#361)` | **PASS** — un-xfailed W15 recon |
 | **W16** | `tests/security/test_cd_egress.py` (10) | `green after W16: egress, SSRF, vuln gates, threat model; no secrets in public comments (#362)` | **PASS** — un-xfailed W16 recon |
-| **W17** | `tests/evals/test_cd_adversarial_corpora.py` (5) | `green after W17: adversarial corpora wired into eval gate (#363 / D15)` | XFAIL until W17 |
+| **W17** | `tests/evals/test_cd_adversarial_corpora.py` (5) | `green after W17: adversarial corpora wired into eval gate (#363 / D15)` | **PASS** — un-xfailed W17 recon |
 | **W18** | `tests/reliability/test_cd_soak_slos.py` (7) + `tests/reliability/test_cd_degradation.py` (13) | `green after W18: soak/SLOs + degradation/recovery/redacted bundles (#364/#365)` | XFAIL until W18 |
 | **W19** | `tests/cli/test_cd_doctor_supply_chain.py` (6) | `green after W19: doctor --supply-chain + provenance (#366 / D16)` | XFAIL until W19 |
 | **W20** | `tests/perf/test_cd_budgets.py` (13) | `green after W20: latency/cost budgets, compression, early stop, regression bench (#367)` | XFAIL until W20 |
@@ -430,7 +430,8 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 | CD363a | Three corpora, separate from human bank | integration | happy/edge | `test_three_adversarial_corpora_are_named_and_non_empty`, `test_adversarial_corpora_stay_out_of_the_human_reference_bank` |
 | CD363b | `eval gate` blocks adversarial regression | functional | error | `test_eval_gate_fails_the_release_on_an_adversarial_regression` |
 | CD363c | CLI path/URL untrusted | unit | happy | `test_cli_source_path_is_treated_as_attacker_controlled_input` |
-| CD363d | D15 no #140 numbers | unit | current + xfail | `test_issue_140_gate_metrics_remain_the_published_numbers`, `test_adversarial_gate_does_not_publish_precision_recall_numbers` |
+| CD363d | D15 no #140 numbers | unit | current + happy | `test_issue_140_gate_metrics_remain_the_published_numbers`, `test_adversarial_gate_does_not_publish_precision_recall_numbers` |
+| CD363e | Seeds not yet eval-gate corpora | unit | current | **deleted W17 recon** (`test_existing_adversarial_seeds_are_not_eval_gate_corpora`) |
 | CD364a | Failure injection, soak, concurrency, scale | unit | happy/edge | `tests/reliability/test_cd_soak_slos.py` |
 | CD364b | Per-stage latency, taxonomy, four SLOs | unit | happy | `test_per_stage_latency_metrics_are_structured`, `test_error_taxonomy_is_a_closed_set`, `test_production_slos_cover_the_four_named_targets` |
 | CD365a | Outage / cache / disk / memory / giant repo | unit | happy/error | `tests/reliability/test_cd_degradation.py` |
@@ -481,3 +482,20 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - W17–W20 still **XFAIL** (`strict=False`)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W17 not started
+
+## Recon notes (W17)
+
+- Un-xfailed every `green after W17: adversarial corpora wired into eval gate (#363 / D15)` marker in `tests/evals/test_cd_adversarial_corpora.py` (5 XPASS → real PASS).
+- Deleted W14 current-state pin: `test_existing_adversarial_seeds_are_not_eval_gate_corpora`.
+- Kept D15 `#140` current-state pin: `test_issue_140_gate_metrics_remain_the_published_numbers`.
+- Left W18–W20 xfails in place.
+- W17 impl: `53335b41`.
+- W17 recon: pending commit SHA.
+
+## Acceptance (W17 recon)
+
+- W17 adversarial corpora pins **PASS** (no leftover xfail, no XPASS)
+- W14 `#363` current-state pin gone; `#140` metrics pin kept
+- W18–W20 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W18 not started

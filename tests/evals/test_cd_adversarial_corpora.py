@@ -18,21 +18,9 @@ from tests.support.cd_batch import (
     ADVERSARIAL_CORPORA_MODULE,
     ADVERSARIAL_CORPUS_KINDS,
     ISSUE_140_GATE_METRICS,
-    green_after,
-    module_exists,
     require_callable,
     require_module,
 )
-from tests.support.dead_package_wiring import SRC_ROOT
-
-_W17 = green_after("W17", "adversarial corpora wired into eval gate (#363 / D15)")
-
-
-def test_existing_adversarial_seeds_are_not_eval_gate_corpora() -> None:
-    """W14 current state — fence corpus + hostile-repo fixture are seeds only."""
-    assert (SRC_ROOT / "evals" / "adversarial.py").is_file()
-    assert (REPO_ROOT / "tests" / "security" / "hostile_corpus.py").is_file()
-    assert module_exists(ADVERSARIAL_CORPORA_MODULE) is False
 
 
 def test_issue_140_gate_metrics_remain_the_published_numbers() -> None:
@@ -46,7 +34,6 @@ def test_issue_140_gate_metrics_remain_the_published_numbers() -> None:
     assert "#140" in source or "Detection" in source
 
 
-@_W17
 def test_three_adversarial_corpora_are_named_and_non_empty() -> None:
     """Happy: prompt-injection, malicious-repo, and malicious-ticket corpora."""
     module = require_module(ADVERSARIAL_CORPORA_MODULE)
@@ -63,7 +50,6 @@ def test_three_adversarial_corpora_are_named_and_non_empty() -> None:
         assert cases, f"empty {item} corpus is a failure, never a vacuous pass"
 
 
-@_W17
 def test_adversarial_corpora_stay_out_of_the_human_reference_bank() -> None:
     """Edge: the three corpora are not top-level ``evals/cases/*.md`` files."""
     module = require_module(ADVERSARIAL_CORPORA_MODULE)
@@ -77,7 +63,6 @@ def test_adversarial_corpora_stay_out_of_the_human_reference_bank() -> None:
             assert Path(str(case_id)).stem not in human_ids or "/" in str(case_id)
 
 
-@_W17
 def test_eval_gate_fails_the_release_on_an_adversarial_regression(tmp_path: Path) -> None:
     """Functional: ``mergecraft eval gate`` blocks when an adversarial case regresses."""
     module = require_module(ADVERSARIAL_CORPORA_MODULE)
@@ -92,7 +77,6 @@ def test_eval_gate_fails_the_release_on_an_adversarial_regression(tmp_path: Path
     assert "adversarial" in help_text
 
 
-@_W17
 def test_cli_source_path_is_treated_as_attacker_controlled_input() -> None:
     """Happy: reviewing a local path or public URL is untrusted input."""
     module = require_module(ADVERSARIAL_CORPORA_MODULE)
@@ -104,7 +88,6 @@ def test_cli_source_path_is_treated_as_attacker_controlled_input() -> None:
         assert trust in {"untrusted", "attacker-controlled", "external"}
 
 
-@_W17
 def test_adversarial_gate_does_not_publish_precision_recall_numbers() -> None:
     """D15 — corpora land; #140 precision/recall numbers are not published here."""
     module = require_module(ADVERSARIAL_CORPORA_MODULE)
