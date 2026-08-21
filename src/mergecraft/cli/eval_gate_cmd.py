@@ -12,6 +12,7 @@ from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.eval_cli_output import default_permanent_dir
 from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.evals.adversarial_corpora import eval_adversarial_gate
 from mergecraft.evals.gate import DEFAULT_GATE_TOLERANCE, eval_gate, load_result_set
 from mergecraft.evals.store import (
     CASE_FILE_SUFFIX,
@@ -62,7 +63,7 @@ def register_gate_command(app: typer.Typer) -> None:
             help="Emit the result as JSON.",
         ),
     ) -> None:
-        """Check the eval bank's integrity — the CI-safe half of the eval loop.
+        """Check the eval bank's integrity and adversarial corpora — the CI-safe half.
 
         This gate is **structural, not behavioural**. It proves every durable case
         still parses against the current schema and provenance model, that ids are
@@ -71,6 +72,11 @@ def register_gate_command(app: typer.Typer) -> None:
         pure function that takes the current decision as an *input*, so replaying in
         CI would require a live agent run per case — non-deterministic, key-bearing,
         and far too slow for a per-PR gate.
+
+        It also runs the **adversarial corpora** gate (prompt injection, malicious
+        repository, malicious ticket/comment). A regression there blocks the
+        release; those corpora are not the human/reference bank and do not
+        publish precision/recall numbers.
 
         The behavioural regression signal is ``mergecraft eval promote``: a promoted
         case becomes a permanent pytest that ``make test`` already runs. This gate's
@@ -98,13 +104,23 @@ def register_gate_command(app: typer.Typer) -> None:
 
         bank_dir = _bank_dir(bank)
         permanent_dir = default_permanent_dir()
+        adversarial_report = eval_adversarial_gate(bank=bank_dir)
 
         if not bank_dir.is_dir():
             if wants_json_output(ctx, json_flag=json_output):
-                emit_cli_json({"status": "empty", "bank": str(bank_dir), "cases": 0})
+                emit_cli_json(
+                    {
+                        "status": "empty",
+                        "bank": str(bank_dir),
+                        "cases": 0,
+                        "adversarial_gate": adversarial_report.model_dump(mode="json"),
+                    }
+                )
             else:
                 console.print(f"[yellow]eval bank {bank_dir} does not exist yet[/yellow]")
-            if gate_report is not None and not gate_report.passed:
+            if (
+                gate_report is not None and not gate_report.passed
+            ) or not adversarial_report.passed:
                 raise typer.Exit(code=CLI_CONFIGURATION_EXIT_CODE)
             return
 
@@ -134,6 +150,8 @@ def register_gate_command(app: typer.Typer) -> None:
             failures += len(unpromoted)
         if gate_failed:
             failures += 1
+        if not adversarial_report.passed:
+            failures += 1
 
         if wants_json_output(ctx, json_flag=json_output):
             payload: dict[str, Any] = {
@@ -144,6 +162,7 @@ def register_gate_command(app: typer.Typer) -> None:
                 "broken": broken,
                 "duplicates": duplicates,
                 "unpromoted": unpromoted,
+                "adversarial_gate": adversarial_report.model_dump(mode="json"),
             }
             if gate_report is not None:
                 payload["regression_gate"] = gate_report.model_dump(mode="json")
@@ -162,6 +181,10 @@ def register_gate_command(app: typer.Typer) -> None:
             if unpromoted:
                 colour = "red" if require_promoted else "yellow"
                 console.print(f"  [{colour}]not promoted[/{colour}]: {', '.join(unpromoted)}")
+            console.print(
+                "adversarial corpora gate: "
+                + ("[green]passed[/green]" if adversarial_report.passed else "[red]failed[/red]")
+            )
             if gate_report is not None:
                 console.print(
                     f"release regression gate (tolerance {gate_report.tolerance:.2%}): "
