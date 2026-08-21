@@ -47,7 +47,6 @@ finding before it is published.
 ### Lock-in → MIT Action
 
 One Docker action, one YAML workflow, MIT-licensed Python you can read end to end.
-Inspired by [pullfrog](https://github.com/pullfrog/pullfrog) and CodeRabbit.
 
 ## How it works
 
@@ -274,4 +273,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor workflow.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+MIT — see [LICENSE](LICENSE).

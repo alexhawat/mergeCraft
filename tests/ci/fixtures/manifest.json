@@ -2,7 +2,7 @@
   "captured_at": "2026-07-29",
   "redaction": "Secrets redacted at capture (K8); canary planted in canary_in_ci_log.json",
   "raw_logs": [
-    "sevn-pullfrog-attempt1-drift.zip",
+    "sevn-attempt1-drift.zip",
     "sevn-tests-shard4.zip",
     "mergecraft-ci-make.zip",
     "mergecraft-catalog-tests-shard1.zip",

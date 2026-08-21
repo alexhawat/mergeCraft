@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 # body was suppressed) at least one finding marker. Reviews from humans and other
 # bots carry neither, and their commit ids must never be mistaken for "the head
 # mergeCraft last reviewed".
-_MERGECRAFT_REVIEW_MARKERS = ("*via mergecraft*", "mergecraft-finding:v1:", "pullfrog-finding:v1:")
+_MERGECRAFT_REVIEW_MARKERS = ("*via mergecraft*", "mergecraft-finding:v1:")
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<to>.+)$", re.MULTILINE)
