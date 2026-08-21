@@ -13,6 +13,7 @@ from mergecraft import __version__
 from mergecraft.cli import (
     agents_cmd,
     analyzers_cmd,
+    ask_cmd,
     auth_cmd,
     cache_cmd,
     capabilities_cmd,
@@ -23,6 +24,7 @@ from mergecraft.cli import (
     doctor_cmd,
     eval_cmd,
     evidence_cmd,
+    explain_cmd,
     findings_cmd,
     gha_cmd,
     init_cmd,
@@ -35,7 +37,9 @@ from mergecraft.cli import (
     plan_cmd,
     policy_cmd,
     profile_cmd,
+    replay_cmd,
     requirements_cmd,
+    run_cmd,
     tracing_cmd,
     tracing_logfire_cmd,
     watch_cmd,
@@ -96,6 +100,9 @@ app.command("watch")(watch_cmd.run)
 app.command("doctor")(doctor_cmd.run)
 app.command("capabilities")(capabilities_cmd.run)
 app.command("describe")(describe_cmd.run)
+app.command("explain")(explain_cmd.run)
+app.command("ask")(ask_cmd.run)
+app.command("replay")(replay_cmd.run)
 app.command("plan")(plan_cmd.run)
 app.command("review")(diff_review_cmd.run)
 app.command("diff-review", hidden=True)(diff_review_cmd.run)
@@ -109,6 +116,7 @@ app.add_typer(xrepo_cmd.app, name="xrepo")
 app.add_typer(evidence_cmd.app, name="evidence")
 app.add_typer(findings_cmd.app, name="findings")
 app.add_typer(eval_cmd.app, name="eval")
+app.add_typer(run_cmd.app, name="run")
 # W8.4 — ``mergecraft config tracing`` + ``mergecraft traces <run-id>``.
 tracing_cmd.config_app.command("show")(config_surface_cmd.config_show)
 tracing_cmd.config_app.command("explain")(config_surface_cmd.config_explain)
