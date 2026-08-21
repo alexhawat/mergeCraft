@@ -1,11 +1,11 @@
-"""W2 DA RED — #380 one engine over one ``ReviewSnapshot``.
+"""#380 one engine over one ``ReviewSnapshot``.
 
 Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-20d-a-engine-wave-plan.md``
-Authoring wave: **W2**. Implementation: **W6**.
+Authoring wave: **W2**. Implementation: **W6** (xfail markers removed after W6).
 
-No ``ReviewSnapshot`` type is in the tree today. CLI (``review``), Action
-(``mergecraft.main`` / ``gha``), and SCM (``conforming_review_request``) do not
-yet enter one engine over one snapshot. Hidden ``diff-review`` must remain.
+CLI (``review``), Action (``mergecraft.main`` / ``gha``), and SCM
+(``conforming_review_request``) enter one engine over one snapshot. Hidden
+``diff-review`` must remain.
 """
 
 from __future__ import annotations
@@ -32,11 +32,6 @@ _SNAPSHOT_MODULES = (
     "mergecraft.engine.snapshot",
     "mergecraft.engine",
     "mergecraft.review",
-)
-
-_XFAIL_W6 = pytest.mark.xfail(
-    reason="green after W6: ReviewSnapshot conformance",
-    strict=False,
 )
 
 
@@ -99,10 +94,9 @@ def test_hidden_diff_review_alias_remains_invocable() -> None:
     assert hidden[0].hidden is True
 
 
-# ── W6 conformance (xfail) ────────────────────────────────────────────────────
+# ── W6 conformance ────────────────────────────────────────────────────────────
 
 
-@_XFAIL_W6
 def test_review_snapshot_type_exists() -> None:
     """Unit: ``ReviewSnapshot`` is a public type CLI / Action / SCM can share."""
     snapshot = _find_review_snapshot()
@@ -110,7 +104,6 @@ def test_review_snapshot_type_exists() -> None:
     assert snapshot.__name__ == "ReviewSnapshot"
 
 
-@_XFAIL_W6
 def test_shared_engine_accepts_review_snapshot() -> None:
     """Unit: one engine callable takes a ``ReviewSnapshot`` (or is annotated as such)."""
     snapshot = _find_review_snapshot()
@@ -124,7 +117,6 @@ def test_shared_engine_accepts_review_snapshot() -> None:
     assert annotated or named, inspect.signature(run)
 
 
-@_XFAIL_W6
 def test_cli_review_path_builds_a_review_snapshot() -> None:
     """Integration: the CLI review module constructs ``ReviewSnapshot``."""
     from mergecraft.cli import diff_review_cmd
@@ -133,7 +125,6 @@ def test_cli_review_path_builds_a_review_snapshot() -> None:
     assert "ReviewSnapshot" in source
 
 
-@_XFAIL_W6
 def test_action_path_builds_a_review_snapshot() -> None:
     """Integration: the Action/runtime entry constructs ``ReviewSnapshot``."""
     import mergecraft.main as action_main
@@ -142,7 +133,6 @@ def test_action_path_builds_a_review_snapshot() -> None:
     assert "ReviewSnapshot" in source
 
 
-@_XFAIL_W6
 def test_scm_conforming_request_builds_or_feeds_a_review_snapshot() -> None:
     """Integration: SCM webhook review requests enter the same snapshot type."""
     from mergecraft.scm import webhooks
