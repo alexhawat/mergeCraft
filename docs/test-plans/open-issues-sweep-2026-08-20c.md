@@ -631,7 +631,7 @@ Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility
 - Deleted W21 current-state pins: `test_repo_settings_has_no_schema_version_yet`, `test_config_compat_module_does_not_exist_yet`.
 - Left W23–W25 xfails in place. D8/D10 pins kept.
 - W22 impl: `a2a3af4c`.
-- W22 recon: pending commit SHA.
+- W22 recon: `d7b83127`.
 
 ## Acceptance (W22 recon)
 
