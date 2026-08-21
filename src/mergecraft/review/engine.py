@@ -3,7 +3,6 @@
 Exports:
     ReviewEngine: Stage machine for materialize / analyze / review / publish.
     ReviewEngineResult: Snapshot plus stages that actually completed.
-    run_from_snapshot: Bind a snapshot into the shared engine.
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
 
 from mergecraft.review.snapshot import (
     ReviewSnapshot,
@@ -19,9 +17,9 @@ from mergecraft.review.snapshot import (
     ReviewStageSpec,
 )
 
-StageHook = Callable[[], Awaitable[Any]]
-PublishHook = Callable[[Any], Awaitable[Any]]
-TimeoutMap = Mapping[ReviewStageName, float | None]
+StageHook = Callable[[], Awaitable[object]]
+PublishHook = Callable[..., Awaitable[object]]
+TimeoutMap = Mapping[ReviewStageName, float]
 OnTimeout = Callable[[ReviewStageName], None]
 
 
@@ -39,7 +37,7 @@ class ReviewEngineResult:
     snapshot: ReviewSnapshot
     stages: tuple[ReviewStageSpec, ...]
     stages_ran: tuple[ReviewStageName, ...]
-    output: Any = None
+    output: object | None = None
 
 
 @dataclass(slots=True)
@@ -63,6 +61,12 @@ class ReviewEngine:
         """Install a handler invoked when a stage ``wait_for`` times out."""
         self._on_timeout = handler
 
+    def _spec(self, name: ReviewStageName) -> ReviewStageSpec:
+        for stage in self.snapshot.stages:
+            if stage.name == name:
+                return stage
+        raise KeyError(name)
+
     def _timeout_for(
         self,
         name: ReviewStageName,
@@ -70,6 +74,8 @@ class ReviewEngine:
     ) -> float | None:
         if timeouts is not None and name in timeouts:
             return timeouts[name]
+        if not self._spec(name).engine_enforced:
+            return None
         return self.timeout_s(name)
 
     async def run_stage(
@@ -79,7 +85,7 @@ class ReviewEngine:
         *,
         timeout_s: float | _TimeoutUnset | None = _TIMEOUT_UNSET,
         timeouts: TimeoutMap | None = None,
-    ) -> Any:
+    ) -> object:
         """Await ``hook`` under the stage timeout; record ``name`` only on success."""
         if isinstance(timeout_s, _TimeoutUnset):
             budget = self._timeout_for(name, timeouts)
@@ -102,7 +108,7 @@ class ReviewEngine:
         self._ran.append(name)
         return value
 
-    def result(self, output: Any = None) -> ReviewEngineResult:
+    def result(self, output: object | None = None) -> ReviewEngineResult:
         """Snapshot the stages that have completed so far."""
         return ReviewEngineResult(
             snapshot=self.snapshot,
@@ -129,7 +135,7 @@ class ReviewEngine:
         await self.run_stage("analyze", analyze, timeouts=timeouts)
         review_out = await self.run_stage("review", review, timeouts=timeouts)
 
-        async def _publish() -> Any:
+        async def _publish() -> object:
             return await publish(review_out)
 
         output = await self.run_stage("publish", _publish, timeouts=timeouts)
@@ -158,17 +164,7 @@ class ReviewEngine:
         )
 
 
-def run_from_snapshot(snapshot: ReviewSnapshot) -> ReviewEngine:
-    """Bind ``snapshot`` as the shared review engine.
-
-    CLI, Action, and SCM call this with the same type. Stage timeouts live
-    on the snapshot; ``stages_ran`` is filled only after ``run`` / ``run_stage``.
-    """
-    return ReviewEngine(snapshot=snapshot)
-
-
 __all__ = [
     "ReviewEngine",
     "ReviewEngineResult",
-    "run_from_snapshot",
 ]

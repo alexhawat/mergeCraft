@@ -24,7 +24,7 @@ from mergecraft.offline_review import (
     parse_offline_review_findings,
     run_offline_diff_review,
 )
-from mergecraft.review.engine import ReviewEngine, run_from_snapshot
+from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.utils.log import configure_logging
 from mergecraft.utils.source_resolve import SourceResolverSpec
@@ -181,8 +181,6 @@ def _start_agent_protocol() -> AgentProtocolStream:
         )
     stream = AgentProtocolStream()
     stream.run_started(negotiated=selected, **protocol_budget_payload())
-    stream.phase("materialize")
-    stream.phase("review")
     return stream
 
 
@@ -520,7 +518,7 @@ def run(
         source=str(root),
         replay_key=str(diff) if diff is not None else None,
     )
-    engine: ReviewEngine = run_from_snapshot(snapshot)
+    engine = ReviewEngine(snapshot=snapshot)
 
     stream: AgentProtocolStream | None = None
     seen: set[str] = set()

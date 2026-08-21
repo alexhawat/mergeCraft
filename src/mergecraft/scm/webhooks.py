@@ -288,7 +288,6 @@ def conforming_review_request(
     body: dict[str, Any],
 ) -> ConformingReviewRequest:
     """Map GitHub pull_request and GitLab merge-request hooks to the same Review mode."""
-    from mergecraft.review.engine import run_from_snapshot
     from mergecraft.review.snapshot import canonical_review_snapshot
 
     _ = body
@@ -298,27 +297,13 @@ def conforming_review_request(
         mode="Review",
         source=name,
     )
-    engine = run_from_snapshot(snapshot)
-
-    async def _noop() -> None:
-        return None
-
-    async def _publish(_review: object) -> None:
-        return None
-
-    staged = engine.run_sync(
-        materialize=_noop,
-        analyze=_noop,
-        review=_noop,
-        publish=_publish,
-    )
     return ConformingReviewRequest(
-        mode=engine.snapshot.mode,
+        mode=snapshot.mode,
         provider=name,
         event=event,
-        snapshot=engine.snapshot,
-        stages=staged.stages,
-        stages_ran=staged.stages_ran,
+        snapshot=snapshot,
+        stages=snapshot.stages,
+        stages_ran=(),
     )
 
 

@@ -50,6 +50,8 @@ class ReviewStageSpec(BaseModel):
     name: ReviewStageName
     timeout_ms: int = Field(gt=0)
     observable: bool = True
+    # Review's 1h budget is payload data; the agent self-times (Action inner deadline).
+    engine_enforced: bool = True
 
 
 class ReviewSnapshot(BaseModel):
@@ -102,7 +104,11 @@ def canonical_review_snapshot(
 ) -> ReviewSnapshot:
     """Return a frozen snapshot with the canonical stage set."""
     stages = tuple(
-        ReviewStageSpec(name=name, timeout_ms=DEFAULT_STAGE_TIMEOUTS_MS[name])
+        ReviewStageSpec(
+            name=name,
+            timeout_ms=DEFAULT_STAGE_TIMEOUTS_MS[name],
+            engine_enforced=name != "review",
+        )
         for name in CANONICAL_STAGE_NAMES
     )
     return ReviewSnapshot(
@@ -121,6 +127,7 @@ def snapshot_manifest_stages(snapshot: ReviewSnapshot) -> tuple[dict[str, object
             "name": stage.name,
             "timeout_ms": stage.timeout_ms,
             "observable": stage.observable,
+            "engine_enforced": stage.engine_enforced,
         }
         for stage in snapshot.stages
     )

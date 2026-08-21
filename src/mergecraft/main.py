@@ -36,7 +36,7 @@ from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import ProgressComment, ToolState, init_tool_state
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
-from mergecraft.review.engine import run_from_snapshot
+from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
@@ -254,24 +254,6 @@ class _ConfigurationError(RuntimeError):
     handler can tag ``RunOutcome.configuration_error`` without confusing
     them with infra crashes.
     """
-
-
-class _ShortCircuit(Exception):
-    """Internal signal: a phase already published and produced the final result (G4.2).
-
-    Raised by ``_execute_agent`` when a trusted-tier ``setup_script``
-    failure short-circuits under the ``inconclusive`` policy (S1/D10) — the
-    publish block (status check + evidence packet) already ran in that
-    branch and the agent loop must never start, so this carries the
-    finished :class:`MainResult` straight back to :func:`main` without
-    going through the generic ``except Exception`` handler (which would
-    mis-tag it ``infra_error`` and skip the packet that was already
-    written).
-    """
-
-    def __init__(self, result: MainResult) -> None:
-        super().__init__("run short-circuited before agent dispatch")
-        self.result = result
 
 
 def _classify_error_outcome(error: BaseException) -> RunOutcome:
@@ -1229,22 +1211,6 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
-async def _execute_agent(ctx: RunContext) -> AgentResult:
-    """Phase 3 — model-chain assembly, MCP lifecycle, agent dispatch, deadline (G4.2).
-
-    Orchestrates the five sub-steps of the original phase body — model-chain
-    assembly, ``tool_context`` construction, setup-input overrides +
-    ``setup_git``, the ``setup_script`` run/skip, and agent dispatch — each
-    now a named local extraction. Raises :class:`_ShortCircuit` when a
-    trusted-tier ``setup_script`` failure short-circuits under the
-    ``inconclusive`` policy (S1/D10) — the publish block already ran in
-    that case and the agent loop must not start.
-    """
-    await _assemble_model_chain(ctx)
-    await _build_run_tool_context(ctx)
-    return await _run_review_after_analyze(ctx)
-
-
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
@@ -1279,21 +1245,8 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult:
             "loop to honour no-verdict: {}",
             skip_reason,
         )
-        skip_outcome = RunOutcome.inconclusive
-        skip_packet_path = await _publish(
-            ctx,
-            outcome=skip_outcome,
-            failure_reason=skip_reason,
-            attrs_source=lambda: {"run_succeeded": False},
-        )
-        raise _ShortCircuit(
-            MainResult(
-                success=False,
-                error=skip_reason,
-                evidence_packet_path=skip_packet_path,
-                outcome=skip_outcome,
-            )
-        )
+        # Engine publish (``_finalize``) owns completion; do not publish here.
+        return AgentResult(success=True, error=skip_reason)
 
     await _prepare_agent_dispatch(ctx)
     return await _dispatch_agent_with_deadline(ctx)
@@ -1304,16 +1257,16 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
     assert ctx.settings is not None
-    assert ctx.run_ctx is not None
 
     tool_context = ctx.tool_context
     tool_state = ctx.tool_state
     settings = ctx.settings
 
-    try:
-        result = await finalize_agent_result(ctx.run_ctx, result)
-    except Exception as exc:
-        logger.debug("post-run finalize skipped: {}", exc)
+    if ctx.run_ctx is not None:
+        try:
+            result = await finalize_agent_result(ctx.run_ctx, result)
+        except Exception as exc:
+            logger.debug("post-run finalize skipped: {}", exc)
 
     # D3/W5.2 + W6.1 + S1/D5/D10 — a completed run is ``passed`` / ``failed``,
     # ``inconclusive`` when review-relevant dependency prep failed OR a
@@ -1490,7 +1443,7 @@ async def main() -> MainResult:
         source=os.environ.get("GITHUB_REPOSITORY") or None,
         replay_key=os.environ.get("GITHUB_SHA") or None,
     )
-    engine = run_from_snapshot(snapshot)
+    engine = ReviewEngine(snapshot=snapshot)
     ensure_github_workspace_registered()
     workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
     if workspace:
@@ -1535,7 +1488,6 @@ async def main() -> MainResult:
                 analyze=analyze,
                 review=review,
                 publish=publish,
-                timeouts={"review": None},
                 on_timeout=lambda _name: kill_all_active_process_groups(),
             )
             output = staged.output
@@ -1546,8 +1498,6 @@ async def main() -> MainResult:
                 error="review engine returned no result",
                 outcome=RunOutcome.infra_error,
             )
-        except _ShortCircuit as short_circuit:
-            return short_circuit.result
         except Exception as error:
             error_message = str(error) if error else "unknown error occurred"
             logger.error("{}", error_message)
