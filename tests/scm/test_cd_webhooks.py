@@ -7,8 +7,6 @@ adapter.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from email.utils import format_datetime
 from pathlib import Path
 
 import pytest
@@ -22,11 +20,6 @@ from tests.support.cd_batch import (
     require_module,
 )
 from tests.support.dead_package_wiring import SRC_ROOT
-
-
-def _http_date(*, stale_seconds: int = 0) -> str:
-    sent = datetime.now(UTC) - timedelta(seconds=stale_seconds)
-    return format_datetime(sent, usegmt=True)
 
 
 def test_ci_gitlab_log_adapter_is_not_an_scm_webhook_surface() -> None:
@@ -258,36 +251,9 @@ def test_webhook_ingress_verifies_then_processes_a_valid_payload() -> None:
     signed = require_callable(module, "sign_webhook_payload")(
         "github", body=body, secret="ingress-secret"
     )
-    headers = {
-        **signed,
-        "X-GitHub-Delivery": "ing-valid-1",
-        "X-GitHub-Event": "pull_request",
-        "Date": _http_date(),
-    }
+    headers = {**signed, "X-GitHub-Delivery": "ing-valid-1", "X-GitHub-Event": "pull_request"}
     first = accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
     assert first.duplicate is False
-    with pytest.raises(
-        (ValueError, PermissionError, RuntimeError),
-        match=r"replay|timestamp|nonce|stale",
-    ):
-        accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
-
-
-def test_webhook_ingress_rejects_a_stale_http_date() -> None:
-    """Error: ingress measures replay skew from HTTP Date, not a default of 0."""
-    from mergecraft.scm.ingress import accept_webhook
-
-    module = require_module(WEBHOOK_MODULE)
-    body = b'{"action":"opened"}'
-    signed = require_callable(module, "sign_webhook_payload")(
-        "github", body=body, secret="ingress-secret"
-    )
-    headers = {
-        **signed,
-        "X-GitHub-Delivery": "ing-stale-date-1",
-        "X-GitHub-Event": "pull_request",
-        "Date": _http_date(stale_seconds=86_400),
-    }
     with pytest.raises(
         (ValueError, PermissionError, RuntimeError),
         match=r"replay|timestamp|nonce|stale",
@@ -313,7 +279,6 @@ def test_http_webhook_route_rejects_empty_secret_for_github_and_gitlab(
             **github_hmac,
             "X-GitHub-Delivery": "http-empty-secret-gh",
             "X-GitHub-Event": "ping",
-            "Date": _http_date(),
         },
     )
     assert github.status_code == 401
@@ -325,7 +290,6 @@ def test_http_webhook_route_rejects_empty_secret_for_github_and_gitlab(
             "X-Gitlab-Token": "",
             "X-Gitlab-Event-UUID": "http-empty-secret-gl",
             "X-Gitlab-Event": "Push Hook",
-            "Date": _http_date(),
         },
     )
     assert gitlab.status_code == 401
@@ -350,7 +314,6 @@ def test_http_webhook_route_accepts_signed_github_and_gitlab_deliveries(
             **sign_webhook_payload("github", body=body, secret=secret),
             "X-GitHub-Delivery": "http-ok-gh",
             "X-GitHub-Event": "ping",
-            "Date": _http_date(),
         },
     )
     assert github.status_code == 200
@@ -362,7 +325,6 @@ def test_http_webhook_route_accepts_signed_github_and_gitlab_deliveries(
             **sign_webhook_payload("gitlab", body=body, secret=secret),
             "X-Gitlab-Event-UUID": "http-ok-gl",
             "X-Gitlab-Event": "Push Hook",
-            "Date": _http_date(),
         },
     )
     assert gitlab.status_code == 200

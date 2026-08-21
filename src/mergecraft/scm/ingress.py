@@ -12,7 +12,6 @@ from mergecraft.scm.webhooks import (
     verify_webhook_signature,
     webhook_delivery_id,
     webhook_event_name,
-    webhook_timestamp_skew_seconds,
 )
 
 
@@ -26,15 +25,20 @@ def accept_webhook(
     """Verify signature and replay protection, then process the delivery.
 
     Call this at the HTTP ingress. Direct ``process_webhook_event`` helpers
-    do not authenticate the request. Replay skew is measured from the HTTP
-    ``Date`` header (process-local nonce reuse is still rejected on restart).
+    do not authenticate the request.
+
+    Replay protection is the process-local delivery-nonce set (GitHub
+    ``X-GitHub-Delivery``, GitLab event UUID). Unsigned HTTP ``Date`` is not
+    used: GitHub and GitLab do not document it as a delivery header, HMAC
+    covers only the body, and a client-supplied value is not a window.
+    Restarting the process clears the nonce set.
     """
     verify_webhook_signature(provider, headers=headers, body=body, secret=secret)
     reject_webhook_replay(
         provider,
         headers=headers,
         body=body,
-        received_at_skew_seconds=webhook_timestamp_skew_seconds(headers),
+        received_at_skew_seconds=0,
     )
     delivery_id = webhook_delivery_id(provider, headers)
     event = webhook_event_name(provider, headers)
