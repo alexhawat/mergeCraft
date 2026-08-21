@@ -158,6 +158,14 @@ def test_diff_review_cmd_exposes_cancellation_subprocess_cleanup() -> None:
     assert callable(cleanup)
 
 
+def test_first_finding_golden_path_is_not_a_src_constant() -> None:
+    """Unit: ``FIRST_FINDING_GOLDEN_RELPATH`` must not live under ``src/``."""
+    from mergecraft.cli import agent_protocol
+
+    assert not hasattr(agent_protocol, "FIRST_FINDING_GOLDEN_RELPATH")
+    assert _FIRST_FINDING_GOLDEN.is_file()
+
+
 def test_reusable_cli_golden_for_first_finding_exists() -> None:
     """Functional: reusable CLI golden under ``tests/cli/goldens/`` (file 8 RV5 extends it).
 

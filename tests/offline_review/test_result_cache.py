@@ -222,7 +222,6 @@ async def test_offline_run_does_not_cache_empty_structured_output(
         review_root=repo,
         json_path=json_path,
         use_cache=True,
-        resume=True,
         model="test-model",
     )
     assert first.success is False
@@ -244,7 +243,6 @@ async def test_offline_run_does_not_cache_empty_structured_output(
         review_root=repo,
         json_path=json_path,
         use_cache=True,
-        resume=True,
         model="test-model",
     )
     assert second.success is False
@@ -311,10 +309,140 @@ async def test_offline_cache_hit_rewrites_findings_json(
         review_root=repo,
         json_path=second_path,
         use_cache=True,
-        resume=True,
         model="test-model",
     )
     assert second.success is True
     assert second.structured_output == payload
     assert second_path.is_file()
     assert json.loads(second_path.read_text(encoding="utf-8"))["findings"]
+
+
+@pytest.mark.asyncio
+async def test_empty_cli_model_cache_key_uses_resolved_slug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy: empty CLI ``--model`` hashes ``resolve_model()``, not a raw empty string."""
+    _isolate_cache(tmp_path, monkeypatch)
+    _patch_offline_harness(monkeypatch)
+    repo = _real_git_repo(tmp_path)
+    hashed_models: list[str | None] = []
+
+    def _materialize(
+        workspace: ResolvedWorkspace,
+        *,
+        spec: SourceResolverSpec,
+        out_dir: Path,
+        diff_file: Path | None = None,
+    ) -> DiffMaterialization:
+        return _nonempty_materialization(out_dir)
+
+    monkeypatch.setattr(offline_mod, "materialize_resolved_diff", _materialize)
+    monkeypatch.setattr(offline_mod, "resolve_model", lambda slug=None, **_: "resolved-opus")
+
+    real_key = __import__(
+        "mergecraft.utils.review_result_cache", fromlist=["cache_key_for_diff_path"]
+    ).cache_key_for_diff_path
+
+    def _capture_key(path: Path, **kwargs: object) -> str:
+        model = kwargs.get("model")
+        hashed_models.append(str(model) if model is not None else None)
+        return real_key(path, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        "mergecraft.utils.review_result_cache.cache_key_for_diff_path",
+        _capture_key,
+    )
+
+    async def _agent_ok(**kwargs: object) -> OfflineReviewResult:
+        return OfflineReviewResult(
+            success=True,
+            output="review",
+            structured_output=_valid_structured_output(),
+            outcome=RunOutcome.passed,
+        )
+
+    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_ok)
+    workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
+    spec = SourceResolverSpec(cwd=repo, invocation_root=repo)
+    await offline_mod._run_offline_diff_review(
+        cwd=repo,
+        workspace=workspace,
+        spec=spec,
+        review_root=repo,
+        json_path=tmp_path / "findings.json",
+        use_cache=True,
+        model=None,
+    )
+    assert hashed_models
+    assert hashed_models[0] == "resolved-opus"
+
+
+@pytest.mark.asyncio
+async def test_resolved_model_cache_keys_do_not_collide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Edge: same diff, ``model=None`` vs a different resolved slug must miss."""
+    _isolate_cache(tmp_path, monkeypatch)
+    _patch_offline_harness(monkeypatch)
+    repo = _real_git_repo(tmp_path)
+    keys: list[str] = []
+
+    def _materialize(
+        workspace: ResolvedWorkspace,
+        *,
+        spec: SourceResolverSpec,
+        out_dir: Path,
+        diff_file: Path | None = None,
+    ) -> DiffMaterialization:
+        return _nonempty_materialization(out_dir)
+
+    monkeypatch.setattr(offline_mod, "materialize_resolved_diff", _materialize)
+
+    real_key = __import__(
+        "mergecraft.utils.review_result_cache", fromlist=["cache_key_for_diff_path"]
+    ).cache_key_for_diff_path
+
+    def _capture_key(path: Path, **kwargs: object) -> str:
+        key = real_key(path, **kwargs)  # type: ignore[arg-type]
+        keys.append(key)
+        return key
+
+    monkeypatch.setattr(
+        "mergecraft.utils.review_result_cache.cache_key_for_diff_path",
+        _capture_key,
+    )
+
+    async def _agent_ok(**kwargs: object) -> OfflineReviewResult:
+        return OfflineReviewResult(
+            success=True,
+            output="review",
+            structured_output=_valid_structured_output(),
+            outcome=RunOutcome.passed,
+        )
+
+    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_ok)
+    workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
+    spec = SourceResolverSpec(cwd=repo, invocation_root=repo)
+
+    monkeypatch.setattr(offline_mod, "resolve_model", lambda slug=None, **_: "model-a")
+    await offline_mod._run_offline_diff_review(
+        cwd=repo,
+        workspace=workspace,
+        spec=spec,
+        review_root=repo,
+        json_path=tmp_path / "a.json",
+        use_cache=True,
+        model=None,
+    )
+    monkeypatch.setattr(offline_mod, "resolve_model", lambda slug=None, **_: "model-b")
+    await offline_mod._run_offline_diff_review(
+        cwd=repo,
+        workspace=workspace,
+        spec=spec,
+        review_root=repo,
+        json_path=tmp_path / "b.json",
+        use_cache=True,
+        model=None,
+    )
+    assert len(keys) == 2
+    assert keys[0] != keys[1]

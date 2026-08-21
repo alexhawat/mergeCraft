@@ -80,6 +80,15 @@ def test_cache_key_for_diff_path_differs_when_inputs_change(
     assert key_a == review_result_cache_key(_DIFF, **{**base, field: value_a})
 
 
+def test_review_result_cache_key_empty_model_differs_from_resolved_slug() -> None:
+    """Unit: callers must hash the resolved slug; empty ``model`` is not ``opus``."""
+    empty = review_result_cache_key(_DIFF, model=None)
+    resolved = review_result_cache_key(_DIFF, model="claude-opus")
+    other = review_result_cache_key(_DIFF, model="claude-sonnet")
+    assert empty != resolved
+    assert resolved != other
+
+
 def test_load_review_result_returns_none_for_corrupt_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

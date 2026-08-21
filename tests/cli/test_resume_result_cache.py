@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
+from mergecraft.offline_review import run_offline_diff_review
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -61,3 +62,10 @@ def test_review_help_documents_resume_as_local_result_cache() -> None:
     option_source = inspect.getsource(diff_review_cmd.run)
     assert "same local result cache as --use-cache" in option_source
     assert "Does not restore a live" in option_source
+
+
+def test_run_offline_diff_review_has_no_distinct_resume_parameter() -> None:
+    """Unit: ``--resume`` is the same read policy as ``--use-cache`` (one bool)."""
+    params = inspect.signature(run_offline_diff_review).parameters
+    assert "use_cache" in params
+    assert "resume" not in params

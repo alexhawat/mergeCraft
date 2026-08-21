@@ -107,7 +107,22 @@ def test_protocol_declares_budget_fields_for_negotiation() -> None:
     assert fields is not None
     names = {str(item) for item in fields}
     assert "token_budget" in names
-    assert "cost_budget_usd" in names or "tool_call_budget" in names
+    assert "cost_budget_usd" in names
+    assert "tool_call_budget" in names
+
+
+def test_run_started_wire_stamps_protocol_budget_fields() -> None:
+    """Happy: ``run_started`` JSONL includes every ``PROTOCOL_BUDGET_FIELDS`` name."""
+    from mergecraft.cli.agent_protocol import (
+        PROTOCOL_BUDGET_FIELDS,
+        format_event_line,
+        protocol_budget_payload,
+    )
+
+    event = json.loads(format_event_line("run_started", **protocol_budget_payload()))
+    assert event["event"] == "run_started"
+    for name in PROTOCOL_BUDGET_FIELDS:
+        assert name in event
 
 
 def test_d12_exposes_a_version_field_adapter_without_picking_the_survivor() -> None:
