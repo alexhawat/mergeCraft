@@ -260,6 +260,7 @@ W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` cle
 - No W8 usage-error pin for materiality (none existed).
 - Left W11–W13 xfails in place.
 - W10.1 impl: `b2cb86c0`.
+- W10 recon: `43e55f84`.
 
 ## Acceptance (W10 recon)
 
