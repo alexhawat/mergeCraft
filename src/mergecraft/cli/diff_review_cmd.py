@@ -8,7 +8,7 @@ import json
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, NoReturn
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
 import typer
 from loguru import logger
@@ -155,18 +155,38 @@ def _write_jsonl_findings(path: Path, findings: Sequence[Finding]) -> None:
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-def _emit_agent_protocol(
-    *,
-    outcome: RunOutcome,
-    exit_code: int,
-    findings: Sequence[Finding],
-) -> None:
+def cleanup_review_subprocesses() -> None:
+    """Kill agent and analyzer process groups after a cancelled review (#378)."""
+    from mergecraft.reliability.recovery import cleanup_on_failure
+
+    cleanup_on_failure("cancellation")
+
+
+def _start_agent_protocol() -> AgentProtocolStream:
     stream = AgentProtocolStream()
     stream.run_started()
     stream.phase("materialize")
     stream.phase("review")
+    return stream
+
+
+def _finish_agent_protocol(
+    stream: AgentProtocolStream,
+    *,
+    outcome: RunOutcome,
+    exit_code: int,
+    findings: Sequence[Finding],
+    seen: set[str],
+) -> None:
+    from mergecraft.cli.agent_protocol import finding_event_key
+
     for row in findings:
-        stream.finding(row.model_dump())
+        dump = row.model_dump()
+        key = finding_event_key(dump)
+        if key in seen:
+            continue
+        seen.add(key)
+        stream.finding(dump)
     stream.verdict(outcome.value, exit_code)
     stream.run_finished(exit_code)
 
@@ -366,6 +386,24 @@ def run(
         ),
         rich_help_panel=_PANEL_TRUST,
     ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help=(
+            "Resume a checkpointed review run where it is safe to continue. "
+            "Uses the local result cache when a matching diff is present."
+        ),
+        rich_help_panel=_PANEL_OUTPUT,
+    ),
+    use_cache: bool = typer.Option(
+        False,
+        "--use-cache/--no-use-cache",
+        help=(
+            "Read and write the local review result cache for this diff "
+            "(distinct from the `mergecraft cache` typer)."
+        ),
+        rich_help_panel=_PANEL_OUTPUT,
+    ),
 ) -> None:
     if ctx.info_name == "diff-review":
         console.print(_DIFF_REVIEW_DEPRECATION)
@@ -464,23 +502,46 @@ def run(
         output is not None and effective_output_format in {"json", "jsonl", "sarif"}
     )
 
+    stream: AgentProtocolStream | None = None
+    seen: set[str] = set()
+    if agent_mode:
+        stream = _start_agent_protocol()
+
+    def _on_finding(finding: dict[str, Any]) -> None:
+        from mergecraft.cli.agent_protocol import finding_event_key
+
+        if stream is None:
+            return
+        key = finding_event_key(finding)
+        if key in seen:
+            return
+        seen.add(key)
+        stream.finding(finding)
+
     try:
-        result = asyncio.run(
-            run_offline_diff_review(
-                cwd=root,
-                base=base,
-                diff_file=diff,
-                model=model,
-                prompt_extra=prompt,
-                dry_run=dry_run,
-                json_path=json_path_for_run,
-                evidence_packet_path=evidence_packet,
-                tracing_cli=tracing_cli,
-                invocation_root=invocation_root,
-                trust_override=trust_override,
-                source_spec=source_spec,
+        try:
+            result = asyncio.run(
+                run_offline_diff_review(
+                    cwd=root,
+                    base=base,
+                    diff_file=diff,
+                    model=model,
+                    prompt_extra=prompt,
+                    dry_run=dry_run,
+                    json_path=json_path_for_run,
+                    evidence_packet_path=evidence_packet,
+                    tracing_cli=tracing_cli,
+                    invocation_root=invocation_root,
+                    trust_override=trust_override,
+                    source_spec=source_spec,
+                    on_finding=_on_finding if agent_mode else None,
+                    use_cache=use_cache,
+                    resume=resume,
+                )
             )
-        )
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            cleanup_review_subprocesses()
+            raise
 
         if result.diff_path:
             logger.info("» diff path: {}", result.diff_path)
@@ -495,12 +556,24 @@ def run(
         if not result.success:
             if result.output and not agent_mode:
                 console.print(result.output)
-            if agent_mode:
-                _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
+            if agent_mode and stream is not None:
+                _finish_agent_protocol(
+                    stream,
+                    outcome=outcome,
+                    exit_code=exit_code,
+                    findings=findings,
+                    seen=seen,
+                )
             _exit_with_message(result.error or "diff-review failed", exit_code)
 
-        if agent_mode:
-            _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
+        if agent_mode and stream is not None:
+            _finish_agent_protocol(
+                stream,
+                outcome=outcome,
+                exit_code=exit_code,
+                findings=findings,
+                seen=seen,
+            )
             raise typer.Exit(exit_code)
 
         text = result.output or ""

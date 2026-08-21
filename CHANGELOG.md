@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `mergecraft explain`, `ask`, and `replay` plus `run inspect` / `run diff` print output-only change, line Q&A, and stored-run views (#377)
+- `mergecraft review --agent` streams the first finding before the verdict; `--use-cache` and `--resume` reuse a local result cache; cancelling a review cleans up child processes (#378)
 - Agent install surfaces: `AGENTS.md`, consumer skill (`skills/mergecraft/SKILL.md`),
   Claude plugin manifests (`.claude-plugin/`), slash commands (`commands/`),
   GitHub Copilot instructions (`.github/copilot-instructions.md`), curated

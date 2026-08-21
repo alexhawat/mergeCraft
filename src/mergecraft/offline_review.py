@@ -65,6 +65,8 @@ from mergecraft.utils.source_resolve import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mergecraft.tracing.review_context import ReviewContext
     from mergecraft.utils.source_resolve import ResolvedWorkspace
 
@@ -122,6 +124,22 @@ def parse_offline_review_findings(result: OfflineReviewResult) -> list[Finding]:
         ]
     except ValueError:
         return []
+
+
+def _notify_structured_findings(
+    structured_output: str | None,
+    on_finding: Callable[[dict[str, Any]], None] | None,
+) -> None:
+    """Emit parsed findings to ``on_finding`` while the review coroutine is still running."""
+    if on_finding is None or not structured_output:
+        return
+    try:
+        rows = parse_findings_payload(structured_output)
+    except ValueError:
+        return
+    from mergecraft.cli.agent_protocol import notify_findings
+
+    notify_findings(on_finding, rows)
 
 
 def build_offline_review_prompt(
@@ -407,6 +425,9 @@ async def run_offline_diff_review(
     trust_override: CliTrustOverride | None = None,
     cloned: bool = False,
     source_spec: SourceResolverSpec | None = None,
+    on_finding: Callable[[dict[str, Any]], None] | None = None,
+    use_cache: bool = False,
+    resume: bool = False,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
     spec = source_spec or SourceResolverSpec(cwd=cwd, invocation_root=invocation_root or cwd)
@@ -447,6 +468,9 @@ async def run_offline_diff_review(
             review_root=review_root,
             trust_override=trust_override,
             cloned=cloned,
+            on_finding=on_finding,
+            use_cache=use_cache,
+            resume=resume,
         )
 
 
@@ -499,6 +523,9 @@ async def _run_offline_diff_review(
     review_root: Path,
     trust_override: CliTrustOverride | None = None,
     cloned: bool = False,
+    on_finding: Callable[[dict[str, Any]], None] | None = None,
+    use_cache: bool = False,
+    resume: bool = False,
 ) -> OfflineReviewResult:
     """Body of :func:`run_offline_diff_review`, run under the bound review context."""
     cwd = cwd.resolve()
@@ -610,6 +637,26 @@ async def _run_offline_diff_review(
                 scope_reduction=scope_reduction,
             )
 
+        if resume:
+            from mergecraft.reliability.recovery import resume_review
+
+            resume_review(os.environ.get("MERGECRAFT_REVIEW_ID") or "latest")
+
+        cache_key: str | None = None
+        if use_cache or resume:
+            from mergecraft.utils.review_result_cache import (
+                cache_key_for_diff_path,
+                load_review_result,
+            )
+
+            cache_key = cache_key_for_diff_path(materialization.path, model=model)
+            cached = load_review_result(cache_key)
+            if cached is not None:
+                _notify_structured_findings(cached.structured_output, on_finding)
+                if cached.diff_path is None:
+                    cached.diff_path = str(materialization.path)
+                return cached
+
         result = await _run_agent_review(
             cwd=cwd,
             materialization=materialization,
@@ -620,7 +667,12 @@ async def _run_offline_diff_review(
             evidence_packet_path=evidence_packet_path,
             trust_tier=trust_tier,
             run_bounds=run_bounds,
+            on_finding=on_finding,
         )
+        if cache_key is not None and result.success:
+            from mergecraft.utils.review_result_cache import store_review_result
+
+            store_review_result(cache_key, result)
         if json_path is None:
             if result.outcome is not None:
                 result.outcome = outcome_with_scope_reduction(result.outcome, scope_reduction)
@@ -667,6 +719,7 @@ async def _run_agent_review(
     evidence_packet_path: Path | None = None,
     trust_tier: str = "trusted",
     run_bounds: RunBounds | None = None,
+    on_finding: Callable[[dict[str, Any]], None] | None = None,
 ) -> OfflineReviewResult:
     stop_mcp = None
     github: GitHubClient | None = None
@@ -675,6 +728,7 @@ async def _run_agent_review(
         # the prompt forbids them.
         github = GitHubClient(token="")
         tool_state = init_tool_state(owner="local", name=cwd.name, dir=str(cwd))
+        tool_state.on_finding = on_finding
         # Carry the review's resolved trust tier so drivers resolving the OB2
         # content policy via ``ctx.tool_state.trust_tier`` get the honest
         # derived tier (the OB2 security gate) rather than an env fallback.
@@ -796,6 +850,7 @@ async def _run_agent_review(
             executed_model=resolved_model,
         ):
             result = await agent.run(run_ctx)
+        _notify_structured_findings(tool_state.output, on_finding)
         try:
             record_agent_usage(budget_tracker, result.usage)
         except BudgetExhausted as exc:
