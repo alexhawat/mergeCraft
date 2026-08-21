@@ -75,6 +75,10 @@ def _patch_offline_harness(monkeypatch: pytest.MonkeyPatch) -> None:
         "apply_diff_line_budget",
         lambda text, *, max_lines: (text, None),
     )
+    monkeypatch.setattr(
+        "mergecraft.review.offline_stages.run_analyzer_pipeline",
+        lambda **_kwargs: None,
+    )
 
 
 def test_finish_does_not_store_when_structured_output_missing(
@@ -317,15 +321,47 @@ async def test_offline_cache_hit_rewrites_findings_json(
     assert json.loads(second_path.read_text(encoding="utf-8"))["findings"]
 
 
+def _capture_cache_and_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[object], list[object]]:
+    hashed: list[object] = []
+    agent_models: list[object] = []
+    real_key = __import__(
+        "mergecraft.utils.review_result_cache", fromlist=["cache_key_for_diff_path"]
+    ).cache_key_for_diff_path
+
+    def _capture_key(path: Path, **kwargs: object) -> str:
+        hashed.append(kwargs.get("model"))
+        return real_key(path, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        "mergecraft.utils.review_result_cache.cache_key_for_diff_path",
+        _capture_key,
+    )
+
+    async def _agent_ok(**kwargs: object) -> OfflineReviewResult:
+        agent_models.append(kwargs.get("model"))
+        return OfflineReviewResult(
+            success=True,
+            output="review",
+            structured_output=_valid_structured_output(),
+            outcome=RunOutcome.passed,
+        )
+
+    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_ok)
+    return hashed, agent_models
+
+
 @pytest.mark.asyncio
-async def test_empty_cli_model_cache_key_uses_resolved_slug(
+async def test_cache_key_hashes_none_when_resolve_model_returns_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Happy: empty CLI ``--model`` hashes ``resolve_model()``, not a raw empty string."""
+    """Happy: ``model=None`` hashes the same empty id the agent receives, not config slug."""
     _isolate_cache(tmp_path, monkeypatch)
     _patch_offline_harness(monkeypatch)
     repo = _real_git_repo(tmp_path)
-    hashed_models: list[str | None] = []
+    hashed_models: list[object] = []
+    agent_models: list[object] = []
 
     def _materialize(
         workspace: ResolvedWorkspace,
@@ -337,15 +373,22 @@ async def test_empty_cli_model_cache_key_uses_resolved_slug(
         return _nonempty_materialization(out_dir)
 
     monkeypatch.setattr(offline_mod, "materialize_resolved_diff", _materialize)
-    monkeypatch.setattr(offline_mod, "resolve_model", lambda slug=None, **_: "resolved-opus")
+    monkeypatch.setattr(offline_mod, "resolve_model", lambda slug=None, **_: None)
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve.resolve_effective_model_slug",
+        lambda _settings: "config-opus",
+    )
+    if hasattr(offline_mod, "resolve_effective_model_slug"):
+        monkeypatch.setattr(
+            offline_mod, "resolve_effective_model_slug", lambda _settings: "config-opus"
+        )
 
     real_key = __import__(
         "mergecraft.utils.review_result_cache", fromlist=["cache_key_for_diff_path"]
     ).cache_key_for_diff_path
 
     def _capture_key(path: Path, **kwargs: object) -> str:
-        model = kwargs.get("model")
-        hashed_models.append(str(model) if model is not None else None)
+        hashed_models.append(kwargs.get("model"))
         return real_key(path, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(
@@ -354,6 +397,7 @@ async def test_empty_cli_model_cache_key_uses_resolved_slug(
     )
 
     async def _agent_ok(**kwargs: object) -> OfflineReviewResult:
+        agent_models.append(kwargs.get("model"))
         return OfflineReviewResult(
             success=True,
             output="review",
@@ -374,7 +418,75 @@ async def test_empty_cli_model_cache_key_uses_resolved_slug(
         model=None,
     )
     assert hashed_models
-    assert hashed_models[0] == "resolved-opus"
+    assert hashed_models[0] in {None, ""}
+    assert "config-opus" not in hashed_models
+    assert agent_models
+    assert agent_models[0] == hashed_models[0]
+
+
+@pytest.mark.asyncio
+async def test_cache_key_and_agent_share_resolved_model_slug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy: a ``resolve_model`` slug is hashed and passed to the agent."""
+    _isolate_cache(tmp_path, monkeypatch)
+    _patch_offline_harness(monkeypatch)
+    repo = _real_git_repo(tmp_path)
+    hashed_models: list[object] = []
+    agent_models: list[object] = []
+
+    def _materialize(
+        workspace: ResolvedWorkspace,
+        *,
+        spec: SourceResolverSpec,
+        out_dir: Path,
+        diff_file: Path | None = None,
+    ) -> DiffMaterialization:
+        return _nonempty_materialization(out_dir)
+
+    monkeypatch.setattr(offline_mod, "materialize_resolved_diff", _materialize)
+    monkeypatch.setattr(offline_mod, "resolve_model", lambda slug=None, **_: "resolved-opus")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve.resolve_effective_model_slug",
+        lambda _settings: "config-sonnet",
+    )
+
+    real_key = __import__(
+        "mergecraft.utils.review_result_cache", fromlist=["cache_key_for_diff_path"]
+    ).cache_key_for_diff_path
+
+    def _capture_key(path: Path, **kwargs: object) -> str:
+        hashed_models.append(kwargs.get("model"))
+        return real_key(path, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        "mergecraft.utils.review_result_cache.cache_key_for_diff_path",
+        _capture_key,
+    )
+
+    async def _agent_ok(**kwargs: object) -> OfflineReviewResult:
+        agent_models.append(kwargs.get("model"))
+        return OfflineReviewResult(
+            success=True,
+            output="review",
+            structured_output=_valid_structured_output(),
+            outcome=RunOutcome.passed,
+        )
+
+    monkeypatch.setattr(offline_mod, "_run_agent_review", _agent_ok)
+    workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
+    spec = SourceResolverSpec(cwd=repo, invocation_root=repo)
+    await offline_mod._run_offline_diff_review(
+        cwd=repo,
+        workspace=workspace,
+        spec=spec,
+        review_root=repo,
+        json_path=tmp_path / "findings.json",
+        use_cache=True,
+        model=None,
+    )
+    assert hashed_models == ["resolved-opus"]
+    assert agent_models == ["resolved-opus"]
 
 
 @pytest.mark.asyncio

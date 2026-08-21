@@ -19,7 +19,15 @@ from typing import Any
 
 import pytest
 
-from mergecraft.cli.agent_protocol import AGENT_PROTOCOL_VERSION, format_event_line
+from mergecraft.cli.agent_protocol import (
+    AGENT_PROTOCOL_VERSION,
+    PROTOCOL_BUDGET_FIELDS,
+    VERSION_FIELD_ALIASES,
+    ProtocolNegotiationError,
+    format_event_line,
+    negotiate_protocol,
+    protocol_budget_payload,
+)
 from mergecraft.cli.global_surface import CLI_JSON_SCHEMA_VERSION, cli_json_dumps
 
 
@@ -69,43 +77,20 @@ def test_schema_version_and_protocol_version_are_distinct_unreconciled_fields() 
 
 def test_negotiate_protocol_selects_a_mutually_supported_version() -> None:
     """Happy: a consumer can offer accepted versions and receive a selection."""
-    from mergecraft.cli import agent_protocol
-
-    negotiate = getattr(agent_protocol, "negotiate_protocol", None) or getattr(
-        agent_protocol, "negotiate", None
-    )
-    assert callable(negotiate)
-    selected = negotiate(accepted=(AGENT_PROTOCOL_VERSION, CLI_JSON_SCHEMA_VERSION))
-    assert selected is not None
-    assert str(selected) in {AGENT_PROTOCOL_VERSION, CLI_JSON_SCHEMA_VERSION, "1", "1.0.0"}
+    selected = negotiate_protocol(accepted=(AGENT_PROTOCOL_VERSION, CLI_JSON_SCHEMA_VERSION))
+    assert selected in {AGENT_PROTOCOL_VERSION, CLI_JSON_SCHEMA_VERSION, "1", "1.0.0"}
 
 
 def test_protocol_mismatch_is_retryable() -> None:
     """Error: an unsupported offered version is retryable, not a silent stamp."""
-    from mergecraft.cli import agent_protocol
-
-    negotiate = getattr(agent_protocol, "negotiate_protocol", None) or getattr(
-        agent_protocol, "negotiate", None
-    )
-    assert callable(negotiate)
-    with pytest.raises(
-        (LookupError, ValueError, TypeError), match=r"retry|unsupported|negotiat"
-    ) as exc_info:
-        negotiate(accepted=("0-unsupported",))
-    err = exc_info.value
-    retryable = getattr(err, "retryable", None)
-    if retryable is None:
-        retryable = type(err).__name__.casefold().find("retry") >= 0
-    assert retryable
+    with pytest.raises(ProtocolNegotiationError, match=r"retry|unsupported|negotiat") as exc_info:
+        negotiate_protocol(accepted=("0-unsupported",))
+    assert exc_info.value.retryable is True
 
 
 def test_protocol_declares_budget_fields_for_negotiation() -> None:
     """Edge: W5 publishes named protocol budget fields (not ad-hoc ``**payload``)."""
-    from mergecraft.cli import agent_protocol
-
-    fields = getattr(agent_protocol, "PROTOCOL_BUDGET_FIELDS", None)
-    assert fields is not None
-    names = {str(item) for item in fields}
+    names = {str(item) for item in PROTOCOL_BUDGET_FIELDS}
     assert "token_budget" in names
     assert "cost_budget_usd" in names
     assert "tool_call_budget" in names
@@ -113,12 +98,6 @@ def test_protocol_declares_budget_fields_for_negotiation() -> None:
 
 def test_run_started_wire_stamps_protocol_budget_fields() -> None:
     """Happy: ``run_started`` JSONL includes every ``PROTOCOL_BUDGET_FIELDS`` name."""
-    from mergecraft.cli.agent_protocol import (
-        PROTOCOL_BUDGET_FIELDS,
-        format_event_line,
-        protocol_budget_payload,
-    )
-
     event = json.loads(format_event_line("run_started", **protocol_budget_payload()))
     assert event["event"] == "run_started"
     for name in PROTOCOL_BUDGET_FIELDS:
@@ -131,12 +110,6 @@ def test_d12_exposes_a_version_field_adapter_without_picking_the_survivor() -> N
     Assert an adapter exists that mentions both current field names. Do not
     require deleting ``schema_version`` or ``protocol_version``.
     """
-    from mergecraft.cli import agent_protocol
-
-    adapter = getattr(agent_protocol, "VERSION_FIELD_ALIASES", None) or getattr(
-        agent_protocol, "d12_version_aliases", None
-    )
-    assert adapter is not None
-    blob = str(adapter).casefold()
+    blob = str(VERSION_FIELD_ALIASES).casefold()
     assert "schema_version" in blob
     assert "protocol_version" in blob

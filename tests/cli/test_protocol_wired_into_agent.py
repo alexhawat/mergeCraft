@@ -67,6 +67,15 @@ def test_start_agent_protocol_negotiates_default_offer(
     assert started["event"] == "run_started"
     for field in PROTOCOL_BUDGET_FIELDS:
         assert field in started
+    phase_names = [
+        event.get("name")
+        for event in (json.loads(line) for line in lines)
+        if event.get("event") == "phase"
+    ]
+    assert "materialize" not in phase_names
+    assert "review" not in phase_names
+    events = [json.loads(line) for line in lines]
+    assert not any(event.get("event") == "phase" for event in events)
 
 
 def test_start_agent_protocol_unsupported_offer_is_configuration_error(

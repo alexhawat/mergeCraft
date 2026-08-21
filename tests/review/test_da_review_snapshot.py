@@ -10,67 +10,26 @@ CLI (``review``), Action (``mergecraft.main`` / ``gha``), and SCM
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import inspect
 import re
-from typing import Any
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
+from mergecraft.review.engine import ReviewEngine
+from mergecraft.review.snapshot import ReviewSnapshot
+from mergecraft.scm.webhooks import ConformingReviewRequest, conforming_review_request
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
 
-_SNAPSHOT_MODULES = (
-    "mergecraft.review.snapshot",
-    "mergecraft.review_snapshot",
-    "mergecraft.engine.snapshot",
-    "mergecraft.engine",
-    "mergecraft.review",
-)
-
 
 def _plain(text: str) -> str:
     return _ANSI.sub("", text)
-
-
-def _find_review_snapshot() -> Any:
-    for name in _SNAPSHOT_MODULES:
-        spec = importlib.util.find_spec(name)
-        if spec is None:
-            continue
-        module = importlib.import_module(name)
-        snapshot = getattr(module, "ReviewSnapshot", None)
-        if snapshot is not None:
-            return snapshot
-    pytest.fail("ReviewSnapshot type is not in the tree")
-
-
-def _find_engine_run() -> Any:
-    engine_modules = (
-        "mergecraft.engine",
-        "mergecraft.review.engine",
-        "mergecraft.review.snapshot",
-        "mergecraft.review_snapshot",
-    )
-    for name in engine_modules:
-        spec = importlib.util.find_spec(name)
-        if spec is None:
-            continue
-        module = importlib.import_module(name)
-        for attr in ("run_review", "execute_review", "run_from_snapshot"):
-            fn = getattr(module, attr, None)
-            if callable(fn):
-                return fn
-    pytest.fail("no shared engine callable that accepts ReviewSnapshot")
-
-
-# ── Already true — do not xfail; do not require deleting hidden diff-review ───
 
 
 def test_review_is_the_documented_command() -> None:
@@ -94,59 +53,82 @@ def test_hidden_diff_review_alias_remains_invocable() -> None:
     assert hidden[0].hidden is True
 
 
-# ── W6 conformance ────────────────────────────────────────────────────────────
-
-
 def test_review_snapshot_type_exists() -> None:
     """Unit: ``ReviewSnapshot`` is a public type CLI / Action / SCM can share."""
-    snapshot = _find_review_snapshot()
-    assert inspect.isclass(snapshot)
-    assert snapshot.__name__ == "ReviewSnapshot"
+    assert inspect.isclass(ReviewSnapshot)
+    assert ReviewSnapshot.__name__ == "ReviewSnapshot"
 
 
 def test_shared_engine_accepts_review_snapshot() -> None:
-    """Unit: one engine callable takes a ``ReviewSnapshot`` (or is annotated as such)."""
-    snapshot = _find_review_snapshot()
-    run = _find_engine_run()
-    params = inspect.signature(run).parameters
-    annotated = any(
-        parameter.annotation is snapshot or "ReviewSnapshot" in str(parameter.annotation)
-        for parameter in params.values()
+    """Unit: ``ReviewEngine`` is constructed with a ``ReviewSnapshot``."""
+    params = inspect.signature(ReviewEngine.__init__).parameters
+    assert "snapshot" in params
+    annotation = str(params["snapshot"].annotation)
+    assert "ReviewSnapshot" in annotation
+
+
+def test_cli_review_path_builds_a_review_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Integration: CLI review constructs a ``ReviewSnapshot`` on the engine."""
+    seen: list[ReviewSnapshot] = []
+    orig = ReviewEngine.__init__
+
+    def counted(self: ReviewEngine, *args: object, **kwargs: object) -> None:
+        orig(self, *args, **kwargs)
+        seen.append(self.snapshot)
+
+    monkeypatch.setattr(ReviewEngine, "__init__", counted)
+    monkeypatch.setattr(
+        "mergecraft.review.offline_stages.run_analyzer_pipeline",
+        lambda **_kwargs: None,
     )
-    named = any(name in {"snapshot", "review_snapshot"} for name in params)
-    assert annotated or named, inspect.signature(run)
+    patch = tmp_path / "change.diff"
+    patch.write_text(
+        "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n",
+        encoding="utf-8",
+    )
+    runner.invoke(
+        app,
+        ["review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"],
+        env=_DUMB_ENV,
+        catch_exceptions=True,
+    )
+    assert seen
+    assert all(isinstance(snapshot, ReviewSnapshot) for snapshot in seen)
+    assert seen[0].entry == "cli"
 
 
-def test_cli_review_path_builds_a_review_snapshot() -> None:
-    """Integration: the CLI review module constructs ``ReviewSnapshot``."""
-    from mergecraft.cli import diff_review_cmd
+@pytest.mark.asyncio
+async def test_action_path_builds_a_review_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Integration: Action ``main`` constructs a ``ReviewSnapshot``."""
+    from tests.support.run_main_harness import run_main_for_test
 
-    source = inspect.getsource(diff_review_cmd)
-    assert "ReviewSnapshot" in source
+    seen: list[ReviewSnapshot] = []
+    orig = ReviewEngine.__init__
 
+    def counted(self: ReviewEngine, *args: object, **kwargs: object) -> None:
+        orig(self, *args, **kwargs)
+        seen.append(self.snapshot)
 
-def test_action_path_builds_a_review_snapshot() -> None:
-    """Integration: the Action/runtime entry constructs ``ReviewSnapshot``."""
-    import mergecraft.main as action_main
-
-    source = inspect.getsource(action_main)
-    assert "ReviewSnapshot" in source
+    monkeypatch.setattr(ReviewEngine, "__init__", counted)
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        event_name="workflow_dispatch",
+        event_payload={"action": "workflow_dispatch"},
+    )
+    assert rec.raised is None, rec.raised
+    assert seen
+    assert isinstance(seen[0], ReviewSnapshot)
+    assert seen[0].entry == "action"
 
 
 def test_scm_conforming_request_builds_or_feeds_a_review_snapshot() -> None:
     """Integration: SCM webhook review requests enter the same snapshot type."""
-    from mergecraft.scm import webhooks
-
-    source = inspect.getsource(webhooks)
-    assert "ReviewSnapshot" in source
-    snapshot = _find_review_snapshot()
-    request = getattr(webhooks, "ConformingReviewRequest", None)
-    if request is not None and inspect.isclass(request):
-        hints = getattr(request, "__annotations__", {})
-        blob = " ".join(str(value) for value in hints.values()) + str(request)
-        if "ReviewSnapshot" not in blob and "snapshot" not in blob.casefold():
-            # Callable path is enough: conforming_review_request must mention the type.
-            fn_source = inspect.getsource(webhooks.conforming_review_request)
-            assert "ReviewSnapshot" in fn_source
-    else:
-        assert snapshot is not None
+    request = conforming_review_request("github", event="pull_request", body={})
+    assert isinstance(request, ConformingReviewRequest)
+    assert isinstance(request.snapshot, ReviewSnapshot)
+    assert request.snapshot.entry == "scm"

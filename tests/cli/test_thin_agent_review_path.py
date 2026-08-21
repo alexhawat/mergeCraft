@@ -1,8 +1,8 @@
 """W9 / #383 — thin integrations: one review path, no per-agent fork.
 
 Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-20d-a-engine-wave-plan.md``
-(W9.3). Source/AST pin only — not a live LLM test. Packaging Codex/Gemini/
-OpenCode is out of scope (file 8 RV3).
+(W9.3). Source/AST pin only for agent-name forks — not a live LLM test.
+Packaging Codex/Gemini/OpenCode is out of scope (file 8 RV3).
 """
 
 from __future__ import annotations
@@ -11,6 +11,9 @@ import ast
 from pathlib import Path
 
 from tests.ci.workflow_support import REPO_ROOT
+
+from mergecraft.offline_review import run_offline_diff_review
+from mergecraft.review import ReviewEngine
 
 _AGENT_FORK_VALUES: frozenset[str] = frozenset({"codex", "gemini", "opencode", "cursor", "claude"})
 _REVIEW_PATH_FILES: tuple[Path, ...] = (
@@ -56,13 +59,15 @@ def _agent_behaviour_forks(source: str) -> list[str]:
 
 
 def test_review_entry_is_not_forked_per_agent_binary() -> None:
-    """Happy: CLI review admits ``run_from_snapshot`` / ``run_offline_diff_review`` once."""
+    """Happy: CLI review admits ``run_offline_diff_review`` once; no per-agent fork."""
+    from mergecraft.cli import diff_review_cmd
+
+    assert callable(diff_review_cmd.run)
+    assert callable(run_offline_diff_review)
     source = (REPO_ROOT / "src" / "mergecraft" / "cli" / "diff_review_cmd.py").read_text(
         encoding="utf-8"
     )
-    assert "run_from_snapshot" in source
     assert "run_offline_diff_review" in source
-    assert "def run(" in source
     forks = _agent_behaviour_forks(source)
     assert not forks, f"diff_review_cmd forks review behaviour per agent: {forks}"
 
@@ -82,12 +87,17 @@ def test_cli_agent_review_path_has_no_per_agent_behaviour_fork() -> None:
 
 
 def test_shared_engine_callable_is_agent_agnostic() -> None:
-    """Unit: ``run_from_snapshot`` does not branch on agent binary."""
+    """Unit: ``ReviewEngine`` does not branch on agent binary."""
     source = (REPO_ROOT / "src" / "mergecraft" / "review" / "engine.py").read_text(encoding="utf-8")
-    assert "def run_from_snapshot(" in source
+    assert "class ReviewEngine" in source
     forks = _agent_behaviour_forks(source)
-    assert not forks, f"run_from_snapshot forks per agent: {forks}"
+    assert not forks, f"ReviewEngine forks per agent: {forks}"
     assert "codex" not in source
     assert "gemini" not in source
     assert "opencode" not in source
     assert "cursor" not in source
+    snapshot = __import__(
+        "mergecraft.review.snapshot", fromlist=["canonical_review_snapshot"]
+    ).canonical_review_snapshot(entry="cli")
+    engine = ReviewEngine(snapshot=snapshot)
+    assert engine.snapshot.entry == "cli"

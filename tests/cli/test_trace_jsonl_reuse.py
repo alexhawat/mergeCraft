@@ -2,28 +2,42 @@
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from typer.testing import CliRunner
+
+from mergecraft.cli.app import app
 from mergecraft.cli.trace_jsonl import default_trace_dir, load_trace_jsonl_events
 
 if TYPE_CHECKING:
     import pytest
 
+runner = CliRunner()
+_DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
 
-def test_replay_and_run_cmd_use_shared_jsonl_loader() -> None:
-    """Unit: no duplicated ``json.loads`` glob in replay / run inspect."""
-    from mergecraft.cli import replay_cmd, run_cmd
 
-    replay_src = inspect.getsource(replay_cmd)
-    run_src = inspect.getsource(run_cmd)
-    assert "load_trace_jsonl_events" in replay_src
-    assert "load_trace_jsonl_events" in run_src
-    assert "default_trace_dir" in replay_src
-    assert "default_trace_dir" in run_src
-    assert 'glob("*.jsonl")' not in replay_src
-    assert 'glob("*.jsonl")' not in run_src
+def test_replay_and_run_cmd_use_shared_jsonl_loader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy: ``replay`` and ``run inspect`` both call ``load_trace_jsonl_events``."""
+    calls: list[Path] = []
+    events = [{"session_id": "s1", "kind": "span"}]
+
+    def _load(trace_dir: Path) -> list[dict[str, Any]]:
+        calls.append(trace_dir)
+        return events
+
+    monkeypatch.setattr("mergecraft.cli.trace_jsonl.load_trace_jsonl_events", _load)
+    monkeypatch.setattr("mergecraft.cli.replay_cmd.load_trace_jsonl_events", _load)
+    monkeypatch.setattr("mergecraft.cli.run_cmd.load_trace_jsonl_events", _load)
+    replay = runner.invoke(app, ["replay", "--trace-dir", str(tmp_path / "traces")], env=_DUMB_ENV)
+    inspect_run = runner.invoke(
+        app, ["run", "inspect", "--trace-dir", str(tmp_path / "traces")], env=_DUMB_ENV
+    )
+    assert replay.exit_code == 0, replay.stdout + replay.stderr
+    assert inspect_run.exit_code == 0, inspect_run.stdout + inspect_run.stderr
+    assert len(calls) >= 2
 
 
 def test_default_trace_dir_reads_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
