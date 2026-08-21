@@ -11,9 +11,7 @@ import pytest
 from tests.support.cc_batch import invoke, plain, require_registered
 from tests.support.ce_batch import (
     CE_PROFILE_NAMES,
-    SHIPPED_PROFILE_NAMES,
     d10_root_callback_owns_globals,
-    green_after,
     require_callable,
     require_module,
 )
@@ -24,22 +22,16 @@ from mergecraft.cli.profiles import parse_profile_name, resolve_profile
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.run_bounds import BudgetExhausted, budget_exhaustion_outcome
 
-_W23 = green_after("W23", "remaining profiles + risk-based select; additive CLI (#369 / D10)")
 _PROFILES_MODULE = "mergecraft.cli.profiles"
 
 
-def test_shipped_profiles_are_fast_deep_security_only() -> None:
-    """W21 current state — five plan profiles are still missing."""
-    for name in SHIPPED_PROFILE_NAMES:
-        assert parse_profile_name(name) == name
-        assert resolve_profile(name) is not None
-    for missing in sorted(CE_PROFILE_NAMES - SHIPPED_PROFILE_NAMES):
-        with pytest.raises(ValueError, match=r"unknown profile"):
-            parse_profile_name(missing)
+def test_profile_recommend_is_registered_and_requires_risk() -> None:
+    """W23 — ``profile recommend`` exists; missing ``--risk`` is usage (exit 2)."""
+    help_result = invoke("profile", "recommend", "--help")
+    help_text = plain(help_result.stdout + help_result.stderr)
+    assert help_result.exit_code == CLI_SUCCESS_EXIT_CODE, help_text
+    assert "risk" in help_text.casefold()
 
-
-def test_profile_recommend_is_currently_a_usage_error() -> None:
-    """W21 current state — ``mergecraft profile`` is not a command yet."""
     result = invoke("profile", "recommend")
     assert result.exit_code == CLI_USAGE_EXIT_CODE, plain(result.stdout + result.stderr)
 
@@ -70,7 +62,6 @@ def test_w23_does_not_fold_profile_into_root_callback() -> None:
     assert "def _root(" in source
 
 
-@_W23
 def test_eight_named_profiles_are_registered() -> None:
     """Happy: the eight plan profiles resolve."""
     require_module(_PROFILES_MODULE)
@@ -81,7 +72,6 @@ def test_eight_named_profiles_are_registered() -> None:
         assert profile.token_budget > 0
 
 
-@_W23
 @pytest.mark.parametrize(
     ("alias", "canonical"),
     [
@@ -95,7 +85,6 @@ def test_hyphenated_cli_aliases_map_to_canonical_names(alias: str, canonical: st
     assert parsed == canonical
 
 
-@_W23
 def test_unknown_profile_names_the_full_set() -> None:
     """Error: unknown profile names the eight allowed values (type + message)."""
     with pytest.raises(ValueError, match=r"standard") as err:
@@ -105,7 +94,6 @@ def test_unknown_profile_names_the_full_set() -> None:
         assert name in message
 
 
-@_W23
 def test_select_profile_from_risk_picks_security_for_high_risk() -> None:
     """Happy: high/critical risk selects the security profile."""
     module = require_module(_PROFILES_MODULE)
@@ -116,7 +104,6 @@ def test_select_profile_from_risk_picks_security_for_high_risk() -> None:
         assert name == "security"
 
 
-@_W23
 def test_select_profile_from_risk_picks_fast_for_trivial() -> None:
     """Happy: trivial risk selects fast."""
     module = require_module(_PROFILES_MODULE)
@@ -126,7 +113,6 @@ def test_select_profile_from_risk_picks_fast_for_trivial() -> None:
     assert name == "fast"
 
 
-@_W23
 def test_unknown_risk_is_an_error() -> None:
     """Error: unknown risk fails closed (type + message)."""
     module = require_module(_PROFILES_MODULE)
@@ -135,7 +121,6 @@ def test_unknown_risk_is_an_error() -> None:
         select("not-a-risk")
 
 
-@_W23
 def test_cli_profile_overrides_risk_selection() -> None:
     """Happy: explicit CLI profile wins over risk auto-select."""
     module = require_module(_PROFILES_MODULE)
@@ -145,7 +130,6 @@ def test_cli_profile_overrides_risk_selection() -> None:
     assert name == "fast"
 
 
-@_W23
 def test_policy_profile_overrides_risk_selection() -> None:
     """Happy: policy profile wins over risk when CLI is unset."""
     module = require_module(_PROFILES_MODULE)
@@ -155,7 +139,6 @@ def test_policy_profile_overrides_risk_selection() -> None:
     assert name == "deep"
 
 
-@_W23
 def test_cli_profile_overrides_policy() -> None:
     """Happy: CLI still wins when policy also pins a profile."""
     module = require_module(_PROFILES_MODULE)
@@ -165,7 +148,6 @@ def test_cli_profile_overrides_policy() -> None:
     assert name == "standard"
 
 
-@_W23
 def test_profile_cli_is_a_new_cmd_module() -> None:
     """Happy: additive ``cli/profile_cmd.py`` (D10), not a root-callback fold-in."""
     path = CLI_DIR / "profile_cmd.py"
@@ -177,7 +159,6 @@ def test_profile_cli_is_a_new_cmd_module() -> None:
     assert "add_typer" in app_src
 
 
-@_W23
 def test_root_help_lists_profile() -> None:
     """Functional: root help lists the ``profile`` command."""
     result = invoke("--help")
@@ -186,7 +167,6 @@ def test_root_help_lists_profile() -> None:
     assert "profile" in help_text
 
 
-@_W23
 def test_profile_recommend_help_is_registered() -> None:
     """Functional: ``profile recommend`` help is registered."""
     result = require_registered("profile", "recommend", "--help", label="profile recommend")
@@ -194,7 +174,6 @@ def test_profile_recommend_help_is_registered() -> None:
     assert "risk" in help_text.casefold()
 
 
-@_W23
 def test_profile_recommend_emits_auto_selected_name() -> None:
     """Functional: ``profile recommend --risk high`` prints security."""
     result = invoke("profile", "recommend", "--risk", "high")
@@ -203,7 +182,6 @@ def test_profile_recommend_emits_auto_selected_name() -> None:
     assert "security" in output
 
 
-@_W23
 def test_budget_exhaustion_is_partial_or_inconclusive_never_clean() -> None:
     """Happy: profile budget exhaustion is ``partial`` or ``inconclusive``, never passed."""
     module = require_module(_PROFILES_MODULE)

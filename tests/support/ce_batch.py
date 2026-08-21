@@ -16,7 +16,6 @@ SPECIALIST_ECONOMICS_MODULE = "mergecraft.agents.economics"
 PROVIDER_HEALTH_MODULE = "mergecraft.agents.provider_health"
 
 CONFIG_SCHEMA_VERSION_ATTR = "CONFIG_SCHEMA_VERSION"
-SHIPPED_PROFILE_NAMES = frozenset({"fast", "deep", "security"})
 CE_PROFILE_NAMES = frozenset(
     {
         "fast",
@@ -67,7 +66,6 @@ __all__ = [
     "CONFIG_COMPAT_MODULE",
     "CONFIG_SCHEMA_VERSION_ATTR",
     "PROVIDER_HEALTH_MODULE",
-    "SHIPPED_PROFILE_NAMES",
     "SPECIALIST_ECONOMICS_MODULE",
     "TRACING_EXPORTERS",
     "USAGE_ATTRS",

@@ -565,11 +565,11 @@ After each impl wave, recon **deletes** the matching W21 current-state pins and 
 | Wave | Tests | Marker reason | Status |
 |------|-------|---------------|--------|
 | **W22** | `tests/config/test_ce_schema.py` (10) | `green after W22: config schema version, migrations, deprecations (#368)` | PASS after W22 recon |
-| **W23** | `tests/cli/test_ce_profiles.py` (15 collected / 14 functions) | `green after W23: remaining profiles + risk-based select; additive CLI (#369 / D10)` | XFAIL until W23 |
+| **W23** | `tests/cli/test_ce_profiles.py` (15 collected / 14 functions) | `green after W23: remaining profiles + risk-based select; additive CLI (#369 / D10)` | PASS after W23 recon |
 | **W24** | `tests/agents/test_ce_economics.py` (8) | `green after W24: specialist economics consume gen_ai.usage.* on llm.call (#370 / D11)` | XFAIL until W24 |
 | **W25** | `tests/agents/test_ce_providers.py` (14 + 1 live skip) | `green after W25: provider health, cooldown, degradation, residency, routing eval (#371)` | XFAIL until W25 |
 
-Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error / unversioned rows after the matching impl wave): D10 root-callback pins; shipped `fast`/`deep`/`security` profiles; token/cost/tool/latency budgets; `budget_exhaustion_outcome` never `passed`; CLI JSON + agent protocol versions (not negotiation); `gen_ai.usage.*` substrate; lens routing file; retry-policy classifier; no cooldown/residency in src; tracing exporters untouched.
+Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error / unversioned rows after the matching impl wave): D10 root-callback pins; eight named profiles (W23); `profile recommend` registered (missing `--risk` is usage 2); token/cost/tool/latency budgets; `budget_exhaustion_outcome` never `passed`; CLI JSON + agent protocol versions (not negotiation); `gen_ai.usage.*` substrate; lens routing file; retry-policy classifier; no cooldown/residency in src; tracing exporters untouched.
 
 W21 run: **20 passed / 47 xfailed / 1 skipped (no live gate) / 0 XPASS**. `make lint` + `make typecheck` clean.
 
@@ -589,8 +589,8 @@ W21 run: **20 passed / 47 xfailed / 1 skipped (no live gate) / 0 XPASS**. `make 
 | CE368j | Upgrade preserves models | unit | happy | `test_upgrade_from_previous_schema_preserves_models` |
 | CE368k | Compat policy + LTS | unit | happy | `test_backward_compat_policy_names_supported_range`, `test_lts_expectations_are_declared` |
 | CE368l | Published CLI + agent protocol contracts | unit | happy | `test_stable_cli_contract_is_published`, `test_stable_agent_protocol_contract_is_published` |
-| CE369a | Only fast/deep/security ship | unit | current | `test_shipped_profiles_are_fast_deep_security_only` |
-| CE369b | `profile recommend` usage-error | functional | current | `test_profile_recommend_is_currently_a_usage_error` |
+| CE369a | Only fast/deep/security ship | unit | current | deleted in W23 recon (`test_shipped_profiles_are_fast_deep_security_only`) |
+| CE369b | `profile recommend` registered; missing `--risk` is usage 2 | functional | happy/error | `test_profile_recommend_is_registered_and_requires_risk` |
 | CE369c | Budgets / latency out of scope | unit | current | `test_profile_token_cost_and_tool_budgets_remain_out_of_scope` |
 | CE369d | Exhaustion never passed | unit | current | `test_budget_exhaustion_never_returns_passed` |
 | CE369e | Eight profiles + hyphen aliases | unit | happy/edge | `test_eight_named_profiles_are_registered`, `test_hyphenated_cli_aliases_map_to_canonical_names` |
@@ -640,3 +640,19 @@ Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility
 - W23–W25 still **XFAIL** (`strict=False`)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W23 not started
+
+## Recon notes (W23)
+
+- Un-xfailed every `green after W23: remaining profiles + risk-based select; additive CLI (#369 / D10)` marker in `tests/cli/test_ce_profiles.py` (15 XPASS → real PASS).
+- Deleted W21 current-state pin: `test_shipped_profiles_are_fast_deep_security_only` (and unused `SHIPPED_PROFILE_NAMES` helper).
+- Replaced `test_profile_recommend_is_currently_a_usage_error` with `test_profile_recommend_is_registered_and_requires_risk` (help succeeds; missing `--risk` stays usage 2).
+- Left W24–W25 xfails in place. D8/D10 pins kept.
+- W23 impl: `ead3cb2b`.
+
+## Acceptance (W23 recon)
+
+- W23 profile/risk/CLI pins **PASS** (no leftover xfail, no XPASS)
+- W21 `#369` shipped-only pin gone; recommend command is registered
+- W24–W25 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W24 not started
