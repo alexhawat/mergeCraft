@@ -18,25 +18,17 @@ from mergecraft.cli.profiles import ReviewProfile, resolve_profile
 from tests.support.cd_batch import (
     PERF_MODULE,
     d10_root_callback_owns_globals,
-    green_after,
-    module_exists,
     require_callable,
     require_module,
 )
 
-_W20 = green_after(
-    "W20",
-    "latency/cost budgets, compression, early stop, regression bench (#367)",
-)
-
 
 def test_profile_token_cost_and_tool_budgets_already_exist() -> None:
-    """W14 current state — cost/token/tool budgets ship; latency budget does not."""
+    """W14 current state — cost/token/tool budgets ship on ``ReviewProfile``."""
     names = {field.name for field in dataclasses.fields(ReviewProfile)}
     assert "token_budget" in names
     assert "cost_budget_usd" in names
     assert "tool_call_budget" in names
-    assert "latency_budget_ms" not in names
     deep = resolve_profile("deep")
     assert deep is not None
     assert deep.cost_budget_usd == 100.0
@@ -45,10 +37,14 @@ def test_profile_token_cost_and_tool_budgets_already_exist() -> None:
 def test_w20_does_not_publish_measured_cost_or_latency_numbers() -> None:
     """#367 out of scope + D8 — no published benchmark numbers in this program."""
     d10_root_callback_owns_globals()
-    assert module_exists(PERF_MODULE) is False
+    module = require_module(PERF_MODULE)
+    bench = require_callable(module, "run_perf_regression_benchmark")
+    report = bench(kind="regression")
+    payload = report.model_dump() if hasattr(report, "model_dump") else dict(report)
+    for banned in ("published_usd", "published_p95_ms", "precision", "recall"):
+        assert banned not in payload
 
 
-@_W20
 @pytest.mark.parametrize("name", ["fast", "deep", "security"])
 def test_each_profile_has_an_explicit_latency_budget(name: str) -> None:
     """Happy: every review profile carries ``latency_budget_ms``."""
@@ -57,7 +53,6 @@ def test_each_profile_has_an_explicit_latency_budget(name: str) -> None:
     assert profile.latency_budget_ms > 0
 
 
-@_W20
 def test_ensemble_cost_ceiling_is_enforced() -> None:
     """Error: exceeding the profile cost ceiling fails closed (type + message)."""
     module = require_module(PERF_MODULE)
@@ -66,7 +61,6 @@ def test_ensemble_cost_ceiling_is_enforced() -> None:
         enforce(profile="fast", spent_usd=10_000.0)
 
 
-@_W20
 def test_cheap_classification_runs_before_expensive_specialists() -> None:
     """Happy: routing order classifies cheaply before specialist fan-out."""
     module = require_module(PERF_MODULE)
@@ -77,7 +71,6 @@ def test_cheap_classification_runs_before_expensive_specialists() -> None:
     )
 
 
-@_W20
 def test_independent_work_is_marked_parallelizable() -> None:
     """Happy: independent specialist work is tagged for parallel dispatch."""
     module = require_module(PERF_MODULE)
@@ -89,7 +82,6 @@ def test_independent_work_is_marked_parallelizable() -> None:
     assert parallel
 
 
-@_W20
 def test_repo_map_symbol_analyzer_and_summary_caches_exist() -> None:
     """Happy: cache keys cover repo map, symbols, analyzers, immutable summaries."""
     module = require_module(PERF_MODULE)
@@ -98,7 +90,6 @@ def test_repo_map_symbol_analyzer_and_summary_caches_exist() -> None:
         assert hasattr(cache, key) or key in cache
 
 
-@_W20
 def test_identical_context_is_not_resent_to_every_agent() -> None:
     """Edge: shared evidence is reused instead of duplicated per agent."""
     module = require_module(PERF_MODULE)
@@ -110,7 +101,6 @@ def test_identical_context_is_not_resent_to_every_agent() -> None:
     assert first_id == second_id
 
 
-@_W20
 def test_semantic_compression_and_structural_summaries_precede_llm() -> None:
     """Happy: deterministic structural summaries run before LLM summaries."""
     module = require_module(PERF_MODULE)
@@ -122,7 +112,6 @@ def test_semantic_compression_and_structural_summaries_precede_llm() -> None:
     ) < joined.find("llm")
 
 
-@_W20
 def test_early_stop_when_sufficient_evidence_exists() -> None:
     """Happy: early-stop fires once evidence is sufficient."""
     module = require_module(PERF_MODULE)
@@ -131,7 +120,6 @@ def test_early_stop_when_sufficient_evidence_exists() -> None:
     assert decide(evidence_complete=False, remaining_specialists=("security",)) is False
 
 
-@_W20
 def test_budget_aware_specialist_and_model_routing() -> None:
     """Happy: specialist routing considers remaining budget and model cost."""
     module = require_module(PERF_MODULE)
@@ -141,7 +129,6 @@ def test_budget_aware_specialist_and_model_routing() -> None:
     assert model
 
 
-@_W20
 def test_per_agent_token_accounting_and_cache_hit_metrics() -> None:
     """Happy: per-agent tokens and cache hit/miss counters are recorded."""
     module = require_module(PERF_MODULE)
@@ -153,7 +140,6 @@ def test_per_agent_token_accounting_and_cache_hit_metrics() -> None:
     assert "cache_misses" in payload
 
 
-@_W20
 def test_performance_regression_and_monorepo_benchmarks_exist() -> None:
     """Happy: regression + large-monorepo benches exist without published numbers."""
     module = require_module(PERF_MODULE)
