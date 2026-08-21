@@ -448,3 +448,4 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - Collection clean; current-state pins **PASS**; wiring pins **XFAIL** (`strict=False`); **no XPASS**
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W15 not started
+- W14 commit: `3e812e5c`
