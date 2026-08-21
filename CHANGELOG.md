@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added: generated CLI and Action reference pages (`docs/cli.md`,
   `docs/action-reference.md`) plus a docs manifest; `make docs-check`
   replaces landing-README table splices.
+- `.mergecraft/config.yaml` now carries a `schema_version`; unversioned files migrate on load, unknown versions fail closed, and deprecated keys warn before a breaking removal (#368)
 - Review profiles now carry an explicit latency budget; ensemble spend over the profile cost ceiling fails closed; cheap classification runs before specialists, independent work can run in parallel, and structural summaries compress context before an LLM step; early-stop fires when evidence is already sufficient, routing considers remaining budget, and regression/monorepo benches exist without publishing measured cost or latency numbers (#367)
 - `mergecraft doctor --supply-chain` verifies lockfile reproducibility, bundled agent-CLI provenance, and analyzer version pins; every run manifest now records runtime and tool versions (#366)
 - Failure-injection, soak, high-concurrency, monorepo, and large-PR harnesses now pin production SLOs for review completion, time to first finding, total review latency, and publication success, with a closed reliability error taxonomy and per-stage latency metrics (#364)
