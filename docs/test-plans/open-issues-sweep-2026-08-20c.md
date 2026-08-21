@@ -456,6 +456,7 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - Deleted W14 current-state pin: `test_webhook_handler_module_does_not_exist_yet`.
 - Left W16–W20 xfails in place. D10 root-callback pin and CI GitLab log-adapter pin kept.
 - W15 impl: `13b86c39`.
+- W15 recon: `a8dbdc9e`.
 
 ## Acceptance (W15 recon)
 
