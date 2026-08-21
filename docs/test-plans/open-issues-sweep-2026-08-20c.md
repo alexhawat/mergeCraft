@@ -297,6 +297,7 @@ W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` cle
   `test_policy_simulate_is_currently_a_usage_error`.
 - Left W13 xfails in place (`tests/memory/test_cc_validation.py`).
 - W12.1 impl: `19318055`.
+- W12 recon: `65760a24`.
 
 ## Acceptance (W12 recon)
 
