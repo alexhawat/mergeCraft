@@ -12,11 +12,11 @@ removed after 45/45 XPASS on `c32b2eae`. W8.2 (`tests/release/`) and W10.2
 (`tests/evals/`) xfails left in place. No assertion edits; no leftover
 enterprise xfail. `tests/enterprise/`: 46 passed, 0 fail, 0 xfail.
 
-**W8.2 recon (2026-08-21, `wave/20d-b-release` @ impl `2376589e`):** all
-`tests/release/` `green after W8.2` markers removed after 12/12 XPASS. W7.2
-enterprise markers already gone; W10.2 (`tests/evals/`) xfails left in place.
-No assertion edits; no leftover release xfail. `tests/release/`: 15 passed,
-0 fail, 0 xfail. DCF.1 may run on this branch.
+**W8.2 recon (2026-08-21, `80b6b728`):** all `tests/release/` `green after W8.2`
+markers removed after 12/12 XPASS on `2376589e`. W7.2 enterprise markers
+already gone; W10.2 (`tests/evals/`) xfails left in place. No assertion
+edits; no leftover release xfail. `tests/release/`: 15 passed, 0 fail,
+0 xfail. DCF.1 may run on this branch.
 
 D17: new CLI tests live under `tests/enterprise/`, not `tests/cli/`. No
 `mergecraft.cli.app` imports. D10: `test_no_eval_scores_on_landing_readme`
