@@ -9,13 +9,41 @@ Exports:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "DEFAULT_AUDIT_REL",
     "explain_blocking_decision",
     "export_audit_log",
     "export_usage",
+    "load_audit_events",
 ]
+
+DEFAULT_AUDIT_REL: Path = Path(".mergecraft") / "audit.jsonl"
+
+
+def load_audit_events(*, root: Path | None = None) -> list[dict[str, Any]]:
+    """Load audit events from ``.mergecraft/audit.jsonl`` under *root*.
+
+    Args:
+        root: Workspace root. Defaults to the current working directory.
+
+    Returns:
+        Event dicts, one per non-empty JSONL line. Missing file → ``[]``.
+    """
+    path = (root if root is not None else Path.cwd()) / DEFAULT_AUDIT_REL
+    if not path.is_file():
+        return []
+    events: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        payload = json.loads(stripped)
+        if isinstance(payload, dict):
+            events.append(payload)
+    return events
 
 
 def _dump_records(records: list[dict[str, Any]]) -> str:

@@ -7,7 +7,8 @@ and are not mixed in here.
 
 No I/O at import time: on-disk paths are constants. Call
 :func:`cases_for_kind` / :func:`golden_languages` / :func:`golden_cases` to
-load JSON from those directories (the canonical catalog).
+load JSON from packaged module resources (the wheel catalog), falling back
+to a checkout ``evals/cases/`` tree when present.
 
 Exports:
     GOLDEN_CATEGORIES: Defect classes the golden corpus must cover.
@@ -22,11 +23,14 @@ Exports:
 from __future__ import annotations
 
 import json
+from importlib.resources import files
 from pathlib import Path
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+if TYPE_CHECKING:
+    from importlib.resources.abc import Traversable
 __all__ = [
     "BENCHMARK_CASE_KINDS",
     "GOLDEN_CATEGORIES",
@@ -107,6 +111,34 @@ class CorpusCase(BaseModel):
     notes: str = ""
 
 
+def _cases_from_path(directory: Path) -> tuple[CorpusCase, ...]:
+    """Load every ``*.json`` row from a filesystem directory."""
+    cases: list[CorpusCase] = []
+    for path in sorted(directory.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        cases.append(CorpusCase.model_validate(payload))
+    return tuple(cases)
+
+
+def _cases_from_traversable(directory: Traversable) -> tuple[CorpusCase, ...]:
+    """Load every ``*.json`` row from a packaged resource directory."""
+    cases: list[CorpusCase] = []
+    for item in sorted(directory.iterdir(), key=lambda entry: entry.name):
+        if not item.name.endswith(".json") or not item.is_file():
+            continue
+        payload = json.loads(item.read_text(encoding="utf-8"))
+        cases.append(CorpusCase.model_validate(payload))
+    return tuple(cases)
+
+
+def _packaged_cases(kind: str) -> tuple[CorpusCase, ...]:
+    """Load *kind* (``golden`` / ``mutation``) from wheel/package resources."""
+    packaged = files("mergecraft.evals").joinpath("cases", kind)
+    if not packaged.is_dir():
+        return ()
+    return _cases_from_traversable(packaged)
+
+
 def _resolved_dir(declared: Path) -> Path:
     """Prefer *declared* when it exists (cwd), else the checkout-relative path."""
     if declared.is_dir():
@@ -115,16 +147,17 @@ def _resolved_dir(declared: Path) -> Path:
 
 
 def _load_cases(declared: Path) -> tuple[CorpusCase, ...]:
-    """Load every ``*.json`` row under *declared* (canonical on-disk catalog)."""
-    directory = _resolved_dir(declared)
-    if not directory.is_dir():
-        msg = f"corpus directory does not exist: {declared}"
-        raise FileNotFoundError(msg)
-    cases: list[CorpusCase] = []
-    for path in sorted(directory.glob("*.json")):
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        cases.append(CorpusCase.model_validate(payload))
-    return tuple(cases)
+    """Load every ``*.json`` row for *declared* (cwd, package, or checkout)."""
+    if declared.is_dir():
+        return _cases_from_path(declared)
+    packaged = _packaged_cases(declared.name)
+    if packaged:
+        return packaged
+    checkout = _resolved_dir(declared)
+    if checkout.is_dir() and checkout != declared:
+        return _cases_from_path(checkout)
+    msg = f"corpus directory does not exist: {declared}"
+    raise FileNotFoundError(msg)
 
 
 def golden_languages() -> frozenset[str]:

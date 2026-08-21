@@ -6,7 +6,7 @@ import typer
 
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
-from mergecraft.enterprise.audit import export_audit_log
+from mergecraft.enterprise.audit import export_audit_log, load_audit_events
 
 app = typer.Typer(
     name="audit",
@@ -36,4 +36,4 @@ def export(
             f"unsupported audit export format {format!r}; only 'json' is supported",
             code=CLI_USAGE_EXIT_CODE,
         )
-    typer.echo(export_audit_log([]))
+    typer.echo(export_audit_log(load_audit_events()))

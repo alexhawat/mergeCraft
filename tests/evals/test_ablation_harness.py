@@ -41,6 +41,23 @@ def test_run_ablation_returns_per_dimension_delta() -> None:
     assert "verifier" in blob
 
 
+def test_run_ablation_measured_delta_from_paired_scores() -> None:
+    """Paired scored runs record a non-zero measured delta vs the baseline."""
+    from mergecraft.evals.ablation import AblationConfig, run_ablation
+
+    report = run_ablation(
+        AblationConfig(
+            dimensions=("verifier",),
+            baseline="single_agent",
+            scores={"single_agent": 0.40, "verifier": 0.55},
+        )
+    )
+    row = report.contributions[0]
+    assert row.dimension == "verifier"
+    assert row.measured is True
+    assert row.delta == pytest.approx(0.15)
+
+
 def test_run_ablation_unknown_dimension_raises() -> None:
     """Error: an unknown dimension raises ValueError naming ablation."""
     from mergecraft.evals.ablation import AblationConfig, run_ablation

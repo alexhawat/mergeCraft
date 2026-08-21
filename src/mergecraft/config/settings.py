@@ -20,6 +20,7 @@ from pydantic import (
 
 from mergecraft.classify import RuleSet
 from mergecraft.config.compat import CONFIG_SCHEMA_VERSION, migrate_config
+from mergecraft.enterprise.controls import EnterpriseSettings
 from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 
 AccountPlan = Literal["none", "payg"]
@@ -473,6 +474,7 @@ class RepoSettings(BaseModel):
     )
     tracing: TracingSettings = Field(default_factory=TracingSettings)
     run_bounds: RunBoundsSettings = Field(default_factory=RunBoundsSettings, alias="runBounds")
+    enterprise: EnterpriseSettings = Field(default_factory=EnterpriseSettings)
 
     @field_validator("push", "shell", mode="before")
     @classmethod
@@ -742,6 +744,9 @@ def load_repo_settings(
             raw = migrate_config(loaded)
 
     settings = _merge_settings(raw)
+    from mergecraft.enterprise.runtime import bind_enterprise_from_settings
+
+    bind_enterprise_from_settings(settings)
 
     if not load_learnings_files:
         return settings

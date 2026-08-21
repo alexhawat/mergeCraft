@@ -6,6 +6,7 @@ Intended public API (W7.2): ``mergecraft.enterprise.audit``.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -56,3 +57,17 @@ def test_explain_blocking_decision_missing_artifact_raises() -> None:
 
     with pytest.raises(ValueError, match="artifact"):
         explain_blocking_decision({})
+
+
+def test_load_audit_events_reads_jsonl(tmp_path: Path) -> None:
+    """Happy: audit JSONL on disk is the export source, not a hardcoded empty list."""
+    from mergecraft.enterprise.audit import load_audit_events
+
+    store = tmp_path / ".mergecraft"
+    store.mkdir()
+    (store / "audit.jsonl").write_text(
+        '{"event": "review", "decision": "block"}\n',
+        encoding="utf-8",
+    )
+    events = load_audit_events(root=tmp_path)
+    assert events[0]["event"] == "review"

@@ -85,3 +85,44 @@ def test_unknown_corpus_kind_raises() -> None:
 
     with pytest.raises((KeyError, ValueError), match=r"kind|corpus"):
         cases_for_kind("not-a-kind")
+
+
+def test_golden_cases_load_from_package_without_checkout_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: golden/mutation JSON loads from package resources, not cwd."""
+    monkeypatch.chdir(tmp_path)
+    from mergecraft.evals.corpora import golden_cases, mutation_cases
+
+    golden = golden_cases()
+    mutation = mutation_cases()
+    assert golden
+    assert mutation
+    assert {case.source for case in mutation} == {"synthetic"}
+
+
+def test_built_wheel_contains_eval_corpus_json(tmp_path: Path) -> None:
+    """Regression: the hatchling wheel packages golden/mutation JSON."""
+    import subprocess
+    import zipfile
+
+    from tests.ci.workflow_support import REPO_ROOT
+
+    completed = subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    wheels = list(tmp_path.glob("*.whl"))
+    assert wheels, completed.stdout + completed.stderr
+    with zipfile.ZipFile(wheels[0]) as archive:
+        names = [name.replace("\\", "/") for name in archive.namelist()]
+    assert any(
+        "mergecraft/evals/cases/golden/" in name and name.endswith(".json") for name in names
+    )
+    assert any(
+        "mergecraft/evals/cases/mutation/" in name and name.endswith(".json") for name in names
+    )

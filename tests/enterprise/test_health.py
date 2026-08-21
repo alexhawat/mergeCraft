@@ -23,6 +23,10 @@ def test_health_payload_is_machine_readable() -> None:
     assert isinstance(payload, dict)
     status = str(payload.get("status", "")).casefold()
     assert status in {"ok", "healthy"}
+    checks = payload.get("checks")
+    assert isinstance(checks, dict)
+    assert "python" in checks
+    assert "telemetry" in checks
 
 
 def test_health_app_serves_healthz() -> None:

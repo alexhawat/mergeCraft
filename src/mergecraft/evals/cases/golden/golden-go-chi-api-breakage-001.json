@@ -1,0 +1,12 @@
+{
+  "id": "golden-go-chi-api-breakage-001",
+  "title": "Exported handler signature drop breaks downstream clients",
+  "language": "go",
+  "framework": "chi",
+  "category": "api_breakage",
+  "kind": "xrepo",
+  "source": "human",
+  "path": "pkg/api/handlers.go",
+  "start_line": 90,
+  "end_line": 110
+}

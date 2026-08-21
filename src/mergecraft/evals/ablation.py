@@ -6,9 +6,10 @@ analyzer, memory. Adversarial corpora are out of scope (separate issue).
 Analyzer contribution uses the **current** shipped catalog as its baseline
 inventory (#339 closed and added analyzers; do not freeze a pre-sweep count).
 
-This harness records per-dimension contribution structure. Live deltas are
-``0.0`` until a scored live run fills them — do not treat a zero as proof of
-no value, and do not claim superiority without numbers.
+This harness records per-dimension contribution versus a named baseline.
+Pass paired scores on :class:`AblationConfig` (baseline plus each dimension)
+to get ``measured=True`` deltas. Without scores, deltas stay ``0.0`` /
+``measured=False`` — do not treat a zero as proof of no value.
 
 Exports:
     ABLATION_DIMENSIONS: Required #384 ablation dimension names.
@@ -48,12 +49,19 @@ ABLATION_DIMENSIONS: Final[frozenset[str]] = frozenset(
 
 
 class AblationConfig(BaseModel):
-    """Which ablation dimensions to compare against a named baseline."""
+    """Which ablation dimensions to compare against a named baseline.
+
+    ``scores`` maps a dimension (or the baseline name) to a comparable
+    metric such as F1. When both the baseline and a dimension are present,
+    :func:`run_ablation` records ``delta = score[dimension] - score[baseline]``
+    with ``measured=True``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     dimensions: tuple[str, ...]
     baseline: str = "single_agent"
+    scores: dict[str, float] | None = None
 
 
 class AblationContribution(BaseModel):
@@ -93,11 +101,12 @@ def _analyzer_catalog_size() -> int:
 def run_ablation(config: AblationConfig) -> AblationReport:
     """Return a per-dimension contribution report.
 
-    Unknown dimension names raise ``ValueError``. Live numeric deltas are left
-    at ``0.0`` with ``measured=False`` until a live-provider eval fills them.
+    Unknown dimension names raise ``ValueError``. When ``config.scores``
+    includes both the baseline and a dimension, that row is measured;
+    otherwise the row stays ``delta=0.0`` / ``measured=False``.
 
     Args:
-        config: Dimensions to ablate and the baseline configuration name.
+        config: Dimensions to ablate, baseline name, and optional paired scores.
 
     Returns:
         An :class:`AblationReport` naming every requested dimension.
@@ -110,22 +119,35 @@ def run_ablation(config: AblationConfig) -> AblationReport:
         msg = f"unknown ablation dimension(s): {', '.join(unknown)}"
         raise ValueError(msg)
     catalog_size = _analyzer_catalog_size()
-    contributions = tuple(
-        AblationContribution(
-            dimension=name,
-            delta=0.0,
-            measured=False,
-            notes=(
-                f"unmeasured; analyzer catalog baseline is {catalog_size} shipped "
-                "manifests (post-#339), not a frozen pre-sweep count"
-                if name == "analyzer"
-                else "unmeasured until a live-provider eval records a delta"
-            ),
+    scores = config.scores or {}
+    baseline_score = scores.get(config.baseline)
+    contributions: list[AblationContribution] = []
+    for name in config.dimensions:
+        if baseline_score is not None and name in scores:
+            contributions.append(
+                AblationContribution(
+                    dimension=name,
+                    delta=scores[name] - baseline_score,
+                    measured=True,
+                    notes="measured from paired scored runs",
+                )
+            )
+            continue
+        contributions.append(
+            AblationContribution(
+                dimension=name,
+                delta=0.0,
+                measured=False,
+                notes=(
+                    f"unmeasured; analyzer catalog baseline is {catalog_size} shipped "
+                    "manifests (post-#339), not a frozen pre-sweep count"
+                    if name == "analyzer"
+                    else "unmeasured until paired scored runs record a delta"
+                ),
+            )
         )
-        for name in config.dimensions
-    )
     return AblationReport(
         baseline=config.baseline,
-        contributions=contributions,
+        contributions=tuple(contributions),
         analyzer_catalog_size=catalog_size,
     )
