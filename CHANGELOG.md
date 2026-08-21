@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added: generated CLI and Action reference pages (`docs/cli.md`,
   `docs/action-reference.md`) plus a docs manifest; `make docs-check`
   replaces landing-README table splices.
+- Provider routing now tracks capability dimensions (context, reasoning, tools, structured IO, cost, latency, residency), require/prefer/fallback intents, per-specialist and per-risk model selection, heterogeneous verifier/judge models, health tracking, bounded retryable-only retries, circuit breakers with cooldown, degradation when a non-required provider is down, fail-closed required-model pins, run-manifest provider/model hashes, per-provider budgets, routing-quality eval, residency allow-lists, and a nightly catalog smoke (#371)
 - Review specialists now report unique useful findings plus latency, cost, precision, and recall; specialists that add cost without review value can be skipped via per-agent circuit breakers (#370)
 - Review profiles now include `standard`, `api_compatibility`, `migration`, `monorepo`, and `cross_repo` (hyphen aliases on the CLI); `mergecraft profile recommend --risk` auto-selects from change risk, with CLI then policy overrides; profile budget exhaustion stays `inconclusive`, never a clean pass (#369)
 - `.mergecraft/config.yaml` now carries a `schema_version`; unversioned files migrate on load, unknown versions fail closed, and deprecated keys warn before a breaking removal (#368)
