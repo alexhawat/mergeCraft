@@ -15,21 +15,10 @@ from tests.support.cd_batch import (
     SUPPORTED_WEBHOOK_PROVIDERS,
     WEBHOOK_MODULE,
     d10_root_callback_owns_globals,
-    green_after,
-    module_exists,
     require_callable,
     require_module,
 )
 from tests.support.dead_package_wiring import SRC_ROOT
-
-_W15 = green_after("W15", "webhook security, idempotency, provider conformance (#361)")
-
-
-def test_webhook_handler_module_does_not_exist_yet() -> None:
-    """W14 current state — signature verification is still prompt prose only."""
-    assert module_exists(WEBHOOK_MODULE) is False
-    scm_dir = SRC_ROOT / "scm"
-    assert not list(scm_dir.glob("*webhook*"))
 
 
 def test_ci_gitlab_log_adapter_is_not_an_scm_webhook_surface() -> None:
@@ -49,7 +38,6 @@ def test_w15_does_not_fold_webhooks_into_root_callback() -> None:
     assert "supply_chain" not in root_block
 
 
-@_W15
 def test_webhook_module_covers_github_and_gitlab_only() -> None:
     """Happy: supported providers are GitHub and GitLab; Bitbucket stays out."""
     module = require_module(WEBHOOK_MODULE)
@@ -63,7 +51,6 @@ def test_webhook_module_covers_github_and_gitlab_only() -> None:
         verify("bitbucket", headers={}, body=b"", secret="secret")
 
 
-@_W15
 @pytest.mark.parametrize("provider", sorted(SUPPORTED_WEBHOOK_PROVIDERS))
 def test_webhook_signature_verification_accepts_a_valid_payload(provider: str) -> None:
     """Happy: each supported provider verifies a matching signature."""
@@ -75,7 +62,6 @@ def test_webhook_signature_verification_accepts_a_valid_payload(provider: str) -
     verify(provider, headers=signed, body=b'{"ok":true}', secret="test-secret")
 
 
-@_W15
 def test_webhook_signature_verification_rejects_a_bad_hmac() -> None:
     """Error: invalid signature names the failure (type + message)."""
     module = require_module(WEBHOOK_MODULE)
@@ -92,7 +78,6 @@ def test_webhook_signature_verification_rejects_a_bad_hmac() -> None:
         )
 
 
-@_W15
 def test_webhook_replay_protection_rejects_stale_or_reused_delivery() -> None:
     """Error: replay protection rejects a stale timestamp or reused nonce."""
     module = require_module(WEBHOOK_MODULE)
@@ -109,7 +94,6 @@ def test_webhook_replay_protection_rejects_stale_or_reused_delivery() -> None:
         )
 
 
-@_W15
 def test_webhook_event_processing_is_idempotent_on_delivery_id() -> None:
     """Edge: the same delivery id is processed once."""
     module = require_module(WEBHOOK_MODULE)
@@ -140,7 +124,6 @@ def test_webhook_event_processing_is_idempotent_on_delivery_id() -> None:
         assert second_id == first_id
 
 
-@_W15
 def test_webhook_rate_limit_is_handled_without_dropping_the_event() -> None:
     """Edge: a 429 from the provider is surfaced, not silently dropped."""
     module = require_module(WEBHOOK_MODULE)
@@ -153,7 +136,6 @@ def test_webhook_rate_limit_is_handled_without_dropping_the_event() -> None:
     assert "429" in str(outcome) or "rate" in str(outcome).casefold()
 
 
-@_W15
 def test_provider_permission_checks_are_asserted_per_adapter() -> None:
     """Happy: GitHub and GitLab adapters expose permission probes."""
     module = require_module(WEBHOOK_MODULE)
@@ -162,7 +144,6 @@ def test_provider_permission_checks_are_asserted_per_adapter() -> None:
         probe(provider)
 
 
-@_W15
 def test_provider_conformance_uses_identical_review_semantics() -> None:
     """Integration: GitHub and GitLab webhook events map to the same review."""
     module = require_module(WEBHOOK_MODULE)
@@ -175,7 +156,6 @@ def test_provider_conformance_uses_identical_review_semantics() -> None:
     assert github_mode in {"Review", "IncrementalReview"}
 
 
-@_W15
 def test_scm_adapters_cannot_bypass_review_only_restrictions() -> None:
     """Error: webhook-driven adapters still cannot edit / commit / push."""
     module = require_module(WEBHOOK_MODULE)
@@ -187,7 +167,6 @@ def test_scm_adapters_cannot_bypass_review_only_restrictions() -> None:
         guard(requested_capability="commit")
 
 
-@_W15
 def test_webhook_module_does_not_import_ci_gitlab_log_adapter() -> None:
     """#361 out of scope — webhook code must not import CI GitLab logs."""
     module = require_module(WEBHOOK_MODULE)

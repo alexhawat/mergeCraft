@@ -398,7 +398,7 @@ After each impl wave, recon **deletes** matching W14 current-state pins and **un
 
 | Wave | Tests | Marker reason | Status |
 |------|-------|---------------|--------|
-| **W15** | `tests/scm/test_cd_webhooks.py` (11) | `green after W15: webhook security, idempotency, provider conformance (#361)` | XFAIL until W15 |
+| **W15** | `tests/scm/test_cd_webhooks.py` (11) | `green after W15: webhook security, idempotency, provider conformance (#361)` | **PASS** — un-xfailed W15 recon |
 | **W16** | `tests/security/test_cd_egress.py` (10) | `green after W16: egress, SSRF, vuln gates, threat model; no secrets in public comments (#362)` | XFAIL until W16 |
 | **W17** | `tests/evals/test_cd_adversarial_corpora.py` (5) | `green after W17: adversarial corpora wired into eval gate (#363 / D15)` | XFAIL until W17 |
 | **W18** | `tests/reliability/test_cd_soak_slos.py` (7) + `tests/reliability/test_cd_degradation.py` (13) | `green after W18: soak/SLOs + degradation/recovery/redacted bundles (#364/#365)` | XFAIL until W18 |
@@ -413,7 +413,7 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 
 | # | Contract | Layer | Scenario | Primary test |
 |---|----------|-------|----------|--------------|
-| CD361a | Webhook module missing | unit | current | `test_webhook_handler_module_does_not_exist_yet` |
+| CD361a | Webhook module missing | unit | current | **deleted W15 recon** (`test_webhook_handler_module_does_not_exist_yet`) |
 | CD361b | GitHub + GitLab only; Bitbucket rejected | unit | error | `test_webhook_module_covers_github_and_gitlab_only` |
 | CD361c | Signature verify / reject | unit | happy/error | `test_webhook_signature_verification_*` |
 | CD361d | Replay protection | unit | error | `test_webhook_replay_protection_rejects_stale_or_reused_delivery` |
@@ -449,3 +449,18 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W15 not started
 - W14 commit: `3e812e5c`
+
+## Recon notes (W15)
+
+- Un-xfailed every `green after W15: webhook security, idempotency, provider conformance (#361)` marker in `tests/scm/test_cd_webhooks.py` (11 XPASS → real PASS, including parametrized GitHub/GitLab signature verify).
+- Deleted W14 current-state pin: `test_webhook_handler_module_does_not_exist_yet`.
+- Left W16–W20 xfails in place. D10 root-callback pin and CI GitLab log-adapter pin kept.
+- W15 impl: `13b86c39`.
+
+## Acceptance (W15 recon)
+
+- W15 webhook pins **PASS** (no leftover xfail, no XPASS)
+- W14 `#361` current-state pin gone
+- W16–W20 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W16 not started
