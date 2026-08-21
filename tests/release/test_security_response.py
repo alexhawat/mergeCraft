@@ -8,21 +8,13 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 from tests.ci.workflow_support import read_text
-
-_W82 = pytest.mark.xfail(
-    reason="green after W8.2: security-response / vulnerability-disclosure (#382)",
-    strict=False,
-)
 
 
 def _security() -> str:
     return read_text("SECURITY.md")
 
 
-@_W82
 def test_security_md_has_security_response_process() -> None:
     """Happy: SECURITY.md documents a security-response process (not only reporting)."""
     text = _security()
@@ -31,7 +23,6 @@ def test_security_md_has_security_response_process() -> None:
     )
 
 
-@_W82
 def test_security_md_has_coordinated_vulnerability_disclosure() -> None:
     """Happy: vulnerability disclosure is coordinated, not only 'do not open an issue'."""
     text = _security()
@@ -49,7 +40,6 @@ def test_security_md_already_points_at_private_advisories() -> None:
     assert "advisories" in collapsed or "security advisory" in collapsed
 
 
-@_W82
 def test_security_response_is_not_only_review_only_boundary() -> None:
     """Error contract: the new section is distinct from the review-only product boundary."""
     text = _security()
