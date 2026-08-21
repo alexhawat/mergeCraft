@@ -34,6 +34,7 @@ from mergecraft.cli import (
     pipeline_cmd,
     plan_cmd,
     policy_cmd,
+    profile_cmd,
     requirements_cmd,
     tracing_cmd,
     tracing_logfire_cmd,
@@ -102,6 +103,7 @@ app.add_typer(gha_cmd.app, name="gha")
 app.add_typer(learnings_cmd.app, name="learnings")
 app.add_typer(memory_cmd.app, name="memory")
 app.add_typer(policy_cmd.app, name="policy")
+app.add_typer(profile_cmd.app, name="profile")
 app.add_typer(requirements_cmd.app, name="requirements")
 app.add_typer(xrepo_cmd.app, name="xrepo")
 app.add_typer(evidence_cmd.app, name="evidence")
