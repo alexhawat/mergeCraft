@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from mergecraft.analyzers.finding import make_finding
 from tests.support.cc_batch import (
     PACKET_EVIDENCE_KINDS,
@@ -20,11 +18,6 @@ from tests.support.cc_batch import (
     require_callable,
 )
 from tests.support.dead_package_wiring import SRC_ROOT, production_invoked_names
-
-_W9 = pytest.mark.xfail(
-    reason="green after W9: evidence states + CLI (#354)",
-    strict=False,
-)
 
 
 def _make_finding(*, severity: str = "Major", fingerprint: str = "fp-major") -> Any:
@@ -54,7 +47,6 @@ def test_decide_approval_remains_the_only_approval_path() -> None:
     assert "def decide_verifier_approval(" not in gates
 
 
-@_W9
 def test_verifier_states_are_the_six_named_outcomes() -> None:
     """#354 — proven … inconclusive replace confirm/downgrade/drop as the audit vocab."""
     module = load_module("mergecraft.evidence.audit")
@@ -63,7 +55,6 @@ def test_verifier_states_are_the_six_named_outcomes() -> None:
     assert frozenset(states) == VERIFIER_STATES
 
 
-@_W9
 def test_medium_high_critical_findings_require_an_evidence_packet() -> None:
     """#354 — Major and Critical findings must carry an evidence packet."""
     module = load_module("mergecraft.evidence.audit")
@@ -75,7 +66,6 @@ def test_medium_high_critical_findings_require_an_evidence_packet() -> None:
     assert require_packet(_make_finding(severity="Trivial", fingerprint="fp-triv")) is False
 
 
-@_W9
 def test_evidence_packet_supports_the_named_kinds() -> None:
     """#354 — packets name the listed evidence kinds."""
     module = load_module("mergecraft.evidence.audit")
@@ -84,7 +74,6 @@ def test_evidence_packet_supports_the_named_kinds() -> None:
     assert frozenset(kinds) >= PACKET_EVIDENCE_KINDS
 
 
-@_W9
 def test_unverified_findings_do_not_block_unless_policy_permits() -> None:
     """#354 — unverified must not block by default."""
     module = load_module("mergecraft.evidence.audit")
@@ -94,7 +83,6 @@ def test_unverified_findings_do_not_block_unless_policy_permits() -> None:
     assert unverified_blocks(finding, policy={"allow_unverified_blockers": True}) is True
 
 
-@_W9
 def test_falsification_first_rubric_is_wired() -> None:
     """#354 — verifier rubric actively searches for reasons the finding may be wrong."""
     module = load_module("mergecraft.evidence.audit")
@@ -106,7 +94,6 @@ def test_falsification_first_rubric_is_wired() -> None:
     assert "confirm" not in text or "search" in text or "falsif" in text
 
 
-@_W9
 def test_evidence_freshness_provenance_hash_and_completeness_scoring() -> None:
     """#354 — freshness, provenance hashing, and completeness scoring exist."""
     module = load_module("mergecraft.evidence.audit")
@@ -119,7 +106,6 @@ def test_evidence_freshness_provenance_hash_and_completeness_scoring() -> None:
     assert 0.0 <= float(score) <= 1.0
 
 
-@_W9
 def test_contradiction_detection_between_tools_and_llm() -> None:
     """#354 — deterministic tools vs LLM conclusions are compared."""
     module = load_module("mergecraft.evidence.audit")
@@ -131,7 +117,6 @@ def test_contradiction_detection_between_tools_and_llm() -> None:
     assert hits
 
 
-@_W9
 def test_verification_replay_is_deterministic() -> None:
     """#354 — verification replay yields a stable outcome."""
     module = load_module("mergecraft.evidence.audit")
@@ -142,7 +127,6 @@ def test_verification_replay_is_deterministic() -> None:
     assert first == second
 
 
-@_W9
 def test_policy_evidence_requirements_cover_severity_path_change_type_and_rule() -> None:
     """#354 — policy can require evidence by severity, path, change type, and rule."""
     module = load_module("mergecraft.evidence.audit")
@@ -160,7 +144,6 @@ def test_policy_evidence_requirements_cover_severity_path_change_type_and_rule()
     assert getattr(outcome, "status", outcome) in {"inconclusive", "missing", "unsatisfied"}
 
 
-@_W9
 def test_verifier_failure_cannot_silently_promote_a_finding() -> None:
     """#354 — a failed/crashed verifier must not promote unverified → proven."""
     module = load_module("mergecraft.evidence.audit")

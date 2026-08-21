@@ -5,25 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import pytest
 from tests.support.cc_batch import invoke, load_module, plain, require_registered
 from tests.support.dead_package_wiring import CLI_DIR, cli_cmd_path, root_callback_source
 
-from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
-
-_W9 = pytest.mark.xfail(
-    reason="green after W9: evidence states + CLI (#354)",
-    strict=False,
-)
+from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 
 
-def test_evidence_command_is_currently_a_usage_error() -> None:
-    """W8 current state: ``evidence`` is not a root verb yet."""
-    result = invoke("evidence", "--help")
-    assert result.exit_code == CLI_USAGE_EXIT_CODE, plain(result.stdout + result.stderr)
-
-
-@_W9
 def test_evidence_cli_is_a_new_cmd_module() -> None:
     """D10 — ``mergecraft evidence`` lives in ``cli/evidence_cmd.py``."""
     path = cli_cmd_path("evidence")
@@ -35,7 +22,6 @@ def test_evidence_cli_is_a_new_cmd_module() -> None:
     assert getattr(module, "app", None) is not None or callable(getattr(module, "run", None))
 
 
-@_W9
 def test_root_help_lists_evidence() -> None:
     """Happy: root help advertises ``evidence``."""
     result = invoke("--help")
@@ -44,7 +30,6 @@ def test_root_help_lists_evidence() -> None:
     assert "evidence" in help_text
 
 
-@_W9
 def test_evidence_show_and_verify_help_are_registered() -> None:
     """Happy: ``evidence show`` and ``evidence verify`` exist."""
     show = require_registered("evidence", "show", "--help", label="mergecraft evidence show")
@@ -53,7 +38,6 @@ def test_evidence_show_and_verify_help_are_registered() -> None:
     assert "finding" in plain(verify.stdout + verify.stderr).casefold()
 
 
-@_W9
 def test_evidence_show_unknown_finding_id_is_an_error() -> None:
     """Error: unknown finding id is a non-success exit."""
     require_registered("evidence", "show", "--help", label="mergecraft evidence show")
@@ -62,7 +46,6 @@ def test_evidence_show_unknown_finding_id_is_an_error() -> None:
     assert result.exit_code != CLI_SUCCESS_EXIT_CODE, combined
 
 
-@_W9
 def test_evidence_show_json_is_exportable() -> None:
     """#354 — evidence packets export as JSON via global ``--format json``."""
     require_registered("evidence", "show", "--help", label="mergecraft evidence show")

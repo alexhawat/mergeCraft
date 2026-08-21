@@ -221,7 +221,7 @@ After each impl wave, recon **deletes** matching W8 current-state usage-error pi
 
 | Wave | Tests | Marker reason | Status |
 |------|-------|---------------|--------|
-| **W9** | `tests/evidence/test_cc_verifier_states.py` (10) + `tests/cli/test_evidence_cmd.py` (5) | `green after W9: evidence states + CLI (#354)` | XFAIL |
+| **W9** | `tests/evidence/test_cc_verifier_states.py` (10) + `tests/cli/test_evidence_cmd.py` (5) | `green after W9: evidence states + CLI (#354)` | **PASS** — un-xfailed W9 recon |
 | **W10** | `tests/findings/test_cc_materiality.py` (7) | `green after W10: materiality / calibration / dismissal (#355)` | XFAIL |
 | **W11** | `tests/context/test_cc_search_explain.py` (8) + `tests/context/test_cc_instruction_sources.py` (6) | `green after W11: context search/explain/budgets (#356)` / `instruction sources + external files (#357)` | XFAIL |
 | **W12** | `tests/policy/test_cc_lifecycle.py` (7) + `tests/policy/test_cc_packs.py` (4) | `green after W12: policy lifecycle back half (#358)` / `policy packs (#359)` | XFAIL |
@@ -230,6 +230,26 @@ After each impl wave, recon **deletes** matching W8 current-state usage-error pi
 Current-state **PASS** (not xfailed; recon deletes the usage-error rows after the matching impl wave): D14 `decide_approval` only in `agents/gates.py`; D10 root-callback pin; shipped retrieval/dedup/policy front-half files; CLI usage-error for `evidence`, `context search|explain`, `policy effective|simulate`, `memory validate`.
 
 W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` clean.
+
+## Recon notes (W9)
+
+- Un-xfailed every `green after W9: evidence states + CLI (#354)` marker in
+  `tests/evidence/test_cc_verifier_states.py` (10) and `tests/cli/test_evidence_cmd.py` (5)
+  (15 XPASS → real PASS).
+- `test_root_help_lists_evidence` already matches W5/W6 (`"evidence" in help_text` after
+  ANSI strip + casefold). Rich help is `│ evidence`.
+- Deleted W8 current-state pin `test_evidence_command_is_currently_a_usage_error`
+  (evidence is registered; the usage-error pin failed after W9.1).
+- Left W10–W13 xfails in place. D14 `decide_approval` and D10 root-callback pins kept.
+- W9.1 impl: `b086c292`.
+
+## Acceptance (W9 recon)
+
+- W9 evidence pins **PASS** (no leftover xfail, no XPASS)
+- W8 `#354` current-state usage-error pin gone
+- W10–W13 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W10 not started
 
 ## Contract matrix (W8)
 
