@@ -18,6 +18,7 @@ from mergecraft.cli import (
     capabilities_cmd,
     config_surface_cmd,
     context_cmd,
+    describe_cmd,
     diff_review_cmd,
     doctor_cmd,
     eval_cmd,
@@ -90,6 +91,7 @@ app.command("init")(init_cmd.run)
 app.command("watch")(watch_cmd.run)
 app.command("doctor")(doctor_cmd.run)
 app.command("capabilities")(capabilities_cmd.run)
+app.command("describe")(describe_cmd.run)
 app.command("plan")(plan_cmd.run)
 app.command("review")(diff_review_cmd.run)
 app.command("diff-review", hidden=True)(diff_review_cmd.run)
