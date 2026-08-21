@@ -564,7 +564,7 @@ After each impl wave, recon **deletes** the matching W21 current-state pins and 
 
 | Wave | Tests | Marker reason | Status |
 |------|-------|---------------|--------|
-| **W22** | `tests/config/test_ce_schema.py` (10) | `green after W22: config schema version, migrations, deprecations (#368)` | XFAIL until W22 |
+| **W22** | `tests/config/test_ce_schema.py` (10) | `green after W22: config schema version, migrations, deprecations (#368)` | PASS after W22 recon |
 | **W23** | `tests/cli/test_ce_profiles.py` (15 collected / 14 functions) | `green after W23: remaining profiles + risk-based select; additive CLI (#369 / D10)` | XFAIL until W23 |
 | **W24** | `tests/agents/test_ce_economics.py` (8) | `green after W24: specialist economics consume gen_ai.usage.* on llm.call (#370 / D11)` | XFAIL until W24 |
 | **W25** | `tests/agents/test_ce_providers.py` (14 + 1 live skip) | `green after W25: provider health, cooldown, degradation, residency, routing eval (#371)` | XFAIL until W25 |
@@ -577,8 +577,8 @@ W21 run: **20 passed / 47 xfailed / 1 skipped (no live gate) / 0 XPASS**. `make 
 
 | # | Contract | Layer | Scenario | Primary test |
 |---|----------|-------|----------|--------------|
-| CE368a | `RepoSettings` unversioned | unit | current | `test_repo_settings_has_no_schema_version_yet` |
-| CE368b | Compat module missing | unit | current | `test_config_compat_module_does_not_exist_yet` |
+| CE368a | `RepoSettings` unversioned | unit | current | deleted in W22 recon (`test_repo_settings_has_no_schema_version_yet`) |
+| CE368b | Compat module missing | unit | current | deleted in W22 recon (`test_config_compat_module_does_not_exist_yet`) |
 | CE368c | No protocol capability negotiation | unit | current | `test_agent_protocol_does_not_negotiate_capabilities` |
 | CE368d | D10 root callback | unit | current | `test_w22_does_not_edit_root_callback` |
 | CE368e | CLI JSON + agent protocol versions already ship | unit | current | `test_cli_json_schema_version_already_ships`, `test_agent_protocol_version_already_ships` |
@@ -624,3 +624,19 @@ Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W22 not started
 - W21 commit: `932347cc`
+
+## Recon notes (W22)
+
+- Un-xfailed every `green after W22: config schema version, migrations, deprecations (#368)` marker in `tests/config/test_ce_schema.py` (10 XPASS → real PASS).
+- Deleted W21 current-state pins: `test_repo_settings_has_no_schema_version_yet`, `test_config_compat_module_does_not_exist_yet`.
+- Left W23–W25 xfails in place. D8/D10 pins kept.
+- W22 impl: `a2a3af4c`.
+- W22 recon: pending commit SHA.
+
+## Acceptance (W22 recon)
+
+- W22 schema/migration/deprecation pins **PASS** (no leftover xfail, no XPASS)
+- W21 `#368` unversioned / module-absent pins gone
+- W23–W25 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W23 not started

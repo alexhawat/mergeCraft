@@ -20,28 +20,10 @@ from tests.support.ce_batch import (
     CONFIG_COMPAT_MODULE,
     CONFIG_SCHEMA_VERSION_ATTR,
     d10_root_callback_owns_globals,
-    green_after,
-    module_exists,
     require_callable,
     require_module,
 )
 from tests.support.dead_package_wiring import SRC_ROOT
-
-_W22 = green_after("W22", "config schema version, migrations, deprecations (#368)")
-
-
-def test_repo_settings_has_no_schema_version_yet() -> None:
-    """W21 current state — ``RepoSettings`` is unversioned (issue #368)."""
-    assert "schema_version" not in RepoSettings.model_fields
-    assert "schemaVersion" not in {info.alias for info in RepoSettings.model_fields.values()}
-    settings_src = (SRC_ROOT / "config" / "settings.py").read_text(encoding="utf-8")
-    assert "schema_version" not in settings_src
-    assert "schemaVersion" not in settings_src
-
-
-def test_config_compat_module_does_not_exist_yet() -> None:
-    """W21 current state — migrations live in a new compat module."""
-    assert module_exists(CONFIG_COMPAT_MODULE) is False
 
 
 def test_agent_protocol_does_not_negotiate_capabilities() -> None:
@@ -71,7 +53,6 @@ def test_agent_protocol_version_already_ships() -> None:
     assert AGENT_PROTOCOL_VERSION
 
 
-@_W22
 def test_config_schema_is_versioned() -> None:
     """Happy: repo config declares a pinned ``schema_version``."""
     module = require_module(CONFIG_COMPAT_MODULE)
@@ -84,7 +65,6 @@ def test_config_schema_is_versioned() -> None:
     )
 
 
-@_W22
 def test_load_migrates_unversioned_yaml(tmp_path: Path) -> None:
     """Happy: a pre-version YAML still loads after migration."""
     cfg = tmp_path / ".mergecraft"
@@ -97,7 +77,6 @@ def test_load_migrates_unversioned_yaml(tmp_path: Path) -> None:
     assert models == ["anthropic/claude-sonnet"]
 
 
-@_W22
 def test_migrate_config_is_idempotent_on_current_version() -> None:
     """Edge: migrating an already-current mapping is a no-op."""
     module = require_module(CONFIG_COMPAT_MODULE)
@@ -109,7 +88,6 @@ def test_migrate_config_is_idempotent_on_current_version() -> None:
     assert once == twice
 
 
-@_W22
 def test_unknown_schema_version_is_a_configuration_error() -> None:
     """Error: an unsupported schema version fails closed (type + message)."""
     module = require_module(CONFIG_COMPAT_MODULE)
@@ -118,7 +96,6 @@ def test_unknown_schema_version_is_a_configuration_error() -> None:
         migrate({"schema_version": "999.0.0"})
 
 
-@_W22
 def test_deprecated_key_emits_warning_before_break() -> None:
     """Happy: deprecated keys warn before a breaking removal."""
     module = require_module(CONFIG_COMPAT_MODULE)
@@ -127,7 +104,6 @@ def test_deprecated_key_emits_warning_before_break() -> None:
         warn("legacyKey")
 
 
-@_W22
 def test_upgrade_from_previous_schema_preserves_models() -> None:
     """Happy: upgrade tests keep consumer-visible fields."""
     module = require_module(CONFIG_COMPAT_MODULE)
@@ -138,7 +114,6 @@ def test_upgrade_from_previous_schema_preserves_models() -> None:
     assert payload.get("schema_version") or payload.get("schemaVersion")
 
 
-@_W22
 def test_backward_compat_policy_names_supported_range() -> None:
     """Happy: compatibility policy names the supported schema range."""
     module = require_module(CONFIG_COMPAT_MODULE)
@@ -148,7 +123,6 @@ def test_backward_compat_policy_names_supported_range() -> None:
     assert "current" in payload or CONFIG_SCHEMA_VERSION_ATTR.lower() in str(payload).casefold()
 
 
-@_W22
 def test_stable_cli_contract_is_published() -> None:
     """Happy: the CLI JSON contract is published as a versioned surface."""
     module = require_module(CONFIG_COMPAT_MODULE)
@@ -158,7 +132,6 @@ def test_stable_cli_contract_is_published() -> None:
     assert payload.get("schema_version") == CLI_JSON_SCHEMA_VERSION or "schema_version" in payload
 
 
-@_W22
 def test_stable_agent_protocol_contract_is_published() -> None:
     """Happy: agent JSONL protocol version is published (not negotiated)."""
     module = require_module(CONFIG_COMPAT_MODULE)
@@ -171,7 +144,6 @@ def test_stable_agent_protocol_contract_is_published() -> None:
     assert "negotiate" not in payload
 
 
-@_W22
 def test_lts_expectations_are_declared() -> None:
     """Happy: long-term support expectations are an explicit policy object."""
     module = require_module(CONFIG_COMPAT_MODULE)
