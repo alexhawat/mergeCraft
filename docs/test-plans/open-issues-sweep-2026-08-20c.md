@@ -279,6 +279,7 @@ W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` cle
   `test_discovery_currently_omits_gemini_copilot_and_windsurf`.
 - Left W12–W13 xfails in place. Retrieval-half current-state pin kept (#356 out of scope).
 - W11.1 impl: `e03a7aec`.
+- W11 recon: `733d73c6`.
 
 ## Acceptance (W11 recon)
 
