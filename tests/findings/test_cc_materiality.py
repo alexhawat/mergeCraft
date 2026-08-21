@@ -14,11 +14,6 @@ from tests.findings.support import make_finding
 from tests.support.cc_batch import load_module, require_callable
 from tests.support.dead_package_wiring import SRC_ROOT
 
-_W10 = pytest.mark.xfail(
-    reason="green after W10: materiality / calibration / dismissal (#355)",
-    strict=False,
-)
-
 
 def test_dedup_and_causality_modules_remain_the_shipped_precision_half() -> None:
     """#355 out of scope — do not rebuild dedup / causality (current state)."""
@@ -27,7 +22,6 @@ def test_dedup_and_causality_modules_remain_the_shipped_precision_half() -> None
     assert (SRC_ROOT / "findings" / "severity_rubric.py").is_file()
 
 
-@_W10
 def test_materiality_scoring_ranks_security_above_style() -> None:
     """#354/#355 — materiality scoring; high-impact outranks style commentary."""
     module = load_module("mergecraft.findings.materiality")
@@ -50,7 +44,6 @@ def test_materiality_scoring_ranks_security_above_style() -> None:
     assert ordered[0].fingerprint == security.fingerprint
 
 
-@_W10
 def test_confidence_is_calibrated_from_benchmark_outcomes() -> None:
     """#355 — confidence comes from benchmark outcomes, not model self-report."""
     module = load_module("mergecraft.findings.materiality")
@@ -61,7 +54,6 @@ def test_confidence_is_calibrated_from_benchmark_outcomes() -> None:
     assert str(value) != "certain"
 
 
-@_W10
 def test_finding_budgets_cover_severity_category_file_and_review() -> None:
     """#355 — budgets exist by severity, category, file, and review (not only inline)."""
     module = load_module("mergecraft.findings.materiality")
@@ -82,7 +74,6 @@ def test_finding_budgets_cover_severity_category_file_and_review() -> None:
     assert len(kept) <= 4
 
 
-@_W10
 def test_publication_and_blocking_thresholds_are_configurable() -> None:
     """#355 — configurable publication minimums and stronger blocking thresholds."""
     module = load_module("mergecraft.findings.materiality")
@@ -93,7 +84,6 @@ def test_publication_and_blocking_thresholds_are_configurable() -> None:
     assert blocking(major, minimum={"severity": "Critical", "confidence": "likely"}) is False
 
 
-@_W10
 def test_dismissal_reason_codes_are_a_closed_set() -> None:
     """#355 — dismissal records a structured reason code."""
     module = load_module("mergecraft.findings.materiality")
@@ -109,7 +99,6 @@ def test_dismissal_reason_codes_are_a_closed_set() -> None:
     assert str(code) == "false_positive"
 
 
-@_W10
 def test_dismissal_feeds_evaluation_not_durable_memory(tmp_path: Path) -> None:
     """#355 out of scope — dismissal is an eval signal, not memory, until W13."""
     module = load_module("mergecraft.findings.materiality")
@@ -127,7 +116,6 @@ def test_dismissal_feeds_evaluation_not_durable_memory(tmp_path: Path) -> None:
     assert "fp-eval" not in learnings.read_text(encoding="utf-8")
 
 
-@_W10
 def test_precision_regression_gate_targets_blocker_precision_above_95() -> None:
     """#355 — release-wired precision gate; blocker precision > 95% on the corpus."""
     module = load_module("mergecraft.findings.materiality")

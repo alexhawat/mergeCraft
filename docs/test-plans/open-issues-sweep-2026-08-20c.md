@@ -222,7 +222,7 @@ After each impl wave, recon **deletes** matching W8 current-state usage-error pi
 | Wave | Tests | Marker reason | Status |
 |------|-------|---------------|--------|
 | **W9** | `tests/evidence/test_cc_verifier_states.py` (10) + `tests/cli/test_evidence_cmd.py` (5) | `green after W9: evidence states + CLI (#354)` | **PASS** — un-xfailed W9 recon |
-| **W10** | `tests/findings/test_cc_materiality.py` (7) | `green after W10: materiality / calibration / dismissal (#355)` | XFAIL |
+| **W10** | `tests/findings/test_cc_materiality.py` (7) | `green after W10: materiality / calibration / dismissal (#355)` | **PASS** — un-xfailed W10 recon |
 | **W11** | `tests/context/test_cc_search_explain.py` (8) + `tests/context/test_cc_instruction_sources.py` (6) | `green after W11: context search/explain/budgets (#356)` / `instruction sources + external files (#357)` | XFAIL |
 | **W12** | `tests/policy/test_cc_lifecycle.py` (7) + `tests/policy/test_cc_packs.py` (4) | `green after W12: policy lifecycle back half (#358)` / `policy packs (#359)` | XFAIL |
 | **W13** | `tests/memory/test_cc_validation.py` (9) | `green after W13: memory validation / org / effectiveness (#360)` | XFAIL |
@@ -250,6 +250,23 @@ W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` cle
 - W10–W13 still **XFAIL** (`strict=False`)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W10 not started
+
+## Recon notes (W10)
+
+- Un-xfailed every `green after W10: materiality / calibration / dismissal (#355)` marker in
+  `tests/findings/test_cc_materiality.py` (7 XPASS → real PASS).
+- Kept `test_dedup_and_causality_modules_remain_the_shipped_precision_half` (out-of-scope
+  current-state pin; #355 must not rebuild dedup/causality).
+- No W8 usage-error pin for materiality (none existed).
+- Left W11–W13 xfails in place.
+- W10.1 impl: `b2cb86c0`.
+
+## Acceptance (W10 recon)
+
+- W10 materiality pins **PASS** (no leftover xfail, no XPASS)
+- W11–W13 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W11 not started
 
 ## Contract matrix (W8)
 
