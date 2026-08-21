@@ -42,18 +42,35 @@ class XrepoReview:
     producer: LinkedRepoEntry | None
 
 
+def _is_safe_sibling_name(name: str) -> bool:
+    """Reject absolute paths, separators, and ``..`` in a manifest directory name."""
+    if not name or name in {".", ".."}:
+        return False
+    path = Path(name)
+    if path.is_absolute() or path.anchor:
+        return False
+    return all(
+        part not in {"", ".", ".."} and "/" not in part and "\\" not in part for part in path.parts
+    )
+
+
 def discover_linked_repo_roots(
     *,
     repo_root: Path,
     manifest: LinkedReposManifest,
 ) -> dict[str, Path]:
     """Resolve sibling checkouts next to the primary repo by linked-repo name."""
-    parent = repo_root.parent
+    parent = repo_root.parent.resolve()
     roots: dict[str, Path] = {}
     for entry in manifest.repos:
-        candidate = parent / entry.name
-        if candidate.is_dir():
-            roots[entry.name] = candidate
+        if not _is_safe_sibling_name(entry.name):
+            continue
+        candidate = (parent / entry.name).resolve()
+        if not candidate.is_dir():
+            continue
+        if not candidate.is_relative_to(parent) or candidate == parent:
+            continue
+        roots[entry.name] = candidate
     return roots
 
 
@@ -108,6 +125,15 @@ def _require_head_matches_pin(repo_root: Path, commit_sha: str) -> None:
         raise ValueError(msg)
     if head != pin and not head.startswith(pin) and not pin.startswith(head):
         msg = f"linked repo HEAD {head} does not match pinned {pin}"
+        raise ValueError(msg)
+    dirty = subprocess.run(
+        ["git", "-C", str(repo_root), "status", "--porcelain"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if dirty.returncode != 0 or dirty.stdout.strip():
+        msg = f"linked repo worktree is dirty at {repo_root}"
         raise ValueError(msg)
 
 

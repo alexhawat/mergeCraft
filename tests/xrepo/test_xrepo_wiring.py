@@ -238,3 +238,56 @@ def test_mismatched_consumer_head_is_not_scanned(tmp_path: Path) -> None:
     )
     review = review_linked_repos(repo_root=primary, producer="acme/api-contracts")
     assert all("web-client" not in finding.impact.repo for finding in review.findings)
+
+
+def test_manifest_name_cannot_escape_sibling_parent(tmp_path: Path) -> None:
+    """PR-controlled linked-repo names cannot traverse out of the sibling parent."""
+    from mergecraft.xrepo.linked_repos import parse_manifest
+    from mergecraft.xrepo.review import discover_linked_repo_roots
+
+    parent = tmp_path / "workspace"
+    primary = parent / "primary"
+    sibling = parent / "api-contracts"
+    outside = tmp_path / "outside"
+    primary.mkdir(parents=True)
+    sibling.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("nope\n", encoding="utf-8")
+    write_linked_repos_manifest(
+        primary,
+        repos=[{"owner": "acme", "name": "../outside", "commit": "abc111" * 5}],
+    )
+    manifest = parse_manifest(primary / ".mergecraft" / "linked-repos.yaml")
+    assert discover_linked_repo_roots(repo_root=primary, manifest=manifest) == {}
+    write_linked_repos_manifest(
+        primary,
+        repos=[{"owner": "acme", "name": str(outside), "commit": "abc111" * 5}],
+    )
+    manifest = parse_manifest(primary / ".mergecraft" / "linked-repos.yaml")
+    assert discover_linked_repo_roots(repo_root=primary, manifest=manifest) == {}
+
+
+def test_dirty_worktree_is_not_indexed_as_pinned_sha(tmp_path: Path) -> None:
+    """Matching HEAD with uncommitted dirt is not treated as the pinned commit."""
+    from mergecraft.xrepo.review import review_linked_repos
+
+    primary = tmp_path / "primary"
+    contracts = tmp_path / "api-contracts"
+    consumer = tmp_path / "web-client"
+    primary.mkdir()
+    pin = write_contract_fixture_repo(contracts)
+    consumer_commit = write_cross_repo_consumer_fixture(
+        contracts_root=contracts,
+        consumer_root=consumer,
+        contracts_commit=pin,
+    )
+    (contracts / "dirt.txt").write_text("uncommitted\n", encoding="utf-8")
+    write_linked_repos_manifest(
+        primary,
+        repos=[
+            {"owner": "acme", "name": "api-contracts", "commit": pin},
+            {"owner": "acme", "name": "web-client", "commit": consumer_commit},
+        ],
+    )
+    review = review_linked_repos(repo_root=primary, producer="acme/api-contracts")
+    assert review.findings == ()
