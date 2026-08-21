@@ -15,20 +15,11 @@ from tests.support.ce_batch import (
     SPECIALIST_ECONOMICS_MODULE,
     TRACING_EXPORTERS,
     USAGE_ATTRS,
-    green_after,
-    module_exists,
     require_callable,
     require_module,
     src_mentions,
 )
 from tests.support.dead_package_wiring import SRC_ROOT
-
-_W24 = green_after("W24", "specialist economics consume gen_ai.usage.* on llm.call (#370 / D11)")
-
-
-def test_specialist_economics_module_does_not_exist_yet() -> None:
-    """W21 current state — no specialist economics surface."""
-    assert module_exists(SPECIALIST_ECONOMICS_MODULE) is False
 
 
 def test_w24_does_not_edit_tracing_exporters() -> None:
@@ -53,7 +44,6 @@ def test_usage_attrs_already_exist_on_llm_call_path() -> None:
         assert attr in genai
 
 
-@_W24
 def test_unique_useful_findings_are_counted_per_specialist() -> None:
     """Happy: unique useful findings are tracked per specialist."""
     module = require_module(SPECIALIST_ECONOMICS_MODULE)
@@ -69,7 +59,6 @@ def test_unique_useful_findings_are_counted_per_specialist() -> None:
     assert count("missing", findings) == 0
 
 
-@_W24
 def test_agent_metrics_include_latency_cost_precision_recall() -> None:
     """Happy: per-agent metrics expose latency, cost, precision, and recall."""
     module = require_module(SPECIALIST_ECONOMICS_MODULE)
@@ -91,7 +80,6 @@ def test_agent_metrics_include_latency_cost_precision_recall() -> None:
         assert payload[key] is not None
 
 
-@_W24
 def test_economics_consumes_gen_ai_usage_attrs() -> None:
     """Happy: cost is derived from ``gen_ai.usage.*`` on ``llm.call`` spans (D11)."""
     module = require_module(SPECIALIST_ECONOMICS_MODULE)
@@ -107,7 +95,6 @@ def test_economics_consumes_gen_ai_usage_attrs() -> None:
     assert cost_of(spans) == pytest.approx(1.25)
 
 
-@_W24
 def test_zero_value_specialists_are_identified() -> None:
     """Happy: specialists that add cost without review value are named."""
     module = require_module(SPECIALIST_ECONOMICS_MODULE)
@@ -123,7 +110,6 @@ def test_zero_value_specialists_are_identified() -> None:
     assert "security" not in names
 
 
-@_W24
 def test_empty_metrics_list_yields_no_low_value_specialists() -> None:
     """Edge: empty input is an empty prune list, not an error."""
     module = require_module(SPECIALIST_ECONOMICS_MODULE)
@@ -131,7 +117,6 @@ def test_empty_metrics_list_yields_no_low_value_specialists() -> None:
     assert list(identify([])) == []
 
 
-@_W24
 def test_per_agent_circuit_breaker_opens_on_repeated_waste() -> None:
     """Error: a specialist circuit breaker opens after repeated zero-value runs."""
     module = require_module(SPECIALIST_ECONOMICS_MODULE)
@@ -146,7 +131,6 @@ def test_per_agent_circuit_breaker_opens_on_repeated_waste() -> None:
         breaker.guard()
 
 
-@_W24
 def test_per_agent_degradation_skips_low_value_specialist() -> None:
     """Happy: degradation skips a specialist that is open on the breaker."""
     module = require_module(SPECIALIST_ECONOMICS_MODULE)
@@ -156,7 +140,6 @@ def test_per_agent_degradation_skips_low_value_specialist() -> None:
     assert "security" not in set(skipped)
 
 
-@_W24
 def test_economics_does_not_import_tracing_exporters() -> None:
     """D11 — economics consumes attrs; it must not import exporters."""
     module = require_module(SPECIALIST_ECONOMICS_MODULE)

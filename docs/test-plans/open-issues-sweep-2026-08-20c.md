@@ -566,10 +566,10 @@ After each impl wave, recon **deletes** the matching W21 current-state pins and 
 |------|-------|---------------|--------|
 | **W22** | `tests/config/test_ce_schema.py` (10) | `green after W22: config schema version, migrations, deprecations (#368)` | PASS after W22 recon |
 | **W23** | `tests/cli/test_ce_profiles.py` (15 collected / 14 functions) | `green after W23: remaining profiles + risk-based select; additive CLI (#369 / D10)` | PASS after W23 recon |
-| **W24** | `tests/agents/test_ce_economics.py` (8) | `green after W24: specialist economics consume gen_ai.usage.* on llm.call (#370 / D11)` | XFAIL until W24 |
+| **W24** | `tests/agents/test_ce_economics.py` (8) | `green after W24: specialist economics consume gen_ai.usage.* on llm.call (#370 / D11)` | PASS after W24 recon |
 | **W25** | `tests/agents/test_ce_providers.py` (14 + 1 live skip) | `green after W25: provider health, cooldown, degradation, residency, routing eval (#371)` | XFAIL until W25 |
 
-Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error / unversioned rows after the matching impl wave): D10 root-callback pins; eight named profiles (W23); `profile recommend` registered (missing `--risk` is usage 2); token/cost/tool/latency budgets; `budget_exhaustion_outcome` never `passed`; CLI JSON + agent protocol versions (not negotiation); `gen_ai.usage.*` substrate; lens routing file; retry-policy classifier; no cooldown/residency in src; tracing exporters untouched.
+Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error / unversioned rows after the matching impl wave): D10 root-callback pins; eight named profiles (W23); `profile recommend` registered (missing `--risk` is usage 2); token/cost/tool/latency budgets; `budget_exhaustion_outcome` never `passed`; CLI JSON + agent protocol versions (not negotiation); `gen_ai.usage.*` substrate; lens routing file; retry-policy classifier; no cooldown/residency in src; tracing exporters untouched. (`test_specialist_economics_module_does_not_exist_yet` deleted W24 recon.)
 
 W21 run: **20 passed / 47 xfailed / 1 skipped (no live gate) / 0 XPASS**. `make lint` + `make typecheck` clean.
 
@@ -598,7 +598,7 @@ W21 run: **20 passed / 47 xfailed / 1 skipped (no live gate) / 0 XPASS**. `make 
 | CE369g | Risk select + CLI/policy override | unit | happy | `test_select_profile_from_risk_*`, `test_cli_profile_overrides_*`, `test_policy_profile_overrides_risk_selection` |
 | CE369h | Additive `profile_cmd` (D10) | functional | happy | `test_profile_cli_is_a_new_cmd_module`, `test_root_help_lists_profile`, `test_profile_recommend_*` |
 | CE369i | Profile budget exhaustion | unit | happy | `test_budget_exhaustion_is_partial_or_inconclusive_never_clean` |
-| CE370a | Economics module missing | unit | current | `test_specialist_economics_module_does_not_exist_yet` |
+| CE370a | Economics module missing | unit | current | deleted in W24 recon (`test_specialist_economics_module_does_not_exist_yet`) |
 | CE370b | D6/D11 exporters + usage substrate | unit | current | `test_w24_does_not_edit_tracing_exporters`, `test_usage_attrs_already_exist_on_llm_call_path` |
 | CE370c | Lens routing out of scope | unit | current | `test_lens_routing_remains_the_routing_surface` |
 | CE370d | Unique useful findings / metrics | unit | happy/edge | `test_unique_useful_findings_*`, `test_agent_metrics_*`, `test_empty_metrics_list_*` |
@@ -657,3 +657,18 @@ Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility
 - W24–W25 still **XFAIL** (`strict=False`)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W24 not started
+
+## Recon notes (W24)
+
+- Un-xfailed every `green after W24: specialist economics consume gen_ai.usage.* on llm.call (#370 / D11)` marker in `tests/agents/test_ce_economics.py` (8 XPASS → real PASS).
+- Deleted W21 current-state pin: `test_specialist_economics_module_does_not_exist_yet`.
+- Left W25 xfails in place. D6/D11 exporter and lens-routing pins kept.
+- W24 impl: `87ccff83`.
+
+## Acceptance (W24 recon)
+
+- W24 specialist-economics pins **PASS** (no leftover xfail, no XPASS)
+- W21 `#370` module-absent pin gone
+- W25 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W25 not started
