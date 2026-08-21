@@ -37,6 +37,7 @@ from mergecraft.cli import (
     tracing_cmd,
     tracing_logfire_cmd,
     watch_cmd,
+    xrepo_cmd,
 )
 from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
@@ -101,6 +102,7 @@ app.add_typer(learnings_cmd.app, name="learnings")
 app.add_typer(memory_cmd.app, name="memory")
 app.add_typer(policy_cmd.app, name="policy")
 app.add_typer(requirements_cmd.app, name="requirements")
+app.add_typer(xrepo_cmd.app, name="xrepo")
 app.add_typer(findings_cmd.app, name="findings")
 app.add_typer(eval_cmd.app, name="eval")
 # W8.4 — ``mergecraft config tracing`` + ``mergecraft traces <run-id>``.

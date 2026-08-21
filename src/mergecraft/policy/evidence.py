@@ -28,6 +28,7 @@ def _required_evidence_keys(rule: dict[str, Any]) -> list[str]:
 
 
 REQUIREMENTS_EVIDENCE_KEY = "requirements"
+XREPO_EVIDENCE_KEY = "xrepo"
 
 
 def requirements_evidence_required(rule: dict[str, Any]) -> bool:
@@ -38,6 +39,16 @@ def requirements_evidence_required(rule: dict[str, Any]) -> bool:
     (D14 / #352).
     """
     return REQUIREMENTS_EVIDENCE_KEY in _required_evidence_keys(rule)
+
+
+def xrepo_review_required(rule: dict[str, Any]) -> bool:
+    """Return whether policy requires cross-repo review for public-contract changes.
+
+    Missing xrepo evidence still flows through ``evaluate_rule_evidence`` as
+    ``inconclusive`` — ``decide_approval()`` remains the only approval gate
+    (D14 / #353).
+    """
+    return XREPO_EVIDENCE_KEY in _required_evidence_keys(rule)
 
 
 def evaluate_rule_evidence(
@@ -53,6 +64,8 @@ def evaluate_rule_evidence(
         reason = f"required evidence unavailable: {joined}"
         if requirements_evidence_required(rule) and REQUIREMENTS_EVIDENCE_KEY in missing:
             reason = f"{reason} (requirements evidence required)"
+        if xrepo_review_required(rule) and XREPO_EVIDENCE_KEY in missing:
+            reason = f"{reason} (cross-repo review required for public-contract changes)"
         return EvidenceOutcome(
             status="inconclusive",
             reason=reason,
@@ -67,7 +80,9 @@ def evaluate_rule_evidence(
 
 __all__ = [
     "REQUIREMENTS_EVIDENCE_KEY",
+    "XREPO_EVIDENCE_KEY",
     "EvidenceOutcome",
     "evaluate_rule_evidence",
     "requirements_evidence_required",
+    "xrepo_review_required",
 ]
