@@ -19,6 +19,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [REVIEW-DOCTRINE](REVIEW-DOCTRINE.md) | contributor | Review philosophy, lenses, grading, and verifier doctrine for maintainers. |
 | [TRACING](TRACING.md) | contributor | Tracing sinks, retention, and Logfire/OTLP wiring for operators. |
 | [action-reference](action-reference.md) | consumer | Complete action.yml input and output reference for the GitHub Action. |
+| [agent-loop](agent-loop.md) | consumer | Reference workflow for an external coding agent looping with mergecraft review --agent. |
 | [assets README](assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
 | [authentication](authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
 | [blast-radius](blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
