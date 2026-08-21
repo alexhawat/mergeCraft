@@ -9,14 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import pytest
 import yaml
 from tests.ci.workflow_support import REPO_ROOT, read_text
-
-_W102 = pytest.mark.xfail(
-    reason="green after W10.2: published eval methodology page (#384)",
-    strict=False,
-)
 
 _METHODOLOGY_PATH = "docs/eval-methodology.md"
 _EVAL_SCORE_TERMS = re.compile(r"\b(?:precision|recall|F1)\b", re.IGNORECASE)
@@ -57,14 +51,12 @@ def test_eval_methodology_is_not_readme() -> None:
     assert _METHODOLOGY_PATH.startswith("docs/")
 
 
-@_W102
 def test_eval_methodology_registered_in_manifest() -> None:
     """Happy: methodology is a manifest row (append-only, D17/D18)."""
     row = next((item for item in _pages() if item.get("path") == _METHODOLOGY_PATH), None)
     assert row is not None, f"docs/manifest.yaml missing {_METHODOLOGY_PATH}"
 
 
-@_W102
 def test_eval_methodology_page_exists_and_names_metrics() -> None:
     """Happy: the docs page describes the metric set without living on README."""
     text = read_text(_METHODOLOGY_PATH)
@@ -73,7 +65,6 @@ def test_eval_methodology_page_exists_and_names_metrics() -> None:
         assert term in lowered, f"{_METHODOLOGY_PATH} missing {term!r}"
 
 
-@_W102
 def test_eval_methodology_does_not_claim_superiority_without_numbers() -> None:
     """Error: do not claim superiority until benchmark results support it."""
     text = read_text(_METHODOLOGY_PATH)
@@ -89,7 +80,6 @@ def test_eval_methodology_does_not_claim_superiority_without_numbers() -> None:
         )
 
 
-@_W102
 def test_eval_methodology_does_not_steal_issue_140_publication() -> None:
     """#140 owns publishing precision/recall/F1; this page must not claim that job."""
     text = read_text(_METHODOLOGY_PATH).casefold()

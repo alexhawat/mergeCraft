@@ -9,11 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-_W102 = pytest.mark.xfail(
-    reason="green after W10.2: eval ablation harness (#384)",
-    strict=False,
-)
-
 _REQUIRED_DIMENSIONS = frozenset(
     {
         "multi_agent",
@@ -27,7 +22,6 @@ _REQUIRED_DIMENSIONS = frozenset(
 )
 
 
-@_W102
 def test_ablation_dimensions_cover_issue_384() -> None:
     """Happy: the harness names every required ablation dimension."""
     from mergecraft.evals.ablation import ABLATION_DIMENSIONS
@@ -37,7 +31,6 @@ def test_ablation_dimensions_cover_issue_384() -> None:
     assert not missing, f"ablation harness missing dimensions: {sorted(missing)}"
 
 
-@_W102
 def test_run_ablation_returns_per_dimension_delta() -> None:
     """Happy: running an ablation yields a per-dimension contribution report."""
     from mergecraft.evals.ablation import AblationConfig, run_ablation
@@ -48,7 +41,6 @@ def test_run_ablation_returns_per_dimension_delta() -> None:
     assert "verifier" in blob
 
 
-@_W102
 def test_run_ablation_unknown_dimension_raises() -> None:
     """Error: an unknown dimension raises ValueError naming ablation."""
     from mergecraft.evals.ablation import AblationConfig, run_ablation
@@ -57,7 +49,6 @@ def test_run_ablation_unknown_dimension_raises() -> None:
         run_ablation(AblationConfig(dimensions=("not-a-dimension",), baseline="single_agent"))
 
 
-@_W102
 def test_ablation_does_not_require_adversarial_corpus() -> None:
     """#384 out of scope: adversarial corpora are a separate issue."""
     from mergecraft.evals.ablation import ABLATION_DIMENSIONS
