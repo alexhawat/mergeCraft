@@ -175,6 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Evidence image uploads, issue comments, and PR label tools work on review-only runs again
 - Linked-repo contract breakage is included in ordinary PR checkout, not only `mergecraft xrepo explain`
+- Linked-repo checkout reads only operator-granted siblings, and skips a sibling whose HEAD is not the pinned SHA
 - Incoming GitHub and GitLab webhooks fail closed without a configured secret; reused delivery IDs are rejected for the lifetime of the process
 - Untrusted download and clone URLs are SSRF-checked, and binary downloads pin DNS to the validated addresses
 - `bandit` now uses built-in `--format json` instead of the optional SARIF extra, so auto-enabled Python security coverage still runs on plain Bandit

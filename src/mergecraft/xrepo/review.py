@@ -5,6 +5,7 @@ Output-only (D13): never writes into the reviewed tree.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,6 +93,24 @@ def _changed_from_index(*, repo: str, commit: str, index: ContractIndex) -> list
     ]
 
 
+def _require_head_matches_pin(repo_root: Path, commit_sha: str) -> None:
+    """Fail closed when the sibling checkout HEAD is not the pinned SHA."""
+    completed = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    head = completed.stdout.strip()
+    pin = commit_sha.strip()
+    if completed.returncode != 0 or not head:
+        msg = f"could not read HEAD in {repo_root}"
+        raise ValueError(msg)
+    if head != pin and not head.startswith(pin) and not pin.startswith(head):
+        msg = f"linked repo HEAD {head} does not match pinned {pin}"
+        raise ValueError(msg)
+
+
 def review_linked_repos(
     *,
     repo_root: Path,
@@ -126,6 +145,10 @@ def review_linked_repos(
     for entry in producers:
         root = roots.get(entry.name)
         if root is None:
+            continue
+        try:
+            _require_head_matches_pin(root, entry.commit)
+        except ValueError:
             continue
         cache_key = (entry.name, entry.commit)
         if cache_key not in index_cache:

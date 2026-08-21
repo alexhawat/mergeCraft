@@ -320,9 +320,15 @@ def checkout_pr_tool(ctx: ToolContext):
             logger.info("impact extraction soft-failed: {}", imp_err)
 
         try:
-            from mergecraft.review.linked_repos import attach_linked_repo_review
+            from mergecraft.review.linked_repos import (
+                attach_linked_repo_review,
+                operator_authorized_linked_repos,
+            )
 
-            linked = attach_linked_repo_review(Path(cwd))
+            linked = attach_linked_repo_review(
+                Path(cwd),
+                authorized_repos=operator_authorized_linked_repos(),
+            )
             if linked is not None:
                 result.update(linked)
         except Exception as xrepo_err:

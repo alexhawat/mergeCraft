@@ -148,3 +148,66 @@ def test_multi_service_fixture_reports_producer_consumer_breakage(tmp_path: Path
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, output
     assert "web-client" in output or "consumer" in output
     assert "openapi" in output or "contract" in output or "break" in output
+
+
+def test_pr_manifest_cannot_authorize_an_ungranted_sibling(tmp_path: Path) -> None:
+    """D9 — checkout grant is the operator set, not names from the PR manifest."""
+    from mergecraft.review.linked_repos import attach_linked_repo_review
+
+    primary = tmp_path / "primary"
+    secrets = tmp_path / "secrets-store"
+    contracts = tmp_path / "api-contracts"
+    primary.mkdir()
+    secrets.mkdir()
+    (secrets / "secret.txt").write_text("classified\n", encoding="utf-8")
+    git_init_repo(secrets)
+    secret_commit = git_commit_all(secrets)
+    contracts_commit = write_contract_fixture_repo(contracts)
+    write_linked_repos_manifest(
+        primary,
+        repos=[
+            {"owner": "acme", "name": "api-contracts", "commit": contracts_commit},
+            {"owner": "acme", "name": "secrets-store", "commit": secret_commit},
+        ],
+    )
+    denied = attach_linked_repo_review(primary)
+    assert denied is not None
+    assert denied["linkedRepoFindings"] == []
+    granted = attach_linked_repo_review(primary, authorized_repos=frozenset({"api-contracts"}))
+    assert granted is not None
+    joined = " ".join(
+        f"{row['consumer']} {row['producer']}" for row in granted["linkedRepoFindings"]
+    )
+    assert "secrets-store" not in joined
+
+
+def test_mismatched_head_is_not_reported_as_pinned_sha(tmp_path: Path) -> None:
+    """Pinned SHA evidence is omitted when the sibling checkout HEAD differs."""
+    from mergecraft.xrepo.review import review_linked_repos
+
+    primary = tmp_path / "primary"
+    contracts = tmp_path / "api-contracts"
+    consumer = tmp_path / "web-client"
+    primary.mkdir()
+    pin = write_contract_fixture_repo(contracts)
+    (contracts / "openapi.yaml").write_text(
+        "openapi: 3.0.0\ninfo:\n  title: Demo API\n  version: 2.0.0\n"
+        "paths:\n  /accounts:\n    get:\n      operationId: listAccounts\n"
+        "      responses:\n        '200':\n          description: ok\n",
+        encoding="utf-8",
+    )
+    git_commit_all(contracts)
+    consumer_commit = write_cross_repo_consumer_fixture(
+        contracts_root=contracts,
+        consumer_root=consumer,
+        contracts_commit=pin,
+    )
+    write_linked_repos_manifest(
+        primary,
+        repos=[
+            {"owner": "acme", "name": "api-contracts", "commit": pin},
+            {"owner": "acme", "name": "web-client", "commit": consumer_commit},
+        ],
+    )
+    review = review_linked_repos(repo_root=primary, producer="acme/api-contracts")
+    assert all(finding.impact.changed_contract.commit != pin for finding in review.findings)
