@@ -648,6 +648,7 @@ Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility
 - Replaced `test_profile_recommend_is_currently_a_usage_error` with `test_profile_recommend_is_registered_and_requires_risk` (help succeeds; missing `--risk` stays usage 2).
 - Left W24–W25 xfails in place. D8/D10 pins kept.
 - W23 impl: `ead3cb2b`.
+- W23 recon: `802f3d23`.
 
 ## Acceptance (W23 recon)
 
