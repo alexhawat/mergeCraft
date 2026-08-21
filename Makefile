@@ -15,10 +15,14 @@ PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
-	examples example-workflows-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
-	bench-detect \
+	examples example-workflows-check docs docs-check llms llms-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
+	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check
+
+PIPELINE_D2 := docs/diagrams/pipeline.d2
+PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
+PIPELINE_DARK := assets/diagrams/pipeline-dark.svg
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -140,17 +144,48 @@ examples: ## Render example workflow YAML from templates
 example-workflows-check: ## Fail when committed example workflows drift from templates
 	$(UV) run python scripts/render_example_workflows.py --check
 
-reference-docs: ## Regenerate the README action + CLI reference tables
-	$(UV) run python scripts/gen_reference_docs.py
+docs: ## Regenerate generated doc pages (CLI, action ref, docs index, llms-full)
+	$(UV) run python scripts/gen_docs.py
 
-reference-docs-check: ## Fail when README reference tables drift from action.yml / the CLI
-	$(UV) run python scripts/gen_reference_docs.py --check
+docs-check: llms-check diagrams-check ## Fail when generated docs drift
+	$(UV) run python scripts/gen_docs.py --check
 
-ci-static: lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check reference-docs-check ## Static/build tier
+llms: ## Regenerate llms-full.txt concatenation
+	$(UV) run python scripts/gen_llms_full.py
+
+llms-check: ## Fail when llms-full.txt drifts
+	$(UV) run python scripts/gen_llms_full.py --check
+
+diagrams: ## Regenerate architecture SVGs from D2 source (requires d2 on PATH)
+	@command -v d2 >/dev/null 2>&1 || { echo "d2 not found — install from https://d2lang.com" >&2; exit 1; }
+	d2 --theme 0 $(PIPELINE_D2) $(PIPELINE_LIGHT)
+	d2 --theme 200 $(PIPELINE_D2) $(PIPELINE_DARK)
+
+diagrams-check: ## Assert committed pipeline SVGs exist and README references them
+	@test -s $(PIPELINE_D2) || (echo "missing $(PIPELINE_D2)" >&2; exit 1)
+	@test -s $(PIPELINE_LIGHT) || (echo "missing $(PIPELINE_LIGHT)" >&2; exit 1)
+	@test -s $(PIPELINE_DARK) || (echo "missing $(PIPELINE_DARK)" >&2; exit 1)
+	@grep -q 'assets/diagrams/pipeline-light.svg' README.md
+	@grep -q 'assets/diagrams/pipeline-dark.svg' README.md
+	@if [ -n "$$MERGECRAFT_REQUIRE_D2" ]; then \
+		command -v d2 >/dev/null 2>&1 || { echo "d2 not found — install from https://d2lang.com" >&2; exit 1; }; \
+		tmp=$$(mktemp -d); \
+		trap 'rm -rf "$$tmp"' EXIT; \
+		d2 --theme 0 $(PIPELINE_D2) "$$tmp/pipeline-light.svg"; \
+		d2 --theme 200 $(PIPELINE_D2) "$$tmp/pipeline-dark.svg"; \
+		cmp -s "$$tmp/pipeline-light.svg" $(PIPELINE_LIGHT) || { echo "$(PIPELINE_LIGHT) drifted from $(PIPELINE_D2) (run: make diagrams)" >&2; exit 1; }; \
+		cmp -s "$$tmp/pipeline-dark.svg" $(PIPELINE_DARK) || { echo "$(PIPELINE_DARK) drifted from $(PIPELINE_D2) (run: make diagrams)" >&2; exit 1; }; \
+	fi
+
+reference-docs: docs ## Regenerate the README action + CLI reference tables (alias)
+
+reference-docs-check: docs-check ## Fail when README reference tables drift (alias)
+
+ci-static: lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check docs-check ## Static/build tier
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check reference-docs-check security coverage-gate
+CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check docs-check security coverage-gate
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)

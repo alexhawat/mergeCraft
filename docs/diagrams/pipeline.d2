@@ -1,0 +1,40 @@
+# mergeCraft review pipeline — source for assets/diagrams/pipeline-{light,dark}.svg
+# Regenerate: make diagrams (requires d2 on PATH; see assets/diagrams/README.md)
+
+direction: right
+
+pr_event: PR event {
+  style.fill: "#2a7fc6"
+  style.font-color: "#fbf9f6"
+}
+
+trust_tier: Trust tier {
+  style.stroke: "#2a7fc6"
+}
+
+analyzers: Analyzers {
+  style.stroke: "#2a7fc6"
+}
+
+review_agent: Review agent {
+  style.stroke: "#2a7fc6"
+}
+
+verifier: Verifier {
+  style.stroke: "#ff3b3b"
+  style.font-color: "#ff3b3b"
+}
+
+typed_findings: Typed findings {
+  style.stroke: "#2a7fc6"
+  style.bold: true
+}
+
+approval: Approval status
+comments: Inline comments
+sarif: SARIF (opt-in)
+
+pr_event -> trust_tier -> analyzers -> review_agent -> verifier -> typed_findings
+typed_findings -> approval
+typed_findings -> comments
+typed_findings -> sarif

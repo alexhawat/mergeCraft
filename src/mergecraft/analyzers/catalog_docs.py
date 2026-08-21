@@ -303,16 +303,16 @@ def _related_providers_lines() -> list[str]:
         "",
         "> **Provider configuration (catalog slugs, credential detection, "
         "`mergecraft auth <provider>`) is documented in "
-        "[the README → Authentication](../README.md#authentication).** "
+        "[Authentication](../docs/authentication.md).** "
         "This page is the *analyzer* catalog — the rows below are "
         "deterministic, manifest-driven tools (`actionlint`, `zizmor`, "
         "`ShellCheck`, `Hadolint`, …) the reviewer runs mechanically. The "
         "Nous Research / DeepSeek V4 Flash path (provider id `nous`, catalog "
         "slug `nous/deepseek/deepseek-v4-flash`) is a *provider*, not an "
         "analyzer, and lives in the README's "
-        "[Authentication table](../README.md#authentication) alongside "
+        "[Authentication table](../docs/authentication.md) alongside "
         "Anthropic, OpenAI, Google, and Cursor. Set up its secret with "
-        "[`mergecraft auth nous`](../README.md#authentication); see "
+        "[`mergecraft auth nous`](../docs/authentication.md); see "
         "[issue #57](https://github.com/alexhawat/mergeCraft/issues/57) for "
         "the rationale.",
     ]

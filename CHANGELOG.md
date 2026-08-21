@@ -7,8 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Landing README redesigned as a REACH-style product page (outline B): problem/solution
+  cards, D2 architecture hero, numbered install, and jump-nav. Long-form install,
+  authentication, and workflow essays moved to `docs/install.md`,
+  `docs/authentication.md`, and `docs/workflows.md`.
+
 ### Added
 
+- Agent install surfaces: `AGENTS.md`, consumer skill (`skills/mergecraft/SKILL.md`),
+  Claude plugin manifests (`.claude-plugin/`), slash commands (`commands/`),
+  GitHub Copilot instructions (`.github/copilot-instructions.md`), curated
+  `llms.txt`, and a **For AI coding agents** section on the landing README.
+- `llms-full.txt` generated concatenation plus docs pin/link gate (`make llms-check`,
+  folded into `make docs-check`).
+- Added: generated CLI and Action reference pages (`docs/cli.md`,
+  `docs/action-reference.md`) plus a docs manifest; `make docs-check`
+  replaces landing-README table splices.
 - Python 3.11 install floor (#343, option A): `requires-python` lowered to `>=3.11`; mypy/Pyright target 3.11; CI matrix runs on 3.11 and 3.14. README and `docs/distribution.md` install copy use stock `uv` from git (PyPI not published); Docker remains for pinned runtimes. Parenthesized the last PEP 758 site in `analyzers/detect.py` for the 3.11 compile gate; `harbor` extra gated to Python >=3.12.
 - Python 3.11 floor ADR (#343, option A): `docs/dev/python-version-floor.md` records parenthesize-now / binary-later (D8). PEP 758 multi-type `except` handlers under `src/mergecraft/` are parenthesized (44 sites / 27 files).
 - JS/TS lint: `biome` and `eslint` declare `supports_fix: true`; the JS-lint exclusive group (`js-lint`) now resolves the winner by config-file presence alone — `biome.json`/`biome.jsonc` beats any eslint config; eslint config beats any oxlint config — package-script and dependency signals are only consulted when no config file is found (D17, #310)

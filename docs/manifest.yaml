@@ -1,0 +1,194 @@
+# Consumer and contributor documentation inventory for mergeCraft.
+# Per-wave working trees (docs/test-plans/, docs/artifacts/) are intentionally excluded.
+pages:
+  - path: README.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Product landing page — install, features, and pointers to generated reference pages.
+
+  - path: AGENTS.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Cross-vendor agent guidance — consumer setup and mergeCraft development rules.
+
+  - path: skills/mergecraft/SKILL.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Agent-Skills consumer skill — install checklist, CLI reference, troubleshooting.
+
+  - path: llms.txt
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Curated documentation map for LLM agents (llms.txt convention).
+
+  - path: llms-full.txt
+    audience: consumer
+    template: generated-ref
+    generator: llms-full
+    purpose: Concatenated LLM bundle of core consumer and contributor docs (generated).
+
+  - path: docs/README.md
+    audience: contributor
+    template: contributor
+    generator: index
+    purpose: Generated map of every manifest row with audience and purpose.
+
+  - path: docs/cli.md
+    audience: consumer
+    template: generated-ref
+    generator: reference-docs
+    purpose: Full mergecraft CLI command reference derived from the live Typer app.
+
+  - path: docs/action-reference.md
+    audience: consumer
+    template: generated-ref
+    generator: reference-docs
+    purpose: Complete action.yml input and output reference for the GitHub Action.
+
+  - path: docs/ANALYZERS.md
+    audience: consumer
+    template: generated-ref
+    generator: catalog
+    purpose: Shipped analyzer catalog — rows generated from manifests via make catalog-check.
+
+  - path: docs/EXIT-CODES.md
+    audience: consumer
+    template: generated-ref
+    generator: null
+    purpose: Named CLI exit codes and when mergecraft returns each status.
+
+  - path: docs/distribution.md
+    audience: consumer
+    template: generated-ref
+    generator: null
+    purpose: How mergeCraft is packaged — PyPI, Docker, and git install paths.
+
+  - path: docs/blast-radius.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Blast-radius lane semantics in the merge evidence packet.
+
+  - path: docs/compatibility-matrix.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Harness and provider compatibility notes for maintainers.
+
+  - path: docs/config-failure-policy.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: setup_failure_policy and setup_timeout runtime behaviour (S1 / D10).
+
+  - path: docs/eval-bank.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Eval bank layout, promotion, and CI gate semantics.
+
+  - path: docs/evidence-packet.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Merge evidence packet schema emitted as the evidence_packet action output.
+
+  - path: docs/findings-carryover.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Findings carryover and export CLI behaviour for unresolved review items.
+
+  - path: docs/supply-chain.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Supply-chain and SBOM posture for releases and the Action image.
+
+  - path: docs/REVIEW-DOCTRINE.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Review philosophy, lenses, grading, and verifier doctrine for maintainers.
+
+  - path: docs/TRACING.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Tracing sinks, retention, and Logfire/OTLP wiring for operators.
+
+  - path: docs/CONTRIBUTING-ANALYZERS.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: How to add or change a catalog analyzer and keep make catalog-check green.
+
+  - path: docs/dev/python-version-floor.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: ADR for the Python 3.11 install floor and PEP 758 parenthesize-now strategy.
+
+  - path: docs/dev/provider-harness.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Provider harness notes for OpenCode, Codex, and OpenAI-compatible gateways.
+
+  - path: docs/assets/README.md
+    audience: satellite
+    template: satellite
+    generator: null
+    purpose: Demo capture path and rules — omit broken GIF/MP4 until a real asset exists.
+
+  - path: docs/install.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback.
+
+  - path: docs/authentication.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Provider auth, custom OpenAI-compatible gateways, and model fallback chains.
+
+  - path: docs/workflows.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Workflow examples 2–6, trust tiers, [security model](workflows.md#security-model), and pull_request_target placement gotchas.
+
+  - path: assets/diagrams/README.md
+    audience: satellite
+    template: satellite
+    generator: null
+    purpose: Architecture diagram SVG inventory and D2 regeneration commands.
+
+  - path: assets/brand/README.md
+    audience: satellite
+    template: satellite
+    generator: null
+    purpose: Brand SVG inventory and regeneration commands for logo assets.
+
+  - path: CONTRIBUTING.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Contributor setup, make targets, and PR expectations for mergeCraft itself.
+
+  - path: REVIEW-CHECKS.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Enumerated review checks mergeCraft applies on pull requests.
+
+  - path: evals/README.md
+    audience: satellite
+    template: satellite
+    generator: null
+    purpose: Eval bank vs ReviewBench — what each mechanism measures and how to run gates.

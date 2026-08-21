@@ -202,7 +202,11 @@ def test_published_metrics_are_not_placeholders() -> None:
     """Refuse fabricated TBD / 0.00 / lorem tables next to the eval claim."""
     text = read_text("README.md")
     match = _EVAL_HEADING.search(text)
-    assert match is not None
+    if match is None:
+        # RD4: landing README omits eval benchmark numbers; guard the satellite doc.
+        text = read_text("evals/README.md")
+        match = re.search(r"benchmark replay", text, re.IGNORECASE)
+    assert match is not None, "no eval benchmark section in README or evals/README.md"
     window = text[max(0, match.start() - 400) : match.end() + 1600]
     assert not re.search(r"\bTBD\b|\blorem\b|TODO: publish", window, re.IGNORECASE)
 
