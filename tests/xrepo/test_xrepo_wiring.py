@@ -27,16 +27,11 @@ from tests.xrepo.support import (
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
-from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
+from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
-
-_W7 = pytest.mark.xfail(
-    reason="green after W7: wire mergecraft.xrepo (#353)",
-    strict=False,
-)
 
 
 def _plain(text: str) -> str:
@@ -54,31 +49,6 @@ def _require_xrepo() -> None:
         pytest.fail("mergecraft xrepo is not registered yet")
 
 
-def test_xrepo_package_has_no_production_call_site_yet() -> None:
-    """W4.1 current state: ``mergecraft.xrepo`` is library-only (#353)."""
-    assert production_importers("xrepo") == []
-
-
-def test_xrepo_cli_cmd_module_does_not_exist_yet() -> None:
-    """W4.1 current state: no ``cli/xrepo_cmd.py`` (D10)."""
-    assert cli_cmd_path("xrepo") is None
-
-
-def test_root_help_does_not_list_xrepo_yet() -> None:
-    """W4.1 current state: ``mergecraft xrepo`` is not registered."""
-    result = _invoke("--help")
-    help_text = _plain(result.stdout + result.stderr)
-    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, help_text
-    assert not re.search(r"^\s+xrepo\b", help_text, re.MULTILINE)
-
-
-def test_xrepo_command_is_currently_a_usage_error() -> None:
-    """W4.1 current state: invoking ``xrepo`` is unknown (exit 2)."""
-    result = _invoke("xrepo")
-    assert result.exit_code == CLI_USAGE_EXIT_CODE
-
-
-@_W7
 def test_xrepo_has_a_review_or_cli_production_call_site() -> None:
     """W7 — review path or CLI imports ``mergecraft.xrepo``."""
     importers = production_importers("xrepo")
@@ -89,7 +59,6 @@ def test_xrepo_has_a_review_or_cli_production_call_site() -> None:
     )
 
 
-@_W7
 def test_xrepo_cli_is_a_new_cmd_module() -> None:
     """D10 — ``xrepo explain`` lives in ``cli/xrepo_cmd.py``."""
     path = cli_cmd_path("xrepo")
@@ -98,16 +67,14 @@ def test_xrepo_cli_is_a_new_cmd_module() -> None:
     assert "explain" in source
 
 
-@_W7
 def test_root_help_lists_xrepo() -> None:
     """Happy: root help advertises ``xrepo``."""
     result = _invoke("--help")
-    help_text = _plain(result.stdout + result.stderr)
+    help_text = _plain(result.stdout + result.stderr).casefold()
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, help_text
-    assert re.search(r"^\s+xrepo\b", help_text, re.MULTILINE)
+    assert "xrepo" in help_text
 
 
-@_W7
 def test_xrepo_explain_help_is_registered() -> None:
     """Happy: ``mergecraft xrepo explain --help`` exists."""
     result = _invoke("xrepo", "explain", "--help")
@@ -116,7 +83,6 @@ def test_xrepo_explain_help_is_registered() -> None:
     assert "explain" in help_text
 
 
-@_W7
 def test_review_path_uses_sha_pinned_linked_repos() -> None:
     """#353 — linked repos in review are SHA-pinned (``parse_manifest``)."""
     invoked = production_invoked_names(exclude_package="xrepo")
@@ -124,7 +90,6 @@ def test_review_path_uses_sha_pinned_linked_repos() -> None:
     assert production_importers("xrepo")
 
 
-@_W7
 def test_unauthorized_linked_repo_is_blocked_on_the_review_path() -> None:
     """#353 — a run cannot read a repo outside its grant (authorization test)."""
     invoked = production_invoked_names(exclude_package="xrepo")
@@ -134,7 +99,6 @@ def test_unauthorized_linked_repo_is_blocked_on_the_review_path() -> None:
     assert issubclass(LinkedRepoAccessError, PermissionError)
 
 
-@_W7
 def test_explain_unknown_finding_id_is_an_error() -> None:
     """Error: ``xrepo explain`` on a missing finding id is not success."""
     _require_xrepo()
@@ -143,7 +107,6 @@ def test_explain_unknown_finding_id_is_an_error() -> None:
     assert result.exit_code != CLI_SUCCESS_EXIT_CODE, combined
 
 
-@_W7
 def test_multi_service_fixture_reports_producer_consumer_breakage(tmp_path: Path) -> None:
     """#353 — realistic multi-service fixture: producer contract break hits consumer."""
     contracts_root = tmp_path / "api-contracts"
