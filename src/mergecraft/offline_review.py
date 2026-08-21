@@ -549,12 +549,7 @@ class _OfflineDiffReviewRun:
             on_finding=self.on_finding,
         )
 
-    async def publish(self, review_out: object) -> OfflineReviewResult:
-        if not isinstance(review_out, OfflineReviewResult):
-            return _offline_failure(
-                error="review engine returned no result",
-                outcome=RunOutcome.infra_error,
-            )
+    async def publish(self, review_out: OfflineReviewResult) -> OfflineReviewResult:
         if review_out.empty_diff or self.dry_run:
             return review_out
         store_key = None if self.from_cache else self.cache_key

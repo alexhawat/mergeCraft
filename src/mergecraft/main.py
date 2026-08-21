@@ -205,14 +205,8 @@ class RunContext:
     async def review(self) -> AgentResult | SkipAgentReview:
         return await _run_review_after_analyze(self)
 
-    async def publish(self, review_out: object) -> MainResult:
-        if isinstance(review_out, (AgentResult, SkipAgentReview)):
-            return await _finalize(self, review_out)
-        return MainResult(
-            success=False,
-            error="review engine returned no result",
-            outcome=RunOutcome.infra_error,
-        )
+    async def publish(self, review_out: AgentResult | SkipAgentReview) -> MainResult:
+        return await _finalize(self, review_out)
 
 
 @dataclass(frozen=True, slots=True)
