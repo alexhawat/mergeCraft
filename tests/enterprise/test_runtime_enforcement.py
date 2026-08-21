@@ -201,3 +201,67 @@ def test_providers_catalog_us_model_passes_us_residency() -> None:
     bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("us-east-1",)))
     settings = RepoSettings.model_validate({"models": ["openai/gpt"]})
     assert effective_model_chain(settings) == ["openai/gpt"]
+
+
+def test_undeclared_gateway_residency_fails_closed() -> None:
+    """TokenHub / MiniMax / OpenCode have no region and are refused on a US allow-list."""
+    from mergecraft.models import lookup_model_data_residency
+    from mergecraft.utils.agent_resolve import effective_model_chain
+
+    assert lookup_model_data_residency("tokenhub/hy3") is None
+    assert lookup_model_data_residency("minimax/MiniMax-M3") is None
+    assert lookup_model_data_residency("deepseek/deepseek-pro") == "cn-north-1"
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("us-east-1",)))
+    with pytest.raises(PermissionError, match=r"allowedRegions|residency"):
+        effective_model_chain(RepoSettings.model_validate({"models": ["tokenhub/hy3"]}))
+    with pytest.raises(PermissionError, match=r"allowedRegions|residency"):
+        effective_model_chain(RepoSettings.model_validate({"models": ["deepseek/deepseek-pro"]}))
+
+
+def test_invalid_telemetry_mode_fails_at_config_load() -> None:
+    """A telemetry typo names enterprise.telemetry instead of crashing later."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match=r"enterprise\.telemetry"):
+        EnterpriseSettings.model_validate({"telemetry": "maybe"})
+
+
+def test_enterprise_retention_purges_expired_jsonl_on_write(
+    tmp_path: Path,
+) -> None:
+    """enterprise.retentionDays deletes expired JSONL files on the write path."""
+    from mergecraft.tracing.event import TraceEvent
+    from mergecraft.tracing.sinks import sink_factory
+
+    bind_enterprise_from_settings(EnterpriseSettings(retention_days=1))
+    expired = tmp_path / "2020-01-01.jsonl"
+    expired.write_text("{}\n", encoding="utf-8")
+    expired.touch()
+    import os
+    import time
+
+    old = time.time() - 3 * 86_400
+    os.utime(expired, (old, old))
+    settings = RepoSettings.model_validate(
+        {
+            "tracing": {
+                "enabled": True,
+                "sinks": [{"type": "jsonl_file", "path": str(tmp_path)}],
+            }
+        }
+    )
+    sink = sink_factory(settings.tracing)
+    sink.write(
+        TraceEvent(
+            kind="mergecraft.run",
+            span_id="span-retention",
+            session_id="sess",
+            turn_id="turn",
+            trace_id="trace",
+            tier="trusted",
+            ts_start_ns=1,
+            ts_end_ns=2,
+            status="ok",
+        )
+    )
+    assert not expired.exists()
