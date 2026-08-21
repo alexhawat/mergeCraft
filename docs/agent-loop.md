@@ -38,3 +38,7 @@ Named exits the loop should handle: `0` (pass), `10` (findings), `11`
 
 See also: [`docs/cli.md`](cli.md) (`review --agent`),
 [`docs/workflows.md`](workflows.md) (local review examples).
+
+Harness packages for Codex, Gemini CLI, and OpenCode are not authored here.
+Once README v2 RV3 lands, `skills/harnesses.yaml` is the authority this page
+should cite for install paths. Until then, create nothing under `skills/`.
