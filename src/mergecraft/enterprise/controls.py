@@ -35,7 +35,7 @@ class EnterpriseSettings(BaseModel):
     no_proxy: str = Field(default="", alias="noProxy")
     ca_file: str | None = Field(default=None, alias="caFile")
     allowed_regions: tuple[str, ...] = Field(default=(), alias="allowedRegions")
-    retention_days: int | None = Field(default=None, alias="retentionDays")
+    retention_days: int | None = Field(default=None, alias="retentionDays", gt=0)
 
     @field_validator("telemetry", mode="before")
     @classmethod

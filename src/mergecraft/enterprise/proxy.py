@@ -47,9 +47,11 @@ def _validate_proxy_url(url: str) -> None:
 def apply_enterprise_proxy(config: ProxyConfig) -> None:
     """Apply *config* to the current process environment.
 
-    Sets ``HTTPS_PROXY`` and ``HTTP_PROXY`` to the same URL. When
-    ``no_proxy`` is non-empty, sets ``NO_PROXY``; when it is empty, clears
-    a previously exported ``NO_PROXY`` so stale bypass lists cannot linger.
+    Sets ``HTTPS_PROXY``/``HTTP_PROXY`` and the lowercase ``https_proxy``/
+    ``http_proxy`` forms to the same URL so POSIX urllib clients cannot keep
+    a stale lowercase proxy. When ``no_proxy`` is non-empty, sets ``NO_PROXY``
+    and ``no_proxy``; when it is empty, clears both so stale bypass lists
+    cannot linger.
 
     Args:
         config: The proxy configuration to apply.
@@ -60,8 +62,11 @@ def apply_enterprise_proxy(config: ProxyConfig) -> None:
     _validate_proxy_url(config.https_proxy)
     os.environ["HTTPS_PROXY"] = config.https_proxy
     os.environ["HTTP_PROXY"] = config.https_proxy
+    os.environ["https_proxy"] = config.https_proxy
+    os.environ["http_proxy"] = config.https_proxy
     if config.no_proxy.strip():
         os.environ["NO_PROXY"] = config.no_proxy
+        os.environ["no_proxy"] = config.no_proxy
     else:
         os.environ.pop("NO_PROXY", None)
         os.environ.pop("no_proxy", None)

@@ -57,7 +57,10 @@ def test_apply_enterprise_proxy_sets_http_and_clears_stale_no_proxy(
     apply_enterprise_proxy(ProxyConfig(https_proxy="http://proxy.example:8080", no_proxy=""))
     assert os.environ.get("HTTPS_PROXY") == "http://proxy.example:8080"
     assert os.environ.get("HTTP_PROXY") == "http://proxy.example:8080"
+    assert os.environ.get("https_proxy") == "http://proxy.example:8080"
+    assert os.environ.get("http_proxy") == "http://proxy.example:8080"
     assert "NO_PROXY" not in os.environ
+    assert "no_proxy" not in os.environ
 
 
 def test_bind_custom_ca_exports_ssl_cert_file(
@@ -191,6 +194,31 @@ def test_in_region_vertex_model_passes_residency() -> None:
     enforce_routed_model_residency("vertex/byok")
 
 
+def test_resolve_model_vertex_byok_uses_catalog_slug_for_residency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Residency is checked on vertex/byok, not the raw VERTEX_MODEL_ID."""
+    from mergecraft.utils.agent_resolve import resolve_model
+
+    monkeypatch.setenv("VERTEX_MODEL_ID", "gemini-2.5-pro-001")
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("eu-west-1",)))
+    assert resolve_model(slug="vertex/byok", respect_env_override=False) == "gemini-2.5-pro-001"
+
+
+def test_resolve_model_bedrock_byok_uses_catalog_slug_for_residency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Residency is checked on bedrock/byok, not the raw BEDROCK_MODEL_ID."""
+    from mergecraft.utils.agent_resolve import resolve_model
+
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4")
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("us-east-1",)))
+    assert (
+        resolve_model(slug="bedrock/byok", respect_env_override=False)
+        == "anthropic.claude-sonnet-4"
+    )
+
+
 def test_providers_catalog_us_model_passes_us_residency() -> None:
     """Support-matrix PROVIDERS slugs (not only the 4 routing rows) carry us-east-1."""
     from mergecraft.models import lookup_model_data_residency
@@ -224,6 +252,16 @@ def test_invalid_telemetry_mode_fails_at_config_load() -> None:
 
     with pytest.raises(ValidationError, match=r"enterprise\.telemetry"):
         EnterpriseSettings.model_validate({"telemetry": "maybe"})
+
+
+def test_non_positive_retention_days_fail_at_config_load() -> None:
+    """Zero or negative retentionDays must not parse (would purge today's JSONL)."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        EnterpriseSettings.model_validate({"retentionDays": 0})
+    with pytest.raises(ValidationError):
+        RepoSettings.model_validate({"tracing": {"retentionDays": 0}})
 
 
 def test_enterprise_retention_purges_expired_jsonl_on_write(

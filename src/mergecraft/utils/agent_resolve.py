@@ -1121,22 +1121,20 @@ def resolve_model(*, slug: str | None = None, respect_env_override: bool = True)
     if respect_env_override:
         env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
         if env_model:
-            resolved_env = _resolve_slug(env_model) or env_model
-            _enforce_resolved_model_residency(resolved_env)
-            return resolved_env
+            _enforce_resolved_model_residency(env_model)
+            return _resolve_slug(env_model) or env_model
 
     cleaned = (slug or "").strip()
     if cleaned:
+        _enforce_resolved_model_residency(cleaned)
         resolved = _resolve_slug(cleaned)
         if resolved:
-            _enforce_resolved_model_residency(resolved)
             return resolved
         if "/" in cleaned:
             logger.info(
                 '» "{}" is not a curated alias — passing through as a raw model specifier',
                 cleaned,
             )
-            _enforce_resolved_model_residency(cleaned)
             return cleaned
         logger.warning('» unknown model slug "{}" — agent will auto-select', cleaned)
     return None

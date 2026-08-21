@@ -24,6 +24,8 @@ def test_apply_enterprise_proxy_sets_https_proxy(monkeypatch: pytest.MonkeyPatch
     exported = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
     assert exported == _EXAMPLE_PROXY
     assert os.environ.get("HTTP_PROXY") == _EXAMPLE_PROXY
+    assert os.environ.get("https_proxy") == _EXAMPLE_PROXY
+    assert os.environ.get("http_proxy") == _EXAMPLE_PROXY
 
 
 def test_apply_enterprise_proxy_honours_no_proxy(monkeypatch: pytest.MonkeyPatch) -> None:

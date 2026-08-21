@@ -329,7 +329,7 @@ class TracingSettings(BaseModel):
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
     enabled: bool | None = None
-    retention_days: int = Field(default=30, alias="retentionDays")
+    retention_days: int = Field(default=30, alias="retentionDays", gt=0)
     sinks: list[TraceSinkEntry] = Field(default_factory=list)
     redaction: bool = True
     content: str = Field(default="redacted", exclude_if=lambda value: value == "redacted")
