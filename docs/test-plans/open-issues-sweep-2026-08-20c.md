@@ -372,3 +372,79 @@ W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` cle
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W9 not started
 - W8 commit: `ba8f6f4d`
+
+---
+
+# Batch CD — hardening (#361–#367)
+
+Authoring wave: **W14** (Batch CD RED) · Implementation: **W15** `#361` · **W16** `#362` · **W17** `#363` · **W18** `#364+#365` · **W19** `#366` · **W20** `#367`
+
+Helper: `tests/support/cd_batch.py`.
+
+Out of scope honoured (no extra tests): D8 P12–P31 / #377–#385; D6 file 7 / 20b; new SCM providers; `ci/providers/gitlab.py`; MCP auth (#345/#346); review-only boundary (#350); #140 precision/recall numbers (D15 — do not close #140); SBOM/signing/attestation (already shipped); publishing measured cost/latency numbers.
+
+Canonical impl modules the RED suite pins (W15–W20):
+
+- W15: `mergecraft.scm.webhooks`
+- W16: `mergecraft.security.egress`, `mergecraft.security.public_comments`, `docs/THREAT-MODEL.md`
+- W17: `mergecraft.evals.adversarial_corpora` (D15 — not #140 gate metrics)
+- W18: `mergecraft.reliability.slo`, `chaos`, `recovery`, `diagnostic_bundle`
+- W19: `--supply-chain` on `cli/doctor_cmd.py` (D16 — do not restyle `cli/consoles.py`)
+- W20: `mergecraft.perf.budgets` + `ReviewProfile.latency_budget_ms`
+
+After each impl wave, recon **deletes** matching W14 current-state pins and **un-xfails** `green after W15|W16|W17|W18|W19|W20` markers (`strict=False`).
+
+## xfail schedule (W14)
+
+| Wave | Tests | Marker reason | Status |
+|------|-------|---------------|--------|
+| **W15** | `tests/scm/test_cd_webhooks.py` (11) | `green after W15: webhook security, idempotency, provider conformance (#361)` | XFAIL until W15 |
+| **W16** | `tests/security/test_cd_egress.py` (10) | `green after W16: egress, SSRF, vuln gates, threat model; no secrets in public comments (#362)` | XFAIL until W16 |
+| **W17** | `tests/evals/test_cd_adversarial_corpora.py` (5) | `green after W17: adversarial corpora wired into eval gate (#363 / D15)` | XFAIL until W17 |
+| **W18** | `tests/reliability/test_cd_soak_slos.py` (7) + `tests/reliability/test_cd_degradation.py` (13) | `green after W18: soak/SLOs + degradation/recovery/redacted bundles (#364/#365)` | XFAIL until W18 |
+| **W19** | `tests/cli/test_cd_doctor_supply_chain.py` (6) | `green after W19: doctor --supply-chain + provenance (#366 / D16)` | XFAIL until W19 |
+| **W20** | `tests/perf/test_cd_budgets.py` (13) | `green after W20: latency/cost budgets, compression, early stop, regression bench (#367)` | XFAIL until W20 |
+
+Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error rows after the matching impl wave): D10 root-callback pins; D16 consoles.py; D14 `decide_approval` only in `agents/gates.py`; `doctor --supply-chain` usage-error; shipped token/cost/tool budgets; #140 gate metrics leftover; process-group cleanup; `make security`; CI GitLab log adapter.
+
+W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` clean.
+
+## Contract matrix (W14)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| CD361a | Webhook module missing | unit | current | `test_webhook_handler_module_does_not_exist_yet` |
+| CD361b | GitHub + GitLab only; Bitbucket rejected | unit | error | `test_webhook_module_covers_github_and_gitlab_only` |
+| CD361c | Signature verify / reject | unit | happy/error | `test_webhook_signature_verification_*` |
+| CD361d | Replay protection | unit | error | `test_webhook_replay_protection_rejects_stale_or_reused_delivery` |
+| CD361e | Idempotent delivery id | integration | edge | `test_webhook_event_processing_is_idempotent_on_delivery_id` |
+| CD361f | Rate-limit retryable | unit | edge | `test_webhook_rate_limit_is_handled_without_dropping_the_event` |
+| CD361g | Permissions + conformance | integration | happy | `test_provider_permission_checks_are_asserted_per_adapter`, `test_provider_conformance_uses_identical_review_semantics` |
+| CD361h | Review-only cannot bypass | functional | error | `test_scm_adapters_cannot_bypass_review_only_restrictions` |
+| CD361i | CI GitLab logs out of scope | unit | current | `test_ci_gitlab_log_adapter_is_not_an_scm_webhook_surface` |
+| CD362a | Egress allow-list + SSRF | unit | happy/error | `tests/security/test_cd_egress.py` |
+| CD362b | Dep + image vuln gates ≠ `make security` | unit | happy | `test_dependency_vulnerability_gate_is_invocable`, `test_container_image_vulnerability_gate_is_distinct_from_make_security` |
+| CD362c | Threat-model doc tied to tests | functional | happy | `test_threat_model_document_is_tied_to_executable_tests` |
+| CD362d | No secrets in public comments | functional | error | `test_public_comments_never_include_secret_material` |
+| CD362e | MCP auth / second approval out of scope | unit | current | `test_w16_does_not_touch_mcp_auth_or_a_second_approval_path` |
+| CD363a | Three corpora, separate from human bank | integration | happy/edge | `test_three_adversarial_corpora_are_named_and_non_empty`, `test_adversarial_corpora_stay_out_of_the_human_reference_bank` |
+| CD363b | `eval gate` blocks adversarial regression | functional | error | `test_eval_gate_fails_the_release_on_an_adversarial_regression` |
+| CD363c | CLI path/URL untrusted | unit | happy | `test_cli_source_path_is_treated_as_attacker_controlled_input` |
+| CD363d | D15 no #140 numbers | unit | current + xfail | `test_issue_140_gate_metrics_remain_the_published_numbers`, `test_adversarial_gate_does_not_publish_precision_recall_numbers` |
+| CD364a | Failure injection, soak, concurrency, scale | unit | happy/edge | `tests/reliability/test_cd_soak_slos.py` |
+| CD364b | Per-stage latency, taxonomy, four SLOs | unit | happy | `test_per_stage_latency_metrics_are_structured`, `test_error_taxonomy_is_a_closed_set`, `test_production_slos_cover_the_four_named_targets` |
+| CD365a | Outage / cache / disk / memory / giant repo | unit | happy/error | `tests/reliability/test_cd_degradation.py` |
+| CD365b | Idempotent SCM publish (not webhook transport) | integration | happy | `test_scm_publication_is_idempotent_without_using_webhook_transport` |
+| CD365c | Resume + redacted bundle + cleanup modes | functional | happy/error | `test_execution_is_resumable_where_correctness_permits`, `test_diagnostic_bundle_redacts_secrets`, `test_cleanup_runs_on_timeout_cancel_and_crashes` |
+| CD366a | `doctor --supply-chain` usage-error today | functional | current | `test_doctor_supply_chain_flag_is_currently_a_usage_error` |
+| CD366b | D16 consoles + D10 doctor module | unit | current | `test_d16_does_not_restyle_shared_console`, `test_w19_does_not_fold_supply_chain_into_root_callback` |
+| CD366c | Provenance / reproducibility / analyzer pin | functional | happy | remaining `test_cd_doctor_supply_chain.py` |
+| CD367a | Token/cost/tool budgets exist; no latency yet | unit | current | `test_profile_token_cost_and_tool_budgets_already_exist` |
+| CD367b | Latency + cost ceiling + routing + cache + early stop | unit | happy/error | `tests/perf/test_cd_budgets.py` |
+| CD367c | No published measured numbers | unit | current/edge | `test_w20_does_not_publish_measured_cost_or_latency_numbers`, `test_performance_regression_and_monorepo_benchmarks_exist` |
+
+## Acceptance (W14)
+
+- Collection clean; current-state pins **PASS**; wiring pins **XFAIL** (`strict=False`); **no XPASS**
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W15 not started
