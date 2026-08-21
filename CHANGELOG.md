@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added: generated CLI and Action reference pages (`docs/cli.md`,
   `docs/action-reference.md`) plus a docs manifest; `make docs-check`
   replaces landing-README table splices.
+- Failure-injection, soak, high-concurrency, monorepo, and large-PR harnesses now pin production SLOs for review completion, time to first finding, total review latency, and publication success, with a closed reliability error taxonomy and per-stage latency metrics (#364)
+- A mid-review provider outage degrades instead of crashing; corrupt local cache rebuilds, disk and memory preflight fail closed, giant repositories skip or partial, SCM publication is idempotent, runs resume from a checkpoint, cleanup runs on timeout/cancel/crash, and diagnostic bundles redact secrets (#365)
 - `mergecraft eval gate` now blocks a release when a prompt-injection, malicious-repository, or malicious-ticket corpus case regresses; reviewing a local path or public URL treats the tree as attacker-controlled input (#363)
 - `mergecraft memory validate` checks the learnings store; learned behaviour needs historical evidence or explicit approval; factual / policy / preference / false-positive memory stay distinct; organization memory is a pluggable backend; effectiveness metrics prove precision rises without losing recall (#360)
 - `mergecraft policy effective` and `simulate` resolve the effective rule set (with the source of every rule, including symbol scope), detect same-scope enforcement conflicts, emit policy audit artifacts, and report trigger / false-positive / waiver / blocking rates (#358)

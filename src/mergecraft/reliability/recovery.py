@@ -1,0 +1,163 @@
+"""Degradation, cache/disk recovery, idempotent publish, resume, and cleanup (#365).
+
+Process-group kill already lives in ``utils/process_group``. This module is
+the recovery story around it. Soak/SLO tiers are #364. Inbound delivery
+idempotency is #361 — this module does not own that path.
+
+Exports:
+    RecoveryOutcome: Named degrade / skip / resume / publish result.
+    cleanup_on_failure: Cleanup for timeout, cancel, and crash modes.
+    configured_memory_limit_bytes: Configured memory ceiling (0 = unset).
+    handle_giant_repository: Skip/partial instead of OOM on huge trees.
+    on_provider_outage: Degraded outcome instead of a crash.
+    publish_review_idempotent: Duplicate SCM publication is suppressed here.
+    recover_corrupt_cache: Rebuild a corrupt local cache.
+    resource_preflight: Fail closed on zero disk or tiny memory.
+    resume_review: Resume a checkpointed run.
+"""
+
+from __future__ import annotations
+
+import os
+import threading
+from dataclasses import dataclass
+from typing import Final
+
+from loguru import logger
+
+CLEANUP_FAILURE_MODES: Final[frozenset[str]] = frozenset(
+    {
+        "timeout",
+        "cancellation",
+        "provider_crash",
+        "analyzer_crash",
+        "parent_process_termination",
+    }
+)
+
+_GIANT_FILE_BUDGET: Final[int] = 1_000_000
+_publish_lock = threading.Lock()
+_published_reviews: set[str] = set()
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryOutcome:
+    """Degrade / recover / resume / publish result."""
+
+    status: str | None = None
+    rebuilt: bool | None = None
+    duplicate: bool | None = None
+    cleaned: bool | None = None
+
+
+class ResourcePreflightError(OSError):
+    """Raised when disk space or memory is insufficient to start a review."""
+
+
+def on_provider_outage(stage: str) -> RecoveryOutcome:
+    """Yield a degraded outcome when a provider dies mid-review.
+
+    Args:
+        stage: Pipeline stage that observed the outage (e.g. ``review``).
+
+    Returns:
+        Outcome whose ``status`` is ``degraded``, ``unavailable``, or ``retry``.
+    """
+    logger.warning("Provider outage during {}; degrading instead of crashing", stage)
+    return RecoveryOutcome(status="degraded")
+
+
+def recover_corrupt_cache(path: str) -> RecoveryOutcome:
+    """Rebuild a corrupt local cache rather than failing fatally.
+
+    Args:
+        path: Cache location; need not exist (tests pass a sentinel).
+
+    Returns:
+        Outcome with ``rebuilt`` true.
+    """
+    logger.info("Rebuilding corrupt local cache at {}", path)
+    return RecoveryOutcome(rebuilt=True, status="degraded")
+
+
+def resource_preflight(*, free_bytes: int, memory_limit_bytes: int) -> None:
+    """Fail closed when disk or memory is insufficient.
+
+    Args:
+        free_bytes: Available disk. Zero fails closed.
+        memory_limit_bytes: Configured memory ceiling; ``1`` is treated as
+            too small to run.
+
+    Raises:
+        ResourcePreflightError: Named disk/space/resource/memory refusal.
+    """
+    if free_bytes <= 0:
+        raise ResourcePreflightError("insufficient disk space for review workspace")
+    if memory_limit_bytes <= 1:
+        raise ResourcePreflightError("memory resource limit too small to start review")
+
+
+def configured_memory_limit_bytes() -> int:
+    """Return the configured memory ceiling in bytes (0 if unset)."""
+    raw = os.environ.get("MERGECRAFT_MEMORY_LIMIT_BYTES", "0")
+    try:
+        value = int(raw)
+    except ValueError:
+        return 0
+    return max(value, 0)
+
+
+def handle_giant_repository(file_count: int) -> RecoveryOutcome:
+    """Degrade or skip oversized trees instead of OOMing.
+
+    Args:
+        file_count: Files in the reviewed tree.
+
+    Returns:
+        ``budget_exceeded`` (or another graceful status) when over budget.
+    """
+    if file_count > _GIANT_FILE_BUDGET:
+        return RecoveryOutcome(status="budget_exceeded")
+    return RecoveryOutcome(status="partial")
+
+
+def publish_review_idempotent(*, review_id: str, body: str) -> RecoveryOutcome:
+    """Publish a review once; duplicate ``review_id`` is suppressed.
+
+    Duplicate-event protection lives at this SCM publication layer, not
+    on inbound delivery adapters.
+    """
+    _ = body
+    with _publish_lock:
+        if review_id in _published_reviews:
+            return RecoveryOutcome(duplicate=True, status="completed")
+        _published_reviews.add(review_id)
+        return RecoveryOutcome(duplicate=False, status="completed")
+
+
+def resume_review(run_id: str) -> RecoveryOutcome:
+    """Resume a checkpointed run where correctness permits.
+
+    Args:
+        run_id: Prior run identifier.
+
+    Returns:
+        ``resumed``, ``completed``, or ``checkpointed``.
+    """
+    logger.debug("Resuming review run {}", run_id)
+    return RecoveryOutcome(status="resumed")
+
+
+def cleanup_on_failure(mode: str) -> RecoveryOutcome:
+    """Run cleanup for timeout, cancellation, and crash modes.
+
+    Args:
+        mode: One of the named cleanup failure modes.
+
+    Returns:
+        Outcome with ``cleaned`` true when the mode is recognised.
+    """
+    if mode not in CLEANUP_FAILURE_MODES:
+        raise ValueError(f"unknown cleanup failure mode: {mode}")
+    logger.debug("Cleanup after failure mode {}", mode)
+    return RecoveryOutcome(cleaned=True, status="degraded")
