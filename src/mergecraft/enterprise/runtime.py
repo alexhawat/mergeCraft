@@ -53,6 +53,12 @@ _AGENT_NETWORK_ENV: tuple[str, ...] = (
     "REQUESTS_CA_BUNDLE",
 )
 
+# Child processes pick Bedrock/Vertex endpoints from these vars, not catalog labels.
+_BYOK_RUNTIME_REGION_ENV: dict[str, tuple[str, ...]] = {
+    "bedrock": ("AWS_REGION", "AWS_DEFAULT_REGION"),
+    "vertex": ("VERTEX_LOCATION",),
+}
+
 _BOUND: ContextVar[EnterpriseSettings | None] = ContextVar(
     "mergecraft_enterprise_settings",
     default=None,
@@ -133,6 +139,22 @@ def effective_retention_days() -> int | None:
     return current_enterprise_settings().retention_days
 
 
+def _byok_runtime_region(model_id: str) -> str | None:
+    """Return the live Bedrock/Vertex region from process env, if set."""
+    needle = model_id.strip()
+    if not needle:
+        return None
+    provider = needle.split("/", 1)[0]
+    keys = _BYOK_RUNTIME_REGION_ENV.get(provider)
+    if keys is None:
+        return None
+    for key in keys:
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return None
+
+
 def enforce_routed_model_residency(
     model_id: str,
     *,
@@ -141,9 +163,11 @@ def enforce_routed_model_residency(
     """Refuse *model_id* when a non-empty residency allow-list is bound.
 
     Regions are resolved from :func:`mergecraft.models.lookup_model_data_residency`
-    (the support-matrix ``PROVIDERS`` catalog). The routing capability catalog
-    is a fallback for ids that catalog still lists. Unknown ids are
-    ``unknown`` and fail closed.
+    (the support-matrix ``PROVIDERS`` catalog). BYOK slugs prefer
+    ``AWS_REGION`` / ``AWS_DEFAULT_REGION`` (Bedrock) or ``VERTEX_LOCATION``
+    (Vertex) when those are set, because the child process uses those
+    endpoints. The routing capability catalog is a fallback for ids the
+    catalog still lists. Unknown ids are ``unknown`` and fail closed.
 
     Args:
         model_id: Catalog model id chosen by routing.
@@ -157,7 +181,7 @@ def enforce_routed_model_residency(
         return
     from mergecraft.models import lookup_model_data_residency
 
-    region = lookup_model_data_residency(model_id) or "unknown"
+    region = _byok_runtime_region(model_id) or lookup_model_data_residency(model_id) or "unknown"
     if region == "unknown":
         rows = catalog
         if rows is None:

@@ -182,10 +182,11 @@ def test_disallowed_model_is_never_selected_to_start(monkeypatch: pytest.MonkeyP
         pick_runnable_slug_from_chain(effective_model_chain(settings))
 
 
-def test_in_region_vertex_model_passes_residency() -> None:
+def test_in_region_vertex_model_passes_residency(monkeypatch: pytest.MonkeyPatch) -> None:
     """Vertex BYOK is catalogued in eu-west-1 so an EU allow-list can run a review."""
     from mergecraft.utils.agent_resolve import effective_model_chain
 
+    monkeypatch.delenv("VERTEX_LOCATION", raising=False)
     bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("eu-west-1",)))
     settings = RepoSettings.model_validate({"models": ["vertex/byok"]})
     assert effective_model_chain(settings) == ["vertex/byok"]
@@ -201,6 +202,7 @@ def test_resolve_model_vertex_byok_uses_catalog_slug_for_residency(
     from mergecraft.utils.agent_resolve import resolve_model
 
     monkeypatch.setenv("VERTEX_MODEL_ID", "gemini-2.5-pro-001")
+    monkeypatch.setenv("VERTEX_LOCATION", "eu-west-1")
     bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("eu-west-1",)))
     assert resolve_model(slug="vertex/byok", respect_env_override=False) == "gemini-2.5-pro-001"
 
@@ -212,11 +214,60 @@ def test_resolve_model_bedrock_byok_uses_catalog_slug_for_residency(
     from mergecraft.utils.agent_resolve import resolve_model
 
     monkeypatch.setenv("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("us-east-1",)))
     assert (
         resolve_model(slug="bedrock/byok", respect_env_override=False)
         == "anthropic.claude-sonnet-4"
     )
+
+
+def test_byok_runtime_region_matching_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BYOK residency follows AWS_REGION / VERTEX_LOCATION when they match the allow-list."""
+    from mergecraft.utils.agent_resolve import effective_model_chain, resolve_model
+
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4")
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("us-east-1",)))
+    assert effective_model_chain(RepoSettings.model_validate({"models": ["bedrock/byok"]})) == [
+        "bedrock/byok"
+    ]
+    assert (
+        resolve_model(slug="bedrock/byok", respect_env_override=False)
+        == "anthropic.claude-sonnet-4"
+    )
+
+    monkeypatch.setenv("VERTEX_LOCATION", "eu-west-1")
+    monkeypatch.setenv("VERTEX_MODEL_ID", "gemini-2.5-pro-001")
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("eu-west-1",)))
+    assert effective_model_chain(RepoSettings.model_validate({"models": ["vertex/byok"]})) == [
+        "vertex/byok"
+    ]
+    assert resolve_model(slug="vertex/byok", respect_env_override=False) == "gemini-2.5-pro-001"
+
+
+def test_byok_runtime_region_mismatch_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A catalog-in-region BYOK slug is refused when the live cloud region is out of policy."""
+    from mergecraft.utils.agent_resolve import effective_model_chain, resolve_model
+
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4")
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("us-east-1",)))
+    with pytest.raises(PermissionError, match=r"allowedRegions|residency"):
+        effective_model_chain(RepoSettings.model_validate({"models": ["bedrock/byok"]}))
+    with pytest.raises(PermissionError, match="residency"):
+        resolve_model(slug="bedrock/byok", respect_env_override=False)
+
+    monkeypatch.setenv("VERTEX_LOCATION", "us-central1")
+    monkeypatch.setenv("VERTEX_MODEL_ID", "gemini-2.5-pro-001")
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("eu-west-1",)))
+    with pytest.raises(PermissionError, match=r"allowedRegions|residency"):
+        effective_model_chain(RepoSettings.model_validate({"models": ["vertex/byok"]}))
+    with pytest.raises(PermissionError, match="residency"):
+        resolve_model(slug="vertex/byok", respect_env_override=False)
 
 
 def test_providers_catalog_us_model_passes_us_residency() -> None:

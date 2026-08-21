@@ -4,9 +4,9 @@ Defaults are inert: telemetry stays on, proxy/CA are unset, and an empty
 residency allow-list means *no extra policy* (existing reviews keep working).
 A non-empty ``allowed_regions`` fails closed via :func:`enforce_data_residency`.
 Model regions come from :data:`mergecraft.models.PROVIDERS` (per-provider
-``data_residency``; unset means unknown and is refused). Vertex BYOK is
-``eu-west-1``. Gateway models (OpenCode, OpenRouter, TokenHub, MiniMax, Nous)
-have no declared region.
+``data_residency``; unset means unknown and is refused). Bedrock/Vertex BYOK
+prefer ``AWS_REGION`` / ``VERTEX_LOCATION`` when set. Gateway models
+(OpenCode, OpenRouter, TokenHub, MiniMax, Nous) have no declared region.
 
 Exports:
     EnterpriseSettings: Nested ``enterprise:`` block on :class:`RepoSettings`.
