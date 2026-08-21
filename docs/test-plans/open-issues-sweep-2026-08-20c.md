@@ -522,7 +522,7 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - Deleted W14 current-state pin: `test_doctor_supply_chain_flag_is_currently_a_usage_error`.
 - Left W20 xfails in place. D16 consoles.py pin and D10 doctor-option pin kept.
 - W19 impl: `8cc88ce6`.
-- W19 recon: pending commit SHA.
+- W19 recon: `f958c546`.
 
 ## Acceptance (W19 recon)
 
