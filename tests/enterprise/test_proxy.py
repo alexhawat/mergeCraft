@@ -23,6 +23,8 @@ def test_apply_enterprise_proxy_sets_https_proxy(monkeypatch: pytest.MonkeyPatch
 
 def test_apply_enterprise_proxy_honours_no_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Edge: empty no_proxy is accepted; a host list is exported as NO_PROXY."""
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("https_proxy", raising=False)
     monkeypatch.delenv("NO_PROXY", raising=False)
     from mergecraft.enterprise.proxy import ProxyConfig, apply_enterprise_proxy
 
