@@ -104,19 +104,20 @@ config keys, exit codes, and failure modes.
 1. Fetch the skill:
      git clone --depth 1 https://github.com/alexhawat/mergeCraft /tmp/mergecraft-src
 
-2. Detect which coding agent you are, and copy skills/mergecraft/ to the
-   matching location. If you are unsure, do the AGENTS.md fallback (last row).
+2. Copy skills/mergecraft/ to the path your agent reads. Almost every agent
+   now shares one location -- the Agent Skills standard path:
 
-     Claude Code / Copilot CLI  ->  .claude/skills/mergecraft/
-     Cursor                     ->  .cursor/skills/mergecraft/
-     OpenCode                   ->  .opencode/skill/mergecraft/
-     Codex CLI                  ->  .codex/skills/mergecraft/
-     Gemini CLI                 ->  .gemini/skills/mergecraft/
-     anything else              ->  copy AGENTS.md to ./AGENTS.md and
-                                    llms.txt to ./llms.txt
+     .agents/skills/mergecraft/   -> Codex, Cursor, OpenCode, Gemini CLI,
+                                     OpenClaw
+     .claude/skills/mergecraft/   -> Claude Code (it does NOT read
+                                     .agents/skills/); OpenCode reads it too
+     hermes skills install        -> Hermes Agent (uses ~/.hermes/skills/)
+
+   If your agent is none of these, copy AGENTS.md and llms.txt to the repo
+   root -- every agent reads those.
 
 3. Also copy commands/ to your agent's slash-command directory if it has one
-   (Claude Code: .claude/commands/; Codex: ~/.codex/prompts/).
+   (Claude Code: .claude/commands/).
 
 4. rm -rf /tmp/mergecraft-src
 
@@ -146,7 +147,7 @@ mergeCraft up in this repo. Install the CLI with uv (uv fetches its own Python �
 do not install Python), run `mergecraft init`, wire .mergecraft/config.yaml, and
 open a PR with the workflow. Print the `mergecraft auth <provider>` command for
 me to run myself — never touch credentials. Then copy the repo's
-skills/mergecraft/ into .cursor/skills/mergecraft/ so you keep the knowledge.
+skills/mergecraft/ into .agents/skills/mergecraft/ so you keep the knowledge.
 ```
 
 **Codex CLI / ChatGPT cloud agent:**
@@ -174,7 +175,7 @@ harness. Install with uv, run `mergecraft init`, then set in
 Read docs/authentication.md and tell me exactly which
 MERGECRAFT_CUSTOM_PROVIDER_BASE_URL / MERGECRAFT_CUSTOM_PROVIDER_API_KEY pair
 to set as GitHub secrets for my endpoint. Do not handle the key yourself.
-Copy skills/mergecraft/ into .opencode/skill/mergecraft/. Open a PR.
+Copy skills/mergecraft/ into .agents/skills/mergecraft/. Open a PR.
 ```
 
 **Gemini CLI:**
@@ -251,8 +252,9 @@ Everything else — install, scaffold, config, commit, PR — is unattended.
 > local diff, worktree, or cloned repo — no GitHub Action required.
 > See [`docs/cli.md`](docs/cli.md).
 
-<sub>Skill paths follow each tool's current convention and move as those tools
-evolve. `AGENTS.md` at the repo root is the fallback every one of them reads.</sub>
+<sub>Skill paths follow the [Agent Skills](https://agentskills.io/specification)
+open standard, verified against each tool's own docs on 2026-08-21. `AGENTS.md` at the
+repo root is the fallback every one of them reads.</sub>
 
 ---
 
