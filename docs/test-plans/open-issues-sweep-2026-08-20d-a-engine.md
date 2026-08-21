@@ -127,3 +127,26 @@ lane B also appends) with `path: docs/agent-loop.md` and non-empty
 Already-true D13 product refusals (MCP review-only, no write JSONL events, thin
 single review path) ship as **green guards**. W9.1 loop page + manifest row
 markers removed after impl (`b821e477`).
+
+## Thermos follow-up — typed `ReviewRun` (2026-08-22)
+
+`ReviewEngine.run` takes a positional `ReviewRun` driver plus `timeouts=` /
+`on_timeout=`. Keyword `materialize=`/`analyze=`/`review=`/`publish=` and
+`_resolve_driver` are gone. `HookReviewRun` is **not** on
+`mergecraft.review` or `mergecraft.review.engine`. Tests that still need four
+closures use **test-only** `tests/review/hook_review_run.py`.
+
+| Contract | Layer | Scenario | Primary test |
+|---|---|---|---|
+| Four stages in order; publish sees review output | unit | happy | `tests/review/test_review_engine_behavior.py::test_engine_run_executes_four_hooks_in_order` |
+| Positional driver (not hook kwargs) | unit | happy | `test_engine_run_accepts_positional_hook_driver` |
+| `HookReviewRun` not a package export; `ReviewRun` is | unit | error | `test_review_package_reexports_engine_types` |
+| Timeout omits incomplete stage | unit | error | `test_engine_run_timeout_omits_incomplete_stage_from_stages_ran` |
+| Self-timed review without overlay | unit | edge | `test_engine_does_not_wait_for_self_timed_review_without_timeouts_overlay` |
+| Analyze timeout vs materialize | unit | edge | `test_analyze_timeout_does_not_wrap_credentials_owned_by_materialize` |
+| Payload-sized review override | unit | happy | `test_slow_review_succeeds_under_payload_sized_override` |
+| Publish timeout + `on_timeout` | unit | error | `test_publish_timeout_after_successful_review_omits_publish` |
+| CLI dry-run taps a driver (`_OfflineDiffReviewRun`) | integration | happy | `test_cli_review_drives_engine_run` |
+| Skip-agent publish owned by finalize | integration | error | `test_skip_agent_publish_is_owned_by_finalize` |
+| Skip-agent is `SkipAgentReview` | integration | error | `test_skip_agent_review_returns_skip_agent_review_not_dummy_agent_result` |
+| Publish timeout → `timed_out` | integration | error | `test_action_publish_timeout_is_timed_out_outcome` |

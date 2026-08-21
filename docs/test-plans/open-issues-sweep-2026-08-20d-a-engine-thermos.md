@@ -29,7 +29,9 @@ not add write-capability tests that enable Fix.
 | `_run_offline_diff_review` has no `resume` param | `tests/cli/test_resume_result_cache.py::test_run_offline_diff_review_body_has_no_distinct_resume_parameter` | RED while the private signature still has `resume` |
 | CLI `--resume` help text | same file | keep |
 | Exactly one `ReviewEngine` on CLI dry-run | `test_cli_review_constructs_exactly_one_engine` | RED if CLI and offline each construct |
-| Dry-run executes materialize→analyze→review→publish | `test_cli_review_drives_engine_run` | keep (behavioral wrap of `engine.run`) |
+| Dry-run executes materialize→analyze→review→publish | `test_cli_review_drives_engine_run` | keep (wrap always taps a positional driver; CLI uses `_OfflineDiffReviewRun`) |
+| `ReviewEngine.run` takes positional `ReviewRun` only | `test_engine_run_executes_four_hooks_in_order`, `test_engine_run_accepts_positional_hook_driver` | keep (test-only `tests/review/hook_review_run.py`; not a package export) |
+| `HookReviewRun` is not a product type | `test_review_package_reexports_engine_types` | keep (`ReviewRun` in `__all__`; no `HookReviewRun` / `_resolve_driver`) |
 | JSONL reuse via calling `load_trace_jsonl_events` | `tests/cli/test_trace_jsonl_reuse.py` | keep |
 | Streaming boundary via import/call, not AST | `tests/cli/test_finding_stream_boundary.py` | keep |
 | Thin path: no per-agent fork; no `run_from_snapshot` source pin | `tests/cli/test_thin_agent_review_path.py` | keep |

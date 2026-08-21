@@ -19,7 +19,6 @@ from typer.testing import CliRunner
 from mergecraft.cli.app import app
 from mergecraft.offline_review import OfflineReviewResult
 from mergecraft.review import ReviewEngine, ReviewEngineResult
-from mergecraft.review.engine import HookReviewRun
 from mergecraft.review.snapshot import (
     CANONICAL_STAGE_NAMES,
     DEFAULT_STAGE_TIMEOUTS_MS,
@@ -29,6 +28,7 @@ from mergecraft.review.snapshot import (
 )
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.scm.webhooks import conforming_review_request
+from tests.review.hook_review_run import HookReviewRun
 
 runner = CliRunner()
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
@@ -49,6 +49,21 @@ async def _noop() -> None:
 
 async def _publish_echo(payload: object) -> object:
     return payload
+
+
+def _hooks(
+    *,
+    materialize: Any = _noop,
+    analyze: Any = _noop,
+    review: Any = _noop,
+    publish: Any = _publish_echo,
+) -> HookReviewRun[Any, Any]:
+    return HookReviewRun(
+        materialize_hook=materialize,
+        analyze_hook=analyze,
+        review_hook=review,
+        publish_hook=publish,
+    )
 
 
 class _OrderTap:
@@ -102,7 +117,13 @@ def test_review_package_reexports_engine_types() -> None:
 
     assert review_pkg.ReviewEngine is ReviewEngine
     assert review_pkg.ReviewEngineResult is ReviewEngineResult
-    assert review_pkg.HookReviewRun is HookReviewRun
+    assert review_pkg.ReviewRun is engine_mod.ReviewRun
+    assert "ReviewRun" in review_pkg.__all__
+    assert "HookReviewRun" not in review_pkg.__all__
+    assert "HookReviewRun" not in engine_mod.__all__
+    assert not hasattr(review_pkg, "HookReviewRun")
+    assert not hasattr(engine_mod, "HookReviewRun")
+    assert not hasattr(engine_mod, "_resolve_driver")
     assert "run_from_snapshot" not in review_pkg.__all__
     assert not hasattr(review_pkg, "run_from_snapshot")
     assert not hasattr(engine_mod, "run_from_snapshot")
@@ -194,10 +215,7 @@ async def test_engine_run_executes_four_hooks_in_order() -> None:
         return "published"
 
     result = await engine.run(
-        materialize=materialize,
-        analyze=analyze,
-        review=review,
-        publish=publish,
+        _hooks(materialize=materialize, analyze=analyze, review=review, publish=publish),
     )
     assert isinstance(result, ReviewEngineResult)
     assert isinstance(result.stages[0], ReviewStageSpec)
@@ -210,7 +228,7 @@ async def test_engine_run_executes_four_hooks_in_order() -> None:
 
 @pytest.mark.asyncio
 async def test_engine_run_accepts_positional_hook_driver() -> None:
-    """Happy: production-style ``run(driver)`` wraps four hooks as ``HookReviewRun``."""
+    """Happy: production-style ``run(driver)`` takes a positional ``ReviewRun``."""
     engine = ReviewEngine(snapshot=_short_snapshot())
     order: list[str] = []
 
@@ -229,7 +247,7 @@ async def test_engine_run_accepts_positional_hook_driver() -> None:
         assert payload == "reviewed"
         return "published"
 
-    driver: HookReviewRun[str] = HookReviewRun(
+    driver: HookReviewRun[str, str] = HookReviewRun(
         materialize_hook=materialize,
         analyze_hook=analyze,
         review_hook=review,
@@ -257,10 +275,7 @@ async def test_engine_run_timeout_omits_incomplete_stage_from_stages_ran() -> No
 
     with pytest.raises(TimeoutError):
         await engine.run(
-            materialize=_noop,
-            analyze=_noop,
-            review=slow_review,
-            publish=_publish_echo,
+            _hooks(review=slow_review),
             timeouts={"review": 0.02},
         )
     assert engine.result().stages_ran == ("materialize", "analyze")
@@ -283,12 +298,7 @@ async def test_engine_does_not_wait_for_self_timed_review_without_timeouts_overl
         await asyncio.sleep(0.03)
         return "self-timed"
 
-    result = await engine.run(
-        materialize=_noop,
-        analyze=_noop,
-        review=slower_than_one_ms,
-        publish=_publish_echo,
-    )
+    result = await engine.run(_hooks(review=slower_than_one_ms))
     assert result.stages_ran == CANONICAL_STAGE_NAMES
     assert result.output == "self-timed"
 
@@ -302,10 +312,7 @@ async def test_analyze_timeout_does_not_wrap_credentials_owned_by_materialize() 
         await asyncio.sleep(0.05)
 
     result = await engine.run(
-        materialize=credentials_like_materialize,
-        analyze=_noop,
-        review=_noop,
-        publish=_publish_echo,
+        _hooks(materialize=credentials_like_materialize),
         timeouts={"analyze": 0.01, "materialize": 1.0},
     )
     assert result.stages_ran == CANONICAL_STAGE_NAMES
@@ -322,10 +329,7 @@ async def test_slow_review_succeeds_under_payload_sized_override() -> None:
         return "payload"
 
     result = await engine.run(
-        materialize=_noop,
-        analyze=_noop,
-        review=slow_review,
-        publish=_publish_echo,
+        _hooks(review=slow_review),
         timeouts={"review": 0.5},
     )
     assert result.output == "payload"
@@ -346,10 +350,7 @@ async def test_publish_timeout_after_successful_review_omits_publish() -> None:
 
     with pytest.raises(TimeoutError):
         await engine.run(
-            materialize=_noop,
-            analyze=_noop,
-            review=_noop,
-            publish=slow_publish,
+            _hooks(publish=slow_publish),
             timeouts={"publish": 0.02},
             on_timeout=on_timeout,
         )
@@ -378,9 +379,7 @@ def test_cli_review_timeout_cleans_up_subprocesses(
 
     monkeypatch.setattr(diff_review_cmd, "run_offline_diff_review", boom)
 
-    async def boom_run(
-        self: ReviewEngine, driver: object | None = None, /, **_kwargs: Any
-    ) -> ReviewEngineResult:
+    async def boom_run(self: ReviewEngine, driver: object, /, **_kwargs: Any) -> ReviewEngineResult:
         raise TimeoutError
 
     monkeypatch.setattr(ReviewEngine, "run", boom_run)
@@ -404,9 +403,7 @@ def test_scm_conforming_request_runs_engine_and_exposes_stage_specs(
     """Integration: SCM maps identity onto a snapshot; engine is not fake-run."""
     runs: list[str] = []
 
-    async def boom_run(
-        self: ReviewEngine, driver: object | None = None, /, **_kwargs: Any
-    ) -> ReviewEngineResult:
+    async def boom_run(self: ReviewEngine, driver: object, /, **_kwargs: Any) -> ReviewEngineResult:
         runs.append("run")
         raise AssertionError("conforming_review_request must not run the engine")
 
@@ -426,36 +423,8 @@ def test_cli_review_drives_engine_run(tmp_path: Path, monkeypatch: pytest.Monkey
     order: list[str] = []
     original = ReviewEngine.run
 
-    async def wrapped(
-        self: ReviewEngine, driver: object | None = None, /, **kwargs: Any
-    ) -> ReviewEngineResult:
-        if driver is not None:
-            return await original(self, _OrderTap(driver, order), **kwargs)
-
-        def _tap(name: str, hook: Any) -> Any:
-            if name == "publish":
-
-                async def _publish(payload: object) -> object:
-                    order.append(name)
-                    return await hook(payload)
-
-                return _publish
-
-            async def _stage() -> object:
-                order.append(name)
-                return await hook()
-
-            return _stage
-
-        return await original(
-            self,
-            materialize=_tap("materialize", kwargs["materialize"]),
-            analyze=_tap("analyze", kwargs["analyze"]),
-            review=_tap("review", kwargs["review"]),
-            publish=_tap("publish", kwargs["publish"]),
-            timeouts=kwargs.get("timeouts"),
-            on_timeout=kwargs.get("on_timeout"),
-        )
+    async def wrapped(self: ReviewEngine, driver: object, /, **kwargs: Any) -> ReviewEngineResult:
+        return await original(self, _OrderTap(driver, order), **kwargs)
 
     monkeypatch.setattr(ReviewEngine, "run", wrapped)
     monkeypatch.setattr(
@@ -518,9 +487,7 @@ async def test_action_main_calls_engine_run(
     timeout_overlays: list[object] = []
     original = ReviewEngine.run
 
-    async def wrapped(
-        self: ReviewEngine, driver: object | None = None, /, **kwargs: Any
-    ) -> ReviewEngineResult:
+    async def wrapped(self: ReviewEngine, driver: object, /, **kwargs: Any) -> ReviewEngineResult:
         calls.append("run")
         timeout_overlays.append(kwargs.get("timeouts", _MISSING))
         timeouts = kwargs.get("timeouts")
