@@ -402,10 +402,10 @@ After each impl wave, recon **deletes** matching W14 current-state pins and **un
 | **W16** | `tests/security/test_cd_egress.py` (10) | `green after W16: egress, SSRF, vuln gates, threat model; no secrets in public comments (#362)` | **PASS** — un-xfailed W16 recon |
 | **W17** | `tests/evals/test_cd_adversarial_corpora.py` (5) | `green after W17: adversarial corpora wired into eval gate (#363 / D15)` | **PASS** — un-xfailed W17 recon |
 | **W18** | `tests/reliability/test_cd_soak_slos.py` (7) + `tests/reliability/test_cd_degradation.py` (13) | `green after W18: soak/SLOs + degradation/recovery/redacted bundles (#364/#365)` | **PASS** — un-xfailed W18 recon |
-| **W19** | `tests/cli/test_cd_doctor_supply_chain.py` (6) | `green after W19: doctor --supply-chain + provenance (#366 / D16)` | XFAIL until W19 |
+| **W19** | `tests/cli/test_cd_doctor_supply_chain.py` (6) | `green after W19: doctor --supply-chain + provenance (#366 / D16)` | **PASS** — un-xfailed W19 recon |
 | **W20** | `tests/perf/test_cd_budgets.py` (13) | `green after W20: latency/cost budgets, compression, early stop, regression bench (#367)` | XFAIL until W20 |
 
-Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error rows after the matching impl wave): D10 root-callback pins; D16 consoles.py; D14 `decide_approval` only in `agents/gates.py`; `doctor --supply-chain` usage-error; shipped token/cost/tool budgets; #140 gate metrics leftover; `make security`; CI GitLab log adapter.
+Current-state **PASS** (not xfailed; recon deletes the "does not exist yet" / usage-error rows after the matching impl wave): D10 root-callback pins; D16 consoles.py; D14 `decide_approval` only in `agents/gates.py`; shipped token/cost/tool budgets; #140 gate metrics leftover; `make security`; CI GitLab log adapter. (`doctor --supply-chain` usage-error pin deleted W19 recon.)
 
 W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` clean.
 
@@ -437,7 +437,7 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 | CD365a | Outage / cache / disk / memory / giant repo | unit | happy/error | `tests/reliability/test_cd_degradation.py` |
 | CD365b | Idempotent SCM publish (not webhook transport) | integration | happy | `test_scm_publication_is_idempotent_without_using_webhook_transport` |
 | CD365c | Resume + redacted bundle + cleanup modes | functional | happy/error | `test_execution_is_resumable_where_correctness_permits`, `test_diagnostic_bundle_redacts_secrets`, `test_cleanup_runs_on_timeout_cancel_and_crashes` |
-| CD366a | `doctor --supply-chain` usage-error today | functional | current | `test_doctor_supply_chain_flag_is_currently_a_usage_error` |
+| CD366a | `doctor --supply-chain` usage-error today | functional | current | **deleted W19 recon** (`test_doctor_supply_chain_flag_is_currently_a_usage_error`) |
 | CD366b | D16 consoles + D10 doctor module | unit | current | `test_d16_does_not_restyle_shared_console`, `test_w19_does_not_fold_supply_chain_into_root_callback` |
 | CD366c | Provenance / reproducibility / analyzer pin | functional | happy | remaining `test_cd_doctor_supply_chain.py` |
 | CD367a | Token/cost/tool budgets exist; no latency yet | unit | current | `test_profile_token_cost_and_tool_budgets_already_exist` |
@@ -515,3 +515,19 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - W19–W20 still **XFAIL** (`strict=False`)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W19 not started
+
+## Recon notes (W19)
+
+- Un-xfailed every `green after W19: doctor --supply-chain + provenance (#366 / D16)` marker in `tests/cli/test_cd_doctor_supply_chain.py` (6 XPASS → real PASS).
+- Deleted W14 current-state pin: `test_doctor_supply_chain_flag_is_currently_a_usage_error`.
+- Left W20 xfails in place. D16 consoles.py pin and D10 doctor-option pin kept.
+- W19 impl: `8cc88ce6`.
+- W19 recon: pending commit SHA.
+
+## Acceptance (W19 recon)
+
+- W19 doctor `--supply-chain` pins **PASS** (no leftover xfail, no XPASS)
+- W14 `#366` current-state pin gone
+- W20 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W20 not started

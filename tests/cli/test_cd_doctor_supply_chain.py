@@ -15,27 +15,12 @@ from tests.ci.workflow_support import REPO_ROOT
 from tests.support.cc_batch import invoke, plain
 from tests.support.cd_batch import (
     d10_root_callback_owns_globals,
-    green_after,
     require_callable,
     require_module,
 )
 from tests.support.dead_package_wiring import CLI_DIR, root_callback_source
 
-from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
-
-_W19 = green_after("W19", "doctor --supply-chain + provenance (#366 / D16)")
-
-
-def test_doctor_supply_chain_flag_is_currently_a_usage_error() -> None:
-    """W14 current state — ``doctor`` has no ``--supply-chain`` option yet."""
-    result = invoke("doctor", "--supply-chain")
-    combined = plain(result.stdout + result.stderr).casefold()
-    assert result.exit_code == CLI_USAGE_EXIT_CODE, combined
-    help_result = invoke("doctor", "--help")
-    help_text = plain(help_result.stdout + help_result.stderr).casefold()
-    assert help_result.exit_code == CLI_SUCCESS_EXIT_CODE
-    assert "supply-chain" not in help_text
-    assert "supply_chain" not in help_text
+from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 
 
 def test_d16_does_not_restyle_shared_console() -> None:
@@ -72,7 +57,6 @@ def test_sbom_signing_and_digest_pinning_already_ship() -> None:
     assert "security" in makefile.casefold()
 
 
-@_W19
 def test_doctor_supply_chain_help_is_registered() -> None:
     """Happy: ``mergecraft doctor --help`` advertises ``--supply-chain``."""
     result = invoke("doctor", "--help")
@@ -84,7 +68,6 @@ def test_doctor_supply_chain_help_is_registered() -> None:
     assert "supply_chain" in doctor_src
 
 
-@_W19
 def test_doctor_supply_chain_runs_provenance_probes(tmp_path: Path) -> None:
     """Happy: ``doctor --supply-chain`` emits provenance / pinning rows."""
     result = invoke("doctor", "--supply-chain", "--cwd", str(tmp_path))
@@ -93,7 +76,6 @@ def test_doctor_supply_chain_runs_provenance_probes(tmp_path: Path) -> None:
     assert "supply" in output or "provenance" in output or "pin" in output
 
 
-@_W19
 def test_reproducibility_probe_is_part_of_supply_chain_doctor() -> None:
     """Happy: reproducibility is a named doctor probe, not a new CLI verb."""
     module = require_module("mergecraft.cli.doctor_cmd")
@@ -103,7 +85,6 @@ def test_reproducibility_probe_is_part_of_supply_chain_doctor() -> None:
     assert "reproducibility" in names
 
 
-@_W19
 def test_bundled_agent_cli_provenance_is_verified() -> None:
     """Happy: ``docker/agent-clis`` provenance is checked through doctor."""
     module = require_module("mergecraft.cli.doctor_cmd")
@@ -115,7 +96,6 @@ def test_bundled_agent_cli_provenance_is_verified() -> None:
     assert ok is True
 
 
-@_W19
 def test_run_manifest_records_runtime_and_tool_versions() -> None:
     """Happy: every run manifest records runtime and tool versions."""
     module = require_module("mergecraft.cli.doctor_cmd")
@@ -126,7 +106,6 @@ def test_run_manifest_records_runtime_and_tool_versions() -> None:
     assert "tools" in payload or any("analyzer" in str(k) for k in payload)
 
 
-@_W19
 def test_analyzer_install_and_pinning_surface_through_doctor() -> None:
     """Happy: analyzer install / version pinning is a doctor supply-chain row."""
     module = require_module("mergecraft.cli.doctor_cmd")
