@@ -14,16 +14,9 @@ from tests.support.cd_batch import (
     EGRESS_MODULE,
     PUBLIC_COMMENT_MODULE,
     d10_root_callback_owns_globals,
-    green_after,
-    module_exists,
     require_module,
 )
 from tests.support.dead_package_wiring import SRC_ROOT
-
-_W16 = green_after(
-    "W16",
-    "egress, SSRF, vuln gates, threat model; no secrets in public comments (#362)",
-)
 
 _SSRF_URLS = [
     "http://127.0.0.1/latest/meta-data/",
@@ -32,15 +25,6 @@ _SSRF_URLS = [
     "file:///etc/passwd",
     "http://localhost:1/",
 ]
-
-
-def test_egress_and_ssrf_module_does_not_exist_yet() -> None:
-    """W14 current state — no network-boundary control module."""
-    assert module_exists(EGRESS_MODULE) is False
-    security_dir = SRC_ROOT / "security"
-    if security_dir.is_dir():
-        assert not list(security_dir.glob("*egress*"))
-        assert not list(security_dir.glob("*ssrf*"))
 
 
 def test_w16_does_not_touch_mcp_auth_or_a_second_approval_path() -> None:
@@ -58,7 +42,6 @@ def test_make_security_target_already_exists() -> None:
     assert "security:" in makefile or "\nsecurity :" in makefile
 
 
-@_W16
 def test_network_egress_controls_deny_unlisted_hosts() -> None:
     """Happy: egress allow-list denies an arbitrary host when deployment permits."""
     module = require_module(EGRESS_MODULE)
@@ -68,7 +51,6 @@ def test_network_egress_controls_deny_unlisted_hosts() -> None:
     assert denied is False
 
 
-@_W16
 @pytest.mark.parametrize("url", _SSRF_URLS)
 def test_ssrf_protections_block_link_local_and_metadata_urls(url: str) -> None:
     """Error: external retrieval refuses SSRF targets (type + message)."""
@@ -81,7 +63,6 @@ def test_ssrf_protections_block_link_local_and_metadata_urls(url: str) -> None:
         check(url)
 
 
-@_W16
 def test_dependency_vulnerability_gate_is_invocable() -> None:
     """Happy: a dependency vuln gate exists as a named callable."""
     module = require_module(EGRESS_MODULE)
@@ -93,7 +74,6 @@ def test_dependency_vulnerability_gate_is_invocable() -> None:
     assert passed is True or passed is False
 
 
-@_W16
 def test_container_image_vulnerability_gate_is_distinct_from_make_security() -> None:
     """Happy: image scanning is not an alias of ``make security``."""
     module = require_module(EGRESS_MODULE)
@@ -108,7 +88,6 @@ def test_container_image_vulnerability_gate_is_distinct_from_make_security() -> 
         assert name != "make security"
 
 
-@_W16
 def test_threat_model_document_is_tied_to_executable_tests() -> None:
     """Happy: threat-model doc exists under ``docs/`` and names this test file."""
     doc = REPO_ROOT / "docs" / "THREAT-MODEL.md"
@@ -119,7 +98,6 @@ def test_threat_model_document_is_tied_to_executable_tests() -> None:
     assert "independent security review" in text.casefold()
 
 
-@_W16
 def test_public_comments_never_include_secret_material() -> None:
     """Error: publication redacts tokens before they hit a public comment."""
     module = require_module(PUBLIC_COMMENT_MODULE)

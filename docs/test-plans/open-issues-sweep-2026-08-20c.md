@@ -399,7 +399,7 @@ After each impl wave, recon **deletes** matching W14 current-state pins and **un
 | Wave | Tests | Marker reason | Status |
 |------|-------|---------------|--------|
 | **W15** | `tests/scm/test_cd_webhooks.py` (11) | `green after W15: webhook security, idempotency, provider conformance (#361)` | **PASS** — un-xfailed W15 recon |
-| **W16** | `tests/security/test_cd_egress.py` (10) | `green after W16: egress, SSRF, vuln gates, threat model; no secrets in public comments (#362)` | XFAIL until W16 |
+| **W16** | `tests/security/test_cd_egress.py` (10) | `green after W16: egress, SSRF, vuln gates, threat model; no secrets in public comments (#362)` | **PASS** — un-xfailed W16 recon |
 | **W17** | `tests/evals/test_cd_adversarial_corpora.py` (5) | `green after W17: adversarial corpora wired into eval gate (#363 / D15)` | XFAIL until W17 |
 | **W18** | `tests/reliability/test_cd_soak_slos.py` (7) + `tests/reliability/test_cd_degradation.py` (13) | `green after W18: soak/SLOs + degradation/recovery/redacted bundles (#364/#365)` | XFAIL until W18 |
 | **W19** | `tests/cli/test_cd_doctor_supply_chain.py` (6) | `green after W19: doctor --supply-chain + provenance (#366 / D16)` | XFAIL until W19 |
@@ -465,3 +465,19 @@ W14 run: **16 passed / 65 xfailed / 0 XPASS**. `make lint` + `make typecheck` cl
 - W16–W20 still **XFAIL** (`strict=False`)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; W16 not started
+
+## Recon notes (W16)
+
+- Un-xfailed every `green after W16: egress, SSRF, vuln gates, threat model; no secrets in public comments (#362)` marker in `tests/security/test_cd_egress.py` (10 XPASS → real PASS, including 5 parametrized SSRF URLs).
+- Deleted W14 current-state pin: `test_egress_and_ssrf_module_does_not_exist_yet`.
+- Left W17–W20 xfails in place. D10/D14 MCP-auth pin and `make security` pin kept.
+- W16 impl: `2f142694`.
+- W16 recon: pending commit.
+
+## Acceptance (W16 recon)
+
+- W16 egress/SSRF/vuln/threat-model pins **PASS** (no leftover xfail, no XPASS)
+- W14 `#362` current-state pin gone
+- W17–W20 still **XFAIL** (`strict=False`)
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W17 not started
