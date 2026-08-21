@@ -140,9 +140,14 @@ def enforce_routed_model_residency(
 ) -> None:
     """Refuse *model_id* when a non-empty residency allow-list is bound.
 
+    Regions are resolved from :func:`mergecraft.models.lookup_model_data_residency`
+    (the support-matrix ``PROVIDERS`` catalog). The routing capability catalog
+    is a fallback for ids that catalog still lists. Unknown ids are
+    ``unknown`` and fail closed.
+
     Args:
         model_id: Catalog model id chosen by routing.
-        catalog: Optional catalog rows; defaults to :func:`capability_catalog`.
+        catalog: Optional capability-catalog rows when PROVIDERS has no match.
 
     Raises:
         PermissionError: The model's ``data_residency`` is not allowed.
@@ -150,14 +155,17 @@ def enforce_routed_model_residency(
     allowed = current_enterprise_settings().allowed_regions
     if not allowed:
         return
-    rows = catalog
-    if rows is None:
-        from mergecraft.agents.provider_health import capability_catalog
+    from mergecraft.models import lookup_model_data_residency
 
-        rows = capability_catalog()
-    region = "unknown"
-    for row in rows:
-        if str(row.get("id")) == model_id:
-            region = str(row.get("data_residency") or "unknown")
-            break
+    region = lookup_model_data_residency(model_id) or "unknown"
+    if region == "unknown":
+        rows = catalog
+        if rows is None:
+            from mergecraft.agents.provider_health import capability_catalog
+
+            rows = capability_catalog()
+        for row in rows:
+            if str(row.get("id")) == model_id:
+                region = str(row.get("data_residency") or "unknown")
+                break
     enforce_data_residency(region=region, policy=DataResidencyPolicy(allowed=allowed))

@@ -177,3 +177,27 @@ def test_disallowed_model_is_never_selected_to_start(monkeypatch: pytest.MonkeyP
     settings = RepoSettings.model_validate({"models": ["anthropic/claude-opus"]})
     with pytest.raises(PermissionError, match=r"allowedRegions|residency"):
         pick_runnable_slug_from_chain(effective_model_chain(settings))
+
+
+def test_in_region_vertex_model_passes_residency() -> None:
+    """Vertex BYOK is catalogued in eu-west-1 so an EU allow-list can run a review."""
+    from mergecraft.utils.agent_resolve import effective_model_chain
+
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("eu-west-1",)))
+    settings = RepoSettings.model_validate({"models": ["vertex/byok"]})
+    assert effective_model_chain(settings) == ["vertex/byok"]
+    from mergecraft.enterprise.runtime import enforce_routed_model_residency
+
+    enforce_routed_model_residency("vertex/byok")
+
+
+def test_providers_catalog_us_model_passes_us_residency() -> None:
+    """Support-matrix PROVIDERS slugs (not only the 4 routing rows) carry us-east-1."""
+    from mergecraft.models import lookup_model_data_residency
+    from mergecraft.utils.agent_resolve import effective_model_chain
+
+    assert lookup_model_data_residency("openai/gpt") == "us-east-1"
+    assert lookup_model_data_residency("openrouter/openai/gpt-5.6-sol") == "us-east-1"
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("us-east-1",)))
+    settings = RepoSettings.model_validate({"models": ["openai/gpt"]})
+    assert effective_model_chain(settings) == ["openai/gpt"]

@@ -3,6 +3,9 @@
 Defaults are inert: telemetry stays on, proxy/CA are unset, and an empty
 residency allow-list means *no extra policy* (existing reviews keep working).
 A non-empty ``allowed_regions`` fails closed via :func:`enforce_data_residency`.
+Model regions come from :data:`mergecraft.models.PROVIDERS` (default
+``us-east-1``; Vertex BYOK is ``eu-west-1``). Ids absent from that catalog
+are treated as ``unknown`` and refused.
 
 Exports:
     EnterpriseSettings: Nested ``enterprise:`` block on :class:`RepoSettings`.

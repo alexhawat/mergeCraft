@@ -49,6 +49,7 @@ class ModelDef(BaseModel):
     routing: ModelRouting | None = None
     subagent_model: str | None = None
     hidden: bool = False
+    data_residency: str = "us-east-1"
 
 
 class ProviderConfig(BaseModel):
@@ -400,6 +401,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
                     display_name="Google Vertex AI",
                     resolve="vertex",
                     routing="vertex",
+                    data_residency="eu-west-1",
                 ),
             },
         )
@@ -636,6 +638,25 @@ def get_model_managed_credentials(slug: str) -> list[str]:
     if provider_config is None:
         return []
     return list(provider_config.managed_credentials)
+
+
+def lookup_model_data_residency(model_id: str) -> str | None:
+    """Return the PROVIDERS ``data_residency`` for *model_id*, if known.
+
+    Matches ``provider/slug``, the model slug, ``resolve``, and
+    ``open_router_resolve``. Unknown ids return ``None`` (fail closed).
+    """
+    needle = model_id.strip()
+    if not needle:
+        return None
+    for provider_key, config in PROVIDERS.items():
+        for slug, defn in config.models.items():
+            names = {f"{provider_key}/{slug}", defn.resolve, slug}
+            if defn.open_router_resolve:
+                names.add(defn.open_router_resolve)
+            if needle in names:
+                return defn.data_residency
+    return None
 
 
 # ── derived flat list ──────────────────────────────────────────────────────────
