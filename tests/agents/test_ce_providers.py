@@ -105,17 +105,23 @@ def test_retries_are_bounded_and_retryable_only() -> None:
         decide(failure="rate_limit", attempt=99)
 
 
-def test_circuit_breaker_and_cooldown() -> None:
-    """Happy: circuit breaker opens and cooldown delays re-entry."""
+def test_circuit_breaker_and_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Happy: circuit breaker opens and cooldown elapses on monotonic time."""
     module = require_module(PROVIDER_HEALTH_MODULE)
     breaker_cls = getattr(module, "ProviderBreaker", None)
     if breaker_cls is None:
         pytest.fail("expected ProviderBreaker")
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(module, "monotonic", lambda: clock["now"])
     breaker = breaker_cls(provider="anthropic", cooldown_s=30)
     breaker.trip()
     assert breaker.allow() is False
     cooldown = getattr(breaker, "cooldown_s", None) or getattr(breaker, "cooldown", None)
     assert cooldown == 30
+    clock["now"] = 1_029.0
+    assert breaker.allow() is False
+    clock["now"] = 1_030.0
+    assert breaker.allow() is True
 
 
 def test_degrade_when_non_required_provider_unavailable() -> None:

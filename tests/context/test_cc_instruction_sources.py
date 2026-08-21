@@ -66,8 +66,10 @@ def test_injected_instructions_are_hashed_into_the_run_manifest(tmp_path: Path) 
     module = load_module("mergecraft.context.instruction_discovery")
     hash_injected = require_callable(module, "hash_injected_instructions")
     digest = hash_injected({"AGENTS.md": "follow the service boundaries"})
-    assert isinstance(digest, str)
-    assert len(digest) >= 16
+    assert isinstance(digest, dict)
+    assert "AGENTS.md" in digest
+    assert isinstance(digest["AGENTS.md"], str)
+    assert len(digest["AGENTS.md"]) == 64
     manifest_mod = load_module("mergecraft.evidence.run_manifest")
     build = require_callable(manifest_mod, "build_run_manifest")
     manifest = build(
@@ -75,10 +77,10 @@ def test_injected_instructions_are_hashed_into_the_run_manifest(tmp_path: Path) 
         model="test-model",
         agent_id="reviewer",
         prompt_text="prompt",
-        instruction_hashes={"AGENTS.md": digest},
+        instruction_hashes=digest,
     )
     hashes = manifest.get("instruction_hashes") or manifest.get("hashes", {}).get("instructions")
-    assert hashes
+    assert hashes == digest
 
 
 def test_competing_instruction_sources_are_resolved() -> None:

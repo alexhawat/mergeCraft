@@ -16,6 +16,7 @@ import pytest
 from mergecraft.mcp.shell import shell_tool
 from mergecraft.utils.git_setup import setup_git
 from tests.security.conftest import PUSH_MODES, SHELL_MODES, PlantedRepo
+from tests.support.tool_context import write_capable_mcp_mode
 
 CELLS = [(s, p) for s in SHELL_MODES for p in PUSH_MODES]
 CELL_IDS = [f"shell-{s}__push-{p}" for s in SHELL_MODES for p in PUSH_MODES]
@@ -109,9 +110,10 @@ async def test_working_directory_escapes_rejected(
         str(workspace / ".." / ".." / ".."),
     ]
     for escape in escapes:
-        result = await tool.execute(
-            {"command": "pwd", "description": "cwd escape attempt", "working_directory": escape}
-        )
+        with write_capable_mcp_mode():
+            result = await tool.execute(
+                {"command": "pwd", "description": "cwd escape attempt", "working_directory": escape}
+            )
         assert result.is_error, f"cwd escape {escape!r} executed under push={push}"
 
 
@@ -126,9 +128,10 @@ async def test_working_directory_inside_workspace_accepted(
     monkeypatch.setenv("GITHUB_WORKSPACE", str(workspace))
     ctx = make_tool_ctx(shell="restricted", push=push)
     tool = shell_tool(ctx)
-    result = await tool.execute(
-        {"command": "pwd", "description": "in-workspace cwd", "working_directory": str(subdir)}
-    )
+    with write_capable_mcp_mode():
+        result = await tool.execute(
+            {"command": "pwd", "description": "in-workspace cwd", "working_directory": str(subdir)}
+        )
     assert not result.is_error, f"legitimate cwd rejected: {result.content}"
 
 

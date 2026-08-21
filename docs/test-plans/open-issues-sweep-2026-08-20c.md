@@ -690,3 +690,26 @@ Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility
 - Live smoke **skipped: no live gate** (`MERGECRAFT_LIVE_E2E` unset)
 - `make lint` + `make typecheck` clean
 - No `src/` edits; CEF not started
+
+## Thermos recon (test-creator)
+
+Product SHA `91b3d96f`. Tests retargeted to honest contracts; security properties kept.
+
+| Contract | Tests |
+|----------|--------|
+| Instruction hashes are a per-source mapping | `tests/context/test_cc_instruction_sources.py::test_injected_instructions_are_hashed_into_the_run_manifest` |
+| Memory effectiveness zeros without corpus; labeled counts compute deltas | `tests/memory/test_cc_validation.py` |
+| Empty FP patterns do not match every path | `test_false_positive_memory_empty_rules_do_not_match_every_path` |
+| Lazy retrieve omits without tools/root; no query echo | `tests/context/test_cc_search_explain.py::test_lazy_context_retrieval_goes_through_controlled_tools` |
+| Review-only default-deny when mode is None; inner guards after `Fix` | git/shell/credential/containment/push-matrix |
+| Missing cache path is not rebuilt | `tests/reliability/test_cd_degradation.py` |
+| GitLab token equality; missing delivery id fail-closed | `tests/scm/test_cd_webhooks.py` |
+| SSRF decimal/hex/short IPv4 + mapped IPv6 | `tests/security/test_cd_egress.py` |
+| Vuln gates `passed=False` when not run | `test_cd_egress` |
+| Soak `duration_seconds=0` → `passed=False` | `test_cd_soak_slos` |
+| Perf bench `status=not_run` | `test_cd_budgets` |
+| ProviderBreaker cooldown elapses on monotonic | `test_ce_providers` |
+| Doctor `migrate_config` unknown version | `tests/cli/test_doctor.py` |
+| Policy CLI `--symbol` | `test_cc_lifecycle` / `test_policy_verbs` |
+
+Rationale: Thermos product changes were honest (not test stubs). Do not weaken fail-closed / review-only / SSRF / GitLab token tests.

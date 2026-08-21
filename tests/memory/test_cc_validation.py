@@ -98,14 +98,32 @@ def test_organization_memory_backend_is_pluggable() -> None:
         assert callable(getattr(backend_cls, name, None)) or hasattr(backend_cls, name)
 
 
-def test_memory_effectiveness_improves_precision_without_reducing_recall() -> None:
-    """#360 — effectiveness metrics prove precision up, recall not down."""
+def test_false_positive_memory_empty_rules_do_not_match_every_path() -> None:
+    """#360 — empty pattern list (or empty pattern) never suppresses."""
     module = _memory_api()
-    report = require_callable(module, "evaluate_memory_effectiveness")()
-    precision_delta = float(report.precision_delta)
-    recall_delta = float(report.recall_delta)
-    assert precision_delta > 0.0
-    assert recall_delta >= 0.0
+    store = require_callable(module, "FalsePositiveMemory")(ttl_days=30, scope="**")
+    assert store.matches(path="src/app.py", message="unused import") is False
+    store.add(pattern="", path_scope="**")
+    assert store.matches(path="src/app.py", message="unused import") is False
+
+
+def test_memory_effectiveness_improves_precision_without_reducing_recall() -> None:
+    """#360 — labeled corpus: precision up, recall not down; empty input is zeros."""
+    module = _memory_api()
+    evaluate = require_callable(module, "evaluate_memory_effectiveness")
+    empty = evaluate()
+    assert float(empty.precision_delta) == 0.0
+    assert float(empty.recall_delta) == 0.0
+    report = evaluate(
+        baseline_true_positives=10,
+        baseline_false_positives=5,
+        baseline_false_negatives=1,
+        memory_true_positives=10,
+        memory_false_positives=1,
+        memory_false_negatives=1,
+    )
+    assert float(report.precision_delta) > 0.0
+    assert float(report.recall_delta) >= 0.0
 
 
 def test_w13_consumes_dismissal_codes_it_does_not_define_them() -> None:

@@ -146,6 +146,6 @@ def test_performance_regression_and_monorepo_benchmarks_exist() -> None:
     bench = require_callable(module, "run_perf_regression_benchmark")
     report = bench(kind="monorepo")
     payload = report.model_dump() if hasattr(report, "model_dump") else dict(report)
-    assert "passed" in payload or "status" in payload
+    assert payload.get("status") == "not_run"
     for banned in ("published_usd", "published_p95_ms", "precision", "recall"):
         assert banned not in payload

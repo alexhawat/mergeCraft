@@ -24,6 +24,7 @@ import pytest
 from mergecraft.mcp.shell import shell_tool
 from mergecraft.utils.git_setup import setup_git
 from tests.security.conftest import HOOK_SENTINEL, PlantedRepo
+from tests.support.tool_context import write_capable_mcp_mode
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ENTRYPOINT = _REPO_ROOT / "docker-entrypoint.sh"
@@ -104,9 +105,10 @@ async def test_shell_working_directory_escape_rejected(
     """
     ctx = make_tool_ctx(shell="restricted")
     tool = shell_tool(ctx)
-    result = await tool.execute(
-        {"command": "pwd", "description": "probe cwd", "working_directory": escape_cwd}
-    )
+    with write_capable_mcp_mode():
+        result = await tool.execute(
+            {"command": "pwd", "description": "probe cwd", "working_directory": escape_cwd}
+        )
     assert result.is_error, f"cwd escape {escape_cwd!r} was executed: {result.content}"
     text = result.content[0]["text"]
     assert "working_directory" in text or "outside" in text or "not allowed" in text, (
@@ -124,9 +126,10 @@ async def test_shell_working_directory_symlink_escape_rejected(
     link.symlink_to("/etc", target_is_directory=True)
     ctx = make_tool_ctx(shell="restricted")
     tool = shell_tool(ctx)
-    result = await tool.execute(
-        {"command": "pwd", "description": "probe cwd", "working_directory": str(link)}
-    )
+    with write_capable_mcp_mode():
+        result = await tool.execute(
+            {"command": "pwd", "description": "probe cwd", "working_directory": str(link)}
+        )
     assert result.is_error, f"symlink escape executed: {result.content}"
 
 

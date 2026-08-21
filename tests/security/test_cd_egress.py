@@ -24,6 +24,10 @@ _SSRF_URLS = [
     "http://[::1]/",
     "file:///etc/passwd",
     "http://localhost:1/",
+    "http://2130706433/",
+    "http://0x7f000001/",
+    "http://127.1/",
+    "http://[::ffff:127.0.0.1]/",
 ]
 
 
@@ -71,7 +75,11 @@ def test_dependency_vulnerability_gate_is_invocable() -> None:
     passed = getattr(report, "passed", None)
     if passed is None:
         passed = report.get("passed")
-    assert passed is True or passed is False
+    ran = getattr(report, "ran", None)
+    if ran is None and isinstance(report, dict):
+        ran = report.get("ran")
+    assert passed is False
+    assert ran is False or "not_run" in str(report)
 
 
 def test_container_image_vulnerability_gate_is_distinct_from_make_security() -> None:
@@ -84,6 +92,11 @@ def test_container_image_vulnerability_gate_is_distinct_from_make_security() -> 
     )
     command = str(report)
     assert "make security" not in command
+    passed = getattr(report, "passed", None)
+    if passed is None and isinstance(report, dict):
+        passed = report.get("passed")
+    if passed is not None:
+        assert passed is False
     if name is not None:
         assert name != "make security"
 

@@ -63,7 +63,7 @@ def test_webhook_signature_verification_accepts_a_valid_payload(provider: str) -
 
 
 def test_webhook_signature_verification_rejects_a_bad_hmac() -> None:
-    """Error: invalid signature names the failure (type + message)."""
+    """Error: invalid GitHub HMAC names the failure (type + message)."""
     module = require_module(WEBHOOK_MODULE)
     verify = require_callable(module, "verify_webhook_signature")
     with pytest.raises(
@@ -75,6 +75,31 @@ def test_webhook_signature_verification_rejects_a_bad_hmac() -> None:
             headers={"X-Hub-Signature-256": "sha256=deadbeef"},
             body=b'{"ok":true}',
             secret="test-secret",
+        )
+
+
+def test_gitlab_webhook_token_is_shared_secret_equality_not_hmac() -> None:
+    """GitLab ``X-Gitlab-Token`` is timing-safe equality, not HMAC of the body."""
+    module = require_module(WEBHOOK_MODULE)
+    verify = require_callable(module, "verify_webhook_signature")
+    signed = require_callable(module, "sign_webhook_payload")(
+        "gitlab", body=b'{"ok":true}', secret="gitlab-shared-secret"
+    )
+    verify(
+        "gitlab",
+        headers=signed,
+        body=b'{"different":"body"}',
+        secret="gitlab-shared-secret",
+    )
+    with pytest.raises(
+        (ValueError, PermissionError, RuntimeError),
+        match=r"signature|hmac|unauthor|secret",
+    ):
+        verify(
+            "gitlab",
+            headers={"X-Gitlab-Token": "wrong-token"},
+            body=b'{"ok":true}',
+            secret="gitlab-shared-secret",
         )
 
 
@@ -91,6 +116,26 @@ def test_webhook_replay_protection_rejects_stale_or_reused_delivery() -> None:
             headers={"X-Hub-Signature-256": "sha256=00", "X-GitHub-Delivery": "dup"},
             body=b"{}",
             received_at_skew_seconds=86_400,
+        )
+
+
+def test_webhook_event_processing_fails_closed_without_delivery_id() -> None:
+    """Error: missing delivery id is rejected, not stored as anonymous."""
+    module = require_module(WEBHOOK_MODULE)
+    process = require_callable(module, "process_webhook_event")
+    with pytest.raises(
+        (ValueError, PermissionError, RuntimeError), match=r"missing webhook delivery id"
+    ):
+        process(provider="github", delivery_id="", event="pull_request", body={"action": "opened"})
+    check = require_callable(module, "reject_webhook_replay")
+    with pytest.raises(
+        (ValueError, PermissionError, RuntimeError), match=r"missing webhook delivery id"
+    ):
+        check(
+            provider="github",
+            headers={"X-Hub-Signature-256": "sha256=00"},
+            body=b"{}",
+            received_at_skew_seconds=0,
         )
 
 

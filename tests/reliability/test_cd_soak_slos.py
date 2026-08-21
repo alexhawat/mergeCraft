@@ -32,7 +32,12 @@ def test_soak_harness_is_invocable_without_a_live_gateway() -> None:
     passed = getattr(report, "passed", None)
     if passed is None:
         passed = report.get("passed")
-    assert passed is True or passed is False
+    assert passed is False
+    ran = soak(duration_seconds=1, concurrency=1)
+    ran_passed = getattr(ran, "passed", None)
+    if ran_passed is None:
+        ran_passed = ran.get("passed")
+    assert ran_passed is True
 
 
 def test_high_concurrency_tier_is_named() -> None:

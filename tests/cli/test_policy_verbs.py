@@ -96,6 +96,8 @@ def test_policy_explain_names_the_source_of_each_effective_rule(
             "acme-corp",
             "--repo",
             "payments-api",
+            "--symbol",
+            "process",
         ],
     )
 

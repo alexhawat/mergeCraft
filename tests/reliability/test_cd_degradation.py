@@ -27,11 +27,18 @@ def test_provider_outage_degrades_instead_of_crashing() -> None:
     assert status in {"degraded", "unavailable", "retry"}
 
 
-def test_local_cache_corruption_is_recoverable() -> None:
-    """Error: corrupt cache is rebuilt rather than fatal."""
+def test_local_cache_corruption_is_recoverable(tmp_path: Path) -> None:
+    """Error: present corrupt cache is rebuilt; missing paths are not fake-passed."""
     module = require_module(RECOVERY_MODULE)
     recover = require_callable(module, "recover_corrupt_cache")
-    result = recover(path="not-a-real-cache")
+    missing = recover(path="not-a-real-cache")
+    missing_rebuilt = getattr(missing, "rebuilt", None)
+    if missing_rebuilt is None:
+        missing_rebuilt = missing.get("rebuilt")
+    assert missing_rebuilt is False
+    cache = tmp_path / "corrupt-cache"
+    cache.write_text("garbage", encoding="utf-8")
+    result = recover(path=str(cache))
     rebuilt = getattr(result, "rebuilt", None)
     if rebuilt is None:
         rebuilt = result.get("rebuilt")

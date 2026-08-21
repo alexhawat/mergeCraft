@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
+from tests.context.support import git_commit_all, git_init_repo
 from tests.support.cc_batch import invoke, load_module, plain, require_callable, require_registered
 from tests.support.dead_package_wiring import SRC_ROOT
 
@@ -64,14 +65,29 @@ def test_context_budget_allocation_per_specialist() -> None:
     assert sum(int(value) for value in budgets.values()) <= 8000
 
 
-def test_lazy_context_retrieval_goes_through_controlled_tools() -> None:
-    """#356 — lazy retrieval is tool-gated, not a bulk dump."""
+def test_lazy_context_retrieval_goes_through_controlled_tools(tmp_path: Path) -> None:
+    """#356 — lazy retrieval is tool-gated, not a query echo."""
     module = load_module("mergecraft.context.operator")
     retrieve = require_callable(module, "lazy_retrieve")
-    result = retrieve(query="callers of process", tools_allowed=("search",))
-    assert result
-    denied = retrieve(query="callers of process", tools_allowed=())
-    assert not denied or getattr(denied, "omitted", False)
+    query = "callers of process"
+    denied = retrieve(query=query, tools_allowed=())
+    assert getattr(denied, "omitted", False)
+    assert tuple(getattr(denied, "items", ())) == ()
+    no_root = retrieve(query=query, tools_allowed=("search",))
+    assert getattr(no_root, "omitted", False)
+    assert query not in tuple(getattr(no_root, "items", ()))
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "app.py").write_text("def process():\n    return 1\n", encoding="utf-8")
+    git_init_repo(repo)
+    git_commit_all(repo)
+    hits = retrieve(query="process", tools_allowed=("search",), repo_root=repo)
+    assert getattr(hits, "omitted", True) is False
+    items = tuple(getattr(hits, "items", ()))
+    assert items
+    assert "process" not in items
+    assert any("app.py" in item for item in items)
 
 
 def test_context_omission_reporting_downgrades_the_outcome() -> None:

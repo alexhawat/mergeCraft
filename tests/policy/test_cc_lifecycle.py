@@ -29,6 +29,7 @@ def test_policy_effective_help_names_source_of_every_rule() -> None:
     )
     help_text = plain(result.stdout + result.stderr).casefold()
     assert "source" in help_text or "effective" in help_text
+    assert "--symbol" in help_text or "symbol" in help_text
 
 
 def test_policy_simulate_help_is_registered() -> None:
