@@ -196,3 +196,84 @@ W7 wiring tests (un-xfailed W7 recon): `test_xrepo_has_a_review_or_cli_productio
 - CB pr/requirements/xrepo wiring tests **PASS**
 - `make lint` + `make typecheck` clean
 - No `src/` edits; CBF not started
+
+---
+
+# Batch CC — evidence through memory (#354–#360)
+
+Authoring wave: **W8** (Batch CC RED) · Implementation: **W9** `#354` · **W10** `#355` · **W11** `#356+#357` · **W12** `#358+#359` · **W13** `#360`
+
+Helper: `tests/support/cc_batch.py`.
+
+Out of scope honoured (no extra tests): D8 P12–P31 / #377–#385; D6 file 7 / 20b; #354 second `decide_approval()`; #355 rebuild of dedup/causality; #355→memory until W13; #356 retrieval half already shipped; #357 authoring mergeCraft AGENTS.md; #358 schema/enforcement already shipped; #359 engine widening; #360 producing dismissal codes.
+
+Canonical impl modules the RED suite pins (W9–W13):
+
+- W9: `mergecraft.evidence.audit`, `mergecraft.cli.evidence_cmd` (new `cli/*_cmd.py`, D10)
+- W10: `mergecraft.findings.materiality`
+- W11: `mergecraft.context.operator`, `instruction_discovery` extras, `mergecraft.context.external_files`
+- W12: `mergecraft.policy.lifecycle`, `mergecraft.policy.packs` + `src/mergecraft/policy/packs/*.yaml`
+- W13: `mergecraft.memory`
+
+After each impl wave, recon **deletes** matching W8 current-state usage-error pins and **un-xfails** `green after W9|W10|W11|W12|W13` markers (`strict=False`).
+
+## xfail schedule (W8)
+
+| Wave | Tests | Marker reason | Status |
+|------|-------|---------------|--------|
+| **W9** | `tests/evidence/test_cc_verifier_states.py` (10) + `tests/cli/test_evidence_cmd.py` (5) | `green after W9: evidence states + CLI (#354)` | XFAIL |
+| **W10** | `tests/findings/test_cc_materiality.py` (7) | `green after W10: materiality / calibration / dismissal (#355)` | XFAIL |
+| **W11** | `tests/context/test_cc_search_explain.py` (8) + `tests/context/test_cc_instruction_sources.py` (6) | `green after W11: context search/explain/budgets (#356)` / `instruction sources + external files (#357)` | XFAIL |
+| **W12** | `tests/policy/test_cc_lifecycle.py` (7) + `tests/policy/test_cc_packs.py` (4) | `green after W12: policy lifecycle back half (#358)` / `policy packs (#359)` | XFAIL |
+| **W13** | `tests/memory/test_cc_validation.py` (9) | `green after W13: memory validation / org / effectiveness (#360)` | XFAIL |
+
+Current-state **PASS** (not xfailed; recon deletes the usage-error rows after the matching impl wave): D14 `decide_approval` only in `agents/gates.py`; D10 root-callback pin; shipped retrieval/dedup/policy front-half files; CLI usage-error for `evidence`, `context search|explain`, `policy effective|simulate`, `memory validate`.
+
+W8 run: **12 passed / 56 xfailed / 0 XPASS**. `make lint` + `make typecheck` clean.
+
+## Contract matrix (W8)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| CC354a | Six verifier states | unit | happy | `test_verifier_states_are_the_six_named_outcomes` |
+| CC354b | Major/Critical require packets | unit | happy | `test_medium_high_critical_findings_require_an_evidence_packet` |
+| CC354c | Packet evidence kinds | unit | happy | `test_evidence_packet_supports_the_named_kinds` |
+| CC354d | Unverified does not block unless policy | unit | edge | `test_unverified_findings_do_not_block_unless_policy_permits` |
+| CC354e | Falsification-first rubric | unit | happy | `test_falsification_first_rubric_is_wired` |
+| CC354f | Freshness / hash / completeness | unit | happy | `test_evidence_freshness_provenance_hash_and_completeness_scoring` |
+| CC354g | Tool vs LLM contradiction | unit | happy | `test_contradiction_detection_between_tools_and_llm` |
+| CC354h | Verification replay | unit | happy | `test_verification_replay_is_deterministic` |
+| CC354i | Policy evidence by severity/path/change/rule | integration | error | `test_policy_evidence_requirements_cover_severity_path_change_type_and_rule` |
+| CC354j | Verifier failure cannot promote | unit | error | `test_verifier_failure_cannot_silently_promote_a_finding` |
+| CC354k | D14 no second approval path | unit | current | `test_decide_approval_remains_the_only_approval_path` |
+| CC354l | New `evidence_cmd.py` + show/verify | functional | happy/error | `tests/cli/test_evidence_cmd.py` |
+| CC354m | JSON export / D10 root callback | functional | happy | `test_evidence_show_json_is_exportable`, `test_w9_does_not_fold_evidence_into_root_callback` |
+| CC355a | Materiality + high-impact over style | unit | happy | `test_materiality_scoring_ranks_security_above_style` |
+| CC355b | Benchmark-calibrated confidence | unit | happy | `test_confidence_is_calibrated_from_benchmark_outcomes` |
+| CC355c | Budgets by severity/category/file/review | unit | edge | `test_finding_budgets_cover_severity_category_file_and_review` |
+| CC355d | Publication + blocking thresholds | unit | happy | `test_publication_and_blocking_thresholds_are_configurable` |
+| CC355e | Dismissal reason codes | unit | happy | `test_dismissal_reason_codes_are_a_closed_set` |
+| CC355f | Dismissal → eval, not memory | integration | edge | `test_dismissal_feeds_evaluation_not_durable_memory` |
+| CC355g | Blocker precision > 95% gate | integration | happy | `test_precision_regression_gate_targets_blocker_precision_above_95` |
+| CC356a | `context search` / `explain` | functional | happy/error | `tests/context/test_cc_search_explain.py` |
+| CC356b | Relevance, specialist budgets, lazy tools | unit | happy | `test_context_relevance_scoring`, `test_context_budget_allocation_per_specialist`, `test_lazy_context_retrieval_goes_through_controlled_tools` |
+| CC356c | Omission downgrade | unit | edge | `test_context_omission_reporting_downgrades_the_outcome` |
+| CC356d | Retrieval quality ≠ model quality | integration | happy | `test_context_retrieval_quality_is_benchmarked_separately_from_models` |
+| CC357a | GEMINI / Copilot / Windsurf / custom | integration | happy | `test_discovers_gemini_copilot_windsurf_and_custom_list` |
+| CC357b | Instruction hashes + conflicts | unit | happy | `test_injected_instructions_are_hashed_into_the_run_manifest`, `test_competing_instruction_sources_are_resolved` |
+| CC357c | Untrusted GEMINI fenced | functional | error | `test_untrusted_gemini_renders_through_the_nonce_fence` |
+| CC357d | External files type/size/trust/provenance | unit | error | `test_external_context_files_enforce_type_size_trust_and_provenance` |
+| CC358a | `policy effective` / `simulate` | functional | happy | `tests/policy/test_cc_lifecycle.py` |
+| CC358b | Symbol scope + conflicts + metrics + audit | unit | happy/error | `test_policy_resolution_stays_deterministic_at_symbol_scope`, `test_conflicting_policies_are_detected`, `test_policy_metrics_include_trigger_fp_waiver_and_blocking_rates`, `test_policy_audit_artifacts_are_emitted` |
+| CC359a | Seven packs + identity fields | integration | happy | `tests/policy/test_cc_packs.py` |
+| CC359b | Fixtures via `policy test`; no schema widen | functional | happy | `test_pack_fixtures_are_runnable_by_policy_test`, `test_packs_do_not_widen_the_policy_schema` |
+| CC360a | `memory validate` | functional | happy/error | `test_memory_validate_help_is_registered`, `test_memory_validate_rejects_a_corrupt_store` |
+| CC360b | Historical validation; no one-shot durable memory | unit | error | `test_historical_validation_is_required_before_activation`, `test_one_reviewer_action_does_not_silently_create_durable_memory` |
+| CC360c | Kinds + FP over-suppression + org backend | unit | happy/edge | `test_memory_kinds_are_separated`, `test_false_positive_memory_has_expiry_scope_and_over_suppression_guard`, `test_organization_memory_backend_is_pluggable` |
+| CC360d | Effectiveness; consume dismissal codes | integration | happy | `test_memory_effectiveness_improves_precision_without_reducing_recall`, `test_w13_consumes_dismissal_codes_it_does_not_define_them` |
+
+## Acceptance (W8)
+
+- Collection clean; current-state pins **PASS**; wiring pins **XFAIL** (`strict=False`); **no XPASS**
+- `make lint` + `make typecheck` clean
+- No `src/` edits; W9 not started
