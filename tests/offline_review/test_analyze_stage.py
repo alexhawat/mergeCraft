@@ -43,6 +43,9 @@ def _patch_harness(
         "mergecraft.config.load_repo_settings",
         lambda root, load_learnings_files=False: settings,
     )
+    monkeypatch.setattr(
+        offline_mod, "load_repo_settings", lambda root, load_learnings_files=False: settings
+    )
     monkeypatch.setattr(offline_mod, "resolve_offline_review_trust_tier", lambda **_: "trusted")
     monkeypatch.setattr(offline_mod, "apply_cli_trust_tier_env", lambda _: {})
     monkeypatch.setattr(offline_mod, "_apply_tracing_cli_overrides", lambda _: {})
