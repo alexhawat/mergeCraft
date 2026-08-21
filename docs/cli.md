@@ -85,6 +85,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft policy lint` | Validate policy rule YAML under `.mergecraft/policy/`. |
 | `mergecraft policy simulate` | Simulate a proposed rule against past PRs. |
 | `mergecraft policy test --fixtures FIXTURES` | Run should-trigger and should-not policy fixtures. |
+| `mergecraft profile recommend --risk RISK` | Print the review profile auto-selected from `--risk`. |
 | `mergecraft requirements explain <requirement-id>` | Explain one requirement by id; unknown ids are an error. |
 | `mergecraft requirements inspect` | List ingested requirements and their states. |
 | `mergecraft review` | Review a local git diff offline (no GitHub Action / PR posting). |
