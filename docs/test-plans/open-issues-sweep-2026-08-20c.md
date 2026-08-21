@@ -681,7 +681,7 @@ Locked profile names: `fast`, `standard`, `deep`, `security`, `api_compatibility
 - Kept `test_live_provider_smoke_runs_when_gated` skip when `MERGECRAFT_LIVE_E2E` is unset (`skipped: no live gate`).
 - D6 exporter pin kept. No leftover CE xfails.
 - W25 impl: `231aa4c4`.
-- W25 recon: pending commit SHA.
+- W25 recon: `ab506f34`.
 
 ## Acceptance (W25 recon)
 
