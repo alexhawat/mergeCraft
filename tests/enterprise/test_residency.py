@@ -8,13 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: data-residency controls (#381)",
-    strict=False,
-)
 
-
-@_W72
 def test_enforce_data_residency_allows_listed_region() -> None:
     """Happy: a region on the allow-list is accepted."""
     from mergecraft.enterprise.residency import DataResidencyPolicy, enforce_data_residency
@@ -22,7 +16,6 @@ def test_enforce_data_residency_allows_listed_region() -> None:
     enforce_data_residency(region="eu-west-1", policy=DataResidencyPolicy(allowed=("eu-west-1",)))
 
 
-@_W72
 def test_enforce_data_residency_blocks_disallowed_region() -> None:
     """Error: a region outside the allow-list raises PermissionError naming residency."""
     from mergecraft.enterprise.residency import DataResidencyPolicy, enforce_data_residency
@@ -34,7 +27,6 @@ def test_enforce_data_residency_blocks_disallowed_region() -> None:
         )
 
 
-@_W72
 def test_enforce_data_residency_empty_allow_list_fails_closed() -> None:
     """Edge: an empty allow-list refuses every region (fail closed)."""
     from mergecraft.enterprise.residency import DataResidencyPolicy, enforce_data_residency
@@ -43,7 +35,6 @@ def test_enforce_data_residency_empty_allow_list_fails_closed() -> None:
         enforce_data_residency(region="eu-west-1", policy=DataResidencyPolicy(allowed=()))
 
 
-@_W72
 def test_enterprise_residency_is_not_provider_health_module() -> None:
     """The #381 control lives under enterprise/, wrapping rather than rewriting #371."""
     from mergecraft.enterprise import residency as enterprise_residency

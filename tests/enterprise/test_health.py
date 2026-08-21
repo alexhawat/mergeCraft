@@ -6,15 +6,7 @@ Distinct from the MCP FastAPI ``/health`` probe.
 
 from __future__ import annotations
 
-import pytest
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: health endpoint (#381)",
-    strict=False,
-)
-
-
-@_W72
 def test_healthz_path_is_not_mcp_health() -> None:
     """Happy: enterprise health is ``/healthz``, not the MCP ``/health`` route."""
     from mergecraft.enterprise.health import HEALTHZ_PATH
@@ -23,7 +15,6 @@ def test_healthz_path_is_not_mcp_health() -> None:
     assert HEALTHZ_PATH != "/health"
 
 
-@_W72
 def test_health_payload_is_machine_readable() -> None:
     """Happy: the payload is JSON-shaped with a status field."""
     from mergecraft.enterprise.health import health_payload
@@ -34,11 +25,11 @@ def test_health_payload_is_machine_readable() -> None:
     assert status in {"ok", "healthy"}
 
 
-@_W72
 def test_health_app_serves_healthz() -> None:
     """Integration: the health ASGI app answers GET /healthz with JSON."""
-    from mergecraft.enterprise.health import build_health_app
     from starlette.testclient import TestClient
+
+    from mergecraft.enterprise.health import build_health_app
 
     client = TestClient(build_health_app())
     response = client.get("/healthz")
@@ -47,11 +38,11 @@ def test_health_app_serves_healthz() -> None:
     assert str(payload.get("status", "")).casefold() in {"ok", "healthy"}
 
 
-@_W72
 def test_health_app_unknown_path_is_not_ok() -> None:
     """Error: a missing path is not reported as healthy."""
-    from mergecraft.enterprise.health import build_health_app
     from starlette.testclient import TestClient
+
+    from mergecraft.enterprise.health import build_health_app
 
     client = TestClient(build_health_app())
     response = client.get("/not-a-health-route")

@@ -16,11 +16,6 @@ from typer.testing import CliRunner
 
 from tests.ci.workflow_support import REPO_ROOT
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: enterprise CLI verbs (#381)",
-    strict=False,
-)
-
 runner = CliRunner()
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
 
@@ -29,7 +24,6 @@ def _load_cmd(module_name: str) -> Any:
     return importlib.import_module(module_name)
 
 
-@_W72
 @pytest.mark.parametrize(
     ("module_name", "filename"),
     [
@@ -46,7 +40,6 @@ def test_enterprise_cli_module_exists(module_name: str, filename: str) -> None:
     assert hasattr(module, "app")
 
 
-@_W72
 def test_health_cmd_emits_json_status() -> None:
     """Functional: ``health_cmd.app`` prints machine-readable status JSON."""
     module = _load_cmd("mergecraft.cli.health_cmd")
@@ -58,7 +51,6 @@ def test_health_cmd_emits_json_status() -> None:
     assert str(payload.get("status", "")).casefold() in {"ok", "healthy"}
 
 
-@_W72
 def test_audit_cmd_export_empty_json_array() -> None:
     """Functional: ``audit export`` with no records prints ``[]``."""
     module = _load_cmd("mergecraft.cli.audit_cmd")
@@ -68,7 +60,6 @@ def test_audit_cmd_export_empty_json_array() -> None:
     assert payload == []
 
 
-@_W72
 def test_support_bundle_cmd_writes_archive(tmp_path: Path) -> None:
     """Functional: ``support-bundle`` writes a gzipped archive to ``--output``."""
     module = _load_cmd("mergecraft.cli.support_bundle_cmd")

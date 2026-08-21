@@ -7,6 +7,11 @@ Authoring waves: **W7.1** (#381), **W8.1** (#382), **W10.1** (#384)
 Implementation waves (do not edit these tests): W7.2, W8.2, W10.2.
 Recon after each impl wave removes the matching non-strict `xfail` markers.
 
+**W7.2 recon (2026-08-21):** all `tests/enterprise/` `green after W7.2` markers
+removed after 45/45 XPASS on `c32b2eae`. W8.2 (`tests/release/`) and W10.2
+(`tests/evals/`) xfails left in place. No assertion edits; no leftover
+enterprise xfail.
+
 D17: new CLI tests live under `tests/enterprise/`, not `tests/cli/`. No
 `mergecraft.cli.app` imports. D10: `test_no_eval_scores_on_landing_readme`
 stays green; this suite mirrors it and never asserts scores belong on README.
@@ -18,17 +23,17 @@ All cross-wave markers use `@pytest.mark.xfail(..., strict=False)`.
 
 | Wave | Test module | Marker reason | Status |
 | --- | --- | --- | --- |
-| **W7.2** | `tests/enterprise/test_proxy.py` | `green after W7.2: enterprise proxy (#381)` | RED @ W7.1 |
-| **W7.2** | `tests/enterprise/test_certificates.py` | `green after W7.2: custom CA path (#381)` | RED @ W7.1 |
-| **W7.2** | `tests/enterprise/test_offline_install.py` (xfails only) | `green after W7.2: offline install path (#381)` | RED @ W7.1 |
-| **W7.2** | `tests/enterprise/test_telemetry.py` | `green after W7.2: telemetry opt-out contract (#381)` | RED @ W7.1 |
-| **W7.2** | `tests/enterprise/test_residency.py` | `green after W7.2: data-residency controls (#381)` | RED @ W7.1 |
-| **W7.2** | `tests/enterprise/test_health.py` | `green after W7.2: health endpoint (#381)` | RED @ W7.1 |
-| **W7.2** | `tests/enterprise/test_audit.py` | `green after W7.2: audit and usage export (#381)` | RED @ W7.1 |
-| **W7.2** | `tests/enterprise/test_support_bundle.py` | `green after W7.2: support bundle with redaction (#381)` | RED @ W7.1 |
-| **W7.2** | `tests/enterprise/test_policy_memory_distribution.py` | `green after W7.2: org policy/memory without dashboard (#381)` | RED @ W7.1 |
-| **W7.2** | `tests/enterprise/test_retention_diagnostics.py` | `green after W7.2: retention and operational diagnostics (#381)` | RED @ W7.1 |
-| **W7.2** | `tests/enterprise/test_cli_verbs.py` | `green after W7.2: enterprise CLI verbs (#381)` | RED @ W7.1 |
+| **W7.2** | `tests/enterprise/test_proxy.py` | `green after W7.2: enterprise proxy (#381)` | GREEN — markers removed |
+| **W7.2** | `tests/enterprise/test_certificates.py` | `green after W7.2: custom CA path (#381)` | GREEN — markers removed |
+| **W7.2** | `tests/enterprise/test_offline_install.py` (xfails only) | `green after W7.2: offline install path (#381)` | GREEN — markers removed |
+| **W7.2** | `tests/enterprise/test_telemetry.py` | `green after W7.2: telemetry opt-out contract (#381)` | GREEN — markers removed |
+| **W7.2** | `tests/enterprise/test_residency.py` | `green after W7.2: data-residency controls (#381)` | GREEN — markers removed |
+| **W7.2** | `tests/enterprise/test_health.py` | `green after W7.2: health endpoint (#381)` | GREEN — markers removed |
+| **W7.2** | `tests/enterprise/test_audit.py` | `green after W7.2: audit and usage export (#381)` | GREEN — markers removed |
+| **W7.2** | `tests/enterprise/test_support_bundle.py` | `green after W7.2: support bundle with redaction (#381)` | GREEN — markers removed |
+| **W7.2** | `tests/enterprise/test_policy_memory_distribution.py` | `green after W7.2: org policy/memory without dashboard (#381)` | GREEN — markers removed |
+| **W7.2** | `tests/enterprise/test_retention_diagnostics.py` | `green after W7.2: retention and operational diagnostics (#381)` | GREEN — markers removed |
+| **W7.2** | `tests/enterprise/test_cli_verbs.py` | `green after W7.2: enterprise CLI verbs (#381)` | GREEN — markers removed |
 | **W8.2** | `tests/release/test_support_matrix.py` (xfails only) | `green after W8.2: generated six-axis support matrix (#382)` | RED @ W8.1 |
 | **W8.2** | `tests/release/test_rc_soak_docs.py` | `green after W8.2: RC/soak process doc (#382)` | RED @ W8.1 |
 | **W8.2** | `tests/release/test_security_response.py` (xfails only) | `green after W8.2: security-response / vulnerability-disclosure (#382)` | RED @ W8.1 |

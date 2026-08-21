@@ -9,13 +9,7 @@ import json
 
 import pytest
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: audit and usage export (#381)",
-    strict=False,
-)
 
-
-@_W72
 def test_export_audit_log_empty_is_json_array() -> None:
     """Edge: an empty audit log exports as a JSON array, not null."""
     from mergecraft.enterprise.audit import export_audit_log
@@ -24,7 +18,6 @@ def test_export_audit_log_empty_is_json_array() -> None:
     assert payload == []
 
 
-@_W72
 def test_export_audit_log_json_includes_event() -> None:
     """Happy: audit export is JSON and preserves the event records."""
     from mergecraft.enterprise.audit import export_audit_log
@@ -36,7 +29,6 @@ def test_export_audit_log_json_includes_event() -> None:
     assert payload[0]["decision"] == "block"
 
 
-@_W72
 def test_export_usage_includes_cost() -> None:
     """Happy: usage export is JSON and includes a cost field."""
     from mergecraft.enterprise.audit import export_usage
@@ -47,7 +39,6 @@ def test_export_usage_includes_cost() -> None:
     assert "cost" in str(payload[0]).casefold() or "cost_usd" in payload[0]
 
 
-@_W72
 def test_explain_blocking_decision_uses_stored_artifact() -> None:
     """Happy: a blocking decision is explainable from the stored artifact."""
     from mergecraft.enterprise.audit import explain_blocking_decision
@@ -59,7 +50,6 @@ def test_explain_blocking_decision_uses_stored_artifact() -> None:
     assert "secret" in explanation.casefold() or "run-1" in explanation
 
 
-@_W72
 def test_explain_blocking_decision_missing_artifact_raises() -> None:
     """Error: a missing stored artifact raises ValueError naming artifact."""
     from mergecraft.enterprise.audit import explain_blocking_decision

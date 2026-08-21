@@ -8,13 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: retention and operational diagnostics (#381)",
-    strict=False,
-)
 
-
-@_W72
 def test_trace_retention_policy_privacy_aware_mode() -> None:
     """Happy: retention accepts a positive day count and a privacy-aware log mode."""
     from mergecraft.enterprise.retention import PrivacyLogMode, TraceRetentionPolicy
@@ -24,7 +18,6 @@ def test_trace_retention_policy_privacy_aware_mode() -> None:
     assert policy.privacy_mode == PrivacyLogMode.PRIVACY_AWARE
 
 
-@_W72
 @pytest.mark.parametrize("days", [0, -1])
 def test_trace_retention_rejects_non_positive_days(days: int) -> None:
     """Error: zero or negative retention is refused."""
@@ -34,7 +27,6 @@ def test_trace_retention_rejects_non_positive_days(days: int) -> None:
         TraceRetentionPolicy(days=days, privacy_mode=PrivacyLogMode.STANDARD)
 
 
-@_W72
 def test_operational_diagnostics_report_includes_python() -> None:
     """Happy: operational diagnostics expose a python/runtime field."""
     from mergecraft.enterprise.diagnostics import operational_diagnostics

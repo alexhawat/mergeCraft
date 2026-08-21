@@ -10,13 +10,7 @@ import pytest
 
 from tests.ci.workflow_support import REPO_ROOT
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: offline install path (#381)",
-    strict=False,
-)
 
-
-@_W72
 def test_offline_install_plan_uses_python_311_floor() -> None:
     """Happy: the offline plan cites the shipped 3.11 floor, not a binary."""
     from mergecraft.enterprise.offline import offline_install_plan
@@ -28,7 +22,6 @@ def test_offline_install_plan_uses_python_311_floor() -> None:
     assert "docs/dev/python-version-floor.md" in floor_doc.replace("\\", "/")
 
 
-@_W72
 def test_offline_install_plan_names_wheel_or_docker_artifact() -> None:
     """Happy: offline install is a wheel/sdist or image, never an executable bundle."""
     from mergecraft.enterprise.offline import offline_install_plan
@@ -42,7 +35,6 @@ def test_offline_install_plan_names_wheel_or_docker_artifact() -> None:
     assert "standalone" not in artifacts
 
 
-@_W72
 def test_offline_install_rejects_standalone_binary_request() -> None:
     """Error (D14): requesting a standalone binary is refused by type and message."""
     from mergecraft.enterprise.offline import OfflineInstallError, offline_install_plan

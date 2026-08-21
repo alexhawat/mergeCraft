@@ -8,13 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: telemetry opt-out contract (#381)",
-    strict=False,
-)
 
-
-@_W72
 def test_telemetry_modes_include_on_opt_out_and_off() -> None:
     """Happy: the contract exposes on, opt_out, and off modes."""
     from mergecraft.enterprise.telemetry import TelemetryMode
@@ -33,7 +27,6 @@ def test_telemetry_modes_include_on_opt_out_and_off() -> None:
     assert "off" in combined
 
 
-@_W72
 def test_telemetry_off_disables_export() -> None:
     """Happy: off mode is a hard disable of remote export."""
     from mergecraft.enterprise.telemetry import (
@@ -47,7 +40,6 @@ def test_telemetry_off_disables_export() -> None:
     assert is_telemetry_export_enabled(mode) is False
 
 
-@_W72
 def test_telemetry_opt_out_is_not_on() -> None:
     """Edge: opt-out is a first-class mode, not silently treated as on."""
     from mergecraft.enterprise.telemetry import (
@@ -61,7 +53,6 @@ def test_telemetry_opt_out_is_not_on() -> None:
     assert is_telemetry_export_enabled(mode) is False
 
 
-@_W72
 def test_unknown_telemetry_mode_raises() -> None:
     """Error: an unknown mode name raises ValueError naming telemetry."""
     from mergecraft.enterprise.telemetry import resolve_telemetry_mode

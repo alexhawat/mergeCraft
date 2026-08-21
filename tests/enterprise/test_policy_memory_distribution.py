@@ -14,11 +14,6 @@ import pytest
 from mergecraft.memory import LocalMemoryBackend
 from mergecraft.policy import parse_rules_document
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: org policy/memory without dashboard (#381)",
-    strict=False,
-)
-
 _MINIMAL_RULES = """
 rules:
   - id: testing.behavior-coverage-for-src
@@ -32,7 +27,6 @@ rules:
 """
 
 
-@_W72
 def test_distribute_org_policy_from_files_without_dashboard(tmp_path: Path) -> None:
     """Happy: file-backed policy distribution does not require a dashboard URL."""
     from mergecraft.enterprise.policy_distribution import distribute_org_policy
@@ -44,7 +38,6 @@ def test_distribute_org_policy_from_files_without_dashboard(tmp_path: Path) -> N
     assert parse_rules_document(_MINIMAL_RULES)
 
 
-@_W72
 def test_distribute_org_policy_rejects_dashboard_only_source() -> None:
     """Error: a dashboard-only source is refused (no dashboard required)."""
     from mergecraft.enterprise.policy_distribution import distribute_org_policy
@@ -53,7 +46,6 @@ def test_distribute_org_policy_rejects_dashboard_only_source() -> None:
         distribute_org_policy(None, dashboard_url="https://dashboard.example/org")
 
 
-@_W72
 def test_bind_org_memory_uses_existing_backend() -> None:
     """Happy: org memory binds to 20c's OrganizationMemoryBackend without a dashboard."""
     from mergecraft.enterprise.memory_distribution import bind_org_memory
@@ -65,7 +57,6 @@ def test_bind_org_memory_uses_existing_backend() -> None:
     assert "policy-pack" in bound.list()
 
 
-@_W72
 def test_bind_org_memory_rejects_dashboard_url() -> None:
     """Error: passing a dashboard URL is refused — distribution is file/API only."""
     from mergecraft.enterprise.memory_distribution import bind_org_memory

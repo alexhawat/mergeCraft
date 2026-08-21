@@ -10,15 +10,9 @@ from ssl import SSLContext
 
 import pytest
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: custom CA path (#381)",
-    strict=False,
-)
-
 _BOGUS_PEM = "-----BEGIN CERTIFICATE-----\nnot-a-real-cert\n-----END CERTIFICATE-----\n"
 
 
-@_W72
 def test_load_custom_ca_missing_file_raises(tmp_path: Path) -> None:
     """Error: a missing CA file raises CustomCAError naming the certificate/CA."""
     from mergecraft.enterprise.certificates import CustomCAError, load_custom_ca
@@ -28,7 +22,6 @@ def test_load_custom_ca_missing_file_raises(tmp_path: Path) -> None:
         load_custom_ca(missing)
 
 
-@_W72
 def test_load_custom_ca_rejects_invalid_pem(tmp_path: Path) -> None:
     """Error: a file that is not a usable CA PEM raises CustomCAError."""
     from mergecraft.enterprise.certificates import CustomCAError, load_custom_ca
@@ -69,7 +62,6 @@ def _write_self_signed_ca(path: Path) -> None:
         pytest.fail(f"openssl failed to mint a test CA: {completed.stderr}")
 
 
-@_W72
 def test_load_custom_ca_returns_ssl_context(tmp_path: Path) -> None:
     """Happy: a valid CA PEM returns an ssl.SSLContext."""
     from mergecraft.enterprise.certificates import load_custom_ca

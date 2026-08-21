@@ -11,15 +11,9 @@ from pathlib import Path
 
 import pytest
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: support bundle with redaction (#381)",
-    strict=False,
-)
-
 _SECRET = "sk-abcdefghijklmnopqrstuvwxyz012345"
 
 
-@_W72
 def test_support_bundle_redacts_secrets(tmp_path: Path) -> None:
     """Happy: a written support bundle never contains the raw secret material."""
     from mergecraft.enterprise.support_bundle import write_support_bundle
@@ -40,7 +34,6 @@ def test_support_bundle_redacts_secrets(tmp_path: Path) -> None:
     assert "[REDACTED]" in haystack or "redact" in haystack.casefold()
 
 
-@_W72
 def test_support_bundle_missing_destination_parent_is_created(tmp_path: Path) -> None:
     """Edge: nested destination directories are created."""
     from mergecraft.enterprise.support_bundle import write_support_bundle
@@ -50,7 +43,6 @@ def test_support_bundle_missing_destination_parent_is_created(tmp_path: Path) ->
     assert Path(written).is_file()
 
 
-@_W72
 def test_support_bundle_rejects_non_archive_suffix(tmp_path: Path) -> None:
     """Error: a destination that is not an archive path raises ValueError."""
     from mergecraft.enterprise.support_bundle import write_support_bundle

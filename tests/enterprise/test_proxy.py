@@ -9,13 +9,7 @@ import os
 
 import pytest
 
-_W72 = pytest.mark.xfail(
-    reason="green after W7.2: enterprise proxy (#381)",
-    strict=False,
-)
 
-
-@_W72
 def test_apply_enterprise_proxy_sets_https_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Happy: applying a proxy config exports HTTPS_PROXY for outbound HTTPS."""
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
@@ -27,7 +21,6 @@ def test_apply_enterprise_proxy_sets_https_proxy(monkeypatch: pytest.MonkeyPatch
     assert exported == "http://proxy.example:8080"
 
 
-@_W72
 def test_apply_enterprise_proxy_honours_no_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Edge: empty no_proxy is accepted; a host list is exported as NO_PROXY."""
     monkeypatch.delenv("NO_PROXY", raising=False)
@@ -41,7 +34,6 @@ def test_apply_enterprise_proxy_honours_no_proxy(monkeypatch: pytest.MonkeyPatch
     assert "localhost" in (exported or "")
 
 
-@_W72
 @pytest.mark.parametrize("bad", ["", "not-a-url", "ftp://proxy.example:8080"])
 def test_invalid_proxy_url_raises(bad: str) -> None:
     """Error: invalid or non-HTTP(S) proxy URLs raise ValueError naming proxy."""
