@@ -17,11 +17,13 @@ from mergecraft.analyzers.registry import filter_changed_files_for_manifest, get
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv, resolve_analyzer
 from mergecraft.analyzers.run import run_plan
 from mergecraft.analyzers.sandbox import plan_sandbox
-from mergecraft.analyzers.trust import IN_PROCESS_ANALYZER_IDS
+from mergecraft.analyzers.trust import (
+    IN_PROCESS_ANALYZER_IDS,
+    IN_PROCESS_CONFIG_NOTE,
+    IN_PROCESS_VERSION_NOTES,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import AnalyzerManifest
     from mergecraft.analyzers.sandbox import SandboxContext
@@ -56,9 +58,46 @@ class _NativeScanOutcome:
     skip_reason: str | None = None
 
 
-_IN_PROCESS_VERSION_NOTES: dict[str, str] = {
-    "agentsec": "ran mergeCraft native agent-security policy engine",
-    "antislop": "ran mergeCraft native anti-slop policy engine",
+def _scan_agentsec_in_process(
+    *,
+    repo_root: Path,
+    scoped: list[str],
+    tier: TrustTier,
+) -> _NativeScanOutcome:
+    from mergecraft.analyzers.agentsec import scan_manifests
+
+    agentsec_result = scan_manifests(
+        repo_root=repo_root,
+        changed_files=scoped,
+        tier=tier,
+    )
+    return _NativeScanOutcome(
+        findings=agentsec_result.findings,
+        skipped=agentsec_result.skipped,
+        skip_reason=agentsec_result.skip_reason,
+    )
+
+
+def _scan_antislop_in_process(
+    *,
+    repo_root: Path,
+    scoped: list[str],
+    tier: TrustTier,
+) -> _NativeScanOutcome:
+    _ = tier
+    from mergecraft.analyzers.antislop import scan_changed_files
+
+    antislop_result = scan_changed_files(repo_root=repo_root, changed_files=scoped)
+    return _NativeScanOutcome(
+        findings=antislop_result.findings,
+        skipped=antislop_result.skipped,
+        skip_reason=antislop_result.skip_reason,
+    )
+
+
+_IN_PROCESS_SCANNERS = {
+    "agentsec": _scan_agentsec_in_process,
+    "antislop": _scan_antislop_in_process,
 }
 
 
@@ -69,30 +108,11 @@ def _run_in_process_scan(
     scoped: list[str],
     tier: TrustTier,
 ) -> _NativeScanOutcome:
-    if tool_id == "agentsec":
-        from mergecraft.analyzers.agentsec import scan_manifests
-
-        agentsec_result = scan_manifests(
-            repo_root=repo_root,
-            changed_files=scoped,
-            tier=tier,
-        )
-        return _NativeScanOutcome(
-            findings=agentsec_result.findings,
-            skipped=agentsec_result.skipped,
-            skip_reason=agentsec_result.skip_reason,
-        )
-    if tool_id == "antislop":
-        from mergecraft.analyzers.antislop import scan_changed_files
-
-        antislop_result = scan_changed_files(repo_root=repo_root, changed_files=scoped)
-        return _NativeScanOutcome(
-            findings=antislop_result.findings,
-            skipped=antislop_result.skipped,
-            skip_reason=antislop_result.skip_reason,
-        )
-    msg = f"unsupported in-process analyzer {tool_id!r}"
-    raise ValueError(msg)
+    scanner = _IN_PROCESS_SCANNERS.get(tool_id)
+    if scanner is None:
+        msg = f"unsupported in-process analyzer {tool_id!r}"
+        raise ValueError(msg)
+    return scanner(repo_root=repo_root, scoped=scoped, tier=tier)
 
 
 def _run_in_process_native_adapter(
@@ -101,8 +121,7 @@ def _run_in_process_native_adapter(
     manifest: AnalyzerManifest,
     repo_root: Path,
     changed_files: list[str],
-    scan_fn: Callable[[list[str]], _NativeScanOutcome],
-    version_note: str,
+    tier: TrustTier,
 ) -> AdapterRunResult:
     scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
     if not scoped_files:
@@ -110,19 +129,25 @@ def _run_in_process_native_adapter(
         logger.info("{}", reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
-    outcome = scan_fn(scoped_files)
+    outcome = _run_in_process_scan(
+        tool_id,
+        repo_root=repo_root,
+        scoped=scoped_files,
+        tier=tier,
+    )
+    version_note = IN_PROCESS_VERSION_NOTES[tool_id]
     if outcome.skipped:
         return AdapterRunResult(
             findings=[],
             skipped=True,
             skip_reason=outcome.skip_reason,
             version_note=version_note,
-            config_note="native YAML rules",
+            config_note=IN_PROCESS_CONFIG_NOTE,
         )
     return AdapterRunResult(
         findings=_normalize_paths(outcome.findings, repo_root=repo_root),
         version_note=version_note,
-        config_note="native YAML rules",
+        config_note=IN_PROCESS_CONFIG_NOTE,
     )
 
 
@@ -349,23 +374,12 @@ def run_adapter(
         )
 
     if tool_id in IN_PROCESS_ANALYZER_IDS:
-        version_note = _IN_PROCESS_VERSION_NOTES[tool_id]
-
-        def _scan(scoped: list[str]) -> _NativeScanOutcome:
-            return _run_in_process_scan(
-                tool_id,
-                repo_root=repo_root,
-                scoped=scoped,
-                tier=tier,
-            )
-
         return _run_in_process_native_adapter(
             tool_id=tool_id,
             manifest=manifest,
             repo_root=repo_root,
             changed_files=changed_files,
-            scan_fn=_scan,
-            version_note=version_note,
+            tier=tier,
         )
 
     scoped_files = filter_changed_files_for_manifest(manifest, changed_files)

@@ -52,6 +52,13 @@ SHELL_DISABLED_ELIGIBLE_RUNTIMES: frozenset[str] = frozenset({"managed", "contai
 #: really does resolve without repo-provided tooling.
 IN_PROCESS_ANALYZER_IDS: frozenset[str] = frozenset({"agentsec", "antislop"})
 
+IN_PROCESS_VERSION_NOTES: dict[str, str] = {
+    "agentsec": "ran mergeCraft native agent-security policy engine",
+    "antislop": "ran mergeCraft native anti-slop policy engine",
+}
+
+IN_PROCESS_CONFIG_NOTE = "native YAML rules"
+
 
 @dataclass(frozen=True, slots=True)
 class ManifestTierDecision:

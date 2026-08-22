@@ -30,7 +30,7 @@ from typing import Any, Final
 
 from loguru import logger
 
-from mergecraft.orchestrator.pipeline import RISK_BANDS, risk_at_or_above
+from mergecraft.utils.risk_bands import RISK_BANDS, risk_at_or_above
 
 ROUTING_INTENTS: Final[frozenset[str]] = frozenset({"require", "prefer", "fallback"})
 MAX_RETRY_ATTEMPTS: Final[int] = 5

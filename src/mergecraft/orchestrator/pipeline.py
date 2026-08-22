@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from pathlib import PurePath
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-_RISK_BANDS: frozenset[str] = frozenset({"low", "medium", "high", "critical"})
-_RISK_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+from mergecraft.utils.path_globs import path_matches_glob
+from mergecraft.utils.risk_bands import RISK_BANDS, risk_at_or_above
+
 _SEVERITIES: frozenset[str] = frozenset({"Minor", "Major", "Critical"})
 _SEVERITY_ORDER: dict[str, int] = {"Minor": 0, "Major": 1, "Critical": 2}
 
@@ -110,20 +110,8 @@ def validate_predicate(expression: str) -> None:
         raise PipelineValidationError(msg)
 
 
-def risk_at_or_above(risk: str, threshold: str) -> bool:
-    """Return whether ``risk`` is at or above ``threshold`` in the shared band order."""
-    actual = str(risk).casefold()
-    return _RISK_ORDER.get(actual, 0) >= _RISK_ORDER.get(str(threshold).casefold(), 0)
-
-
 def _path_matches(pattern: str, path: str) -> bool:
-    pure = PurePath(path)
-    if pure.match(pattern):
-        return True
-    # ``**/*.ext`` also matches root-level files (``README.md`` has no parent segment).
-    if pattern.startswith("**/"):
-        return pure.match(pattern[3:])
-    return False
+    return path_matches_glob(pattern, path)
 
 
 def evaluate_predicate(
@@ -248,5 +236,3 @@ __all__ = [
     "risk_at_or_above",
     "validate_predicate",
 ]
-
-RISK_BANDS = _RISK_BANDS

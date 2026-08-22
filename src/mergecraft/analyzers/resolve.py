@@ -14,7 +14,11 @@ from mergecraft.analyzers.detect import (
     has_sqlfluff_dialect,
     resolve_repo_tool,
 )
-from mergecraft.analyzers.trust import IN_PROCESS_ANALYZER_IDS
+from mergecraft.analyzers.trust import (
+    IN_PROCESS_ANALYZER_IDS,
+    IN_PROCESS_CONFIG_NOTE,
+    IN_PROCESS_VERSION_NOTES,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -105,14 +109,8 @@ def _sqlfluff_no_dialect_plan(manifest: AnalyzerManifest, repo_root: Path) -> An
 
 
 _IN_PROCESS_PLAN_NOTES: dict[str, tuple[str, str]] = {
-    "agentsec": (
-        "ran mergeCraft native agent-security policy engine",
-        "native YAML rules",
-    ),
-    "antislop": (
-        "ran mergeCraft native anti-slop policy engine",
-        "native YAML rules",
-    ),
+    tool_id: (IN_PROCESS_VERSION_NOTES[tool_id], IN_PROCESS_CONFIG_NOTE)
+    for tool_id in IN_PROCESS_ANALYZER_IDS
 }
 
 
