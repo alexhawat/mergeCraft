@@ -46,7 +46,9 @@ DEFAULT_BLOB_REF = "pre-0.0.1"
 def _blob_ref() -> str:
     env_ref = os.environ.get("MERGECRAFT_AGENT_PACKAGES_REF", "").strip()
     if env_ref:
-        return env_ref
+        if git_ref_exists(env_ref, cwd=REPO_ROOT):
+            return env_ref
+        return DEFAULT_BLOB_REF
     pin = action_pin_minimal()
     if git_ref_exists(pin, cwd=REPO_ROOT):
         return pin

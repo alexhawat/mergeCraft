@@ -162,7 +162,7 @@ cli-examples-check: ## Fail when examples/cli fixtures drift from run.sh output
 docs: ## Regenerate generated doc pages (CLI, action ref, docs index, llms-full)
 	$(UV) run python scripts/gen_docs.py
 
-docs-check: llms-check diagrams-check ## Fail when generated docs drift
+docs-check: llms-check diagrams-check pins-check ## Fail when generated docs drift
 	$(UV) run python scripts/gen_docs.py --check
 
 llms: ## Regenerate llms-full.txt concatenation

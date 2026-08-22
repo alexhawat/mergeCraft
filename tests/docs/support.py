@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -65,5 +66,6 @@ def load_script_module(path: str | Path) -> ModuleType:
         msg = f"could not load {script}"
         raise ImportError(msg)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module

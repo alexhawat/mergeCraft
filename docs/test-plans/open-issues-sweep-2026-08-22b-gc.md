@@ -27,9 +27,9 @@ uv run pytest --collect-only -q tests/docs/test_gen_agent_packages_blob_ref.py
 uv run pytest -q tests/docs/test_gen_agent_packages_blob_ref.py  # green since W6 (808763ce)
 ```
 
-## W5 evidence (2026-08-22 ✅: 92ffc0b8)
+## W5 evidence (2026-08-22 ✅: 808763ce)
 
-- `scripts/gen_agent_packages.py` sets `DEFAULT_BLOB_REF = "main"` and `_blob_ref()` ignores
-  `action_pin_minimal()` (no git verify).
+- `scripts/gen_agent_packages.py` uses `DEFAULT_BLOB_REF = "pre-0.0.1"` and `_blob_ref()` falls back
+  when `action_pin_minimal()` tag is absent (`mergecraft.utils.git_ref.git_ref_exists`).
 - `git rev-parse --verify refs/tags/v0.1.0a1^{commit}` fails on this checkout (G1 tag not cut).
-- `pre-0.0.1` branch resolves locally (`bc76b1dc` at W0 base).
+- `pre-0.0.1` branch resolves locally.

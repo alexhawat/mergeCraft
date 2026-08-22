@@ -10,6 +10,8 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
+import pytest
+
 from mergecraft.pins import action_pin_minimal
 from tests.ci.workflow_support import REPO_ROOT
 from tests.docs.support import git_ref_exists, load_script_module
@@ -29,10 +31,16 @@ def test_default_blob_ref_constant_is_pre_0_0_1() -> None:
 
 
 def test_blob_ref_uses_env_override(monkeypatch: MonkeyPatch) -> None:
-    """``MERGECRAFT_AGENT_PACKAGES_REF`` wins over pin and default (D8 step 1)."""
+    """``MERGECRAFT_AGENT_PACKAGES_REF`` wins when the ref resolves (D8 step 1)."""
     module = load_script_module(GEN_SCRIPT)
-    monkeypatch.setenv(_ENV_KEY, "feature/test-override")
-    assert module._blob_ref() == "feature/test-override"
+    override = "feature/test-override"
+    monkeypatch.setenv(_ENV_KEY, override)
+    monkeypatch.setattr(
+        module,
+        "git_ref_exists",
+        lambda ref, *, cwd=None: ref == override,
+    )
+    assert module._blob_ref() == override
 
 
 def test_blob_ref_returns_default_when_pin_tag_missing(
@@ -41,9 +49,8 @@ def test_blob_ref_returns_default_when_pin_tag_missing(
     """When ``v0.1.0a1`` is absent locally, return ``pre-0.0.1`` — not the pin (D8)."""
     pin = action_pin_minimal()
     assert pin == "v0.1.0a1", "fixture assumes action_pin_minimal is v0.1.0a1"
-    assert not git_ref_exists(pin), (
-        f"test requires missing tag {pin!r} (G1 not cut); fetch a leaner checkout or skip"
-    )
+    if git_ref_exists(pin):
+        pytest.skip(f"G1: tag {pin!r} exists locally — skip missing-tag half of D8 test")
     monkeypatch.delenv(_ENV_KEY, raising=False)
     module = load_script_module(GEN_SCRIPT)
     ref = module._blob_ref()
