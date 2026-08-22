@@ -8,7 +8,7 @@ Authoring wave: **W1** (FA RED) · Implementation: **W2** (`provider_health.py` 
 
 | Wave | Test | Marker reason | Status |
 |------|------|---------------|--------|
-| **W2** | `test_route_model_per_specialist_and_risk` | `green after W2: critical-risk security routing (#394)` | pending — **XFAIL** (`critical` → Haiku today) |
+| **W2** | `test_route_model_per_specialist_and_risk` | `green after W2: critical-risk security routing (#394)` | reconciled @ `72b80ece` — marker removed |
 
 ## Contract matrix
 

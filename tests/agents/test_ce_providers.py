@@ -61,10 +61,6 @@ def test_require_prefer_fallback_semantics() -> None:
     assert intents == frozenset({"require", "prefer", "fallback"})
 
 
-@pytest.mark.xfail(
-    reason="green after W2: critical-risk security routing (#394)",
-    strict=False,
-)
 def test_route_model_per_specialist_and_risk() -> None:
     """Happy: routing is per specialist and per risk level."""
     module = require_module(PROVIDER_HEALTH_MODULE)
