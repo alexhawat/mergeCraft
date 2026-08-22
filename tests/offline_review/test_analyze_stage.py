@@ -82,11 +82,15 @@ def _patch_harness(
     return calls
 
 
+@pytest.mark.xfail(
+    reason="green after W6: dry-run skips analyzer catalog (#401)",
+    strict=False,
+)
 @pytest.mark.asyncio
-async def test_offline_analyze_invokes_pipeline_when_analyzers_enabled(
+async def test_offline_analyze_skips_pipeline_on_dry_run_when_analyzers_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Happy: nonempty dry-run analyze calls ``run_analyzer_pipeline`` with trust + files."""
+    """Error (#401): nonempty dry-run analyze must not call ``run_analyzer_pipeline``."""
     calls = _patch_harness(monkeypatch, analyzers_enabled=True)
     repo = _real_git_repo(tmp_path)
 
@@ -111,12 +115,7 @@ async def test_offline_analyze_invokes_pipeline_when_analyzers_enabled(
     )
     assert result.success is True
     assert result.outcome is RunOutcome.passed
-    assert calls, "enabled analyzers must invoke run_analyzer_pipeline"
-    call = calls[0]
-    assert call["repo_root"] == repo
-    changed = call["changed_files"]
-    assert "demo.py" in list(changed)
-    assert call["tier"] == "trusted"
+    assert calls == [], "dry-run must skip run_analyzer_pipeline when analyzers are enabled (#401)"
 
 
 @pytest.mark.asyncio

@@ -8,7 +8,7 @@ Authoring wave: **W3** (FB RED) · Implementation: **W4** (`agent_protocol.py` d
 
 | Wave | Test | Marker reason | Status |
 |------|------|---------------|--------|
-| **W4** | `test_load_audit_events_skips_malformed_and_non_dict_lines` | `green after W4: skip malformed audit JSONL lines (#398)` | pending — **XFAIL** (malformed line raises `JSONDecodeError` today) |
+| **W4** | `test_load_audit_events_skips_malformed_and_non_dict_lines` | `green after W4: skip malformed audit JSONL lines (#398)` | **GREEN** — xfail removed W4 reconcile |
 
 ## Contract matrix
 
@@ -27,7 +27,7 @@ Authoring wave: **W3** (FB RED) · Implementation: **W4** (`agent_protocol.py` d
 ## W3 RED evidence
 
 - **#400** — negotiation contracts pass today (regression guards for W4 dead-code removal); no xfail.
-- **#398** — `load_audit_events` on mixed file raises `JSONDecodeError` on malformed line → **XFAIL**.
+- **#398** — `load_audit_events` skips malformed/non-dict lines → **GREEN** (xfail removed after W4).
 
 ## Out of scope
 

@@ -429,7 +429,11 @@ def test_scm_conforming_request_runs_engine_and_exposes_stage_specs(
 
 
 def test_cli_review_drives_engine_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Integration: dry-run review executes materialize → analyze → review → publish."""
+    """Integration: dry-run review runs materialize → analyze stage → review short-circuit → publish.
+
+    D10 (#401): analyze must not invoke the analyzer catalog on ``--dry-run``; the engine
+    stage order is unchanged. Pipeline-skip pins live in ``test_fc_dry_run_skips_analyzers``.
+    """
     order: list[str] = []
     original = ReviewEngine.run
 
