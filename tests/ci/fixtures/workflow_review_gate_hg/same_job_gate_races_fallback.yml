@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MIT
+# Models the #433 race: Codex fallback and the approval gate are sequential steps
+# in one job, so the gate can sample check-runs before the fallback posts.
+name: HG same-job gate races fallback
+
+on:
+  workflow_dispatch:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review (Nous DeepSeek V4 Flash)
+        run: echo nous attempt
+      - name: Decide Codex fallback after Nous
+        id: fallback
+        run: echo need=true >> "${GITHUB_OUTPUT}"
+      - name: mergeCraft PR review (Codex)
+        if: steps.fallback.outputs.need == 'true'
+        run: echo codex posts mergecraft-approval asynchronously
+      - name: Fail when mergeCraft would not approve
+        run: echo gate samples check-runs too early

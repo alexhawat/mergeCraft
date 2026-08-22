@@ -345,3 +345,62 @@ Fixture workflows live under ``tests/ci/fixtures/workflow_permissions_hf/``.
 - `make lint` + `make typecheck` clean on touched paths
 - HF425a–j xfail (non-strict); fixture anchor tests pass
 - No `src/` or `scripts/` edits
+
+---
+
+# Batch HG — #433 review gate vs Codex fallback
+
+Authoring wave: **W13** (HG RED) · Implementation: **W14** (`fix(ci): wait for Codex fallback before the approval gate`, D9)
+GitHub issue: **#433** — review gate fails PRs that mergeCraft approved via fallback
+
+Locked decision **D9**: gate step must not run until every review attempt in that
+workflow (including Codex fallback) has finished. Fail-closed stays; do not weaken
+the check.
+
+## xfail schedule
+
+| Wave | Test | Marker reason | Issue |
+|------|------|---------------|-------|
+| **W14** | `test_mergecraft_yml_gate_waits_for_every_review_attempt` | `green after W14: gate waits for Codex fallback (#433)` | #433 |
+| **W14** | `test_mergecraft_yml_approval_gate_is_not_in_review_job` | same | #433 |
+| **W14** | `test_repo_mergecraft_workflow_passes_gate_ordering_scan` | same | #433 |
+
+Never `strict=True` — impl wave drops each xfail in the workflow ordering commit.
+
+## Contract matrix (#433 / D9)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| HG433a | Same-job gate after Codex fallback is flagged | unit | error (#433) | `test_same_job_gate_is_flagged` |
+| HG433b | Gate job missing ``needs: codex-fallback`` is flagged | unit | error | `test_split_jobs_missing_fallback_needs_is_flagged` |
+| HG433c | Gate job ``needs:`` every attempt job passes | unit | happy | `test_gate_needs_all_attempt_jobs_passes` |
+| HG433d | Gate job ``needs:`` combined attempts job passes | unit | happy | `test_combined_attempts_job_passes` |
+| HG433e | Fixture scan flags racing workflows | integration | error | `test_scan_flags_racing_fixtures` |
+| HG433f | Fixture scan passes correct ordering | integration | happy | `test_scan_passes_correct_ordering_fixtures` |
+| HG433g | ``mergecraft.yml`` still declares Nous + Codex attempts | integration | anchor | `test_review_job_still_declares_nous_and_codex_attempts` |
+| HG433h | Fail-closed gate step text preserved | integration | policy | `test_gate_step_still_fails_closed_on_missing_check` |
+| HG433i | Real ``mergecraft.yml`` satisfies gate ordering | integration | regression | `test_mergecraft_yml_gate_waits_for_every_review_attempt` |
+| HG433j | Approval gate is not colocated in ``review`` job | integration | regression | `test_mergecraft_yml_approval_gate_is_not_in_review_job` |
+| HG433k | Repo scan passes for ``mergecraft.yml`` | integration | regression | `test_repo_mergecraft_workflow_passes_gate_ordering_scan` |
+
+## Named symbols W14 must satisfy
+
+| Symbol | Location | Test |
+|--------|----------|------|
+| Approval gate step | `.github/workflows/mergecraft.yml` | HG433h–k |
+| Codex fallback step | `.github/workflows/mergecraft.yml` | HG433g |
+| Gate job ``needs:`` review-attempts job(s) | `.github/workflows/mergecraft.yml` | HG433i–k |
+| ``gate_job_needs_attempt_jobs`` | `tests/ci/review_gate_ordering.py` | HG433a–d |
+
+Fixture workflows live under ``tests/ci/fixtures/workflow_review_gate_hg/``.
+
+## Collection target (W13)
+
+`tests/ci/test_review_gate_fallback_hg.py` — **16 tests** (3 xfail, 13 pass).
+
+## Acceptance (W13)
+
+- New tests collect with zero import errors
+- `make lint` + `make typecheck` clean on touched paths
+- HG433i–k xfail (non-strict); HG433a–h pass
+- No `src/` or `.github/workflows/` edits
