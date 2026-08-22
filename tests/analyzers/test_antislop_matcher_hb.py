@@ -7,8 +7,6 @@ positionals. Implementation lands in W4 (one commit per issue, D2).
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.analyzers.antislop.matcher import apply_rules
 from mergecraft.analyzers.antislop.policy import load_native_rules
 
@@ -79,10 +77,6 @@ def test_snippet_after_non_ascii_quotes_real_source_text() -> None:
 # --- #438 pass-through-wrapper literal positionals -----------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W4: abort pass-through check on literal positionals (#438)",
-    strict=False,
-)
 def test_wrapper_that_binds_a_literal_argument_is_not_a_pass_through() -> None:
     """A wrapper supplying an extra constant argument adds behaviour."""
     source = "def fetch(url: str) -> object:\n    return request('GET', url)\n"

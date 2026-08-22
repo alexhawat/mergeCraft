@@ -494,9 +494,11 @@ def _call_positional_argument_names(call_node: Node) -> tuple[str, ...]:
     if args is None:
         return ()
     for child in args.children:
+        if child.type in {"(", ")", ","}:
+            continue
         if child.type in {"identifier", "attribute"}:
             names.append(_node_text_from_node(child))
-        elif child.type == "keyword_argument":
+        else:
             return ()
     return tuple(names)
 
