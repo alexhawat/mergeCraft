@@ -71,3 +71,21 @@ def test_load_audit_events_reads_jsonl(tmp_path: Path) -> None:
     )
     events = load_audit_events(root=tmp_path)
     assert events[0]["event"] == "review"
+
+
+@pytest.mark.xfail(
+    reason="green after W4: skip malformed audit JSONL lines (#398)",
+    strict=False,
+)
+def test_load_audit_events_skips_malformed_and_non_dict_lines(tmp_path: Path) -> None:
+    """Happy (#398): one good dict, one malformed line, one non-dict → only the dict; no raise."""
+    from mergecraft.enterprise.audit import load_audit_events
+
+    store = tmp_path / ".mergecraft"
+    store.mkdir()
+    (store / "audit.jsonl").write_text(
+        '{"event": "review", "decision": "allow"}\n{not valid json\n[1, 2, 3]\n',
+        encoding="utf-8",
+    )
+    events = load_audit_events(root=tmp_path)
+    assert events == [{"event": "review", "decision": "allow"}]
