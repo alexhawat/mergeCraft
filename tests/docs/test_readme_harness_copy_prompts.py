@@ -114,9 +114,6 @@ def test_jump_nav_may_link_source_skill_developer_path() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W8: Also teach prompt uses generated harness packages (D10)", strict=False
-)
 def test_also_teach_agent_prompt_does_not_instruct_source_skill_copy() -> None:
     """Consumer copy prompt must not tell readers to copy repo-root skills/mergecraft/."""
     prompt = _also_teach_prompt_text(read_text("README.md"))
@@ -127,10 +124,6 @@ def test_also_teach_agent_prompt_does_not_instruct_source_skill_copy() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W8: Also teach prompt names harness package paths (D10)",
-    strict=False,
-)
 def test_also_teach_agent_prompt_references_generated_harness_packages() -> None:
     """Consumer copy prompt must name a generated harness package or install destination."""
     manifest = _load_harness_manifest()
@@ -144,10 +137,6 @@ def test_also_teach_agent_prompt_references_generated_harness_packages() -> None
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W8: per-agent one-liners drop source skill copy (D10)",
-    strict=False,
-)
 def test_per_agent_one_liners_do_not_instruct_source_skill_copy() -> None:
     """Per-agent fenced prompts must not instruct copying repo-root skills/mergecraft/."""
     prompts = _per_agent_prompts(read_text("README.md"))
@@ -164,10 +153,6 @@ def test_per_agent_one_liners_do_not_instruct_source_skill_copy() -> None:
 @pytest.mark.parametrize(
     "agent_name",
     ["Cursor", "OpenCode"],
-)
-@pytest.mark.xfail(
-    reason="green after W8: per-agent skill copy names harness packages (D10)",
-    strict=False,
 )
 def test_per_agent_skill_copy_prompts_reference_harness_packages(agent_name: str) -> None:
     """Agents that install the skill must point at generated harness packages."""
