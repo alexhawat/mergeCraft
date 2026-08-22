@@ -11,6 +11,7 @@ import pytest
 import mergecraft.offline_review as offline_mod
 from mergecraft.analyzers.finding import STRUCTURED_OUTPUT_REQUIRED_MSG, make_finding
 from mergecraft.config.settings import RepoSettings
+from mergecraft.mcp.tool_state import AnalyzerRunState
 from mergecraft.offline_review import OfflineReviewResult, _finish_offline_result
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.offline_diff import DiffMaterialization
@@ -77,7 +78,7 @@ def _patch_offline_harness(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         "mergecraft.review.offline_stages.run_analyzer_pipeline",
-        lambda **_kwargs: None,
+        lambda **_kwargs: AnalyzerRunState(ran=False, reason="stubbed"),
     )
 
 
