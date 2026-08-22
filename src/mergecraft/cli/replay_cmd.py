@@ -17,11 +17,11 @@ from mergecraft.cli import trace_jsonl
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
-from mergecraft.cli.trace_jsonl import load_trace_jsonl_events
+from mergecraft.cli.trace_jsonl import load_trace_jsonl_events, session_ids_in_trace_order
 
 
 def _payload(*, run_id: str | None, events: list[dict[str, Any]]) -> dict[str, Any]:
-    sessions = sorted({str(event.get("session_id")) for event in events if event.get("session_id")})
+    sessions = session_ids_in_trace_order(events)
     chosen = run_id or (sessions[-1] if sessions else None)
     replayed = [event for event in events if chosen and event.get("session_id") == chosen]
     return {

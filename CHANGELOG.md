@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `review --agent` emits `phase` events as `ReviewEngine` runs each stage (fallback `materialize`/`review` when the engine is stubbed); result-cache keys include repository identity; `replay` / `run inspect` / `run diff` order sessions by trace timestamps, not lexicographic ids (#399)
+
 ### Changed
 
 - Offline `--use-cache` / `--resume` store only after structured-output finalize and re-validate on hit; cache keys include trust tier, `--prompt`, and related review inputs; `--resume` reads that cache and does not call a no-op checkpoint stub (#378)
-- CLI, Action, and SCM share one four-stage review engine (materialize / analyze / review / publish) with per-stage timeouts recorded after each stage; the 1h review budget is snapshot data (the agent self-times); `--resume` is an alias of `--use-cache`; `--agent` negotiates `MERGECRAFT_AGENT_PROTOCOL` and stamps protocol budgets without emitting stage phases before the engine runs (#378, #379, #380)
+- CLI, Action, and SCM share one four-stage review engine (materialize / analyze / review / publish) with per-stage timeouts recorded after each stage; the 1h review budget is snapshot data (the agent self-times); `--resume` is an alias of `--use-cache`; `--agent` negotiates `MERGECRAFT_AGENT_PROTOCOL` and stamps protocol budgets, emitting `phase` events as each engine stage starts (#378, #379, #380)
 - Eval methodology: blocker precision is `None` (unpublished) when a run reports no blockers, and severity accuracy is `None` when there are no locality matches — never a vacuous 1.0
 - Landing README redesigned as a REACH-style product page (outline B): problem/solution
   cards, D2 architecture hero, numbered install, and jump-nav. Long-form install,

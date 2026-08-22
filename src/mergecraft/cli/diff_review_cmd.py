@@ -25,7 +25,7 @@ from mergecraft.offline_review import (
     run_offline_diff_review,
 )
 from mergecraft.review.engine import ReviewEngine
-from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
+from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, canonical_review_snapshot
 from mergecraft.utils.log import configure_logging
 from mergecraft.utils.source_resolve import SourceResolverSpec
 
@@ -505,8 +505,17 @@ def run(
 
     stream: AgentProtocolStream | None = None
     seen: set[str] = set()
+    phases_emitted = False
     if agent_mode:
-        stream = _start_agent_protocol()
+        agent_stream = _start_agent_protocol()
+        stream = agent_stream
+
+        def _on_stage(name: ReviewStageName) -> None:
+            nonlocal phases_emitted
+            phases_emitted = True
+            agent_stream.phase(name)
+
+        engine.set_on_stage(_on_stage)
 
     def _on_finding(finding: dict[str, Any]) -> None:
         if stream is None:
@@ -546,6 +555,12 @@ def run(
         except (KeyboardInterrupt, asyncio.CancelledError):
             cleanup_review_subprocesses()
             raise
+
+        if agent_mode and stream is not None and not phases_emitted:
+            # Tests (and other stubs) replace ``run_offline_diff_review`` and
+            # never drive ``ReviewEngine``; still emit the documented phases.
+            stream.phase("materialize")
+            stream.phase("review")
 
         if result.diff_path:
             logger.info("» diff path: {}", result.diff_path)

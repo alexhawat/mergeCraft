@@ -528,6 +528,7 @@ class _OfflineDiffReviewRun:
                 prompt_extra=self.prompt_extra,
                 json_mode=self.json_path is not None,
                 base_ref=self.materialization.base_ref,
+                cwd=self.cwd,
             )
             cached = load_review_result(self.cache_key)
             if cached is not None:

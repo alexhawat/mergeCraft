@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
-from mergecraft.cli.trace_jsonl import default_trace_dir, load_trace_jsonl_events
+from mergecraft.cli.trace_jsonl import (
+    default_trace_dir,
+    load_trace_jsonl_events,
+    session_ids_in_trace_order,
+)
 
 if TYPE_CHECKING:
     import pytest
@@ -70,3 +75,36 @@ def test_load_trace_jsonl_events_skips_malformed_lines(tmp_path: Path) -> None:
 def test_load_trace_jsonl_events_missing_dir_returns_empty(tmp_path: Path) -> None:
     """Edge: a missing trace directory is an empty list, not OSError."""
     assert load_trace_jsonl_events(tmp_path / "missing-traces") == []
+
+
+def test_session_ids_order_by_timestamp_not_lexicographic_ids() -> None:
+    """Unit: non-monotonic session ids default to chronological, not string sort."""
+    events = [
+        {"session_id": "aaa", "ts_start_ns": 200},
+        {"session_id": "zzz", "ts_start_ns": 100},
+    ]
+    assert session_ids_in_trace_order(events) == ["zzz", "aaa"]
+
+
+def test_run_inspect_defaults_to_latest_timestamp_when_ids_are_non_monotonic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Functional: ``run inspect`` without an id picks the later timestamp, not ``zzz`` vs ``aaa``."""
+    events = [
+        {"session_id": "aaa", "ts_start_ns": 200, "kind": "span"},
+        {"session_id": "zzz", "ts_start_ns": 100, "kind": "span"},
+    ]
+
+    def _load(_trace_dir: Path) -> list[dict[str, Any]]:
+        return events
+
+    monkeypatch.setattr("mergecraft.cli.run_cmd.load_trace_jsonl_events", _load)
+    result = runner.invoke(
+        app,
+        ["--format", "json", "run", "inspect", "--trace-dir", str(tmp_path / "traces")],
+        env=_DUMB_ENV,
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["run_id"] == "aaa"
+    assert payload["runs"] == ["zzz", "aaa"]

@@ -33,4 +33,31 @@ def load_trace_jsonl_events(trace_dir: Path) -> list[dict[str, Any]]:
     return matched
 
 
-__all__ = ["default_trace_dir", "load_trace_jsonl_events"]
+def session_ids_in_trace_order(events: list[dict[str, Any]]) -> list[str]:
+    """Return unique ``session_id`` values ordered by earliest trace timestamp.
+
+    UUID4 (and operator-supplied) ids are not chronological; lexicographic sort
+    would pick the wrong default for ``replay`` / ``run inspect`` / ``run diff``.
+    """
+    first_index: dict[str, int] = {}
+    min_ts: dict[str, int] = {}
+    for idx, event in enumerate(events):
+        raw = event.get("session_id")
+        if raw is None or raw == "":
+            continue
+        session_id = str(raw)
+        if session_id not in first_index:
+            first_index[session_id] = idx
+        ts = event.get("ts_start_ns")
+        if isinstance(ts, int) and (session_id not in min_ts or ts < min_ts[session_id]):
+            min_ts[session_id] = ts
+
+    def _sort_key(session_id: str) -> tuple[int, int, int]:
+        if session_id in min_ts:
+            return (0, min_ts[session_id], first_index[session_id])
+        return (1, first_index[session_id], 0)
+
+    return sorted(first_index, key=_sort_key)
+
+
+__all__ = ["default_trace_dir", "load_trace_jsonl_events", "session_ids_in_trace_order"]

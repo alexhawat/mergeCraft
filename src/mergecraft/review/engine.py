@@ -21,6 +21,7 @@ from mergecraft.review.snapshot import (
 
 TimeoutMap = Mapping[ReviewStageName, float]
 OnTimeout = Callable[[ReviewStageName], None]
+OnStage = Callable[[ReviewStageName], None]
 
 R = TypeVar("R")
 S = TypeVar("S")
@@ -71,6 +72,7 @@ class ReviewEngine(Generic[T]):
     snapshot: ReviewSnapshot
     _ran: list[ReviewStageName] = field(default_factory=list, init=False, repr=False)
     _on_timeout: OnTimeout | None = field(default=None, init=False, repr=False)
+    _on_stage: OnStage | None = field(default=None, init=False, repr=False)
 
     @property
     def stages(self) -> tuple[ReviewStageSpec, ...]:
@@ -84,6 +86,10 @@ class ReviewEngine(Generic[T]):
     def set_on_timeout(self, handler: OnTimeout | None) -> None:
         """Install a handler invoked when a stage ``wait_for`` times out."""
         self._on_timeout = handler
+
+    def set_on_stage(self, handler: OnStage | None) -> None:
+        """Install a handler invoked when a stage starts (before the hook runs)."""
+        self._on_stage = handler
 
     def _spec(self, name: ReviewStageName) -> ReviewStageSpec:
         for stage in self.snapshot.stages:
@@ -111,6 +117,9 @@ class ReviewEngine(Generic[T]):
         timeouts: TimeoutMap | None = None,
     ) -> S:
         """Await ``hook`` under the stage timeout; record ``name`` only on success."""
+        on_stage = self._on_stage
+        if on_stage is not None:
+            on_stage(name)
         if isinstance(timeout_s, _TimeoutUnset):
             budget = self._timeout_for(name, timeouts)
         else:

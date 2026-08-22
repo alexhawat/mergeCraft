@@ -4,17 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from mergecraft.review.offline_result import OfflineReviewResult
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.run_bounds import ScopeReduction, resolve_run_bounds
 from mergecraft.utils.run_cache import RunCache, default_cache_root, open_run_cache
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from mergecraft.utils.workspace import git_repo_root
 
 _KEY_PREFIX = "review-result:"
+
+
+def review_cache_repo_identity(*, cwd: Path | str | None = None) -> str:
+    """Return a stable identity for the repository or worktree being reviewed."""
+    start = Path(cwd) if cwd is not None else Path.cwd()
+    root = git_repo_root(str(start))
+    if root is not None:
+        return str(root)
+    return str(start)
 
 
 def review_result_cache_key(
@@ -25,8 +32,11 @@ def review_result_cache_key(
     prompt_extra: str | None = None,
     json_mode: bool = False,
     base_ref: str | None = None,
+    repo_identity: str | None = None,
+    cwd: Path | str | None = None,
 ) -> str:
     """Return a cache key for a materialized review, including inputs that change it."""
+    identity = repo_identity if repo_identity is not None else review_cache_repo_identity(cwd=cwd)
     hasher = hashlib.sha256()
     hasher.update(diff_bytes)
     hasher.update(b"\0model=")
@@ -39,6 +49,8 @@ def review_result_cache_key(
     hasher.update(b"1" if json_mode else b"0")
     hasher.update(b"\0base=")
     hasher.update((base_ref or "").encode("utf-8"))
+    hasher.update(b"\0repo=")
+    hasher.update(identity.encode("utf-8"))
     return f"{_KEY_PREFIX}{hasher.hexdigest()}"
 
 
@@ -156,6 +168,8 @@ def cache_key_for_diff_path(
     prompt_extra: str | None = None,
     json_mode: bool = False,
     base_ref: str | None = None,
+    repo_identity: str | None = None,
+    cwd: Path | str | None = None,
 ) -> str:
     """Hash an on-disk unified diff plus review-changing inputs into a result-cache key."""
     return review_result_cache_key(
@@ -165,12 +179,15 @@ def cache_key_for_diff_path(
         prompt_extra=prompt_extra,
         json_mode=json_mode,
         base_ref=base_ref,
+        repo_identity=repo_identity,
+        cwd=cwd,
     )
 
 
 __all__ = [
     "cache_key_for_diff_path",
     "load_review_result",
+    "review_cache_repo_identity",
     "review_result_cache_key",
     "store_review_result",
 ]

@@ -110,6 +110,16 @@ def test_review_engine_constructs_from_snapshot_without_pre_stamping() -> None:
     assert engine.result().stages_ran == ()
 
 
+@pytest.mark.asyncio
+async def test_review_engine_invokes_on_stage_before_each_hook() -> None:
+    """Unit: ``set_on_stage`` fires at the start of every canonical stage."""
+    seen: list[str] = []
+    engine = ReviewEngine(snapshot=_short_snapshot())
+    engine.set_on_stage(seen.append)
+    await engine.run(_hooks())
+    assert seen == ["materialize", "analyze", "review", "publish"]
+
+
 def test_review_package_reexports_engine_types() -> None:
     """Unit: ``mergecraft.review`` re-exports the engine types, not ``run_from_snapshot``."""
     import mergecraft.review as review_pkg

@@ -18,7 +18,7 @@ from mergecraft.cli import trace_jsonl
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
-from mergecraft.cli.trace_jsonl import load_trace_jsonl_events
+from mergecraft.cli.trace_jsonl import load_trace_jsonl_events, session_ids_in_trace_order
 
 app = typer.Typer(
     name="run",
@@ -32,7 +32,7 @@ def _load_events(trace_dir: Path) -> list[dict[str, Any]]:
 
 
 def _sessions(events: list[dict[str, Any]]) -> list[str]:
-    return sorted({str(event.get("session_id")) for event in events if event.get("session_id")})
+    return session_ids_in_trace_order(events)
 
 
 def _kinds_for(events: list[dict[str, Any]], run_id: str) -> set[str]:
