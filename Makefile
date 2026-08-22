@@ -18,7 +18,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory hook-pins-check
+	lint-ruff-advisory hook-pins-check pins-check
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
 PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
@@ -144,6 +144,9 @@ examples: ## Render example workflow YAML from templates
 example-workflows-check: ## Fail when committed example workflows drift from templates
 	$(UV) run python scripts/render_example_workflows.py --check
 
+pins-check: ## Fail when packaged defaults.yaml drifts from checkout copy (#402, #414)
+	cmp -s scripts/example_workflows/defaults.yaml src/mergecraft/data/example_workflows/defaults.yaml || { echo "defaults.yaml copies drifted (edit scripts/example_workflows/defaults.yaml, sync packaged copy, then make pins-check)" >&2; exit 1; }
+
 agent-packages: ## Regenerate per-harness Agent Skills packages
 	$(UV) run python scripts/gen_agent_packages.py
 
@@ -193,11 +196,11 @@ reference-docs: docs ## Regenerate the README action + CLI reference tables (ali
 
 reference-docs-check: docs-check ## Fail when README reference tables drift (alias)
 
-ci-static: lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check ## Static/build tier
+ci-static: lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check ## Static/build tier
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check security coverage-gate
+CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check security coverage-gate
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)

@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT, read_text
 
 _CHECKOUT_DEFAULTS = REPO_ROOT / "scripts" / "example_workflows" / "defaults.yaml"
@@ -33,7 +31,6 @@ def _ci_steps(makefile: str) -> list[str]:
     return match.group(1).split()
 
 
-@pytest.mark.xfail(reason="green after W2: sync packaged defaults.yaml copy (#402)", strict=False)
 def test_checkout_and_packaged_defaults_yaml_are_byte_identical() -> None:
     """D7: checkout YAML is source of truth; packaged copy must match byte-for-byte."""
     assert _CHECKOUT_DEFAULTS.is_file(), (
@@ -51,7 +48,6 @@ def test_checkout_and_packaged_defaults_yaml_are_byte_identical() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W2: add pins-check Makefile target (#414)", strict=False)
 def test_make_pins_check_target_exists() -> None:
     makefile = read_text("Makefile")
     assert re.search(
@@ -61,7 +57,6 @@ def test_make_pins_check_target_exists() -> None:
     ), f"Makefile must define {_PINS_CHECK_TARGET}:"
 
 
-@pytest.mark.xfail(reason="green after W2: wire pins-check into CI_STEPS (#414)", strict=False)
 def test_make_pins_check_in_ci_steps() -> None:
     makefile = read_text("Makefile")
     steps = _ci_steps(makefile)
@@ -70,7 +65,6 @@ def test_make_pins_check_in_ci_steps() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W2: wire pins-check into ci-static (#414)", strict=False)
 def test_make_pins_check_in_ci_static() -> None:
     makefile = read_text("Makefile")
     ci_static = _makefile_prerequisite_tokens(makefile, "ci-static")

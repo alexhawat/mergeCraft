@@ -1,5 +1,5 @@
 # Shared placeholders for rendered example workflows.
-# Checkout copy: scripts/example_workflows/defaults.yaml (edit there, then sync here).
+# Edit here (or override via env) then run: make examples
 action_repo: alexhawat/mergeCraft
 # A tagged release ref is fine for the minimal getting-started example.
 action_pin_minimal: v0.1.0a1

@@ -14,6 +14,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CHECKOUT_DEFAULTS_PATH: Final[Path] = (
     _REPO_ROOT / "scripts" / "example_workflows" / "defaults.yaml"
 )
+# Sync rule: edit scripts/example_workflows/defaults.yaml, copy byte-identical to packaged path, then make pins-check.
 _PACKAGED_DEFAULTS_PATH: Final[str] = "example_workflows/defaults.yaml"
 
 # G1 option B — embedded fallback when neither checkout nor wheel data is present.
