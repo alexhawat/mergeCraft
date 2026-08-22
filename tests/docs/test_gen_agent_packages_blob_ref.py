@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING, Any
 
 from mergecraft.pins import action_pin_minimal
 from tests.ci.workflow_support import REPO_ROOT
+
+if TYPE_CHECKING:
+    from _pytest.monkeypatch import MonkeyPatch
 
 GEN_SCRIPT = REPO_ROOT / "scripts" / "gen_agent_packages.py"
 _ENV_KEY = "MERGECRAFT_AGENT_PACKAGES_REF"
@@ -44,26 +45,21 @@ def _git_tag_exists(ref: str) -> bool:
     )
 
 
-@pytest.mark.xfail(reason="green after W6: DEFAULT_BLOB_REF is pre-0.0.1", strict=False)
 def test_default_blob_ref_constant_is_pre_0_0_1() -> None:
     """``DEFAULT_BLOB_REF`` must be ``pre-0.0.1`` on this branch (D8)."""
     module = _load_gen_module()
     assert module.DEFAULT_BLOB_REF == _EXPECTED_DEFAULT
 
 
-def test_blob_ref_uses_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_blob_ref_uses_env_override(monkeypatch: MonkeyPatch) -> None:
     """``MERGECRAFT_AGENT_PACKAGES_REF`` wins over pin and default (D8 step 1)."""
     module = _load_gen_module()
     monkeypatch.setenv(_ENV_KEY, "feature/test-override")
     assert module._blob_ref() == "feature/test-override"
 
 
-@pytest.mark.xfail(
-    reason="green after W6: fall back to DEFAULT_BLOB_REF when pin tag missing",
-    strict=False,
-)
 def test_blob_ref_returns_default_when_pin_tag_missing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     """When ``v0.1.0a1`` is absent locally, return ``pre-0.0.1`` — not the pin (D8)."""
     pin = action_pin_minimal()
@@ -78,12 +74,8 @@ def test_blob_ref_returns_default_when_pin_tag_missing(
     assert ref == _EXPECTED_DEFAULT
 
 
-@pytest.mark.xfail(
-    reason="green after W6: use action_pin_minimal when git verify succeeds",
-    strict=False,
-)
 def test_blob_ref_uses_action_pin_minimal_when_tag_exists(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     """When the pin tag resolves locally, ``_blob_ref()`` uses ``action_pin_minimal()``."""
     pin = action_pin_minimal()

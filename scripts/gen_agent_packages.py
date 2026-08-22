@@ -29,6 +29,8 @@ from typing import Any
 
 import yaml
 
+from mergecraft.pins import action_pin_minimal
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SKILL = REPO_ROOT / "skills" / "mergecraft" / "SKILL.md"
 HARNESS_MANIFEST = REPO_ROOT / "skills" / "harnesses.yaml"
@@ -37,13 +39,29 @@ GITHUB_REPO = "alexhawat/mergeCraft"
 _RELATIVE_LINK = re.compile(r"\(\.\./\.\./([^)]+)\)")
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
-DEFAULT_BLOB_REF = "main"
+DEFAULT_BLOB_REF = "pre-0.0.1"
+
+
+def _git_ref_exists(ref: str) -> bool:
+    """Return True when ``ref`` resolves in this checkout."""
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", ref],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=False,
+        ).returncode
+        == 0
+    )
 
 
 def _blob_ref() -> str:
     env_ref = os.environ.get("MERGECRAFT_AGENT_PACKAGES_REF", "").strip()
     if env_ref:
         return env_ref
+    pin = action_pin_minimal()
+    if _git_ref_exists(pin):
+        return pin
     return DEFAULT_BLOB_REF
 
 
