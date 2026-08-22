@@ -79,12 +79,19 @@ _CAPABILITY_CATALOG: Final[tuple[dict[str, Any], ...]] = (
     },
 )
 
+_RISK_ORDER: Final[dict[str, int]] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
 _ROUTE_TABLE: Final[dict[tuple[str, str], str]] = {
     ("security", "high"): "anthropic/claude-opus",
     ("security", "trivial"): "anthropic/claude-haiku",
     ("tests", "high"): "openai/gpt-5.3-codex",
     ("tests", "trivial"): "anthropic/claude-haiku",
 }
+
+
+def _risk_at_or_above(*, risk: str, threshold: str) -> bool:
+    """Return whether ``risk`` is at or above ``threshold`` in the shared band order."""
+    return _RISK_ORDER.get(str(risk).lower(), 0) >= _RISK_ORDER.get(threshold, 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,15 +192,16 @@ def route_model(*, specialist: str, risk: str) -> str:
 
     Args:
         specialist: Review specialist id (e.g. ``security``).
-        risk: Change risk band (e.g. ``high``, ``trivial``).
+        risk: Change risk band (e.g. ``high``, ``critical``, ``trivial``).
 
     Returns:
-        A catalog model id. High-risk security is never the trivial-risk pick.
+        A catalog model id. High- and critical-risk bands never use the
+        trivial-risk cheap pick.
     """
     key = (str(specialist), str(risk))
     if key in _ROUTE_TABLE:
         chosen = _ROUTE_TABLE[key]
-    elif str(risk) == "high":
+    elif _risk_at_or_above(risk=risk, threshold="high"):
         chosen = "anthropic/claude-opus"
     else:
         chosen = "anthropic/claude-haiku"
