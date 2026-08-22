@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-harness Agent Skills packages generated from `skills/mergecraft/SKILL.md` via
+  `scripts/gen_agent_packages.py`, with `skills/harnesses.yaml` install matrix,
+  `make agent-packages-check` in CI, and Hermes/OpenClaw surfaces (#383 bullet 1, RV3)
 - Agent-loop reference workflow (`docs/agent-loop.md`) for `mergecraft review --agent` (#383)
 - CLI, GitHub Action, and SCM webhooks now enter one review engine over one immutable snapshot (#380)
 - `mergecraft explain`, `ask`, and `replay` plus `run inspect` / `run diff` print output-only change, line Q&A, and stored-run views (#377)
