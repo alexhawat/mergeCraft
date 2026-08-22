@@ -12,6 +12,7 @@ import pytest
 
 from mergecraft.analyzers.registry import load_catalog
 from mergecraft.analyzers.trust import evaluate_manifest_for_shell
+from mergecraft.mcp.tool_state import AnalyzerRunState
 from mergecraft.offline_review import _OfflineDiffReviewRun
 from mergecraft.review.offline_result import OfflineReviewResult
 from mergecraft.review.offline_stages import run_offline_analyze
@@ -35,8 +36,9 @@ def _materialization(tmp_path: Path) -> DiffMaterialization:
 def _capture_pipeline(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     seen: dict[str, Any] = {}
 
-    def fake_pipeline(**kwargs: Any) -> None:
+    def fake_pipeline(**kwargs: Any) -> AnalyzerRunState:
         seen.update(kwargs)
+        return AnalyzerRunState(ran=False, reason="stubbed")
 
     monkeypatch.setattr(
         "mergecraft.review.offline_stages.run_analyzer_pipeline",

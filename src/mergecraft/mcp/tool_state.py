@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -164,6 +166,93 @@ class AnalyzerStatusRow:
     finding_count: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class AnalyzerRunKey:
+    """Identity of the inputs one analyzer-pipeline run was computed from.
+
+    An offline ``mergecraft review`` runs the catalog pipeline twice over the
+    same inputs: once as a pre-pass (``review/offline_stages.py``, whose result
+    feeds the structured findings and the exit code) and once when the
+    reviewing agent calls the ``run_analyzers`` MCP tool. Recording the pre-pass
+    inputs lets the tool reuse that result instead of provisioning and
+    executing every analyzer a second time.
+
+    Every field is an input that can change what the pipeline returns:
+    ``repo_root`` and ``changed_files`` decide which manifests are selected,
+    ``tier`` / ``shell`` / ``mode`` decide which of those may execute,
+    ``inline_budget`` decides the inline/mechanical split, ``offline`` gates
+    base-comparison work, ``base_ref`` picks the base for the differential
+    analyzers, and ``diff_digest`` covers the diff the findings are scoped to.
+    Anything not listed here must not differ between the two call sites.
+    """
+
+    repo_root: str
+    changed_files: tuple[str, ...]
+    tier: str
+    shell: str
+    mode: str
+    inline_budget: int
+    offline: bool
+    base_ref: str | None
+    diff_digest: str
+
+    def matches(self, request: AnalyzerRunKey) -> bool:
+        """Return True when ``request`` may reuse the run recorded under self.
+
+        ``request`` is the incoming ``run_analyzers`` call. Every field must be
+        equal, with one asymmetry: a ``request`` that omits ``base_ref``
+        (``None``) is compatible with a recorded run that named one. ``None`` is
+        the tool's "resolve a base yourself" sentinel, not a value — and because
+        ``diff_digest`` already had to match, the recorded ``base_ref`` is the
+        base of the very diff being scoped. A ``request`` that names a
+        *different* base is not compatible.
+        """
+        if request.base_ref is not None and request.base_ref != self.base_ref:
+            return False
+        return (
+            self.repo_root == request.repo_root
+            and self.changed_files == request.changed_files
+            and self.tier == request.tier
+            and self.shell == request.shell
+            and self.mode == request.mode
+            and self.inline_budget == request.inline_budget
+            and self.offline == request.offline
+            and self.diff_digest == request.diff_digest
+        )
+
+
+def analyzer_run_key(
+    *,
+    repo_root: Path | str,
+    changed_files: list[str],
+    tier: str,
+    shell: str,
+    mode: str,
+    inline_budget: int,
+    offline: bool,
+    base_ref: str | None,
+    diff_text: str,
+) -> AnalyzerRunKey:
+    """Build an :class:`AnalyzerRunKey` from one pipeline call's inputs.
+
+    Both call sites go through this helper so the normalisation stays identical:
+    ``repo_root`` is resolved, ``changed_files`` is de-duplicated and sorted
+    (order never changes the selected manifests), and the diff is reduced to a
+    SHA-256 digest rather than carried whole.
+    """
+    return AnalyzerRunKey(
+        repo_root=str(Path(repo_root).resolve()),
+        changed_files=tuple(sorted({str(path) for path in changed_files})),
+        tier=tier,
+        shell=shell,
+        mode=mode,
+        inline_budget=inline_budget,
+        offline=offline,
+        base_ref=base_ref,
+        diff_digest=hashlib.sha256(diff_text.encode("utf-8")).hexdigest(),
+    )
+
+
 @dataclass(slots=True)
 class AnalyzerRunState:
     ran: bool = False
@@ -175,6 +264,11 @@ class AnalyzerRunState:
     pre_merge_summary: str | None = None
     lockfile_digest: str | None = None
     verified_ids: set[str] = field(default_factory=set)
+    # Inputs this run was computed from, when they were recorded. Set only by
+    # the offline pre-pass (``review/offline_stages.py``); ``None`` everywhere
+    # else — including on the GitHub Action path, which has no pre-pass — so an
+    # unkeyed run is never reused by ``run_analyzers``.
+    key: AnalyzerRunKey | None = None
 
 
 @dataclass(slots=True)

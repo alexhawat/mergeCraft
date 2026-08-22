@@ -44,6 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Transitive `h2` 4.4.0→4.4.1 in `uv.lock` for `pip-audit` (PYSEC-2026-3628)
 - `mergecraft init` no longer emits `uses: ./` in consumer repos — published Action ref instead (V8/D13)
 - `mergecraft init` scaffold drops comment triggers and unsafe `github.event.comment.body` prompt wiring; defaults to `CLAUDE_CODE_OAUTH_TOKEN` (README Example 1 parity)
+- Offline `mergecraft review` no longer runs the analyzer catalog twice: the pre-pass in
+  `run_offline_analyze` and the reviewing agent's `run_analyzers` call each provisioned tools and
+  executed every eligible analyzer over the same diff, doubling review time and duplicating the
+  skip block, sandbox probe, and semgrep/trufflehog output in the log. The pre-pass now records the
+  inputs it ran under (repo root, changed files, trust tier, shell, analyzer mode, inline budget,
+  offline flag, base ref, and a digest of the diff) and `run_analyzers` reuses that result when every
+  one of them matches; any difference — and the GitHub Action path, which has no pre-pass — runs the
+  pipeline exactly as before
 - Offline analyze stores ``AnalyzerRunState`` on the CLI tool context and merges analyzer findings into structured output so CC1 exit codes see Critical/Major hits the agent omitted; result-cache keys include mergeCraft version and a settings digest (#399)
 - Managed analyzer binaries are re-verified on every cache hit, not just at download time: the cache
   directory is keyed by the *archive* sha256, so a tool that rewrites itself in place was executed on
