@@ -115,6 +115,15 @@ def _load_scope_reduction(raw: object) -> ScopeReduction | None:
     )
 
 
+def _existing_evidence_packet_path(raw: object) -> str | None:
+    """Return ``raw`` only when it still names a file on disk; otherwise omit it."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    if Path(raw).is_file():
+        return raw
+    return None
+
+
 def load_review_result(key: str) -> OfflineReviewResult | None:
     """Load a previously cached review result, or ``None`` on miss/corrupt."""
     cache = _open_result_cache()
@@ -153,11 +162,7 @@ def load_review_result(key: str) -> OfflineReviewResult | None:
             if isinstance(payload.get("structured_output"), str)
             else None
         ),
-        evidence_packet_path=(
-            payload.get("evidence_packet_path")
-            if isinstance(payload.get("evidence_packet_path"), str)
-            else None
-        ),
+        evidence_packet_path=_existing_evidence_packet_path(payload.get("evidence_packet_path")),
         outcome=outcome,
         scope_reduction=scope_reduction,
     )

@@ -565,8 +565,9 @@ def run(
         if result.diff_path:
             logger.info("» diff path: {}", result.diff_path)
 
-        if result.evidence_packet_path:
-            logger.info("» evidence packet: {}", result.evidence_packet_path)
+        packet_path = result.evidence_packet_path
+        if packet_path and Path(packet_path).is_file():
+            logger.info("» evidence packet: {}", packet_path)
 
         outcome = _resolve_outcome(result)
         findings = parse_offline_review_findings(result)

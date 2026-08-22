@@ -70,7 +70,7 @@ def run(
     ctx: typer.Context,
     question: str | None = typer.Argument(
         default=None,
-        help="Question about the change or a specific line.",
+        help="Question text recorded in the payload; not sent to a model.",
     ),
     file: Path | None = typer.Option(
         None,
@@ -83,7 +83,7 @@ def run(
         help="1-based line number in --file.",
     ),
 ) -> None:
-    """Answer a question about the tree, optionally scoped to a file line."""
+    """Show a file-line excerpt or canned text; does not call a model."""
     if line is not None and line < 1:
         cli_bail("--line must be a 1-based line number", code=CLI_USAGE_EXIT_CODE)
     if line is not None and file is None:

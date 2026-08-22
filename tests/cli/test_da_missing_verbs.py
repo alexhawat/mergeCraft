@@ -187,3 +187,16 @@ def test_remaining_verbs_are_not_the_config_or_analyzers_homonyms() -> None:
     assert config_explain.exit_code == CLI_SUCCESS_EXIT_CODE
     assert analyzers_run.exit_code == CLI_SUCCESS_EXIT_CODE
     assert "explain" in _root_command_names()
+
+
+def test_ask_help_describes_excerpt_not_model_qa() -> None:
+    """Help: ``ask`` is line excerpt / canned text; it does not answer the tree via a model."""
+    result = _invoke("ask", "--help")
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, combined
+    folded = combined.casefold()
+    assert "answer a question about the tree" not in folded
+    assert "excerpt" in folded
+    assert "canned" in folded
+    assert "model" in folded
+    assert "recorded in the payload" in folded

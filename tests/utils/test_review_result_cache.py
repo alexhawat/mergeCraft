@@ -285,6 +285,58 @@ def test_legacy_payload_without_scope_reduction_loads_other_fields(
     assert loaded.output == "legacy review"
     assert loaded.diff_path == "legacy.diff"
     assert loaded.structured_output == '{"findings":[]}'
-    assert loaded.evidence_packet_path == "/tmp/legacy-packet.json"
+    assert loaded.evidence_packet_path is None
     assert loaded.outcome is RunOutcome.passed
     assert loaded.scope_reduction is None
+
+
+def test_load_keeps_evidence_packet_path_when_file_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy: a stored packet path is returned when the file is still on disk."""
+    _isolate_cache(tmp_path, monkeypatch)
+    packet = tmp_path / "packet.json"
+    packet.write_text("{}", encoding="utf-8")
+    key = review_result_cache_key(_DIFF, model="m")
+    payload = {
+        "success": True,
+        "output": "ok",
+        "error": None,
+        "diff_path": "x.diff",
+        "empty_diff": False,
+        "structured_output": None,
+        "evidence_packet_path": str(packet),
+        "outcome": "passed",
+    }
+    cache = open_run_cache(root=tmp_path / "run-cache", max_bytes=1_000_000)
+    cache.put(key, json.dumps(payload).encode("utf-8"))
+    loaded = load_review_result(key)
+    assert loaded is not None
+    assert loaded.evidence_packet_path == str(packet)
+
+
+def test_load_omits_missing_evidence_packet_path_without_cache_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Edge: a gone packet path is omitted; the cached result still loads."""
+    _isolate_cache(tmp_path, monkeypatch)
+    gone = tmp_path / "gone-packet.json"
+    gone.write_text("{}", encoding="utf-8")
+    gone.unlink()
+    key = review_result_cache_key(_DIFF, model="m")
+    payload = {
+        "success": True,
+        "output": "still-here",
+        "error": None,
+        "diff_path": "x.diff",
+        "empty_diff": False,
+        "structured_output": None,
+        "evidence_packet_path": str(gone),
+        "outcome": "passed",
+    }
+    cache = open_run_cache(root=tmp_path / "run-cache", max_bytes=1_000_000)
+    cache.put(key, json.dumps(payload).encode("utf-8"))
+    loaded = load_review_result(key)
+    assert loaded is not None
+    assert loaded.output == "still-here"
+    assert loaded.evidence_packet_path is None
