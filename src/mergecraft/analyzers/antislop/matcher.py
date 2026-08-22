@@ -241,8 +241,11 @@ def _python_phantom_import_matches(source: str) -> Iterable[tuple[int, int, str]
                         (_node_text(source, child).split(".", 1)[0], node.start_point[0] + 1)
                     )
                 elif child.type == "aliased_import":
+                    alias = child.child_by_field_name("alias")
                     name_node = child.child_by_field_name("name")
-                    if name_node is not None:
+                    if alias is not None:
+                        import_names.append((_node_text(source, alias), node.start_point[0] + 1))
+                    elif name_node is not None:
                         import_names.append(
                             (
                                 _node_text(source, name_node).split(".", 1)[0],

@@ -83,7 +83,7 @@ def scan_changed_files(
             continue
         try:
             source = absolute.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             logger.warning("antislop: could not read {}: {}", rel_path, exc)
             continue
         matches.extend(
