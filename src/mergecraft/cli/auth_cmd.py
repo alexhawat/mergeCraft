@@ -216,31 +216,41 @@ def _persist_credential(
     credential — and only bails when neither half lands.
     """
     entries = dict(local_entries) if local_entries is not None else {name: value}
-    wrote_local = False
+    any_local_written = False
     if target.local:
         env_path = _local_env_path()
         # Not short-circuited: every entry is attempted so a partial failure
-        # still leaves the entries that could be written.
-        wrote_local = all(
-            [
-                _write_env_value(env_path, key, _single_line_credential(name=key, value=entry))
-                for key, entry in entries.items()
-            ]
-        )
-        written = " and ".join(entries)
-        if wrote_local:
-            console.print(f"[green]wrote {written}[/green] to {env_path}")
-        else:
+        # still leaves the entries that could be written (#437).
+        succeeded_keys: list[str] = []
+        failed_keys: list[str] = []
+        for key, entry in entries.items():
+            if _write_env_value(env_path, key, _single_line_credential(name=key, value=entry)):
+                succeeded_keys.append(key)
+            else:
+                failed_keys.append(key)
+        if succeeded_keys:
+            landed = " and ".join(succeeded_keys)
+            console.print(f"[green]wrote {landed}[/green] to {env_path}")
+        if failed_keys:
             # Bandit's B608 fires on the interpolated `env_path`; this is a
             # console warning, not a SQL statement (no DB engine involved).
-            console.print(
-                f"[yellow]warning:[/yellow] could not update {env_path} "  # nosec B608
-                f"— set {written} manually or check file permissions."
-            )
+            if succeeded_keys:
+                console.print(
+                    f"[yellow]warning:[/yellow] could not update {env_path} "  # nosec B608
+                    "— check file permissions and set any missing entries manually."
+                )
+            else:
+                failed = " and ".join(failed_keys)
+                console.print(
+                    f"[yellow]warning:[/yellow] could not write {failed} to {env_path} "  # nosec B608
+                    f"— set {failed} manually or check file permissions."
+                )
+        any_local_written = bool(succeeded_keys)
 
     if target.github is None:
-        if not wrote_local:
-            cli_bail(f"nothing was written — could not save {name} locally.")
+        if not any_local_written:
+            local_label = " and ".join(entries)
+            cli_bail(f"nothing was written — could not save {local_label} locally.")
         return
 
     console.print(f"saving [cyan]{name}[/cyan] via gh secret set...")
@@ -255,7 +265,7 @@ def _persist_credential(
             f"[yellow]warning:[/yellow] gh secret set failed — set it manually at:\n  {secrets_url}"
         )
 
-    if not wrote_local and not wrote_github:
+    if not any_local_written and not wrote_github:
         cli_bail(
             "nothing was written — both local and github scopes failed. "
             "retry with --scope local or --scope github to isolate the failure."
@@ -843,14 +853,18 @@ def auth_logfire(
         },
     )
 
-    console.print(
+    next_steps = (
         "\n[bold]next steps[/bold]\n"
-        f"  - verify wiring: [cyan]mergecraft config tracing[/cyan] "
-        f"(token is redacted)\n"
-        f"  - run with traces: [cyan]mergecraft diff-review --tracing --tracing-to logfire[/cyan]\n"
-        f"  - in the GitHub Action, the workflow can pass "
-        f"[cyan]tracing-to: logfire[/cyan] + [cyan]logfire-token: ${{{{ secrets.{LOGFIRE_TOKEN_SECRET} }}}}[/cyan]"
+        "  - verify wiring: [cyan]mergecraft config tracing[/cyan] "
+        "(token is redacted)\n"
+        "  - run with traces: [cyan]mergecraft diff-review --tracing --tracing-to logfire[/cyan]\n"
     )
+    if target.github is not None:
+        next_steps += (
+            f"  - in the GitHub Action, the workflow can pass "
+            f"[cyan]tracing-to: logfire[/cyan] + [cyan]logfire-token: ${{{{ secrets.{LOGFIRE_TOKEN_SECRET} }}}}[/cyan]\n"
+        )
+    console.print(next_steps)
 
 
 def _validate_minimax_api_key(api_key: str) -> bool:

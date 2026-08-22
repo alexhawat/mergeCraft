@@ -5,8 +5,7 @@ Pins that a mixed local write of the logfire pair
 collapsed into "nothing was written" and does not name the Actions secret
 ``LOGFIRE_TOKEN`` when the failed keys were local env vars.
 
-Moved from ``tests/cli/test_cov_auth_cmd_paths.py`` (strict xfail from #431)
-with non-strict W10 markers.
+Moved from ``tests/cli/test_cov_auth_cmd_paths.py`` (strict xfail from #431).
 """
 
 from __future__ import annotations
@@ -75,10 +74,6 @@ def _mock_httpx(
 # --- #437 partial local write — _persist_credential unit contracts ----------
 
 
-@pytest.mark.xfail(
-    reason="green after W10: report partial local auth writes honestly (#437)",
-    strict=False,
-)
 def test_partial_local_write_must_not_claim_that_nothing_was_written(
     monkeypatch: MonkeyPatch, tmp_path: Path, capsys: CaptureFixture[str]
 ) -> None:
@@ -95,10 +90,6 @@ def test_partial_local_write_must_not_claim_that_nothing_was_written(
     assert "nothing was written" not in capsys.readouterr().err
 
 
-@pytest.mark.xfail(
-    reason="green after W10: report partial local auth writes honestly (#437)",
-    strict=False,
-)
 def test_partial_local_write_must_not_name_actions_secret_in_stderr(
     monkeypatch: MonkeyPatch, tmp_path: Path, capsys: CaptureFixture[str]
 ) -> None:
@@ -117,10 +108,6 @@ def test_partial_local_write_must_not_name_actions_secret_in_stderr(
     assert "MERGECRAFT_LOGFIRE_TOKEN" in err or "MERGECRAFT_TRACING_PROJECT" in err
 
 
-@pytest.mark.xfail(
-    reason="green after W10: report partial local auth writes honestly (#437)",
-    strict=False,
-)
 def test_partial_local_write_reports_which_local_keys_landed(
     monkeypatch: MonkeyPatch, tmp_path: Path, capsys: CaptureFixture[str]
 ) -> None:
@@ -138,10 +125,6 @@ def test_partial_local_write_reports_which_local_keys_landed(
     assert "MERGECRAFT_TRACING_PROJECT" in err or "mergecraft" in err
 
 
-@pytest.mark.xfail(
-    reason="green after W10: report partial local auth writes honestly (#437)",
-    strict=False,
-)
 def test_partial_local_write_token_landed_when_project_write_fails(
     monkeypatch: MonkeyPatch, tmp_path: Path, capsys: CaptureFixture[str]
 ) -> None:
@@ -161,10 +144,6 @@ def test_partial_local_write_token_landed_when_project_write_fails(
 # --- #437 CLI integration — auth logfire --scope local ----------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W10: report partial local auth writes honestly (#437)",
-    strict=False,
-)
 def test_auth_logfire_scope_local_partial_write_is_honest(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
