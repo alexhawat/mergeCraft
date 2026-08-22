@@ -67,7 +67,11 @@ def merge_recall_findings_into_analyzer_run(
 
     draft_findings = [_finding_from_row(row) for row in draft]
     recalled_findings = [_finding_from_row(row) for row in recalled]
-    novel = filter_novel_recall_findings(draft_findings, recalled_findings)
+    deferred_findings = [_finding_from_row(row) for row in analyzer_run.deferred_findings]
+    novel = filter_novel_recall_findings(
+        [*draft_findings, *deferred_findings],
+        recalled_findings,
+    )
     if not novel:
         return
     placement = place_findings(novel, inline_budget=0)
