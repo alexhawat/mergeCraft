@@ -14,9 +14,11 @@
 # Auto-reviews PRs on open / ready / new commits, posting inline comments
 # plus a summary as github-actions[bot], and opt-in `mergecraft` /
 # `mergecraft-approval` check-runs.
-# The enforce step below fails the job unless `mergecraft-approval` is a
-# confirmed "success" (outstanding feedback, no check posted at all, and an
-# unreachable check-runs API after retries all fail closed — see that step).
+# The `approval-gate` job fails unless `mergecraft-approval` is a confirmed
+# "success" (outstanding feedback, no check posted at all, and an unreachable
+# check-runs API after retries all fail closed — see that job's step). It
+# `needs:` the review-attempts job so Codex fallback can finish before the gate
+# samples check-runs (#433).
 #
 # Provider priority: DeepSeek V4 Flash via the Nous Portal is primary; OpenAI
 # (Codex) is the one-shot fallback when Nous is absent or its review posts no
@@ -105,8 +107,10 @@
 #
 # Merge gate: ruleset `require-mergecraft-review` requires the **mergeCraft
 # review** job check only — not the raw `mergecraft` completion check (which goes
-# red on agent infra failures). The enforce step now fails closed on every
-# non-success `mergecraft-approval` outcome (no fail-open path remains).
+# red on agent infra failures). That name is on the `approval-gate` job (which
+# `needs:` review attempts); the attempts job is `mergecraft review attempts`.
+# The gate fails closed on every non-success `mergecraft-approval` outcome (no
+# fail-open path remains).
 #
 # === ACTION PIN ===
 # The action is pinned to a FULL SHA on both review steps. This is MANDATORY,
@@ -245,7 +249,7 @@ jobs:
           exit 0
 
   review:
-    name: mergecraft review
+    name: mergecraft review attempts
     needs: wait-for-ci
     # Write scopes stay on the review job only (zizmor excessive-permissions).
     permissions:
@@ -612,13 +616,36 @@ jobs:
             )
           )
         run: |
-          echo "::notice title=mergecraft incomplete::Review step did not finish successfully (see its log — e.g. provider session limit or a runtime error). Approval enforcement below will fail closed on this."
+          echo "::notice title=mergecraft incomplete::Review step did not finish successfully (see its log — e.g. provider session limit or a runtime error). Approval enforcement in the approval-gate job will fail closed on this."
 
+  approval-gate:
+    name: mergecraft review
+    needs: review
+    # Same draft/dispatch/dependabot guard as the attempts job. `always()` keeps
+    # the required check reporting when the attempts job errors on a runner fault;
+    # a skipped attempts job still skips the gate.
+    if: >-
+      always() &&
+      needs.review.result != 'skipped' &&
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    env:
+      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    steps:
       - name: Fail when mergeCraft would not approve
         # Gate directly on the `mergecraft-approval` check-run, decoupled from the
         # review step's own exit code (which can be non-zero on a benign output
         # hiccup even when the review + approval check posted fine). Runs on every
         # PR where auth is present.
+        #
+        # This job `needs:` the review-attempts job so the gate cannot sample
+        # check-runs until every attempt in that job (including Codex fallback)
+        # has finished — fixing the #433 race where a legitimate Codex approval
+        # read as "review did not complete".
         #
         # FAIL CLOSED on every non-success outcome. PR #194 showed the review can
         # fail outright (there, a bwrap sandbox namespace failure), posting no

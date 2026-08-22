@@ -16,8 +16,6 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-import pytest
-
 from tests.ci.review_gate_ordering import (
     APPROVAL_GATE_STEP,
     CODEX_FALLBACK_DECIDE_STEP,
@@ -149,7 +147,6 @@ class TestMergecraftWorkflow:
         assert "Failing closed" in text
         assert "mergecraft review incomplete" in text
 
-    @pytest.mark.xfail(reason="green after W14: gate waits for Codex fallback (#433)", strict=False)
     def test_mergecraft_yml_gate_waits_for_every_review_attempt(self) -> None:
         offense = gate_job_needs_attempt_jobs(
             load_workflow(_MERGECRAFT_WORKFLOW),
@@ -157,7 +154,6 @@ class TestMergecraftWorkflow:
         )
         assert offense is None, f"mergecraft.yml gate ordering: {offense}"
 
-    @pytest.mark.xfail(reason="green after W14: gate waits for Codex fallback (#433)", strict=False)
     def test_mergecraft_yml_approval_gate_is_not_in_review_job(self) -> None:
         assert approval_gate_job(load_workflow(_MERGECRAFT_WORKFLOW)) != "review"
 
@@ -165,7 +161,6 @@ class TestMergecraftWorkflow:
 class TestRepoWorkflowScan:
     """Scanning the real tree must pass once W14 lands."""
 
-    @pytest.mark.xfail(reason="green after W14: gate waits for Codex fallback (#433)", strict=False)
     def test_repo_mergecraft_workflow_passes_gate_ordering_scan(self) -> None:
         offenses = [
             offense
