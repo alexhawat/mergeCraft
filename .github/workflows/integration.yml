@@ -29,6 +29,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Tag-resolution checks (README Action pin, D25) ask git whether
+          # the release tag exists. The default shallow fetch omits tags,
+          # so without this they fail on every branch build while passing
+          # on tag builds.
+          fetch-tags: true
       - uses: ./.github/actions/bootstrap
       - name: Integration suite
         run: make test-integration
@@ -84,6 +90,12 @@ jobs:
         provider: [anthropic, openai, gemini, nous, github]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Tag-resolution checks (README Action pin, D25) ask git whether
+          # the release tag exists. The default shallow fetch omits tags,
+          # so without this they fail on every branch build while passing
+          # on tag builds.
+          fetch-tags: true
       - uses: ./.github/actions/bootstrap
       - name: Live-provider integration (${{ matrix.provider }})
         env:
