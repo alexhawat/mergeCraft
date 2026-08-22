@@ -1,4 +1,4 @@
-"""RV1.4 — authentication reference table contracts (RED until RV4).
+"""RV1.4 — authentication reference table contracts (green after RV4).
 
 Pins the recommended-model column, live slug discipline, the custom OpenAI-compatible
 provider row, and parity between the Typer ``auth`` app and documented provider rows.
@@ -7,8 +7,6 @@ provider row, and parity between the Typer ``auth`` app and documented provider 
 from __future__ import annotations
 
 import re
-
-import pytest
 
 from mergecraft.cli.auth_cmd import app as auth_app
 from tests.ci.workflow_support import REPO_ROOT, read_text
@@ -27,6 +25,39 @@ _MODEL_SLUG = re.compile(r"`([a-z0-9]+/[a-z0-9._-]+)`", re.IGNORECASE)
 def _auth_table_region(text: str) -> str | None:
     match = _AUTH_TABLE_REGION_RE.search(text)
     return match.group(1) if match else None
+
+
+def _auth_doc_table_text() -> str:
+    return AUTH_DOC.read_text(encoding="utf-8")
+
+
+def _provider_table_rows() -> list[list[str]]:
+    rows: list[list[str]] = []
+    in_provider = False
+    for line in _auth_doc_table_text().splitlines():
+        if not line.strip().startswith("|"):
+            if in_provider:
+                break
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 2 or set(cells[0]) <= {"-", ":"}:
+            continue
+        if cells[0].lower() == "provider":
+            in_provider = True
+            rows = [cells]
+            continue
+        if in_provider:
+            rows.append(cells)
+    return rows
+
+
+def _recommended_model_column_index(header: list[str]) -> int:
+    for idx, cell in enumerate(header):
+        lowered = cell.lower()
+        if "recommended" in lowered and "model" in lowered:
+            return idx
+    msg = "provider table missing Recommended model column"
+    raise AssertionError(msg)
 
 
 def _auth_subcommands() -> set[str]:
@@ -56,30 +87,25 @@ def _table_rows(region: str) -> list[list[str]]:
     return rows
 
 
-@pytest.mark.xfail(reason="green after RV4: recommended-model column (A3)", strict=False)
 def test_auth_table_has_recommended_model_column() -> None:
-    readme_region = _auth_table_region(read_text("README.md"))
-    assert readme_region is not None, "README missing ## Authentication section"
-    header = next(
-        (row for row in _table_rows(readme_region) if row[0].lower() == "provider"),
-        None,
-    )
-    assert header is not None, "README auth table missing header row"
+    rows = _provider_table_rows()
+    assert rows, "docs/authentication.md provider table missing header row"
+    header = rows[0]
     joined = " ".join(header).lower()
     assert "recommended" in joined
-    assert "model" in joined, "README auth table must add a Recommended model column (A3)"
+    assert "model" in joined, "auth reference must add a Recommended model column (A3)"
 
 
-@pytest.mark.xfail(reason="green after RV4: recommended slugs are live only", strict=False)
 def test_recommended_slugs_are_real() -> None:
-    readme_region = _auth_table_region(read_text("README.md"))
-    assert readme_region is not None
+    rows = _provider_table_rows()
+    assert rows, "docs/authentication.md provider table missing"
+    model_col = _recommended_model_column_index(rows[0])
     matrix_slugs = _matrix_slugs()
     invented: list[str] = []
-    for row in _table_rows(readme_region):
-        if row[0].lower() == "provider" or row[0].startswith("---"):
+    for row in rows[1:]:
+        if len(row) <= model_col:
             continue
-        for slug in _MODEL_SLUG.findall(" ".join(row)):
+        for slug in _MODEL_SLUG.findall(row[model_col]):
             if slug not in matrix_slugs:
                 invented.append(slug)
     assert not invented, (
@@ -87,17 +113,11 @@ def test_recommended_slugs_are_real() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after RV4: custom OpenAI-compatible provider row (A3)",
-    strict=False,
-)
 def test_custom_openai_compatible_row_present() -> None:
-    readme_region = _auth_table_region(read_text("README.md"))
-    assert readme_region is not None, "README missing ## Authentication section"
-    haystack = readme_region + "\n" + AUTH_DOC.read_text(encoding="utf-8")
+    table_rows = _provider_table_rows()
+    haystack = _auth_doc_table_text()
     assert "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL" in haystack
     assert "MERGECRAFT_CUSTOM_PROVIDER_API_KEY" in haystack
-    table_rows = _table_rows(readme_region)
     custom_rows = [
         row
         for row in table_rows
@@ -105,7 +125,7 @@ def test_custom_openai_compatible_row_present() -> None:
         or "openai-compatible" in " ".join(row).lower()
     ]
     assert custom_rows, (
-        "README auth table must include an OpenAI-compatible custom provider row (A3)"
+        "docs/authentication.md must include an OpenAI-compatible custom provider row (A3)"
     )
     assert "docs/authentication.md" in read_text("README.md")
 

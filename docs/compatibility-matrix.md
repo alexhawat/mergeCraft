@@ -24,14 +24,16 @@ Nous = provider · DeepSeek = model family. When `harness:` is unset in
 Explicit `harness:` wins over inference; unsupported combinations are
 configuration errors naming both halves.
 
-| Model slug | `harness` unset (inferred) | Explicit override / error |
-|------------|----------------------------|---------------------------|
-| `nous/deepseek-v4-flash` | `opencode` | — |
-| `nous/deepseek/deepseek-v4-flash` | `opencode` | `harness: claude` → configuration error |
-| `openai/gpt-5.3-codex` | `codex` | `harness: opencode` → `opencode` |
-| `anthropic/claude-sonnet` | `claude` | `harness: opencode` → `opencode` |
-| `google/gemini-3.1-pro-preview` | `gemini` | — |
-| `cursor/cloud-agent` | `cursor` | — |
+| Model slug | Recommended model | `harness` unset (inferred) | Explicit override / error |
+|------------|-------------------|----------------------------|---------------------------|
+| `nous/deepseek-v4-flash` | `nous/deepseek/deepseek-v4-flash` | `opencode` | — |
+| `nous/deepseek/deepseek-v4-flash` | `nous/deepseek/deepseek-v4-flash` | `opencode` | `harness: claude` → configuration error |
+| `openai/gpt-5.3-codex` | `openai/gpt-5.3-codex` | `codex` | `harness: opencode` → `opencode` |
+| `anthropic/claude-sonnet` | `anthropic/claude-sonnet` | `claude` | `harness: opencode` → `opencode` |
+| `google/gemini-3.1-pro-preview` | `google/gemini-3.1-pro-preview` | `gemini` | — |
+| `cursor/cloud-agent` | `cursor/cloud-agent` | `cursor` | — |
+| `tokenhub/hy3` | `tokenhub/hy3` | `opencode` | — |
+| `minimax/MiniMax-M3` | `minimax/MiniMax-M3` | `opencode` | — |
 
 ## Security-relevant slice (PR gate — `.github/workflows/e2e.yml`)
 
