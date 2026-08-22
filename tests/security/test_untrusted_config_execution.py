@@ -289,7 +289,7 @@ async def test_untrusted_offline_review_withholds_makefile_static_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """D7 — Makefile discovery must not be reachable on untrusted CLI offline reviews."""
-    import mergecraft.offline_review as offline_mod
+    import mergecraft.review.offline_agent as offline_agent
     from mergecraft.agents.shared import AgentResult
     from mergecraft.mcp.server import build_common_tools
     from mergecraft.utils.offline_diff import DiffMaterialization
@@ -319,10 +319,10 @@ async def test_untrusted_offline_review_withholds_makefile_static_checks(
         async def run(self, _ctx: object) -> AgentResult:
             return AgentResult(success=True, output="ok")
 
-    monkeypatch.setattr(offline_mod, "start_mcp_http_server", fake_start_mcp)
-    monkeypatch.setattr(offline_mod, "resolve_runtime_agent", lambda **_: FakeAgent())
-    monkeypatch.setattr(offline_mod, "resolve_model", lambda slug: slug or "claude")
-    monkeypatch.setattr(offline_mod, "install_bundled_skills", lambda **_: None)
+    monkeypatch.setattr(offline_agent, "start_mcp_http_server", fake_start_mcp)
+    monkeypatch.setattr(offline_agent, "resolve_runtime_agent", lambda **_: FakeAgent())
+    monkeypatch.setattr(offline_agent, "resolve_model", lambda slug: slug or "claude")
+    monkeypatch.setattr(offline_agent, "install_bundled_skills", lambda **_: None)
 
     diff_file = tmp_path / "diff.patch"
     diff_file.write_text("diff --git a/Makefile b/Makefile\n", encoding="utf-8")
@@ -333,7 +333,7 @@ async def test_untrusted_offline_review_withholds_makefile_static_checks(
         empty=False,
     )
 
-    await offline_mod._run_agent_review(
+    await offline_agent.run_offline_agent_review(
         cwd=repo,
         materialization=materialization,
         prompt="review",

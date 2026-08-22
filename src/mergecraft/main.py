@@ -36,6 +36,8 @@ from mergecraft.mcp.server import start_mcp_http_server
 from mergecraft.mcp.tool_state import ProgressComment, ToolState, init_tool_state
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
+from mergecraft.review.engine import ReviewEngine
+from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
 from mergecraft.scm.github import (
@@ -85,6 +87,7 @@ from mergecraft.utils.payload import (
 )
 from mergecraft.utils.privilege import prepare_workspace_for_agent
 from mergecraft.utils.process_group import (
+    kill_all_active_process_groups,
     kill_process_group,
     register_process_group,
     unregister_process_group,
@@ -191,6 +194,27 @@ class RunContext:
     budget_tracker: Any = None
     budget_exhaustion: Any = None
 
+    async def materialize(self) -> None:
+        await _setup_run(self)
+        await _resolve_credentials(self)
+
+    async def analyze(self) -> None:
+        await _assemble_model_chain(self)
+        await _build_run_tool_context(self)
+
+    async def review(self) -> AgentResult | SkipAgentReview:
+        return await _run_review_after_analyze(self)
+
+    async def publish(self, review_out: AgentResult | SkipAgentReview) -> MainResult:
+        return await _finalize(self, review_out)
+
+
+@dataclass(frozen=True, slots=True)
+class SkipAgentReview:
+    """Review-stage outcome when setup-script policy skips the agent loop."""
+
+    reason: str
+
 
 def _first_runnable_in_chain(chain: list[str]) -> str:
     """Harness-patchable one-arg facade over :func:`pick_runnable_slug_from_chain`.
@@ -253,24 +277,6 @@ class _ConfigurationError(RuntimeError):
     """
 
 
-class _ShortCircuit(Exception):
-    """Internal signal: a phase already published and produced the final result (G4.2).
-
-    Raised by ``_execute_agent`` when a trusted-tier ``setup_script``
-    failure short-circuits under the ``inconclusive`` policy (S1/D10) — the
-    publish block (status check + evidence packet) already ran in that
-    branch and the agent loop must never start, so this carries the
-    finished :class:`MainResult` straight back to :func:`main` without
-    going through the generic ``except Exception`` handler (which would
-    mis-tag it ``infra_error`` and skip the packet that was already
-    written).
-    """
-
-    def __init__(self, result: MainResult) -> None:
-        super().__init__("run short-circuited before agent dispatch")
-        self.result = result
-
-
 def _classify_error_outcome(error: BaseException) -> RunOutcome:
     """Split the outer catch-all into timeout / config / infra buckets (D3, W5.2).
 
@@ -281,7 +287,7 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
     """
     from pydantic import ValidationError
 
-    if isinstance(error, _AgentTimeoutError):
+    if isinstance(error, (_AgentTimeoutError, TimeoutError, asyncio.TimeoutError)):
         return RunOutcome.timed_out
     if isinstance(
         error,
@@ -1148,13 +1154,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         ):
             return await attempt_agent.run(attempt_ctx)
 
-    # Named ``_execute_agent`` deliberately — same name as the top-level
-    # phase function that calls this one, shadowed locally. A pre-G4 test
-    # (``tests/config/test_setup_script_timeout.py::test_setup_timeout_is_deducted_from_the_run_budget``)
-    # identifies the ``asyncio.wait_for``-wrapped task by this exact
-    # coroutine name via ``cr_code.co_name`` introspection, so the inner
-    # closure keeps the name the pre-G4.2 code already used here.
-    async def _execute_agent() -> tuple[str | None, AgentResult]:
+    async def _dispatch_selected_agent() -> tuple[str | None, AgentResult]:
         if use_model_chain:
             winning_slug, chain_result = await run_with_model_chain(
                 settings=settings,
@@ -1176,7 +1176,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         ):
             return selected_slug, await agent.run(run_ctx)
 
-    agent_task = asyncio.create_task(_execute_agent())
+    agent_task = asyncio.create_task(_dispatch_selected_agent())
 
     # S1 / F6 — deduct the setup-script elapsed time from the agent
     # deadline. A slow setup must NOT silently extend the total run
@@ -1207,8 +1207,6 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
             )
         except TimeoutError:
             agent_task.cancel()
-            from mergecraft.utils.process_group import kill_all_active_process_groups
-
             kill_all_active_process_groups()
             msg = f"agent run timed out after {ctx.timeout_raw or '1h'}"
             raise _AgentTimeoutError(msg) from None
@@ -1228,19 +1226,8 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
-async def _execute_agent(ctx: RunContext) -> AgentResult:
-    """Phase 3 — model-chain assembly, MCP lifecycle, agent dispatch, deadline (G4.2).
-
-    Orchestrates the five sub-steps of the original phase body — model-chain
-    assembly, ``tool_context`` construction, setup-input overrides +
-    ``setup_git``, the ``setup_script`` run/skip, and agent dispatch — each
-    now a named local extraction. Raises :class:`_ShortCircuit` when a
-    trusted-tier ``setup_script`` failure short-circuits under the
-    ``inconclusive`` policy (S1/D10) — the publish block already ran in
-    that case and the agent loop must not start.
-    """
-    await _assemble_model_chain(ctx)
-    await _build_run_tool_context(ctx)
+async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
+    """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
     await _run_setup_script_phase(ctx)
 
@@ -1273,41 +1260,32 @@ async def _execute_agent(ctx: RunContext) -> AgentResult:
             "loop to honour no-verdict: {}",
             skip_reason,
         )
-        skip_outcome = RunOutcome.inconclusive
-        skip_packet_path = await _publish(
-            ctx,
-            outcome=skip_outcome,
-            failure_reason=skip_reason,
-            attrs_source=lambda: {"run_succeeded": False},
-        )
-        raise _ShortCircuit(
-            MainResult(
-                success=False,
-                error=skip_reason,
-                evidence_packet_path=skip_packet_path,
-                outcome=skip_outcome,
-            )
-        )
+        # Engine publish (``_finalize``) owns completion; do not publish here.
+        return SkipAgentReview(reason=skip_reason)
 
     await _prepare_agent_dispatch(ctx)
     return await _dispatch_agent_with_deadline(ctx)
 
 
-async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
+async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> MainResult:
     """Phase 4 — post-run, publish, outcome mapping (G4.2)."""
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
     assert ctx.settings is not None
-    assert ctx.run_ctx is not None
 
     tool_context = ctx.tool_context
     tool_state = ctx.tool_state
     settings = ctx.settings
 
-    try:
-        result = await finalize_agent_result(ctx.run_ctx, result)
-    except Exception as exc:
-        logger.debug("post-run finalize skipped: {}", exc)
+    if isinstance(result, SkipAgentReview):
+        agent_result = AgentResult(success=True)
+    else:
+        agent_result = result
+        if ctx.run_ctx is not None:
+            try:
+                agent_result = await finalize_agent_result(ctx.run_ctx, agent_result)
+            except Exception as exc:
+                logger.debug("post-run finalize skipped: {}", exc)
 
     # D3/W5.2 + W6.1 + S1/D5/D10 — a completed run is ``passed`` / ``failed``,
     # ``inconclusive`` when review-relevant dependency prep failed OR a
@@ -1341,7 +1319,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
         failure_reason = str(ctx.budget_tracker.last_exhausted)
     else:
         outcome, failure_reason = _classify_outcome(
-            result=result,
+            result=agent_result,
             setup_reason=setup_reason,
             setup_policy=settings.setup_failure_policy,
             prep_reason=prep_reason,
@@ -1350,7 +1328,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
             final_summary_written=tool_state.final_summary_written,
         )
     verdict_publish = _verdict_protocol_publish(
-        result=result,
+        result=agent_result,
         mode=tool_state.selected_mode,
         setup_reason=setup_reason,
         setup_policy=settings.setup_failure_policy,
@@ -1386,7 +1364,7 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
             from mergecraft.tracing import get_tracer_from_settings
             from mergecraft.tracing.signals import emit_verdict
 
-            fallback_reason = (result.metadata or {}).get("fallback_reason")
+            fallback_reason = (agent_result.metadata or {}).get("fallback_reason")
             published_count = len(submission.findings)
             emit_verdict(
                 get_tracer_from_settings(settings),
@@ -1403,13 +1381,13 @@ async def _finalize(ctx: RunContext, result: AgentResult) -> MainResult:
     if outcome is not RunOutcome.passed:
         return MainResult(
             success=False,
-            error=failure_reason or result.error or "agent execution failed",
+            error=failure_reason or agent_result.error or "agent execution failed",
             evidence_packet_path=packet_path,
             outcome=outcome,
             verdict_diagnostic=verdict_diagnostic_code,
         )
 
-    output = tool_state.output or result.output
+    output = tool_state.output or agent_result.output
     return MainResult(
         success=True,
         output=output,
@@ -1468,11 +1446,10 @@ def _action_review_context() -> ReviewContext:
 
 
 async def main() -> MainResult:
-    """Run the mergecraft action flow using local ``.mergecraft/config.yaml``.
-
-    Orchestrates the four G4.2 phases — ``_setup_run`` → ``_resolve_credentials``
-    → ``_execute_agent`` → ``_finalize`` — over a single shared :class:`RunContext`.
-    The ``try``/``except``/``else``/``finally`` below is the same completion
+    """Orchestrates the four engine stages — materialize (setup + credentials),
+    analyze (model chain + tool context), review (setup script + payload-timed
+    agent), publish (finalize) — over a single shared :class:`RunContext`.
+    The ``try``/``except``/``finally`` below is the same completion
     contract ``main()`` always had: every exit path (success, agent failure,
     timeout, the ``inconclusive`` setup-script short-circuit, or an
     unclassified exception) reaches cleanup, and every path except the two
@@ -1480,6 +1457,12 @@ async def main() -> MainResult:
     """
     install_loguru_redaction_filter()
     normalize_env()
+    snapshot: ReviewSnapshot = canonical_review_snapshot(
+        entry="action",
+        source=os.environ.get("GITHUB_REPOSITORY") or None,
+        replay_key=os.environ.get("GITHUB_SHA") or None,
+    )
+    engine: ReviewEngine[MainResult] = ReviewEngine(snapshot=snapshot)
     ensure_github_workspace_registered()
     workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
     if workspace:
@@ -1503,15 +1486,23 @@ async def main() -> MainResult:
     # spawned agent CLI) carries the same ``review.id``.
     with bind_review_context(_action_review_context()):
         try:
-            ctx = await _setup_run(ctx)
-            ctx = await _resolve_credentials(ctx)
-            agent_result = await _execute_agent(ctx)
-        except _ShortCircuit as short_circuit:
-            return short_circuit.result
+            staged = await engine.run(
+                ctx,
+                on_timeout=lambda _name: kill_all_active_process_groups(),
+            )
+            return staged.published_or(
+                MainResult(
+                    success=False,
+                    error="review engine returned no result",
+                    outcome=RunOutcome.infra_error,
+                )
+            )
         except Exception as error:
             error_message = str(error) if error else "unknown error occurred"
             logger.error("{}", error_message)
             error_outcome = _classify_error_outcome(error)
+            if isinstance(error, (TimeoutError, asyncio.TimeoutError, _AgentTimeoutError)):
+                kill_all_active_process_groups()
             if ctx.tool_context:
                 try:
                     await persist_learnings(ctx.tool_context)
@@ -1524,8 +1515,6 @@ async def main() -> MainResult:
                 except Exception as cleanup_exc:
                     logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
             return MainResult(success=False, error=error_message, outcome=error_outcome)
-        else:
-            return await _finalize(ctx, agent_result)
         finally:
             if ctx.stop_mcp is not None:
                 with contextlib.suppress(Exception):

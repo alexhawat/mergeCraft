@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mergecraft.modes import Mode
     from mergecraft.prep.types import PrepResult
 
@@ -265,6 +267,8 @@ class ToolState:
     xrepo_learnings_seed: str | None = None
     xrepo_learnings_persist_attempted: bool = False
     output: str | None = None
+    # First-finding stream for ``mergecraft review --agent`` (#378).
+    on_finding: Callable[[dict[str, Any]], None] | None = None
     # Per-attempt ``AgentUsage`` token counts, appended once per run by
     # ``main.py``. Despite what the merge-evidence plan assumed, this is *not*
     # a tool-call log — the trajectory record (#43) keeps its own field below.

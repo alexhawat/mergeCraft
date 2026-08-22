@@ -8,13 +8,13 @@ import json
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, NoReturn
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
 import typer
 from loguru import logger
 
 from mergecraft.analyzers.sarif import export_sarif
-from mergecraft.cli.agent_protocol import AgentProtocolStream
+from mergecraft.cli.agent_protocol import AgentProtocolStream, notify_findings
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
 from mergecraft.cli.global_surface import get_cli_globals
@@ -24,6 +24,8 @@ from mergecraft.offline_review import (
     parse_offline_review_findings,
     run_offline_diff_review,
 )
+from mergecraft.review.engine import ReviewEngine
+from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, canonical_review_snapshot
 from mergecraft.utils.log import configure_logging
 from mergecraft.utils.source_resolve import SourceResolverSpec
 
@@ -132,22 +134,6 @@ def _resolve_outcome(result: OfflineReviewResult) -> RunOutcome:
     return RunOutcome.passed if result.success else RunOutcome.failed
 
 
-def _needs_structured_output(
-    *,
-    json_output: Path | None,
-    output_format: OutputFormat,
-) -> bool:
-    # The agent's structured findings are read for two reasons: (a) writing
-    # --json/--format json/jsonl/sarif, (b) computing the CC1 exit codes
-    # 10/11 (which key off the parsed findings list). Default text ``review``
-    # therefore *also* requests structured findings — the temp file is
-    # cleaned up at end of run — so a CI script running `review` and
-    # blocking on exit 10/11 sees the contract applied uniformly. PR #242
-    # review findings ``3f363546e98dad517048b8b9`` and
-    # ``7a3cdf5ef1994610113e8e37``.
-    return True
-
-
 def _write_jsonl_findings(path: Path, findings: Sequence[Finding]) -> None:
     lines: list[str] = []
     for row in findings:
@@ -155,18 +141,46 @@ def _write_jsonl_findings(path: Path, findings: Sequence[Finding]) -> None:
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-def _emit_agent_protocol(
+def cleanup_review_subprocesses() -> None:
+    """Kill agent and analyzer process groups after a cancelled review (#378)."""
+    from mergecraft.reliability.recovery import cleanup_on_failure
+
+    cleanup_on_failure("cancellation")
+
+
+def _start_agent_protocol() -> AgentProtocolStream:
+    from mergecraft.cli.agent_protocol import (
+        ProtocolNegotiationError,
+        accepted_protocol_versions,
+        negotiate_protocol,
+        protocol_budget_payload,
+    )
+
+    try:
+        selected = negotiate_protocol(accepted=accepted_protocol_versions())
+    except ProtocolNegotiationError as exc:
+        _exit_with_message(
+            str(exc),
+            cli_exit_code_for_review(RunOutcome.configuration_error),
+        )
+    stream = AgentProtocolStream()
+    stream.run_started(negotiated=selected, **protocol_budget_payload())
+    return stream
+
+
+def _finish_agent_protocol(
+    stream: AgentProtocolStream,
     *,
     outcome: RunOutcome,
     exit_code: int,
     findings: Sequence[Finding],
+    seen: set[str],
 ) -> None:
-    stream = AgentProtocolStream()
-    stream.run_started()
-    stream.phase("materialize")
-    stream.phase("review")
-    for row in findings:
-        stream.finding(row.model_dump())
+    notify_findings(
+        stream.finding,
+        [row.model_dump() for row in findings],
+        seen=seen,
+    )
     stream.verdict(outcome.value, exit_code)
     stream.run_finished(exit_code)
 
@@ -366,6 +380,25 @@ def run(
         ),
         rich_help_panel=_PANEL_TRUST,
     ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help=(
+            "Reuse a cached review result for this diff when one exists "
+            "(same local result cache as --use-cache). Does not restore a live "
+            "agent checkpoint."
+        ),
+        rich_help_panel=_PANEL_OUTPUT,
+    ),
+    use_cache: bool = typer.Option(
+        False,
+        "--use-cache/--no-use-cache",
+        help=(
+            "Read and write the local review result cache for this diff "
+            "(same policy as --resume; distinct from the `mergecraft cache` typer)."
+        ),
+        rich_help_panel=_PANEL_OUTPUT,
+    ),
 ) -> None:
     if ctx.info_name == "diff-review":
         console.print(_DIFF_REVIEW_DEPRECATION)
@@ -428,8 +461,7 @@ def run(
     if otel_endpoint is not None:
         tracing_cli.extend(["--otel-endpoint", otel_endpoint])
 
-    # The CLI always asks the agent for structured findings (see
-    # ``_needs_structured_output`` — always True now). Precedence of the
+    # The CLI always asks the agent for structured findings. Precedence of the
     # structured sink path:
     # 1. ``--json PATH`` if supplied — that is the canonical findings file.
     # 2. ``--output PATH`` for ``--output-format json|jsonl|sarif`` — the writer is
@@ -464,29 +496,78 @@ def run(
         output is not None and effective_output_format in {"json", "jsonl", "sarif"}
     )
 
+    snapshot: ReviewSnapshot = canonical_review_snapshot(
+        entry="cli",
+        source=str(root),
+        replay_key=str(diff) if diff is not None else None,
+    )
+    engine: ReviewEngine[OfflineReviewResult] = ReviewEngine(snapshot=snapshot)
+
+    stream: AgentProtocolStream | None = None
+    seen: set[str] = set()
+    phases_emitted = False
+    if agent_mode:
+        agent_stream = _start_agent_protocol()
+        stream = agent_stream
+
+        def _on_stage(name: ReviewStageName) -> None:
+            nonlocal phases_emitted
+            phases_emitted = True
+            agent_stream.phase(name)
+
+        engine.set_on_stage(_on_stage)
+
+    def _on_finding(finding: dict[str, Any]) -> None:
+        if stream is None:
+            return
+        notify_findings(stream.finding, [finding], seen=seen)
+
+    read_cache = use_cache or resume
+
     try:
-        result = asyncio.run(
-            run_offline_diff_review(
-                cwd=root,
-                base=base,
-                diff_file=diff,
-                model=model,
-                prompt_extra=prompt,
-                dry_run=dry_run,
-                json_path=json_path_for_run,
-                evidence_packet_path=evidence_packet,
-                tracing_cli=tracing_cli,
-                invocation_root=invocation_root,
-                trust_override=trust_override,
-                source_spec=source_spec,
+        try:
+            result = asyncio.run(
+                run_offline_diff_review(
+                    cwd=root,
+                    base=base,
+                    diff_file=diff,
+                    model=model,
+                    prompt_extra=prompt,
+                    dry_run=dry_run,
+                    json_path=json_path_for_run,
+                    evidence_packet_path=evidence_packet,
+                    tracing_cli=tracing_cli,
+                    invocation_root=invocation_root,
+                    trust_override=trust_override,
+                    source_spec=source_spec,
+                    on_finding=_on_finding if agent_mode else None,
+                    use_cache=read_cache,
+                    engine=engine,
+                )
             )
-        )
+        except TimeoutError:
+            cleanup_review_subprocesses()
+            result = OfflineReviewResult(
+                success=False,
+                error="review timed out",
+                outcome=RunOutcome.timed_out,
+            )
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            cleanup_review_subprocesses()
+            raise
+
+        if agent_mode and stream is not None and not phases_emitted:
+            # Tests (and other stubs) replace ``run_offline_diff_review`` and
+            # never drive ``ReviewEngine``; still emit the documented phases.
+            stream.phase("materialize")
+            stream.phase("review")
 
         if result.diff_path:
             logger.info("» diff path: {}", result.diff_path)
 
-        if result.evidence_packet_path:
-            logger.info("» evidence packet: {}", result.evidence_packet_path)
+        packet_path = result.evidence_packet_path
+        if packet_path and Path(packet_path).is_file():
+            logger.info("» evidence packet: {}", packet_path)
 
         outcome = _resolve_outcome(result)
         findings = parse_offline_review_findings(result)
@@ -495,12 +576,24 @@ def run(
         if not result.success:
             if result.output and not agent_mode:
                 console.print(result.output)
-            if agent_mode:
-                _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
+            if agent_mode and stream is not None:
+                _finish_agent_protocol(
+                    stream,
+                    outcome=outcome,
+                    exit_code=exit_code,
+                    findings=findings,
+                    seen=seen,
+                )
             _exit_with_message(result.error or "diff-review failed", exit_code)
 
-        if agent_mode:
-            _emit_agent_protocol(outcome=outcome, exit_code=exit_code, findings=findings)
+        if agent_mode and stream is not None:
+            _finish_agent_protocol(
+                stream,
+                outcome=outcome,
+                exit_code=exit_code,
+                findings=findings,
+                seen=seen,
+            )
             raise typer.Exit(exit_code)
 
         text = result.output or ""

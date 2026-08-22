@@ -143,7 +143,7 @@ async def test_empty_diff_with_scope_reduction_is_downgraded_to_inconclusive(
     async def _no_agent(*args: object, **kwargs: object):
         raise AssertionError("agent must not be invoked on the empty-diff early return")
 
-    monkeypatch.setattr(offline_mod, "_run_agent_review", _no_agent)
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", _no_agent)
 
     workspace = ResolvedWorkspace(
         cwd=repo,

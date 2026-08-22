@@ -193,6 +193,12 @@ pages:
     generator: null
     purpose: Eval bank vs ReviewBench — what each mechanism measures and how to run gates.
 
+  - path: docs/agent-loop.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Reference workflow for an external coding agent looping with mergecraft review --agent.
+
   - path: docs/support-matrix.md
     audience: consumer
     template: generated-ref

@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Offline analyze stores ``AnalyzerRunState`` on the CLI tool context and merges analyzer findings into structured output so CC1 exit codes see Critical/Major hits the agent omitted; result-cache keys include mergeCraft version and a settings digest (#399)
+
 ### Changed
 
+- Offline `--use-cache` / `--resume` store only after structured-output finalize and re-validate on hit; cache keys include trust tier, `--prompt`, and related review inputs; `--resume` reads that cache and does not call a no-op checkpoint stub (#378)
+- CLI, Action, and SCM share one four-stage review engine (materialize / analyze / review / publish) with per-stage timeouts recorded after each stage; the 1h review budget is snapshot data (the agent self-times); `--resume` is an alias of `--use-cache`; `--agent` negotiates `MERGECRAFT_AGENT_PROTOCOL` and stamps protocol budgets, emitting `phase` events as each engine stage starts (#378, #379, #380)
 - Eval methodology: blocker precision is `None` (unpublished) when a run reports no blockers, and severity accuracy is `None` when there are no locality matches — never a vacuous 1.0
 - Landing README redesigned as a REACH-style product page (outline B): problem/solution
   cards, D2 architecture hero, numbered install, and jump-nav. Long-form install,
@@ -17,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Agent-loop reference workflow (`docs/agent-loop.md`) for `mergecraft review --agent` (#383)
+- CLI, GitHub Action, and SCM webhooks now enter one review engine over one immutable snapshot (#380)
+- `mergecraft explain`, `ask`, and `replay` plus `run inspect` / `run diff` print output-only change, line Q&A, and stored-run views (#377)
+- `mergecraft review --agent` negotiates protocol version against CLI JSON `schema_version` (both fields kept, aliased), reports retryable mismatches, and names token/cost/tool-call budgets (#379)
+- `mergecraft review --agent` streams the first finding before the verdict; `--use-cache` and `--resume` reuse a local result cache; cancelling a review cleans up child processes (#378)
 - Generated six-axis support matrix (`docs/support-matrix.md`), RC/soak release process (`docs/release-process.md`), and a security-response plus coordinated vulnerability-disclosure path in `SECURITY.md` (#382)
 - Eval methodology (#384): quality metric set (`mergecraft.evals.quality_metrics`), ablation harness (`mergecraft.evals.ablation`), expanded human-reviewed golden corpus plus a separate synthetic mutation corpus (`mergecraft.evals.corpora`), and a `docs/eval-methodology.md` page registered in `docs/manifest.yaml`. Scores stay off the landing README; #140 still owns publishing precision/recall/F1.
 - Enterprise runtime (`mergecraft.enterprise`): offline/self-hosted install plan citing the Python 3.11 floor, HTTP(S) proxy with `HTTPS_PROXY`/`NO_PROXY` export, custom CA certificate loading via `ssl.SSLContext`, data-residency allow-list enforcement, configurable telemetry with on/opt-out/off modes, support bundles with secret redaction, audit-log and usage/cost export, blocking-decision explainability, trace-retention policy with privacy-aware log mode, operational diagnostics, organisation policy/memory distribution without a dashboard. New CLI verbs: `mergecraft health`, `mergecraft audit export`, `mergecraft support-bundle`. (#381)

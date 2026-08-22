@@ -15,9 +15,8 @@ from rich.console import COLOR_SYSTEMS
 from mergecraft.cli import consoles
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
+from mergecraft.review.snapshot import REVIEW_SCHEMA_VERSION as CLI_JSON_SCHEMA_VERSION
 from mergecraft.utils.log import configure_logging
-
-CLI_JSON_SCHEMA_VERSION = "1.0.0"
 
 OutputFormat = Literal["table", "json"]
 ColorMode = Literal["auto", "always", "never"]
