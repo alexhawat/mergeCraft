@@ -8,7 +8,6 @@ this suite stays RED (xfail) until then.
 
 from __future__ import annotations
 
-import importlib.util
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -19,6 +18,7 @@ import yaml
 from mergecraft.cli.app import app as root_app
 from mergecraft.cli.auth_cmd import app as auth_app
 from tests.ci.workflow_support import REPO_ROOT
+from tests.docs.support import load_script_module
 
 if TYPE_CHECKING:
     import typer
@@ -174,14 +174,7 @@ def _cli_doc_auth_providers() -> set[str]:
 
 def _load_gen_reference_docs() -> Any:
     """Load ``scripts/gen_reference_docs.py`` per-test (never at module import time)."""
-    path = REPO_ROOT / "scripts" / "gen_reference_docs.py"
-    assert path.is_file(), "scripts/gen_reference_docs.py missing"
-    spec = importlib.util.spec_from_file_location("gen_reference_docs", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_script_module(REPO_ROOT / "scripts" / "gen_reference_docs.py")
 
 
 def _patch_module_doc_paths(module: Any, *, cli_doc: Path, action_doc: Path) -> None:

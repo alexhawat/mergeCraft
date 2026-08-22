@@ -9,7 +9,8 @@ compatibility: Requires uv; gh CLI optional
 required_environment_variables:
 - ANTHROPIC_API_KEY
 - OPENAI_API_KEY
-- GOOGLE_API_KEY
+- GEMINI_API_KEY
+- NOUS_API_KEY
 - CURSOR_API_KEY
 ---
 ## Hermes install
@@ -18,7 +19,7 @@ Hermes Agent reads skills from ``~/.hermes/skills/`` or a category-nested projec
 ``skills/`` tree. Install this package with:
 
 ```bash
-hermes skills install https://github.com/alexhawat/mergeCraft/tree/main/skills/hermes
+hermes skills install https://github.com/alexhawat/mergeCraft/tree/pre-0.0.1/skills/hermes
 ```
 
 mergeCraft ships a Nous provider (``mergecraft auth nous``,
@@ -35,7 +36,7 @@ a read-only verifier; typed findings drive inline comments and the
 ## Setup checklist (new consumer repo)
 
 1. **Prereqs:** Python **3.11+**, uv, authenticated `gh` CLI. If no Python 3.11+
-   locally → use the Docker Action only ([`docs/install.md`](https://github.com/alexhawat/mergeCraft/blob/main/docs/install.md)).
+   locally → use the Docker Action only ([`docs/install.md`](https://github.com/alexhawat/mergeCraft/blob/pre-0.0.1/docs/install.md)).
 2. **Install:**
 
    ```bash
@@ -100,5 +101,5 @@ The reviewer role is served at `/mcp/reviewer`. Startup prints
   commenters are authorized; authorization reads `author_association` from the
   event payload, never the comment body.
 - **Model skipped** — no credential for that provider; run `mergecraft models list`.
-- **Full docs:** [`README.md`](https://github.com/alexhawat/mergeCraft/blob/main/README.md), [`AGENTS.md`](https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md),
-  [`REVIEW-CHECKS.md`](https://github.com/alexhawat/mergeCraft/blob/main/REVIEW-CHECKS.md), [`docs/`](https://github.com/alexhawat/mergeCraft/blob/main/docs/README.md).
+- **Full docs:** [`README.md`](https://github.com/alexhawat/mergeCraft/blob/pre-0.0.1/README.md), [`AGENTS.md`](https://github.com/alexhawat/mergeCraft/blob/pre-0.0.1/AGENTS.md),
+  [`REVIEW-CHECKS.md`](https://github.com/alexhawat/mergeCraft/blob/pre-0.0.1/REVIEW-CHECKS.md), [`docs/`](https://github.com/alexhawat/mergeCraft/blob/pre-0.0.1/docs/README.md).

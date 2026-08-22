@@ -6,8 +6,8 @@ Depends: argparse, hashlib, json, os, re, subprocess, sys, pathlib
 
 Reads ``skills/harnesses.yaml``, renders ``skills/<harness-id>/SKILL.md`` for every
 verified harness row, and rewrites ``../../`` relative links to absolute GitHub blob
-URLs so copied skills still resolve. ``make agent-packages`` / ``agent-packages-check``
-call this entry point.
+URLs so copied skills still resolve. ``make agent-packages`` / ``agent-packages-check`` call this entry point via
+``uv run python`` (requires the ``mergecraft`` package on ``PYTHONPATH``).
 
 Exports:
     main — regenerate (default) or ``--check`` per-harness packages.
@@ -29,6 +29,9 @@ from typing import Any
 
 import yaml
 
+from mergecraft.pins import action_pin_minimal
+from mergecraft.utils.git_ref import git_ref_exists
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SKILL = REPO_ROOT / "skills" / "mergecraft" / "SKILL.md"
 HARNESS_MANIFEST = REPO_ROOT / "skills" / "harnesses.yaml"
@@ -37,13 +40,18 @@ GITHUB_REPO = "alexhawat/mergeCraft"
 _RELATIVE_LINK = re.compile(r"\(\.\./\.\./([^)]+)\)")
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
-DEFAULT_BLOB_REF = "main"
+DEFAULT_BLOB_REF = "pre-0.0.1"
 
 
 def _blob_ref() -> str:
     env_ref = os.environ.get("MERGECRAFT_AGENT_PACKAGES_REF", "").strip()
     if env_ref:
-        return env_ref
+        if git_ref_exists(env_ref, cwd=REPO_ROOT):
+            return env_ref
+        return DEFAULT_BLOB_REF
+    pin = action_pin_minimal()
+    if git_ref_exists(pin, cwd=REPO_ROOT):
+        return pin
     return DEFAULT_BLOB_REF
 
 
