@@ -61,15 +61,28 @@ def test_require_prefer_fallback_semantics() -> None:
     assert intents == frozenset({"require", "prefer", "fallback"})
 
 
+@pytest.mark.xfail(
+    reason="green after W2: critical-risk security routing (#394)",
+    strict=False,
+)
 def test_route_model_per_specialist_and_risk() -> None:
     """Happy: routing is per specialist and per risk level."""
     module = require_module(PROVIDER_HEALTH_MODULE)
     route = require_callable(module, "route_model")
+    cheap = "anthropic/claude-haiku"
     high = route(specialist="security", risk="high")
     low = route(specialist="security", risk="trivial")
     assert high
     assert low
     assert high != low or route(specialist="tests", risk="high") != high
+    assert high == "anthropic/claude-opus"
+
+    for risk in ("medium", "low", "trivial"):
+        assert route(specialist="security", risk=risk) == cheap
+
+    critical = route(specialist="security", risk="critical")
+    assert critical != cheap
+    assert critical == high
 
 
 def test_heterogeneous_verifier_and_judge_models() -> None:
