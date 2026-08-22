@@ -286,7 +286,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
 
         state = primary_repo_state(ctx.tool_state)
         repo_root = Path(state.dir)
-        settings = load_repo_settings(root=repo_root, load_learnings_files=False).analyzers
+        repo_settings = load_repo_settings(root=repo_root, load_learnings_files=False)
 
         findings = [
             AgentFinding(
@@ -325,9 +325,18 @@ def verify_agent_findings_tool(ctx: ToolContext):
         )
         plan = plan_agent_verifications(
             normalized_findings,
-            budget=settings.inline_budget,
+            budget=repo_settings.review.verification_budget,
             learnings_text=_learnings_text(ctx),
             repo_root=repo_root,
+        )
+        from mergecraft.findings.ledger import (
+            ensure_finding_ledger,
+            record_over_budget_verifications,
+        )
+
+        record_over_budget_verifications(
+            ensure_finding_ledger(ctx.tool_state),
+            skipped_over_budget=plan.skipped_over_budget,
         )
         logger.info(
             "agent-finding verification: {} queued, {} already withdrawn, {} over budget "
@@ -368,7 +377,8 @@ def verify_agent_findings_tool(ctx: ToolContext):
             "Queue the Critical/Major findings you wrote yourself for the "
             "mergecraft-verifier subagent, before you publish them. Returns one dispatch "
             "prompt per finding — already carrying the finding, its cited file and the "
-            "withdrawn-findings section — capped at the repo's inline budget, with "
+            "withdrawn-findings section — capped at the repo's `review.verificationBudget` "
+            "(default 24; `0` = no cap), with findings the author already refuted skipped. "
             "findings the author already refuted skipped. Returns ready:false until a "
             "deterministic check has run: the judge is a secondary signal, not a "
             "substitute for analyzers or static gates."
@@ -446,6 +456,9 @@ def record_finding_verdict_tool(ctx: ToolContext):
         if outcome.recorded_withdrawn:
             ctx.tool_state.was_updated = True
             ctx.tool_state.withdrawn_fingerprints.add(outcome.fingerprint)
+            from mergecraft.findings.ledger import record_withdrawn_in_ledger
+
+            record_withdrawn_in_ledger(ctx.tool_state)
         if outcome.verdict == "confirm" and outcome.publishable:
             _validate_publication_finding(
                 ctx,

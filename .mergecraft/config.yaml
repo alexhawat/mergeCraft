@@ -9,3 +9,5 @@
 # regardless of fork status. See the mergecraft.yml trigger comment for how the
 # workflow now earns that "trusted" tier for same-repo PRs.
 prApproveEnabled: true
+review:
+  recallPass: true

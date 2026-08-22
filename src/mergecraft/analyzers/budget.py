@@ -14,6 +14,8 @@ from mergecraft.review_taxonomy import (
 )
 
 MECHANICAL_SECTION_HEADING = "### 🔧 Mechanical findings"
+DEFERRED_SECTION_HEADING = "### 🗂 Deferred findings"
+FIX_ALL_DEFERRED_HEADING = "## Deferred (non-blocking)"
 
 _DEFAULT_INLINE_BUDGET = 8
 _SEVERITY_RANK = {name: index for index, name in enumerate(FINDING_SEVERITIES)}
@@ -21,11 +23,13 @@ _SEVERITY_RANK = {name: index for index, name in enumerate(FINDING_SEVERITIES)}
 
 @dataclass
 class FindingPlacement:
-    """Inline vs mechanical placement for normalized and agent findings."""
+    """Inline vs mechanical/deferred placement for normalized and agent findings."""
 
     inline: list[Any] = field(default_factory=list)
     mechanical: list[Finding] = field(default_factory=list)
     mechanical_section: str | None = None
+    deferred: list[Finding] = field(default_factory=list)
+    deferred_section: str | None = None
 
 
 def default_inline_budget() -> int:
@@ -80,6 +84,12 @@ def _overflow_fingerprint(item: dict[str, Any], *, path: str, message: str) -> s
     return finding_fingerprint(path=path, body=body)
 
 
+def _finding_anchor(finding: Finding) -> str:
+    if finding.start_line is None:
+        return finding.path
+    return f"{finding.path}:{finding.start_line}"
+
+
 def _render_mechanical_section(mechanical: list[Finding]) -> str | None:
     if not mechanical:
         return None
@@ -95,11 +105,50 @@ def _render_mechanical_section(mechanical: list[Finding]) -> str | None:
         lines.append(f"| {tool} | {count} |")
     lines.append("")
     for finding in mechanical:
-        anchor = (
-            finding.path if finding.start_line is None else f"{finding.path}:{finding.start_line}"
-        )
-        lines.append(f"- **{finding.tool}** `{finding.rule_id}` — {anchor}")
+        lines.append(f"- **{finding.tool}** `{finding.rule_id}` — {_finding_anchor(finding)}")
     return "\n".join(lines)
+
+
+def _render_deferred_section(deferred: list[Finding]) -> str | None:
+    if not deferred:
+        return None
+    lines = [
+        DEFERRED_SECTION_HEADING,
+        "",
+        "<details><summary>Non-blocking deferred findings</summary>",
+        "",
+    ]
+    for finding in deferred:
+        lines.append(f"**{finding.severity}** `{_finding_anchor(finding)}` — {finding.message}")
+        lines.append("")
+    lines.append("</details>")
+    return "\n".join(lines)
+
+
+def _agent_dict_to_finding(item: dict[str, Any]) -> Finding:
+    message = str(item.get("message", item.get("body", "")))
+    path = str(item.get("path", ""))
+    start_line = int(item.get("line", item.get("start_line", 1)))
+    end_line = int(item.get("end_line", item.get("line", item.get("start_line", start_line))))
+    return Finding(
+        tool=str(item.get("tool", "agent")),
+        rule_id=str(item.get("rule_id", "review")),
+        category=str(item.get("category", "Maintainability & Code Quality")),
+        severity=str(item.get("severity", "Minor")),
+        confidence=str(item.get("confidence", "likely")),
+        message=message,
+        path=path,
+        start_line=start_line,
+        end_line=end_line,
+        fingerprint=_overflow_fingerprint(item, path=path, message=message),
+        evidence=[],
+        remediation=None,
+        autofix=None,
+        introduced_by_pr="unknown",
+        source="agent",
+        cluster_id=None,
+        collateral=[str(path) for path in item.get("collateral", []) if str(path).strip()],
+    )
 
 
 def place_findings(
@@ -108,7 +157,7 @@ def place_findings(
     inline_budget: int,
     agent_findings: list[dict[str, Any]] | None = None,
 ) -> FindingPlacement:
-    """Place findings inline up to ``inline_budget``; overflow goes to the mechanical section."""
+    """Place findings inline up to ``inline_budget``; overflow routes by source."""
     candidates: list[Finding | dict[str, Any]] = list(agent_findings or [])
     candidates.extend(findings)
 
@@ -119,43 +168,30 @@ def place_findings(
     inline_ids = {id(item) for item in inline}
 
     mechanical: list[Finding] = []
+    deferred: list[Finding] = []
     for item in candidates:
         if id(item) in inline_ids:
             continue
         if isinstance(item, Finding):
-            mechanical.append(item)
+            if item.source == "agent":
+                deferred.append(item)
+            else:
+                mechanical.append(item)
         elif not _is_body_only_finding(item):
-            message = str(item.get("message", item.get("body", "")))
-            path = str(item.get("path", ""))
-            mechanical.append(
-                Finding(
-                    tool=str(item.get("tool", "agent")),
-                    rule_id=str(item.get("rule_id", "review")),
-                    category=str(item.get("category", "Maintainability & Code Quality")),
-                    severity=str(item.get("severity", "Minor")),
-                    confidence=str(item.get("confidence", "likely")),
-                    message=message,
-                    path=path,
-                    start_line=int(item.get("line", item.get("start_line", 1))),
-                    end_line=int(item.get("end_line", item.get("line", item.get("start_line", 1)))),
-                    fingerprint=_overflow_fingerprint(item, path=path, message=message),
-                    evidence=[],
-                    remediation=None,
-                    autofix=None,
-                    introduced_by_pr="unknown",
-                    source="agent",
-                    cluster_id=None,
-                )
-            )
+            deferred.append(_agent_dict_to_finding(item))
 
     return FindingPlacement(
         inline=inline,
         mechanical=mechanical,
         mechanical_section=_render_mechanical_section(mechanical),
+        deferred=deferred,
+        deferred_section=_render_deferred_section(deferred),
     )
 
 
 __all__ = [
+    "DEFERRED_SECTION_HEADING",
+    "FIX_ALL_DEFERRED_HEADING",
     "MECHANICAL_SECTION_HEADING",
     "FindingPlacement",
     "default_inline_budget",

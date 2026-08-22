@@ -9,7 +9,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-LifecycleState = Literal["open", "resolved-by-change", "stale", "disputed", "waived"]
+LifecycleState = Literal[
+    "open",
+    "resolved-by-change",
+    "stale",
+    "disputed",
+    "waived",
+    "deferred",
+    "unpublished",
+    "withdrawn",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +29,9 @@ class LifecycleRecord:
     state: LifecycleState
     reason: str | None = None
     expires_at: str | None = None
+    round_index: int | None = None
+    recorded_at: str | None = None
+    source: str | None = None
 
 
 def dispute_finding(

@@ -41,6 +41,7 @@ from mergecraft.findings.select import (
 from mergecraft.findings.threads import fetch_review_threads
 
 if TYPE_CHECKING:
+    from mergecraft.findings.lifecycle import LifecycleRecord
     from mergecraft.utils.github import GitHubClient
 
 _ISSUE_PAGE_SIZE: Final[int] = 100
@@ -162,6 +163,7 @@ async def plan_carryover(
     label: str = DEFAULT_LABEL,
     include_resolved: bool = False,
     include_answered: bool = False,
+    ledger_records: list[LifecycleRecord] | None = None,
 ) -> CarryoverPlan:
     """Decide which findings to file for ``pull_number`` without writing anything.
 
@@ -173,6 +175,8 @@ async def plan_carryover(
         label: Label used to find issues already filed.
         include_resolved: Carry over threads the author resolved.
         include_answered: Carry over threads a human replied to.
+        ledger_records: Open-PR ledger rows — fingerprints already tracked there
+            are not filed while the pull request is open (D5).
 
     Returns:
         A :class:`CarryoverPlan`; ``to_file`` is empty when nothing survives or
@@ -199,11 +203,15 @@ async def plan_carryover(
     known = (
         await filed_carryover_keys(github, owner, repo, label=label) if findings else frozenset()
     )
+    ledger_fps = {record.fingerprint for record in (ledger_records or [])}
 
     to_file: list[CarryoverFinding] = []
     already: list[CarryoverFinding] = []
     planned: set[str] = set()
     for finding in findings:
+        if finding.fingerprint in ledger_fps:
+            already.append(finding)
+            continue
         key = carryover_key(pull_number=pull_number, fingerprint=finding.fingerprint)
         # `planned` also guards the within-run case: two threads whose text and
         # path match normalize to one fingerprint, and one issue is the point.

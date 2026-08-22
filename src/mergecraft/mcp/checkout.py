@@ -77,6 +77,21 @@ def last_reviewed_sha(reviews: list[dict[str, Any]], *, head_sha: str) -> str | 
     return None
 
 
+def review_round_index(reviews: list[dict[str, Any]]) -> int:
+    """Return the 1-based review round from prior mergeCraft-authored PR reviews (RC12).
+
+    Counts prior reviews whose body carries a mergeCraft marker — the same
+    recovery signal ``last_reviewed_sha`` uses — and adds one for the run about
+    to start. This is the single source of truth for round-aware budgets (W9.2c).
+    """
+    prior_rounds = sum(
+        1
+        for review in reviews or []
+        if any(marker in str(review.get("body") or "") for marker in _MERGECRAFT_REVIEW_MARKERS)
+    )
+    return prior_rounds + 1
+
+
 def changed_paths_in_diff(diff_text: str) -> list[str]:
     """Return the post-image paths named by a unified diff, in first-seen order."""
     seen: dict[str, None] = {}
@@ -85,15 +100,21 @@ def changed_paths_in_diff(diff_text: str) -> list[str]:
     return list(seen)
 
 
-async def _recover_last_reviewed_sha(ctx: ToolContext, *, pull_number: int, head_sha: str) -> str:
-    """Fetch prior reviews and return the last mergeCraft-reviewed SHA (``""`` if none)."""
+async def _list_pull_reviews(ctx: ToolContext, *, pull_number: int) -> list[dict[str, Any]]:
+    """Return PR reviews oldest-first, or ``[]`` when listing soft-fails."""
     try:
         reviews = await ctx.scm.list_reviews(
             ctx.repo.owner, ctx.repo.name, pull_number, params={"per_page": 100}
         )
     except Exception as err:  # advisory; a missing review history is not fatal
         logger.info("incremental diff: listing prior reviews soft-failed: {}", err)
-        return ""
+        return []
+    return list(reviews or [])
+
+
+async def _recover_last_reviewed_sha(ctx: ToolContext, *, pull_number: int, head_sha: str) -> str:
+    """Fetch prior reviews and return the last mergeCraft-reviewed SHA (``""`` if none)."""
+    reviews = await _list_pull_reviews(ctx, pull_number=pull_number)
     return last_reviewed_sha(reviews, head_sha=head_sha) or ""
 
 
@@ -137,6 +158,7 @@ def checkout_pr_tool(ctx: ToolContext):
         pull_number = int(params["pull_number"])
         state = primary_repo_state(ctx.tool_state)
         cwd = state.dir
+        prior_reviews: list[dict[str, Any]] = []
 
         dirty = _run_git(["status", "--porcelain"], cwd=cwd).strip()
         if dirty:
@@ -243,14 +265,24 @@ def checkout_pr_tool(ctx: ToolContext):
             "url": pr.get("html_url"),
         }
 
+        prior_reviews = await _list_pull_reviews(ctx, pull_number=pull_number)
+        round_index = review_round_index(prior_reviews)
+        ctx.tool_state.review_round_index = round_index
+        if ctx.budget_tracker is not None:
+            from mergecraft.utils.run_bounds import resolve_run_bounds
+
+            repo_settings = load_repo_settings(root=Path(cwd), load_learnings_files=False)
+            ctx.budget_tracker.bounds = resolve_run_bounds(
+                settings=repo_settings,
+                round_index=round_index,
+            )
+
         # A re-review should pay for the new commits, not the whole PR. The key is
         # emitted only when the range is real: the prompt tells the reviewer to
         # read this path first, so advertising a path that does not resolve is
         # worse than not advertising one at all.
         if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE:
-            prior_sha = await _recover_last_reviewed_sha(
-                ctx, pull_number=pull_number, head_sha=state.checkout_sha or ""
-            )
+            prior_sha = last_reviewed_sha(prior_reviews, head_sha=state.checkout_sha or "") or ""
             if prior_sha:
                 written = _write_incremental_diff(
                     cwd=cwd,
@@ -336,8 +368,38 @@ def checkout_pr_tool(ctx: ToolContext):
 
         logger.info("checked out PR #{} -> {}", pull_number, local_branch)
         ctx.tool_state.review_phase = "ESTABLISH_SCOPE"
+        from mergecraft.findings.ledger import hydrate_finding_ledger_from_progress_comment
         from mergecraft.mcp.verdict import ReviewPhase, stamp_review_phase_on_active_span
 
+        await hydrate_finding_ledger_from_progress_comment(ctx)
+        if (
+            ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE
+            and state.incremental_changed_paths
+        ):
+            from datetime import UTC, datetime
+
+            from mergecraft.findings.ledger import ensure_finding_ledger
+            from mergecraft.modes._incremental_promotion import (
+                deferred_findings_from_reviews,
+                promote_deferred_for_incremental_paths,
+            )
+
+            ledger = ensure_finding_ledger(ctx.tool_state)
+            deferred_rows = deferred_findings_from_reviews(prior_reviews)
+            stamp = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            promoted = promote_deferred_for_incremental_paths(
+                ledger,
+                deferred_findings=deferred_rows,
+                incremental_changed_paths=state.incremental_changed_paths,
+                round_index=round_index,
+                recorded_at=stamp,
+            )
+            if promoted:
+                logger.info(
+                    "promoted {} deferred finding(s) for incremental paths on PR #{}",
+                    len(promoted),
+                    pull_number,
+                )
         stamp_review_phase_on_active_span(ReviewPhase.ESTABLISH_SCOPE)
         return result
 

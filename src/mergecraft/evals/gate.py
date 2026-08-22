@@ -21,6 +21,12 @@ Gated metrics:
   an absent half is skipped, never fabricated): ``detection.recall``,
   ``detection.corpus_confirmed_precision`` and ``detection.f1`` (all higher
   is better).
+- Convergence corpus (compared only when **both** result sets carry a
+  ``convergence`` block — W10): ``convergence.mean_first_pass_recall`` (higher
+  is better). When that block is present the gate also enforces the **paired
+  DG1 precision floor** via :func:`mergecraft.findings.precision_corpus.evaluate_dg1_precision_corpus`
+  — recall must stay at or above :data:`~mergecraft.findings.precision_corpus.PRE_DG1_BASELINE`
+  and corpus-confirmed precision must not fall below the same baseline.
 
 Pure core: no I/O except in :func:`load_result_set`, which the caller hands
 an explicit path; no ``os.environ`` reads; nothing at import time (§W11.6).
@@ -57,6 +63,12 @@ _DETECTION_GATE_METRICS: Final[tuple[tuple[str, Direction], ...]] = (
     ("recall", "higher_is_better"),
     ("corpus_confirmed_precision", "higher_is_better"),
     ("f1", "higher_is_better"),
+)
+
+#: Convergence corpus gate metrics — compared when both result sets carry
+#: a ``convergence`` block (W10).
+_CONVERGENCE_GATE_METRICS: Final[tuple[tuple[str, Direction], ...]] = (
+    ("convergence.mean_first_pass_recall", "higher_is_better"),
 )
 
 
@@ -113,6 +125,45 @@ def _compare(
     )
 
 
+def _convergence_metric_value(result: BenchmarkResultSet, metric: str) -> float:
+    convergence = result.convergence
+    if convergence is None:
+        msg = f"result set has no convergence block for {metric!r}"
+        raise ValueError(msg)
+    if metric == "convergence.mean_first_pass_recall":
+        return convergence.mean_first_pass_recall
+    msg = f"unknown convergence gate metric {metric!r}"
+    raise ValueError(msg)
+
+
+def _append_dg1_precision_floor(deltas: list[MetricDelta]) -> None:
+    """Enforce the DG1 precision corpus paired constraint (W10)."""
+    from mergecraft.findings.precision_corpus import (
+        PRE_DG1_BASELINE,
+        evaluate_dg1_precision_corpus,
+    )
+
+    precision = evaluate_dg1_precision_corpus()
+    deltas.append(
+        _compare(
+            "dg1.recall",
+            "higher_is_better",
+            PRE_DG1_BASELINE.recall,
+            precision.recall,
+            tolerance=0.0,
+        )
+    )
+    deltas.append(
+        _compare(
+            "dg1.corpus_confirmed_precision",
+            "higher_is_better",
+            PRE_DG1_BASELINE.corpus_confirmed_precision,
+            precision.corpus_confirmed_precision,
+            tolerance=0.0,
+        )
+    )
+
+
 def eval_gate(
     *,
     candidate: BenchmarkResultSet,
@@ -155,6 +206,19 @@ def eval_gate(
                     tolerance,
                 )
             )
+
+    if baseline.convergence is not None and candidate.convergence is not None:
+        for metric, direction in _CONVERGENCE_GATE_METRICS:
+            deltas.append(
+                _compare(
+                    metric,
+                    direction,
+                    _convergence_metric_value(baseline, metric),
+                    _convergence_metric_value(candidate, metric),
+                    tolerance,
+                )
+            )
+        _append_dg1_precision_floor(deltas)
 
     regressed = tuple(delta.metric for delta in deltas if delta.regressed)
     return GateReport(

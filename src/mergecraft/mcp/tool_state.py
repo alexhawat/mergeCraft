@@ -10,10 +10,12 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
+    from mergecraft.findings.ledger import FindingLedger
     from mergecraft.modes import Mode
     from mergecraft.prep.types import PrepResult
+    from mergecraft.review.lens_routing import LensRoutingDecision
 
 RepoAccess = Literal["primary", "write", "read"]
 
@@ -261,6 +263,8 @@ class AnalyzerRunState:
     findings: list[dict[str, Any]] = field(default_factory=list)
     inline: list[dict[str, Any]] = field(default_factory=list)
     mechanical_section: str | None = None
+    deferred_section: str | None = None
+    deferred_findings: list[dict[str, Any]] = field(default_factory=list)
     pre_merge_summary: str | None = None
     lockfile_digest: str | None = None
     verified_ids: set[str] = field(default_factory=set)
@@ -399,6 +403,14 @@ class ToolState:
     # cross-run memory of the same decision; the approve gate unions both
     # (``verdict._withdrawn_fingerprints_for_state``).
     withdrawn_fingerprints: set[str] = field(default_factory=set)
+    # Lens routing snapshot (RC7, W5) — recommended vs actually-dispatched lenses.
+    lens_routing_decision: LensRoutingDecision | None = None
+    dispatched_lens_ids: tuple[str, ...] = ()
+    # Open-PR finding ledger (RC4, D4) — hydrated from the sticky progress comment.
+    finding_ledger: FindingLedger | None = None
+    finding_ledger_loaded: bool = False
+    # RC12 — 1-based review round, set by ``checkout_pr`` from prior PR reviews.
+    review_round_index: int = 1
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
     agent_findings: list[dict[str, Any]] = field(default_factory=list)
     # Evidence normalised from the consumer's finished CI (#36). ``None`` until
@@ -413,6 +425,17 @@ class ToolState:
     # appended) on each call. Read by ``validation_state_from_tool_context`` so
     # ``approve`` is rejected when a required gate recorded ``status: failed``.
     static_checks: list[dict[str, Any]] = field(default_factory=list)
+
+
+def record_lens_execution(
+    tool_state: ToolState,
+    *,
+    routing_decision: LensRoutingDecision,
+    dispatched_lens_ids: Sequence[str],
+) -> None:
+    """Persist the routing decision and the lenses that actually ran (RC7)."""
+    tool_state.lens_routing_decision = routing_decision
+    tool_state.dispatched_lens_ids = tuple(dispatched_lens_ids)
 
 
 def repo_key(owner: str, name: str) -> str:

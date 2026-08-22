@@ -1142,6 +1142,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         # carries it and ``spawn_agent_cli`` exports it as
         # ``MERGECRAFT_AGENT_ID`` so the MCP server can attribute this
         # agent's tool calls.
+        from mergecraft.review.lens_routing import lens_id_from_agent_id
         from mergecraft.tracing import get_tracer_from_settings
         from mergecraft.tracing.signals import agent_run_span
 
@@ -1149,7 +1150,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
             get_tracer_from_settings(settings),
             agent_id=str(attempt_agent_id),
             role="reviewer",
-            lens=str(tool_state.selected_mode or "") or None,
+            lens=lens_id_from_agent_id(str(attempt_agent_id)),
             executed_model=attempt_model,
         ):
             return await attempt_agent.run(attempt_ctx)
@@ -1164,6 +1165,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 tool_state=tool_state,
             )
             return winning_slug, chain_result
+        from mergecraft.review.lens_routing import lens_id_from_agent_id
         from mergecraft.tracing import get_tracer_from_settings
         from mergecraft.tracing.signals import agent_run_span
 
@@ -1171,7 +1173,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
             get_tracer_from_settings(settings),
             agent_id=str(agent.name),
             role="reviewer",
-            lens=str(tool_state.selected_mode or "") or None,
+            lens=lens_id_from_agent_id(str(agent.name)),
             executed_model=ctx.resolved_model,
         ):
             return selected_slug, await agent.run(run_ctx)

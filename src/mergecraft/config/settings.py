@@ -266,6 +266,37 @@ class AnalyzersSettings(BaseModel):
     impact: bool = Field(default=False, alias="impact")
 
 
+class RoundBudgetsSettings(BaseModel):
+    """Per-round budget multipliers for token, cost, tool-call, and subagent ceilings (RC12).
+
+    Each entry is a multiplier applied to the resolved run bounds and subagent
+    budget for that review round (1-based index). When the round index exceeds
+    the list length, the final multiplier is reused. Default ``[1.0]`` preserves
+    today's flat behaviour for consumers who do not opt in.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    multipliers: list[float] = Field(default_factory=lambda: [1.0])
+
+
+class ReviewSettings(BaseModel):
+    """Review-depth knobs that are separate from analyzer placement (RC3, D2)."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    # RC3 / D2 — how many Critical/Major findings earn a verifier dispatch per run.
+    # ``0`` means verify every eligible finding (no cap).
+    verification_budget: int = Field(default=24, alias="verificationBudget")
+    # RC10 / D7 — optional adversarial recall pass after aggregation (default off).
+    recall_pass: bool = Field(default=False, alias="recallPass")
+    # RC12 — optional per-round budget taper (default flat).
+    round_budgets: RoundBudgetsSettings = Field(
+        default_factory=RoundBudgetsSettings,
+        alias="roundBudgets",
+    )
+
+
 # D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.
 # The block is opt-in: a repo that does not declare one sees identical behaviour,
 # identical performance, and zero egress (convention 9). See docs/TRACING.md.
@@ -457,6 +488,7 @@ class RepoSettings(BaseModel):
     # no declaration, no substitution, no extra API call.
     ci_evidence: CiEvidenceSettings = Field(default_factory=CiEvidenceSettings, alias="ciEvidence")
     analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
+    review: ReviewSettings = Field(default_factory=ReviewSettings)
     agents: dict[str, AgentBindingOverride] = Field(default_factory=dict)
     # AP6 / D10 — orchestrator kind. Default ``llm`` preserves today's prompt-driven
     # orchestrator; ``deterministic`` walks a declarative pipeline file; ``hybrid``

@@ -68,6 +68,25 @@ the finding's own fingerprint, so the same claim is skipped before verification 
 run — the same section, parser and identity analyzer suppression already uses. Verifying a
 finding the author refuted last month is the failure this prevents.
 
+## Recall pass — the verifier's mirror (RC10, D1, D7)
+
+**Every stage before publication subtracts findings; the recall pass is the one stage that may
+add them back.** After aggregation the orchestrator dispatches `mergecraft-recall` with the
+authoritative diff and the draft finding list. The subagent is read-only, uses the same
+subagent deny-list as `mergecraft-reviewer`, and may return only findings absent from that
+draft — paraphrases and overlaps are filtered through `findings.dedup.dedupe_findings`, not a
+second matcher.
+
+**Output is always deferred (D1).** Recall findings publish in `### 🗂 Deferred findings`
+regardless of the severity the subagent claims. They never consume inline budget and never
+block merge. A precision gain bought by silently dropping recall output would be a regression;
+the novelty filter and deferred placement are the paired constraint.
+
+**Default off, dogfooded here (D7).** `review.recallPass` defaults `false` for consumers — it
+costs a subagent dispatch per review — and is `true` in mergeCraft's own `.mergecraft/config.yaml`.
+The W7 corpus gate (`evaluate_recall_pass_corpus`) must show first-pass recall up with the DG1
+precision corpus flat or better before the wave ships.
+
 ## LLM judges are secondary evaluators (D14, #45)
 
 **The verifier is an LLM judging an LLM, so it is pinned, logged, ordered last, and never
@@ -270,6 +289,11 @@ The bank surfaces two distinct failure modes:
   should have produced a `block` verdict and the related finding.
 - **`reverted`** — the merge made it past the reviewer but had to be rolled back. The
   case asserts the packet should have caught the regression that the revert exposed.
+
+A precision gain bought with recall is a regression — measure it with
+`mergecraft eval convergence` / `make eval-convergence`, which scores
+first-pass recall and leakage rate from ledger snapshots via
+`mergecraft.evals.convergence.score_convergence` (RC6).
 
 A failure mode is captured as a case by the operator, never by the agent. The
 `create_pull_request_review` MCP tool logs a one-line suggestion at `logger.info` when

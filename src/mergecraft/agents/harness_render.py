@@ -47,6 +47,11 @@ _VERIFIER_DESCRIPTION = (
     f"publication against rubric v{VERIFIER_RUBRIC_VERSION}."
 )
 
+_RECALL_DESCRIPTION = (
+    "Read-only recall subagent. Receives the diff and draft findings; may only "
+    "return novel findings absent from the draft list. Output is deferred-only."
+)
+
 _CLASSIFIER_DESCRIPTION = (
     "Read-only change classifier subagent. Emits a typed risk and change map for lens routing."
 )
@@ -158,7 +163,7 @@ def _harness_dispatched_model(binding: AgentBinding, settings: Any) -> str:
 def _claude_harness_model(binding: AgentBinding, settings: Any) -> str:
     if binding.role is AgentRole.verifier:
         return pinned_judge_model("claude") or "claude-sonnet-5"
-    if binding.role is AgentRole.reviewer:
+    if binding.role in (AgentRole.reviewer, AgentRole.recall):
         return "claude-sonnet-5"
     return _strip_provider_prefix(_harness_dispatched_model(binding, settings))
 
@@ -169,6 +174,8 @@ def _role_description(binding: AgentBinding) -> str:
             return _REVIEWER_DESCRIPTION
         case AgentRole.verifier | AgentRole.judge:
             return _VERIFIER_DESCRIPTION
+        case AgentRole.recall:
+            return _RECALL_DESCRIPTION
         case AgentRole.classifier:
             return _CLASSIFIER_DESCRIPTION
         case AgentRole.orchestrator:
@@ -344,11 +351,19 @@ def render_agents(
     raise ValueError(msg)
 
 
-def default_subagent_selection(registry: Registry) -> tuple[str, str]:
-    """Default routed roster before AP4 lens routing — reviewer + verifier."""
+def default_subagent_selection(
+    registry: Registry,
+    *,
+    recall_pass: bool = False,
+) -> tuple[str, ...]:
+    """Default routed roster before AP4 lens routing — reviewer + verifier (+ recall)."""
     reviewer = registry.resolve_role(AgentRole.reviewer)
     verifier = registry.resolve_role(AgentRole.verifier)
-    return (reviewer.agent_id, verifier.agent_id)
+    roster: list[str] = [reviewer.agent_id, verifier.agent_id]
+    if recall_pass:
+        recall = registry.resolve_role(AgentRole.recall)
+        roster.append(recall.agent_id)
+    return tuple(roster)
 
 
 def render_for_run(
@@ -363,7 +378,11 @@ def render_for_run(
     root = _repo_root_from_ctx(ctx) or Path(ctx.tmpdir)
     settings = load_repo_settings(root=root)
     registry = load_registry(settings=settings, repo_root=root)
-    roster = tuple(selected) if selected is not None else default_subagent_selection(registry)
+    roster = (
+        tuple(selected)
+        if selected is not None
+        else default_subagent_selection(registry, recall_pass=settings.review.recall_pass)
+    )
     return render_agents(registry, selected=roster, harness=harness, ctx=ctx)
 
 

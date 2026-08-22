@@ -362,6 +362,8 @@ def test_no_new_finding_fields_introduced(tmp_path: Path) -> None:
         "introduced_by_pr",
         "source",
         "cluster_id",
+        "lens",
+        "collateral",
     }
     assert set(Finding.model_fields) == expected
 

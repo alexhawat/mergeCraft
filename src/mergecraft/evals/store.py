@@ -71,13 +71,17 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import yaml
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from mergecraft.utils.learnings import LearningProvenance
+
+if TYPE_CHECKING:
+    from mergecraft.evals.convergence import ConvergenceRound
+    from mergecraft.findings.lifecycle import LifecycleState
 
 # D13 — local + file-backed. No database, no hosted service. The bank
 # lives under the repo's ``evals/`` tree; the path is configurable so
@@ -106,6 +110,7 @@ CASE_STATUS_BLOCKED: CaseStatus = "blocked"
 # — the promote workflow's tests pin them as the canonical examples.
 CATEGORY_REJECTED: str = "rejected"
 CATEGORY_REVERTED: str = "reverted"
+CATEGORY_MULTI_ROUND_CONVERGENCE: str = "multi_round_convergence"
 FAILURE_CATEGORIES: frozenset[str] = frozenset({CATEGORY_REJECTED, CATEGORY_REVERTED})
 
 # The case directory's per-file front-matter shape. Each row is the
@@ -242,6 +247,44 @@ def _require_keys(front: dict[str, Any], path: Path) -> None:
         raise _FrontmatterError(path, msg)
 
 
+# ── multi-round convergence shapes (W10) ────────────────────────────
+
+
+class CaseRoundLedgerEntry(BaseModel):
+    """One ledger row for a round in a multi-round convergence case."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fingerprint: str = Field(min_length=1)
+    state: str = Field(min_length=1)
+    round_index: int | None = None
+
+
+class CaseRoundFinding(BaseModel):
+    """One ground-truth finding row with the round it first appeared in."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fingerprint: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    start_line: int
+    end_line: int
+    body: str = Field(min_length=1)
+    first_appeared_round: int = Field(ge=1)
+
+
+class CaseRound(BaseModel):
+    """One review round: diff, recorded findings, and ledger snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    round_index: int = Field(ge=1)
+    diff_text: str = ""
+    findings: list[CaseRoundFinding] = Field(default_factory=list)
+    ledger: list[CaseRoundLedgerEntry] = Field(default_factory=list)
+    generated_fingerprints: list[str] = Field(default_factory=list)
+
+
 # ── public data shapes ────────────────────────────────────────────────
 
 
@@ -286,6 +329,14 @@ class Case(BaseModel):
     # "empty for some other reason" (mergeCraft self-review, PR #216 —
     # gate-matrix classification must not infer ground truth from trust_tier).
     closed_world: bool = False
+    # Multi-round convergence corpus (W10). When set, the case is scored via
+    # :func:`convergence_rounds_from_case` rather than single-round replay.
+    rounds: list[CaseRound] | None = None
+
+    @property
+    def is_multi_round(self) -> bool:
+        """True when the case carries an ordered multi-round convergence corpus."""
+        return bool(self.rounds)
 
     @property
     def is_replayable(self) -> bool:
@@ -868,7 +919,61 @@ def diff_cases(a: Case, b: Case) -> dict[str, Any]:
         }
     if a.body != b.body:
         diff["body"] = {"expected": a.body, "got": b.body}
+    if a.rounds != b.rounds:
+        diff["rounds"] = {
+            "expected": [row.model_dump(mode="json") for row in a.rounds or []],
+            "got": [row.model_dump(mode="json") for row in b.rounds or []],
+        }
     return diff
+
+
+def convergence_rounds_from_case(case: Case) -> list[ConvergenceRound]:
+    """Materialize :class:`CaseRound` rows as :class:`ConvergenceRound` inputs.
+
+    Imports :class:`~mergecraft.evals.convergence.ConvergenceRound` lazily so
+    the bank store does not pull the convergence scorer at import time.
+    """
+    if not case.rounds:
+        msg = f"case {case.id!r} has no multi-round corpus"
+        raise ValueError(msg)
+    from mergecraft.evals.convergence import ConvergenceRound
+    from mergecraft.findings.ledger import FindingLedger
+
+    materialized: list[ConvergenceRound] = []
+    for round_row in sorted(case.rounds, key=lambda row: row.round_index):
+        ledger = FindingLedger()
+        for entry in round_row.ledger:
+            ledger.record(
+                entry.fingerprint,
+                cast("LifecycleState", entry.state),  # bank YAML uses ledger vocabulary
+                source=case.id,
+                round_index=entry.round_index or round_row.round_index,
+            )
+        finding_rows = [row.model_dump() for row in round_row.findings]
+        generated = list(round_row.generated_fingerprints)
+        if not generated:
+            generated = [row.fingerprint for row in round_row.findings]
+        materialized.append(
+            ConvergenceRound(
+                round_index=round_row.round_index,
+                ledger=ledger,
+                findings=finding_rows,
+                generated_fingerprints=generated,
+                diff_text=round_row.diff_text,
+            )
+        )
+    return materialized
+
+
+def list_multi_round_cases(
+    bank_dir: Path,
+    *,
+    category: str = CATEGORY_MULTI_ROUND_CONVERGENCE,
+) -> list[Case]:
+    """Return bank cases with a multi-round convergence corpus, sorted by id."""
+    cases = [case for case in list_cases(bank_dir, category=category) if case.is_multi_round]
+    cases.sort(key=lambda row: row.id)
+    return cases
 
 
 def _now_utc() -> datetime:
@@ -1153,6 +1258,7 @@ __all__ = [
     "CASE_STATUS_BLOCKED",
     "CASE_STATUS_PASSED",
     "CASE_STATUS_REGRESSION",
+    "CATEGORY_MULTI_ROUND_CONVERGENCE",
     "CATEGORY_REJECTED",
     "CATEGORY_REVERTED",
     "DEFAULT_BANK_DIR",
@@ -1161,12 +1267,17 @@ __all__ = [
     "PERMANENT_TEST_FILE_SUFFIX",
     "Case",
     "CaseFilter",
+    "CaseRound",
+    "CaseRoundFinding",
+    "CaseRoundLedgerEntry",
     "EvalMetadata",
     "ReplayDiff",
     "add_case",
     "build_eval_metadata",
+    "convergence_rounds_from_case",
     "diff_cases",
     "list_cases",
+    "list_multi_round_cases",
     "load_case",
     "parse_case_text",
     "permanent_test_path",

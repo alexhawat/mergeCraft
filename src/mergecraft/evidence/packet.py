@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
 from mergecraft.analyzers.finding import Finding
@@ -70,7 +70,10 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   (minor bump) — a packet that previously omitted the field still
 #   validates, and the section's ``None`` default keeps it forward-
 #   compatible with consumers that do not yet read it.
-PACKET_SCHEMA_VERSION = "1.7.0"
+# - 1.8.0 — W5 (review convergence) records ``dispatched_lens_ids`` on
+#   ``AgentMetadata`` so each run's evidence names which lenses actually
+#   executed (RC7).
+PACKET_SCHEMA_VERSION = "1.8.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -119,6 +122,8 @@ class AgentMetadata(BaseModel):
     provider: str = ""
     fallback_index: int = 0
     fallback_occurred: bool = False
+    # RC7 — lens ids actually dispatched this run (recommended set may differ).
+    dispatched_lens_ids: list[str] = Field(default_factory=list)
 
 
 class DeterministicCheck(BaseModel):

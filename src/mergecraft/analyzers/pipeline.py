@@ -403,6 +403,16 @@ def run_analyzer_pipeline(
         lock_path = repo_root / ".mergecraft" / "analyzers.lock"
         digest = lock_digest(lock_path)
         summary = _build_pre_merge_summary(rows, lockfile_digest_value=digest)
+        deferred_findings = [
+            {
+                "path": finding.path,
+                "line": finding.start_line,
+                "body": finding.message,
+                "severity": finding.severity,
+                "fingerprint": finding.fingerprint,
+            }
+            for finding in placement.deferred
+        ]
 
         executed = [row for row in rows if row.status in {"passed", "failed"}]
         if not executed:
@@ -416,6 +426,8 @@ def run_analyzer_pipeline(
                 findings=serialized,
                 inline=inline_payload,
                 mechanical_section=placement.mechanical_section,
+                deferred_section=placement.deferred_section,
+                deferred_findings=deferred_findings,
                 pre_merge_summary=summary,
                 lockfile_digest=digest,
             )
@@ -426,6 +438,8 @@ def run_analyzer_pipeline(
             findings=serialized,
             inline=inline_payload,
             mechanical_section=placement.mechanical_section,
+            deferred_section=placement.deferred_section,
+            deferred_findings=deferred_findings,
             pre_merge_summary=summary,
             lockfile_digest=digest,
         )

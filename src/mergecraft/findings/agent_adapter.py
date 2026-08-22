@@ -33,16 +33,31 @@ def coerce_agent_finding(item: Any) -> AgentFinding:
     raise ValueError(msg)
 
 
+def _lens_from_current_agent() -> str | None:
+    """Resolve lens attribution from the dispatch-issued agent id (D9, RC8)."""
+    from mergecraft.tracing.signals import current_agent_id
+
+    agent_id = current_agent_id()
+    if agent_id is None:
+        return None
+    prefix = "lens-"
+    if agent_id.startswith(prefix):
+        return agent_id[len(prefix) :]
+    return None
+
+
 def agent_finding_to_finding(
     finding: AgentFinding,
     *,
     rule_id: str,
     causality: str | None = None,
+    lens: str | None = None,
 ) -> Finding:
     """Convert a reviewer draft into a normalized ``Finding`` for the precision pipeline."""
     evidence: list[str] = []
     if causality and causality.strip():
         evidence.append(f"{CAUSALITY_EVIDENCE_PREFIX} {causality.strip()}")
+    resolved_lens = lens if lens is not None else _lens_from_current_agent()
     return make_finding(
         tool="agent",
         rule_id=rule_id,
@@ -55,6 +70,7 @@ def agent_finding_to_finding(
         end_line=int(finding.line or 1),
         source="agent",
         evidence=evidence,
+        lens=resolved_lens,
     )
 
 

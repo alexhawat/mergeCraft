@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from mergecraft.agents.shared import AgentUsage
-    from mergecraft.config.settings import RepoSettings, RunBoundsSettings
+    from mergecraft.config.settings import RepoSettings, RoundBudgetsSettings, RunBoundsSettings
 
 BudgetKind = Literal["token", "cost", "tool_call"]
 
@@ -161,17 +161,38 @@ def _env_int(env: Mapping[str, str], key: str) -> int | None:
     return int(raw)
 
 
+def round_budget_multiplier(
+    round_budgets: RoundBudgetsSettings | None,
+    *,
+    round_index: int,
+) -> float:
+    """Return the budget multiplier for a 1-based review round (RC12)."""
+    if round_budgets is None:
+        return 1.0
+    multipliers = round_budgets.multipliers
+    if not multipliers:
+        return 1.0
+    index = max(1, round_index) - 1
+    if index >= len(multipliers):
+        return multipliers[-1]
+    return multipliers[index]
+
+
+def _scale_budget_int(value: int, multiplier: float) -> int:
+    return int(value * multiplier)
+
+
 def resolve_run_bounds(
     *,
     settings: RepoSettings | None = None,
     env: Mapping[str, str] | None = None,
+    round_index: int = 1,
 ) -> RunBounds:
     """Resolve :class:`RunBounds` from repo settings with env overrides."""
     from mergecraft.config.settings import default_settings
 
-    cfg: RunBoundsSettings = (
-        settings.run_bounds if settings is not None else default_settings().run_bounds
-    )
+    resolved_settings = settings if settings is not None else default_settings()
+    cfg: RunBoundsSettings = resolved_settings.run_bounds
     environ = dict(env if env is not None else os.environ)
 
     token_budget = _env_int(environ, "MERGECRAFT_TOKEN_BUDGET") or cfg.token_budget
@@ -191,10 +212,15 @@ def resolve_run_bounds(
         external_timeout = _DEFAULT_EXTERNAL_OPERATION_TIMEOUT_S
     cache_max = _env_int(environ, "MERGECRAFT_CACHE_MAX_BYTES") or cfg.cache_max_bytes
 
+    multiplier = round_budget_multiplier(
+        resolved_settings.review.round_budgets,
+        round_index=round_index,
+    )
+
     return RunBounds(
-        token_budget=token_budget,
-        cost_budget_usd=cost_budget,
-        tool_call_budget=tool_call_budget,
+        token_budget=_scale_budget_int(token_budget, multiplier),
+        cost_budget_usd=cost_budget * multiplier,
+        tool_call_budget=_scale_budget_int(tool_call_budget, multiplier),
         run_timeout_s=run_timeout,
         context_retrieval_timeout_s=context_timeout,
         max_diff_lines=max_diff_lines,
@@ -327,5 +353,6 @@ __all__ = [
     "outcome_with_scope_reduction",
     "record_agent_usage",
     "resolve_run_bounds",
+    "round_budget_multiplier",
     "timeout_for_external_operation",
 ]
