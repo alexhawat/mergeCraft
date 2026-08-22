@@ -62,14 +62,12 @@ def _first_occurrence_link(text: str, term: str, anchor: str) -> bool:
     return f"docs/glossary.md#{anchor}" in segment or f"glossary.md#{anchor}" in segment
 
 
-@pytest.mark.xfail(reason="green after RV2: docs/glossary.md + manifest row", strict=False)
 def test_glossary_exists_and_is_manifested() -> None:
     assert GLOSSARY.is_file(), f"missing {GLOSSARY.relative_to(REPO_ROOT)} (RV2)"
     paths = _load_manifest_paths()
     assert "docs/glossary.md" in paths, "docs/manifest.yaml must list docs/glossary.md (D10)"
 
 
-@pytest.mark.xfail(reason="green after RV2: glossary defines required terms", strict=False)
 def test_glossary_defines_required_terms() -> None:
     assert GLOSSARY.is_file(), "docs/glossary.md missing"
     text = GLOSSARY.read_text(encoding="utf-8")

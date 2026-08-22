@@ -33,6 +33,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [eval-methodology](eval-methodology.md) | contributor | Eval quality metrics, ablation dimensions, and corpus methodology (#384). Never README; issue 140 owns precision/recall/F1 publication. |
 | [evidence-packet](evidence-packet.md) | contributor | Merge evidence packet schema emitted as the evidence_packet action output. |
 | [findings-carryover](findings-carryover.md) | contributor | Findings carryover and export CLI behaviour for unresolved review items. |
+| [glossary](glossary.md) | consumer | Plain-language definitions for landing-page jargon — trust tier, typed findings, and related terms. |
 | [install](install.md) | consumer | Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback. |
 | [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |
 | [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
