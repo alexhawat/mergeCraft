@@ -50,7 +50,7 @@ SHELL_DISABLED_ELIGIBLE_RUNTIMES: frozenset[str] = frozenset({"managed", "contai
 #: because convention 6 / D6 forbid widening the taxonomy. A drift guard in
 #: ``tests/analyzers/test_trust_aware_analyzer_mode.py`` asserts each id here
 #: really does resolve without repo-provided tooling.
-IN_PROCESS_ANALYZER_IDS: frozenset[str] = frozenset({"agentsec"})
+IN_PROCESS_ANALYZER_IDS: frozenset[str] = frozenset({"agentsec", "antislop"})
 
 
 @dataclass(frozen=True, slots=True)

@@ -296,6 +296,30 @@ def run_adapter(
             config_note="native YAML rules",
         )
 
+    if tool_id == "antislop":
+        from mergecraft.analyzers.antislop import scan_changed_files
+
+        scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
+        if not scoped_files:
+            reason = "skipped antislop: no changed files match detect globs"
+            logger.info("{}", reason)
+            return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
+
+        antislop_result = scan_changed_files(repo_root=repo_root, changed_files=scoped_files)
+        if antislop_result.skipped:
+            return AdapterRunResult(
+                findings=[],
+                skipped=True,
+                skip_reason=antislop_result.skip_reason,
+                version_note="ran mergeCraft native anti-slop policy engine",
+                config_note="native YAML rules",
+            )
+        return AdapterRunResult(
+            findings=_normalize_paths(antislop_result.findings, repo_root=repo_root),
+            version_note="ran mergeCraft native anti-slop policy engine",
+            config_note="native YAML rules",
+        )
+
     scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
     if not scoped_files:
         reason = f"skipped {tool_id}: no changed files match detect globs"

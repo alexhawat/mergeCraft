@@ -46,6 +46,7 @@ def _fixture_candidates(manifest_id: str) -> tuple[Path, ...]:
         _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.jsonl",
         _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.txt",
         _DEFAULT_FIXTURE_ROOT / "agentsec" / f"{manifest_id}-minimal.yaml",
+        _DEFAULT_FIXTURE_ROOT / "antislop" / f"{manifest_id}-minimal.yaml",
     )
 
 
@@ -58,6 +59,8 @@ def manifest_has_fixture(
     root = fixture_root or _DEFAULT_FIXTURE_ROOT
     if manifest.id == "agentsec":
         return (root / "agentsec" / "agentsec-minimal.yaml").is_file()
+    if manifest.id == "antislop":
+        return (root / "antislop" / "antislop-minimal.yaml").is_file()
     return any(
         (root / rel).is_file()
         for rel in (

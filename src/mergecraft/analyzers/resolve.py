@@ -118,6 +118,21 @@ def _agentsec_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan 
     )
 
 
+def _antislop_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
+    """Per-source resolver: the ``antislop`` special-case (mergeCraft's native engine)."""
+    if manifest.id != "antislop":
+        return None
+    return AnalyzerPlan(
+        manifest_id=manifest.id,
+        mode="repo-native",
+        argv=("antislop",),
+        cwd=repo_root,
+        timeout_s=manifest.timeout_s,
+        version_note="ran mergeCraft native anti-slop policy engine",
+        config_note="native YAML rules",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _RepoToolState:
     """Availability + provenance for the repo-native execution source."""
@@ -356,6 +371,8 @@ def resolve_analyzer(
         plan = _sqlfluff_no_dialect_plan(manifest, repo_root)
     if plan is None:
         plan = _agentsec_plan(manifest, repo_root)
+    if plan is None:
+        plan = _antislop_plan(manifest, repo_root)
     if plan is None:
         repo_tool_state, early_skip = _detect_repo_tool_state(
             manifest,
