@@ -27,6 +27,12 @@ jobs:
         python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Ref-resolution checks ask git whether a tag or branch exists
+          # (README Action pin D25, tests/docs/support.py). A shallow fetch
+          # has neither, so they answer "no" on PR builds while passing on
+          # tag builds. Full history is what makes those answers truthful.
+          fetch-depth: 0
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
@@ -44,6 +50,12 @@ jobs:
         group: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Ref-resolution checks ask git whether a tag or branch exists
+          # (README Action pin D25, tests/docs/support.py). A shallow fetch
+          # has neither, so they answer "no" on PR builds while passing on
+          # tag builds. Full history is what makes those answers truthful.
+          fetch-depth: 0
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
@@ -63,6 +75,12 @@ jobs:
         python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Ref-resolution checks ask git whether a tag or branch exists
+          # (README Action pin D25, tests/docs/support.py). A shallow fetch
+          # has neither, so they answer "no" on PR builds while passing on
+          # tag builds. Full history is what makes those answers truthful.
+          fetch-depth: 0
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
@@ -79,6 +97,12 @@ jobs:
         python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Ref-resolution checks ask git whether a tag or branch exists
+          # (README Action pin D25, tests/docs/support.py). A shallow fetch
+          # has neither, so they answer "no" on PR builds while passing on
+          # tag builds. Full history is what makes those answers truthful.
+          fetch-depth: 0
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
@@ -95,6 +119,12 @@ jobs:
         python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Ref-resolution checks ask git whether a tag or branch exists
+          # (README Action pin D25, tests/docs/support.py). A shallow fetch
+          # has neither, so they answer "no" on PR builds while passing on
+          # tag builds. Full history is what makes those answers truthful.
+          fetch-depth: 0
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}

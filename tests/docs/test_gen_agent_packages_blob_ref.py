@@ -10,11 +10,9 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
-import pytest
-
 from mergecraft.pins import action_pin_minimal
 from tests.ci.workflow_support import REPO_ROOT
-from tests.docs.support import git_ref_exists, load_script_module
+from tests.docs.support import load_script_module
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -43,19 +41,37 @@ def test_blob_ref_uses_env_override(monkeypatch: MonkeyPatch) -> None:
     assert module._blob_ref() == override
 
 
-def test_blob_ref_returns_default_when_pin_tag_missing(
+def test_blob_ref_uses_the_pin_even_when_the_tag_is_absent_locally(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """When ``v0.1.0a1`` is absent locally, return ``pre-0.0.1`` — not the pin (D8)."""
+    """The pin is used regardless of local git state.
+
+    Replaces the old D8 assertion that a locally-missing tag falls back to
+    ``DEFAULT_BLOB_REF``. That behaviour made the generated packages depend on
+    whether the checkout happened to have fetched tags: a tag build emitted the
+    pin, a `fetch-depth: 1` branch build emitted the default, and whichever the
+    committed files matched, the other failed `agent-packages-check`. The refs
+    are github.com blob URLs, so the tag resolving locally is irrelevant.
+    """
     pin = action_pin_minimal()
     assert pin == "v0.1.0a1", "fixture assumes action_pin_minimal is v0.1.0a1"
-    if git_ref_exists(pin):
-        pytest.skip(f"G1: tag {pin!r} exists locally — skip missing-tag half of D8 test")
     monkeypatch.delenv(_ENV_KEY, raising=False)
     module = load_script_module(GEN_SCRIPT)
-    ref = module._blob_ref()
-    assert ref != pin, f"_blob_ref() must not return missing tag {pin!r} (D8)"
-    assert ref == _EXPECTED_DEFAULT
+    # Simulate a shallow checkout with no tags: every ref lookup fails.
+    monkeypatch.setattr(module, "git_ref_exists", lambda ref, *, cwd=None: False)
+    assert module._blob_ref() == pin
+
+
+def test_generated_packages_are_identical_without_local_tags(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Rendered output must not change with local git state (the drift bug)."""
+    module = load_script_module(GEN_SCRIPT)
+    monkeypatch.delenv(_ENV_KEY, raising=False)
+    with_tags = module.render_all()
+    monkeypatch.setattr(module, "git_ref_exists", lambda ref, *, cwd=None: False)
+    without_tags = module.render_all()
+    assert with_tags == without_tags
 
 
 def test_blob_ref_uses_action_pin_minimal_when_tag_exists(
