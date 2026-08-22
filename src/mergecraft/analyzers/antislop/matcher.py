@@ -186,10 +186,20 @@ def _python_placeholder_matches(source: str) -> Iterable[tuple[int, int, str]]:
                 yield start_line, end_line, "function body is only ..."
 
 
+def _except_clause_body(handler: Node) -> Node | None:
+    """Return the suite block for an ``except_clause`` node.
+
+    tree-sitter-python exposes the suite as an unnamed ``block`` child, not a
+    named ``body`` field.
+    """
+    blocks = _child_nodes(handler, "block")
+    return blocks[0] if blocks else None
+
+
 def _python_empty_error_handler_matches(source: str) -> Iterable[tuple[int, int, str]]:
     for _node, _start_line, end_line in _walk_python_try_blocks(source):
         for handler in _child_nodes(_node, "except_clause"):
-            block = handler.child_by_field_name("body")
+            block = _except_clause_body(handler)
             if block is None:
                 continue
             statements = [child for child in block.children if child.type not in {"comment", "\n"}]
@@ -201,7 +211,7 @@ def _python_empty_error_handler_matches(source: str) -> Iterable[tuple[int, int,
 def _python_error_obscuring_catch_matches(source: str) -> Iterable[tuple[int, int, str]]:
     for _node, _start_line, end_line in _walk_python_try_blocks(source):
         for handler in _child_nodes(_node, "except_clause"):
-            block = handler.child_by_field_name("body")
+            block = _except_clause_body(handler)
             if block is None:
                 continue
             statements = [child for child in block.children if child.type not in {"comment", "\n"}]

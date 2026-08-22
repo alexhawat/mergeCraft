@@ -31,10 +31,6 @@ def _findings(source: str, *, rel_path: str = "src/sample.py") -> list[tuple[str
 # --- #434 empty-error-handler / error-obscuring-catch ------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W4: walk unnamed except_clause children (#434)",
-    strict=False,
-)
 def test_python_except_block_that_only_passes_is_reported() -> None:
     """``except OSError: pass`` swallows the failure and must be reported."""
     source = (
@@ -49,10 +45,6 @@ def test_python_except_block_that_only_passes_is_reported() -> None:
     assert "antislop/empty-error-handler" in _rule_ids(source)
 
 
-@pytest.mark.xfail(
-    reason="green after W4: walk unnamed except_clause children (#434)",
-    strict=False,
-)
 def test_python_except_block_returning_none_is_reported() -> None:
     """``except KeyError: return None`` hides the failure and must be reported."""
     source = (
