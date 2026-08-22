@@ -5,7 +5,7 @@ Authoring wave: **W5** (FC RED). Implementation: **W6** (skip analyze when ``dry
 
 ``--dry-run`` must still materialize the diff and return/print the offline review
 prompt. It must **not** invoke ``run_analyzer_pipeline`` or ``run_offline_analyze``
-when analyzers are enabled. Cross-wave contracts use ``strict=False`` xfails.
+when analyzers are enabled. W6 implementation landed; xfails reconciled.
 """
 
 from __future__ import annotations
@@ -94,10 +94,6 @@ class _OrderTap:
         return await self._inner.publish(review_out)  # type: ignore[union-attr]
 
 
-@pytest.mark.xfail(
-    reason="green after W6: dry-run skips analyzer catalog (#401)",
-    strict=False,
-)
 def test_review_dry_run_skips_run_analyzer_pipeline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -122,10 +118,6 @@ def test_review_dry_run_skips_run_analyzer_pipeline(
     assert pipeline_calls == []
 
 
-@pytest.mark.xfail(
-    reason="green after W6: dry-run skips analyzer catalog (#401)",
-    strict=False,
-)
 def test_review_dry_run_skips_run_offline_analyze(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -199,10 +191,6 @@ def test_review_dry_run_returns_offline_prompt(
     assert "demo.py" in out
 
 
-@pytest.mark.xfail(
-    reason="green after W6: dry-run skips analyzer catalog (#401)",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_offline_diff_review_dry_run_skips_pipeline_when_analyzers_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
