@@ -61,10 +61,6 @@ def test_python_except_block_returning_none_is_reported() -> None:
 # --- #435 byte-offset slicing ------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W4: decode node text like _node_text_from_node (#435)",
-    strict=False,
-)
 def test_non_ascii_above_an_import_must_not_make_a_used_import_phantom() -> None:
     """A used import stays used when the file contains a non-ASCII character."""
     source = "# café — notes\nimport os\n\n\ndef run() -> str:\n    return os.sep\n"
@@ -72,10 +68,6 @@ def test_non_ascii_above_an_import_must_not_make_a_used_import_phantom() -> None
     assert "antislop/phantom-import" not in _rule_ids(source)
 
 
-@pytest.mark.xfail(
-    reason="green after W4: decode node text like _node_text_from_node (#435)",
-    strict=False,
-)
 def test_snippet_after_non_ascii_quotes_real_source_text() -> None:
     """The placeholder snippet must be a substring of the file it came from."""
     source = "# — notes\ndef pending(value: int) -> int:\n    raise NotImplementedError\n"

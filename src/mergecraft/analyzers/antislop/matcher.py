@@ -506,9 +506,7 @@ def _child_nodes(node: Node, node_type: str) -> list[Node]:
 
 
 def _node_text(source: str, node: Node) -> str:
-    start = node.start_byte
-    end = node.end_byte
-    return source[start:end]
+    return _node_text_from_node(node)
 
 
 def _node_text_from_node(node: Node) -> str:
