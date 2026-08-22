@@ -27,7 +27,7 @@ uv run pytest --collect-only -q tests/docs/test_gen_agent_packages_blob_ref.py
 uv run pytest -q tests/docs/test_gen_agent_packages_blob_ref.py  # expect 3 XFAIL until W6
 ```
 
-## W5 evidence
+## W5 evidence (2026-08-22 ✅: 92ffc0b8)
 
 - `scripts/gen_agent_packages.py` sets `DEFAULT_BLOB_REF = "main"` and `_blob_ref()` ignores
   `action_pin_minimal()` (no git verify).
