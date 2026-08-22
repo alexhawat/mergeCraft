@@ -138,8 +138,14 @@ def _line_regex_matches(
         return
     pattern = re.compile(rule.pattern)
     for line_no, line in enumerate(source.splitlines(), start=1):
-        if pattern.search(line):
+        search_line = _strip_quoted_literals(line)
+        if pattern.search(search_line):
             yield line_no, line_no, _snippet(line, pattern)
+
+
+def _strip_quoted_literals(line: str) -> str:
+    """Drop string literals so regex heuristics do not match prose examples."""
+    return re.sub(r"""(['"])(?:\\.|(?!\1).)*\1""", '""', line)
 
 
 def _extract_line_comment(line: str, *, prefix: str) -> str | None:
@@ -245,10 +251,14 @@ def _python_phantom_import_matches(source: str) -> Iterable[tuple[int, int, str]
                             )
                         )
         elif node.type == "import_from_statement":
+            seen_import_keyword = False
             for child in node.children:
-                if child.type in {"dotted_name", "identifier"}:
-                    import_names.append((_node_text(source, child), node.start_point[0] + 1))
-                elif child.type == "aliased_import":
+                if child.type == "import":
+                    seen_import_keyword = True
+                    continue
+                if not seen_import_keyword:
+                    continue
+                if child.type == "aliased_import":
                     alias = child.child_by_field_name("alias")
                     name_node = child.child_by_field_name("name")
                     if alias is not None:
@@ -257,6 +267,8 @@ def _python_phantom_import_matches(source: str) -> Iterable[tuple[int, int, str]
                         import_names.append(
                             (_node_text(source, name_node), node.start_point[0] + 1)
                         )
+                elif child.type in {"dotted_name", "identifier"}:
+                    import_names.append((_node_text(source, child), child.start_point[0] + 1))
 
     if not import_names:
         return
@@ -269,7 +281,7 @@ def _python_phantom_import_matches(source: str) -> Iterable[tuple[int, int, str]
 
 
 def _js_empty_error_handler_matches(*, source: str) -> Iterable[tuple[int, int, str]]:
-    pattern = re.compile(r"catch\s*\([^)]*\)\s*\{\s*\}")
+    pattern = re.compile(r"catch\s*\([^)]*\)\s*\{\s*\}", re.DOTALL)
     for match in pattern.finditer(source):
         line = source.count("\n", 0, match.start()) + 1
         yield line, line, match.group(0).strip()

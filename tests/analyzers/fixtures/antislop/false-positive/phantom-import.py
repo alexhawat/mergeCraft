@@ -1,5 +1,4 @@
-import os
+from os.path import join
 
-
-def run() -> str:
-    return os.getcwd()
+def build(path: str) -> str:
+    return join(path, "file")
