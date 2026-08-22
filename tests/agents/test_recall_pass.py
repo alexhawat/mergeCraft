@@ -246,8 +246,8 @@ agents:
     )
     monkeypatch.chdir(tmp_path)
 
+    from mergecraft.agents.recall import build_recall_pass_brief
     from mergecraft.agents.registry import AgentRole, effective_agent_limits
-    from mergecraft.mcp.convergence_runtime import build_recall_dispatch_plan
 
     registry = _load_registry(tmp_path)
     binding = registry.resolve_role(AgentRole.recall)
@@ -259,15 +259,9 @@ agents:
     assert limits.budget == 4
     assert limits.timeout_s == 90
 
-    plan = build_recall_dispatch_plan(
-        diff_text=_SAMPLE_DIFF,
-        draft_findings=[],
-        binding=binding,
-        settings=settings,
-        tool_state=_tool_ctx(tmp_path).tool_state,
-    )
-    assert plan.budget == 4
-    assert plan.timeout_s == 90
+    brief = build_recall_pass_brief(diff_text=_SAMPLE_DIFF, draft_findings=[])
+    assert isinstance(brief, str)
+    assert _SAMPLE_DIFF.strip() in brief
 
 
 def test_recall_pass_cannot_call_terminal_or_mutation_tools(tmp_path: Path) -> None:

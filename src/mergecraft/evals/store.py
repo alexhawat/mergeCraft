@@ -805,14 +805,6 @@ def _now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-from mergecraft.evals.permanent_tests import (  # noqa: E402
-    PERMANENT_TEST_DIR_NAME,
-    PERMANENT_TEST_FILE_SUFFIX,
-    permanent_test_path,
-    render_permanent_test,
-    write_permanent_test,
-)
-
 __all__ = [
     "CASES_DIR_NAME",
     "CASE_FILE_SUFFIX",
@@ -824,8 +816,6 @@ __all__ = [
     "CATEGORY_REVERTED",
     "DEFAULT_BANK_DIR",
     "FAILURE_CATEGORIES",
-    "PERMANENT_TEST_DIR_NAME",
-    "PERMANENT_TEST_FILE_SUFFIX",
     "Case",
     "CaseFilter",
     "CaseRound",
@@ -841,9 +831,6 @@ __all__ = [
     "list_multi_round_cases",
     "load_case",
     "parse_case_text",
-    "permanent_test_path",
     "render_case_text",
-    "render_permanent_test",
     "replay_case",
-    "write_permanent_test",
 ]

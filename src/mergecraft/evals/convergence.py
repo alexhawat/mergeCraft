@@ -7,6 +7,8 @@ overlap (±``DEFAULT_LINE_SLACK`` lines), not fingerprint equality.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,6 +42,8 @@ __all__ = [
 ]
 
 _SURFACED_STATES: Final[frozenset[str]] = frozenset({"open", "deferred"})
+RECALL_PASS_CORPUS_PATH: Final[Path] = Path("evals/corpora/recall_pass_corpus.json")
+_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
 
 
 class ConvergenceRound(BaseModel):
@@ -98,24 +102,112 @@ class RecallPassCorpusReport(BaseModel):
     without_recall: ConvergenceMetrics
 
 
-def _score_recall_corpus(*, with_recall: bool) -> ConvergenceMetrics:
-    from mergecraft.evals.corpora.recall_pass_corpus import (
-        recall_corpus_cases,
-        recall_round_one,
-        recall_round_two,
+def _resolved_recall_pass_corpus_path() -> Path:
+    if RECALL_PASS_CORPUS_PATH.is_file():
+        return RECALL_PASS_CORPUS_PATH
+    checkout = _REPO_ROOT / RECALL_PASS_CORPUS_PATH
+    if checkout.is_file():
+        return checkout
+    msg = f"recall pass corpus does not exist: {RECALL_PASS_CORPUS_PATH}"
+    raise FileNotFoundError(msg)
+
+
+def _load_recall_pass_corpus() -> tuple[str, list[tuple[str, str, str]]]:
+    payload = json.loads(_resolved_recall_pass_corpus_path().read_text(encoding="utf-8"))
+    diff_text = str(payload["diff"])
+    cases: list[tuple[str, str, str]] = []
+    for row in payload["cases"]:
+        cases.append((str(row["id"]), str(row["drafted"]), str(row["missed"])))
+    return diff_text, cases
+
+
+def _recall_round_one(
+    *,
+    case_id: str,
+    drafted_body: str,
+    missed_body: str,
+    with_recall: bool,
+    diff_text: str,
+) -> ConvergenceRound:
+    from mergecraft.review_taxonomy import finding_fingerprint
+
+    path = "src/app.py"
+    drafted_fp = finding_fingerprint(path=path, body=drafted_body)
+    missed_fp = finding_fingerprint(path="src/util.py", body=missed_body)
+    drafted_row = {
+        "fingerprint": drafted_fp,
+        "path": path,
+        "start_line": 12,
+        "end_line": 12,
+        "body": drafted_body,
+    }
+    missed_row = {
+        "fingerprint": missed_fp,
+        "path": "src/util.py",
+        "start_line": 42,
+        "end_line": 42,
+        "body": missed_body,
+    }
+    ledger = FindingLedger()
+    ledger.record(drafted_fp, "open", source=case_id, round_index=1)
+    generated = [drafted_fp]
+    findings = [drafted_row]
+    if with_recall:
+        ledger.record(
+            missed_fp,
+            "deferred",
+            source=case_id,
+            round_index=1,
+            reason="path:src/util.py",
+        )
+        generated.append(missed_fp)
+        findings.append(missed_row)
+    return ConvergenceRound(
+        round_index=1,
+        ledger=ledger,
+        findings=findings,
+        generated_fingerprints=generated,
+        diff_text=diff_text,
     )
 
+
+def _recall_round_two(*, case_id: str, missed_body: str, diff_text: str) -> ConvergenceRound:
+    from mergecraft.review_taxonomy import finding_fingerprint
+
+    missed_fp = finding_fingerprint(path="src/util.py", body=missed_body)
+    ledger = FindingLedger()
+    ledger.record(missed_fp, "open", source=case_id, round_index=2)
+    return ConvergenceRound(
+        round_index=2,
+        ledger=ledger,
+        findings=[
+            {
+                "fingerprint": missed_fp,
+                "path": "src/util.py",
+                "start_line": 42,
+                "end_line": 42,
+                "body": missed_body,
+            }
+        ],
+        generated_fingerprints=[missed_fp],
+        diff_text=diff_text,
+    )
+
+
+def _score_recall_corpus(*, with_recall: bool) -> ConvergenceMetrics:
+    diff_text, cases = _load_recall_pass_corpus()
     case_results: list[ConvergenceCaseResult] = []
-    for case_id, drafted, missed in recall_corpus_cases():
+    for case_id, drafted, missed in cases:
         report = score_convergence(
             [
-                recall_round_one(
+                _recall_round_one(
                     case_id=case_id,
                     drafted_body=drafted,
                     missed_body=missed,
                     with_recall=with_recall,
+                    diff_text=diff_text,
                 ),
-                recall_round_two(case_id=case_id, missed_body=missed),
+                _recall_round_two(case_id=case_id, missed_body=missed, diff_text=diff_text),
             ]
         )
         case_results.append(ConvergenceCaseResult(case_id=case_id, report=report))
@@ -331,23 +423,19 @@ def fold_convergence_reports(
 
 
 def _build_recall_baseline_case_results() -> list[ConvergenceCaseResult]:
-    from mergecraft.evals.corpora.recall_pass_corpus import (
-        recall_corpus_cases,
-        recall_round_one,
-        recall_round_two,
-    )
-
+    diff_text, cases = _load_recall_pass_corpus()
     rows: list[ConvergenceCaseResult] = []
-    for case_id, drafted, missed in recall_corpus_cases():
+    for case_id, drafted, missed in cases:
         report = score_convergence(
             [
-                recall_round_one(
+                _recall_round_one(
                     case_id=case_id,
                     drafted_body=drafted,
                     missed_body=missed,
                     with_recall=False,
+                    diff_text=diff_text,
                 ),
-                recall_round_two(case_id=case_id, missed_body=missed),
+                _recall_round_two(case_id=case_id, missed_body=missed, diff_text=diff_text),
             ]
         )
         rows.append(ConvergenceCaseResult(case_id=case_id, report=report))

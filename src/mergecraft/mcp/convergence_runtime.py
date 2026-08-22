@@ -13,13 +13,10 @@ from mergecraft.modes._pr_summary_format import append_collateral_to_inline_body
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from mergecraft.agents.recall import RecallPassPlan
-    from mergecraft.agents.registry import AgentBinding, AgentLimits, Registry
-    from mergecraft.classify.change_classifier import ChangeClassification
+    from mergecraft.agents.registry import AgentBinding, AgentLimits
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import AnalyzerRunState, ToolState
-    from mergecraft.review.lens_routing import LensRoutingDecision
 
 
 def subagent_limits_for_round(
@@ -36,27 +33,6 @@ def subagent_limits_for_round(
         settings=settings,
         round_index=ledger_round_index(tool_state),
     )
-
-
-def route_lenses_for_review(
-    classification: ChangeClassification,
-    *,
-    registry: Registry,
-    prior_dispatched_lens_ids: Sequence[str] = (),
-    dispatch_budget: int = 8,
-    incremental: bool = False,
-) -> LensRoutingDecision:
-    """Route lenses for a review round — complement bias on incremental runs."""
-    from mergecraft.review.lens_routing import route_lenses, route_lenses_complement
-
-    if incremental and prior_dispatched_lens_ids:
-        return route_lenses_complement(
-            classification,
-            registry=registry,
-            prior_dispatched_lens_ids=prior_dispatched_lens_ids,
-            dispatch_budget=dispatch_budget,
-        )
-    return route_lenses(classification, registry=registry)
 
 
 def _finding_from_row(row: Mapping[str, object]) -> Finding:
@@ -109,22 +85,6 @@ def merge_recall_findings_into_analyzer_run(
     analyzer_run.deferred_findings = deferred_rows
     if placement.deferred_section:
         analyzer_run.deferred_section = placement.deferred_section
-
-
-def build_recall_dispatch_plan(
-    *,
-    diff_text: str,
-    draft_findings: Sequence[Mapping[str, object]],
-    binding: AgentBinding,
-    settings: RepoSettings,
-    tool_state: ToolState,
-) -> RecallPassPlan:
-    """Return recall brief and round-scaled dispatch limits for one orchestrator run."""
-    from mergecraft.agents.recall import RecallPassPlan, build_recall_pass_brief
-
-    limits = subagent_limits_for_round(binding, settings=settings, tool_state=tool_state)
-    brief = build_recall_pass_brief(diff_text=diff_text, draft_findings=draft_findings)
-    return RecallPassPlan(budget=limits.budget, timeout_s=limits.timeout_s, brief=brief)
 
 
 def collateral_by_fingerprint(ctx: ToolContext) -> dict[str, list[str]]:
@@ -274,12 +234,10 @@ def strip_recall_inline_comments(
 
 __all__ = [
     "apply_recall_pass_post_process",
-    "build_recall_dispatch_plan",
     "collateral_by_fingerprint",
     "enforce_recall_deferred_lane_at_publish",
     "merge_recall_findings_into_analyzer_run",
     "prepare_inline_comment_for_publish",
-    "route_lenses_for_review",
     "strip_recall_inline_comments",
     "subagent_limits_for_round",
 ]

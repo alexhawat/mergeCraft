@@ -46,6 +46,16 @@ from mergecraft.cli.exits import (
 )
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.config import load_repo_settings
+from mergecraft.evals import (
+    CASE_FILE_SUFFIX,
+    DEFAULT_BANK_DIR,
+    Case,
+    add_case,
+    list_cases,
+    load_case,
+    replay_case,
+    write_permanent_test,
+)
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
@@ -64,19 +74,7 @@ from mergecraft.evals.scoring import (
     load_reported_findings,
     score_findings,
 )
-from mergecraft.evals.store import (
-    CASE_FILE_SUFFIX,
-    CATEGORY_REJECTED,
-    CATEGORY_REVERTED,
-    DEFAULT_BANK_DIR,
-    FAILURE_CATEGORIES,
-    Case,
-    add_case,
-    list_cases,
-    load_case,
-    replay_case,
-    write_permanent_test,
-)
+from mergecraft.evals.store import CATEGORY_REJECTED, CATEGORY_REVERTED, FAILURE_CATEGORIES
 from mergecraft.models import get_model_provider
 from mergecraft.utils.agent_resolve import resolve_effective_model_slug, resolve_model
 from mergecraft.utils.learnings import LearningProvenance
