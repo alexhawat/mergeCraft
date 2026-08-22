@@ -8,6 +8,7 @@ command:
   - trufflehog
   - filesystem
   - -j
+  - --no-update
   - --no-verification
   - --config
   - "{trufflehog_config}"

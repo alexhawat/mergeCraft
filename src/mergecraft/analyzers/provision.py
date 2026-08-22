@@ -6,6 +6,7 @@ import contextlib
 import fcntl
 import hashlib
 import os
+import re
 import shutil
 import stat
 import sys
@@ -56,6 +57,82 @@ def _verify_sha256(path: Path, expected: str) -> None:
             "refusing to execute unpinned binary"
         )
         raise ProvisionError(msg)
+
+
+#: Sidecar recording the sha256 of the binary that was actually installed into a
+#: sha-keyed cache directory. The directory key is the *archive* pin, so it says
+#: nothing about the extracted binary once a tool rewrites itself in place (e.g.
+#: TruffleHog's built-in updater). The receipt closes that gap for every managed
+#: analyzer: a cached binary is only reused when it still hashes to what we wrote.
+RECEIPT_NAME = ".provisioned-sha256"
+
+_PROVISION_LOCK_NAME = ".provision.lock"
+_HEX64_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def _receipt_path(cache_root: Path) -> Path:
+    return cache_root / RECEIPT_NAME
+
+
+def read_provision_receipt(cache_root: Path) -> str | None:
+    """Return the recorded binary sha256 for a cache directory, or ``None``."""
+    try:
+        raw = _receipt_path(cache_root).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    candidate = raw.strip().casefold()
+    return candidate if _HEX64_RE.fullmatch(candidate) else None
+
+
+def _write_provision_receipt(cache_root: Path, digest: str) -> None:
+    receipt = _receipt_path(cache_root)
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    staging = receipt.with_name(f".{receipt.name}.staging")
+    staging.write_text(f"{digest.casefold()}\n", encoding="utf-8")
+    os.replace(staging, receipt)
+
+
+def _verified_cache_hit(*, cached: Path, cache_root: Path, manifest_id: str) -> str | None:
+    """Return the cached binary's sha256 when it still matches its receipt.
+
+    Returns ``None`` when the cache entry is unusable — no receipt (provisioned by
+    an older mergeCraft, or the receipt was removed) or a digest that no longer
+    matches. Callers must re-provision instead of executing the file.
+    """
+    recorded = read_provision_receipt(cache_root)
+    if recorded is None:
+        logger.info(
+            "no provisioning receipt for cached {} binary at {} — re-provisioning from the pin",
+            manifest_id,
+            cached,
+        )
+        return None
+    actual = _sha256_file(cached)
+    if actual.casefold() != recorded:
+        logger.warning(
+            "cached {} binary changed after provisioning (recorded {}, found {}) — "
+            "discarding and re-provisioning from the pin",
+            manifest_id,
+            recorded,
+            actual,
+        )
+        return None
+    return actual
+
+
+def _purge_cache_entry(cache_root: Path) -> None:
+    """Drop everything in a cache directory except the lock we hold."""
+    for child in cache_root.iterdir():
+        if child.name == _PROVISION_LOCK_NAME:
+            continue
+        try:
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        except OSError as exc:
+            msg = f"failed to discard untrusted cache entry {child}: {exc}"
+            raise ProvisionError(msg) from exc
 
 
 def _safe_archive_member_path(dest_dir: Path, member_name: str) -> Path:
@@ -160,7 +237,7 @@ def _extract_executable(archive: Path, dest_dir: Path, binary_name: str) -> Path
 def _cache_provision_lock(cache_root: Path) -> Iterator[None]:
     """Serialize cache writes so parallel workers cannot clobber a running binary."""
     cache_root.mkdir(parents=True, exist_ok=True)
-    lock_path = cache_root / ".provision.lock"
+    lock_path = cache_root / _PROVISION_LOCK_NAME
     with lock_path.open("a+", encoding="utf-8") as lock_file:
         if sys.platform != "win32":
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
@@ -171,12 +248,16 @@ def _cache_provision_lock(cache_root: Path) -> Iterator[None]:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def _install_cached_binary(*, staged: Path, cached: Path) -> None:
+def _install_cached_binary(*, staged: Path, cached: Path) -> str:
+    """Install the staged binary into the cache and record its sha256 receipt."""
     cached.parent.mkdir(parents=True, exist_ok=True)
     staging = cached.with_name(f".{cached.name}.staging")
     staging.write_bytes(staged.read_bytes())
     staging.chmod(staging.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    digest = _sha256_file(staging)
     os.replace(staging, cached)
+    _write_provision_receipt(cached.parent, digest)
+    return digest
 
 
 def fetch_unpinned(*, url: str, cache_dir: Path) -> None:
@@ -208,23 +289,33 @@ def provision_managed_binary(
     cache_root = _cache_path(cache_dir, manifest.id, platform, artifact_pin)
     cached = cache_root / binary_name
     if cached.is_file():
-        binary_sha = _sha256_file(cached)
-        return ProvisionResult(
-            resolved_path=cached,
-            sha256=binary_sha,
-            version=manifest.version,
-            source="cache",
+        verified = _verified_cache_hit(
+            cached=cached, cache_root=cache_root, manifest_id=manifest.id
         )
-
-    with _cache_provision_lock(cache_root):
-        if cached.is_file():
-            binary_sha = _sha256_file(cached)
+        if verified is not None:
             return ProvisionResult(
                 resolved_path=cached,
-                sha256=binary_sha,
+                sha256=verified,
                 version=manifest.version,
                 source="cache",
             )
+
+    with _cache_provision_lock(cache_root):
+        if cached.is_file():
+            verified = _verified_cache_hit(
+                cached=cached, cache_root=cache_root, manifest_id=manifest.id
+            )
+            if verified is not None:
+                return ProvisionResult(
+                    resolved_path=cached,
+                    sha256=verified,
+                    version=manifest.version,
+                    source="cache",
+                )
+            # Never execute a binary we cannot tie back to the pin: drop the whole
+            # entry (binary plus any updater state a self-updating tool left behind)
+            # and fall through to a fresh pinned download.
+            _purge_cache_entry(cache_root)
 
         logger.info("provisioning {} {} from pinned url", manifest.id, platform)
         with tempfile.TemporaryDirectory() as tmp:
@@ -246,9 +337,8 @@ def provision_managed_binary(
             else:
                 staged = download_path
 
-            _install_cached_binary(staged=staged, cached=cached)
+            binary_sha = _install_cached_binary(staged=staged, cached=cached)
 
-    binary_sha = _sha256_file(cached)
     return ProvisionResult(
         resolved_path=cached,
         sha256=binary_sha,
@@ -328,11 +418,13 @@ def platform_key() -> str:
 
 __all__ = [
     "BAKED_ANALYZER_ROOT",
+    "RECEIPT_NAME",
     "ProvisionError",
     "ProvisionResult",
     "fetch_unpinned",
     "platform_key",
     "provision_managed_binary",
+    "read_provision_receipt",
     "resolve_baked_binary",
     "resolve_with_lock",
 ]
