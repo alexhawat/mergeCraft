@@ -85,6 +85,7 @@ _ROUTE_TABLE: Final[dict[tuple[str, str], str]] = {
     ("security", "high"): "anthropic/claude-opus",
     ("security", "trivial"): "anthropic/claude-haiku",
     ("tests", "high"): "openai/gpt-5.3-codex",
+    ("tests", "critical"): "openai/gpt-5.3-codex",
     ("tests", "trivial"): "anthropic/claude-haiku",
 }
 

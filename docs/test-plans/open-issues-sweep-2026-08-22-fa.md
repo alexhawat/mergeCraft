@@ -18,6 +18,7 @@ Authoring wave: **W1** (FA RED) · Implementation: **W2** (`provider_health.py` 
 | FA394b | `route_model(security, critical)` is **not** `anthropic/claude-haiku` | unit | happy | same |
 | FA394c | `route_model(security, critical)` equals `route_model(security, high)` (D7) | unit | happy | same |
 | FA394d | `medium` / `low` / `trivial` security bands stay on cheap pick unless `_ROUTE_TABLE` has a row | unit | edge | same (`trivial` has explicit Haiku row; `medium`/`low` use fallback) |
+| FA394e | `route_model(tests, critical)` equals `route_model(tests, high)` (explicit table row) | unit | edge | same |
 
 ## W1 RED evidence (@ `243eaf01`)
 

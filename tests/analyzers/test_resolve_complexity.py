@@ -24,6 +24,7 @@ from pathlib import Path
 
 from mergecraft.analyzers.registry import load_catalog
 from mergecraft.analyzers.resolve import _TYPE_CHECKER_IDS, resolve_analyzer
+from mergecraft.analyzers.trust import IN_PROCESS_ANALYZER_IDS
 
 CATALOG = {m.id: m for m in load_catalog()}
 
@@ -34,8 +35,8 @@ def test_resolve_analyzer_behaviour_unchanged(tmp_path: Path) -> None:
     Four scenarios per manifest:
 
     1. Nothing available — only `declared_unavailable` manifests and the
-       always-in-process `agentsec` special case resolve to anything but
-       `skip`.
+       always-in-process native engines (`agentsec`, `antislop`) resolve to
+       anything but `skip`.
     2. The repo already has the tool installed — repo-native wins for
        everyone except `declared_unavailable`, which is checked first and
        short-circuits regardless of tool availability.
@@ -63,7 +64,7 @@ def test_resolve_analyzer_behaviour_unchanged(tmp_path: Path) -> None:
         )
         if manifest.declared_unavailable:
             expected_mode = "skip"
-        elif manifest_id == "agentsec":
+        elif manifest_id in IN_PROCESS_ANALYZER_IDS:
             expected_mode = "repo-native"
         else:
             expected_mode = "skip"
@@ -97,7 +98,7 @@ def test_resolve_analyzer_behaviour_unchanged(tmp_path: Path) -> None:
                 f"{manifest_id} repo-has-tool: mode={plan.mode!r}, expected {expected_mode!r}"
             )
         if (
-            manifest_id != "agentsec"
+            manifest_id not in IN_PROCESS_ANALYZER_IDS
             and plan.mode == "repo-native"
             and (not plan.version_note or "9.9.9" not in plan.version_note)
         ):
@@ -117,7 +118,7 @@ def test_resolve_analyzer_behaviour_unchanged(tmp_path: Path) -> None:
         )
         if manifest.declared_unavailable or sqlfluff_needs_dialect:
             expected_mode = "skip"
-        elif manifest_id == "agentsec":
+        elif manifest_id in IN_PROCESS_ANALYZER_IDS:
             expected_mode = "repo-native"
         elif manifest_id in _TYPE_CHECKER_IDS:
             expected_mode = "skip"
@@ -142,7 +143,7 @@ def test_resolve_analyzer_behaviour_unchanged(tmp_path: Path) -> None:
         )
         if manifest.declared_unavailable or sqlfluff_needs_dialect:
             expected_mode = "skip"
-        elif manifest_id == "agentsec":
+        elif manifest_id in IN_PROCESS_ANALYZER_IDS:
             expected_mode = "repo-native"
         elif manifest_id in _TYPE_CHECKER_IDS:
             expected_mode = "skip"

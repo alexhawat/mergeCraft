@@ -80,6 +80,11 @@ def test_route_model_per_specialist_and_risk() -> None:
     assert critical != cheap
     assert critical == high
 
+    tests_high = route(specialist="tests", risk="high")
+    tests_critical = route(specialist="tests", risk="critical")
+    assert tests_critical == tests_high
+    assert tests_critical == "openai/gpt-5.3-codex"
+
 
 def test_heterogeneous_verifier_and_judge_models() -> None:
     """Happy: verifier and judge may use different models."""
