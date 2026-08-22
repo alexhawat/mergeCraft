@@ -382,18 +382,32 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
 
     existing = tool_state.finding_ledger
     if existing is not None:
-        hydrated_fps = {record.fingerprint for record in ledger.records()}
+        # When both in-memory and hydrated rows share a fingerprint, keep the
+        # newer ``recorded_at`` stamp — progress comments can lag live session
+        # updates during the same Action run.
         for record in existing.records():
-            if record.fingerprint in hydrated_fps:
+            hydrated = ledger._records.get(record.fingerprint)
+            if hydrated is None:
+                ledger.record(
+                    record.fingerprint,
+                    record.state,
+                    source=record.source or "unknown",
+                    round_index=record.round_index if record.round_index is not None else 1,
+                    reason=record.reason,
+                    recorded_at=record.recorded_at,
+                )
                 continue
-            ledger.record(
-                record.fingerprint,
-                record.state,
-                source=record.source or "unknown",
-                round_index=record.round_index if record.round_index is not None else 1,
-                reason=record.reason,
-                recorded_at=record.recorded_at,
-            )
+            existing_at = record.recorded_at or ""
+            hydrated_at = hydrated.recorded_at or ""
+            if existing_at > hydrated_at:
+                ledger.record(
+                    record.fingerprint,
+                    record.state,
+                    source=record.source or "unknown",
+                    round_index=record.round_index if record.round_index is not None else 1,
+                    reason=record.reason,
+                    recorded_at=record.recorded_at,
+                )
 
     tool_state.finding_ledger = ledger
     tool_state.finding_ledger_loaded = True

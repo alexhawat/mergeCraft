@@ -77,6 +77,12 @@ import yaml
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from mergecraft.evals.multi_round_types import (
+    CATEGORY_MULTI_ROUND_CONVERGENCE,
+    CaseRound,
+    CaseRoundFinding,
+    CaseRoundLedgerEntry,
+)
 from mergecraft.utils.learnings import LearningProvenance
 
 # D13 — local + file-backed. No database, no hosted service. The bank
@@ -107,15 +113,6 @@ CASE_STATUS_BLOCKED: CaseStatus = "blocked"
 CATEGORY_REJECTED: str = "rejected"
 CATEGORY_REVERTED: str = "reverted"
 FAILURE_CATEGORIES: frozenset[str] = frozenset({CATEGORY_REJECTED, CATEGORY_REVERTED})
-
-from mergecraft.evals.convergence_store import (  # noqa: E402
-    CATEGORY_MULTI_ROUND_CONVERGENCE,
-    CaseRound,
-    CaseRoundFinding,
-    CaseRoundLedgerEntry,
-    convergence_rounds_from_case,
-    list_multi_round_cases,
-)
 
 # The case directory's per-file front-matter shape. Each row is the
 # field name and the parser key expected in the YAML map. Keeping the
@@ -825,10 +822,8 @@ __all__ = [
     "ReplayDiff",
     "add_case",
     "build_eval_metadata",
-    "convergence_rounds_from_case",
     "diff_cases",
     "list_cases",
-    "list_multi_round_cases",
     "load_case",
     "parse_case_text",
     "render_case_text",

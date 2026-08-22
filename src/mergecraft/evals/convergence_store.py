@@ -1,11 +1,15 @@
-"""Multi-round convergence case shapes and materialization (W10, RC6)."""
+"""Multi-round convergence case materialization (W10, RC6)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field
-
+from mergecraft.evals.multi_round_types import (
+    CATEGORY_MULTI_ROUND_CONVERGENCE,
+    CaseRound,
+    CaseRoundFinding,
+    CaseRoundLedgerEntry,
+)
 from mergecraft.findings.lifecycle import validate_lifecycle_state
 
 if TYPE_CHECKING:
@@ -13,43 +17,6 @@ if TYPE_CHECKING:
 
     from mergecraft.evals.convergence import ConvergenceRound
     from mergecraft.evals.store import Case
-
-CATEGORY_MULTI_ROUND_CONVERGENCE: str = "multi_round_convergence"
-
-
-class CaseRoundLedgerEntry(BaseModel):
-    """One ledger row for a round in a multi-round convergence case."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    fingerprint: str = Field(min_length=1)
-    state: str = Field(min_length=1)
-    round_index: int | None = None
-
-
-class CaseRoundFinding(BaseModel):
-    """One ground-truth finding row with the round it first appeared in."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    fingerprint: str = Field(min_length=1)
-    path: str = Field(min_length=1)
-    start_line: int
-    end_line: int
-    body: str = Field(min_length=1)
-    first_appeared_round: int = Field(ge=1)
-
-
-class CaseRound(BaseModel):
-    """One review round: diff, recorded findings, and ledger snapshot."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    round_index: int = Field(ge=1)
-    diff_text: str = ""
-    findings: list[CaseRoundFinding] = Field(default_factory=list)
-    ledger: list[CaseRoundLedgerEntry] = Field(default_factory=list)
-    generated_fingerprints: list[str] = Field(default_factory=list)
 
 
 def convergence_rounds_from_case(case: Case) -> list[ConvergenceRound]:

@@ -318,3 +318,75 @@ async def test_hydrate_merges_pre_checkout_ledger_records(tmp_path: Path) -> Non
     assert states[persisted_fp] == "deferred"
     assert len(states) == 2
     assert state.finding_ledger_loaded is True
+
+
+@pytest.mark.asyncio
+async def test_hydrate_collision_prefers_newer_recorded_at(tmp_path: Path) -> None:
+    """When hydrate and in-memory share a fingerprint, keep the newer ``recorded_at``."""
+    from mergecraft.mcp.context import (
+        PayloadEvent,
+        RepoIdentity,
+        ResolvedPayload,
+        ToolContext,
+    )
+    from mergecraft.mcp.tool_state import ProgressComment, init_tool_state
+    from mergecraft.modes import compute_modes
+    from mergecraft.review_taxonomy import finding_fingerprint
+    from mergecraft.utils.github import GitHubClient
+
+    ledger = _ledger_mod()
+    collision_fp = finding_fingerprint(path="src/collision.py", body="Shared fingerprint row.")
+
+    persisted_book = ledger.FindingLedger()
+    persisted_book.record(
+        collision_fp,
+        "deferred",
+        source="overflow",
+        round_index=1,
+        recorded_at="2026-08-20T10:00:00Z",
+    )
+    progress_body = ledger.merge_ledger_into_comment(
+        "## mergeCraft progress\n\nRound 1 complete.\n",
+        records=persisted_book.records(),
+    )
+
+    class _Scm:
+        async def get_issue_comment(
+            self, owner: str, repo: str, comment_id: int
+        ) -> dict[str, object]:
+            assert comment_id == 42
+            return {"body": progress_body}
+
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    pre_checkout = ledger.ensure_finding_ledger(state)
+    pre_checkout.record(
+        collision_fp,
+        "open",
+        source="inline",
+        round_index=2,
+        recorded_at="2026-08-22T12:00:00Z",
+    )
+    state.progress_comment = ProgressComment(id=42, type="issue")
+    state.finding_ledger_loaded = False
+
+    ctx = ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request")),
+        github=GitHubClient(token="test-token"),
+        scm=_Scm(),
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=compute_modes("claude"),
+        tool_state=state,
+        mcp_server_url="",
+        tmpdir=str(tmp_path),
+    )
+
+    hydrated = await ledger.hydrate_finding_ledger_from_progress_comment(ctx)
+
+    record = next(row for row in hydrated.records() if row.fingerprint == collision_fp)
+    assert record.state == "open"
+    assert record.recorded_at == "2026-08-22T12:00:00Z"
+    assert record.round_index == 2

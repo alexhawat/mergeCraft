@@ -83,24 +83,14 @@ def merge_recall_findings_into_analyzer_run(
             }
         )
     analyzer_run.deferred_findings = deferred_rows
-    from mergecraft.analyzers.budget import _agent_dict_to_finding, _render_deferred_section
+    from mergecraft.analyzers.budget import sync_deferred_section
 
-    deferred_findings = [
-        _agent_dict_to_finding(row) for row in deferred_rows if isinstance(row, dict)
-    ]
-    analyzer_run.deferred_section = _render_deferred_section(deferred_findings)
+    sync_deferred_section(analyzer_run)
 
 
 def collateral_by_fingerprint(ctx: ToolContext) -> dict[str, list[str]]:
     """Map analyzer finding fingerprints to optional collateral path lists (RC11)."""
-    rows: list[Mapping[str, object]] = []
-    analyzer_run = ctx.tool_state.analyzer_run
-    if analyzer_run is not None:
-        rows.extend(row for row in analyzer_run.findings if isinstance(row, dict))
-        rows.extend(row for row in analyzer_run.deferred_findings if isinstance(row, dict))
-        rows.extend(row for row in analyzer_run.inline if isinstance(row, dict))
-    rows.extend(row for row in ctx.tool_state.agent_findings if isinstance(row, dict))
-    rows.extend(row for row in ctx.tool_state.confirmed_findings if isinstance(row, dict))
+    rows = ctx.tool_state.iter_finding_rows()
     mapping: dict[str, list[str]] = {}
     for row in rows:
         fingerprint = str(row.get("fingerprint") or "").strip()

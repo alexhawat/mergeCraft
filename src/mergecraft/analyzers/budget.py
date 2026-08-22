@@ -109,7 +109,7 @@ def _render_mechanical_section(mechanical: list[Finding]) -> str | None:
     return "\n".join(lines)
 
 
-def _render_deferred_section(deferred: list[Finding]) -> str | None:
+def render_deferred_section(deferred: list[Finding]) -> str | None:
     if not deferred:
         return None
     lines = [
@@ -125,7 +125,7 @@ def _render_deferred_section(deferred: list[Finding]) -> str | None:
     return "\n".join(lines)
 
 
-def _agent_dict_to_finding(item: dict[str, Any]) -> Finding:
+def agent_dict_to_finding(item: dict[str, Any]) -> Finding:
     message = str(item.get("message", item.get("body", "")))
     path = str(item.get("path", ""))
     start_line = int(item.get("line", item.get("start_line", 1)))
@@ -178,14 +178,32 @@ def place_findings(
             else:
                 mechanical.append(item)
         elif not _is_body_only_finding(item):
-            deferred.append(_agent_dict_to_finding(item))
+            deferred.append(agent_dict_to_finding(item))
 
     return FindingPlacement(
         inline=inline,
         mechanical=mechanical,
         mechanical_section=_render_mechanical_section(mechanical),
         deferred=deferred,
-        deferred_section=_render_deferred_section(deferred),
+        deferred_section=render_deferred_section(deferred),
+    )
+
+
+def render_deferred_section_from_rows(rows: list[dict[str, Any]]) -> str | None:
+    """Render the deferred HTML section from serialized analyzer-run rows."""
+    findings = [agent_dict_to_finding(row) for row in rows if isinstance(row, dict)]
+    return render_deferred_section(findings)
+
+
+def sync_deferred_section(analyzer_run: object) -> None:
+    """Re-render ``deferred_section`` from ``deferred_findings`` rows."""
+    from mergecraft.mcp.tool_state import AnalyzerRunState
+
+    if not isinstance(analyzer_run, AnalyzerRunState):
+        msg = "sync_deferred_section expects AnalyzerRunState"
+        raise TypeError(msg)
+    analyzer_run.deferred_section = render_deferred_section_from_rows(
+        analyzer_run.deferred_findings
     )
 
 
@@ -194,6 +212,10 @@ __all__ = [
     "FIX_ALL_DEFERRED_HEADING",
     "MECHANICAL_SECTION_HEADING",
     "FindingPlacement",
+    "agent_dict_to_finding",
     "default_inline_budget",
     "place_findings",
+    "render_deferred_section",
+    "render_deferred_section_from_rows",
+    "sync_deferred_section",
 ]

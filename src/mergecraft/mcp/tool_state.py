@@ -274,6 +274,13 @@ class AnalyzerRunState:
     # unkeyed run is never reused by ``run_analyzers``.
     key: AnalyzerRunKey | None = None
 
+    def all_rows(self) -> list[dict[str, Any]]:
+        """Return every dict-shaped finding row held on this analyzer run."""
+        rows: list[dict[str, Any]] = []
+        for collection in (self.findings, self.deferred_findings, self.inline):
+            rows.extend(row for row in collection if isinstance(row, dict))
+        return rows
+
 
 @dataclass(slots=True)
 class CiEvidenceState:
@@ -425,6 +432,15 @@ class ToolState:
     # appended) on each call. Read by ``validation_state_from_tool_context`` so
     # ``approve`` is rejected when a required gate recorded ``status: failed``.
     static_checks: list[dict[str, Any]] = field(default_factory=list)
+
+    def iter_finding_rows(self) -> list[dict[str, Any]]:
+        """Return every dict-shaped finding row across analyzer and agent lanes."""
+        rows: list[dict[str, Any]] = []
+        if self.analyzer_run is not None:
+            rows.extend(self.analyzer_run.all_rows())
+        rows.extend(row for row in self.agent_findings if isinstance(row, dict))
+        rows.extend(row for row in self.confirmed_findings if isinstance(row, dict))
+        return rows
 
 
 def record_lens_routing_decision(

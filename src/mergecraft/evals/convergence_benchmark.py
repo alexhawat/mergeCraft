@@ -155,13 +155,17 @@ def replay_convergence(
 
 def _assert_recall_pass_corpus_gate() -> None:
     """Fail closed when the recall-pass A/B corpus does not improve first-pass recall."""
-    from mergecraft.evals.convergence import RECALL_PASS_W0_BASELINE, evaluate_recall_pass_corpus
+    from mergecraft.evals.convergence import (
+        evaluate_recall_pass_corpus,
+        load_recall_pass_w0_baseline,
+    )
 
     report = evaluate_recall_pass_corpus()
+    baseline = load_recall_pass_w0_baseline()
     if report.with_recall.mean_first_pass_recall <= report.without_recall.mean_first_pass_recall:
         msg = "recall-pass corpus gate failed: with-recall first-pass recall did not improve"
         raise ValueError(msg)
-    if report.with_recall.mean_first_pass_recall <= RECALL_PASS_W0_BASELINE.mean_first_pass_recall:
+    if report.with_recall.mean_first_pass_recall <= baseline.mean_first_pass_recall:
         msg = "recall-pass corpus gate failed: with-recall first-pass recall below W0 baseline"
         raise ValueError(msg)
 

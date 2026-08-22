@@ -8,6 +8,7 @@ overlap (±``DEFAULT_LINE_SLACK`` lines), not fingerprint equality.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
@@ -29,7 +30,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PRE_W1_LEAKAGE_BASELINE_SCENARIO",
-    "RECALL_PASS_W0_BASELINE",
     "ConvergenceCaseResult",
     "ConvergenceMetrics",
     "ConvergenceReport",
@@ -38,6 +38,7 @@ __all__ = [
     "build_pre_w1_leakage_round",
     "evaluate_recall_pass_corpus",
     "fold_convergence_reports",
+    "load_recall_pass_w0_baseline",
     "score_convergence",
 ]
 
@@ -442,9 +443,12 @@ def _build_recall_baseline_case_results() -> list[ConvergenceCaseResult]:
     return rows
 
 
-RECALL_PASS_W0_BASELINE: Final[ConvergenceMetrics] = ConvergenceMetrics(
-    cases_total=3,
-    mean_first_pass_recall=0.5,
-    mean_leakage_rate=0.0,
-    case_results=_build_recall_baseline_case_results(),
-)
+@lru_cache(maxsize=1)
+def load_recall_pass_w0_baseline() -> ConvergenceMetrics:
+    """Return the W0 recall-pass baseline without corpus I/O at import time."""
+    return ConvergenceMetrics(
+        cases_total=3,
+        mean_first_pass_recall=0.5,
+        mean_leakage_rate=0.0,
+        case_results=_build_recall_baseline_case_results(),
+    )

@@ -6,13 +6,12 @@ import pytest
 
 from mergecraft.evals.benchmark import load_convergence_scenarios, run_convergence_eval
 from mergecraft.evals.convergence import score_convergence
-from mergecraft.evals.store import (
+from mergecraft.evals.convergence_store import (
     CATEGORY_MULTI_ROUND_CONVERGENCE,
-    DEFAULT_BANK_DIR,
     convergence_rounds_from_case,
     list_multi_round_cases,
-    load_case,
 )
+from mergecraft.evals.store import DEFAULT_BANK_DIR, load_case
 
 
 def test_bank_carries_at_least_three_multi_round_cases() -> None:
