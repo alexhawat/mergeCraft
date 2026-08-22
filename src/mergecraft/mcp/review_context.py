@@ -22,20 +22,22 @@ async def hydrate_review_context(
     round_index: int,
     incremental_changed_paths: Sequence[str] | None = None,
 ) -> None:
-    """Hydrate ledger state, round bounds, and incremental deferred promotion."""
+    """Hydrate ledger state, round bounds, and incremental deferred promotion.
+
+    Complement lens routing (RC9) is prompt-only: the incremental checklist
+    reads prior review metadata and tells the orchestrator which lenses to
+    dispatch; this hook does not pre-dispatch lenses at checkout.
+    """
     from mergecraft.config.settings import load_repo_settings
     from mergecraft.findings.ledger import (
         ensure_finding_ledger,
         hydrate_finding_ledger_from_progress_comment,
     )
-    from mergecraft.mcp.convergence_runtime import route_lenses_for_review
-    from mergecraft.mcp.tool_state import primary_repo_state, record_lens_execution
+    from mergecraft.mcp.tool_state import primary_repo_state
     from mergecraft.modes._incremental_promotion import (
         deferred_rows_from_ledger,
         promote_deferred_for_incremental_paths,
     )
-    from mergecraft.modes._pr_summary_format import parse_dispatched_lenses_from_review_body
-    from mergecraft.review.lens_routing import load_routing_registry
     from mergecraft.utils.run_bounds import resolve_run_bounds
 
     repo_root = Path(primary_repo_state(ctx.tool_state).dir or Path.cwd())
@@ -48,39 +50,6 @@ async def hydrate_review_context(
         )
 
     await hydrate_finding_ledger_from_progress_comment(ctx)
-
-    if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE:
-        prior_body = ""
-        for review in reversed(prior_reviews or []):
-            body = str(review.get("body") or "")
-            if body.strip():
-                prior_body = body
-                break
-        prior_dispatched = parse_dispatched_lenses_from_review_body(prior_body)
-        primary = primary_repo_state(ctx.tool_state)
-        diff_path = primary.incremental_diff_path or primary.diff_path
-        if diff_path and Path(diff_path).is_file():
-            from mergecraft.classify.change_classifier import classify_change
-
-            diff_text = Path(diff_path).read_text(encoding="utf-8")
-            classification = classify_change(
-                {
-                    "changed_paths": list(incremental_changed_paths or []),
-                    "diff_stats": {"diff": diff_text},
-                }
-            )
-            registry = load_routing_registry(settings=repo_settings, repo_root=repo_root)
-            decision = route_lenses_for_review(
-                classification,
-                registry=registry,
-                prior_dispatched_lens_ids=prior_dispatched,
-                incremental=True,
-            )
-            record_lens_execution(
-                ctx.tool_state,
-                routing_decision=decision,
-                dispatched_lens_ids=(),
-            )
 
     if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE and incremental_changed_paths:
         from datetime import UTC, datetime

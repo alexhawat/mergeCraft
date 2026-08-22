@@ -30,7 +30,6 @@ def deferred_rows_from_ledger(book: FindingLedger) -> list[dict[str, object]]:
             {
                 "fingerprint": record.fingerprint,
                 "path": path,
-                "body": record.reason or "",
             }
         )
     return rows

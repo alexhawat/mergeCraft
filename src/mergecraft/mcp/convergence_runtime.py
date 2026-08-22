@@ -13,6 +13,7 @@ from mergecraft.modes._pr_summary_format import append_collateral_to_inline_body
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from mergecraft.agents.recall import RecallPassPlan
     from mergecraft.agents.registry import AgentBinding, AgentLimits, Registry
     from mergecraft.classify.change_classifier import ChangeClassification
     from mergecraft.config.settings import RepoSettings
@@ -114,14 +115,38 @@ def build_recall_dispatch_plan(
     *,
     diff_text: str,
     draft_findings: Sequence[Mapping[str, object]],
-    budget: int,
-    timeout_s: int,
-) -> tuple[str, int, int]:
-    """Return recall brief and bounded dispatch limits for one orchestrator run."""
-    from mergecraft.agents.recall import build_recall_pass_brief
+    binding: AgentBinding,
+    settings: RepoSettings,
+    tool_state: ToolState,
+) -> RecallPassPlan:
+    """Return recall brief and round-scaled dispatch limits for one orchestrator run."""
+    from mergecraft.agents.recall import RecallPassPlan, build_recall_pass_brief
 
+    limits = subagent_limits_for_round(binding, settings=settings, tool_state=tool_state)
     brief = build_recall_pass_brief(diff_text=diff_text, draft_findings=draft_findings)
-    return brief, budget, timeout_s
+    return RecallPassPlan(budget=limits.budget, timeout_s=limits.timeout_s, brief=brief)
+
+
+def collateral_by_fingerprint(ctx: ToolContext) -> dict[str, list[str]]:
+    """Map analyzer finding fingerprints to optional collateral path lists (RC11)."""
+    rows: list[Mapping[str, object]] = []
+    analyzer_run = ctx.tool_state.analyzer_run
+    if analyzer_run is not None:
+        rows.extend(row for row in analyzer_run.findings if isinstance(row, dict))
+        rows.extend(row for row in analyzer_run.deferred_findings if isinstance(row, dict))
+        rows.extend(row for row in analyzer_run.inline if isinstance(row, dict))
+    rows.extend(row for row in ctx.tool_state.agent_findings if isinstance(row, dict))
+    rows.extend(row for row in ctx.tool_state.confirmed_findings if isinstance(row, dict))
+    mapping: dict[str, list[str]] = {}
+    for row in rows:
+        fingerprint = str(row.get("fingerprint") or "").strip()
+        collateral = row.get("collateral")
+        if not fingerprint or not isinstance(collateral, list):
+            continue
+        paths = [str(path).strip() for path in collateral if str(path).strip()]
+        if paths:
+            mapping[fingerprint] = paths
+    return mapping
 
 
 def prepare_inline_comment_for_publish(
@@ -131,9 +156,11 @@ def prepare_inline_comment_for_publish(
     line: int | None,
     body: str,
     collateral: Sequence[str] | None = None,
+    fingerprint: str | None = None,
 ) -> str:
     """Apply incremental miss labelling and collateral append at publish time."""
     from mergecraft.mcp.tool_state import primary_repo_state
+    from mergecraft.review_taxonomy import finding_fingerprint
     from mergecraft.types import INCREMENTAL_REVIEW_MODE
 
     prepared = body
@@ -150,8 +177,12 @@ def prepare_inline_comment_for_publish(
                 line=line,
                 incremental_diff_text=incremental_diff,
             )
-    if collateral:
-        prepared = append_collateral_to_inline_body(prepared, list(collateral))
+    resolved_collateral = list(collateral) if collateral else None
+    if not resolved_collateral:
+        lookup_fp = fingerprint or finding_fingerprint(path=path, body=body)
+        resolved_collateral = collateral_by_fingerprint(ctx).get(lookup_fp)
+    if resolved_collateral:
+        prepared = append_collateral_to_inline_body(prepared, list(resolved_collateral))
     return prepared
 
 
@@ -162,8 +193,10 @@ def apply_recall_pass_post_process(
     from pathlib import Path
 
     from mergecraft.config.settings import load_repo_settings
+    from mergecraft.mcp.tool_state import primary_repo_state
 
-    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    repo_root = Path(primary_repo_state(ctx.tool_state).dir or Path.cwd())
+    settings = load_repo_settings(root=repo_root, load_learnings_files=False)
     if not settings.review.recall_pass or not recalled:
         return
     analyzer_run = ctx.tool_state.analyzer_run
@@ -242,6 +275,7 @@ def strip_recall_inline_comments(
 __all__ = [
     "apply_recall_pass_post_process",
     "build_recall_dispatch_plan",
+    "collateral_by_fingerprint",
     "enforce_recall_deferred_lane_at_publish",
     "merge_recall_findings_into_analyzer_run",
     "prepare_inline_comment_for_publish",

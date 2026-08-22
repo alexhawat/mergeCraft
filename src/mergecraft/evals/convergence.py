@@ -99,7 +99,7 @@ class RecallPassCorpusReport(BaseModel):
 
 
 def _score_recall_corpus(*, with_recall: bool) -> ConvergenceMetrics:
-    from mergecraft.evals.recall_pass_corpus import (
+    from mergecraft.evals.corpora.recall_pass_corpus import (
         recall_corpus_cases,
         recall_round_one,
         recall_round_two,
@@ -331,7 +331,7 @@ def fold_convergence_reports(
 
 
 def _build_recall_baseline_case_results() -> list[ConvergenceCaseResult]:
-    from mergecraft.evals.recall_pass_corpus import (
+    from mergecraft.evals.corpora.recall_pass_corpus import (
         recall_corpus_cases,
         recall_round_one,
         recall_round_two,

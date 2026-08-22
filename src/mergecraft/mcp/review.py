@@ -281,12 +281,14 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             if isinstance(collateral, list)
             else None
         )
+        comment_body = str(c.get("body") or "")
         prepared_body = prepare_inline_comment_for_publish(
             ctx,
             path=path,
             line=line,
-            body=str(c.get("body") or ""),
+            body=comment_body,
             collateral=collateral_list,
+            fingerprint=str(c.get("fingerprint") or "") or None,
         )
         item: dict[str, Any] = {
             "path": path,
@@ -313,12 +315,10 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
         payload["comments"] = inline
 
     from mergecraft.findings.ledger import (
-        record_deferred_from_analyzer_run,
+        persist_finding_ledger_to_progress_comment,
         record_published_findings_in_ledger,
     )
 
-    if ctx.tool_state.analyzer_run is not None:
-        record_deferred_from_analyzer_run(ctx.tool_state, ctx.tool_state.analyzer_run)
     record_published_findings_in_ledger(ctx.tool_state, inline)
 
     scm = ctx.scm
@@ -366,6 +366,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     )
     if resolved:
         response["resolvedThreads"] = resolved
+    await persist_finding_ledger_to_progress_comment(ctx)
     return response
 
 

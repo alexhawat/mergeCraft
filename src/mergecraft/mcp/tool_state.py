@@ -427,6 +427,14 @@ class ToolState:
     static_checks: list[dict[str, Any]] = field(default_factory=list)
 
 
+def record_lens_routing_decision(
+    tool_state: ToolState,
+    routing_decision: LensRoutingDecision,
+) -> None:
+    """Persist a lens routing decision before any lens subagent runs (RC7)."""
+    tool_state.lens_routing_decision = routing_decision
+
+
 def record_lens_execution(
     tool_state: ToolState,
     *,
@@ -434,7 +442,7 @@ def record_lens_execution(
     dispatched_lens_ids: Sequence[str],
 ) -> None:
     """Persist the routing decision and the lenses that actually ran (RC7)."""
-    tool_state.lens_routing_decision = routing_decision
+    record_lens_routing_decision(tool_state, routing_decision)
     tool_state.dispatched_lens_ids = tuple(dispatched_lens_ids)
 
 

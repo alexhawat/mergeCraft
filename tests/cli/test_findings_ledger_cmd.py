@@ -48,6 +48,20 @@ class _FakeClient:
             }
         }
 
+    async def list_issue_comments(
+        self,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": 42,
+                "body": f"## mergeCraft progress\n\n{_LEDGER_MARKER}\n",
+            }
+        ]
+
     async def list_issues(self, owner: str, repo: str, **kwargs: Any) -> list[dict[str, Any]]:
         return []
 

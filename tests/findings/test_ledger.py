@@ -25,7 +25,9 @@ _DEFERRED_FP = finding_fingerprint(path="src/deferred.py", body=_DEFERRED_BODY)
 _DROPPED_FP = finding_fingerprint(path="src/dropped.py", body=_DROPPED_BODY)
 _UNPUBLISHED_FP = finding_fingerprint(path="src/unpub.py", body=_UNPUBLISHED_BODY)
 
-_LEDGER_MARKER_RE = re.compile(r"<!-- mergecraft-ledger:v1:([0-9a-f]+):([a-z-]+) -->")
+_LEDGER_MARKER_RE = re.compile(
+    r"<!-- mergecraft-ledger:v[12]:([0-9a-f]+):([a-z-]+)(?::([^>]*?))? -->"
+)
 
 
 def _ledger_mod() -> Any:
@@ -81,7 +83,7 @@ def test_ledger_key_is_the_review_taxonomy_fingerprint() -> None:
     book.record(taxonomy_fp, "open", source="inline", round_index=1)
 
     block = book.render_ledger_block()
-    assert f"<!-- mergecraft-ledger:v1:{taxonomy_fp}:open -->" in block
+    assert f"<!-- mergecraft-ledger:v2:{taxonomy_fp}:open:" in block
     assert taxonomy_fp == _PUBLISHED_FP
     assert ledger.LEDGER_MARKER_PREFIX == "<!-- mergecraft-ledger:v1:"
 
@@ -181,7 +183,6 @@ def test_ledger_never_files_a_github_issue(monkeypatch: MonkeyPatch) -> None:
 
     book = ledger.FindingLedger()
     book.record(_DEFERRED_FP, "deferred", source="overflow", round_index=1)
-    ledger.persist_to_progress_comment(book)
 
     plan = asyncio.run(
         plan_carryover(
@@ -195,7 +196,6 @@ def test_ledger_never_files_a_github_issue(monkeypatch: MonkeyPatch) -> None:
 
     assert plan.to_file == []
     assert created == []
-    assert ledger.files_github_issues() is False
 
 
 def test_deferred_state_is_added_to_lifecycle_state_literal() -> None:

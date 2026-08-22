@@ -39,6 +39,7 @@ from mergecraft.review_taxonomy import FINDING_SEVERITIES
 from mergecraft.utils.learnings import learnings_file_path
 
 if TYPE_CHECKING:
+    from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
 
 _NOT_READY_REASON = (
@@ -94,6 +95,22 @@ def _learnings_text(ctx: ToolContext) -> str:
     if not candidate.is_file():
         return ""
     return candidate.read_text(encoding="utf-8")
+
+
+def _verification_budget_for_round(settings: RepoSettings, ctx: ToolContext) -> int:
+    """Return the verification budget scaled for the active review round (RC12)."""
+    from mergecraft.findings.ledger import ledger_round_index
+    from mergecraft.utils.run_bounds import round_budget_multiplier
+
+    review = settings.review
+    budget = int(review.verification_budget)
+    if budget == 0:
+        return 0
+    multiplier = round_budget_multiplier(
+        review.round_budgets,
+        round_index=ledger_round_index(ctx.tool_state),
+    )
+    return int(budget * multiplier)
 
 
 def _persist_confirmed_fingerprint(
@@ -325,7 +342,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
         )
         plan = plan_agent_verifications(
             normalized_findings,
-            budget=repo_settings.review.verification_budget,
+            budget=_verification_budget_for_round(repo_settings, ctx),
             learnings_text=_learnings_text(ctx),
             repo_root=repo_root,
         )

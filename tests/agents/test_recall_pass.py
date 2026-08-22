@@ -247,6 +247,7 @@ agents:
     monkeypatch.chdir(tmp_path)
 
     from mergecraft.agents.registry import AgentRole, effective_agent_limits
+    from mergecraft.mcp.convergence_runtime import build_recall_dispatch_plan
 
     registry = _load_registry(tmp_path)
     binding = registry.resolve_role(AgentRole.recall)
@@ -258,9 +259,13 @@ agents:
     assert limits.budget == 4
     assert limits.timeout_s == 90
 
-    recall = _recall_mod()
-    brief = recall.build_recall_pass_brief(diff_text=_SAMPLE_DIFF, draft_findings=[])
-    plan = recall.RecallPassPlan(budget=limits.budget, timeout_s=limits.timeout_s, brief=brief)
+    plan = build_recall_dispatch_plan(
+        diff_text=_SAMPLE_DIFF,
+        draft_findings=[],
+        binding=binding,
+        settings=settings,
+        tool_state=_tool_ctx(tmp_path).tool_state,
+    )
     assert plan.budget == 4
     assert plan.timeout_s == 90
 

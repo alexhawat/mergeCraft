@@ -24,9 +24,9 @@ from mergecraft.cli.exits import (
 )
 from mergecraft.cli.global_surface import emit_cli_json, get_cli_globals, wants_json_output
 from mergecraft.findings.ledger import (
-    LEDGER_MARKER_PREFIX,
     LEDGER_SCHEMA_VERSION,
     FindingLedger,
+    fetch_sticky_progress_comment_body,
 )
 from mergecraft.findings.select import (
     DEFAULT_LABEL,
@@ -112,40 +112,21 @@ def _ledger_record_payload(record: LifecycleRecord) -> dict[str, Any]:
     }
 
 
-_PROGRESS_COMMENT_QUERY = """
-query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      comments(first: 50) {
-        nodes { databaseId body }
-      }
-    }
-  }
-}
-"""
-
-
 async def _fetch_progress_comment_body(
     client: GitHubClient,
     owner: str,
     name: str,
     pull_number: int,
 ) -> str:
-    data = await client.graphql(
-        _PROGRESS_COMMENT_QUERY,
-        {"owner": owner, "name": name, "number": pull_number},
+    from mergecraft.scm.github import GitHubScmAdapter
+
+    adapter = GitHubScmAdapter(client)
+    return await fetch_sticky_progress_comment_body(
+        adapter,
+        owner,
+        name,
+        pull_number,
     )
-    nodes = (
-        data.get("repository", {}).get("pullRequest", {}).get("comments", {}).get("nodes", []) or []
-    )
-    progress_body = ""
-    for node in nodes:
-        body = str(node.get("body") or "")
-        if LEDGER_MARKER_PREFIX in body:
-            return body
-        if "mergeCraft progress" in body or "*via mergecraft*" in body.lower():
-            progress_body = body
-    return progress_body
 
 
 def _render_ledger_markdown(records: list[LifecycleRecord], *, pull_number: int) -> str:

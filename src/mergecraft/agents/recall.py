@@ -17,14 +17,18 @@ from mergecraft.findings.dedup import dedupe_findings, dedupe_findings_with_indi
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from mergecraft.agents.registry import AgentBinding
     from mergecraft.analyzers.finding import Finding
+    from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.tool_state import ToolState
 
 __all__ = [
     "RECALL_SYSTEM_PROMPT",
     "RecallPassPlan",
     "build_recall_pass_brief",
     "filter_novel_recall_findings",
+    "plan_recall_pass",
     "recall_denied_tool_names",
 ]
 
@@ -95,6 +99,26 @@ def build_recall_pass_brief(
         ]
     )
     return "\n".join(lines)
+
+
+def plan_recall_pass(
+    *,
+    diff_text: str,
+    draft_findings: Sequence[Mapping[str, object]],
+    binding: AgentBinding,
+    settings: RepoSettings,
+    tool_state: ToolState,
+) -> RecallPassPlan:
+    """Return round-scaled recall dispatch limits and brief for one orchestrator run."""
+    from mergecraft.mcp.convergence_runtime import build_recall_dispatch_plan
+
+    return build_recall_dispatch_plan(
+        diff_text=diff_text,
+        draft_findings=draft_findings,
+        binding=binding,
+        settings=settings,
+        tool_state=tool_state,
+    )
 
 
 def filter_novel_recall_findings(

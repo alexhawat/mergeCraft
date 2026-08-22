@@ -6,6 +6,7 @@ Action checkouts. Post-merge issue filing stays in :mod:`mergecraft.findings.swe
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -17,39 +18,21 @@ from loguru import logger
 from mergecraft.findings.lifecycle import LifecycleRecord, LifecycleState, validate_lifecycle_state
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import AnalyzerRunState, ToolState
+    from mergecraft.scm.protocol import ScmProvider
 
 LEDGER_MARKER_PREFIX: str = "<!-- mergecraft-ledger:v1:"
-LEDGER_SCHEMA_VERSION: str = "v1"
+LEDGER_MARKER_V2_PREFIX: str = "<!-- mergecraft-ledger:v2:"
+LEDGER_SCHEMA_VERSION: str = "v2"
+
+_PROGRESS_HEADING = "## mergeCraft progress"
+_VIA_MERGECRAFT_MARKER = "*via mergecraft*"
 
 _LEDGER_MARKER_RE = re.compile(r"<!-- mergecraft-ledger:v1:([0-9a-f]+):([a-z-]+)(?::([^>]*?))? -->")
-
-
-def files_github_issues() -> bool:
-    """Return whether the ledger files GitHub issues (D5 — always false)."""
-    return False
-
-
-def persist_to_progress_comment(book: FindingLedger) -> None:
-    """Record-only hook: the ledger never writes issues; persistence is via the progress comment."""
-    _ = book
-
-
-_LEDGER_STATES: frozenset[str] = frozenset(
-    {
-        "open",
-        "resolved-by-change",
-        "stale",
-        "disputed",
-        "waived",
-        "deferred",
-        "unpublished",
-        "withdrawn",
-    }
-)
+_LEDGER_MARKER_V2_RE = re.compile(r"<!-- mergecraft-ledger:v2:([0-9a-f]+):([a-z-]+):([^>]+) -->")
 
 
 @dataclass
@@ -120,25 +103,22 @@ class FindingLedger:
     def from_comment_body(cls, body: str) -> FindingLedger:
         """Parse ledger markers from a progress-comment body."""
         records: dict[str, LifecycleRecord] = {}
+        for match in _LEDGER_MARKER_V2_RE.finditer(body):
+            fingerprint, raw_state, encoded_meta = (
+                match.group(1),
+                match.group(2),
+                match.group(3),
+            )
+            record = _record_from_v2_marker(fingerprint, raw_state, encoded_meta)
+            if record is not None:
+                records[fingerprint] = record
         for match in _LEDGER_MARKER_RE.finditer(body):
             fingerprint, raw_state, encoded_path = match.group(1), match.group(2), match.group(3)
-            try:
-                state = validate_lifecycle_state(raw_state)
-            except ValueError:
-                logger.warning(
-                    "finding ledger: skipping marker with unknown state {} for fingerprint {}",
-                    raw_state,
-                    fingerprint,
-                )
+            if fingerprint in records:
                 continue
-            reason = None
-            if encoded_path:
-                reason = f"path:{unquote(encoded_path)}"
-            records[fingerprint] = LifecycleRecord(
-                fingerprint=fingerprint,
-                state=state,
-                reason=reason,
-            )
+            record = _record_from_v1_marker(fingerprint, raw_state, encoded_path)
+            if record is not None:
+                records[fingerprint] = record
         return cls(_records=records)
 
 
@@ -147,9 +127,126 @@ def ledger_round_index(tool_state: ToolState) -> int:
     return max(int(getattr(tool_state, "review_round_index", 1) or 1), 1)
 
 
+def is_sticky_progress_comment(body: str) -> bool:
+    """Return whether ``body`` looks like the mergeCraft sticky progress comment."""
+    lowered = body.lower()
+    return (
+        LEDGER_MARKER_PREFIX in body
+        or LEDGER_MARKER_V2_PREFIX in body
+        or _PROGRESS_HEADING in body
+        or _VIA_MERGECRAFT_MARKER in lowered
+    )
+
+
+def sticky_progress_comment_body(comments: Sequence[Mapping[str, object]]) -> str:
+    """Select the sticky progress comment body from issue comments (ledger wins)."""
+    progress_body = ""
+    for comment in comments:
+        body = str(comment.get("body") or "")
+        if LEDGER_MARKER_PREFIX in body or LEDGER_MARKER_V2_PREFIX in body:
+            return body
+        if is_sticky_progress_comment(body):
+            progress_body = body
+    return progress_body
+
+
+async def fetch_sticky_progress_comment_body(
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    issue_number: int,
+    *,
+    known_comment_id: int | None = None,
+) -> str:
+    """Load the sticky progress comment body by id or from paginated issue comments."""
+    if known_comment_id is not None:
+        comment = await scm.get_issue_comment(owner, repo, known_comment_id)
+        return str(comment.get("body") or "")
+    comments = await scm.list_issue_comments(
+        owner,
+        repo,
+        issue_number,
+        params={"per_page": 100},
+    )
+    return sticky_progress_comment_body(comments)
+
+
+def _record_from_v1_marker(
+    fingerprint: str,
+    raw_state: str,
+    encoded_path: str | None,
+) -> LifecycleRecord | None:
+    try:
+        state = validate_lifecycle_state(raw_state)
+    except ValueError:
+        logger.warning(
+            "finding ledger: skipping marker with unknown state {} for fingerprint {}",
+            raw_state,
+            fingerprint,
+        )
+        return None
+    reason = None
+    if encoded_path:
+        reason = f"path:{unquote(encoded_path)}"
+    return LifecycleRecord(
+        fingerprint=fingerprint,
+        state=state,
+        reason=reason,
+    )
+
+
+def _record_from_v2_marker(
+    fingerprint: str,
+    raw_state: str,
+    encoded_meta: str,
+) -> LifecycleRecord | None:
+    try:
+        state = validate_lifecycle_state(raw_state)
+    except ValueError:
+        logger.warning(
+            "finding ledger: skipping v2 marker with unknown state {} for fingerprint {}",
+            raw_state,
+            fingerprint,
+        )
+        return None
+    try:
+        payload = json.loads(unquote(encoded_meta))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        logger.warning(
+            "finding ledger: skipping v2 marker with invalid metadata for fingerprint {}",
+            fingerprint,
+        )
+        return None
+    if not isinstance(payload, dict):
+        return None
+    reason = payload.get("reason")
+    round_index = payload.get("round_index")
+    recorded_at = payload.get("recorded_at")
+    source = payload.get("source")
+    return LifecycleRecord(
+        fingerprint=fingerprint,
+        state=state,
+        reason=str(reason) if reason else None,
+        round_index=int(round_index) if round_index is not None else None,
+        recorded_at=str(recorded_at) if recorded_at else None,
+        source=str(source) if source else None,
+    )
+
+
 def _marker_lines(record: LifecycleRecord) -> list[str]:
-    # Marker format: <!-- mergecraft-ledger:v1:{fingerprint}:{state} -->
-    # Optional 4th segment URL-encodes a cited path for deferred promotion (v1.1).
+    metadata: dict[str, object] = {}
+    if record.round_index is not None:
+        metadata["round_index"] = record.round_index
+    if record.recorded_at:
+        metadata["recorded_at"] = record.recorded_at
+    if record.source:
+        metadata["source"] = record.source
+    if record.reason:
+        metadata["reason"] = record.reason
+    if metadata:
+        encoded = quote(json.dumps(metadata, separators=(",", ":"), sort_keys=True), safe="")
+        return [f"{LEDGER_MARKER_V2_PREFIX}{record.fingerprint}:{record.state}:{encoded} -->"]
+    # v1 fallback for records without metadata (should not happen on new writes).
     path_suffix = ""
     if record.reason and record.reason.startswith("path:"):
         path_suffix = f":{quote(record.reason.removeprefix('path:'), safe='')}"
@@ -258,38 +355,132 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
     if tool_state.finding_ledger_loaded:
         return ensure_finding_ledger(tool_state)
 
-    from mergecraft.mcp.tool_state import ProgressComment
+    from mergecraft.mcp.tool_state import ProgressComment, primary_repo_state
 
     ledger = FindingLedger()
     progress = tool_state.progress_comment
-    if isinstance(progress, ProgressComment):
-        try:
+    issue_number = primary_repo_state(tool_state).issue_number or tool_state.pr_number
+    try:
+        if isinstance(progress, ProgressComment):
             comment = await ctx.scm.get_issue_comment(
                 ctx.repo.owner,
                 ctx.repo.name,
                 int(progress.id),
             )
             ledger = FindingLedger.from_comment_body(str(comment.get("body") or ""))
-        except Exception as err:
-            logger.info("finding ledger: could not read progress comment: {}", err)
+        elif issue_number is not None:
+            body = await fetch_sticky_progress_comment_body(
+                ctx.scm,
+                ctx.repo.owner,
+                ctx.repo.name,
+                int(issue_number),
+            )
+            if body:
+                ledger = FindingLedger.from_comment_body(body)
+    except Exception as err:
+        logger.info("finding ledger: could not read progress comment: {}", err)
 
     tool_state.finding_ledger = ledger
     tool_state.finding_ledger_loaded = True
     return ledger
 
 
+async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
+    """Persist the in-memory ledger into the sticky progress comment (RC4, M9)."""
+    from mergecraft.mcp.comment import add_footer
+    from mergecraft.mcp.tool_state import ProgressComment, primary_repo_state
+    from mergecraft.utils.learnings import (
+        ensure_learnings_review_delta,
+        merge_learnings_delta_into_review_body,
+    )
+
+    tool_state = ctx.tool_state
+    if tool_state.progress_comment is False:
+        return
+
+    ledger = ensure_finding_ledger(tool_state)
+    if not ledger.records():
+        return
+
+    issue_number = primary_repo_state(tool_state).issue_number or tool_state.pr_number
+    if issue_number is None:
+        return
+
+    try:
+        base_body = str(tool_state.last_progress_body or "").strip()
+        if not base_body:
+            base_body = f"{_PROGRESS_HEADING}\n\nReview published."
+
+        await ensure_learnings_review_delta(tool_state)
+        body_with_delta = merge_learnings_delta_into_review_body(tool_state, base_body)
+        body_with_ledger = merge_ledger_into_comment(body_with_delta, records=ledger.records())
+        body_with_footer = add_footer(ctx, body_with_ledger)
+
+        if isinstance(tool_state.progress_comment, ProgressComment):
+            await ctx.scm.update_issue_comment(
+                ctx.repo.owner,
+                ctx.repo.name,
+                int(tool_state.progress_comment.id),
+                body_with_footer,
+            )
+            return
+
+        existing_body = await fetch_sticky_progress_comment_body(
+            ctx.scm,
+            ctx.repo.owner,
+            ctx.repo.name,
+            int(issue_number),
+        )
+        if existing_body:
+            merged = merge_ledger_into_comment(existing_body, records=ledger.records())
+            body_with_footer = add_footer(ctx, merged)
+            comments = await ctx.scm.list_issue_comments(
+                ctx.repo.owner,
+                ctx.repo.name,
+                int(issue_number),
+                params={"per_page": 100},
+            )
+            for comment in comments:
+                body = str(comment.get("body") or "")
+                if is_sticky_progress_comment(body):
+                    await ctx.scm.update_issue_comment(
+                        ctx.repo.owner,
+                        ctx.repo.name,
+                        int(comment["id"]),
+                        body_with_footer,
+                    )
+                    tool_state.progress_comment = ProgressComment(
+                        id=str(comment["id"]),
+                        type="issue",
+                    )
+                    return
+
+        result = await ctx.scm.create_issue_comment(
+            ctx.repo.owner,
+            ctx.repo.name,
+            int(issue_number),
+            body_with_footer,
+        )
+        tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
+    except Exception as err:
+        logger.info("finding ledger: could not persist progress comment: {}", err)
+
+
 __all__ = [
     "LEDGER_MARKER_PREFIX",
+    "LEDGER_MARKER_V2_PREFIX",
     "LEDGER_SCHEMA_VERSION",
     "FindingLedger",
     "ensure_finding_ledger",
-    "files_github_issues",
+    "fetch_sticky_progress_comment_body",
     "hydrate_finding_ledger_from_progress_comment",
+    "is_sticky_progress_comment",
     "ledger_round_index",
     "merge_ledger_into_comment",
-    "persist_to_progress_comment",
+    "persist_finding_ledger_to_progress_comment",
     "record_deferred_from_analyzer_run",
     "record_over_budget_verifications",
     "record_published_findings_in_ledger",
     "record_withdrawn_in_ledger",
+    "sticky_progress_comment_body",
 ]

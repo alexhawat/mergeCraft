@@ -106,25 +106,58 @@ def _settings_for_ctx(ctx: AgentRunContext | ToolContext) -> Any:
 def _resolve_selected_bindings(
     registry: Registry,
     selected: Sequence[str],
+    *,
+    settings: Any | None = None,
+    tool_state: Any | None = None,
 ) -> list[AgentBinding]:
     bindings: list[AgentBinding] = []
     role_values = {role.value for role in AgentRole}
     by_id = {binding.agent_id: binding for binding in registry.all_bindings()}
     for key in selected:
+        resolved: AgentBinding
         if key in role_values:
-            bindings.append(registry.resolve_role(key))
-            continue
-        if key in by_id:
-            bindings.append(by_id[key])
-            continue
-        for binding in registry.all_bindings():
-            if binding.agent_id == key:
-                bindings.append(binding)
-                break
+            resolved = registry.resolve_role(key)
+        elif key in by_id:
+            resolved = by_id[key]
         else:
-            msg = f"no registry binding for selected agent {key!r}"
-            raise KeyError(msg)
+            for candidate in registry.all_bindings():
+                if candidate.agent_id == key:
+                    resolved = candidate
+                    break
+            else:
+                msg = f"no registry binding for selected agent {key!r}"
+                raise KeyError(msg)
+        bindings.append(
+            _binding_with_round_limits(
+                resolved,
+                settings=settings,
+                tool_state=tool_state,
+            )
+        )
     return bindings
+
+
+def _binding_with_round_limits(
+    binding: AgentBinding,
+    *,
+    settings: Any | None,
+    tool_state: Any | None,
+) -> AgentBinding:
+    """Apply RC12 round-scaled budget/timeout to reviewer, verifier, and recall."""
+    if settings is None or tool_state is None:
+        return binding
+    if binding.role not in (AgentRole.reviewer, AgentRole.verifier, AgentRole.recall):
+        return binding
+    if binding.role is AgentRole.recall and not settings.review.recall_pass:
+        return binding
+    from mergecraft.mcp.convergence_runtime import subagent_limits_for_round
+
+    limits = subagent_limits_for_round(
+        binding,
+        settings=settings,
+        tool_state=tool_state,
+    )
+    return binding.model_copy(update={"budget": limits.budget, "timeout_s": limits.timeout_s})
 
 
 def _denied_tool_names(
@@ -337,8 +370,14 @@ def render_agents(
 ) -> HarnessRenderResult:
     """Project ``selected`` registry bindings into ``harness`` config (D2)."""
     harness_name: HarnessName = harness  # type: ignore[assignment]  # — harness is HarnessName | str; callers pass a valid HarnessName literal
-    bindings = _resolve_selected_bindings(registry, selected)
     settings = _settings_for_ctx(ctx)
+    tool_state = getattr(ctx, "tool_state", None)
+    bindings = _resolve_selected_bindings(
+        registry,
+        selected,
+        settings=settings,
+        tool_state=tool_state,
+    )
 
     if harness_name == "claude":
         return _render_claude(bindings, ctx=ctx, settings=settings)
@@ -383,16 +422,6 @@ def render_for_run(
         if selected is not None
         else default_subagent_selection(registry, recall_pass=settings.review.recall_pass)
     )
-    from mergecraft.mcp.convergence_runtime import subagent_limits_for_round
-
-    for role in (AgentRole.verifier, AgentRole.recall):
-        if role is AgentRole.recall and not settings.review.recall_pass:
-            continue
-        subagent_limits_for_round(
-            registry.resolve_role(role),
-            settings=settings,
-            tool_state=ctx.tool_state,
-        )
     return render_agents(registry, selected=roster, harness=harness, ctx=ctx)
 
 
