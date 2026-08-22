@@ -75,10 +75,24 @@ def _clear_home_parent_env(monkeypatch: MonkeyPatch) -> None:
         monkeypatch.delenv(key, raising=False)
 
 
-def _temp_rooted_ctx(tmp_path: Path) -> AgentRunContext:
-    """Context whose tmpdir sits under ``/tmp`` — the relocation trigger."""
+def _pin_forbidden_root(tmp_path: Path, monkeypatch: MonkeyPatch) -> Path:
+    """Treat only ``tmp_path/forbidden-tmp`` as world-writable.
+
+    Pytest's ``tmp_path`` lives under ``/tmp`` on GitHub Actions, so the
+    production forbidden-root list would also reject a *safe* candidate
+    placed next to it. A synthetic root keeps both sides of the ladder
+    inside ``tmp_path``.
+    """
+    root = tmp_path / "forbidden-tmp"
+    root.mkdir()
+    monkeypatch.setattr(codex_module, "_FORBIDDEN_TEMP_ROOTS", (str(root),))
+    return root
+
+
+def _temp_rooted_ctx(tmp_path: Path, *, tmpdir: Path | None = None) -> AgentRunContext:
+    """Context whose tmpdir sits under a forbidden temp root."""
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
-    ctx.tmpdir = "/tmp/mergecraft-cov431-run"
+    ctx.tmpdir = str(tmpdir) if tmpdir is not None else "/tmp/mergecraft-cov431-run"
     return ctx
 
 
@@ -87,8 +101,11 @@ def _temp_rooted_ctx(tmp_path: Path) -> AgentRunContext:
 # ---------------------------------------------------------------------------
 
 
-def test_codex_home_keeps_run_tmpdir_when_it_is_not_world_writable(tmp_path: Path) -> None:
-    """A tmpdir outside ``/tmp`` needs no relocation: home is ``<tmpdir>/.codex``."""
+def test_codex_home_keeps_run_tmpdir_when_it_is_not_world_writable(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A tmpdir outside a forbidden root needs no relocation: home is ``<tmpdir>/.codex``."""
+    monkeypatch.setattr(codex_module, "_FORBIDDEN_TEMP_ROOTS", ())
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     assert codex_module._codex_home(ctx) == tmp_path / ".codex"
@@ -98,13 +115,18 @@ def test_codex_home_parent_skips_env_candidate_that_is_also_world_writable(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """A ``/tmp``-rooted override is rejected, not used: Codex would refuse it too."""
+    """A forbidden-root override is rejected, not used: Codex would refuse it too."""
     _clear_home_parent_env(monkeypatch)
+    forbidden = _pin_forbidden_root(tmp_path, monkeypatch)
+    run_dir = forbidden / "mergecraft-cov431-run"
+    run_dir.mkdir()
+    override = forbidden / "still-world-writable"
+    override.mkdir()
     safe = tmp_path / "runner-temp"
-    monkeypatch.setenv("MERGECRAFT_CODEX_HOME_PARENT", "/tmp/still-world-writable")
+    monkeypatch.setenv("MERGECRAFT_CODEX_HOME_PARENT", str(override))
     monkeypatch.setenv("RUNNER_TEMP", str(safe))
 
-    resolved = codex_module._safe_codex_home_parent(_temp_rooted_ctx(tmp_path))
+    resolved = codex_module._safe_codex_home_parent(_temp_rooted_ctx(tmp_path, tmpdir=run_dir))
 
     assert resolved == safe / "mergecraft-cov431-run"
 
@@ -115,13 +137,16 @@ def test_codex_home_parent_skips_candidate_whose_mkdir_fails(
 ) -> None:
     """An unusable override (its parent is a regular file) falls through to the next key."""
     _clear_home_parent_env(monkeypatch)
+    forbidden = _pin_forbidden_root(tmp_path, monkeypatch)
+    run_dir = forbidden / "mergecraft-cov431-run"
+    run_dir.mkdir()
     blocker = tmp_path / "not-a-dir"
     blocker.write_text("regular file", encoding="utf-8")
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("MERGECRAFT_CODEX_HOME_PARENT", str(blocker / "child"))
     monkeypatch.setenv("GITHUB_WORKSPACE", str(workspace))
 
-    resolved = codex_module._safe_codex_home_parent(_temp_rooted_ctx(tmp_path))
+    resolved = codex_module._safe_codex_home_parent(_temp_rooted_ctx(tmp_path, tmpdir=run_dir))
 
     assert resolved == workspace / "mergecraft-cov431-run"
     assert workspace.is_dir()
