@@ -223,3 +223,57 @@ Claude path is the precedent (D11); do not rewrite the span stack.
 - HD436a–d xfail (non-strict); HD436e–f pass
 - Strict xfail removed from `test_cov_gemini_paths.py`
 - No `src/` edits
+
+---
+
+# Batch HE — #437 auth partial local write
+
+Authoring wave: **W9** (HE RED) · Implementation: **W10** (`fix(cli): report partial local auth writes honestly`)
+GitHub issue: **#437** — `auth --scope local` claims nothing was written after a partial write
+
+Moved from `tests/cli/test_cov_auth_cmd_paths.py` (strict xfail from #431)
+into `tests/cli/test_auth_partial_write_he.py` with non-strict W10 markers.
+
+## xfail schedule
+
+| Wave | Test | Marker reason | Issue |
+|------|------|---------------|-------|
+| **W10** | `test_partial_local_write_must_not_claim_that_nothing_was_written` | `green after W10: report partial local auth writes honestly (#437)` | #437 |
+| **W10** | `test_partial_local_write_must_not_name_actions_secret_in_stderr` | same | #437 |
+| **W10** | `test_partial_local_write_reports_which_local_keys_landed` | same | #437 |
+| **W10** | `test_partial_local_write_token_landed_when_project_write_fails` | same | #437 |
+| **W10** | `test_auth_logfire_scope_local_partial_write_is_honest` | same | #437 |
+
+Never `strict=True` — impl wave drops each xfail in the auth fix commit.
+
+## Contract matrix (#437)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| HE437a | Partial local write is not reported as "nothing was written" | unit | edge | `test_partial_local_write_must_not_claim_that_nothing_was_written` |
+| HE437b | Local-only failure stderr must not name Actions secret `LOGFIRE_TOKEN` | unit | error | `test_partial_local_write_must_not_name_actions_secret_in_stderr` |
+| HE437c | Mixed local result reports which env keys landed | unit | happy | `test_partial_local_write_reports_which_local_keys_landed` |
+| HE437d | Reverse partial (token lands, project fails) is also honest | unit | edge | `test_partial_local_write_token_landed_when_project_write_fails` |
+| HE437e | `auth logfire --scope local` CLI path matches unit contract | functional | integration | `test_auth_logfire_scope_local_partial_write_is_honest` |
+| HE437f | Total local failure may still use "nothing was written" | unit | regression | `test_total_local_failure_may_still_report_nothing_was_written` |
+
+## Named symbols W10 must satisfy
+
+| Symbol | Module | Test |
+|--------|--------|------|
+| `_persist_credential` local branch | `mergecraft.cli.auth_cmd` | HE437a–f |
+| `auth_logfire` → `_persist_credential` | `mergecraft.cli.auth_cmd` | HE437e |
+
+`--scope both` already tolerates local-success/github-failure; local-only must be at least as honest (#437).
+
+## Collection target (W9)
+
+`tests/cli/test_auth_partial_write_he.py` — **6 tests** (5 xfail, 1 pass).
+
+## Acceptance (W9)
+
+- New tests collect with zero import errors
+- `make lint` + `make typecheck` clean on touched paths
+- HE437a–e xfail (non-strict); HE437f pass
+- Strict xfail removed from `test_cov_auth_cmd_paths.py`
+- No `src/` edits
