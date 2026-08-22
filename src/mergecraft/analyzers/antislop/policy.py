@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast, get_args
 
 import yaml
 
@@ -19,17 +20,7 @@ MatchKind = Literal[
 ]
 
 _RULES_DIR = Path(__file__).resolve().parent / "rules"
-_SUPPORTED_KINDS = frozenset(
-    {
-        "comment_regex",
-        "line_regex",
-        "python_placeholder_implementation",
-        "empty_error_handler",
-        "error_obscuring_catch",
-        "python_pass_through_wrapper",
-        "python_phantom_import",
-    }
-)
+_SUPPORTED_KINDS = frozenset(get_args(MatchKind))
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +37,7 @@ class AntislopRule:
     languages: frozenset[str]
     match_kind: MatchKind
     pattern: str | None
+    compiled_pattern: re.Pattern[str] | None
 
 
 def _rules_dir(custom: Path | None) -> Path:
@@ -116,8 +108,9 @@ def _load_rule_file(path: Path) -> list[AntislopRule]:
             message=str(raw.get("message") or rule_id),
             remediation=str(raw.get("remediation") or "").strip(),
             languages=languages,
-            match_kind=kind,  # type: ignore[arg-type]  # — kind is str from YAML; MatchKind is validated above
+            match_kind=cast("MatchKind", kind),  # kind validated against _SUPPORTED_KINDS above
             pattern=pattern,
+            compiled_pattern=re.compile(pattern) if pattern is not None else None,
         )
     ]
 

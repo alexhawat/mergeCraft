@@ -30,6 +30,8 @@ from typing import Any, Final
 
 from loguru import logger
 
+from mergecraft.orchestrator.pipeline import RISK_BANDS, risk_at_or_above
+
 ROUTING_INTENTS: Final[frozenset[str]] = frozenset({"require", "prefer", "fallback"})
 MAX_RETRY_ATTEMPTS: Final[int] = 5
 RETRYABLE_FAILURES: Final[frozenset[str]] = frozenset(
@@ -79,10 +81,9 @@ _CAPABILITY_CATALOG: Final[tuple[dict[str, Any], ...]] = (
     },
 )
 
-_RISK_ORDER: Final[dict[str, int]] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-
 _ROUTE_TABLE: Final[dict[tuple[str, str], str]] = {
     ("security", "high"): "anthropic/claude-opus",
+    ("security", "critical"): "anthropic/claude-opus",
     ("security", "trivial"): "anthropic/claude-haiku",
     ("tests", "high"): "openai/gpt-5.3-codex",
     ("tests", "critical"): "openai/gpt-5.3-codex",
@@ -90,9 +91,18 @@ _ROUTE_TABLE: Final[dict[tuple[str, str], str]] = {
 }
 
 
-def _risk_at_or_above(*, risk: str, threshold: str) -> bool:
-    """Return whether ``risk`` is at or above ``threshold`` in the shared band order."""
-    return _RISK_ORDER.get(str(risk).lower(), 0) >= _RISK_ORDER.get(threshold, 0)
+def _routing_risk_band(risk: str) -> str:
+    """Map a routing risk label onto the shared ``RISK_BANDS`` vocabulary."""
+    normalized = str(risk).casefold()
+    if normalized == "trivial":
+        return "low"
+    if normalized not in RISK_BANDS:
+        logger.warning(
+            "Unknown risk band {risk!r}; routing as high-tier capable model",
+            risk=risk,
+        )
+        return "high"
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,10 +209,14 @@ def route_model(*, specialist: str, risk: str) -> str:
         A catalog model id. High- and critical-risk bands never use the
         trivial-risk cheap pick.
     """
-    key = (str(specialist), str(risk))
+    risk_key = str(risk).casefold()
+    key = (str(specialist), risk_key)
     if key in _ROUTE_TABLE:
         chosen = _ROUTE_TABLE[key]
-    elif _risk_at_or_above(risk=risk, threshold="high"):
+    elif str(specialist) == "security" and risk_at_or_above(
+        _routing_risk_band(risk),
+        "high",
+    ):
         chosen = "anthropic/claude-opus"
     else:
         chosen = "anthropic/claude-haiku"

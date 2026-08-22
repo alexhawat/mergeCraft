@@ -104,12 +104,16 @@ to run the *repo's* tool against the *repo's* config.
 | `managed` (17) | `untrusted` | **runs** (pinned binary only) | runs |
 | `container` (4) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
 
-One documented exception to the runtime row: `agentsec`, `antislop`. It declares
-`runtime: repo-native` but `resolve_analyzer()` special-cases it before the
-repo-binary preference is consulted and `run_adapter()` executes it
+One documented exception to the runtime row: `agentsec`, `antislop`. They declare
+`runtime: repo-native` but `resolve_analyzer()` special-cases them before the
+repo-binary preference is consulted and `run_adapter()` executes them
 in-process — no subprocess, no argv, nothing the PR authored is run. The
 runtime axis asks whether PR content could steer what executes; for these
 the answer is no, so they stay eligible (#38).
+
+`antislop` is `trust: trusted` and `default_enabled: false`. Enabling it via
+`analyzers.overrides` on untrusted fork runs still no-ops when the trust axis
+skips trusted-only analyzers — opt in only on trusted events.
 
 ### The `analyzers:` mode axis
 

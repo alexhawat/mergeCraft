@@ -110,6 +110,12 @@ def validate_predicate(expression: str) -> None:
         raise PipelineValidationError(msg)
 
 
+def risk_at_or_above(risk: str, threshold: str) -> bool:
+    """Return whether ``risk`` is at or above ``threshold`` in the shared band order."""
+    actual = str(risk).casefold()
+    return _RISK_ORDER.get(actual, 0) >= _RISK_ORDER.get(str(threshold).casefold(), 0)
+
+
 def _path_matches(pattern: str, path: str) -> bool:
     pure = PurePath(path)
     if pure.match(pattern):
@@ -148,8 +154,8 @@ def evaluate_predicate(
 
     if expr.startswith("risk_band >= "):
         threshold = expr.rsplit(">= ", 1)[1].strip()
-        actual = str(signals.get("risk_band", "low")).lower()
-        return _RISK_ORDER.get(actual, 0) >= _RISK_ORDER.get(threshold, 0)
+        actual = str(signals.get("risk_band", "low"))
+        return risk_at_or_above(actual, threshold)
 
     if expr.startswith("languages includes "):
         needle = expr.rsplit("includes ", 1)[1].strip()
@@ -229,6 +235,7 @@ def lint_pipeline_agents(pipeline: PipelineDefinition, registry: Any) -> list[st
 
 
 __all__ = [
+    "RISK_BANDS",
     "OnErrorPolicy",
     "PipelineDefinition",
     "PipelineSource",
@@ -238,5 +245,8 @@ __all__ = [
     "evaluate_predicate",
     "lint_pipeline_agents",
     "parse_pipeline",
+    "risk_at_or_above",
     "validate_predicate",
 ]
+
+RISK_BANDS = _RISK_BANDS

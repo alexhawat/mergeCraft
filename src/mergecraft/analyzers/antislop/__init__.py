@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import fnmatch
 from dataclasses import dataclass
+from pathlib import PurePath
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -73,9 +73,11 @@ def scan_changed_files(
         )
 
     matches: list[RuleMatch] = []
+    scanned_any = False
     for rel_path in scoped:
         if _path_ignored(rel_path, ignore_patterns):
             continue
+        scanned_any = True
         absolute = repo_root / rel_path
         if not absolute.is_file():
             continue
@@ -86,6 +88,13 @@ def scan_changed_files(
             continue
         matches.extend(
             apply_rules(rel_path=rel_path, source=source, rules=rules),
+        )
+
+    if not scanned_any and ignore_patterns:
+        return AntislopScanResult(
+            findings=[],
+            skipped=True,
+            skip_reason="skipped antislop: all changed paths ignored",
         )
 
     findings = [_finding_from_match(match) for match in matches]
@@ -107,6 +116,13 @@ def _active_rules(
 ) -> tuple[AntislopRule, ...]:
     if not rule_overrides:
         return rules
+    known_ids = {rule.rule_id for rule in rules}
+    for override_id in rule_overrides:
+        if override_id not in known_ids:
+            logger.warning(
+                "antislop: unknown rule override {rule_id!r} ignored",
+                rule_id=override_id,
+            )
     active: list[AntislopRule] = []
     for rule in rules:
         override = rule_overrides.get(rule.rule_id)
@@ -120,14 +136,13 @@ def _path_ignored(rel_path: str, patterns: list[str] | None) -> bool:
     if not patterns:
         return False
     normalized = rel_path.replace("\\", "/")
+    pure = PurePath(normalized)
     for pattern in patterns:
         pat = pattern.replace("\\", "/")
-        if fnmatch.fnmatch(normalized, pat):
+        if pure.match(pat):
             return True
-        if "**" in pat:
-            prefix = pat.split("**", 1)[0]
-            if prefix and normalized.startswith(prefix.rstrip("/") + "/"):
-                return True
+        if pat.startswith("**/") and pure.match(pat[3:]):
+            return True
     return False
 
 

@@ -131,7 +131,11 @@ class CiEvidenceSettings(_OptionalFeatureModel):
 
 
 class AnalyzerOverride(_OptionalFeatureModel):
-    """Per-analyzer config override."""
+    """Per-analyzer config override.
+
+    ``rules`` and ``ignore`` are consumed only by the ``antislop`` in-process
+    analyzer; other analyzers ignore those fields.
+    """
 
     enabled: bool | None = None
     rules: dict[str, str] | None = None
@@ -149,8 +153,6 @@ class AnalyzerOverride(_OptionalFeatureModel):
         for key, value in rules.items():
             if value is False:
                 normalized[str(key)] = "off"
-            elif value is True:
-                normalized[str(key)] = "on"
             elif value is not None:
                 normalized[str(key)] = str(value)
         return {**data, "rules": normalized}

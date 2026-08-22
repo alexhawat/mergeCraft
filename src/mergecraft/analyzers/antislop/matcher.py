@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -46,7 +47,6 @@ def apply_rules(
             continue
         for start_line, end_line, snippet in _matches_for_kind(
             rule=rule,
-            rel_path=rel_path,
             source=source,
             language=language,
         ):
@@ -80,7 +80,6 @@ def _language_for_path(rel_path: str) -> str | None:
 def _matches_for_kind(
     *,
     rule: AntislopRule,
-    rel_path: str,
     source: str,
     language: str,
 ) -> Iterable[tuple[int, int, str]]:
@@ -117,9 +116,9 @@ def _comment_regex_matches(
     source: str,
     language: str,
 ) -> Iterable[tuple[int, int, str]]:
-    if not rule.pattern:
+    if not rule.compiled_pattern:
         return
-    pattern = re.compile(rule.pattern)
+    pattern = rule.compiled_pattern
     prefix = "#" if language == "python" else "//"
     for line_no, line in enumerate(source.splitlines(), start=1):
         comment = _extract_line_comment(line, prefix=prefix)
@@ -134,9 +133,9 @@ def _line_regex_matches(
     rule: AntislopRule,
     source: str,
 ) -> Iterable[tuple[int, int, str]]:
-    if not rule.pattern:
+    if not rule.compiled_pattern:
         return
-    pattern = re.compile(rule.pattern)
+    pattern = rule.compiled_pattern
     for line_no, line in enumerate(source.splitlines(), start=1):
         search_line = _strip_quoted_literals(line)
         if pattern.search(search_line):
@@ -273,25 +272,86 @@ def _python_phantom_import_matches(source: str) -> Iterable[tuple[int, int, str]
     if not import_names:
         return
 
+    type_checking_only = _type_checking_only_imports(source)
     body_without_imports = _strip_python_imports(source)
     for name, line_no in import_names:
+        if name in type_checking_only:
+            continue
         if re.search(rf"\b{re.escape(name)}\b", body_without_imports):
             continue
         yield line_no, line_no, f"import {name} is unused"
 
 
 def _js_empty_error_handler_matches(*, source: str) -> Iterable[tuple[int, int, str]]:
-    pattern = re.compile(r"catch\s*\([^)]*\)\s*\{\s*\}", re.DOTALL)
-    for match in pattern.finditer(source):
-        line = source.count("\n", 0, match.start()) + 1
-        yield line, line, match.group(0).strip()
+    patterns = (
+        re.compile(r"catch\s*\{\s*\}", re.DOTALL),
+        re.compile(r"catch\s*\([^)]*\)\s*\{\s*\}", re.DOTALL),
+        re.compile(r"catch\s*\([^)]*\)\s*\{\s*/\*[^*]*\*/\s*\}", re.DOTALL),
+    )
+    for pattern in patterns:
+        for match in pattern.finditer(source):
+            line = source.count("\n", 0, match.start()) + 1
+            yield line, line, match.group(0).strip()
 
 
 def _js_error_obscuring_catch_matches(*, source: str) -> Iterable[tuple[int, int, str]]:
-    pattern = re.compile(r"catch\s*\([^)]*\)\s*\{[^}]*\breturn\s+null\b")
+    pattern = re.compile(
+        r"catch\s*(?:\([^)]*\))?\s*\{[^}]*\breturn\s+(?:null|undefined)\b",
+        re.DOTALL,
+    )
     for match in pattern.finditer(source):
         line = source.count("\n", 0, match.start()) + 1
         yield line, line, match.group(0).strip()
+
+
+def _type_checking_only_imports(source: str) -> frozenset[str]:
+    """Names imported only under ``if TYPE_CHECKING:`` blocks."""
+    names: set[str] = set()
+    for node in _walk_python_nodes(source):
+        if node.type != "if_statement":
+            continue
+        condition = node.child_by_field_name("condition")
+        if condition is None or "TYPE_CHECKING" not in _node_text(source, condition):
+            continue
+        consequence = node.child_by_field_name("consequence")
+        if consequence is None:
+            continue
+        for child in consequence.children:
+            names.update(_collect_import_names(source, child))
+    return frozenset(names)
+
+
+def _collect_import_names(source: str, node: Node) -> set[str]:
+    collected: set[str] = set()
+    if node.type == "import_statement":
+        for child in node.children:
+            if child.type == "dotted_name":
+                collected.add(_node_text(source, child).split(".", 1)[0])
+            elif child.type == "aliased_import":
+                name_node = child.child_by_field_name("name")
+                if name_node is not None:
+                    collected.add(_node_text(source, name_node).split(".", 1)[0])
+    elif node.type == "import_from_statement":
+        seen_import_keyword = False
+        for child in node.children:
+            if child.type == "import":
+                seen_import_keyword = True
+                continue
+            if not seen_import_keyword:
+                continue
+            if child.type == "aliased_import":
+                alias = child.child_by_field_name("alias")
+                name_node = child.child_by_field_name("name")
+                if alias is not None:
+                    collected.add(_node_text(source, alias))
+                elif name_node is not None:
+                    collected.add(_node_text(source, name_node))
+            elif child.type in {"dotted_name", "identifier"}:
+                collected.add(_node_text(source, child))
+    elif node.type == "block":
+        for child in node.children:
+            collected.update(_collect_import_names(source, child))
+    return collected
 
 
 def _walk_python_functions(source: str) -> Iterable[tuple[Node, int, int]]:
@@ -313,27 +373,28 @@ def _walk_python_try_blocks(source: str) -> Iterable[tuple[Node, int, int]]:
 
 
 def _walk_python_nodes(source: str) -> Iterable[Node]:
-    import tree_sitter_python as tspython
-    from tree_sitter import Language, Parser
-
-    parser = Parser(Language(tspython.language()))
-    tree = parser.parse(source.encode("utf-8"))
+    root = _parse_python_root(source)
 
     def walk(node: Node) -> Iterable[Node]:
         yield node
         for child in node.children:
             yield from walk(child)
 
-    yield from walk(tree.root_node)
+    yield from walk(root)
+
+
+@lru_cache(maxsize=32)
+def _parse_python_root(source: str) -> Node:
+    import tree_sitter_python as tspython
+    from tree_sitter import Language, Parser
+
+    parser = Parser(Language(tspython.language()))
+    tree = parser.parse(source.encode("utf-8"))
+    return tree.root_node
 
 
 def _python_function_body(node: Node) -> Node | None:
-    body = node.child_by_field_name("body")
-    if body is None:
-        return None
-    if body.type == "block":
-        return body
-    return body
+    return node.child_by_field_name("body")
 
 
 def _python_function_name(node: Node) -> str | None:

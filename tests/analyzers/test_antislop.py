@@ -151,7 +151,10 @@ def test_every_v1_rule_has_false_positive_fixture(rule_id: str) -> None:
 @pytest.mark.parametrize("rule_id", V1_RULE_IDS)
 def test_positive_fixture_fires_rule(tmp_path: Path, rule_id: str) -> None:
     antislop = _antislop()
-    for fixture in _fixture_paths("positive", rule_id):
+    fixtures = list(_fixture_paths("positive", rule_id))
+    if not fixtures:
+        pytest.fail(f"{rule_id} has no positive fixtures")
+    for fixture in fixtures:
         rel = f"src/{fixture.name}"
         repo = tmp_path / f"pos-{fixture.name}"
         repo.mkdir()
@@ -163,7 +166,8 @@ def test_positive_fixture_fires_rule(tmp_path: Path, rule_id: str) -> None:
         matched = [finding for finding in result.findings if finding.rule_id == rule_id]
         if matched:
             return
-    pytest.fail(f"{rule_id} must fire on {fixture.name}")
+    names = ", ".join(fixture.name for fixture in fixtures)
+    pytest.fail(f"{rule_id} must fire on at least one of: {names}")
 
 
 @pytest.mark.parametrize("rule_id", V1_RULE_IDS)
@@ -209,6 +213,7 @@ def test_path_ignore_honoured(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     result = antislop.scan_changed_files(repo_root=repo, changed_files=[rel])
+    assert result.skipped, result.skip_reason
     assert result.findings == []
 
 

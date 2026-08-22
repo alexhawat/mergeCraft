@@ -14,6 +14,7 @@ from mergecraft.analyzers.detect import (
     has_sqlfluff_dialect,
     resolve_repo_tool,
 )
+from mergecraft.analyzers.trust import IN_PROCESS_ANALYZER_IDS
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -103,33 +104,31 @@ def _sqlfluff_no_dialect_plan(manifest: AnalyzerManifest, repo_root: Path) -> An
     )
 
 
-def _agentsec_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
-    """Per-source resolver: the ``agentsec`` special-case (mergeCraft's native engine)."""
-    if manifest.id != "agentsec":
+_IN_PROCESS_PLAN_NOTES: dict[str, tuple[str, str]] = {
+    "agentsec": (
+        "ran mergeCraft native agent-security policy engine",
+        "native YAML rules",
+    ),
+    "antislop": (
+        "ran mergeCraft native anti-slop policy engine",
+        "native YAML rules",
+    ),
+}
+
+
+def _in_process_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
+    """Per-source resolver for in-process native engines (#38, #393)."""
+    if manifest.id not in IN_PROCESS_ANALYZER_IDS:
         return None
+    version_note, config_note = _IN_PROCESS_PLAN_NOTES[manifest.id]
     return AnalyzerPlan(
         manifest_id=manifest.id,
         mode="repo-native",
-        argv=("agentsec",),
+        argv=(manifest.id,),
         cwd=repo_root,
         timeout_s=manifest.timeout_s,
-        version_note="ran mergeCraft native agent-security policy engine",
-        config_note="native YAML rules",
-    )
-
-
-def _antislop_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
-    """Per-source resolver: the ``antislop`` special-case (mergeCraft's native engine)."""
-    if manifest.id != "antislop":
-        return None
-    return AnalyzerPlan(
-        manifest_id=manifest.id,
-        mode="repo-native",
-        argv=("antislop",),
-        cwd=repo_root,
-        timeout_s=manifest.timeout_s,
-        version_note="ran mergeCraft native anti-slop policy engine",
-        config_note="native YAML rules",
+        version_note=version_note,
+        config_note=config_note,
     )
 
 
@@ -370,9 +369,7 @@ def resolve_analyzer(
     if plan is None:
         plan = _sqlfluff_no_dialect_plan(manifest, repo_root)
     if plan is None:
-        plan = _agentsec_plan(manifest, repo_root)
-    if plan is None:
-        plan = _antislop_plan(manifest, repo_root)
+        plan = _in_process_plan(manifest, repo_root)
     if plan is None:
         repo_tool_state, early_skip = _detect_repo_tool_state(
             manifest,
