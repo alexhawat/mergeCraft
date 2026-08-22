@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 __all__ = [
     "DEFAULT_AUDIT_REL",
     "explain_blocking_decision",
@@ -40,9 +42,15 @@ def load_audit_events(*, root: Path | None = None) -> list[dict[str, Any]]:
         stripped = line.strip()
         if not stripped:
             continue
-        payload = json.loads(stripped)
-        if isinstance(payload, dict):
-            events.append(payload)
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            logger.warning("Skipping malformed audit JSONL line")
+            continue
+        if not isinstance(payload, dict):
+            logger.warning("Skipping non-dict audit JSONL payload")
+            continue
+        events.append(payload)
     return events
 
 
