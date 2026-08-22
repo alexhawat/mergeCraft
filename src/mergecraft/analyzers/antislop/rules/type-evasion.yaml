@@ -1,0 +1,10 @@
+id: antislop/type-evasion
+severity: minor
+confidence: likely
+category: Maintainability & Code Quality
+languages: [python, javascript, typescript]
+message: Type information is erased with any, ignore, or double casts
+remediation: Model the real type or narrow safely instead of bypassing the type checker.
+match:
+  kind: line_regex
+  pattern: '(?i)(?::\s*any\b|as\s+unknown\s+as\b|#\s*type:\s*ignore\b)'
