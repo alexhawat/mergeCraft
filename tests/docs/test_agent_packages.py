@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 
 import pytest
-import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
-from tests.docs.support import ci_steps, load_script_module
+from tests.docs.support import ci_steps, load_harness_manifest, load_script_module
 
 HARNESS_MANIFEST = REPO_ROOT / "skills" / "harnesses.yaml"
 GEN_SCRIPT = REPO_ROOT / "scripts" / "gen_agent_packages.py"
@@ -32,13 +30,6 @@ _SKILL_PATH_RE = re.compile(
 )
 
 
-def _load_harness_manifest() -> dict[str, Any]:
-    assert HARNESS_MANIFEST.is_file(), f"missing {HARNESS_MANIFEST.relative_to(REPO_ROOT)} (RV3)"
-    data = yaml.safe_load(HARNESS_MANIFEST.read_text(encoding="utf-8"))
-    assert isinstance(data, dict), "skills/harnesses.yaml must parse as a mapping"
-    return data
-
-
 def _readme_agent_region() -> str:
     text = read_text("README.md")
     match = re.search(
@@ -51,7 +42,7 @@ def _readme_agent_region() -> str:
 
 
 def test_every_declared_harness_has_a_package_or_fallback() -> None:
-    manifest = _load_harness_manifest()
+    manifest = load_harness_manifest()
     harnesses = manifest.get("harnesses") or []
     assert isinstance(harnesses, list)
     assert harnesses, "skills/harnesses.yaml needs harnesses:"
@@ -113,7 +104,7 @@ def test_generated_packages_have_no_broken_relative_links() -> None:
 
 
 def test_unverified_formats_are_marked() -> None:
-    manifest = _load_harness_manifest()
+    manifest = load_harness_manifest()
     harnesses = manifest.get("harnesses") or []
     offenders: list[str] = []
     for row in harnesses:
@@ -132,7 +123,7 @@ def test_unverified_formats_are_marked() -> None:
 
 
 def test_readme_paths_match_harness_manifest() -> None:
-    manifest = _load_harness_manifest()
+    manifest = load_harness_manifest()
     declared_paths: set[str] = set()
     for block in manifest.get("install_paths") or []:
         if isinstance(block, dict) and isinstance(block.get("path"), str):

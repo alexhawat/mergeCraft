@@ -4,54 +4,45 @@ from __future__ import annotations
 
 import importlib.util
 import re
-import subprocess
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
+import yaml
+
+from mergecraft.utils.git_ref import git_ref_exists
 from tests.ci.workflow_support import REPO_ROOT
 
-_SHA_REF = re.compile(r"^[0-9a-f]{40}$")
+__all__ = [
+    "action_uses_pattern",
+    "ci_steps",
+    "git_ref_exists",
+    "load_harness_manifest",
+    "load_script_module",
+    "makefile_prerequisite_tokens",
+]
 
 action_uses_pattern = re.compile(
     r"uses:\s*alexhawat/mergeCraft@(\S+)",
     re.IGNORECASE,
 )
 
+HARNESS_MANIFEST = REPO_ROOT / "skills" / "harnesses.yaml"
 
-def git_ref_exists(ref: str) -> bool:
-    """Return whether *ref* resolves as a tag, branch, or commit in this checkout."""
-    ref = ref.rstrip("#").strip()
-    candidates: list[list[str]]
-    if _SHA_REF.fullmatch(ref):
-        candidates = [["git", "rev-parse", "--verify", f"{ref}^{{commit}}"]]
-    elif ref.startswith("v"):
-        candidates = [["git", "rev-parse", "--verify", f"refs/tags/{ref}^{{commit}}"]]
-    else:
-        candidates = [
-            ["git", "rev-parse", "--verify", f"refs/heads/{ref}^{{commit}}"],
-            ["git", "rev-parse", "--verify", f"refs/remotes/origin/{ref}^{{commit}}"],
-        ]
-    for cmd in candidates:
-        if subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, check=False).returncode == 0:
-            return True
-    if not _SHA_REF.fullmatch(ref):
-        return False
-    # CI checkouts use fetch-depth: 1 — pinned SHAs may not be in the object db.
-    fetch = subprocess.run(
-        ["git", "fetch", "origin", ref, "--depth=1"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        check=False,
-    )
-    if fetch.returncode != 0:
-        return False
-    verify = subprocess.run(
-        ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        check=False,
-    )
-    return verify.returncode == 0
+
+def load_harness_manifest() -> dict[str, Any]:
+    """Parse ``skills/harnesses.yaml`` as a mapping."""
+    assert HARNESS_MANIFEST.is_file(), f"missing {HARNESS_MANIFEST.relative_to(REPO_ROOT)}"
+    data = yaml.safe_load(HARNESS_MANIFEST.read_text(encoding="utf-8"))
+    assert isinstance(data, dict), "skills/harnesses.yaml must parse as a mapping"
+    return data
+
+
+def makefile_prerequisite_tokens(makefile: str, target: str) -> set[str]:
+    """Return Makefile prerequisite tokens for *target*."""
+    match = re.search(rf"^{re.escape(target)}:(.*)$", makefile, re.MULTILINE)
+    assert match, f"Makefile missing {target}: recipe"
+    return set(match.group(1).split())
 
 
 def ci_steps() -> list[str]:

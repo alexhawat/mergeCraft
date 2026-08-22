@@ -11,24 +11,13 @@ from __future__ import annotations
 import re
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
+from tests.docs.support import ci_steps, makefile_prerequisite_tokens
 
 _CHECKOUT_DEFAULTS = REPO_ROOT / "scripts" / "example_workflows" / "defaults.yaml"
 _PACKAGED_DEFAULTS = (
     REPO_ROOT / "src" / "mergecraft" / "data" / "example_workflows" / "defaults.yaml"
 )
 _PINS_CHECK_TARGET = "pins-check"
-
-
-def _makefile_prerequisite_tokens(makefile: str, target: str) -> set[str]:
-    match = re.search(rf"^{re.escape(target)}:(.*)$", makefile, re.MULTILINE)
-    assert match, f"Makefile missing {target}: recipe"
-    return set(match.group(1).split())
-
-
-def _ci_steps(makefile: str) -> list[str]:
-    match = re.search(r"^CI_STEPS\s*:?=\s*(.+)$", makefile, re.MULTILINE)
-    assert match, "Makefile missing CI_STEPS"
-    return match.group(1).split()
 
 
 def test_checkout_and_packaged_defaults_yaml_are_byte_identical() -> None:
@@ -58,16 +47,14 @@ def test_make_pins_check_target_exists() -> None:
 
 
 def test_make_pins_check_in_ci_steps() -> None:
-    makefile = read_text("Makefile")
-    steps = _ci_steps(makefile)
-    assert _PINS_CHECK_TARGET in steps, (
+    assert _PINS_CHECK_TARGET in ci_steps(), (
         f"Makefile CI_STEPS must include {_PINS_CHECK_TARGET} (#414 drift gate)"
     )
 
 
 def test_make_pins_check_in_ci_static() -> None:
     makefile = read_text("Makefile")
-    ci_static = _makefile_prerequisite_tokens(makefile, "ci-static")
+    ci_static = makefile_prerequisite_tokens(makefile, "ci-static")
     assert _PINS_CHECK_TARGET in ci_static, (
         f"Makefile ci-static must include {_PINS_CHECK_TARGET} (#414 drift gate)"
     )

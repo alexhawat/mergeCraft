@@ -1,5 +1,7 @@
 # Shared placeholders for rendered example workflows.
-# Edit here (or override via env) then run: make examples
+# Source of truth: scripts/example_workflows/defaults.yaml — copy byte-identical
+# to src/mergecraft/data/example_workflows/defaults.yaml, then make pins-check.
+# Override via env when generating examples: make examples
 action_repo: alexhawat/mergeCraft
 # A tagged release ref is fine for the minimal getting-started example.
 action_pin_minimal: v0.1.0a1

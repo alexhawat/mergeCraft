@@ -9,13 +9,15 @@ as documented in ``docs/authentication.md``. Implementation lands in W10.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
+import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT
+from tests.docs.support import load_harness_manifest
 
-HARNESS_MANIFEST = REPO_ROOT / "skills" / "harnesses.yaml"
 HERMES_SKILL_MD = REPO_ROOT / "skills" / "hermes" / "mergecraft" / "SKILL.md"
 AUTH_DOC = REPO_ROOT / "docs" / "authentication.md"
 
@@ -27,13 +29,6 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 _ENV_VAR_RE = re.compile(r"`([A-Z][A-Z0-9_]+)`")
 
 
-def _load_harness_manifest() -> dict[str, Any]:
-    assert HARNESS_MANIFEST.is_file(), f"missing {HARNESS_MANIFEST.relative_to(REPO_ROOT)} (D11)"
-    data = yaml.safe_load(HARNESS_MANIFEST.read_text(encoding="utf-8"))
-    assert isinstance(data, dict), "skills/harnesses.yaml must parse as a mapping"
-    return data
-
-
 def _hermes_harness_row(manifest: dict[str, Any]) -> dict[str, Any]:
     for row in manifest.get("harnesses") or []:
         if isinstance(row, dict) and row.get("id") == _HERMES_ID:
@@ -43,7 +38,7 @@ def _hermes_harness_row(manifest: dict[str, Any]) -> dict[str, Any]:
 
 
 def _required_env_vars_from_manifest() -> list[str]:
-    row = _hermes_harness_row(_load_harness_manifest())
+    row = _hermes_harness_row(load_harness_manifest())
     raw = row.get("required_environment_variables")
     assert isinstance(raw, list), "Hermes harness must declare required_environment_variables"
     env_vars: list[str] = []
@@ -101,93 +96,53 @@ def _auth_doc_env_names_for_provider(provider_label: str) -> set[str]:
     raise AssertionError(msg)
 
 
-def test_hermes_manifest_lists_gemini_api_key() -> None:
-    """Hermes harness manifest must name GEMINI_API_KEY for Google Gemini auth."""
-    env_vars = _required_env_vars_from_manifest()
-    assert _GEMINI_ENV in env_vars, (
-        f"skills/harnesses.yaml Hermes required_environment_variables must include "
-        f"{_GEMINI_ENV} per docs/authentication.md"
-    )
+_ENV_GETTERS: dict[str, Callable[[], list[str]]] = {
+    "manifest": _required_env_vars_from_manifest,
+    "skill_md": _required_env_vars_from_skill_md,
+}
 
 
-def test_hermes_manifest_lists_nous_api_key() -> None:
-    """Hermes harness manifest must name NOUS_API_KEY for mergecraft auth nous."""
-    env_vars = _required_env_vars_from_manifest()
-    assert _NOUS_ENV in env_vars, (
-        f"skills/harnesses.yaml Hermes required_environment_variables must include "
-        f"{_NOUS_ENV} per docs/authentication.md"
-    )
+@pytest.mark.parametrize("source", _ENV_GETTERS.keys())
+@pytest.mark.parametrize(
+    ("env_name", "must_present"),
+    [
+        (_GEMINI_ENV, True),
+        (_NOUS_ENV, True),
+        (_FORBIDDEN_GOOGLE_ENV, False),
+    ],
+)
+def test_hermes_required_env_var(
+    source: str,
+    env_name: str,
+    must_present: bool,
+) -> None:
+    """Hermes manifest and generated SKILL.md must agree on auth env var names."""
+    env_vars = _ENV_GETTERS[source]()
+    if must_present:
+        assert env_name in env_vars, (
+            f"{source} required_environment_variables must include {env_name} "
+            "per docs/authentication.md"
+        )
+    else:
+        assert env_name not in env_vars, (
+            f"{source} must not list {env_name}; use {_GEMINI_ENV} per docs/authentication.md"
+        )
 
 
-def test_hermes_manifest_excludes_google_api_key() -> None:
-    """Hermes must not list GOOGLE_API_KEY — mergeCraft reads GEMINI_API_KEY for Gemini."""
-    env_vars = _required_env_vars_from_manifest()
-    assert _FORBIDDEN_GOOGLE_ENV not in env_vars, (
-        f"skills/harnesses.yaml Hermes must not list {_FORBIDDEN_GOOGLE_ENV}; "
-        f"use {_GEMINI_ENV} per docs/authentication.md"
-    )
-
-
-def test_hermes_skill_md_lists_gemini_api_key() -> None:
-    """Generated Hermes SKILL.md frontmatter must name GEMINI_API_KEY."""
-    env_vars = _required_env_vars_from_skill_md()
-    assert _GEMINI_ENV in env_vars, (
-        f"skills/hermes/mergecraft/SKILL.md required_environment_variables must include "
-        f"{_GEMINI_ENV} per docs/authentication.md"
-    )
-
-
-def test_hermes_skill_md_lists_nous_api_key() -> None:
-    """Generated Hermes SKILL.md frontmatter must name NOUS_API_KEY."""
-    env_vars = _required_env_vars_from_skill_md()
-    assert _NOUS_ENV in env_vars, (
-        f"skills/hermes/mergecraft/SKILL.md required_environment_variables must include "
-        f"{_NOUS_ENV} per docs/authentication.md"
-    )
-
-
-def test_hermes_skill_md_excludes_google_api_key() -> None:
-    """Generated Hermes SKILL.md must not list GOOGLE_API_KEY."""
-    env_vars = _required_env_vars_from_skill_md()
-    assert _FORBIDDEN_GOOGLE_ENV not in env_vars, (
-        f"skills/hermes/mergecraft/SKILL.md must not list {_FORBIDDEN_GOOGLE_ENV}; "
-        f"use {_GEMINI_ENV} per docs/authentication.md"
-    )
-
-
-def test_hermes_manifest_env_names_match_authentication_doc() -> None:
-    """Hermes manifest env vars must include auth-doc names for Gemini and Nous."""
+def test_hermes_env_names_match_authentication_doc() -> None:
+    """Hermes manifest and SKILL.md env vars must include auth-doc names for Gemini and Nous."""
     gemini_envs = _auth_doc_env_names_for_provider("Google Gemini")
     nous_envs = _auth_doc_env_names_for_provider("Nous Portal")
-    assert _GEMINI_ENV in gemini_envs, (
-        "docs/authentication.md must document GEMINI_API_KEY for Gemini"
-    )
-    assert _NOUS_ENV in nous_envs, "docs/authentication.md must document NOUS_API_KEY for Nous"
-    env_vars = set(_required_env_vars_from_manifest())
-    missing = sorted(
-        name
-        for name in (_GEMINI_ENV, _NOUS_ENV)
-        if name in gemini_envs.union(nous_envs) and name not in env_vars
-    )
-    assert not missing, (
-        f"Hermes manifest required_environment_variables missing auth-doc env names: {missing}"
-    )
-    assert _FORBIDDEN_GOOGLE_ENV not in env_vars
-
-
-def test_hermes_skill_md_env_names_match_authentication_doc() -> None:
-    """Generated Hermes SKILL.md env vars must include auth-doc names for Gemini and Nous."""
-    gemini_envs = _auth_doc_env_names_for_provider("Google Gemini")
-    nous_envs = _auth_doc_env_names_for_provider("Nous Portal")
-    assert _GEMINI_ENV in gemini_envs
-    assert _NOUS_ENV in nous_envs
-    env_vars = set(_required_env_vars_from_skill_md())
-    missing = sorted(
-        name
-        for name in (_GEMINI_ENV, _NOUS_ENV)
-        if name in gemini_envs.union(nous_envs) and name not in env_vars
-    )
-    assert not missing, (
-        f"Hermes SKILL.md required_environment_variables missing auth-doc env names: {missing}"
-    )
-    assert _FORBIDDEN_GOOGLE_ENV not in env_vars
+    assert _GEMINI_ENV in gemini_envs, "docs/authentication.md must document GEMINI_API_KEY"
+    assert _NOUS_ENV in nous_envs, "docs/authentication.md must document NOUS_API_KEY"
+    for source, getter in _ENV_GETTERS.items():
+        env_vars = set(getter())
+        missing = sorted(
+            name
+            for name in (_GEMINI_ENV, _NOUS_ENV)
+            if name in gemini_envs.union(nous_envs) and name not in env_vars
+        )
+        assert not missing, (
+            f"Hermes {source} required_environment_variables missing auth-doc env names: {missing}"
+        )
+        assert _FORBIDDEN_GOOGLE_ENV not in env_vars

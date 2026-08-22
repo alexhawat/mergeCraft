@@ -12,6 +12,7 @@ import pytest
 pytest.importorskip("harbor")
 
 from mergecraft.harbor.agent import MergecraftReviewAgent, _resolve_patch_path
+from mergecraft.pins import action_pin_minimal
 
 _HARBOR_AGENT_MODULE = "mergecraft.harbor.agent"
 
@@ -24,26 +25,10 @@ def _reload_harbor_agent_module() -> Any:
     return importlib.import_module(_HARBOR_AGENT_MODULE)
 
 
-def _resolved_default_install_ref(agent_module: Any | None = None) -> str:
-    """Resolve the default Harbor install ref across eager and lazy pin layouts (D9)."""
-    module = agent_module or importlib.import_module(_HARBOR_AGENT_MODULE)
-    accessor = getattr(module, "_default_install_ref", None)
-    if accessor is not None:
-        resolved = accessor()
-        return str(resolved)
-    ref = module.DEFAULT_INSTALL_REF
-    if isinstance(ref, str):
-        return ref
-    if callable(ref):
-        return str(ref())
-    msg = f"unexpected DEFAULT_INSTALL_REF type: {type(ref)!r}"
-    raise TypeError(msg)
-
-
 def test_default_install_ref_pins_a_release_tag_not_a_moving_branch() -> None:
-    resolved = _resolved_default_install_ref()
+    resolved = action_pin_minimal()
     assert resolved.startswith("v"), (
-        f"DEFAULT_INSTALL_REF={resolved!r} must pin a release tag "
+        f"action_pin_minimal()={resolved!r} must pin a release tag "
         "(e.g. 'v0.1.0'), not a moving branch name like 'pre-0.0.1' — a "
         "Harbor install with no MERGECRAFT_INSTALL_REF override should not "
         "silently drift onto trunk."
@@ -59,29 +44,6 @@ def test_import_harbor_agent_does_not_resolve_pin(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("mergecraft.pins.action_pin_minimal", _raise_pin)
     module = _reload_harbor_agent_module()
     assert module.MergecraftReviewAgent is not None
-
-
-def test_default_install_ref_accessor_calls_action_pin_minimal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Lazy accessor mirrors ``init_cmd._workflow_template`` — resolve pin on demand."""
-    calls: list[str] = []
-
-    def _tracking_pin() -> str:
-        calls.append("called")
-        return "v0.1.0a1"
-
-    monkeypatch.setattr("mergecraft.pins.action_pin_minimal", _tracking_pin)
-    agent_mod = _reload_harbor_agent_module()
-    accessor = getattr(agent_mod, "_default_install_ref", None)
-    assert accessor is not None, (
-        "mergecraft.harbor.agent must expose _default_install_ref() "
-        "(mirror init_cmd._workflow_template; D9)"
-    )
-    calls.clear()
-    ref = accessor()
-    assert ref.startswith("v"), f"unexpected install ref: {ref!r}"
-    assert calls == ["called"], "lazy accessor must call action_pin_minimal()"
 
 
 @pytest.mark.asyncio

@@ -14,12 +14,9 @@ import re
 from typing import Any
 
 import pytest
-import yaml
 
-from tests.ci.workflow_support import REPO_ROOT, read_text
-
-README = REPO_ROOT / "README.md"
-HARNESS_MANIFEST = REPO_ROOT / "skills" / "harnesses.yaml"
+from tests.ci.workflow_support import read_text
+from tests.docs.support import load_harness_manifest
 
 _ALSO_TEACH_HEADING = re.compile(
     r"^###\s+Also teach your agent",
@@ -39,13 +36,6 @@ _NUMBERED_SOURCE_SKILL_COPY = re.compile(
 _REPO_SOURCE_INTO_DEST = re.compile(
     r"(?i)(?:repo'?s?\s+)?skills/mergecraft/\s+into",
 )
-
-
-def _load_harness_manifest() -> dict[str, Any]:
-    assert HARNESS_MANIFEST.is_file(), f"missing {HARNESS_MANIFEST.relative_to(REPO_ROOT)} (D10)"
-    data = yaml.safe_load(HARNESS_MANIFEST.read_text(encoding="utf-8"))
-    assert isinstance(data, dict), "skills/harnesses.yaml must parse as a mapping"
-    return data
 
 
 def _generated_harness_package_paths(manifest: dict[str, Any]) -> set[str]:
@@ -126,7 +116,7 @@ def test_also_teach_agent_prompt_does_not_instruct_source_skill_copy() -> None:
 
 def test_also_teach_agent_prompt_references_generated_harness_packages() -> None:
     """Consumer copy prompt must name a generated harness package or install destination."""
-    manifest = _load_harness_manifest()
+    manifest = load_harness_manifest()
     prompt = _also_teach_prompt_text(read_text("README.md"))
     assert _references_generated_harness_packages(
         prompt,
@@ -156,7 +146,7 @@ def test_per_agent_one_liners_do_not_instruct_source_skill_copy() -> None:
 )
 def test_per_agent_skill_copy_prompts_reference_harness_packages(agent_name: str) -> None:
     """Agents that install the skill must point at generated harness packages."""
-    manifest = _load_harness_manifest()
+    manifest = load_harness_manifest()
     prompts = _per_agent_prompts(read_text("README.md"))
     prompt = prompts.get(agent_name)
     assert prompt is not None, f"missing fenced prompt for {agent_name!r} (D10)"

@@ -18,7 +18,12 @@ import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
-from tests.docs.support import action_uses_pattern, ci_steps, load_script_module
+from tests.docs.support import (
+    action_uses_pattern,
+    ci_steps,
+    load_script_module,
+    makefile_prerequisite_tokens,
+)
 
 README = REPO_ROOT / "README.md"
 AGENTS_MD = REPO_ROOT / "AGENTS.md"
@@ -136,12 +141,6 @@ def _manifest_paths(manifest: dict[str, Any]) -> list[str]:
         assert path.strip(), "each manifest row needs path: str"
         paths.append(path)
     return paths
-
-
-def _makefile_prerequisite_tokens(makefile: str, target: str) -> set[str]:
-    match = re.search(rf"^{re.escape(target)}:(.*)$", makefile, re.MULTILINE)
-    assert match, f"Makefile missing {target}: recipe"
-    return set(match.group(1).split())
 
 
 def test_install_pin_is_consistent_when_present() -> None:
@@ -294,7 +293,7 @@ def test_llms_check_and_docs_check_in_ci_steps() -> None:
     )
 
     ci_steps_set = set(ci_steps())
-    docs_check_deps = _makefile_prerequisite_tokens(makefile, "docs-check")
+    docs_check_deps = makefile_prerequisite_tokens(makefile, "docs-check")
 
     assert "llms-check" in ci_steps_set or "llms-check" in docs_check_deps, (
         "llms-check must be in CI_STEPS or docs-check prerequisites (RD4.2)"

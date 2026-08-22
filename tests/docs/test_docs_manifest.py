@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
-from tests.docs.support import ci_steps
+from tests.docs.support import ci_steps, makefile_prerequisite_tokens
 
 _MANIFEST = REPO_ROOT / "docs" / "manifest.yaml"
 _DOCS_INDEX = REPO_ROOT / "docs" / "README.md"
@@ -125,17 +125,11 @@ def test_templates_exist() -> None:
     assert not bad_templates, "\n".join(bad_templates)
 
 
-def _makefile_prerequisite_tokens(makefile: str, target: str) -> set[str]:
-    match = re.search(rf"^{re.escape(target)}:(.*)$", makefile, re.MULTILINE)
-    assert match, f"Makefile missing {target}: recipe"
-    return set(match.group(1).split())
-
-
 def test_make_docs_check_is_in_ci_steps() -> None:
     """D3: ``docs-check`` supersedes ``reference-docs-check`` in ``CI_STEPS`` (RD1.2)."""
     makefile = read_text("Makefile")
     ci_steps_set = set(ci_steps())
-    ci_static = _makefile_prerequisite_tokens(makefile, "ci-static")
+    ci_static = makefile_prerequisite_tokens(makefile, "ci-static")
     assert "docs-check" in ci_steps_set, (
         "Makefile CI_STEPS must include docs-check (not reference-docs-check substring)"
     )

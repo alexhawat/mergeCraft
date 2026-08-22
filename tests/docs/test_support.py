@@ -37,6 +37,8 @@ _MIGRATION_MODULES = (
     "tests.docs.test_cli_examples",
     "tests.docs.test_gen_agent_packages_blob_ref",
     "tests.docs.test_reference_docs",
+    "tests.docs.test_hermes_skill_env_vars",
+    "tests.docs.test_readme_harness_copy_prompts",
 )
 
 _DOCS_TEST_MODULES = tuple(
@@ -114,7 +116,7 @@ def test_git_ref_exists_fetches_shallow_checkout_sha(monkeypatch: pytest.MonkeyP
             return type("R", (), {"returncode": 0})()
         return type("R", (), {"returncode": 1})()
 
-    monkeypatch.setattr("tests.docs.support.subprocess.run", fake_run)
+    monkeypatch.setattr("mergecraft.utils.git_ref.subprocess.run", fake_run)
     assert support.git_ref_exists(sha) is True
     assert any(cmd[:3] == ["git", "fetch", "origin"] for cmd in calls), (
         "git_ref_exists must fetch missing SHAs before re-verify (landing_readme contract)"
