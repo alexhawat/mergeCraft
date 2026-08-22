@@ -16,6 +16,11 @@ from mergecraft.analyzers.registry import filter_changed_files_for_manifest, get
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv, resolve_analyzer
 from mergecraft.analyzers.run import run_plan
 from mergecraft.analyzers.sandbox import plan_sandbox
+from mergecraft.analyzers.trust import (
+    IN_PROCESS_ANALYZER_IDS,
+    IN_PROCESS_CONFIG_NOTE,
+    IN_PROCESS_VERSION_NOTES,
+)
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -43,6 +48,106 @@ def _normalize_paths(findings: list[Finding], *, repo_root: Path) -> list[Findin
         path = resolve_repo_relative_path(finding.path, repo_root=repo_root)
         normalized.append(finding.model_copy(update={"path": path}))
     return normalized
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeScanOutcome:
+    findings: list[Finding]
+    skipped: bool = False
+    skip_reason: str | None = None
+
+
+def _scan_agentsec_in_process(
+    *,
+    repo_root: Path,
+    scoped: list[str],
+    tier: TrustTier,
+) -> _NativeScanOutcome:
+    from mergecraft.analyzers.agentsec import scan_manifests
+
+    agentsec_result = scan_manifests(
+        repo_root=repo_root,
+        changed_files=scoped,
+        tier=tier,
+    )
+    return _NativeScanOutcome(
+        findings=agentsec_result.findings,
+        skipped=agentsec_result.skipped,
+        skip_reason=agentsec_result.skip_reason,
+    )
+
+
+def _scan_antislop_in_process(
+    *,
+    repo_root: Path,
+    scoped: list[str],
+    tier: TrustTier,
+) -> _NativeScanOutcome:
+    _ = tier
+    from mergecraft.analyzers.antislop import scan_changed_files
+
+    antislop_result = scan_changed_files(repo_root=repo_root, changed_files=scoped)
+    return _NativeScanOutcome(
+        findings=antislop_result.findings,
+        skipped=antislop_result.skipped,
+        skip_reason=antislop_result.skip_reason,
+    )
+
+
+_IN_PROCESS_SCANNERS = {
+    "agentsec": _scan_agentsec_in_process,
+    "antislop": _scan_antislop_in_process,
+}
+
+
+def _run_in_process_scan(
+    tool_id: str,
+    *,
+    repo_root: Path,
+    scoped: list[str],
+    tier: TrustTier,
+) -> _NativeScanOutcome:
+    scanner = _IN_PROCESS_SCANNERS.get(tool_id)
+    if scanner is None:
+        msg = f"unsupported in-process analyzer {tool_id!r}"
+        raise ValueError(msg)
+    return scanner(repo_root=repo_root, scoped=scoped, tier=tier)
+
+
+def _run_in_process_native_adapter(
+    *,
+    tool_id: str,
+    manifest: AnalyzerManifest,
+    repo_root: Path,
+    changed_files: list[str],
+    tier: TrustTier,
+) -> AdapterRunResult:
+    scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
+    if not scoped_files:
+        reason = f"skipped {tool_id}: no changed files match detect globs"
+        logger.info("{}", reason)
+        return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
+
+    outcome = _run_in_process_scan(
+        tool_id,
+        repo_root=repo_root,
+        scoped=scoped_files,
+        tier=tier,
+    )
+    version_note = IN_PROCESS_VERSION_NOTES[tool_id]
+    if outcome.skipped:
+        return AdapterRunResult(
+            findings=[],
+            skipped=True,
+            skip_reason=outcome.skip_reason,
+            version_note=version_note,
+            config_note=IN_PROCESS_CONFIG_NOTE,
+        )
+    return AdapterRunResult(
+        findings=_normalize_paths(outcome.findings, repo_root=repo_root),
+        version_note=version_note,
+        config_note=IN_PROCESS_CONFIG_NOTE,
+    )
 
 
 def _finalize_trufflehog_findings(findings: list[Finding], *, repo_root: Path) -> list[Finding]:
@@ -267,32 +372,13 @@ def run_adapter(
             allow_repo_binaries=allow_repo_binaries,
         )
 
-    if tool_id == "agentsec":
-        from mergecraft.analyzers.agentsec import scan_manifests
-
-        scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
-        if not scoped_files:
-            reason = "skipped agentsec: no changed files match detect globs"
-            logger.info("{}", reason)
-            return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
-
-        result = scan_manifests(
+    if tool_id in IN_PROCESS_ANALYZER_IDS:
+        return _run_in_process_native_adapter(
+            tool_id=tool_id,
+            manifest=manifest,
             repo_root=repo_root,
-            changed_files=scoped_files,
+            changed_files=changed_files,
             tier=tier,
-        )
-        if result.skipped:
-            return AdapterRunResult(
-                findings=[],
-                skipped=True,
-                skip_reason=result.skip_reason,
-                version_note="ran mergeCraft native agent-security policy engine",
-                config_note="native YAML rules",
-            )
-        return AdapterRunResult(
-            findings=_normalize_paths(result.findings, repo_root=repo_root),
-            version_note="ran mergeCraft native agent-security policy engine",
-            config_note="native YAML rules",
         )
 
     scoped_files = filter_changed_files_for_manifest(manifest, changed_files)

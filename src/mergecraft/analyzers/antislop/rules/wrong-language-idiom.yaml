@@ -1,0 +1,10 @@
+id: antislop/wrong-language-idiom
+severity: minor
+confidence: likely
+category: Maintainability & Code Quality
+languages: [python]
+message: Python code uses JavaScript-style collection idioms
+remediation: Use Python list methods such as append and len instead of JS-style APIs.
+match:
+  kind: line_regex
+  pattern: '\.(?:push|length|forEach)\b'

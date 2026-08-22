@@ -11,13 +11,6 @@ from typing import Any, TextIO
 from mergecraft.cli.global_surface import CLI_JSON_SCHEMA_VERSION
 from mergecraft.review.snapshot import REVIEW_PROTOCOL_VERSION as AGENT_PROTOCOL_VERSION
 
-# D12: CLI JSON keeps ``schema_version``; agent JSONL keeps ``protocol_version``.
-# Both fields survive; they name the same generation via this adapter.
-VERSION_FIELD_ALIASES: dict[str, str] = {
-    "schema_version": "protocol_version",
-    "protocol_version": "schema_version",
-}
-
 PROTOCOL_BUDGET_FIELDS: tuple[str, ...] = (
     "token_budget",
     "cost_budget_usd",
@@ -43,10 +36,9 @@ def negotiate_protocol(*, accepted: Sequence[str]) -> str:
     """Select a mutually supported protocol version from a consumer offer.
 
     ``schema_version`` ``1.0.0`` (CLI JSON) and ``protocol_version`` ``1``
-    (agent JSONL) are equivalent under :data:`VERSION_FIELD_ALIASES`. The
-    selected literal is the agent wire version when offered, otherwise the
-    CLI schema literal. Field-name tokens from the alias table count as
-    offering that surface's version.
+    (agent JSONL) are equivalent when offered via their field-name tokens.
+    The selected literal is the agent wire version when offered, otherwise
+    the CLI schema literal.
     """
     offered: set[str] = set()
     for item in accepted:
@@ -56,12 +48,6 @@ def negotiate_protocol(*, accepted: Sequence[str]) -> str:
             offered.add(CLI_JSON_SCHEMA_VERSION)
         elif token == "protocol_version":
             offered.add(AGENT_PROTOCOL_VERSION)
-        else:
-            aliased = VERSION_FIELD_ALIASES.get(token)
-            if aliased == "schema_version":
-                offered.add(CLI_JSON_SCHEMA_VERSION)
-            elif aliased == "protocol_version":
-                offered.add(AGENT_PROTOCOL_VERSION)
     overlap = offered & _SUPPORTED_NEGOTIATION_VERSIONS
     if not overlap:
         raise ProtocolNegotiationError(
@@ -167,7 +153,6 @@ def notify_findings(
 __all__ = [
     "AGENT_PROTOCOL_VERSION",
     "PROTOCOL_BUDGET_FIELDS",
-    "VERSION_FIELD_ALIASES",
     "AgentProtocolStream",
     "ProtocolNegotiationError",
     "accepted_protocol_versions",

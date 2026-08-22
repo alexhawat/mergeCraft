@@ -33,6 +33,7 @@ _PARSER_NATIVE_SEVERITIES: dict[str, frozenset[str]] = {
     "trivy_json": frozenset({"critical", "high", "medium", "low", "unknown"}),
     "trufflehog_jsonl": frozenset({"verified", "unverified"}),
     "agentsec_native": frozenset({"critical", "major", "minor"}),
+    "antislop_native": frozenset({"major", "minor", "trivial"}),
     "buf_native": frozenset({"breaking", "lint"}),
     "bandit_json": frozenset({"high", "medium", "low", "undefined"}),
     "cargo_audit_json": frozenset({"error", "warning"}),

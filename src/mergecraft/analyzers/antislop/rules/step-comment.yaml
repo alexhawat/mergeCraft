@@ -1,0 +1,10 @@
+id: antislop/step-comment
+severity: minor
+confidence: likely
+category: Maintainability & Code Quality
+languages: [python, javascript, typescript]
+message: Step-by-step narration comment adds noise without design value
+remediation: Remove numbered step comments and let function names carry the flow.
+match:
+  kind: comment_regex
+  pattern: '(?i)^\s*(?:#|//)\s*Step\s+\d+\s*:'

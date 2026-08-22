@@ -72,6 +72,7 @@ Shipped catalog ids. The full catalog page is [ANALYZERS.md](ANALYZERS.md).
 |------|------|------|------|
 | `actionlint` | any / universal | ci | auto |
 | `agentsec` | any / universal | security | True |
+| `antislop` | python, javascript, typescript | quality | False |
 | `ast-grep` | python, javascript, typescript, go, java, rust, c, cpp, yaml | security | auto |
 | `bandit` | python | security | auto |
 | `basedpyright` | python | lint | auto |

@@ -46,6 +46,7 @@ def _fixture_candidates(manifest_id: str) -> tuple[Path, ...]:
         _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.jsonl",
         _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.txt",
         _DEFAULT_FIXTURE_ROOT / "agentsec" / f"{manifest_id}-minimal.yaml",
+        _DEFAULT_FIXTURE_ROOT / "antislop" / f"{manifest_id}-minimal.yaml",
     )
 
 
@@ -55,9 +56,11 @@ def manifest_has_fixture(
     fixture_root: Path | None = None,
 ) -> bool:
     """Return whether a parser fixture exists for ``manifest``."""
+    from mergecraft.analyzers.trust import IN_PROCESS_ANALYZER_IDS
+
     root = fixture_root or _DEFAULT_FIXTURE_ROOT
-    if manifest.id == "agentsec":
-        return (root / "agentsec" / "agentsec-minimal.yaml").is_file()
+    if manifest.id in IN_PROCESS_ANALYZER_IDS:
+        return (root / manifest.id / f"{manifest.id}-minimal.yaml").is_file()
     return any(
         (root / rel).is_file()
         for rel in (
@@ -227,12 +230,16 @@ def _shell_trust_matrix_lines() -> list[str]:
         lines.extend(
             [
                 "",
-                f"One documented exception to the runtime row: {exception_ids}. It declares",
-                "`runtime: repo-native` but `resolve_analyzer()` special-cases it before the",
-                "repo-binary preference is consulted and `run_adapter()` executes it",
+                f"One documented exception to the runtime row: {exception_ids}. They declare",
+                "`runtime: repo-native` but `resolve_analyzer()` special-cases them before the",
+                "repo-binary preference is consulted and `run_adapter()` executes them",
                 "in-process — no subprocess, no argv, nothing the PR authored is run. The",
                 "runtime axis asks whether PR content could steer what executes; for these",
                 "the answer is no, so they stay eligible (#38).",
+                "",
+                "`antislop` is `trust: trusted` and `default_enabled: false`. Enabling it via",
+                "`analyzers.overrides` on untrusted fork runs still no-ops when the trust axis",
+                "skips trusted-only analyzers — opt in only on trusted events.",
             ]
         )
 

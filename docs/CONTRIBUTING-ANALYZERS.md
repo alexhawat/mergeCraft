@@ -82,6 +82,7 @@ never quietly more privileged than it declares.
 |-------|----------------|
 | `oasdiff_json`, `squawk_json` parsers (C4.5) | Differential contract output shapes — only new parsers in the catalog plan. |
 | `agentsec/*` manifest readers (C5) | MCP/skill manifests are inputs, not linter stdout; rules stay YAML (C7). |
+| `antislop/*` rule matchers (C5) | Source files are inputs, not linter stdout; rules stay YAML with AST/regex matchers. |
 | `catalog_docs.py`, `cli/analyzers_cmd.py` (C6) | Contributor path and enforced catalog documentation. |
 | `execution.py`, `adapters.py`, `contracts.py`, `supply_chain.py` (C2/C4) | Category adapter routing and shared run orchestration — not per-tool bespoke parsers. |
 | `detect.py`, `pattern.py` (C1/C3) | Repo-native tool resolution and pattern-scanner backend selection. |

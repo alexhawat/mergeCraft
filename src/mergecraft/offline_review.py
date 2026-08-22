@@ -512,6 +512,8 @@ class _OfflineDiffReviewRun:
 
     async def analyze(self) -> None:
         assert self.materialization is not None
+        if self.dry_run:
+            return
         from mergecraft.review.offline_stages import run_offline_analyze
 
         self.analyzer_run = await run_offline_analyze(

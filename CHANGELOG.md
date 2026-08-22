@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `antislop` analyzer: YAML rule pack for placeholder code, narrator comments,
+  swallowed errors, pass-through wrappers, phantom imports, and related low-quality patterns
+  on changed Python and JS/TS files (#393)
+
 ### Changed
 
 - Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
@@ -27,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   untrusted run, gates discovered from the repo's Makefile executed while configured ones were correctly
   withheld — meaning commands from a Makefile that is itself part of the diff under review could run.
   Both routes now go through the same cannot-run reporting, each with a truthful reason
+- `review --dry-run` skips the analyzer catalog while still materializing the diff and returning the review prompt (#401)
+- `load_audit_events` skips malformed JSONL lines and non-dict payloads instead of raising (#398)
+- `route_model` routes security specialist at `critical` risk to the same capable model as `high` instead of Haiku (#394)
 - `mergecraft init` no longer emits `uses: ./` in consumer repos — published Action ref instead (V8/D13)
 - `mergecraft init` scaffold drops comment triggers and unsafe `github.event.comment.body` prompt wiring; defaults to `CLAUDE_CODE_OAUTH_TOKEN` (README Example 1 parity)
 - Offline analyze stores ``AnalyzerRunState`` on the CLI tool context and merges analyzer findings into structured output so CC1 exit codes see Critical/Major hits the agent omitted; result-cache keys include mergeCraft version and a settings digest (#399)

@@ -1,0 +1,9 @@
+id: antislop/error-obscuring-catch
+severity: major
+confidence: likely
+category: Stability & Availability
+languages: [python, javascript, typescript]
+message: Catch block hides failures by returning a sentinel null value
+remediation: Re-raise, return a typed error, or surface why the operation failed.
+match:
+  kind: error_obscuring_catch

@@ -1,0 +1,9 @@
+id: antislop/empty-error-handler
+severity: major
+confidence: likely
+category: Stability & Availability
+languages: [python, javascript, typescript]
+message: Error handler swallows failures without logging, re-raising, or recovery
+remediation: Handle the error explicitly, log context, or let it propagate.
+match:
+  kind: empty_error_handler

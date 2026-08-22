@@ -1,0 +1,9 @@
+id: antislop/placeholder-implementation
+severity: major
+confidence: likely
+category: Maintainability & Code Quality
+languages: [python]
+message: Function body is a placeholder instead of a real implementation
+remediation: Implement the function or remove it until the behavior is ready.
+match:
+  kind: python_placeholder_implementation

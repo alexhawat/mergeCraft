@@ -10,8 +10,6 @@ from __future__ import annotations
 import re
 import subprocess
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT, read_text
 
 README = REPO_ROOT / "README.md"
@@ -195,10 +193,6 @@ def test_landing_has_numbered_install() -> None:
     ), "Install steps must document how to trigger a review"
 
 
-@pytest.mark.xfail(
-    reason="G1: v0.1.0a1 tag not cut yet — Example 1 ref must resolve locally (D8)",
-    strict=False,
-)
 def test_landing_keeps_example_one_workflow() -> None:
     text = _readme_text()
     section = _example_one_section(text)

@@ -1,0 +1,10 @@
+id: antislop/lint-evasion
+severity: minor
+confidence: likely
+category: Maintainability & Code Quality
+languages: [python, javascript, typescript]
+message: Inline lint suppression was added beside suspicious code
+remediation: Fix the underlying issue instead of suppressing the linter beside it.
+match:
+  kind: line_regex
+  pattern: '(?i)(?:#\s*noqa\b|#\s*type:\s*ignore\b|eslint-disable|istanbul ignore|@ts-ignore|@ts-expect-error)'

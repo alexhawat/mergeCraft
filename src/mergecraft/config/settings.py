@@ -131,9 +131,31 @@ class CiEvidenceSettings(_OptionalFeatureModel):
 
 
 class AnalyzerOverride(_OptionalFeatureModel):
-    """Per-analyzer config override."""
+    """Per-analyzer config override.
+
+    ``rules`` and ``ignore`` are consumed only by the ``antislop`` in-process
+    analyzer; other analyzers ignore those fields.
+    """
 
     enabled: bool | None = None
+    rules: dict[str, str] | None = None
+    ignore: list[str] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_yaml_rule_tokens(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        rules = data.get("rules")
+        if not isinstance(rules, dict):
+            return data
+        normalized: dict[str, str] = {}
+        for key, value in rules.items():
+            if value is False:
+                normalized[str(key)] = "off"
+            elif value is not None:
+                normalized[str(key)] = str(value)
+        return {**data, "rules": normalized}
 
 
 # W10.1 — every gate this plan introduces defaults to ``shadow`` (D12).

@@ -30,6 +30,8 @@ from typing import Any, Final
 
 from loguru import logger
 
+from mergecraft.utils.risk_bands import RISK_BANDS, risk_at_or_above
+
 ROUTING_INTENTS: Final[frozenset[str]] = frozenset({"require", "prefer", "fallback"})
 MAX_RETRY_ATTEMPTS: Final[int] = 5
 RETRYABLE_FAILURES: Final[frozenset[str]] = frozenset(
@@ -81,10 +83,26 @@ _CAPABILITY_CATALOG: Final[tuple[dict[str, Any], ...]] = (
 
 _ROUTE_TABLE: Final[dict[tuple[str, str], str]] = {
     ("security", "high"): "anthropic/claude-opus",
+    ("security", "critical"): "anthropic/claude-opus",
     ("security", "trivial"): "anthropic/claude-haiku",
     ("tests", "high"): "openai/gpt-5.3-codex",
+    ("tests", "critical"): "openai/gpt-5.3-codex",
     ("tests", "trivial"): "anthropic/claude-haiku",
 }
+
+
+def _routing_risk_band(risk: str) -> str:
+    """Map a routing risk label onto the shared ``RISK_BANDS`` vocabulary."""
+    normalized = str(risk).casefold()
+    if normalized == "trivial":
+        return "low"
+    if normalized not in RISK_BANDS:
+        logger.warning(
+            "Unknown risk band {risk!r}; routing as high-tier capable model",
+            risk=risk,
+        )
+        return "high"
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,15 +203,21 @@ def route_model(*, specialist: str, risk: str) -> str:
 
     Args:
         specialist: Review specialist id (e.g. ``security``).
-        risk: Change risk band (e.g. ``high``, ``trivial``).
+        risk: Change risk band (e.g. ``high``, ``critical``, ``trivial``).
 
     Returns:
-        A catalog model id. High-risk security is never the trivial-risk pick.
+        A catalog model id. High- and critical-risk bands never use the
+        trivial-risk cheap pick.
     """
-    key = (str(specialist), str(risk))
+    risk_key = str(risk).casefold()
+    specialist_key = str(specialist).casefold()
+    key = (specialist_key, risk_key)
     if key in _ROUTE_TABLE:
         chosen = _ROUTE_TABLE[key]
-    elif str(risk) == "high":
+    elif specialist_key == "security" and risk_at_or_above(
+        _routing_risk_band(risk),
+        "high",
+    ):
         chosen = "anthropic/claude-opus"
     else:
         chosen = "anthropic/claude-haiku"

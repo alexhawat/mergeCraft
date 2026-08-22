@@ -9,6 +9,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 |----|----------|-----------|---------|---------|-------|-----------------|-------|
 | `actionlint` | ci | — | auto | managed | untrusted | — | — |
 | `agentsec` | security | — | enabled | repo-native | untrusted | — | — |
+| `antislop` | quality | python, javascript, typescript | disabled | repo-native | trusted | — | — |
 | `ast-grep` | security | python, javascript, typescript, go, java, rust, c, cpp, yaml | auto | managed | untrusted | pattern-scanner | Substrate for a future native policy engine — not built in C3. |
 | `bandit` | security | python | auto | repo-native | trusted | — | — |
 | `basedpyright` | lint | python | auto | repo-native | trusted | python-typecheck | — |
@@ -97,18 +98,22 @@ to run the *repo's* tool against the *repo's* config.
 
 | runtime | trust | `shell: disabled` | `shell: restricted` / `enabled` |
 |---------|-------|-------------------|----------------------------------|
-| `repo-native` (33) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
+| `repo-native` (34) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
 | `repo-native` (1) | `untrusted` | withheld — `runtime` needs repo-provided tooling | runs |
 | `managed` (12) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
 | `managed` (17) | `untrusted` | **runs** (pinned binary only) | runs |
 | `container` (4) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
 
-One documented exception to the runtime row: `agentsec`. It declares
-`runtime: repo-native` but `resolve_analyzer()` special-cases it before the
-repo-binary preference is consulted and `run_adapter()` executes it
+One documented exception to the runtime row: `agentsec`, `antislop`. They declare
+`runtime: repo-native` but `resolve_analyzer()` special-cases them before the
+repo-binary preference is consulted and `run_adapter()` executes them
 in-process — no subprocess, no argv, nothing the PR authored is run. The
 runtime axis asks whether PR content could steer what executes; for these
 the answer is no, so they stay eligible (#38).
+
+`antislop` is `trust: trusted` and `default_enabled: false`. Enabling it via
+`analyzers.overrides` on untrusted fork runs still no-ops when the trust axis
+skips trusted-only analyzers — opt in only on trusted events.
 
 ### The `analyzers:` mode axis
 
@@ -123,15 +128,15 @@ with a warning, rather than silently widening to `auto`.
 `full` requests more provisioning; it is never a trust override, and cannot
 re-admit a manifest the tier axis skipped.
 
-Counts below are analyzers passing selection, out of 67 shipped, with
+Counts below are analyzers passing selection, out of 68 shipped, with
 `shell: restricted` (the shell axis inert) so the mode axis is isolated.
 
 | mode | trusted event | untrusted event (`pull_request_target`, fork) |
 |------|---------------|-----------------------------------------------|
 | **`off`** | surface not registered | surface not registered |
-| **`auto`** | 67 of 67 | 18 of 67 — `auto` ⇒ `untrusted-only` |
-| **`full`** | 67 of 67 | 18 of 67 |
-| **`untrusted-only`** | 18 of 67 | 18 of 67 |
+| **`auto`** | 68 of 68 | 18 of 68 — `auto` ⇒ `untrusted-only` |
+| **`full`** | 68 of 68 | 18 of 68 |
+| **`untrusted-only`** | 18 of 68 | 18 of 68 |
 
 Passing these axes is necessary, not sufficient: a `container` manifest
 is eligible but still reports `unavailable` wherever no container runtime is
