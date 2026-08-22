@@ -117,3 +117,55 @@ Never `strict=True` — impl wave drops each xfail in the commit that fixes its 
 - HB434a–HB438a xfail (non-strict)
 - No `src/` edits
 - Strict xfails removed from `test_cov_antislop_matcher_paths.py`
+
+---
+
+# Batch HC — #423 antislop scopes wiring
+
+Authoring wave: **W5** (HC RED) · Implementation: **W6** (`refactor(analyzers): use antislop.scopes as the shared suffixes`, D3)
+GitHub issue: **#423** — `antislop/scopes.py` constants unused
+
+## xfail schedule
+
+| Wave | Test | Marker reason | Issue |
+|------|------|---------------|-------|
+| **W6** | `test_init_imports_antislop_scoped_suffixes_from_scopes` | `green after W6: import ANTISLOP_SCOPED_SUFFIXES from scopes (#423)` | #423 |
+| **W6** | `test_init_does_not_define_local_scoped_suffixes` | `green after W6: delete local _SCOPED_SUFFIXES duplicate (#423)` | #423 |
+| **W6** | `test_matcher_imports_antislop_js_suffixes_from_scopes` | `green after W6: import ANTISLOP_JS_SUFFIXES from scopes (#423)` | #423 |
+| **W6** | `test_matcher_does_not_define_local_js_suffixes` | `green after W6: delete local _JS_SUFFIXES duplicate (#423)` | #423 |
+
+Never `strict=True` — impl wave drops each xfail in the scopes refactor commit.
+
+## Contract matrix (#423 / D3)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| HC423a | `__init__.py` imports `ANTISLOP_SCOPED_SUFFIXES` from `scopes` | unit | happy | `test_init_imports_antislop_scoped_suffixes_from_scopes` |
+| HC423b | `__init__.py` has no local `_SCOPED_SUFFIXES` tuple | unit | policy | `test_init_does_not_define_local_scoped_suffixes` |
+| HC423c | `matcher.py` imports `ANTISLOP_JS_SUFFIXES` from `scopes` | unit | happy | `test_matcher_imports_antislop_js_suffixes_from_scopes` |
+| HC423d | `matcher.py` has no local `_JS_SUFFIXES` frozenset | unit | policy | `test_matcher_does_not_define_local_js_suffixes` |
+| HC423e | `scopes.py` exports canonical suffix constants | unit | happy | `test_scopes_module_exports_shared_suffix_constants` |
+| HC423f | Every scoped suffix still reaches `scan_changed_files` | integration | regression | `test_every_scoped_suffix_is_scanned` |
+| HC423g | Every JS suffix still classifies for matcher rules | integration | regression | `test_every_js_suffix_reaches_matcher` |
+
+## Named symbols W6 must satisfy
+
+| Symbol | Module | Test |
+|--------|--------|------|
+| `ANTISLOP_SCOPED_SUFFIXES` | `mergecraft.analyzers.antislop.scopes` | HC423a, HC423e, HC423f |
+| `ANTISLOP_JS_SUFFIXES` | `mergecraft.analyzers.antislop.scopes` | HC423c, HC423e, HC423g |
+| `_is_scoped_path` consumer | `mergecraft.analyzers.antislop.__init__` | HC423a–b, HC423f |
+| `_language_for_path` consumer | `mergecraft.analyzers.antislop.matcher` | HC423c–d, HC423g |
+
+`scopes.py` must **not** be deleted (D3).
+
+## Collection target (W5)
+
+`tests/analyzers/test_antislop_scopes_hc.py` — **18 tests** (4 xfail, 14 pass).
+
+## Acceptance (W5)
+
+- New tests collect with zero import errors
+- `make lint` + `make typecheck` clean on touched paths
+- HC423a–d xfail (non-strict); HC423e–g pass
+- No `src/` edits
