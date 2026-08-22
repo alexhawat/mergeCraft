@@ -49,10 +49,14 @@ def _blob_ref() -> str:
         if git_ref_exists(env_ref, cwd=REPO_ROOT):
             return env_ref
         return DEFAULT_BLOB_REF
-    pin = action_pin_minimal()
-    if git_ref_exists(pin, cwd=REPO_ROOT):
-        return pin
-    return DEFAULT_BLOB_REF
+    # The pin is used unconditionally. These refs become github.com blob URLs,
+    # and the tag resolves there whether or not this clone fetched it. Gating on
+    # local git state made the generated packages differ by environment: a tag
+    # build (checkout has the tag) emitted the pin while a branch build
+    # (`fetch-depth: 1`, no tags) emitted DEFAULT_BLOB_REF, so no committed
+    # output could satisfy both and one of the two always failed the drift gate.
+    # The gate existed only to survive the window before the tag was cut (#404).
+    return action_pin_minimal()
 
 
 def _blob_url(rel_path: str, *, ref: str) -> str:
