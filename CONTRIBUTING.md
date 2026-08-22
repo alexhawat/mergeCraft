@@ -33,6 +33,18 @@ MERGECRAFT_LIVE=1 make test-integration-live
 `MERGECRAFT_LIVE=1` is the opt-in gate: without it, the live modules skip collection.
 With the flag set but secrets absent the suite still fails loudly (D9 — fail-closed).
 
+## Operator: branch protection
+
+The **CI/CD** workflow (`.github/workflows/ci-cd.yml`) must be a **required status
+check** on `main` and `pre-0.0.1`. A workflow that fails at startup
+(``startup_failure``) — for example when a ``uses:`` job does not grant the
+permissions its called workflow declares — produces no logs, annotations, or check
+runs (#425). Requiring CI/CD makes that silence block merges. Apply this in GitHub
+branch protection; this repository does not configure it automatically.
+
+`make lint` now includes ``scripts/check_called_workflow_permissions.py`` to catch
+the permissions mismatch at authoring time (D5).
+
 ## Commits
 
 Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`,

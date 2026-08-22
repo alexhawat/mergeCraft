@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Opt-in `antislop` analyzer: YAML rule pack for placeholder code, narrator comments,
-  swallowed errors, pass-through wrappers, phantom imports, and related low-quality patterns
-  on changed Python and JS/TS files (#393)
+- `make lint` checks that jobs calling local reusable workflows grant at least the
+  permissions the callee declares, catching ``startup_failure`` permission mismatches
+  at authoring time (#425)
 
 ### Changed
 
