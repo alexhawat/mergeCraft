@@ -6,7 +6,6 @@ fixtures, manifest exclusions, and the landing README CLI how-it-works section.
 
 from __future__ import annotations
 
-import importlib.util
 import re
 import stat
 from pathlib import Path
@@ -14,6 +13,7 @@ from pathlib import Path
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
+from tests.docs.support import load_script_module
 
 EXAMPLES_CLI = REPO_ROOT / "examples" / "cli"
 CLI_EXAMPLES_DOC = REPO_ROOT / "docs" / "cli-examples.md"
@@ -92,11 +92,7 @@ def test_run_sh_is_offline() -> None:
 
 def test_expected_output_fixtures_match() -> None:
     script = REPO_ROOT / "scripts" / "check_cli_examples.py"
-    spec = importlib.util.spec_from_file_location("check_cli_examples", script)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_script_module(script)
     exit_code = module.main(["--check"])
     assert exit_code == 0, "CLI example fixtures drift — run: make cli-examples"
 

@@ -8,12 +8,12 @@ Implementation lands in W6.
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from mergecraft.pins import action_pin_minimal
 from tests.ci.workflow_support import REPO_ROOT
+from tests.docs.support import load_script_module
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -21,16 +21,6 @@ if TYPE_CHECKING:
 GEN_SCRIPT = REPO_ROOT / "scripts" / "gen_agent_packages.py"
 _ENV_KEY = "MERGECRAFT_AGENT_PACKAGES_REF"
 _EXPECTED_DEFAULT = "pre-0.0.1"
-
-
-def _load_gen_module() -> Any:
-    assert GEN_SCRIPT.is_file(), f"missing {GEN_SCRIPT.relative_to(REPO_ROOT)}"
-    spec = importlib.util.spec_from_file_location("gen_agent_packages_blob_ref", GEN_SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _git_tag_exists(ref: str) -> bool:
@@ -47,13 +37,13 @@ def _git_tag_exists(ref: str) -> bool:
 
 def test_default_blob_ref_constant_is_pre_0_0_1() -> None:
     """``DEFAULT_BLOB_REF`` must be ``pre-0.0.1`` on this branch (D8)."""
-    module = _load_gen_module()
+    module = load_script_module(GEN_SCRIPT)
     assert module.DEFAULT_BLOB_REF == _EXPECTED_DEFAULT
 
 
 def test_blob_ref_uses_env_override(monkeypatch: MonkeyPatch) -> None:
     """``MERGECRAFT_AGENT_PACKAGES_REF`` wins over pin and default (D8 step 1)."""
-    module = _load_gen_module()
+    module = load_script_module(GEN_SCRIPT)
     monkeypatch.setenv(_ENV_KEY, "feature/test-override")
     assert module._blob_ref() == "feature/test-override"
 
@@ -68,7 +58,7 @@ def test_blob_ref_returns_default_when_pin_tag_missing(
         f"test requires missing tag {pin!r} (G1 not cut); fetch a leaner checkout or skip"
     )
     monkeypatch.delenv(_ENV_KEY, raising=False)
-    module = _load_gen_module()
+    module = load_script_module(GEN_SCRIPT)
     ref = module._blob_ref()
     assert ref != pin, f"_blob_ref() must not return missing tag {pin!r} (D8)"
     assert ref == _EXPECTED_DEFAULT
@@ -79,7 +69,7 @@ def test_blob_ref_uses_action_pin_minimal_when_tag_exists(
 ) -> None:
     """When the pin tag resolves locally, ``_blob_ref()`` uses ``action_pin_minimal()``."""
     pin = action_pin_minimal()
-    module = _load_gen_module()
+    module = load_script_module(GEN_SCRIPT)
     monkeypatch.delenv(_ENV_KEY, raising=False)
 
     original_run = subprocess.run

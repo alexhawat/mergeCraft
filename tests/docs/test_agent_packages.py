@@ -7,7 +7,6 @@ generated packages, README path anti-invention, and ``make agent-packages-check`
 
 from __future__ import annotations
 
-import importlib.util
 import re
 from pathlib import Path
 from typing import Any
@@ -16,10 +15,10 @@ import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
+from tests.docs.support import ci_steps, load_script_module
 
 HARNESS_MANIFEST = REPO_ROOT / "skills" / "harnesses.yaml"
 GEN_SCRIPT = REPO_ROOT / "scripts" / "gen_agent_packages.py"
-MAKEFILE = REPO_ROOT / "Makefile"
 README = REPO_ROOT / "README.md"
 SKILLS_ROOT = REPO_ROOT / "skills"
 
@@ -40,16 +39,6 @@ def _load_harness_manifest() -> dict[str, Any]:
     return data
 
 
-def _load_gen_module() -> Any:
-    assert GEN_SCRIPT.is_file(), f"missing {GEN_SCRIPT.relative_to(REPO_ROOT)} (RV3)"
-    spec = importlib.util.spec_from_file_location("gen_agent_packages", GEN_SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def _readme_agent_region() -> str:
     text = read_text("README.md")
     match = re.search(
@@ -59,13 +48,6 @@ def _readme_agent_region() -> str:
     )
     assert match, "README agent section missing"
     return match.group(1)
-
-
-def _ci_steps() -> list[str]:
-    makefile = MAKEFILE.read_text(encoding="utf-8")
-    match = re.search(r"^CI_STEPS\s*:?=\s*(.+)$", makefile, re.MULTILINE)
-    assert match, "Makefile missing CI_STEPS"
-    return match.group(1).split()
 
 
 def test_every_declared_harness_has_a_package_or_fallback() -> None:
@@ -90,7 +72,7 @@ def test_every_declared_harness_has_a_package_or_fallback() -> None:
 
 
 def test_packages_match_generator(tmp_path: Path) -> None:
-    module = _load_gen_module()
+    module = load_script_module(GEN_SCRIPT)
     assert module.main(["--check"]) == 0
 
     target = SKILLS_ROOT / "mergecraft" / "SKILL.md"
@@ -178,7 +160,7 @@ def test_readme_paths_match_harness_manifest() -> None:
 
 
 def test_make_agent_packages_check_in_ci_steps() -> None:
-    steps = _ci_steps()
+    steps = ci_steps()
     assert "agent-packages-check" in steps, (
         "Makefile CI_STEPS must include agent-packages-check (RV3)"
     )

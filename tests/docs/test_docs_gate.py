@@ -8,20 +8,17 @@ Implementation lands in RD4.2.
 
 from __future__ import annotations
 
-import importlib.util
 import re
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
-
-if TYPE_CHECKING:
-    from types import ModuleType
+from tests.docs.support import action_uses_pattern, ci_steps, load_script_module
 
 README = REPO_ROOT / "README.md"
 AGENTS_MD = REPO_ROOT / "AGENTS.md"
@@ -46,7 +43,6 @@ _VERSIONED_GIT_REF = re.compile(
     r"git\+https://github\.com/alexhawat/mergeCraft@([^\s\"')]+)",
     re.IGNORECASE,
 )
-_ACTION_USES = re.compile(r"uses:\s*alexhawat/mergeCraft@(\S+)", re.IGNORECASE)
 _PINNED_GIT_INSTALL = re.compile(
     r"git\+https://github\.com/alexhawat/mergeCraft@v",
     re.IGNORECASE,
@@ -99,7 +95,7 @@ def _collect_version_tag_refs(text: str) -> list[str]:
     refs: list[str] = []
     for match in _VERSION_TAG.finditer(text):
         refs.append(f"v{match.group(1)}")
-    for pattern in (_VERSIONED_GIT_REF, _ACTION_USES):
+    for pattern in (_VERSIONED_GIT_REF, action_uses_pattern):
         for match in pattern.finditer(text):
             ref = match.group(1).rstrip("#").strip()
             version_match = _VERSION_TAG.search(f"@{ref}")
@@ -146,17 +142,6 @@ def _makefile_prerequisite_tokens(makefile: str, target: str) -> set[str]:
     match = re.search(rf"^{re.escape(target)}:(.*)$", makefile, re.MULTILINE)
     assert match, f"Makefile missing {target}: recipe"
     return set(match.group(1).split())
-
-
-def _load_gen_llms_full() -> ModuleType:
-    assert GEN_LLMS_FULL.is_file(), f"missing {GEN_LLMS_FULL.relative_to(REPO_ROOT)} (RD4.2)"
-    spec = importlib.util.spec_from_file_location("gen_llms_full", GEN_LLMS_FULL)
-    if spec is None or spec.loader is None:
-        msg = f"could not load {GEN_LLMS_FULL}"
-        raise ImportError(msg)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def test_install_pin_is_consistent_when_present() -> None:
@@ -215,7 +200,7 @@ def test_unpinned_install_line_is_the_documented_form() -> None:
 
 def test_llms_full_matches_generator(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """``scripts/gen_llms_full.py --check`` exits 0; a scratch mutation fails."""
-    module = _load_gen_llms_full()
+    module = load_script_module(GEN_LLMS_FULL)
     output_path = tmp_path / "llms-full.txt"
     assert hasattr(module, "main"), "gen_llms_full.py must expose main(argv) -> int"
 
@@ -308,15 +293,13 @@ def test_llms_check_and_docs_check_in_ci_steps() -> None:
         "Makefile must define an llms-check target (RD4.2)"
     )
 
-    ci_steps_match = re.search(r"^CI_STEPS\s*:?=(.+)$", makefile, re.MULTILINE)
-    assert ci_steps_match, "Makefile missing CI_STEPS"
-    ci_steps = set(ci_steps_match.group(1).split())
+    ci_steps_set = set(ci_steps())
     docs_check_deps = _makefile_prerequisite_tokens(makefile, "docs-check")
 
-    assert "llms-check" in ci_steps or "llms-check" in docs_check_deps, (
+    assert "llms-check" in ci_steps_set or "llms-check" in docs_check_deps, (
         "llms-check must be in CI_STEPS or docs-check prerequisites (RD4.2)"
     )
-    assert "docs-check" in ci_steps, "CI_STEPS must still include docs-check"
+    assert "docs-check" in ci_steps_set, "CI_STEPS must still include docs-check"
 
 
 def test_no_eval_scores_on_landing_readme() -> None:
