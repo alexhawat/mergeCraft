@@ -21,9 +21,16 @@ DEFAULT_CONFIG: dict[str, object] = {
     "autoMergeEnabled": False,
 }
 
-_DEFAULT_MODEL = "anthropic/claude-sonnet"
+_DEFAULT_MODELS = DEFAULT_CONFIG["models"]
+assert isinstance(_DEFAULT_MODELS, list)
+assert _DEFAULT_MODELS
+_DEFAULT_MODEL = str(_DEFAULT_MODELS[0])
 
-WORKFLOW_TEMPLATE = f"""\
+
+def _workflow_template() -> str:
+    """Build the init scaffold workflow without import-time pin resolution."""
+    pin = action_pin_minimal()
+    return f"""\
 name: mergeCraft
 
 on:
@@ -53,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Run mergeCraft
-        uses: alexhawat/mergeCraft@{action_pin_minimal()}
+        uses: alexhawat/mergeCraft@{pin}
         with:
           prompt: >
             ${{{{ github.event_name == 'pull_request'
@@ -118,7 +125,7 @@ def run(
     if workflow_path.exists() and not force:
         console.print(f"[yellow]{workflow_path.relative_to(root)} already exists[/yellow]")
     else:
-        workflow_path.write_text(WORKFLOW_TEMPLATE, encoding="utf-8")
+        workflow_path.write_text(_workflow_template(), encoding="utf-8")
         console.print(f"wrote [green]{workflow_path.relative_to(root)}[/green]")
 
     learnings = config_dir / "learnings.md"

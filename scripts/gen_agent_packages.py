@@ -36,32 +36,11 @@ SKILLS_LOCK = REPO_ROOT / "skills-lock.json"
 GITHUB_REPO = "alexhawat/mergeCraft"
 _RELATIVE_LINK = re.compile(r"\(\.\./\.\./([^)]+)\)")
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-_HERMES_ENV_VARS: tuple[str, ...] = (
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "GOOGLE_API_KEY",
-    "CURSOR_API_KEY",
-)
-_HERMES_INSTALL_SECTION = """\
-## Hermes install
-
-Hermes Agent reads skills from ``~/.hermes/skills/`` or a category-nested project
-``skills/`` tree. Install this package with:
-
-```bash
-hermes skills install https://github.com/alexhawat/mergeCraft/tree/<ref>/skills/hermes
-```
-
-mergeCraft ships a Nous provider (``mergecraft auth nous``,
-``nous/deepseek/deepseek-v4-flash``) — a Hermes user can run reviews entirely on
-Nous credentials when configured.
-"""
-
 
 DEFAULT_BLOB_REF = "pre-0.0.1"
 
 
-def _git_ref() -> str:
+def _blob_ref() -> str:
     env_ref = os.environ.get("MERGECRAFT_AGENT_PACKAGES_REF", "").strip()
     if env_ref:
         return env_ref
@@ -103,6 +82,10 @@ def _harness_rows(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _harness_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {row["id"]: row for row in _harness_rows(manifest)}
+
+
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     match = _FRONTMATTER.match(text)
     if not match:
@@ -122,15 +105,19 @@ def _render_frontmatter(data: dict[str, Any]) -> str:
     return f"---\n{dumped}\n---\n"
 
 
-def _render_skill(harness_id: str, *, ref: str) -> str:
+def _render_skill(harness_row: dict[str, Any], *, ref: str) -> str:
     source_text = SOURCE_SKILL.read_text(encoding="utf-8")
     frontmatter, body = _parse_frontmatter(source_text)
     body = _rewrite_links(body, ref=ref)
 
-    if harness_id == "hermes":
+    env_vars = harness_row.get("required_environment_variables")
+    if isinstance(env_vars, list):
         frontmatter = dict(frontmatter)
-        frontmatter["required_environment_variables"] = list(_HERMES_ENV_VARS)
-        body = _HERMES_INSTALL_SECTION.replace("<ref>", ref) + "\n" + body
+        frontmatter["required_environment_variables"] = [str(item) for item in env_vars]
+
+    install_section = harness_row.get("install_section")
+    if isinstance(install_section, str) and install_section.strip():
+        body = install_section.replace("<ref>", ref).rstrip() + "\n" + body
 
     return _render_frontmatter(frontmatter) + body
 
@@ -150,9 +137,10 @@ def _package_paths(manifest: dict[str, Any]) -> dict[str, Path]:
 def render_all(*, ref: str | None = None) -> dict[str, str]:
     """Render every per-harness package body keyed by harness id."""
     manifest = _load_manifest()
-    resolved_ref = ref if ref is not None else _git_ref()
+    resolved_ref = ref if ref is not None else _blob_ref()
+    rows_by_id = _harness_by_id(manifest)
     return {
-        harness_id: _render_skill(harness_id, ref=resolved_ref)
+        harness_id: _render_skill(rows_by_id[harness_id], ref=resolved_ref)
         for harness_id in _package_paths(manifest)
     }
 
@@ -194,12 +182,14 @@ def _write(rendered: dict[str, str]) -> None:
     _update_skills_lock(rendered)
 
 
-def _validate_packages(package_dirs: dict[str, Path]) -> int:
+def _validate_packages(
+    package_dirs: dict[str, Path],
+    *,
+    harness_rows: dict[str, dict[str, Any]],
+) -> int:
     failures: list[str] = []
     for harness_id, skill_path in sorted(package_dirs.items()):
-        if harness_id == "hermes":
-            # Hermes extends Agent Skills frontmatter with required_environment_variables;
-            # the reference validator only knows the cross-vendor subset.
+        if harness_rows.get(harness_id, {}).get("skip_validate"):
             continue
         skill_dir = skill_path.parent
         proc = subprocess.run(
@@ -243,9 +233,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    ref = _git_ref()
+    manifest = _load_manifest()
+    ref = _blob_ref()
     rendered = render_all(ref=ref)
-    package_paths = _package_paths(_load_manifest())
+    package_paths = _package_paths(manifest)
+    rows_by_id = _harness_by_id(manifest)
 
     if args.check:
         drift: list[str] = []
@@ -262,12 +254,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(line, file=sys.stderr)
             return 1
         if not args.skip_validate:
-            return _validate_packages(package_paths)
+            return _validate_packages(package_paths, harness_rows=rows_by_id)
         return 0
 
     _write(rendered)
     if not args.skip_validate:
-        return _validate_packages(package_paths)
+        return _validate_packages(package_paths, harness_rows=rows_by_id)
     return 0
 
 

@@ -35,6 +35,25 @@ harnesses:
   - id: hermes
     source: https://hermes-agent.nousresearch.com/docs/developer-guide/creating-skills
     verified: 2026-08-21
+    required_environment_variables:
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
+      - GOOGLE_API_KEY
+      - CURSOR_API_KEY
+    install_section: |
+      ## Hermes install
+
+      Hermes Agent reads skills from ``~/.hermes/skills/`` or a category-nested project
+      ``skills/`` tree. Install this package with:
+
+      ```bash
+      hermes skills install https://github.com/alexhawat/mergeCraft/tree/<ref>/skills/hermes
+      ```
+
+      mergeCraft ships a Nous provider (``mergecraft auth nous``,
+      ``nous/deepseek/deepseek-v4-flash``) — a Hermes user can run reviews entirely on
+      Nous credentials when configured.
+    skip_validate: true
   - id: claude-code
     source: https://code.claude.com/docs/en/skills
     verified: 2026-08-21

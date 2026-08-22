@@ -93,17 +93,21 @@ def test_packages_match_generator(tmp_path: Path) -> None:
     module = _load_gen_module()
     assert module.main(["--check"]) == 0
 
-    # Scratch mutation must fail --check once the generator exists.
     target = SKILLS_ROOT / "mergecraft" / "SKILL.md"
     if not target.is_file():
         pytest.skip("skills/mergecraft/SKILL.md missing — cannot inject drift")
-    original = target.read_text(encoding="utf-8")
-    mutated = original + "\n<!-- rv1 drift probe -->\n"
-    target.write_text(mutated, encoding="utf-8")
+    scratch_skill = tmp_path / "SKILL.md"
+    scratch_skill.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+    original_skill_path = module.SOURCE_SKILL
+    module.SOURCE_SKILL = scratch_skill
     try:
+        scratch_skill.write_text(
+            scratch_skill.read_text(encoding="utf-8") + "\n<!-- rv1 drift probe -->\n",
+            encoding="utf-8",
+        )
         exit_code = module.main(["--check"])
     finally:
-        target.write_text(original, encoding="utf-8")
+        module.SOURCE_SKILL = original_skill_path
     assert exit_code != 0, "gen_agent_packages.py --check must fail after package drift"
 
 

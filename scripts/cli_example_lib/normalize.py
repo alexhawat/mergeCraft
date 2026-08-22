@@ -18,7 +18,8 @@ def normalize(text: str) -> str:
     text = _ANSI.sub("", text)
     match = _DIFF_SUMMARY.search(text)
     if match is None:
-        return text.strip() + "\n"
+        msg = "dry-run output missing ## Diff summary block"
+        raise ValueError(msg)
     return match.group(1).rstrip() + "\n"
 
 

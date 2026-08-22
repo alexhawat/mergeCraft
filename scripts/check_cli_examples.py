@@ -18,6 +18,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO / "examples" / "cli"
+_SKIP_ARTIFACT_NAMES = frozenset({"run.sh", "README.md"})
+_SKIP_ARTIFACT_DIRS = frozenset({"expected", ".mergecraft", "src"})
 
 
 def example_dirs() -> list[Path]:
@@ -40,6 +42,20 @@ def run_example(example_dir: Path) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
     )
+
+
+def produced_artifacts(example_dir: Path) -> list[Path]:
+    """Return top-level output files produced by ``run.sh``."""
+    artifacts: list[Path] = []
+    for path in example_dir.iterdir():
+        if path.name in _SKIP_ARTIFACT_NAMES or path.name.startswith("."):
+            continue
+        if path.is_dir():
+            if path.name in _SKIP_ARTIFACT_DIRS:
+                continue
+            continue
+        artifacts.append(path)
+    return sorted(artifacts)
 
 
 def expected_fixtures(example_dir: Path) -> list[Path]:
@@ -78,15 +94,15 @@ def regenerate_example(example_dir: Path) -> None:
         raise RuntimeError(msg)
     expected_dir = example_dir / "expected"
     expected_dir.mkdir(parents=True, exist_ok=True)
-    for fixture in expected_fixtures(example_dir):
-        produced = example_dir / fixture.name
-        if not produced.is_file():
-            msg = f"{example_dir.name}: run.sh did not produce {fixture.name}"
-            raise RuntimeError(msg)
-        shutil.copy2(produced, fixture)
+    artifacts = produced_artifacts(example_dir)
+    if not artifacts:
+        msg = f"{example_dir.name}: run.sh produced no syncable artifacts"
+        raise RuntimeError(msg)
+    for produced in artifacts:
+        shutil.copy2(produced, expected_dir / produced.name)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check",
@@ -97,7 +113,7 @@ def main() -> int:
         "--example",
         help="Only run or check one example directory name.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     dirs = example_dirs()
     if args.example is not None:
         dirs = [path for path in dirs if path.name == args.example]

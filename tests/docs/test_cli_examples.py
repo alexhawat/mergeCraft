@@ -6,9 +6,9 @@ fixtures, manifest exclusions, and the landing README CLI how-it-works section.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import stat
-import subprocess
 from pathlib import Path
 
 import yaml
@@ -91,31 +91,14 @@ def test_run_sh_is_offline() -> None:
 
 
 def test_expected_output_fixtures_match() -> None:
-    dirs = _example_dirs()
-    assert dirs, f"missing example trees under {EXAMPLES_CLI.relative_to(REPO_ROOT)}"
-    for example_dir in dirs:
-        run_sh = example_dir / "run.sh"
-        expected_dir = example_dir / "expected"
-        if not run_sh.is_file() or not expected_dir.is_dir():
-            continue
-        proc = subprocess.run(
-            ["bash", str(run_sh)],
-            cwd=example_dir,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert proc.returncode == 0, (
-            f"{example_dir.name}/run.sh failed: {proc.stderr or proc.stdout}"
-        )
-        for fixture in expected_dir.iterdir():
-            if not fixture.is_file():
-                continue
-            produced = example_dir / fixture.name
-            assert produced.is_file(), f"{example_dir.name}: missing output {fixture.name}"
-            assert produced.read_bytes() == fixture.read_bytes(), (
-                f"{example_dir.name}: drift in {fixture.name}"
-            )
+    script = REPO_ROOT / "scripts" / "check_cli_examples.py"
+    spec = importlib.util.spec_from_file_location("check_cli_examples", script)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    exit_code = module.main(["--check"])
+    assert exit_code == 0, "CLI example fixtures drift — run: make cli-examples"
 
 
 def test_examples_are_not_manifested() -> None:

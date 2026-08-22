@@ -75,18 +75,6 @@ def _matrix_slugs() -> set[str]:
     return {m.group(1) for m in _MODEL_SLUG.finditer(text)}
 
 
-def _table_rows(region: str) -> list[list[str]]:
-    rows: list[list[str]] = []
-    for line in region.splitlines():
-        if not line.strip().startswith("|"):
-            continue
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) < 2 or set(cells[0]) <= {"-", ":"}:
-            continue
-        rows.append(cells)
-    return rows
-
-
 def test_auth_table_has_recommended_model_column() -> None:
     rows = _provider_table_rows()
     assert rows, "docs/authentication.md provider table missing header row"

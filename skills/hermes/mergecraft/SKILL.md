@@ -24,7 +24,6 @@ hermes skills install https://github.com/alexhawat/mergeCraft/tree/pre-0.0.1/ski
 mergeCraft ships a Nous provider (``mergecraft auth nous``,
 ``nous/deepseek/deepseek-v4-flash``) — a Hermes user can run reviews entirely on
 Nous credentials when configured.
-
 # mergeCraft
 
 mergeCraft is an AI-powered PR reviewer: a GitHub Action plus a Python CLI

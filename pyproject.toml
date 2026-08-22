@@ -82,6 +82,7 @@ artifacts = [
     "src/mergecraft/skills/**/*.md",
     "src/mergecraft/policy/packs/**/*.yaml",
     "src/mergecraft/evals/cases/**/*.json",
+    "src/mergecraft/data/**/*.yaml",
 ]
 
 [tool.hatch.build.targets.sdist]

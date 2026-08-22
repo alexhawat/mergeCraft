@@ -16,12 +16,12 @@ from tests.ci.workflow_support import REPO_ROOT, read_text
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.pins import action_pin_minimal
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 runner = CliRunner()
-DEFAULTS_YAML = REPO_ROOT / "scripts" / "example_workflows" / "defaults.yaml"
 README = REPO_ROOT / "README.md"
 _ACTION_USES = re.compile(r"uses:\s*alexhawat/mergeCraft@(\S+)", re.IGNORECASE)
 
@@ -64,10 +64,7 @@ def _readme_example_one_ref() -> str | None:
 
 
 def _defaults_pin() -> str:
-    data = yaml.safe_load(DEFAULTS_YAML.read_text(encoding="utf-8"))
-    pin = data.get("action_pin_minimal")
-    assert isinstance(pin, str), "defaults.yaml missing action_pin_minimal"
-    return pin.strip()
+    return action_pin_minimal()
 
 
 def test_scaffolded_workflow_references_published_action(
