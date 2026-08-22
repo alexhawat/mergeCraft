@@ -99,7 +99,7 @@ config keys, exit codes, and failure modes.
 1. Fetch the skill:
      git clone --depth 1 https://github.com/alexhawat/mergeCraft /tmp/mergecraft-src
 
-2. Copy the generated harness package for your agent from
+2. Copy the generated [harness](docs/glossary.md#harness) package for your agent from
    skills/<harness>/mergecraft/ (listed in skills/harnesses.yaml) to the path
    your agent reads. Examples:
 

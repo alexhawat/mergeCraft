@@ -193,7 +193,7 @@ branch = true
 omit = ["*/tests/*"]
 
 [tool.coverage.report]
-fail_under = 75
+fail_under = 80
 show_missing = true
 skip_covered = false
 exclude_lines = [
