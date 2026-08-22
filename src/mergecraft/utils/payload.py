@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -438,6 +439,32 @@ def resolve_prompt_file(input_path: str) -> str:
     return content
 
 
+_MAJOR_MINOR = re.compile(r"^(\d+)\.(\d+)(?:\D|$)")
+
+
+def _parse_version(raw: str) -> tuple[int, int]:
+    """Return the ``(major, minor)`` pair the compatibility policy compares.
+
+    Payloads carry SemVer, but mergeCraft's own version comes from the Python
+    distribution and is PEP 440, where a pre-release is ``0.1.0a1`` rather than
+    SemVer's ``0.1.0-a1``. Parsing the action version as strict SemVer rejected
+    every alpha and beta build. Both spellings agree on major and minor, which
+    is all the policy below inspects, so fall back to reading that pair
+    directly rather than taking a dependency on a second version parser.
+    """
+    import semver
+
+    try:
+        parsed = semver.Version.parse(raw)
+    except ValueError:
+        match = _MAJOR_MINOR.match(raw.strip())
+        if match is None:
+            msg = f"{raw} is not a valid version"
+            raise ValueError(msg) from None
+        return int(match.group(1)), int(match.group(2))
+    return parsed.major, parsed.minor
+
+
 def validate_compatibility(payload_version: str, action_version: str) -> None:
     """Enforce non-breaking semver compatibility between payload and action.
 
@@ -445,19 +472,24 @@ def validate_compatibility(payload_version: str, action_version: str) -> None:
     - ``0.x``: same minor required
     - ``>=1``: same major required
     """
-    import semver
-
     try:
-        payload_semver = semver.Version.parse(payload_version)
-        action_semver = semver.Version.parse(action_version)
+        payload_parsed = _parse_version(payload_version)
     except ValueError as exc:
         msg = f"Payload version {payload_version} is not a valid semantic version."
         raise ValueError(msg) from exc
+    try:
+        action_parsed = _parse_version(action_version)
+    except ValueError as exc:
+        # Parsed separately so the message names the version that actually
+        # failed. Sharing one `try` reported a bad action version as a bad
+        # payload version, which sent the reader after the wrong input.
+        msg = f"Action version {action_version} is not a valid semantic version."
+        raise ValueError(msg) from exc
 
-    major = payload_semver.major
-    minor = payload_semver.minor
-    compatible = (major == 0 and action_semver.major == 0 and action_semver.minor == minor) or (
-        major >= 1 and action_semver.major == major
+    major, minor = payload_parsed
+    action_major, action_minor = action_parsed
+    compatible = (major == 0 and action_major == 0 and action_minor == minor) or (
+        major >= 1 and action_major == major
     )
     if not compatible:
         msg = (
