@@ -41,7 +41,49 @@
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/mergecraft/SKILL.md",
-      "computedHash": "0196572cd8e4b718c8ac9d998a8a7c60e981b850afa4e53873de9a38430bab50"
+      "computedHash": "6eb78f4ef5ca1b0a9c85146b556da729f31af0584812a6b0c426137bbba8b885"
+    },
+    "mergecraft-codex": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/codex/mergecraft/SKILL.md",
+      "computedHash": "d08f310fa2d8c9f4f3b5d992802c2ebb1729392e8a5a5f178fa0c211c8ac5c74"
+    },
+    "mergecraft-cursor": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/cursor/mergecraft/SKILL.md",
+      "computedHash": "d08f310fa2d8c9f4f3b5d992802c2ebb1729392e8a5a5f178fa0c211c8ac5c74"
+    },
+    "mergecraft-opencode": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/opencode/mergecraft/SKILL.md",
+      "computedHash": "d08f310fa2d8c9f4f3b5d992802c2ebb1729392e8a5a5f178fa0c211c8ac5c74"
+    },
+    "mergecraft-gemini-cli": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/gemini-cli/mergecraft/SKILL.md",
+      "computedHash": "d08f310fa2d8c9f4f3b5d992802c2ebb1729392e8a5a5f178fa0c211c8ac5c74"
+    },
+    "mergecraft-openclaw": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/openclaw/mergecraft/SKILL.md",
+      "computedHash": "d08f310fa2d8c9f4f3b5d992802c2ebb1729392e8a5a5f178fa0c211c8ac5c74"
+    },
+    "mergecraft-hermes": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/hermes/mergecraft/SKILL.md",
+      "computedHash": "ffec1edb9c7b894c3ee1f661ea6c0cd9664cb7f55d7df65fd2fb662ef006db7c"
+    },
+    "mergecraft-claude-code": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/claude-code/mergecraft/SKILL.md",
+      "computedHash": "d08f310fa2d8c9f4f3b5d992802c2ebb1729392e8a5a5f178fa0c211c8ac5c74"
     }
   }
 }

@@ -114,7 +114,7 @@ permissions:
 jobs:
   review:
     steps:
-      - uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
+      - uses: alexhawat/mergeCraft@v0.1.0a1
         with:
           sarif_upload: enabled
 ```
@@ -132,7 +132,7 @@ Every run can emit a per-request span tree — to local JSONL, to
 default:
 
 ```yaml
-- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
+- uses: alexhawat/mergeCraft@v0.1.0a1
   with:
     tracing: enabled
     tracing-to: logfire

@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
+  auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
+- `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
+  `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
+
 ### Fixed
 
+- `mergecraft init` no longer emits `uses: ./` in consumer repos — published Action ref instead (V8/D13)
+- `mergecraft init` scaffold drops comment triggers and unsafe `github.event.comment.body` prompt wiring; defaults to `CLAUDE_CODE_OAUTH_TOKEN` (README Example 1 parity)
 - Offline analyze stores ``AnalyzerRunState`` on the CLI tool context and merges analyzer findings into structured output so CC1 exit codes see Critical/Major hits the agent omitted; result-cache keys include mergeCraft version and a settings digest (#399)
 
 ### Changed
@@ -23,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Consumer glossary (`docs/glossary.md`) — plain-language definitions for trust tier, typed
+  findings, blast radius, and related landing-page terms; manifest row and `llms.txt` entry.
+- Per-harness Agent Skills packages generated from `skills/mergecraft/SKILL.md` via
+  `scripts/gen_agent_packages.py`, with `skills/harnesses.yaml` install matrix,
+  `make agent-packages-check` in CI, and Hermes/OpenClaw surfaces (#383 bullet 1, RV3)
+- Runnable CLI example trees under `examples/cli/` (local diff, branch range, patch
+  file, and `--agent` JSONL) with `make cli-examples` / `cli-examples-check` and
+  `docs/cli-examples.md` tour page
 - Agent-loop reference workflow (`docs/agent-loop.md`) for `mergecraft review --agent` (#383)
 - CLI, GitHub Action, and SCM webhooks now enter one review engine over one immutable snapshot (#380)
 - `mergecraft explain`, `ask`, and `replay` plus `run inspect` / `run diff` print output-only change, line Q&A, and stored-run views (#377)

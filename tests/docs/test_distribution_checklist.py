@@ -13,6 +13,7 @@ _PAGES = "https://alexhawat.github.io/mergeCraft/"
 def test_readme_drops_ideal_and_todo_asset_comments() -> None:
     text = read_text("README.md")
     assert "README-ideal.md" not in text
+    assert "readme_test.md" not in text
     assert "TODO: add docs/assets/logo.svg" not in text
     assert "TODO: add docs/assets/demo.gif" not in text
 

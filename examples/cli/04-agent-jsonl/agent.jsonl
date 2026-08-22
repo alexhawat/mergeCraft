@@ -1,0 +1,7 @@
+{"event": "run_started", "protocol_version": "1", "negotiated": "1", "token_budget": 2000000, "cost_budget_usd": 50.0, "tool_call_budget": 500}
+{"event": "phase", "protocol_version": "1", "name": "materialize"}
+{"event": "phase", "protocol_version": "1", "name": "analyze"}
+{"event": "phase", "protocol_version": "1", "name": "review"}
+{"event": "phase", "protocol_version": "1", "name": "publish"}
+{"event": "verdict", "protocol_version": "1", "outcome": "passed", "exit_code": 0}
+{"event": "run_finished", "protocol_version": "1", "exit_code": 0}

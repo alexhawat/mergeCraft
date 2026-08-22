@@ -1,0 +1,4 @@
+models:
+  - anthropic/claude-sonnet
+analyzers:
+  enabled: false

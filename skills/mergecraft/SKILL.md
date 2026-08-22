@@ -1,6 +1,7 @@
 ---
 name: mergecraft
 description: Set up, run, and troubleshoot mergeCraft — the BYOK AI PR review GitHub Action and CLI. Use when the user asks to install or configure mergeCraft, add AI PR review to a repo, run a local review, interpret mergecraft-approval status or findings, configure models in .mergecraft/config.yaml, use mergecraft mcp serve, or debug a failing mergeCraft workflow.
+compatibility: Requires uv; gh CLI optional
 ---
 
 # mergeCraft

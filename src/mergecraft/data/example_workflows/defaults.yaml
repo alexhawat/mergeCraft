@@ -1,0 +1,11 @@
+# Shared placeholders for rendered example workflows.
+# Checkout copy: scripts/example_workflows/defaults.yaml (edit there, then sync here).
+action_repo: alexhawat/mergeCraft
+# A tagged release ref is fine for the minimal getting-started example.
+action_pin_minimal: v0.1.0a1
+# Hardened workflow must pin a full commit SHA for org SHA-pinning policies.
+action_pin_hardened: REPLACE_WITH_FULL_COMMIT_SHA
+# Prefix of YOUR CI job names (see .github/workflows/ci.yml in this repo).
+ci_job_prefix: "Verify ("
+# Base branches auto-reviewed under pull_request_target.
+base_branches: "[main]"

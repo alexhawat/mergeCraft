@@ -1,0 +1,9 @@
+diff --git a/src/demo.py b/src/demo.py
+--- a/src/demo.py
++++ b/src/demo.py
+@@ -4,4 +4,4 @@ from __future__ import annotations
+
+
+ def value() -> int:
+-    return 1
++    return 2

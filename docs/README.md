@@ -23,6 +23,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [assets README](assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
 | [authentication](authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
 | [blast-radius](blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
+| [cli-examples](cli-examples.md) | consumer | Runnable mergecraft review CLI example trees under examples/cli/. |
 | [cli](cli.md) | consumer | Full mergecraft CLI command reference derived from the live Typer app. |
 | [compatibility-matrix](compatibility-matrix.md) | contributor | Harness and provider compatibility notes for maintainers. |
 | [config-failure-policy](config-failure-policy.md) | contributor | setup_failure_policy and setup_timeout runtime behaviour (S1 / D10). |
@@ -33,6 +34,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [eval-methodology](eval-methodology.md) | contributor | Eval quality metrics, ablation dimensions, and corpus methodology (#384). Never README; issue 140 owns precision/recall/F1 publication. |
 | [evidence-packet](evidence-packet.md) | contributor | Merge evidence packet schema emitted as the evidence_packet action output. |
 | [findings-carryover](findings-carryover.md) | contributor | Findings carryover and export CLI behaviour for unresolved review items. |
+| [glossary](glossary.md) | consumer | Plain-language definitions for landing-page jargon — trust tier, typed findings, and related terms. |
 | [install](install.md) | consumer | Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback. |
 | [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |
 | [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
