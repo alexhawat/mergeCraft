@@ -255,7 +255,7 @@ def _marker_lines(record: LifecycleRecord) -> list[str]:
 
 def merge_ledger_into_comment(body: str, *, records: Iterable[LifecycleRecord]) -> str:
     """Strip prior ledger markers and append the supplied record set."""
-    cleaned = _LEDGER_MARKER_V2_RE.sub(_LEDGER_MARKER_RE.sub("", body), "").rstrip()
+    cleaned = _LEDGER_MARKER_V2_RE.sub("", _LEDGER_MARKER_RE.sub("", body)).rstrip()
     markers = [line for record in records for line in _marker_lines(record)]
     if not markers:
         return cleaned
