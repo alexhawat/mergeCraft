@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
@@ -82,10 +81,6 @@ def test_glossary_defines_required_terms() -> None:
     assert not missing, f"docs/glossary.md missing required terms: {missing}"
 
 
-@pytest.mark.xfail(
-    reason="green after RV2: landing jargon links on first use (D5/D6)",
-    strict=False,
-)
 def test_landing_jargon_is_linked_on_first_use() -> None:
     text = read_text("README.md")
     unlinked: list[str] = []

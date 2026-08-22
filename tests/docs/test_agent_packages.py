@@ -68,10 +68,6 @@ def _ci_steps() -> list[str]:
     return match.group(1).split()
 
 
-@pytest.mark.xfail(
-    reason="green after RV3: every harness row has package or fallback",
-    strict=False,
-)
 def test_every_declared_harness_has_a_package_or_fallback() -> None:
     manifest = _load_harness_manifest()
     harnesses = manifest.get("harnesses") or []
@@ -93,7 +89,6 @@ def test_every_declared_harness_has_a_package_or_fallback() -> None:
     assert not missing, f"harnesses without package or agents-md fallback: {missing}"
 
 
-@pytest.mark.xfail(reason="green after RV3: gen_agent_packages --check", strict=False)
 def test_packages_match_generator(tmp_path: Path) -> None:
     module = _load_gen_module()
     assert module.main(["--check"]) == 0
@@ -112,10 +107,6 @@ def test_packages_match_generator(tmp_path: Path) -> None:
     assert exit_code != 0, "gen_agent_packages.py --check must fail after package drift"
 
 
-@pytest.mark.xfail(
-    reason="green after RV3: generated packages use resolvable absolute URLs (D9)",
-    strict=False,
-)
 def test_generated_packages_have_no_broken_relative_links() -> None:
     generated_skills = [
         skill_md
@@ -135,10 +126,6 @@ def test_generated_packages_have_no_broken_relative_links() -> None:
     assert not broken, "\n".join(broken)
 
 
-@pytest.mark.xfail(
-    reason="green after RV3: unverified harness rows marked fallback (D3)",
-    strict=False,
-)
 def test_unverified_formats_are_marked() -> None:
     manifest = _load_harness_manifest()
     harnesses = manifest.get("harnesses") or []
@@ -158,10 +145,6 @@ def test_unverified_formats_are_marked() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after RV3: README skill paths match harness manifest",
-    strict=False,
-)
 def test_readme_paths_match_harness_manifest() -> None:
     manifest = _load_harness_manifest()
     declared_paths: set[str] = set()
@@ -190,7 +173,6 @@ def test_readme_paths_match_harness_manifest() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after RV3: agent-packages-check in CI_STEPS", strict=False)
 def test_make_agent_packages_check_in_ci_steps() -> None:
     steps = _ci_steps()
     assert "agent-packages-check" in steps, (

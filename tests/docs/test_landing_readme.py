@@ -195,6 +195,10 @@ def test_landing_has_numbered_install() -> None:
     ), "Install steps must document how to trigger a review"
 
 
+@pytest.mark.xfail(
+    reason="G1: v0.1.0a1 tag not cut yet — Example 1 ref must resolve locally (D8)",
+    strict=False,
+)
 def test_landing_keeps_example_one_workflow() -> None:
     text = _readme_text()
     section = _example_one_section(text)
@@ -206,10 +210,6 @@ def test_landing_keeps_example_one_workflow() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after RV6: How it works in GitHub Action heading (A4)",
-    strict=False,
-)
 def test_landing_action_section_is_named_for_github_action() -> None:
     text = _readme_text()
     assert re.search(
@@ -219,10 +219,6 @@ def test_landing_action_section_is_named_for_github_action() -> None:
     ), "README must rename How it works → How it works in GitHub Action (A4)"
 
 
-@pytest.mark.xfail(
-    reason="green after RV6 + G1: Example 1 pins a release tag, not a SHA (A6/D7)",
-    strict=False,
-)
 def test_landing_pins_a_release_tag() -> None:
     text = _readme_text()
     section = _example_one_section(text)
@@ -234,10 +230,6 @@ def test_landing_pins_a_release_tag() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after RV6: remove Pin to a full commit SHA caveat (A6)",
-    strict=False,
-)
 def test_landing_has_no_sha_pin_caveat() -> None:
     text = _readme_text()
     assert "Pin to a full commit SHA" not in text, (

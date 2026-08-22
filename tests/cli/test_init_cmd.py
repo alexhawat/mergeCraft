@@ -9,13 +9,16 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
 import yaml
 from tests.ci.workflow_support import REPO_ROOT, read_text
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+
+if TYPE_CHECKING:
+    from _pytest.monkeypatch import MonkeyPatch
 
 runner = CliRunner()
 DEFAULTS_YAML = REPO_ROOT / "scripts" / "example_workflows" / "defaults.yaml"
@@ -68,9 +71,8 @@ def _defaults_pin() -> str:
     return pin.strip()
 
 
-@pytest.mark.xfail(reason="green after RV6: init emits published Action ref (D13/V8)", strict=False)
 def test_scaffolded_workflow_references_published_action(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     _init_git_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -81,9 +83,8 @@ def test_scaffolded_workflow_references_published_action(
     assert "alexhawat/mergeCraft@" in workflow
 
 
-@pytest.mark.xfail(reason="green after RV6: init workflow triggers on pull_request", strict=False)
 def test_scaffolded_workflow_triggers_on_pull_request(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     _init_git_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -95,10 +96,7 @@ def test_scaffolded_workflow_triggers_on_pull_request(
     )
 
 
-@pytest.mark.xfail(reason="green after RV6: init config uses models list (D13)", strict=False)
-def test_scaffolded_config_uses_models_list(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_scaffolded_config_uses_models_list(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     _init_git_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["init", "--force"])
@@ -113,12 +111,8 @@ def test_scaffolded_config_uses_models_list(
     assert "model" not in data or data.get("model") is None
 
 
-@pytest.mark.xfail(
-    reason="green after RV6: init pin matches defaults.yaml and README (D7/D13)",
-    strict=False,
-)
 def test_scaffolded_workflow_pin_matches_defaults_yaml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     _init_git_repo(tmp_path)
     monkeypatch.chdir(tmp_path)

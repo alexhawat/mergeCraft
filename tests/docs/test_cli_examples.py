@@ -11,7 +11,6 @@ import stat
 import subprocess
 from pathlib import Path
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
@@ -128,10 +127,6 @@ def test_examples_are_not_manifested() -> None:
     assert "docs/cli-examples.md" in paths, "docs/manifest.yaml must list docs/cli-examples.md"
 
 
-@pytest.mark.xfail(
-    reason="green after RV5: landing links docs/cli-examples.md (A7)",
-    strict=False,
-)
 def test_landing_has_cli_section() -> None:
     text = read_text("README.md")
     assert _CLI_SECTION_RE.search(text), (

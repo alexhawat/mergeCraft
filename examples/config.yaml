@@ -1,5 +1,6 @@
 # Sample .mergecraft/config.yaml — copy to your repo root as `.mergecraft/config.yaml`
-model: anthropic/claude-sonnet
+models:
+  - anthropic/claude-sonnet
 push: restricted
 shell: restricted
 signedCommits: false

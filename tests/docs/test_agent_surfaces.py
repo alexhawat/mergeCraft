@@ -184,7 +184,6 @@ def _readme_h2_headings(text: str) -> list[str]:
     ]
 
 
-@pytest.mark.xfail(reason="green after RV6: promote readme v2 agent section (D2)", strict=False)
 def test_readme_has_agent_section() -> None:
     text = read_text("README.md")
     assert _AGENT_SECTION_HEADING_RE.search(text), "README must ship ## For LLM / Agents (D2)"
@@ -195,7 +194,6 @@ def test_readme_has_agent_section() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after RV6: agent section is position 1 (D2)", strict=False)
 def test_agent_section_is_first_section() -> None:
     text = read_text("README.md")
     headings = _readme_h2_headings(text)
@@ -217,10 +215,6 @@ def test_agent_section_anchor_survives() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after RV6: agent prompts use fenced blocks for copy button (D2)",
-    strict=False,
-)
 def test_agent_prompts_are_fenced_not_quoted() -> None:
     text = read_text("README.md")
     region = _readme_agent_section_region(text)

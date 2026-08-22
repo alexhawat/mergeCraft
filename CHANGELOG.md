@@ -9,8 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `docs/authentication.md`: provider table now lists **Recommended model** and **Inferred harness** columns; adds an OpenAI-compatible custom-provider row (`MERGECRAFT_CUSTOM_PROVIDER_*`) with harness `opencode` (#A3 / RV4).
-- `docs/compatibility-matrix.md`: Harness × model table gains a **Recommended model** column; adds `tokenhub/hy3` and `minimax/MiniMax-M3` rows (#A3 / RV4).
+- Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
+  auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
+- `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
+  `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
+
+### Fixed
+
+- `mergecraft init` no longer emits `uses: ./` in consumer repos — published Action ref instead (V8/D13)
 
 ### Fixed
 

@@ -11,8 +11,10 @@ from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
 
+DEFAULT_ACTION_REF = "v0.1.0a1"
+
 DEFAULT_CONFIG: dict[str, object] = {
-    "model": "anthropic/claude-sonnet",
+    "models": ["anthropic/claude-sonnet"],
     "push": "restricted",
     "shell": "restricted",
     "signedCommits": False,
@@ -20,10 +22,11 @@ DEFAULT_CONFIG: dict[str, object] = {
     "autoMergeEnabled": False,
 }
 
-WORKFLOW_TEMPLATE = """\
+WORKFLOW_TEMPLATE = f"""\
 name: mergeCraft
 
 on:
+  pull_request:
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -47,12 +50,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run mergeCraft
-        uses: ./  # or your published action ref
+        uses: alexhawat/mergeCraft@{DEFAULT_ACTION_REF}
         with:
-          prompt: ${{ github.event.inputs.prompt || github.event.comment.body }}
+          prompt: ${{{{ github.event.inputs.prompt || github.event.comment.body }}}}
           model: anthropic/claude-sonnet
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{{{ secrets.ANTHROPIC_API_KEY }}}}
           # or: CLAUDE_CODE_OAUTH_TOKEN / CODEX_AUTH_JSON / OPENAI_API_KEY
 """
 

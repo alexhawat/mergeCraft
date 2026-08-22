@@ -7,7 +7,7 @@
 ## Setup
 
 - README.md — landing page, numbered install, Example 1 workflow
-- README.md#for-agents — For AI coding agents (copy/paste setup prompts)
+- README.md#for-agents — For LLM / Agents (copy/paste setup prompts)
 - docs/install.md — Python 3.11+ floor, Action vs CLI, Docker fallback
 - AGENTS.md — cross-vendor agent guidance (consumer setup + this-repo development)
 - skills/mergecraft/SKILL.md — Agent-Skills consumer skill (setup checklist + CLI)
