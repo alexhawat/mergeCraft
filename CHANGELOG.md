@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `antislop` analyzer: YAML rule pack for placeholder code, narrator comments,
+  swallowed errors, pass-through wrappers, phantom imports, and related low-quality patterns
+  on changed Python and JS/TS files (#393)
+
 ### Changed
 
 - Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
