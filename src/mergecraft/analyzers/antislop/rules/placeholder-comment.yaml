@@ -1,0 +1,10 @@
+id: antislop/placeholder-comment
+severity: minor
+confidence: likely
+category: Maintainability & Code Quality
+languages: [python, javascript, typescript]
+message: Comment marks unfinished work instead of shipping behavior
+remediation: Implement the behavior or track the work outside the source file.
+match:
+  kind: comment_regex
+  pattern: '(?i)(?:TODO|FIXME|HACK|XXX)\s*:\s*(?:implement|add|finish|complete|later)'

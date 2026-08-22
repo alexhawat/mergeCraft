@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `antislop` analyzer: YAML rule pack for placeholder code, narrator comments,
+  swallowed errors, pass-through wrappers, phantom imports, and related low-quality patterns
+  on changed Python and JS/TS files (#393)
+
 ### Changed
 
+- Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily in
+  `install()` via `action_pin_minimal()` instead of calling it at module import (#403)
 - Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
   auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
 - `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
@@ -16,9 +24,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `mergecraft --version` reported `0.1.0` while the project was at `0.1.0a1`: the number was restated as a literal in `mergecraft/__init__.py` alongside `pyproject.toml` and the two drifted. It is now read from the installed distribution. The value also keys the offline result cache and is stamped on telemetry and eval reproducibility pins, so the mismatch quietly mixed artefacts from different builds
+- Managed analyzers no longer report a clean scan as skipped: the adapter's fallback re-parse ran on the
+  human-readable output string, which carries the `version_note` prose prefix, so any managed tool whose
+  findings stream was empty failed with `Expecting value: line 1 column 1 (char 0)`. TruffleHog hit this on
+  every secret-free scan, making a passing scan indistinguishable from a broken analyzer. The fallback is
+  removed (it could only duplicate the file parse, and bypassed finding redaction when it did), the output
+  read is classified separately so an undecodable file no longer raises `UnboundLocalError`, and analyzer
+  output is persisted only from the raw stream
+- `staticChecks` withholding no longer depends on how a gate was declared: with `shell: disabled` on an
+  untrusted run, gates discovered from the repo's Makefile executed while configured ones were correctly
+  withheld — meaning commands from a Makefile that is itself part of the diff under review could run.
+  Both routes now go through the same cannot-run reporting, each with a truthful reason
+- `review --dry-run` skips the analyzer catalog while still materializing the diff and returning the review prompt (#401)
+- `load_audit_events` skips malformed JSONL lines and non-dict payloads instead of raising (#398)
+- `route_model` routes security specialist at `critical` risk to the same capable model as `high` instead of Haiku (#394)
+- Checkout and packaged `defaults.yaml` copies drifted after README v2; `make pins-check` gates byte identity (#402, #414)
+- Hermes generated skill package lists `GEMINI_API_KEY` and `NOUS_API_KEY` (not `GOOGLE_API_KEY`) in `required_environment_variables`, matching `docs/authentication.md` (#415)
+- Coverage ratchet floor raised to 80% after new docs contract tests increased measured line coverage above the prior ceiling
+- Transitive `h2` 4.4.0→4.4.1 in `uv.lock` for `pip-audit` (PYSEC-2026-3628)
 - `mergecraft init` no longer emits `uses: ./` in consumer repos — published Action ref instead (V8/D13)
 - `mergecraft init` scaffold drops comment triggers and unsafe `github.event.comment.body` prompt wiring; defaults to `CLAUDE_CODE_OAUTH_TOKEN` (README Example 1 parity)
+- Offline `mergecraft review` no longer runs the analyzer catalog twice: the pre-pass in
+  `run_offline_analyze` and the reviewing agent's `run_analyzers` call each provisioned tools and
+  executed every eligible analyzer over the same diff, doubling review time and duplicating the
+  skip block, sandbox probe, and semgrep/trufflehog output in the log. The pre-pass now records the
+  inputs it ran under (repo root, changed files, trust tier, shell, analyzer mode, inline budget,
+  offline flag, base ref, and a digest of the diff) and `run_analyzers` reuses that result when every
+  one of them matches; any difference — and the GitHub Action path, which has no pre-pass — runs the
+  pipeline exactly as before
 - Offline analyze stores ``AnalyzerRunState`` on the CLI tool context and merges analyzer findings into structured output so CC1 exit codes see Critical/Major hits the agent omitted; result-cache keys include mergeCraft version and a settings digest (#399)
+- Managed analyzer binaries are re-verified on every cache hit, not just at download time: the cache
+  directory is keyed by the *archive* sha256, so a tool that rewrites itself in place was executed on
+  every subsequent run while the path implied the pinned contents. TruffleHog's built-in updater did
+  exactly that, silently replacing the pinned 3.96.0 binary with 3.97.0. Provisioning now records the
+  installed binary's sha256 beside it and refuses to reuse a cache entry that no longer matches —
+  discarding it (updater state included) and re-provisioning from the pin, or failing closed with a
+  truthful skip reason when the pinned source is unreachable. TruffleHog is additionally run with
+  `--no-update` so the updater never fires
 
 ### Changed
 
@@ -32,6 +75,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft review --shell {disabled,restricted,enabled}` — operator opt-in that makes the seven
+  `runtime: repo-native` analyzers (ruff, mypy, bandit, vulture, typos, jscpd, markdownlint) reachable from
+  the offline CLI. The offline path previously hardcoded `shell: disabled` at three sites, so those tools
+  could never run locally under any configuration and a full local review exercised only the two managed
+  analyzers. Defaults to `disabled`, so runs that omit the flag are unchanged; raising it lets analyzers
+  execute tooling supplied by the repository under review and is unsafe for untrusted code
 - Consumer glossary (`docs/glossary.md`) — plain-language definitions for trust tier, typed
   findings, blast radius, and related landing-page terms; manifest row and `llms.txt` entry.
 - Per-harness Agent Skills packages generated from `skills/mergecraft/SKILL.md` via

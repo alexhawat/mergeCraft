@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
 from mergecraft.pins import action_pin_minimal
 
-DEFAULT_INSTALL_REF = action_pin_minimal()
 MERGECRAFT_GIT_URL = "git+https://github.com/alexhawat/mergeCraft"
 FINDINGS_FILENAME = "findings.json"
 _PATCH_CANDIDATES = ("task.patch", "changes.patch", "diff.patch", "review.patch")
@@ -62,7 +61,7 @@ class MergecraftReviewAgent(BaseInstalledAgent):
         return text or "unknown"
 
     async def install(self, environment: BaseEnvironment) -> None:
-        install_ref = self._get_env("MERGECRAFT_INSTALL_REF") or DEFAULT_INSTALL_REF
+        install_ref = self._get_env("MERGECRAFT_INSTALL_REF") or action_pin_minimal()
         install_spec = f"{MERGECRAFT_GIT_URL}@{install_ref}"
 
         await self.exec_as_root(

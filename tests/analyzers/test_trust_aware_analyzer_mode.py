@@ -85,7 +85,7 @@ SHIPPED_ARGV_RUNTIMES: frozenset[str] = frozenset({"managed", "container"})
 # Analyzers that declare a `repo-native` runtime but execute in-process, with no
 # subprocess and no repo-provided binary, so no repo tooling is required. See
 # `resolve_analyzer()`'s special case and the W4 decision note.
-IN_PROCESS_IDS: frozenset[str] = frozenset({"agentsec"})
+IN_PROCESS_IDS: frozenset[str] = frozenset({"agentsec", "antislop"})
 
 
 # --------------------------------------------------------------------------- #

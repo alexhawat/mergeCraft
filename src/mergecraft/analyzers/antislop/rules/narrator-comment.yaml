@@ -1,0 +1,10 @@
+id: antislop/narrator-comment
+severity: minor
+confidence: likely
+category: Maintainability & Code Quality
+languages: [python, javascript, typescript]
+message: Comment narrates the next line instead of explaining non-obvious intent
+remediation: Delete the narrator comment or replace it with rationale the code cannot express.
+match:
+  kind: comment_regex
+  pattern: '(?i)^\s*(?:#|//)\s*This (?:function|method|class|code|block|variable|loop)'

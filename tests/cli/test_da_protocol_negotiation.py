@@ -8,8 +8,9 @@ events — do not duplicate those. This module pins (1) the dual-field wire
 reality (CLI JSON ``schema_version`` vs agent JSONL ``protocol_version``) and
 (2) negotiation / retryability / protocol budgets via ``agent_protocol``.
 
-D12 is reconciled via ``VERSION_FIELD_ALIASES`` (adapter, not a single survivor).
-Both fields remain stamped on their respective surfaces.
+D12 is reconciled via explicit ``negotiate_protocol`` branches for
+``schema_version`` and ``protocol_version`` (both names survive on their wire
+surfaces; no alias lookup table).
 """
 
 from __future__ import annotations
@@ -19,10 +20,10 @@ from typing import Any
 
 import pytest
 
+from mergecraft.cli import agent_protocol as agent_protocol_mod
 from mergecraft.cli.agent_protocol import (
     AGENT_PROTOCOL_VERSION,
     PROTOCOL_BUDGET_FIELDS,
-    VERSION_FIELD_ALIASES,
     ProtocolNegotiationError,
     format_event_line,
     negotiate_protocol,
@@ -105,14 +106,17 @@ def test_run_started_wire_stamps_protocol_budget_fields() -> None:
 
 
 def test_d12_exposes_a_version_field_adapter_without_picking_the_survivor() -> None:
-    """Happy: W5 records how CLI JSON and agent JSONL relate — both names survive.
+    """Happy: D12 — both wire field names negotiate via explicit branches, not an alias map.
 
-    Assert an adapter exists that mentions both current field names. Do not
-    require deleting ``schema_version`` or ``protocol_version``.
+    ``schema_version`` and ``protocol_version`` remain distinct stamps on CLI JSON
+    vs agent JSONL; negotiation selects the matching literal per offered token.
     """
-    blob = str(VERSION_FIELD_ALIASES).casefold()
-    assert "schema_version" in blob
-    assert "protocol_version" in blob
+    assert not hasattr(agent_protocol_mod, "VERSION_FIELD_ALIASES")
+    schema_selected = negotiate_protocol(accepted=("schema_version",))
+    protocol_selected = negotiate_protocol(accepted=("protocol_version",))
+    assert schema_selected == CLI_JSON_SCHEMA_VERSION
+    assert protocol_selected == AGENT_PROTOCOL_VERSION
+    assert schema_selected != protocol_selected
 
 
 def test_negotiate_protocol_schema_version_token_selects_cli_json_schema() -> None:

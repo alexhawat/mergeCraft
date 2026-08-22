@@ -31,6 +31,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Ref-resolution checks ask git whether a tag or branch exists
+          # (README Action pin D25, tests/docs/support.py). A shallow fetch
+          # has neither, so they answer "no" on PR builds while passing on
+          # tag builds. Full history is what makes those answers truthful.
+          fetch-depth: 0
       - uses: ./.github/actions/bootstrap
       - name: make ci
         run: make ci
@@ -38,6 +44,12 @@ jobs:
   e2e-gate:
     name: Action-image E2E (release gate)
     needs: verify
+    # Required: the top-level `permissions: {}` grants this job nothing, and a
+    # called workflow may not request more than its caller holds. `e2e.yml`
+    # declares `contents: read`, so without this the whole run is rejected
+    # before any job starts (startup_failure), release included.
+    permissions:
+      contents: read
     uses: ./.github/workflows/e2e.yml
     secrets: inherit
 

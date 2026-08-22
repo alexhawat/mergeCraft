@@ -65,11 +65,30 @@ def test_route_model_per_specialist_and_risk() -> None:
     """Happy: routing is per specialist and per risk level."""
     module = require_module(PROVIDER_HEALTH_MODULE)
     route = require_callable(module, "route_model")
+    cheap = "anthropic/claude-haiku"
     high = route(specialist="security", risk="high")
     low = route(specialist="security", risk="trivial")
     assert high
     assert low
     assert high != low or route(specialist="tests", risk="high") != high
+    assert high == "anthropic/claude-opus"
+
+    for risk in ("medium", "low", "trivial"):
+        assert route(specialist="security", risk=risk) == cheap
+
+    critical = route(specialist="security", risk="critical")
+    assert critical != cheap
+    assert critical == high
+
+    tests_high = route(specialist="tests", risk="high")
+    tests_critical = route(specialist="tests", risk="critical")
+    assert tests_critical == tests_high
+    assert tests_critical == "openai/gpt-5.3-codex"
+
+    assert route(specialist="general", risk="critical") == cheap
+    assert route(specialist="security", risk="bogus") == high
+
+    assert route(specialist="Security", risk="critical") == high
 
 
 def test_heterogeneous_verifier_and_judge_models() -> None:

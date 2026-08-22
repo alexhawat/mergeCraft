@@ -7,19 +7,15 @@ generated packages, README path anti-invention, and ``make agent-packages-check`
 
 from __future__ import annotations
 
-import importlib.util
 import re
 from pathlib import Path
-from typing import Any
 
 import pytest
-import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
+from tests.docs.support import ci_steps, load_harness_manifest, load_script_module
 
-HARNESS_MANIFEST = REPO_ROOT / "skills" / "harnesses.yaml"
 GEN_SCRIPT = REPO_ROOT / "scripts" / "gen_agent_packages.py"
-MAKEFILE = REPO_ROOT / "Makefile"
 README = REPO_ROOT / "README.md"
 SKILLS_ROOT = REPO_ROOT / "skills"
 
@@ -33,23 +29,6 @@ _SKILL_PATH_RE = re.compile(
 )
 
 
-def _load_harness_manifest() -> dict[str, Any]:
-    assert HARNESS_MANIFEST.is_file(), f"missing {HARNESS_MANIFEST.relative_to(REPO_ROOT)} (RV3)"
-    data = yaml.safe_load(HARNESS_MANIFEST.read_text(encoding="utf-8"))
-    assert isinstance(data, dict), "skills/harnesses.yaml must parse as a mapping"
-    return data
-
-
-def _load_gen_module() -> Any:
-    assert GEN_SCRIPT.is_file(), f"missing {GEN_SCRIPT.relative_to(REPO_ROOT)} (RV3)"
-    spec = importlib.util.spec_from_file_location("gen_agent_packages", GEN_SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def _readme_agent_region() -> str:
     text = read_text("README.md")
     match = re.search(
@@ -61,15 +40,8 @@ def _readme_agent_region() -> str:
     return match.group(1)
 
 
-def _ci_steps() -> list[str]:
-    makefile = MAKEFILE.read_text(encoding="utf-8")
-    match = re.search(r"^CI_STEPS\s*:?=\s*(.+)$", makefile, re.MULTILINE)
-    assert match, "Makefile missing CI_STEPS"
-    return match.group(1).split()
-
-
 def test_every_declared_harness_has_a_package_or_fallback() -> None:
-    manifest = _load_harness_manifest()
+    manifest = load_harness_manifest()
     harnesses = manifest.get("harnesses") or []
     assert isinstance(harnesses, list)
     assert harnesses, "skills/harnesses.yaml needs harnesses:"
@@ -90,7 +62,7 @@ def test_every_declared_harness_has_a_package_or_fallback() -> None:
 
 
 def test_packages_match_generator(tmp_path: Path) -> None:
-    module = _load_gen_module()
+    module = load_script_module(GEN_SCRIPT)
     assert module.main(["--check"]) == 0
 
     target = SKILLS_ROOT / "mergecraft" / "SKILL.md"
@@ -131,7 +103,7 @@ def test_generated_packages_have_no_broken_relative_links() -> None:
 
 
 def test_unverified_formats_are_marked() -> None:
-    manifest = _load_harness_manifest()
+    manifest = load_harness_manifest()
     harnesses = manifest.get("harnesses") or []
     offenders: list[str] = []
     for row in harnesses:
@@ -150,7 +122,7 @@ def test_unverified_formats_are_marked() -> None:
 
 
 def test_readme_paths_match_harness_manifest() -> None:
-    manifest = _load_harness_manifest()
+    manifest = load_harness_manifest()
     declared_paths: set[str] = set()
     for block in manifest.get("install_paths") or []:
         if isinstance(block, dict) and isinstance(block.get("path"), str):
@@ -178,7 +150,7 @@ def test_readme_paths_match_harness_manifest() -> None:
 
 
 def test_make_agent_packages_check_in_ci_steps() -> None:
-    steps = _ci_steps()
+    steps = ci_steps()
     assert "agent-packages-check" in steps, (
         "Makefile CI_STEPS must include agent-packages-check (RV3)"
     )

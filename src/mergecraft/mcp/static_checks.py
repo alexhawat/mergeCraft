@@ -150,10 +150,23 @@ def run_static_checks_tool(ctx: ToolContext):
                 "checks": [],
             }
 
-        if ctx.payload.shell == "disabled" and ctx.static_checks and ctx.trust_tier != "trusted":
+        # The withhold decision is about execution, not provenance: a gate
+        # discovered from the repo's Makefile shell-executes exactly like a
+        # declared one, and on an untrusted event that Makefile is part of the
+        # diff under review. Both are withheld; only the wording differs.
+        if ctx.payload.shell == "disabled" and ctx.trust_tier != "trusted":
             reason = (
-                "staticChecks are configured but cannot run in this environment — "
-                "shell is disabled on pull-request events"
+                (
+                    "staticChecks are configured but cannot run in this environment — "
+                    "shell is disabled on pull-request events"
+                )
+                if ctx.static_checks
+                else (
+                    "this repo declares no `staticChecks`; its mechanical gates were "
+                    "discovered from the Makefile, and they cannot run in this "
+                    "environment — shell is disabled on pull-request events, where the "
+                    "Makefile is itself part of the diff under review"
+                )
             )
             declared = declared_cannot_run_outcomes(checks, reason=reason)
             outcomes, substitutions = await _apply_ci_evidence(ctx, declared)

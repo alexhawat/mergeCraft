@@ -9,7 +9,7 @@ from loguru import logger
 
 from mergecraft.config import load_repo_settings
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.mcp.tool_state import AnalyzerRunState, primary_repo_state
+from mergecraft.mcp.tool_state import AnalyzerRunState, analyzer_run_key, primary_repo_state
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -51,22 +51,44 @@ def run_analyzers_tool(ctx: ToolContext):
         if base_ref is not None:
             base_ref = str(base_ref).strip() or None
 
-        run_state = run_analyzer_pipeline(
+        # An offline `mergecraft review` already ran this pipeline as a pre-pass
+        # and recorded the inputs it used. Reuse that result when every keyed
+        # input matches, rather than provisioning and executing every analyzer a
+        # second time over the same diff. No recorded key — the GitHub Action
+        # path, which has no pre-pass — always runs the pipeline.
+        request_key = analyzer_run_key(
             repo_root=repo_root,
             changed_files=changed,
-            tier=_resolve_tier(ctx),  # type: ignore[arg-type]  # — _resolve_tier returns str; run_analyzer_pipeline expects AnalyzerTier literal
-            diff_text=diff_text,
+            tier=_resolve_tier(ctx),
+            shell=str(ctx.payload.shell),
+            mode=ctx.analyzers_mode,
             inline_budget=settings.inline_budget,
             offline=offline,
             base_ref=base_ref,
-            # #35 — the surface now registers under `shell: disabled`, so the
-            # shell has to reach manifest selection or the withhold is lost.
-            shell=str(ctx.payload.shell),
-            # #38 — likewise the mode: `untrusted-only` (and the `auto` that
-            # resolves to it on untrusted runs) only narrows selection if it
-            # actually reaches the pipeline.
-            mode=ctx.analyzers_mode,
+            diff_text=diff_text,
         )
+        prior = ctx.tool_state.analyzer_run
+        prior_key = prior.key if prior is not None else None
+        if prior is not None and prior_key is not None and prior_key.matches(request_key):
+            logger.info("analyzers: reusing pre-computed run (inputs unchanged)")
+            run_state = prior
+        else:
+            run_state = run_analyzer_pipeline(
+                repo_root=repo_root,
+                changed_files=changed,
+                tier=_resolve_tier(ctx),  # type: ignore[arg-type]  # — _resolve_tier returns str; run_analyzer_pipeline expects AnalyzerTier literal
+                diff_text=diff_text,
+                inline_budget=settings.inline_budget,
+                offline=offline,
+                base_ref=base_ref,
+                # #35 — the surface now registers under `shell: disabled`, so the
+                # shell has to reach manifest selection or the withhold is lost.
+                shell=str(ctx.payload.shell),
+                # #38 — likewise the mode: `untrusted-only` (and the `auto` that
+                # resolves to it on untrusted runs) only narrows selection if it
+                # actually reaches the pipeline.
+                mode=ctx.analyzers_mode,
+            )
         _store_run_state(ctx, run_state)
 
         payload: dict[str, Any] = {

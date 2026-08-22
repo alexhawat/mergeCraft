@@ -1,0 +1,32 @@
+id: antislop
+category: quality
+languages:
+  - python
+  - javascript
+  - typescript
+detect:
+  files:
+    - "*.py"
+    - "*.js"
+    - "*.jsx"
+    - "*.ts"
+    - "*.tsx"
+    - "*.mjs"
+    - "*.cjs"
+command:
+  - antislop
+scope: diff
+parser: antislop_native
+supports_fix: false
+default_enabled: false
+version: native
+runtime: repo-native
+timeout_s: 60
+trust: trusted
+severity_map:
+  major: Major
+  minor: Minor
+  trivial: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: null

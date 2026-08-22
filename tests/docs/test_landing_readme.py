@@ -8,11 +8,9 @@ page moves, and the G1 docs-site badge regression guard.
 from __future__ import annotations
 
 import re
-import subprocess
-
-import pytest
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
+from tests.docs.support import action_uses_pattern, git_ref_exists
 
 README = REPO_ROOT / "README.md"
 _D2_SOURCE = REPO_ROOT / "docs" / "diagrams" / "pipeline.d2"
@@ -25,9 +23,6 @@ _DEMO_PATHS = (
     "assets/demo.gif",
     "assets/demo.mp4",
 )
-
-_ACTION_USES = re.compile(r"uses:\s*alexhawat/mergeCraft@(\S+)")
-_SHA_REF = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _readme_text() -> str:
@@ -70,41 +65,6 @@ def _anchor_present(text: str, *needles: str) -> bool:
     nav = _jump_nav_targets(text)
     haystack = slugs | nav | {text.lower()}
     return any(needle.lower() in haystack for needle in needles)
-
-
-def _git_ref_exists(ref: str) -> bool:
-    ref = ref.rstrip("#").strip()
-    candidates: list[list[str]]
-    if _SHA_REF.fullmatch(ref):
-        candidates = [["git", "rev-parse", "--verify", f"{ref}^{{commit}}"]]
-    elif ref.startswith("v"):
-        candidates = [["git", "rev-parse", "--verify", f"refs/tags/{ref}^{{commit}}"]]
-    else:
-        candidates = [
-            ["git", "rev-parse", "--verify", f"refs/heads/{ref}^{{commit}}"],
-            ["git", "rev-parse", "--verify", f"refs/remotes/origin/{ref}^{{commit}}"],
-        ]
-    for cmd in candidates:
-        if subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, check=False).returncode == 0:
-            return True
-    if not _SHA_REF.fullmatch(ref):
-        return False
-    # CI checkouts use fetch-depth: 1 — pinned SHAs may not be in the object db.
-    fetch = subprocess.run(
-        ["git", "fetch", "origin", ref, "--depth=1"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        check=False,
-    )
-    if fetch.returncode != 0:
-        return False
-    verify = subprocess.run(
-        ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        check=False,
-    )
-    return verify.returncode == 0
 
 
 def _example_one_section(text: str) -> str:
@@ -195,17 +155,13 @@ def test_landing_has_numbered_install() -> None:
     ), "Install steps must document how to trigger a review"
 
 
-@pytest.mark.xfail(
-    reason="G1: v0.1.0a1 tag not cut yet — Example 1 ref must resolve locally (D8)",
-    strict=False,
-)
 def test_landing_keeps_example_one_workflow() -> None:
     text = _readme_text()
     section = _example_one_section(text)
-    uses_match = _ACTION_USES.search(section)
+    uses_match = action_uses_pattern.search(section)
     assert uses_match, "Example 1 must include uses: alexhawat/mergeCraft@…"
     ref = uses_match.group(1).rstrip("#").strip()
-    assert _git_ref_exists(ref), (
+    assert git_ref_exists(ref), (
         f"Example 1 Action ref {ref!r} must resolve to an existing tag, branch, or commit (D25)"
     )
 
@@ -222,7 +178,7 @@ def test_landing_action_section_is_named_for_github_action() -> None:
 def test_landing_pins_a_release_tag() -> None:
     text = _readme_text()
     section = _example_one_section(text)
-    uses_match = _ACTION_USES.search(section)
+    uses_match = action_uses_pattern.search(section)
     assert uses_match, "Example 1 must include uses: alexhawat/mergeCraft@…"
     ref = uses_match.group(1).rstrip("#").strip()
     assert re.fullmatch(r"v\d+\.\d+\.\d+(?:a\d+|b\d+|rc\d+)?", ref, re.IGNORECASE), (

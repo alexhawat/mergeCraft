@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from pathlib import PurePath
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-_RISK_BANDS: frozenset[str] = frozenset({"low", "medium", "high", "critical"})
-_RISK_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+from mergecraft.utils.path_globs import path_matches_glob
+from mergecraft.utils.risk_bands import RISK_BANDS, risk_at_or_above
+
 _SEVERITIES: frozenset[str] = frozenset({"Minor", "Major", "Critical"})
 _SEVERITY_ORDER: dict[str, int] = {"Minor": 0, "Major": 1, "Critical": 2}
 
@@ -111,13 +111,7 @@ def validate_predicate(expression: str) -> None:
 
 
 def _path_matches(pattern: str, path: str) -> bool:
-    pure = PurePath(path)
-    if pure.match(pattern):
-        return True
-    # ``**/*.ext`` also matches root-level files (``README.md`` has no parent segment).
-    if pattern.startswith("**/"):
-        return pure.match(pattern[3:])
-    return False
+    return path_matches_glob(pattern, path)
 
 
 def evaluate_predicate(
@@ -148,8 +142,8 @@ def evaluate_predicate(
 
     if expr.startswith("risk_band >= "):
         threshold = expr.rsplit(">= ", 1)[1].strip()
-        actual = str(signals.get("risk_band", "low")).lower()
-        return _RISK_ORDER.get(actual, 0) >= _RISK_ORDER.get(threshold, 0)
+        actual = str(signals.get("risk_band", "low"))
+        return risk_at_or_above(actual, threshold)
 
     if expr.startswith("languages includes "):
         needle = expr.rsplit("includes ", 1)[1].strip()
@@ -229,6 +223,7 @@ def lint_pipeline_agents(pipeline: PipelineDefinition, registry: Any) -> list[st
 
 
 __all__ = [
+    "RISK_BANDS",
     "OnErrorPolicy",
     "PipelineDefinition",
     "PipelineSource",
@@ -238,5 +233,6 @@ __all__ = [
     "evaluate_predicate",
     "lint_pipeline_agents",
     "parse_pipeline",
+    "risk_at_or_above",
     "validate_predicate",
 ]

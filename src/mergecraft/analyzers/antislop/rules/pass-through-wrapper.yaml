@@ -1,0 +1,9 @@
+id: antislop/pass-through-wrapper
+severity: minor
+confidence: likely
+category: Maintainability & Code Quality
+languages: [python]
+message: Function only forwards arguments to another helper without adding behavior
+remediation: Call the helper directly or justify the wrapper with real logic.
+match:
+  kind: python_pass_through_wrapper

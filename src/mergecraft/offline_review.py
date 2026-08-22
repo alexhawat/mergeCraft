@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import AnalyzerRunState
     from mergecraft.review.engine import ReviewEngine
     from mergecraft.tracing.review_context import ReviewContext
+    from mergecraft.types import ShellPermission
     from mergecraft.utils.source_resolve import ResolvedWorkspace
 
 
@@ -356,6 +357,7 @@ async def run_offline_diff_review(
     json_path: Path | None = None,
     evidence_packet_path: Path | None = None,
     tracing_cli: list[str] | None = None,
+    shell: ShellPermission = "disabled",
     invocation_root: Path | None = None,
     trust_override: CliTrustOverride | None = None,
     cloned: bool = False,
@@ -398,6 +400,7 @@ async def run_offline_diff_review(
             json_path=json_path,
             evidence_packet_path=evidence_packet_path,
             tracing_cli=tracing_cli,
+            shell=shell,
             workspace=workspace,
             spec=spec,
             review_root=review_root,
@@ -461,6 +464,10 @@ class _OfflineDiffReviewRun:
     evidence_packet_path: Path | None
     on_finding: Callable[[dict[str, Any]], None] | None
     read_cache: bool
+    # Operator opt-in (#1). Defaults to the historical hardcoded value so any
+    # caller that omits it keeps the pre-flag behaviour: repo-native analyzers
+    # stay withheld unless `mergecraft review --shell` explicitly raises this.
+    shell: ShellPermission = "disabled"
     materialization: DiffMaterialization | None = None
     scope_reduction: ScopeReduction | None = None
     cache_key: str | None = None
@@ -505,12 +512,15 @@ class _OfflineDiffReviewRun:
 
     async def analyze(self) -> None:
         assert self.materialization is not None
+        if self.dry_run:
+            return
         from mergecraft.review.offline_stages import run_offline_analyze
 
         self.analyzer_run = await run_offline_analyze(
             cwd=self.cwd,
             materialization=self.materialization,
             trust_tier=self.trust_tier,
+            shell=self.shell,
             analyzers_enabled=self.analyzers_enabled,
         )
 
@@ -586,6 +596,7 @@ class _OfflineDiffReviewRun:
             output_schema=output_schema,
             evidence_packet_path=self.evidence_packet_path,
             trust_tier=self.trust_tier,
+            shell=self.shell,
             run_bounds=self.run_bounds,
             on_finding=self.on_finding,
             analyzer_run=self.analyzer_run,
@@ -617,6 +628,7 @@ async def _run_offline_diff_review(
     json_path: Path | None = None,
     evidence_packet_path: Path | None = None,
     tracing_cli: list[str] | None = None,
+    shell: ShellPermission = "disabled",
     workspace: ResolvedWorkspace,
     spec: SourceResolverSpec,
     review_root: Path,
@@ -668,6 +680,7 @@ async def _run_offline_diff_review(
         out_dir=out_dir,
         diff_file=diff_file,
         trust_tier=trust_tier,
+        shell=shell,
         run_bounds=run_bounds,
         analyzers_enabled=settings.analyzers.enabled,
         json_path=json_path,

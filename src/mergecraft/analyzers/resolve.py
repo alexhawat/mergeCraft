@@ -14,6 +14,11 @@ from mergecraft.analyzers.detect import (
     has_sqlfluff_dialect,
     resolve_repo_tool,
 )
+from mergecraft.analyzers.trust import (
+    IN_PROCESS_ANALYZER_IDS,
+    IN_PROCESS_CONFIG_NOTE,
+    IN_PROCESS_VERSION_NOTES,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -103,18 +108,25 @@ def _sqlfluff_no_dialect_plan(manifest: AnalyzerManifest, repo_root: Path) -> An
     )
 
 
-def _agentsec_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
-    """Per-source resolver: the ``agentsec`` special-case (mergeCraft's native engine)."""
-    if manifest.id != "agentsec":
+_IN_PROCESS_PLAN_NOTES: dict[str, tuple[str, str]] = {
+    tool_id: (IN_PROCESS_VERSION_NOTES[tool_id], IN_PROCESS_CONFIG_NOTE)
+    for tool_id in IN_PROCESS_ANALYZER_IDS
+}
+
+
+def _in_process_plan(manifest: AnalyzerManifest, repo_root: Path) -> AnalyzerPlan | None:
+    """Per-source resolver for in-process native engines (#38, #393)."""
+    if manifest.id not in IN_PROCESS_ANALYZER_IDS:
         return None
+    version_note, config_note = _IN_PROCESS_PLAN_NOTES[manifest.id]
     return AnalyzerPlan(
         manifest_id=manifest.id,
         mode="repo-native",
-        argv=("agentsec",),
+        argv=(manifest.id,),
         cwd=repo_root,
         timeout_s=manifest.timeout_s,
-        version_note="ran mergeCraft native agent-security policy engine",
-        config_note="native YAML rules",
+        version_note=version_note,
+        config_note=config_note,
     )
 
 
@@ -342,7 +354,7 @@ def resolve_analyzer(
     disabled`` requires, since the working tree is then PR-authored (#35, D5).
 
     The ladder is a small ordered dispatch of per-source resolvers —
-    declared-unavailable → sqlfluff-no-dialect → agentsec special-case →
+    declared-unavailable → sqlfluff-no-dialect → in-process native analyzers →
     repo-native → type-checker-only-skip → managed → container — each either
     producing a plan or yielding (``None``) to the next. Config-absent argv
     patches (phpstan ``--level=0``, prisma-lint fallback ``--config``) apply
@@ -355,7 +367,7 @@ def resolve_analyzer(
     if plan is None:
         plan = _sqlfluff_no_dialect_plan(manifest, repo_root)
     if plan is None:
-        plan = _agentsec_plan(manifest, repo_root)
+        plan = _in_process_plan(manifest, repo_root)
     if plan is None:
         repo_tool_state, early_skip = _detect_repo_tool_state(
             manifest,

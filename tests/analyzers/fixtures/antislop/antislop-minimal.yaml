@@ -1,0 +1,3 @@
+rule_id: antislop/narrator-comment
+severity: Minor
+message: minimal antislop fixture

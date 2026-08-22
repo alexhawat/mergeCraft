@@ -1,0 +1,10 @@
+id: antislop/section-divider-spam
+severity: trivial
+confidence: likely
+category: Maintainability & Code Quality
+languages: [python, javascript, typescript]
+message: Decorative section divider comments add noise without structure
+remediation: Remove divider spam or replace it with a module docstring when grouping is needed.
+match:
+  kind: comment_regex
+  pattern: '^\s*(?:#|//)\s*={3,}'

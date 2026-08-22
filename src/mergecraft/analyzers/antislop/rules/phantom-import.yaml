@@ -1,0 +1,9 @@
+id: antislop/phantom-import
+severity: minor
+confidence: likely
+category: Maintainability & Code Quality
+languages: [python]
+message: Imported module is never used in the file
+remediation: Remove the unused import or use it in the implementation.
+match:
+  kind: python_phantom_import

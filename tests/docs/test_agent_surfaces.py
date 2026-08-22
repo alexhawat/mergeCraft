@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
+from tests.docs.support import action_uses_pattern, git_ref_exists
 
 AGENTS_MD = REPO_ROOT / "AGENTS.md"
 SKILL_MD = REPO_ROOT / "skills" / "mergecraft" / "SKILL.md"
@@ -33,7 +34,6 @@ _VERSIONED_GIT_REF = re.compile(
     r"git\+https://github\.com/alexhawat/mergeCraft@([^\s\"')]+)",
     re.IGNORECASE,
 )
-_ACTION_USES = re.compile(r"uses:\s*alexhawat/mergeCraft@(\S+)", re.IGNORECASE)
 
 
 def _read(path: Path) -> str:
@@ -41,33 +41,15 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _git_ref_exists(ref: str) -> bool:
-    ref = ref.rstrip("#").strip()
-    if re.fullmatch(r"[0-9a-f]{40}", ref):
-        cmd = ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"]
-        return subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, check=False).returncode == 0
-    if ref.startswith("v"):
-        cmd = ["git", "rev-parse", "--verify", f"refs/tags/{ref}^{{commit}}"]
-        return subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, check=False).returncode == 0
-    for candidate in (
-        f"refs/heads/{ref}^{{commit}}",
-        f"refs/remotes/origin/{ref}^{{commit}}",
-    ):
-        cmd = ["git", "rev-parse", "--verify", candidate]
-        if subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, check=False).returncode == 0:
-            return True
-    return False
-
-
 def _assert_no_unresolvable_version_pins(text: str, *, label: str) -> None:
     assert "@pre-0.0.1" not in text, f"{label} must not teach @pre-0.0.1 (D11)"
     for match in _VERSIONED_GIT_REF.finditer(text):
         ref = match.group(1)
-        if ref.startswith("v") and not _git_ref_exists(ref):
+        if ref.startswith("v") and not git_ref_exists(ref):
             pytest.fail(f"{label} pins git+…@{ref} but tag {ref!r} does not exist (D11)")
-    for match in _ACTION_USES.finditer(text):
+    for match in action_uses_pattern.finditer(text):
         ref = match.group(1)
-        if ref.startswith("v") and not _git_ref_exists(ref):
+        if ref.startswith("v") and not git_ref_exists(ref):
             pytest.fail(f"{label} pins uses:…@{ref} but tag {ref!r} does not exist (D11)")
 
 
