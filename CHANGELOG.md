@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `load_audit_events` skips malformed JSONL lines and non-dict payloads instead of raising (#398)
 - `route_model` routes security specialist at `critical` risk to the same capable model as `high` instead of Haiku (#394)
 - Checkout and packaged `defaults.yaml` copies drifted after README v2; `make pins-check` gates byte identity (#402, #414)
+- Hermes generated skill package lists `GEMINI_API_KEY` and `NOUS_API_KEY` (not `GOOGLE_API_KEY`) in `required_environment_variables`, matching `docs/authentication.md` (#415)
 - `mergecraft init` no longer emits `uses: ./` in consumer repos — published Action ref instead (V8/D13)
 - `mergecraft init` scaffold drops comment triggers and unsafe `github.event.comment.body` prompt wiring; defaults to `CLAUDE_CODE_OAUTH_TOKEN` (README Example 1 parity)
 - Offline analyze stores ``AnalyzerRunState`` on the CLI tool context and merges analyzer findings into structured output so CC1 exit codes see Critical/Major hits the agent omitted; result-cache keys include mergeCraft version and a settings digest (#399)

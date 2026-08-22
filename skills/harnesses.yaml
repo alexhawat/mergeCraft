@@ -38,7 +38,8 @@ harnesses:
     required_environment_variables:
       - ANTHROPIC_API_KEY
       - OPENAI_API_KEY
-      - GOOGLE_API_KEY
+      - GEMINI_API_KEY
+      - NOUS_API_KEY
       - CURSOR_API_KEY
     install_section: |
       ## Hermes install

@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT
@@ -102,9 +101,6 @@ def _auth_doc_env_names_for_provider(provider_label: str) -> set[str]:
     raise AssertionError(msg)
 
 
-@pytest.mark.xfail(
-    reason="green after W10: Hermes manifest lists GEMINI_API_KEY (D11)", strict=False
-)
 def test_hermes_manifest_lists_gemini_api_key() -> None:
     """Hermes harness manifest must name GEMINI_API_KEY for Google Gemini auth."""
     env_vars = _required_env_vars_from_manifest()
@@ -114,7 +110,6 @@ def test_hermes_manifest_lists_gemini_api_key() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W10: Hermes manifest lists NOUS_API_KEY (D11)", strict=False)
 def test_hermes_manifest_lists_nous_api_key() -> None:
     """Hermes harness manifest must name NOUS_API_KEY for mergecraft auth nous."""
     env_vars = _required_env_vars_from_manifest()
@@ -124,10 +119,6 @@ def test_hermes_manifest_lists_nous_api_key() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W10: Hermes manifest must not list GOOGLE_API_KEY (D11)",
-    strict=False,
-)
 def test_hermes_manifest_excludes_google_api_key() -> None:
     """Hermes must not list GOOGLE_API_KEY — mergeCraft reads GEMINI_API_KEY for Gemini."""
     env_vars = _required_env_vars_from_manifest()
@@ -137,9 +128,6 @@ def test_hermes_manifest_excludes_google_api_key() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W10: Hermes SKILL.md lists GEMINI_API_KEY (D11)", strict=False
-)
 def test_hermes_skill_md_lists_gemini_api_key() -> None:
     """Generated Hermes SKILL.md frontmatter must name GEMINI_API_KEY."""
     env_vars = _required_env_vars_from_skill_md()
@@ -149,7 +137,6 @@ def test_hermes_skill_md_lists_gemini_api_key() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W10: Hermes SKILL.md lists NOUS_API_KEY (D11)", strict=False)
 def test_hermes_skill_md_lists_nous_api_key() -> None:
     """Generated Hermes SKILL.md frontmatter must name NOUS_API_KEY."""
     env_vars = _required_env_vars_from_skill_md()
@@ -159,10 +146,6 @@ def test_hermes_skill_md_lists_nous_api_key() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W10: Hermes SKILL.md must not list GOOGLE_API_KEY (D11)",
-    strict=False,
-)
 def test_hermes_skill_md_excludes_google_api_key() -> None:
     """Generated Hermes SKILL.md must not list GOOGLE_API_KEY."""
     env_vars = _required_env_vars_from_skill_md()
@@ -172,10 +155,6 @@ def test_hermes_skill_md_excludes_google_api_key() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W10: Hermes manifest env names match authentication.md (D11)",
-    strict=False,
-)
 def test_hermes_manifest_env_names_match_authentication_doc() -> None:
     """Hermes manifest env vars must include auth-doc names for Gemini and Nous."""
     gemini_envs = _auth_doc_env_names_for_provider("Google Gemini")
@@ -196,10 +175,6 @@ def test_hermes_manifest_env_names_match_authentication_doc() -> None:
     assert _FORBIDDEN_GOOGLE_ENV not in env_vars
 
 
-@pytest.mark.xfail(
-    reason="green after W10: Hermes SKILL.md env names match authentication.md (D11)",
-    strict=False,
-)
 def test_hermes_skill_md_env_names_match_authentication_doc() -> None:
     """Generated Hermes SKILL.md env vars must include auth-doc names for Gemini and Nous."""
     gemini_envs = _auth_doc_env_names_for_provider("Google Gemini")
