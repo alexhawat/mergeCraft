@@ -278,7 +278,7 @@ jobs:
       - name: Attest SBOM (slim)
         id: attest-sbom-slim
         continue-on-error: true
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: ${{ env.IMAGE_SLIM }}
           subject-digest: ${{ needs.build-images.outputs.slim_digest }}
@@ -288,7 +288,7 @@ jobs:
         if: steps.attest-sbom-slim.outcome == 'failure'
         id: attest-sbom-slim-retry
         continue-on-error: true
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: ${{ env.IMAGE_SLIM }}
           subject-digest: ${{ needs.build-images.outputs.slim_digest }}
@@ -297,7 +297,7 @@ jobs:
       - name: Attest SBOM (analyzers)
         id: attest-sbom-analyzers
         continue-on-error: true
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: ${{ env.IMAGE_ANALYZERS }}
           subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
@@ -307,7 +307,7 @@ jobs:
         if: steps.attest-sbom-analyzers.outcome == 'failure'
         id: attest-sbom-analyzers-retry
         continue-on-error: true
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: ${{ env.IMAGE_ANALYZERS }}
           subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
