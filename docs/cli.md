@@ -21,7 +21,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft analyzers list` | List catalog analyzers and whether they would enable here. |
 | `mergecraft analyzers lock` | Write or refresh `.mergecraft/analyzers.lock` for managed tools. |
 | `mergecraft analyzers run <analyzer-id>` | Execute one analyzer against the working tree. |
-| `mergecraft ask` | Answer a question about the tree, optionally scoped to a file line. |
+| `mergecraft ask` | Show a file-line excerpt or canned text; does not call a model. |
 | `mergecraft audit export` | Export the audit log as a JSON array. |
 | `mergecraft auth claude` | Save a Claude Code OAuth token as CLAUDE_CODE_OAUTH_TOKEN. |
 | `mergecraft auth codex` | Mint a Codex subscription credential and save it as CODEX_AUTH_JSON. |
