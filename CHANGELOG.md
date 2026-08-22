@@ -22,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Managed analyzers no longer report a clean scan as skipped: the adapter's fallback re-parse ran on the
+  human-readable output string, which carries the `version_note` prose prefix, so any managed tool whose
+  findings stream was empty failed with `Expecting value: line 1 column 1 (char 0)`. TruffleHog hit this on
+  every secret-free scan, making a passing scan indistinguishable from a broken analyzer. The fallback is
+  removed (it could only duplicate the file parse, and bypassed finding redaction when it did), the output
+  read is classified separately so an undecodable file no longer raises `UnboundLocalError`, and analyzer
+  output is persisted only from the raw stream
+- `staticChecks` withholding no longer depends on how a gate was declared: with `shell: disabled` on an
+  untrusted run, gates discovered from the repo's Makefile executed while configured ones were correctly
+  withheld — meaning commands from a Makefile that is itself part of the diff under review could run.
+  Both routes now go through the same cannot-run reporting, each with a truthful reason
 - `review --dry-run` skips the analyzer catalog while still materializing the diff and returning the review prompt (#401)
 - `load_audit_events` skips malformed JSONL lines and non-dict payloads instead of raising (#398)
 - `route_model` routes security specialist at `critical` risk to the same capable model as `high` instead of Haiku (#394)
@@ -41,6 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft review --shell {disabled,restricted,enabled}` — operator opt-in that makes the seven
+  `runtime: repo-native` analyzers (ruff, mypy, bandit, vulture, typos, jscpd, markdownlint) reachable from
+  the offline CLI. The offline path previously hardcoded `shell: disabled` at three sites, so those tools
+  could never run locally under any configuration and a full local review exercised only the two managed
+  analyzers. Defaults to `disabled`, so runs that omit the flag are unchanged; raising it lets analyzers
+  execute tooling supplied by the repository under review and is unsafe for untrusted code
 - Consumer glossary (`docs/glossary.md`) — plain-language definitions for trust tier, typed
   findings, blast radius, and related landing-page terms; manifest row and `llms.txt` entry.
 - Per-harness Agent Skills packages generated from `skills/mergecraft/SKILL.md` via

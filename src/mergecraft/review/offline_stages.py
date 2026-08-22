@@ -15,6 +15,7 @@ from mergecraft.mcp.tool_state import AnalyzerRunState
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from mergecraft.types import ShellPermission
     from mergecraft.utils.offline_diff import DiffMaterialization
 
 TrustTier = Literal["trusted", "untrusted"]
@@ -31,9 +32,17 @@ async def run_offline_analyze(
     cwd: Path,
     materialization: DiffMaterialization,
     trust_tier: str,
+    shell: ShellPermission = "disabled",
     analyzers_enabled: bool = True,
 ) -> AnalyzerRunState | None:
-    """Run the catalog analyzer pipeline and return its state for the driver."""
+    """Run the catalog analyzer pipeline and return its state for the driver.
+
+    ``shell`` is the operator-resolved shell permission for this run (``--shell``
+    on ``mergecraft review``). It defaults to ``disabled``, which withholds every
+    ``runtime: repo-native`` manifest (see
+    :func:`mergecraft.analyzers.trust.evaluate_manifest_for_shell`); raising it
+    lets those analyzers execute repo-provided tooling.
+    """
     if not analyzers_enabled or materialization.empty:
         return None
     diff_text = materialization.path.read_text(encoding="utf-8")
@@ -45,7 +54,7 @@ async def run_offline_analyze(
         diff_text=diff_text,
         offline=True,
         base_ref=materialization.base_ref,
-        shell="disabled",
+        shell=shell,
         mode="auto",
     )
     try:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -150,3 +151,72 @@ async def test_static_checks_run_when_shell_disabled_but_trusted_offline(
     assert payload["ran"] is True
     assert payload["allPassed"] is True
     assert payload["checks"][0]["status"] == "passed"
+
+
+def _write_makefile(tmp_path: Path) -> None:
+    """Give the repo a discoverable `lint` gate that succeeds when it runs."""
+    (tmp_path / "Makefile").write_text("lint:\n\t@true\n", encoding="utf-8")
+
+
+requires_make = pytest.mark.skipif(
+    shutil.which("make") is None, reason="Makefile gate discovery requires `make` on PATH"
+)
+
+
+@requires_make
+@pytest.mark.asyncio
+async def test_discovered_makefile_gates_withheld_when_shell_disabled(tmp_path: Path) -> None:
+    """The gap: undeclared repos fall back to Makefile gates, which must be withheld too."""
+    _write_makefile(tmp_path)
+    ctx = _ctx(tmp_path, shell="disabled", static_checks=[], enabled=True)
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+    assert payload["ran"] is False
+    checks = payload.get("checks") or []
+    assert [check["status"] for check in checks] == ["declared-but-cannot-run"]
+    assert checks[0]["name"] == "lint"
+    reason = str(payload["reason"])
+    assert "shell is disabled" in reason
+    # Truthful wording: nothing was *configured*, the gate came from the Makefile.
+    assert "Makefile" in reason
+    assert "staticChecks are configured" not in reason
+
+
+@requires_make
+@pytest.mark.asyncio
+async def test_discovered_makefile_gates_run_when_shell_disabled_but_trusted(
+    tmp_path: Path,
+) -> None:
+    """The trusted carve-out is unchanged: offline review still runs discovered gates."""
+    _write_makefile(tmp_path)
+    ctx = _ctx(tmp_path, shell="disabled", static_checks=[], enabled=True)
+    ctx.trust_tier = "trusted"
+    payload = await _run(ctx)
+    assert payload["ran"] is True
+    assert payload["allPassed"] is True
+    assert payload["checks"][0]["status"] == "passed"
+
+
+@requires_make
+@pytest.mark.asyncio
+async def test_discovered_makefile_gates_run_under_permissive_shell(tmp_path: Path) -> None:
+    """An untrusted event with shell available keeps running discovered gates."""
+    _write_makefile(tmp_path)
+    ctx = _ctx(tmp_path, shell="restricted", static_checks=[], enabled=True)
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+    assert payload["ran"] is True
+    assert payload["allPassed"] is True
+    assert payload["checks"][0]["status"] == "passed"
+
+
+@pytest.mark.asyncio
+async def test_no_gate_at_all_keeps_early_return_when_shell_disabled(tmp_path: Path) -> None:
+    """No declared and no discoverable gate: the untouched 'no mechanical gate' return."""
+    ctx = _ctx(tmp_path, shell="disabled", static_checks=[], enabled=True)
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+    assert payload["ran"] is False
+    assert "declares no mechanical gate" in payload["reason"]
+    assert payload["checks"] == []
+    assert ctx.tool_state.static_checks_ran is True

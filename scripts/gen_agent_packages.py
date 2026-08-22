@@ -37,7 +37,7 @@ GITHUB_REPO = "alexhawat/mergeCraft"
 _RELATIVE_LINK = re.compile(r"\(\.\./\.\./([^)]+)\)")
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
-DEFAULT_BLOB_REF = "pre-0.0.1"
+DEFAULT_BLOB_REF = "main"
 
 
 def _blob_ref() -> str:

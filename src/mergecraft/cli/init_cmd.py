@@ -49,7 +49,6 @@ permissions:
   issues: write
   checks: write
   actions: read
-  id-token: write
 
 jobs:
   mergecraft:

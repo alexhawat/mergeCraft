@@ -26,6 +26,7 @@ from mergecraft.offline_review import (
 )
 from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, canonical_review_snapshot
+from mergecraft.types import ShellPermission  # noqa: TC001
 from mergecraft.utils.log import configure_logging
 from mergecraft.utils.source_resolve import SourceResolverSpec
 
@@ -67,6 +68,8 @@ Required vs optional:
 * credentials — required for a live review; skip with --dry-run
 * --base / --head / --range / --staged / --unstaged — optional diff selectors
 * --token — only for private --repo clones (else GH_TOKEN, GITHUB_TOKEN, or `gh auth token`)
+* --shell — optional opt-in that lets analyzers run repo-provided tooling (unsafe
+  for untrusted code); default disabled
 
 Examples — local checkout / worktree vs a GitHub branch:
 
@@ -371,6 +374,18 @@ def run(
         ),
         rich_help_panel=_PANEL_TRACING,
     ),
+    shell: ShellPermission = typer.Option(
+        "disabled",
+        "--shell",
+        help=(
+            "Shell permission for this review: disabled (default), restricted, or enabled. "
+            "Raising it lets analyzers execute tooling provided by the repository under "
+            "review (ruff, mypy, bandit, vulture and the other repo-native analyzers, which "
+            "are withheld at disabled). Unsafe for untrusted code — an opt-in for repos you "
+            "trust. Operator flag only; never read from repo config."
+        ),
+        rich_help_panel=_PANEL_TRUST,
+    ),
     trust: str | None = typer.Option(
         None,
         "--trust",
@@ -539,6 +554,7 @@ def run(
                     tracing_cli=tracing_cli,
                     invocation_root=invocation_root,
                     trust_override=trust_override,
+                    shell=shell,
                     source_spec=source_spec,
                     on_finding=_on_finding if agent_mode else None,
                     use_cache=read_cache,

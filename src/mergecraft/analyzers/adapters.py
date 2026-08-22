@@ -11,7 +11,6 @@ from loguru import logger
 
 from mergecraft.analyzers.execution import finalize_plan, provision_managed_argv
 from mergecraft.analyzers.parse import parse_output_file
-from mergecraft.analyzers.parsers import parse_output
 from mergecraft.analyzers.parsers._common import resolve_repo_relative_path
 from mergecraft.analyzers.registry import filter_changed_files_for_manifest, get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv, resolve_analyzer
@@ -493,24 +492,32 @@ def run_adapter(
         reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
+    output_file = Path(outcome.output_path)
     try:
-        raw = (
-            Path(outcome.output_path).read_text(encoding="utf-8")
-            if outcome.output_path
-            else outcome.output
-        )
+        raw = output_file.read_text(encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        # ``UnicodeDecodeError`` is a ``ValueError``: output we cannot even read
+        # is unreadable, not unparsable — and reading it must happen outside the
+        # parse ``try`` so the handler below never sees an unbound ``raw``.
+        reason = f"skipped {tool_id}: could not read analyzer output ({exc})"
+        logger.info("{}", reason)
+        return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
+
+    try:
+        # Parse only the persisted raw output. ``outcome.output`` is the
+        # human-readable rendering — for every managed analyzer it carries
+        # ``plan.version_note`` prose ahead of the payload, which no parser can
+        # read (a clean trufflehog scan was reported as "failed to parse").
         findings = parse_output_file(
-            Path(outcome.output_path),
+            output_file,
             manifest=manifest,
             repo_root=repo_root,
         )
-        if not findings and outcome.output.strip():
-            findings = parse_output(outcome.output, manifest=manifest, repo_root=repo_root)
     except (ValueError, KeyError) as exc:
         # Classify the failure: empty output means the analyzer never produced
         # anything (sandbox unavailable outside CI), not that it emitted garbage
         # we could not parse.
-        if not (raw or "").strip():
+        if not raw.strip():
             reason = (
                 f"skipped {tool_id}: no output (analyzer did not run — "
                 "likely sandbox unavailable outside CI)"
