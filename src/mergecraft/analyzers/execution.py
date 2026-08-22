@@ -74,6 +74,12 @@ def finalize_plan(
     return replace(plan, argv=tuple(argv), cwd=repo_root, env=env)
 
 
+#: TruffleHog ships a self-updater that rewrites its own binary in place, which
+#: would silently replace the sha-pinned binary mergeCraft provisioned. ``--no-update``
+#: ("Don't check for updates") disables it; confirmed on the pinned 3.96.0 binary.
+TRUFFLEHOG_NO_UPDATE_FLAG = "--no-update"
+
+
 def _trufflehog_argv(
     argv: list[str],
     *,
@@ -84,6 +90,10 @@ def _trufflehog_argv(
     from mergecraft.analyzers.config import trufflehog_verify_enabled
 
     filtered = [arg for arg in argv if arg not in {"--no-verification", "--verification"}]
+    # Belt and braces: the manifest command carries the flag, but argv also arrives
+    # from MCP callers that assemble their own arguments (see ``run_argv``).
+    if TRUFFLEHOG_NO_UPDATE_FLAG not in filtered:
+        filtered.append(TRUFFLEHOG_NO_UPDATE_FLAG)
     if trufflehog_verify_enabled(repo_root=repo_root, tier=tier, event=event):
         if "--verification" not in filtered:
             filtered.append("--verification")
@@ -218,6 +228,7 @@ def run_argv(
 
 
 __all__ = [
+    "TRUFFLEHOG_NO_UPDATE_FLAG",
     "finalize_plan",
     "marker_only_lint_skip_reason",
     "provision_managed_argv",
