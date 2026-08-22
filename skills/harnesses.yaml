@@ -1,0 +1,40 @@
+# Agent Skills open standard — https://agentskills.io/specification
+install_paths:
+  - path: .agents/skills/mergecraft/
+    harnesses: [codex, cursor, opencode, gemini-cli, openclaw]
+    note: The cross-vendor standard path. Gemini CLI prefers it over .gemini/skills/.
+  - path: .claude/skills/mergecraft/
+    harnesses: [claude-code, opencode]
+    note: >-
+      Claude Code does not read .agents/skills/ (anthropics/claude-code#31005).
+      OpenCode reads this path too.
+  - install_command: hermes skills install
+    harnesses: [hermes]
+    note: Hermes uses ~/.hermes/skills/ or a category-nested project skills/ tree.
+harnesses:
+  - id: codex
+    alt_paths: []
+    source: https://learn.chatgpt.com/docs/build-skills
+    verified: 2026-08-21
+  - id: cursor
+    alt_paths: [.cursor/skills/mergecraft/]
+    source: https://cursor.com/docs/skills
+    verified: 2026-08-21
+  - id: opencode
+    alt_paths: [.opencode/skills/mergecraft/, .claude/skills/mergecraft/]
+    source: https://opencode.ai/docs/skills
+    verified: 2026-08-21
+  - id: gemini-cli
+    alt_paths: [.gemini/skills/mergecraft/]
+    source: https://geminicli.com/docs/cli/skills
+    verified: 2026-08-21
+  - id: openclaw
+    alt_paths: []
+    source: https://docs.openclaw.ai/tools/skills
+    verified: 2026-08-21
+  - id: hermes
+    source: https://hermes-agent.nousresearch.com/docs/developer-guide/creating-skills
+    verified: 2026-08-21
+  - id: claude-code
+    source: https://code.claude.com/docs/en/skills
+    verified: 2026-08-21

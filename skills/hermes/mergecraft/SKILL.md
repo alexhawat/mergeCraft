@@ -1,8 +1,29 @@
 ---
 name: mergecraft
-description: Set up, run, and troubleshoot mergeCraft — the BYOK AI PR review GitHub Action and CLI. Use when the user asks to install or configure mergeCraft, add AI PR review to a repo, run a local review, interpret mergecraft-approval status or findings, configure models in .mergecraft/config.yaml, use mergecraft mcp serve, or debug a failing mergeCraft workflow.
+description: Set up, run, and troubleshoot mergeCraft — the BYOK AI PR review GitHub
+  Action and CLI. Use when the user asks to install or configure mergeCraft, add AI
+  PR review to a repo, run a local review, interpret mergecraft-approval status or
+  findings, configure models in .mergecraft/config.yaml, use mergecraft mcp serve,
+  or debug a failing mergeCraft workflow.
 compatibility: Requires uv; gh CLI optional
+required_environment_variables:
+- ANTHROPIC_API_KEY
+- OPENAI_API_KEY
+- GOOGLE_API_KEY
+- CURSOR_API_KEY
 ---
+## Hermes install
+
+Hermes Agent reads skills from ``~/.hermes/skills/`` or a category-nested project
+``skills/`` tree. Install this package with:
+
+```bash
+hermes skills install https://github.com/alexhawat/mergeCraft/tree/pre-0.0.1/skills/hermes
+```
+
+mergeCraft ships a Nous provider (``mergecraft auth nous``,
+``nous/deepseek/deepseek-v4-flash``) — a Hermes user can run reviews entirely on
+Nous credentials when configured.
 
 # mergeCraft
 
@@ -15,7 +36,7 @@ a read-only verifier; typed findings drive inline comments and the
 ## Setup checklist (new consumer repo)
 
 1. **Prereqs:** Python **3.11+**, uv, authenticated `gh` CLI. If no Python 3.11+
-   locally → use the Docker Action only ([`docs/install.md`](../../docs/install.md)).
+   locally → use the Docker Action only ([`docs/install.md`](https://github.com/alexhawat/mergeCraft/blob/pre-0.0.1/docs/install.md)).
 2. **Install:**
 
    ```bash
@@ -80,5 +101,5 @@ The reviewer role is served at `/mcp/reviewer`. Startup prints
   commenters are authorized; authorization reads `author_association` from the
   event payload, never the comment body.
 - **Model skipped** — no credential for that provider; run `mergecraft models list`.
-- **Full docs:** [`README.md`](../../README.md), [`AGENTS.md`](../../AGENTS.md),
-  [`REVIEW-CHECKS.md`](../../REVIEW-CHECKS.md), [`docs/`](../../docs/).
+- **Full docs:** [`README.md`](https://github.com/alexhawat/mergeCraft/blob/pre-0.0.1/README.md), [`AGENTS.md`](https://github.com/alexhawat/mergeCraft/blob/pre-0.0.1/AGENTS.md),
+  [`REVIEW-CHECKS.md`](https://github.com/alexhawat/mergeCraft/blob/pre-0.0.1/REVIEW-CHECKS.md), [`docs/`](https://github.com/alexhawat/mergeCraft/blob/pre-0.0.1/docs/README.md).
