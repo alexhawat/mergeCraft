@@ -56,11 +56,12 @@ def negotiate_protocol(*, accepted: Sequence[str]) -> str:
             offered.add(CLI_JSON_SCHEMA_VERSION)
         elif token == "protocol_version":
             offered.add(AGENT_PROTOCOL_VERSION)
-        aliased = VERSION_FIELD_ALIASES.get(token)
-        if aliased == "schema_version":
-            offered.add(CLI_JSON_SCHEMA_VERSION)
-        elif aliased == "protocol_version":
-            offered.add(AGENT_PROTOCOL_VERSION)
+        else:
+            aliased = VERSION_FIELD_ALIASES.get(token)
+            if aliased == "schema_version":
+                offered.add(CLI_JSON_SCHEMA_VERSION)
+            elif aliased == "protocol_version":
+                offered.add(AGENT_PROTOCOL_VERSION)
     overlap = offered & _SUPPORTED_NEGOTIATION_VERSIONS
     if not overlap:
         raise ProtocolNegotiationError(

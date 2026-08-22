@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 from mergecraft.analyzers.finding import (
     STRUCTURED_OUTPUT_REQUIRED_MSG,
     Finding,
+    FindingsPayload,
+    FindingValidationError,
     findings_output_schema,
     parse_findings_payload,
     write_findings_json,
@@ -70,6 +72,40 @@ def parse_offline_review_findings(result: OfflineReviewResult) -> list[Finding]:
         ]
     except ValueError:
         return []
+
+
+def findings_from_analyzer_run(state: AnalyzerRunState | None) -> list[Finding]:
+    """Coerce stored analyzer rows into typed findings; skip invalid rows."""
+    if state is None:
+        return []
+    findings: list[Finding] = []
+    for row in state.findings:
+        try:
+            findings.append(row if isinstance(row, Finding) else Finding.model_validate(row))
+        except (FindingValidationError, ValueError):
+            continue
+    return findings
+
+
+def merge_analyzer_findings_into_result(
+    result: OfflineReviewResult,
+    extra: list[Finding],
+) -> OfflineReviewResult:
+    """Fold analyzer findings into structured output used for CLI exit codes."""
+    if not extra:
+        return result
+    existing = parse_offline_review_findings(result)
+    seen = {row.fingerprint for row in existing}
+    merged = list(existing)
+    for finding in extra:
+        if finding.fingerprint in seen:
+            continue
+        merged.append(finding)
+        seen.add(finding.fingerprint)
+    if len(merged) == len(existing) and result.structured_output:
+        return result
+    result.structured_output = FindingsPayload(findings=merged).model_dump_json()
+    return result
 
 
 def build_offline_review_prompt(
@@ -537,9 +573,11 @@ class _OfflineDiffReviewRun:
                 if cached.diff_path is None:
                     cached.diff_path = str(self.materialization.path)
                 self.from_cache = True
-                return cached
+                return merge_analyzer_findings_into_result(
+                    cached, findings_from_analyzer_run(self.analyzer_run)
+                )
 
-        return await run_offline_agent_review(
+        reviewed = await run_offline_agent_review(
             cwd=self.cwd,
             materialization=self.materialization,
             prompt=prompt,
@@ -551,6 +589,9 @@ class _OfflineDiffReviewRun:
             run_bounds=self.run_bounds,
             on_finding=self.on_finding,
             analyzer_run=self.analyzer_run,
+        )
+        return merge_analyzer_findings_into_result(
+            reviewed, findings_from_analyzer_run(self.analyzer_run)
         )
 
     async def publish(self, review_out: OfflineReviewResult) -> OfflineReviewResult:

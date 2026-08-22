@@ -113,3 +113,23 @@ def test_d12_exposes_a_version_field_adapter_without_picking_the_survivor() -> N
     blob = str(VERSION_FIELD_ALIASES).casefold()
     assert "schema_version" in blob
     assert "protocol_version" in blob
+
+
+def test_negotiate_protocol_schema_version_token_selects_cli_json_schema() -> None:
+    """Unit: offering only ``schema_version`` selects ``CLI_JSON_SCHEMA_VERSION``, not ``1``."""
+    selected = negotiate_protocol(accepted=("schema_version",))
+    assert selected == CLI_JSON_SCHEMA_VERSION
+    assert selected != AGENT_PROTOCOL_VERSION
+
+
+def test_negotiate_protocol_protocol_version_token_selects_agent_protocol() -> None:
+    """Unit: offering only ``protocol_version`` selects ``AGENT_PROTOCOL_VERSION``."""
+    selected = negotiate_protocol(accepted=("protocol_version",))
+    assert selected == AGENT_PROTOCOL_VERSION
+
+
+def test_negotiate_protocol_literal_cli_schema_selects_cli_json_schema() -> None:
+    """Unit: offering literal ``1.0.0`` still selects ``CLI_JSON_SCHEMA_VERSION``."""
+    selected = negotiate_protocol(accepted=("1.0.0",))
+    assert selected == CLI_JSON_SCHEMA_VERSION
+    assert selected != AGENT_PROTOCOL_VERSION

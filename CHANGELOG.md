@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `review --agent` emits `phase` events as `ReviewEngine` runs each stage (fallback `materialize`/`review` when the engine is stubbed); result-cache keys include repository identity, mergeCraft version, and a settings digest; `replay` / `run inspect` / `run diff` order sessions by trace timestamps, not lexicographic ids; the offline analyze stage stores `AnalyzerRunState` on the CLI tool context so findings reach the evidence packet (#399)
+- Offline analyze stores ``AnalyzerRunState`` on the CLI tool context and merges analyzer findings into structured output so CC1 exit codes see Critical/Major hits the agent omitted; result-cache keys include mergeCraft version and a settings digest (#399)
 
 ### Changed
 

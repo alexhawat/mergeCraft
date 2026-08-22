@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -10,11 +11,19 @@ import pytest
 
 import mergecraft.offline_review as offline_mod
 from mergecraft.agents.shared import AgentResult
+from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.config.settings import AnalyzersSettings, RepoSettings
 from mergecraft.mcp.tool_state import AnalyzerRunState
+from mergecraft.offline_review import (
+    OfflineReviewResult,
+    findings_from_analyzer_run,
+    merge_analyzer_findings_into_result,
+    parse_offline_review_findings,
+)
 from mergecraft.review.offline_agent import run_offline_agent_review
 from mergecraft.review.offline_stages import run_offline_analyze
-from mergecraft.run_outcome import RunOutcome
+from mergecraft.review_taxonomy import FindingSource
+from mergecraft.run_outcome import CLI_BLOCKED_EXIT_CODE, RunOutcome, cli_exit_code_for_review
 from mergecraft.utils.offline_diff import DiffMaterialization
 from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.source_resolve import ResolvedWorkspace, SourceResolverSpec
@@ -306,3 +315,90 @@ async def test_run_offline_agent_review_stamps_analyzer_run_before_packet(
     tool_context = captured[0]
     tool_state = tool_context.tool_state
     assert tool_state.analyzer_run is state
+
+
+def _finding(
+    *,
+    rule_id: str,
+    severity: str,
+    source: FindingSource,
+    fingerprint: str | None = None,
+    message: str = "analyzer finding",
+) -> Finding:
+    return make_finding(
+        tool="ruff",
+        rule_id=rule_id,
+        category=(
+            "Security & Privacy"
+            if severity in {"Critical", "Major"}
+            else "Maintainability & Code Quality"
+        ),
+        severity=severity,
+        confidence="certain",
+        message=message,
+        path="demo.py",
+        start_line=1,
+        end_line=1,
+        source=source,
+        fingerprint=fingerprint,
+    )
+
+
+@pytest.mark.parametrize("severity", ["Critical", "Major"])
+def test_merged_blocking_analyzer_finding_blocks_cli_exit(severity: str) -> None:
+    """Unit: analyzer Critical/Major folded into a clean agent result blocks the CLI."""
+    blocker = _finding(rule_id="SEC-1", severity=severity, source="analyzer")
+    result = OfflineReviewResult(
+        success=True,
+        structured_output='{"findings":[]}',
+        outcome=RunOutcome.passed,
+    )
+    merged = merge_analyzer_findings_into_result(result, [blocker])
+    findings = parse_offline_review_findings(merged)
+    assert any(row.fingerprint == blocker.fingerprint for row in findings)
+    assert cli_exit_code_for_review(RunOutcome.passed, findings) == CLI_BLOCKED_EXIT_CODE
+
+
+def test_merge_analyzer_findings_dedupes_by_fingerprint() -> None:
+    """Unit: cache-hit merge keeps one row per fingerprint."""
+    shared = "fp-shared"
+    agent = _finding(
+        rule_id="AGT-1",
+        severity="Minor",
+        source="agent",
+        fingerprint=shared,
+        message="from agent",
+    )
+    duplicate = _finding(
+        rule_id="ANL-1",
+        severity="Minor",
+        source="analyzer",
+        fingerprint=shared,
+        message="from analyzer",
+    )
+    novel = _finding(
+        rule_id="ANL-2",
+        severity="Minor",
+        source="analyzer",
+        fingerprint="fp-novel",
+        message="new analyzer finding",
+    )
+    result = OfflineReviewResult(
+        success=True,
+        structured_output=json.dumps({"findings": [agent.model_dump()]}),
+        outcome=RunOutcome.passed,
+    )
+    merged = merge_analyzer_findings_into_result(result, [duplicate, novel])
+    findings = parse_offline_review_findings(merged)
+    fingerprints = [row.fingerprint for row in findings]
+    assert fingerprints.count(shared) == 1
+    assert "fp-novel" in fingerprints
+    assert len(findings) == 2
+
+
+def test_findings_from_analyzer_run_skips_invalid_rows() -> None:
+    """Error: invalid analyzer rows are skipped, not raised."""
+    valid = _finding(rule_id="OK-1", severity="Minor", source="analyzer")
+    state = AnalyzerRunState(ran=True, findings=[{"id": "bad"}, valid.model_dump()])
+    findings = findings_from_analyzer_run(state)
+    assert [row.fingerprint for row in findings] == [valid.fingerprint]
