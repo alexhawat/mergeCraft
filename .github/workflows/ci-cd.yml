@@ -38,6 +38,12 @@ jobs:
   e2e-gate:
     name: Action-image E2E (release gate)
     needs: verify
+    # Required: the top-level `permissions: {}` grants this job nothing, and a
+    # called workflow may not request more than its caller holds. `e2e.yml`
+    # declares `contents: read`, so without this the whole run is rejected
+    # before any job starts (startup_failure), release included.
+    permissions:
+      contents: read
     uses: ./.github/workflows/e2e.yml
     secrets: inherit
 
