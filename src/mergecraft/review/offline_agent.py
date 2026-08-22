@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mergecraft.mcp.tool_state import AnalyzerRunState
+    from mergecraft.types import ShellPermission
     from mergecraft.utils.offline_diff import DiffMaterialization
     from mergecraft.utils.run_bounds import RunBounds
 
@@ -61,11 +62,18 @@ async def run_offline_agent_review(
     output_schema: dict[str, Any] | None = None,
     evidence_packet_path: Path | None = None,
     trust_tier: str = "trusted",
+    shell: ShellPermission = "disabled",
     run_bounds: RunBounds | None = None,
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     analyzer_run: AnalyzerRunState | None = None,
 ) -> OfflineReviewResult:
-    """Run the Review agent against a materialized local diff."""
+    """Run the Review agent against a materialized local diff.
+
+    ``shell`` is the operator-resolved shell permission (``--shell`` on
+    ``mergecraft review``). It reaches both the resolved payload the MCP tool
+    surface reads and the agent instructions, so the tool surface and the
+    analyzer pipeline agree on one value. Default ``disabled``.
+    """
     resolved_tier: Literal["trusted", "untrusted"] = (
         "trusted" if trust_tier == "trusted" else "untrusted"
     )
@@ -101,7 +109,7 @@ async def run_offline_agent_review(
 
         payload = ResolvedPayload(
             event=PayloadEvent(trigger="unknown", title="offline diff-review"),
-            shell="disabled",
+            shell=shell,
             push="disabled",
             model=model,
             cwd=str(cwd),
@@ -156,7 +164,7 @@ async def run_offline_agent_review(
         instructions = resolve_instructions(
             payload={
                 "event": {"trigger": "unknown", "title": "offline diff-review"},
-                "shell": "disabled",
+                "shell": shell,
                 "push": "disabled",
                 "prompt": prompt,
             },
