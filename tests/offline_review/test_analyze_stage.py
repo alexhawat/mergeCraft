@@ -82,10 +82,6 @@ def _patch_harness(
     return calls
 
 
-@pytest.mark.xfail(
-    reason="green after W6: dry-run skips analyzer catalog (#401)",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_offline_analyze_skips_pipeline_on_dry_run_when_analyzers_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -238,7 +234,7 @@ async def test_offline_analyze_stage_stores_run_state_on_driver(
         analyzers_enabled=True,
         json_path=None,
         prompt_extra=None,
-        dry_run=True,
+        dry_run=False,
         model=None,
         evidence_packet_path=None,
         on_finding=None,
