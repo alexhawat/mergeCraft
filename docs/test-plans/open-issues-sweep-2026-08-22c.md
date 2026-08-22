@@ -64,3 +64,56 @@ Historically flaky surfaces (issue evidence, not xdist_group):
 - `make lint` + `make typecheck` clean on touched paths
 - HA421a–d xfail; HA421e–g pass
 - No `src/` edits
+
+---
+
+# Batch HB — #434 #435 #438 antislop matcher
+
+Authoring wave: **W3** (HB RED) · Implementation: **W4** (three commits, D2)
+GitHub issues: **#434**, **#435**, **#438** — `src/mergecraft/analyzers/antislop/matcher.py`
+
+Moved from `tests/analyzers/test_cov_antislop_matcher_paths.py` (strict xfails from #431)
+into `tests/analyzers/test_antislop_matcher_hb.py` with non-strict W4 markers.
+
+## xfail schedule
+
+| Wave | Test | Marker reason | Issue |
+|------|------|---------------|-------|
+| **W4** | `test_python_except_block_that_only_passes_is_reported` | `green after W4: walk unnamed except_clause children (#434)` | #434 |
+| **W4** | `test_python_except_block_returning_none_is_reported` | same | #434 |
+| **W4** | `test_non_ascii_above_an_import_must_not_make_a_used_import_phantom` | `green after W4: decode node text like _node_text_from_node (#435)` | #435 |
+| **W4** | `test_snippet_after_non_ascii_quotes_real_source_text` | same | #435 |
+| **W4** | `test_wrapper_that_binds_a_literal_argument_is_not_a_pass_through` | `green after W4: abort pass-through check on literal positionals (#438)` | #438 |
+
+Never `strict=True` — impl wave drops each xfail in the commit that fixes its issue.
+
+## Contract matrix (#434 / #435 / #438)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| HB434a | `except …: pass` reported on Python | unit | happy | `test_python_except_block_that_only_passes_is_reported` |
+| HB434b | `except …: return None` reported on Python | unit | happy | `test_python_except_block_returning_none_is_reported` |
+| HB435a | Non-ASCII above import does not phantom a used import | unit | edge | `test_non_ascii_above_an_import_must_not_make_a_used_import_phantom` |
+| HB435b | Snippet after non-ASCII is a real source substring | unit | edge | `test_snippet_after_non_ascii_quotes_real_source_text` |
+| HB438a | Wrapper binding a literal positional is not pass-through | unit | happy | `test_wrapper_that_binds_a_literal_argument_is_not_a_pass_through` |
+
+## Named symbols W4 must satisfy
+
+| Symbol | Module | Issue | Test |
+|--------|--------|-------|------|
+| `_python_empty_error_handler_matches` | `mergecraft.analyzers.antislop.matcher` | #434 | HB434a |
+| `_python_error_obscuring_catch_matches` | `mergecraft.analyzers.antislop.matcher` | #434 | HB434b |
+| `_node_text` | `mergecraft.analyzers.antislop.matcher` | #435 | HB435a, HB435b |
+| `_call_positional_argument_names` | `mergecraft.analyzers.antislop.matcher` | #438 | HB438a |
+
+## Collection target (W3)
+
+`tests/analyzers/test_antislop_matcher_hb.py` — **5 tests**, all xfail `strict=False`.
+
+## Acceptance (W3)
+
+- New tests collect with zero import errors
+- `make lint` + `make typecheck` clean on touched paths
+- HB434a–HB438a xfail (non-strict)
+- No `src/` edits
+- Strict xfails removed from `test_cov_antislop_matcher_paths.py`
