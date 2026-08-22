@@ -277,3 +277,71 @@ Never `strict=True` — impl wave drops each xfail in the auth fix commit.
 - HE437a–e xfail (non-strict); HE437f pass
 - Strict xfail removed from `test_cov_auth_cmd_paths.py`
 - No `src/` edits
+
+---
+
+# Batch HF — #425 called-workflow permissions lint
+
+Authoring wave: **W11** (HF RED) · Implementation: **W12** (`ci: lint called-workflow permissions on uses jobs`, D5)
+GitHub issue: **#425** — nothing detects a workflow that fails at startup
+
+Locked decision **D5** part 1: lint in `make lint` that every ``uses:`` job grants at
+least the permissions its called workflow declares. Part 2 (branch-protection
+operator note) is W12 docs only — not test-covered here. Do not re-fix
+``ci-cd.yml`` ``e2e-gate`` permissions (shipped in #424).
+
+## xfail schedule
+
+| Wave | Test | Marker reason | Issue |
+|------|------|---------------|-------|
+| **W12** | `test_empty_job_permissions_fail_when_callee_needs_contents_read` | `green after W12: called-workflow permissions lint (#425)` | #425 |
+| **W12** | `test_offense_names_caller_job_and_missing_scope` | same | #425 |
+| **W12** | `test_sufficient_job_permissions_pass` | same | #425 |
+| **W12** | `test_workflow_level_permissions_satisfy_callee` | same | #425 |
+| **W12** | `test_partial_job_permissions_fail_when_callee_needs_more` | same | #425 |
+| **W12** | `test_third_party_uses_are_out_of_scope` | same | #425 |
+| **W12** | `test_main_fails_on_under_permissioned_uses_job` | same | #425 |
+| **W12** | `test_main_passes_when_only_good_fixtures_remain` | same | #425 |
+| **W12** | `test_repo_workflows_pass_called_workflow_permissions_lint` | same | #425 |
+| **W12** | `test_makefile_lint_invokes_called_workflow_permissions_check` | same | #425 |
+
+Never `strict=True` — impl wave drops each xfail in the hygiene-script commit.
+
+`test_e2e_gate_job_grants_contents_read` is a **compatibility pin** (passes on baseline post-#424).
+
+## Contract matrix (#425 / D5)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| HF425a | Empty job ``permissions: {}`` calling callee with ``contents: read`` fails lint | unit | error (#424) | `test_empty_job_permissions_fail_when_callee_needs_contents_read` |
+| HF425b | Offense names workflow, job, and missing scope | unit | error | `test_offense_names_caller_job_and_missing_scope` |
+| HF425c | Job granting callee's scopes passes | unit | happy | `test_sufficient_job_permissions_pass` |
+| HF425d | Workflow-level permissions satisfy callee when job omits block | unit | happy | `test_workflow_level_permissions_satisfy_callee` |
+| HF425e | Partial job permissions fail when callee needs more scopes | unit | edge | `test_partial_job_permissions_fail_when_callee_needs_more` |
+| HF425f | Third-party ``uses:`` (``actions/*``) are not checked | unit | policy | `test_third_party_uses_are_out_of_scope` |
+| HF425g | ``main()`` exits non-zero on offense / zero on clean tree | integration | happy/error | `test_main_fails_on_under_permissioned_uses_job`, `test_main_passes_when_only_good_fixtures_remain` |
+| HF425h | Real ``.github/workflows/`` tree passes (post-#424) | integration | regression | `test_repo_workflows_pass_called_workflow_permissions_lint` |
+| HF425i | ``e2e-gate`` still declares ``contents: read`` | integration | anchor | `test_e2e_gate_job_grants_contents_read` |
+| HF425j | ``make lint`` invokes the new script | integration | policy | `test_makefile_lint_invokes_called_workflow_permissions_check` |
+
+## Named symbols W12 must satisfy
+
+| Symbol | Module | Test |
+|--------|--------|------|
+| `scan_workflows(root)` | `scripts/check_called_workflow_permissions.py` | HF425a–f, HF425h |
+| `main()` | `scripts/check_called_workflow_permissions.py` | HF425g |
+| offense record (`job`, `workflow`, `missing`) | `scripts/check_called_workflow_permissions.py` | HF425b |
+| `make lint` wiring | `Makefile` | HF425j |
+
+Fixture workflows live under ``tests/ci/fixtures/workflow_permissions_hf/``.
+
+## Collection target (W11)
+
+`tests/ci/test_called_workflow_permissions_hf.py` — **16 tests** (10 xfail, 6 pass).
+
+## Acceptance (W11)
+
+- New tests collect with zero import errors
+- `make lint` + `make typecheck` clean on touched paths
+- HF425a–j xfail (non-strict); fixture anchor tests pass
+- No `src/` or `scripts/` edits

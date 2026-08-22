@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+# Callee requesting multiple read scopes — caller must grant all of them.
+name: HF callee (contents + packages)
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo callee ok
