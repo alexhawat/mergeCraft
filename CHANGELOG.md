@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `mergecraft --version` reported `0.1.0` while the project was at `0.1.0a1`: the number was restated as a literal in `mergecraft/__init__.py` alongside `pyproject.toml` and the two drifted. It is now read from the installed distribution. The value also keys the offline result cache and is stamped on telemetry and eval reproducibility pins, so the mismatch quietly mixed artefacts from different builds
 - Managed analyzers no longer report a clean scan as skipped: the adapter's fallback re-parse ran on the
   human-readable output string, which carries the `version_note` prose prefix, so any managed tool whose
   findings stream was empty failed with `Expecting value: line 1 column 1 (char 0)`. TruffleHog hit this on
