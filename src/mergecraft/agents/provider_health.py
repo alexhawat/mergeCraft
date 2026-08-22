@@ -210,10 +210,11 @@ def route_model(*, specialist: str, risk: str) -> str:
         trivial-risk cheap pick.
     """
     risk_key = str(risk).casefold()
-    key = (str(specialist), risk_key)
+    specialist_key = str(specialist).casefold()
+    key = (specialist_key, risk_key)
     if key in _ROUTE_TABLE:
         chosen = _ROUTE_TABLE[key]
-    elif str(specialist) == "security" and risk_at_or_above(
+    elif specialist_key == "security" and risk_at_or_above(
         _routing_risk_band(risk),
         "high",
     ):

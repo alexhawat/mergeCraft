@@ -88,6 +88,8 @@ def test_route_model_per_specialist_and_risk() -> None:
     assert route(specialist="general", risk="critical") == cheap
     assert route(specialist="security", risk="bogus") == high
 
+    assert route(specialist="Security", risk="critical") == high
+
 
 def test_heterogeneous_verifier_and_judge_models() -> None:
     """Happy: verifier and judge may use different models."""

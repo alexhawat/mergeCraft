@@ -354,7 +354,7 @@ def resolve_analyzer(
     disabled`` requires, since the working tree is then PR-authored (#35, D5).
 
     The ladder is a small ordered dispatch of per-source resolvers —
-    declared-unavailable → sqlfluff-no-dialect → agentsec special-case →
+    declared-unavailable → sqlfluff-no-dialect → in-process native analyzers →
     repo-native → type-checker-only-skip → managed → container — each either
     producing a plan or yielding (``None``) to the next. Config-absent argv
     patches (phpstan ``--level=0``, prisma-lint fallback ``--config``) apply
