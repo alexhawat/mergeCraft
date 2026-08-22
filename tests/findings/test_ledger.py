@@ -88,6 +88,23 @@ def test_ledger_key_is_the_review_taxonomy_fingerprint() -> None:
     assert ledger.LEDGER_MARKER_PREFIX == "<!-- mergecraft-ledger:v1:"
 
 
+def test_remerge_v2_marked_body_yields_single_marker_per_fingerprint() -> None:
+    ledger = _ledger_mod()
+
+    book = ledger.FindingLedger()
+    book.record(_DEFERRED_FP, "deferred", source="overflow", round_index=1)
+
+    first_merge = ledger.merge_ledger_into_comment(
+        "## mergeCraft progress\n\nRound 1 complete.\n",
+        records=book.records(),
+    )
+    assert first_merge.count(_DEFERRED_FP) == 1
+
+    remerged = ledger.merge_ledger_into_comment(first_merge, records=book.records())
+    assert remerged.count(_DEFERRED_FP) == 1
+    assert remerged.count("<!-- mergecraft-ledger:v2:") == 1
+
+
 def test_ledger_round_trips_through_the_sticky_comment_html_block() -> None:
     ledger = _ledger_mod()
 
