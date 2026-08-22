@@ -1,15 +1,13 @@
-"""Batch HD RED — Gemini/Codex ``llm.call`` span token attrs (#436).
+"""Batch HD — Gemini/Codex ``llm.call`` span token attrs (#436).
 
 Pins that terminal stream usage (Gemini ``result``, Codex ``turn.completed``)
 reaches ``cost.tokens_*`` and ``gen_ai.usage.*`` on the traced ``llm.call``
-span. Implementation lands in W8 (D11).
+span.
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-import pytest
 
 from mergecraft.agents import codex as codex_mod
 from mergecraft.agents import gemini as gemini_mod
@@ -23,12 +21,6 @@ _CODEX_USAGE = {
     "output_tokens": 5,
     "output_tokens_details": {"reasoning_tokens": 4},
 }
-_SPAN_TOKEN_ATTRS = (
-    "gen_ai.usage.input_tokens",
-    "gen_ai.usage.output_tokens",
-    "cost.tokens_in",
-    "cost.tokens_out",
-)
 
 
 def _gemini_tracer() -> tuple[MemorySink, Tracer]:
@@ -68,13 +60,9 @@ def _assert_span_token_attrs(
     assert attrs["cost.tokens_out"] == output_tokens
 
 
-# --- #436 Gemini ``result`` → ``llm.call`` span attrs (RED until W8) ----------
+# --- #436 Gemini ``result`` → ``llm.call`` span attrs -------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W8: fold Gemini result usage into open_pair_bookkeeping (#436)",
-    strict=False,
-)
 def test_result_event_usage_reaches_the_llm_span_token_attrs() -> None:
     """Token counts on the terminal ``result`` event must land on ``llm.call``."""
     sink, tracer = _gemini_tracer()
@@ -95,10 +83,6 @@ def test_result_event_usage_reaches_the_llm_span_token_attrs() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W8: fold Gemini result usage into open_pair_bookkeeping (#436)",
-    strict=False,
-)
 def test_result_event_partial_usage_stamps_zero_for_missing_output_tokens() -> None:
     """A ``result`` with only ``input_tokens`` must not invent output counts."""
     sink, tracer = _gemini_tracer()
@@ -116,13 +100,9 @@ def test_result_event_partial_usage_stamps_zero_for_missing_output_tokens() -> N
     assert attrs["cost.tokens_out"] == 0
 
 
-# --- #436 Codex ``turn.completed`` → ``llm.call`` span attrs (RED until W8) ---
+# --- #436 Codex ``turn.completed`` → ``llm.call`` span attrs ------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W8: fold Codex turn.completed usage into open_pair_bookkeeping (#436)",
-    strict=False,
-)
 def test_turn_completed_usage_reaches_the_llm_span_token_attrs() -> None:
     """Token counts on ``turn.completed`` must land on the thread's ``llm.call``."""
     handler, close_all, sink, acc = _codex_handler()
@@ -145,10 +125,6 @@ def test_turn_completed_usage_reaches_the_llm_span_token_attrs() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W8: fold Codex turn.completed usage into open_pair_bookkeeping (#436)",
-    strict=False,
-)
 def test_turn_completed_partial_usage_stamps_zero_for_missing_output_tokens() -> None:
     """``turn.completed`` with only ``input_tokens`` must not invent output counts."""
     handler, close_all, sink, acc = _codex_handler()
@@ -164,11 +140,11 @@ def test_turn_completed_partial_usage_stamps_zero_for_missing_output_tokens() ->
     assert attrs["cost.tokens_out"] == 0
 
 
-# --- compatibility pins (pass on baseline; guard W8 refactor) ------------------
+# --- compatibility pins (agent usage + span attrs agree) ----------------------
 
 
-def test_gemini_result_usage_still_reaches_agent_usage_while_span_attrs_are_zero() -> None:
-    """Run-level ``AgentUsage`` is fed today; only the span bookkeeping is wrong."""
+def test_gemini_result_usage_reaches_both_agent_usage_and_span_attrs() -> None:
+    """Run-level ``AgentUsage`` and ``llm.call`` span attrs must agree."""
     sink, tracer = _gemini_tracer()
     handler, close_all = gemini_mod._gemini_stream_event_handler(tracer=tracer, model_id="gemini-3")
     acc = StreamSpanAccumulator(agent_name="gemini")
@@ -185,13 +161,15 @@ def test_gemini_result_usage_still_reaches_agent_usage_while_span_attrs_are_zero
     assert usage.input_tokens == 40
     assert usage.output_tokens == 9
 
-    attrs = _gemini_spans(sink, "llm.call")[0].attrs
-    for key in _SPAN_TOKEN_ATTRS:
-        assert attrs.get(key, 0) == 0, f"baseline bug: {key!r} should be zero until W8"
+    _assert_span_token_attrs(
+        _gemini_spans(sink, "llm.call")[0].attrs,
+        input_tokens=40,
+        output_tokens=9,
+    )
 
 
-def test_codex_turn_completed_usage_still_reaches_agent_usage_while_span_attrs_are_zero() -> None:
-    """Run-level ``AgentUsage`` is fed today; only the span bookkeeping is wrong."""
+def test_codex_turn_completed_usage_reaches_both_agent_usage_and_span_attrs() -> None:
+    """Run-level ``AgentUsage`` and ``llm.call`` span attrs must agree."""
     handler, close_all, sink, acc = _codex_handler()
 
     handler(acc, {"type": "thread.started", "thread_id": "t1"})
@@ -212,6 +190,5 @@ def test_codex_turn_completed_usage_still_reaches_agent_usage_while_span_attrs_a
     assert usage.cost_usd == 0.75
 
     attrs = _codex_llm_attrs(sink)
-    for key in _SPAN_TOKEN_ATTRS:
-        assert attrs.get(key, 0) == 0, f"baseline bug: {key!r} should be zero until W8"
+    _assert_span_token_attrs(attrs, input_tokens=20, output_tokens=5)
     assert attrs["mergecraft.usage.reasoning_tokens"] == 4
