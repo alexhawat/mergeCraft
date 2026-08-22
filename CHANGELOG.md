@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `review --dry-run` skips the analyzer catalog while still materializing the diff and returning the review prompt (#401)
 - `load_audit_events` skips malformed JSONL lines and non-dict payloads instead of raising (#398)
 - `route_model` routes security specialist at `critical` risk to the same capable model as `high` instead of Haiku (#394)
 - `mergecraft init` no longer emits `uses: ./` in consumer repos — published Action ref instead (V8/D13)
