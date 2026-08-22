@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MCP_DIR = Path(__file__).resolve().parent
-_W2_XFAIL = "green after W2: MCP xdist isolation (#421)"
 _FLAKY_TEST_NAMES = frozenset(
     {
         "test_live_verifier_mcp_lists_class_filtered_tools",
@@ -114,7 +113,6 @@ def _start_and_probe(tmp_path: Path) -> tuple[int, str, str]:
         stop()
 
 
-@pytest.mark.xfail(reason=_W2_XFAIL, strict=False)
 def test_reset_mcp_process_state_is_public_api() -> None:
     """D4 — module-level MCP caches must expose a process reset hook."""
     reset = _find_reset_mcp_process_state()
@@ -124,7 +122,6 @@ def test_reset_mcp_process_state_is_public_api() -> None:
     reset()
 
 
-@pytest.mark.xfail(reason=_W2_XFAIL, strict=False)
 def test_mcp_conftest_autouse_resets_process_state() -> None:
     """D4 — tests/mcp/conftest.py must autouse-reset MCP process state."""
     conftest = _MCP_DIR / "conftest.py"
@@ -138,7 +135,6 @@ def test_mcp_conftest_autouse_resets_process_state() -> None:
     )
 
 
-@pytest.mark.xfail(reason=_W2_XFAIL, strict=False)
 def test_start_mcp_http_server_avoids_select_port_release_window() -> None:
     """D4 / #421 — do not release an OS port before uvicorn binds it."""
     from mergecraft.mcp import server as server_mod
@@ -154,7 +150,6 @@ def test_start_mcp_http_server_avoids_select_port_release_window() -> None:
     )
 
 
-@pytest.mark.xfail(reason=_W2_XFAIL, strict=False)
 def test_reset_mcp_process_state_clears_shell_detection_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

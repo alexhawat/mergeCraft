@@ -64,7 +64,7 @@ from mergecraft.mcp.ports import (
 )
 from mergecraft.mcp.ports import (
     port_available,
-    select_port,
+    read_env_port,
 )
 from mergecraft.mcp.pr import (
     close_pull_request_tool,
@@ -671,6 +671,34 @@ async def _kill_background_processes(ctx: ToolContext) -> None:
     procs.clear()
 
 
+def _resolve_bind_port() -> int:
+    """Pick a listen port: explicit env when free, otherwise OS assignment at bind."""
+    requested = read_env_port()
+    if requested is not None and port_available(requested):
+        return requested
+    return 0
+
+
+def _bound_listen_port(server: uvicorn.Server, configured_port: int) -> int:
+    """Return the TCP port uvicorn bound (handles explicit ports and ``port=0``)."""
+    servers = getattr(server, "servers", None) or []
+    for asyncio_server in servers:
+        sockets = getattr(asyncio_server, "sockets", None)
+        if not sockets:
+            continue
+        for sock in sockets:
+            try:
+                _host, port = sock.getsockname()[:2]
+            except OSError:
+                continue
+            if port:
+                return int(port)
+    if configured_port != 0:
+        return configured_port
+    msg = "MCP HTTP server started without a bound listen port"
+    raise RuntimeError(msg)
+
+
 def _serve_in_thread(
     config: uvicorn.Config,
     *,
@@ -724,29 +752,36 @@ def start_mcp_http_server(
         auth_token=agent_token,
         orchestrator_auth_token=orchestrator_token,
     )
-    port = select_port()
+    bind_port = _resolve_bind_port()
     http_config = uvicorn.Config(
         app,
         host=MCP_HOST,
-        port=port,
+        port=bind_port,
         log_level="warning",
         access_log=False,
     )
     server, thread, loop = _serve_in_thread(http_config, thread_name="mergecraft-mcp")
 
-    # Wait briefly for bind
+    # Wait briefly for uvicorn to bind (port=0 resolves only after startup).
+    port = bind_port
     for _ in range(50):
         if getattr(server, "started", False):
-            break
-        # uvicorn sets started after startup; also probe the port
-        if not port_available(port):
-            # port is in use by our server (or something) — good enough after thread start
             try:
-                with socket.create_connection((MCP_HOST, port), timeout=0.1):
+                port = _bound_listen_port(server, bind_port)
+            except RuntimeError:
+                pass
+            else:
+                break
+        if bind_port != 0:
+            try:
+                with socket.create_connection((MCP_HOST, bind_port), timeout=0.1):
+                    port = bind_port
                     break
             except OSError:
                 pass
         time.sleep(0.05)
+    else:
+        port = _bound_listen_port(server, bind_port)
 
     url = f"http://{MCP_HOST}:{port}{MCP_ENDPOINT}"
     ctx.mcp_server_url = url
