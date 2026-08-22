@@ -41,7 +41,7 @@ uv run pytest --collect-only -q tests/docs/
 uv run pytest -q tests/docs/test_support.py  # expect XFAIL until W12
 ```
 
-## W11 evidence
+## W11 evidence (2026-08-22 ✅: ec6390c4)
 
 - `tests/docs/support.py` absent on base `6c135d27` (D12: W12 creates the module).
 - Four helper patterns duplicated across ~8 `tests/docs/test_*.py` modules per #405.
