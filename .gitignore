@@ -57,6 +57,9 @@ tests/analyzers/fixtures/repo/.mergecraft/
 tests/security/fixtures/hostile-repo/
 tests/security/fixtures/outside-target/
 
+# Docker agent CLI installs (local npm deps for image build)
+docker/agent-clis/node_modules/
+
 # Regenerable verifier/tool output (never source of truth)
 /evidence/
 

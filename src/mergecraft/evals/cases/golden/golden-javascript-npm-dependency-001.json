@@ -1,0 +1,12 @@
+{
+  "id": "golden-javascript-npm-dependency-001",
+  "title": "Direct dependency pin removed while lockfile still resolves it",
+  "language": "javascript",
+  "framework": "npm",
+  "category": "dependency",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "package.json",
+  "start_line": 12,
+  "end_line": 40
+}

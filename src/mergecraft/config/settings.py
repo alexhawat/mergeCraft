@@ -20,6 +20,7 @@ from pydantic import (
 
 from mergecraft.classify import RuleSet
 from mergecraft.config.compat import CONFIG_SCHEMA_VERSION, migrate_config
+from mergecraft.enterprise.controls import EnterpriseSettings
 from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 
 AccountPlan = Literal["none", "payg"]
@@ -328,7 +329,7 @@ class TracingSettings(BaseModel):
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
     enabled: bool | None = None
-    retention_days: int = Field(default=30, alias="retentionDays")
+    retention_days: int = Field(default=30, alias="retentionDays", gt=0)
     sinks: list[TraceSinkEntry] = Field(default_factory=list)
     redaction: bool = True
     content: str = Field(default="redacted", exclude_if=lambda value: value == "redacted")
@@ -473,6 +474,7 @@ class RepoSettings(BaseModel):
     )
     tracing: TracingSettings = Field(default_factory=TracingSettings)
     run_bounds: RunBoundsSettings = Field(default_factory=RunBoundsSettings, alias="runBounds")
+    enterprise: EnterpriseSettings = Field(default_factory=EnterpriseSettings)
 
     @field_validator("push", "shell", mode="before")
     @classmethod
@@ -526,6 +528,15 @@ def apply_trust_tier_to_repo_settings(
             else:
                 stripped_checks.append(check)
         updates["static_checks"] = stripped_checks
+
+    ent = settings.enterprise
+    if ent.https_proxy or ent.no_proxy or ent.ca_file:
+        drops["enterprise.network"] = (
+            f"dropped enterprise proxy/CA on untrusted tier ({source_label})"
+        )
+        updates["enterprise"] = ent.model_copy(
+            update={"https_proxy": "", "no_proxy": "", "ca_file": None}
+        )
 
     if not updates:
         return settings, drops

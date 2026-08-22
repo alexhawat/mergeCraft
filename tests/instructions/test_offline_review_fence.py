@@ -110,7 +110,7 @@ def _build_stub_agent(monkeypatch: pytest.MonkeyPatch, capture_path: Path) -> No
 @pytest.mark.xfail(
     reason=(
         "W3 stub infrastructure issue: the test's stub agent uses "
-        "name='stub', but _run_agent_review calls compute_modes(agent.name, "
+        "name='stub', but run_offline_agent_review calls compute_modes(agent.name, "
         "...) which requires a real agent id. The test was meant to mock "
         "compute_modes too, but does not. Deferred to B-Final: patch the "
         "stub to monkeypatch compute_modes or use a real agent id (#276)."

@@ -1,16 +1,21 @@
 # Authentication
 
+| Provider | Subscription (recommended) | API key | Recommended model | Inferred harness |
+|----------|-----------------------------|---------|-------------------|------------------|
+| Anthropic Claude | `mergecraft auth claude` → `CLAUDE_CODE_OAUTH_TOKEN` (Claude Pro/Max) | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` | `claude` |
+| OpenAI Codex | `mergecraft auth codex` → `CODEX_AUTH_JSON` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` | `codex` |
+| Google Gemini | `mergecraft auth gemini` → `GEMINI_API_KEY` (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-3.1-pro-preview` | `gemini` |
+| Nous Portal | — (API key) | `mergecraft auth nous` → `NOUS_API_KEY` | `nous/deepseek/deepseek-v4-flash` | `opencode` |
+| Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → `TOKENHUB_API_KEY` | `tokenhub/hy3` | `opencode` |
+| MiniMax | — (API key) | `mergecraft auth minimax` → `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `minimax/MiniMax-M3` | `opencode` |
+| Cursor Cloud | `mergecraft auth cursor` → `CURSOR_API_KEY` | `CURSOR_API_KEY` | `cursor/cloud-agent` | `cursor` |
+| OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` (indexed `_1`/`_2` …) | `<your-prefix>/<your-model>` — see [Custom OpenAI-compatible provider](#custom-openai-compatible-provider) | `opencode` |
+| Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](TRACING.md) | — | — |
 
-| Provider | Subscription (recommended) | API key |
-|----------|-----------------------------|---------|
-| Anthropic Claude | `mergecraft auth claude` → `CLAUDE_CODE_OAUTH_TOKEN` (Claude Pro/Max) | `ANTHROPIC_API_KEY` |
-| OpenAI Codex | `mergecraft auth codex` → `CODEX_AUTH_JSON` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` |
-| Google Gemini | `mergecraft auth gemini` → `GEMINI_API_KEY` (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` |
-| Nous Portal | — (API key) | `mergecraft auth nous` → `NOUS_API_KEY` (`nous/deepseek/deepseek-v4-flash`) |
-| Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → `TOKENHUB_API_KEY` (`tokenhub/hy3` + any TokenHub model) |
-| MiniMax | — (API key) | `mergecraft auth minimax` → `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` (`minimax/MiniMax-M3`; OpenAI-compatible, default `https://api.minimax.io/v1`) |
-| Cursor Cloud | `mergecraft auth cursor` → `CURSOR_API_KEY` | `CURSOR_API_KEY` |
-| Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](TRACING.md) |
+When `harness:` is unset in `.mergecraft/config.yaml`, mergeCraft infers the harness
+from the model slug (the **Inferred harness** column). Set `harness:` explicitly to
+override inference; unsupported combinations are configuration errors naming both halves
+(see [compatibility-matrix.md](compatibility-matrix.md) § Harness × model).
 
 Subscription auth runs the official `claude` / `codex` / `gemini` CLIs as *you*
 — the same credential your local coding agent uses. Only set env vars for
@@ -52,7 +57,7 @@ For the common single-provider case, two top-level `with:` inputs map
 onto the singleton env vars — no need to name them in `env:`:
 
 ```yaml
-- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
+- uses: alexhawat/mergeCraft@v0.1.0a1
   with:
     model: default/your-model-id
     provider_base_url: https://api.example.com/v1
@@ -99,7 +104,7 @@ A raw pass-through slug reaches Nous's OpenAI-compatible endpoint via
 either harness:
 
 ```yaml
-- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
+- uses: alexhawat/mergeCraft@v0.1.0a1
   with:
     model: nous/deepseek/deepseek-v4-flash  # raw pass-through slug
   env:
@@ -116,7 +121,7 @@ Two distinct OpenAI-compatible providers in one workflow (e.g. MiniMax
 and Nous alongside OpenAI):
 
 ```yaml
-- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
+- uses: alexhawat/mergeCraft@v0.1.0a1
   with:
     model: provider_1/deepseek-v4-flash           # active provider_1
   env:
@@ -204,7 +209,7 @@ modelFallbacks:
 ```yaml
 # .github/workflows/mergecraft.yml — a single ``uses:`` step walks the
 # chain. ``model:`` is the head; the configured tail follows.
-- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
+- uses: alexhawat/mergeCraft@v0.1.0a1
   with:
     model: anthropic/claude-sonnet        # ← chain head (your pick)
     # model_pin: enabled                 # ← uncomment to collapse to one model
@@ -231,7 +236,7 @@ semantics, set `model_pin: enabled` on the `with:` block, or
 `modelPin: true` in `.mergecraft/config.yaml` (the action input wins):
 
 ```yaml
-- uses: alexhawat/mergeCraft@9cdd46d2f5521e663ad8f895ccd87b8fe8c15301
+- uses: alexhawat/mergeCraft@v0.1.0a1
   with:
     model: anthropic/claude-sonnet
     model_pin: enabled                 # ← chain collapses to [claude-sonnet]

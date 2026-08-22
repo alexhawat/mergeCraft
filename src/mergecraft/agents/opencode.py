@@ -85,7 +85,7 @@ class ProviderTimeoutError(RuntimeError):
     """Raised when the opencode provider endpoint times out.
 
     This is a controlled domain error so callers (``shared.run`` /
-    ``offline_review._run_agent_review``) treat the attempt as a clean failure
+    ``review.offline_agent.run_offline_agent_review``) treat the attempt as a clean failure
     instead of letting a raw ``httpx.ReadTimeout`` traceback abort the whole
     review.
     """

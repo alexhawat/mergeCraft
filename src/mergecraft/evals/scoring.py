@@ -245,10 +245,15 @@ class ScoreReport(BaseModel):
         return self.found / denominator
 
     @property
-    def severity_agreement(self) -> float:
-        """Fraction of matches whose severity equals the baseline's."""
+    def severity_agreement(self) -> float | None:
+        """Fraction of matches whose severity equals the baseline's.
+
+        ``None`` — never a fabricated 1.0 — when there are no locality matches
+        (including zero findings). Same honest-None pattern as
+        :attr:`blocker_precision`.
+        """
         if not self.matches:
-            return 1.0
+            return None
         return sum(1 for m in self.matches if m.severity_agrees) / len(self.matches)
 
     @property
@@ -694,8 +699,9 @@ def format_report(report: ScoreReport, *, corpus: Path | str = "") -> str:
         f"  recall           : {report.recall:.2%}",
         f"  corpus-confirmed : {report.precision:.2%}",
     ]
-    if report.matches:
-        lines.append(f"  severity agree   : {report.severity_agreement:.2%}")
+    agreement = report.severity_agreement
+    if agreement is not None:
+        lines.append(f"  severity agree   : {agreement:.2%}")
     if report.missed_issue_ids:
         lines.append(f"  missed           : {', '.join(report.missed_issue_ids)}")
     return "\n".join(lines)

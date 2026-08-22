@@ -483,21 +483,12 @@ async def test_setup_timeout_is_deducted_from_the_run_budget(
     real_wait_for = _asyncio.wait_for
 
     def _capturing_wait_for(awaitable, timeout=None, **kwargs):  # type: ignore[no-untyped-def]
-        # Only capture the deadline argument on the AGENT wait — the setup
-        # script has its own (smaller) wait_for. We tag it by the coroutine
-        # name: ``_execute_agent`` is the only task S1.2 wraps at top-level.
-        # Production passes a Task (``asyncio.create_task(_execute_agent())``),
-        # so we resolve the underlying coroutine via ``get_coro`` first, then
-        # fall back to direct ``cr_code`` (e.g. for raw coroutines).
-        coro = awaitable
-        if hasattr(awaitable, "get_coro"):
-            with contextlib.suppress(Exception):
-                coro = awaitable.get_coro()
-        try:
-            coro_name = getattr(getattr(coro, "cr_code", None), "co_name", "") or ""
-        except AttributeError:
-            coro_name = ""
-        if coro_name == "_execute_agent" and timeout is not None:
+        # Only capture the deadline on the AGENT wait — the setup script
+        # has its own (smaller) wait_for over ``proc.communicate()`` (a
+        # coroutine, not a Task). The agent deadline wraps
+        # ``asyncio.wait_for(agent_task, …)`` where ``agent_task`` is
+        # ``asyncio.create_task(...)``.
+        if isinstance(awaitable, _asyncio.Task) and timeout is not None:
             recorded_agent_deadlines.append(float(timeout))
         return real_wait_for(awaitable, timeout=timeout, **kwargs)
 

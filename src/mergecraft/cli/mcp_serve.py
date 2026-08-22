@@ -87,6 +87,9 @@ def build_mcp_tool_context(
         trust_tier,
         source_label="CLI mcp serve",
     )
+    from mergecraft.enterprise.runtime import bind_enterprise_after_trust
+
+    bind_enterprise_after_trust(settings, trust_tier)
     shell_policy: Literal["disabled", "restricted", "enabled"] = (
         "restricted" if trust_tier == "trusted" else "disabled"
     )

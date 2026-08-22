@@ -43,6 +43,12 @@ pages:
     generator: reference-docs
     purpose: Full mergecraft CLI command reference derived from the live Typer app.
 
+  - path: docs/cli-examples.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Runnable mergecraft review CLI example trees under examples/cli/.
+
   - path: docs/action-reference.md
     audience: consumer
     template: generated-ref
@@ -192,3 +198,33 @@ pages:
     template: satellite
     generator: null
     purpose: Eval bank vs ReviewBench — what each mechanism measures and how to run gates.
+
+  - path: docs/agent-loop.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Reference workflow for an external coding agent looping with mergecraft review --agent.
+
+  - path: docs/support-matrix.md
+    audience: consumer
+    template: generated-ref
+    generator: support-matrix
+    purpose: Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models.
+
+  - path: docs/release-process.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Release candidates, soak periods, changelog, and per-release migration notes.
+
+  - path: docs/eval-methodology.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: "Eval quality metrics, ablation dimensions, and corpus methodology (#384). Never README; issue 140 owns precision/recall/F1 publication."
+
+  - path: docs/glossary.md
+    audience: consumer
+    template: satellite
+    generator: null
+    purpose: Plain-language definitions for landing-page jargon — trust tier, typed findings, and related terms.

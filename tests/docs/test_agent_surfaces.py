@@ -161,21 +161,77 @@ def test_copilot_instructions_point_at_agents_md() -> None:
     )
 
 
-def test_readme_has_for_ai_coding_agents_section() -> None:
+_AGENT_SECTION_HEADING_RE = re.compile(
+    r"^##\s+.*For LLM\s*/\s*Agents",
+    re.MULTILINE | re.IGNORECASE,
+)
+_AGENT_SECTION_REGION_RE = re.compile(
+    r"^##\s+.*For LLM\s*/\s*Agents[^\n]*\n(.*?)(?=^## |\Z)",
+    re.MULTILINE | re.IGNORECASE | re.DOTALL,
+)
+
+
+def _readme_agent_section_region(text: str) -> str | None:
+    match = _AGENT_SECTION_REGION_RE.search(text)
+    return match.group(1) if match else None
+
+
+def _readme_h2_headings(text: str) -> list[str]:
+    return [
+        line[3:].strip()
+        for line in text.splitlines()
+        if line.startswith("## ") and not line.startswith("### ")
+    ]
+
+
+def test_readme_has_agent_section() -> None:
     text = read_text("README.md")
-    assert re.search(r"^##\s+.*For AI coding agents", text, re.MULTILINE | re.IGNORECASE), (
-        "README must replace the RD3 placeholder with a For AI coding agents section (RD3.2)"
-    )
-    region_match = re.search(
-        r"^##\s+.*For AI coding agents[^\n]*\n(.*?)(?=^## |\Z)",
-        text,
-        re.MULTILINE | re.IGNORECASE | re.DOTALL,
-    )
-    assert region_match, "README agent section must contain copy/paste prompts"
-    region = region_match.group(1)
+    assert _AGENT_SECTION_HEADING_RE.search(text), "README must ship ## For LLM / Agents (D2)"
+    region = _readme_agent_section_region(text)
+    assert region is not None, "README agent section must contain copy/paste prompts"
     assert "mergecraft init" in region, (
         "README agent prompts must mention mergecraft init for consumer setup"
     )
+
+
+def test_agent_section_is_first_section() -> None:
+    text = read_text("README.md")
+    headings = _readme_h2_headings(text)
+    assert headings, "README must contain at least one H2"
+    first = headings[0]
+    assert re.search(r"For LLM\s*/\s*Agents", first, re.IGNORECASE), (
+        f"first H2 must be For LLM / Agents; got {first!r}"
+    )
+
+
+def test_agent_section_anchor_survives() -> None:
+    text = read_text("README.md")
+    assert 'id="for-agents"' in text or "id='for-agents'" in text, (
+        'README must keep <span id="for-agents"> above the agent section (D2)'
+    )
+    llms = _read(LLMS_TXT)
+    assert "README.md#for-agents" in llms, (
+        "llms.txt must keep README.md#for-agents anchor link (D2)"
+    )
+
+
+def test_agent_prompts_are_fenced_not_quoted() -> None:
+    text = read_text("README.md")
+    region = _readme_agent_section_region(text)
+    assert region is not None, "README agent section missing"
+    prompts_region_match = re.search(
+        r"###\s+One-line setup prompts[^\n]*\n(.*?)(?=\n### |\n## |\Z)",
+        region,
+        re.DOTALL,
+    )
+    assert prompts_region_match, "agent section must document one-line setup prompts"
+    prompts_region = prompts_region_match.group(1)
+    blockquote_prompts = re.findall(r"^>\s+", prompts_region, re.MULTILINE)
+    fenced_blocks = re.findall(r"^```", prompts_region, re.MULTILINE)
+    assert not blockquote_prompts, (
+        "agent setup prompts must not use blockquotes — GitHub copy button needs fences"
+    )
+    assert fenced_blocks, "agent setup prompts must use fenced code blocks"
 
 
 def test_readme_agent_badges() -> None:

@@ -19,9 +19,11 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [REVIEW-DOCTRINE](REVIEW-DOCTRINE.md) | contributor | Review philosophy, lenses, grading, and verifier doctrine for maintainers. |
 | [TRACING](TRACING.md) | contributor | Tracing sinks, retention, and Logfire/OTLP wiring for operators. |
 | [action-reference](action-reference.md) | consumer | Complete action.yml input and output reference for the GitHub Action. |
+| [agent-loop](agent-loop.md) | consumer | Reference workflow for an external coding agent looping with mergecraft review --agent. |
 | [assets README](assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
 | [authentication](authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
 | [blast-radius](blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
+| [cli-examples](cli-examples.md) | consumer | Runnable mergecraft review CLI example trees under examples/cli/. |
 | [cli](cli.md) | consumer | Full mergecraft CLI command reference derived from the live Typer app. |
 | [compatibility-matrix](compatibility-matrix.md) | contributor | Harness and provider compatibility notes for maintainers. |
 | [config-failure-policy](config-failure-policy.md) | contributor | setup_failure_policy and setup_timeout runtime behaviour (S1 / D10). |
@@ -29,10 +31,14 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [python-version-floor](dev/python-version-floor.md) | contributor | ADR for the Python 3.11 install floor and PEP 758 parenthesize-now strategy. |
 | [distribution](distribution.md) | consumer | How mergeCraft is packaged — PyPI, Docker, and git install paths. |
 | [eval-bank](eval-bank.md) | contributor | Eval bank layout, promotion, and CI gate semantics. |
+| [eval-methodology](eval-methodology.md) | contributor | Eval quality metrics, ablation dimensions, and corpus methodology (#384). Never README; issue 140 owns precision/recall/F1 publication. |
 | [evidence-packet](evidence-packet.md) | contributor | Merge evidence packet schema emitted as the evidence_packet action output. |
 | [findings-carryover](findings-carryover.md) | contributor | Findings carryover and export CLI behaviour for unresolved review items. |
+| [glossary](glossary.md) | consumer | Plain-language definitions for landing-page jargon — trust tier, typed findings, and related terms. |
 | [install](install.md) | consumer | Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback. |
+| [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |
 | [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
+| [support-matrix](support-matrix.md) | consumer | Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models. |
 | [workflows](workflows.md) | consumer | Workflow examples 2–6, trust tiers, [security model](workflows.md#security-model), and pull_request_target placement gotchas. |
 | [evals README](../evals/README.md) | satellite | Eval bank vs ReviewBench — what each mechanism measures and how to run gates. |
 | [llms-full.txt](../llms-full.txt) | consumer | Concatenated LLM bundle of core consumer and contributor docs (generated). |

@@ -16,6 +16,7 @@ def set_output_tool(ctx: ToolContext, output_schema: JsonSchema | None = None):
 
         async def _run_schema(params: dict[str, Any]):
             ctx.tool_state.output = json.dumps(params)
+            _notify_set_output_findings(ctx, params)
             return {"success": True}
 
         return tool(
@@ -55,3 +56,20 @@ def set_output_tool(ctx: ToolContext, output_schema: JsonSchema | None = None):
         },
         execute=execute(_run, "set_output"),
     )
+
+
+def _notify_set_output_findings(ctx: ToolContext, params: dict[str, Any]) -> None:
+    """Stream findings as soon as ``set_output`` lands, before the agent returns (#378).
+
+    Dedup and JSONL formatting stay in the CLI protocol callback installed on
+    ``tool_state.on_finding``. This factory only forwards rows.
+    """
+    callback = ctx.tool_state.on_finding
+    if callback is None:
+        return
+    rows = params.get("findings")
+    if not isinstance(rows, list):
+        return
+    for row in rows:
+        if isinstance(row, dict):
+            callback(row)

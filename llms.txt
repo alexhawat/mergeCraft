@@ -7,18 +7,29 @@
 ## Setup
 
 - README.md — landing page, numbered install, Example 1 workflow
-- README.md#for-agents — For AI coding agents (copy/paste setup prompts)
+- README.md#for-agents — For LLM / Agents (copy/paste setup prompts)
 - docs/install.md — Python 3.11+ floor, Action vs CLI, Docker fallback
 - AGENTS.md — cross-vendor agent guidance (consumer setup + this-repo development)
 - skills/mergecraft/SKILL.md — Agent-Skills consumer skill (setup checklist + CLI)
+- skills/README.md — per-harness install matrix and regeneration notes
+- skills/harnesses.yaml — harness manifest (install paths + primary sources)
+- skills/codex/mergecraft/SKILL.md — generated Codex Agent Skills package
+- skills/cursor/mergecraft/SKILL.md — generated Cursor Agent Skills package
+- skills/opencode/mergecraft/SKILL.md — generated OpenCode Agent Skills package
+- skills/gemini-cli/mergecraft/SKILL.md — generated Gemini CLI Agent Skills package
+- skills/openclaw/mergecraft/SKILL.md — generated OpenClaw Agent Skills package
+- skills/hermes/mergecraft/SKILL.md — generated Hermes Agent Skills package
+- skills/claude-code/mergecraft/SKILL.md — generated Claude Code Agent Skills package
 
 ## Docs
 
 - docs/README.md — generated index from docs/manifest.yaml
 - docs/cli.md — full mergecraft CLI reference
+- docs/cli-examples.md — runnable offline CLI example trees (examples/cli/)
 - docs/action-reference.md — action.yml inputs and outputs
 - docs/authentication.md — providers, custom gateways, model chains
 - docs/workflows.md — workflow examples, trust tiers, pull_request_target
+- docs/glossary.md — plain-language definitions for landing-page jargon
 - REVIEW-CHECKS.md — every check a review applies
 - docs/ANALYZERS.md — shipped analyzer catalog
 - docs/REVIEW-DOCTRINE.md — review philosophy and grading

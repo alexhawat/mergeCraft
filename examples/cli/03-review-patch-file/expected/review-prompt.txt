@@ -1,0 +1,5 @@
+command=mergecraft review --diff patch.diff --dry-run
+## Diff summary
+
+1 file(s) changed:
+- src/app.py

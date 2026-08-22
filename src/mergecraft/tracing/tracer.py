@@ -786,6 +786,9 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     # the live sink. The resolver falls back to ``os.environ`` and config
     # auto-discovery, keeping parity with the YAML-only path when no env/CLI
     # overrides are set.
+    from mergecraft.enterprise.runtime import bind_enterprise_from_settings
+
+    bind_enterprise_from_settings(settings, apply_network=False)
     active_tracing = resolve_active_tracing(config=settings.tracing)
     if not active_tracing.enabled:
         return NullTracer()

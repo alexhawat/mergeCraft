@@ -1,0 +1,12 @@
+{
+  "id": "mutation-go-nil-deref-001",
+  "title": "Synthetic nil pointer dereference",
+  "language": "go",
+  "framework": "stdlib",
+  "category": "correctness",
+  "kind": "historical_pr",
+  "source": "synthetic",
+  "path": "internal/ptr.go",
+  "start_line": 8,
+  "end_line": 14
+}

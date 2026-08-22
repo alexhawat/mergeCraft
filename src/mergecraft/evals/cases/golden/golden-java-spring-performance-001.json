@@ -1,0 +1,12 @@
+{
+  "id": "golden-java-spring-performance-001",
+  "title": "N+1 repository call inside a request mapping",
+  "language": "java",
+  "framework": "spring",
+  "category": "performance",
+  "kind": "large_pr",
+  "source": "human",
+  "path": "src/main/java/com/example/OrderService.java",
+  "start_line": 120,
+  "end_line": 160
+}

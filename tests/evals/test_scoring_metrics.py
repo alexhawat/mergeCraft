@@ -130,6 +130,7 @@ def test_empty_corpus_is_vacuously_complete() -> None:
     assert report.recall == 1.0
     assert report.corpus_confirmed_precision == 1.0
     assert report.f1 == pytest.approx(1.0)
+    assert report.severity_agreement is None
     assert report.false_negatives == 0
     assert report.unadjudicated == 0
     assert report.false_positives == 0

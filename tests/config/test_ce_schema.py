@@ -1,7 +1,8 @@
 """W21 / W22 — config schema version, migrations, deprecations (#368).
 
-Out of scope: agent-protocol capability/version negotiation (D8 / #368).
-D10: no root-callback edits. D6: no file 7 / tracing exporter edits.
+Protocol version negotiation lives in ``mergecraft.cli.agent_protocol`` (#379 /
+20d-A W5); this module pins config schema only. D10: no root-callback edits.
+D6: no file 7 / tracing exporter edits.
 """
 
 from __future__ import annotations
@@ -23,14 +24,6 @@ from tests.support.ce_batch import (
     require_callable,
     require_module,
 )
-from tests.support.dead_package_wiring import SRC_ROOT
-
-
-def test_agent_protocol_does_not_negotiate_capabilities() -> None:
-    """#368 out of scope — capability/version negotiation stays a separate issue."""
-    protocol = (SRC_ROOT / "cli" / "agent_protocol.py").read_text(encoding="utf-8")
-    assert "negotiate" not in protocol.casefold()
-    assert "capability" not in protocol.casefold()
 
 
 def test_w22_does_not_edit_root_callback() -> None:
@@ -49,7 +42,7 @@ def test_cli_json_schema_version_already_ships() -> None:
 
 
 def test_agent_protocol_version_already_ships() -> None:
-    """Substrate — JSONL events already stamp ``protocol_version`` (not negotiation)."""
+    """Substrate — JSONL events already stamp ``protocol_version``."""
     assert AGENT_PROTOCOL_VERSION
 
 
@@ -133,7 +126,11 @@ def test_stable_cli_contract_is_published() -> None:
 
 
 def test_stable_agent_protocol_contract_is_published() -> None:
-    """Happy: agent JSONL protocol version is published (not negotiated)."""
+    """Happy: agent JSONL protocol version is published on the config contract.
+
+    Negotiation is owned by ``agent_protocol.negotiate_protocol`` (#379);
+    the published config-schema contract has no ``negotiate`` key.
+    """
     module = require_module(CONFIG_COMPAT_MODULE)
     publish = require_callable(module, "publish_agent_protocol_contract")
     contract = publish()

@@ -1,0 +1,9 @@
+0 pass
+10 findings
+11 blocked
+12 failed
+20 inconclusive
+30 configuration
+40 infra
+50 timeout
+2 usage
