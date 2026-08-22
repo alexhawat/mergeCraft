@@ -1,4 +1,4 @@
-"""RV1.4 — authentication reference table contracts (RED until RV4).
+"""RV1.4 — authentication reference table contracts (green after RV4).
 
 Pins the recommended-model column, live slug discipline, the custom OpenAI-compatible
 provider row, and parity between the Typer ``auth`` app and documented provider rows.
