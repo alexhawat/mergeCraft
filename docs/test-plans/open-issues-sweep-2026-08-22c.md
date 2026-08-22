@@ -169,3 +169,57 @@ Never `strict=True` — impl wave drops each xfail in the scopes refactor commit
 - `make lint` + `make typecheck` clean on touched paths
 - HC423a–d xfail (non-strict); HC423e–g pass
 - No `src/` edits
+
+---
+
+# Batch HD — #436 Gemini/Codex span token attrs
+
+Authoring wave: **W7** (HD RED) · Implementation: **W8** (`fix(tracing): record Gemini and Codex span token usage`, D11)
+GitHub issue: **#436** — Gemini and Codex `llm.call` spans always report zero tokens
+
+Moved from `tests/agents/test_cov_gemini_paths.py` (strict xfail from #431)
+into `tests/agents/test_provider_span_tokens_hd.py` with non-strict W8 markers.
+
+## xfail schedule
+
+| Wave | Test | Marker reason | Issue |
+|------|------|---------------|-------|
+| **W8** | `test_result_event_usage_reaches_the_llm_span_token_attrs` | `green after W8: fold Gemini result usage into open_pair_bookkeeping (#436)` | #436 |
+| **W8** | `test_result_event_partial_usage_stamps_zero_for_missing_output_tokens` | same | #436 |
+| **W8** | `test_turn_completed_usage_reaches_the_llm_span_token_attrs` | `green after W8: fold Codex turn.completed usage into open_pair_bookkeeping (#436)` | #436 |
+| **W8** | `test_turn_completed_partial_usage_stamps_zero_for_missing_output_tokens` | same | #436 |
+
+Never `strict=True` — impl wave drops each xfail in the tracing fix commit.
+
+## Contract matrix (#436 / D11)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| HD436a | Gemini ``result`` usage reaches ``llm.call`` token attrs | unit | happy | `test_result_event_usage_reaches_the_llm_span_token_attrs` |
+| HD436b | Gemini partial usage omits invented output counts | unit | edge | `test_result_event_partial_usage_stamps_zero_for_missing_output_tokens` |
+| HD436c | Codex ``turn.completed`` usage reaches ``llm.call`` token attrs | unit | happy | `test_turn_completed_usage_reaches_the_llm_span_token_attrs` |
+| HD436d | Codex partial usage omits invented output counts | unit | edge | `test_turn_completed_partial_usage_stamps_zero_for_missing_output_tokens` |
+| HD436e | ``AgentUsage`` path already correct for Gemini | unit | regression | `test_gemini_result_usage_still_reaches_agent_usage_while_span_attrs_are_zero` |
+| HD436f | ``AgentUsage`` path already correct for Codex | unit | regression | `test_codex_turn_completed_usage_still_reaches_agent_usage_while_span_attrs_are_zero` |
+
+## Named symbols W8 must satisfy
+
+| Symbol | Module | Test |
+|--------|--------|------|
+| `_gemini_stream_event_handler` ``result`` branch | `mergecraft.agents.gemini` | HD436a–b, HD436e |
+| `_codex_stream_event_handler` ``turn.completed`` branch | `mergecraft.agents.codex` | HD436c–f |
+| `open_pair_bookkeeping` fold-before-stamp | `mergecraft.agents.{gemini,codex}` | HD436a–d |
+
+Claude path is the precedent (D11); do not rewrite the span stack.
+
+## Collection target (W7)
+
+`tests/agents/test_provider_span_tokens_hd.py` — **6 tests** (4 xfail, 2 pass).
+
+## Acceptance (W7)
+
+- New tests collect with zero import errors
+- `make lint` + `make typecheck` clean on touched paths
+- HD436a–d xfail (non-strict); HD436e–f pass
+- Strict xfail removed from `test_cov_gemini_paths.py`
+- No `src/` edits
