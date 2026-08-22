@@ -143,7 +143,7 @@ def _binding_with_round_limits(
     settings: Any | None,
     tool_state: Any | None,
 ) -> AgentBinding:
-    """Apply RC12 round-scaled budget/timeout to reviewer, verifier, and recall."""
+    """Apply RC12 round-scaled budget (not ``timeout_s``) to reviewer, verifier, and recall."""
     if settings is None or tool_state is None:
         return binding
     if binding.role not in (AgentRole.reviewer, AgentRole.verifier, AgentRole.recall):

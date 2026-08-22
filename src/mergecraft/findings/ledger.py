@@ -380,6 +380,21 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
     except Exception as err:
         logger.info("finding ledger: could not read progress comment: {}", err)
 
+    existing = tool_state.finding_ledger
+    if existing is not None:
+        hydrated_fps = {record.fingerprint for record in ledger.records()}
+        for record in existing.records():
+            if record.fingerprint in hydrated_fps:
+                continue
+            ledger.record(
+                record.fingerprint,
+                record.state,
+                source=record.source or "unknown",
+                round_index=record.round_index if record.round_index is not None else 1,
+                reason=record.reason,
+                recorded_at=record.recorded_at,
+            )
+
     tool_state.finding_ledger = ledger
     tool_state.finding_ledger_loaded = True
     return ledger

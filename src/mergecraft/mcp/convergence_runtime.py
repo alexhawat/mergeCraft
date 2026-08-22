@@ -83,8 +83,12 @@ def merge_recall_findings_into_analyzer_run(
             }
         )
     analyzer_run.deferred_findings = deferred_rows
-    if placement.deferred_section:
-        analyzer_run.deferred_section = placement.deferred_section
+    from mergecraft.analyzers.budget import _agent_dict_to_finding, _render_deferred_section
+
+    deferred_findings = [
+        _agent_dict_to_finding(row) for row in deferred_rows if isinstance(row, dict)
+    ]
+    analyzer_run.deferred_section = _render_deferred_section(deferred_findings)
 
 
 def collateral_by_fingerprint(ctx: ToolContext) -> dict[str, list[str]]:

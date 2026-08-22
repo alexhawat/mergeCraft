@@ -7,6 +7,8 @@ import importlib
 import re
 from typing import TYPE_CHECKING, Any, get_args
 
+import pytest
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -254,3 +256,65 @@ def test_promotion_records_a_reason_and_timestamp() -> None:
     assert current.state == "open"
     assert current.reason == "Incremental diff touched src/deferred.py."
     assert current.recorded_at == "2026-08-22T12:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_hydrate_merges_pre_checkout_ledger_records(tmp_path: Path) -> None:
+    """Pre-checkout ``ensure_finding_ledger`` records survive progress-comment hydrate."""
+    from mergecraft.mcp.context import (
+        PayloadEvent,
+        RepoIdentity,
+        ResolvedPayload,
+        ToolContext,
+    )
+    from mergecraft.mcp.tool_state import ProgressComment, init_tool_state
+    from mergecraft.modes import compute_modes
+    from mergecraft.review_taxonomy import finding_fingerprint
+    from mergecraft.utils.github import GitHubClient
+
+    ledger = _ledger_mod()
+    memory_fp = finding_fingerprint(path="src/memory.py", body="Pre-checkout inline record.")
+    persisted_fp = _DEFERRED_FP
+
+    persisted_book = ledger.FindingLedger()
+    persisted_book.record(persisted_fp, "deferred", source="overflow", round_index=1)
+    progress_body = ledger.merge_ledger_into_comment(
+        "## mergeCraft progress\n\nRound 1 complete.\n",
+        records=persisted_book.records(),
+    )
+
+    class _Scm:
+        async def get_issue_comment(
+            self, owner: str, repo: str, comment_id: int
+        ) -> dict[str, object]:
+            assert comment_id == 42
+            return {"body": progress_body}
+
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    pre_checkout = ledger.ensure_finding_ledger(state)
+    pre_checkout.record(memory_fp, "open", source="inline", round_index=1)
+    state.progress_comment = ProgressComment(id=42, type="issue")
+    state.finding_ledger_loaded = False
+
+    ctx = ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request")),
+        github=GitHubClient(token="test-token"),
+        scm=_Scm(),
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=compute_modes("claude"),
+        tool_state=state,
+        mcp_server_url="",
+        tmpdir=str(tmp_path),
+    )
+
+    hydrated = await ledger.hydrate_finding_ledger_from_progress_comment(ctx)
+
+    states = {record.fingerprint: record.state for record in hydrated.records()}
+    assert states[memory_fp] == "open"
+    assert states[persisted_fp] == "deferred"
+    assert len(states) == 2
+    assert state.finding_ledger_loaded is True
