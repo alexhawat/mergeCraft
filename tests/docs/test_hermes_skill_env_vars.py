@@ -37,15 +37,23 @@ def _hermes_harness_row(manifest: dict[str, Any]) -> dict[str, Any]:
     raise AssertionError(msg)
 
 
-def _required_env_vars_from_manifest() -> list[str]:
-    row = _hermes_harness_row(load_harness_manifest())
-    raw = row.get("required_environment_variables")
-    assert isinstance(raw, list), "Hermes harness must declare required_environment_variables"
+def _coerce_env_var_list(raw: object, *, label: str) -> list[str]:
+    assert isinstance(raw, list), f"{label} must declare required_environment_variables as a list"
     env_vars: list[str] = []
     for item in raw:
-        assert isinstance(item, str), "required_environment_variables entries must be strings"
+        assert isinstance(item, str), (
+            f"{label} required_environment_variables entries must be strings"
+        )
         env_vars.append(item)
     return env_vars
+
+
+def _required_env_vars_from_manifest() -> list[str]:
+    row = _hermes_harness_row(load_harness_manifest())
+    return _coerce_env_var_list(
+        row.get("required_environment_variables"),
+        label="Hermes harness",
+    )
 
 
 def _required_env_vars_from_skill_md() -> list[str]:
@@ -55,15 +63,10 @@ def _required_env_vars_from_skill_md() -> list[str]:
     assert match, "skills/hermes/mergecraft/SKILL.md must declare YAML frontmatter (D11)"
     frontmatter = yaml.safe_load(match.group(1))
     assert isinstance(frontmatter, dict), "Hermes SKILL.md frontmatter must be a mapping"
-    raw = frontmatter.get("required_environment_variables")
-    assert isinstance(raw, list), (
-        "skills/hermes/mergecraft/SKILL.md must declare required_environment_variables"
+    return _coerce_env_var_list(
+        frontmatter.get("required_environment_variables"),
+        label="skills/hermes/mergecraft/SKILL.md",
     )
-    env_vars: list[str] = []
-    for item in raw:
-        assert isinstance(item, str), "required_environment_variables entries must be strings"
-        env_vars.append(item)
-    return env_vars
 
 
 def _auth_doc_table_rows() -> list[list[str]]:

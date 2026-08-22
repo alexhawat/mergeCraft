@@ -24,7 +24,7 @@ Maps **W1 RED** contracts for #402 + #414 to the test suite. Source plan:
 make lint
 make typecheck
 uv run pytest --collect-only -q tests/pins/test_defaults_yaml_sync.py
-uv run pytest -q tests/pins/test_defaults_yaml_sync.py  # expect XFAIL until W2
+uv run pytest -q tests/pins/test_defaults_yaml_sync.py  # green since W2 (808763ce)
 ```
 
 ## W1 evidence (2026-08-22)

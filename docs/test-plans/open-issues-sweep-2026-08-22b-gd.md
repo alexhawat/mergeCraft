@@ -30,7 +30,7 @@ Maps **W7 RED** contracts for #413 to the test suite. Source plan:
 make lint
 make typecheck
 uv run pytest --collect-only -q tests/docs/test_readme_harness_copy_prompts.py
-uv run pytest -q tests/docs/test_readme_harness_copy_prompts.py  # expect 1 PASS + 5 XFAIL until W8
+uv run pytest -q tests/docs/test_readme_harness_copy_prompts.py  # green since W8 (808763ce)
 ```
 
 ## W7 evidence

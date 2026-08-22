@@ -137,3 +137,9 @@ def test_migration_module_imports_shared_support(module_name: str) -> None:
     assert "_ci_steps" not in source or "tests.docs.support" in source, (
         f"{module_name} must not keep a private _ci_steps after W12"
     )
+    assert "_load_harness_manifest" not in source or "tests.docs.support" in source, (
+        f"{module_name} must not keep a private _load_harness_manifest after W12"
+    )
+    assert "_makefile_prerequisite_tokens" not in source or "tests.docs.support" in source, (
+        f"{module_name} must not keep a private _makefile_prerequisite_tokens after W12"
+    )

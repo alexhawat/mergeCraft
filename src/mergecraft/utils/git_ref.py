@@ -12,7 +12,7 @@ _SHA_REF = re.compile(r"^[0-9a-f]{40}$")
 def git_ref_exists(ref: str, *, cwd: Path | None = None) -> bool:
     """Return whether *ref* resolves as a tag, branch, or commit in the checkout."""
     ref = ref.rstrip("#").strip()
-    workdir = cwd or Path(__file__).resolve().parents[2]
+    workdir = cwd or Path(__file__).resolve().parents[3]
     candidates: list[list[str]]
     if _SHA_REF.fullmatch(ref):
         candidates = [["git", "rev-parse", "--verify", f"{ref}^{{commit}}"]]

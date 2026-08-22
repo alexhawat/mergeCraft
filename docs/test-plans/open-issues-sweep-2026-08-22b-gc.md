@@ -24,7 +24,7 @@ Maps **W5 RED** contracts for #404 to the test suite. Source plan:
 make lint
 make typecheck
 uv run pytest --collect-only -q tests/docs/test_gen_agent_packages_blob_ref.py
-uv run pytest -q tests/docs/test_gen_agent_packages_blob_ref.py  # expect 3 XFAIL until W6
+uv run pytest -q tests/docs/test_gen_agent_packages_blob_ref.py  # green since W6 (808763ce)
 ```
 
 ## W5 evidence (2026-08-22 ✅: 92ffc0b8)

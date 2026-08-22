@@ -6,8 +6,8 @@ Depends: argparse, hashlib, json, os, re, subprocess, sys, pathlib
 
 Reads ``skills/harnesses.yaml``, renders ``skills/<harness-id>/SKILL.md`` for every
 verified harness row, and rewrites ``../../`` relative links to absolute GitHub blob
-URLs so copied skills still resolve. ``make agent-packages`` / ``agent-packages-check``
-call this entry point.
+URLs so copied skills still resolve. ``make agent-packages`` / ``agent-packages-check`` call this entry point via
+``uv run python`` (requires the ``mergecraft`` package on ``PYTHONPATH``).
 
 Exports:
     main — regenerate (default) or ``--check`` per-harness packages.

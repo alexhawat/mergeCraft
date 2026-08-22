@@ -23,7 +23,7 @@ Maps **W11 RED** contracts for #405 to the test suite. Source plan:
 | --- | --- | --- |
 | `_git_ref_exists()` | `test_landing_readme.py`, `test_agent_surfaces.py` | `git_ref_exists` |
 | `_ACTION_USES` regex | `test_landing_readme.py`, `test_docs_gate.py`, `test_agent_surfaces.py` | `action_uses_pattern` |
-| `_ci_steps()` / inline `CI_STEPS` scrape | `test_agent_packages.py`, `test_docs_manifest.py`, `test_docs_gate.py` | `ci_steps` |
+| `load_harness_manifest()` / `makefile_prerequisite_tokens()` shared exports | `tests/docs/support.py` | `load_harness_manifest`, `makefile_prerequisite_tokens` |
 | `importlib.util` script loading | `test_cli_examples.py`, `test_agent_packages.py`, `test_docs_gate.py`, `test_gen_agent_packages_blob_ref.py`, `test_reference_docs.py` | `load_script_module` |
 
 ## xfail reconciliation
@@ -38,7 +38,7 @@ Maps **W11 RED** contracts for #405 to the test suite. Source plan:
 make lint
 make typecheck
 uv run pytest --collect-only -q tests/docs/
-uv run pytest -q tests/docs/test_support.py  # expect XFAIL until W12
+uv run pytest -q tests/docs/test_support.py  # green since W12 (808763ce)
 ```
 
 ## W11 evidence (2026-08-22 ✅: ec6390c4)

@@ -71,5 +71,5 @@ def test_blob_ref_uses_action_pin_minimal_when_tag_exists(
             return subprocess.CompletedProcess(cmd_list, 0)
         return original_run(cmd, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr("subprocess.run", _fake_run)
+    monkeypatch.setattr("mergecraft.utils.git_ref.subprocess.run", _fake_run)
     assert module._blob_ref() == pin

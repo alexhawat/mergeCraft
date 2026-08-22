@@ -15,7 +15,6 @@ import pytest
 from tests.ci.workflow_support import REPO_ROOT, read_text
 from tests.docs.support import ci_steps, load_harness_manifest, load_script_module
 
-HARNESS_MANIFEST = REPO_ROOT / "skills" / "harnesses.yaml"
 GEN_SCRIPT = REPO_ROOT / "scripts" / "gen_agent_packages.py"
 README = REPO_ROOT / "README.md"
 SKILLS_ROOT = REPO_ROOT / "skills"
