@@ -50,10 +50,6 @@ def test_default_install_ref_pins_a_release_tag_not_a_moving_branch() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W4: defer harbor pin from import (#403, D9)",
-    strict=False,
-)
 def test_import_harbor_agent_does_not_resolve_pin(monkeypatch: pytest.MonkeyPatch) -> None:
     """Importing harbor.agent must not call ``action_pin_minimal()`` at module load."""
 
@@ -65,10 +61,6 @@ def test_import_harbor_agent_does_not_resolve_pin(monkeypatch: pytest.MonkeyPatc
     assert module.MergecraftReviewAgent is not None
 
 
-@pytest.mark.xfail(
-    reason="green after W4: lazy default install ref accessor (#403, D9)",
-    strict=False,
-)
 def test_default_install_ref_accessor_calls_action_pin_minimal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -92,10 +84,6 @@ def test_default_install_ref_accessor_calls_action_pin_minimal(
     assert calls == ["called"], "lazy accessor must call action_pin_minimal()"
 
 
-@pytest.mark.xfail(
-    reason="green after W4: install resolves pin lazily (#403, D9)",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_install_resolves_default_ref_via_action_pin_minimal(
     monkeypatch: pytest.MonkeyPatch,

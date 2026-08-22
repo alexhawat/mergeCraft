@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -19,10 +20,15 @@ if TYPE_CHECKING:
 
 from mergecraft.pins import action_pin_minimal
 
-DEFAULT_INSTALL_REF = action_pin_minimal()
 MERGECRAFT_GIT_URL = "git+https://github.com/alexhawat/mergeCraft"
 FINDINGS_FILENAME = "findings.json"
 _PATCH_CANDIDATES = ("task.patch", "changes.patch", "diff.patch", "review.patch")
+
+
+@functools.cache
+def _default_install_ref() -> str:
+    """Return the Harbor default install ref without resolving at module import."""
+    return action_pin_minimal()
 
 
 def _path_env() -> str:
@@ -62,7 +68,7 @@ class MergecraftReviewAgent(BaseInstalledAgent):
         return text or "unknown"
 
     async def install(self, environment: BaseEnvironment) -> None:
-        install_ref = self._get_env("MERGECRAFT_INSTALL_REF") or DEFAULT_INSTALL_REF
+        install_ref = self._get_env("MERGECRAFT_INSTALL_REF") or _default_install_ref()
         install_spec = f"{MERGECRAFT_GIT_URL}@{install_ref}"
 
         await self.exec_as_root(

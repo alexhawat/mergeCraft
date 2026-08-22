@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily via
+  `_default_install_ref()` instead of calling `action_pin_minimal()` at module import (#403)
 - Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
   auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
 - `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
