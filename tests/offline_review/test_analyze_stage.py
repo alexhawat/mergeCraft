@@ -9,9 +9,14 @@ from typing import Any
 import pytest
 
 import mergecraft.offline_review as offline_mod
+from mergecraft.agents.shared import AgentResult
 from mergecraft.config.settings import AnalyzersSettings, RepoSettings
+from mergecraft.mcp.tool_state import AnalyzerRunState
+from mergecraft.review.offline_agent import run_offline_agent_review
+from mergecraft.review.offline_stages import run_offline_analyze
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.offline_diff import DiffMaterialization
+from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.source_resolve import ResolvedWorkspace, SourceResolverSpec
 
 _PATCH = "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
@@ -134,3 +139,170 @@ async def test_offline_analyze_skips_pipeline_when_analyzers_disabled(
     )
     assert result.success is True
     assert calls == []
+
+
+def _stub_pipeline_state() -> AnalyzerRunState:
+    return AnalyzerRunState(ran=True, findings=[{"id": "f1"}])
+
+
+@pytest.mark.asyncio
+async def test_run_offline_analyze_returns_pipeline_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy: ``run_offline_analyze`` returns the pipeline ``AnalyzerRunState``."""
+    expected = _stub_pipeline_state()
+
+    def _pipeline(**_kwargs: object) -> AnalyzerRunState:
+        return expected
+
+    monkeypatch.setattr("mergecraft.review.offline_stages.run_analyzer_pipeline", _pipeline)
+    result = await run_offline_analyze(
+        cwd=tmp_path,
+        materialization=_nonempty_materialization(tmp_path),
+        trust_tier="trusted",
+        analyzers_enabled=True,
+    )
+    assert result is expected
+
+
+@pytest.mark.asyncio
+async def test_run_offline_analyze_returns_none_when_analyzers_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Edge: ``analyzers_enabled=False`` skips the pipeline and returns ``None``."""
+    calls: list[int] = []
+
+    def _pipeline(**_kwargs: object) -> AnalyzerRunState:
+        calls.append(1)
+        return _stub_pipeline_state()
+
+    monkeypatch.setattr("mergecraft.review.offline_stages.run_analyzer_pipeline", _pipeline)
+    result = await run_offline_analyze(
+        cwd=tmp_path,
+        materialization=_nonempty_materialization(tmp_path),
+        trust_tier="trusted",
+        analyzers_enabled=False,
+    )
+    assert result is None
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_offline_analyze_returns_ran_false_when_pipeline_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Error: unexpected pipeline exceptions become ``AnalyzerRunState(ran=False)``."""
+
+    def _pipeline(**_kwargs: object) -> AnalyzerRunState:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("mergecraft.review.offline_stages.run_analyzer_pipeline", _pipeline)
+    result = await run_offline_analyze(
+        cwd=tmp_path,
+        materialization=_nonempty_materialization(tmp_path),
+        trust_tier="trusted",
+        analyzers_enabled=True,
+    )
+    assert result is not None
+    assert result.ran is False
+    assert result.reason == "boom"
+
+
+@pytest.mark.asyncio
+async def test_offline_analyze_stage_stores_run_state_on_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy: ``_OfflineDiffReviewRun.analyze`` stores pipeline state as ``analyzer_run``."""
+    expected = _stub_pipeline_state()
+
+    async def _analyze(**_kwargs: object) -> AnalyzerRunState:
+        return expected
+
+    monkeypatch.setattr("mergecraft.review.offline_stages.run_offline_analyze", _analyze)
+    driver = offline_mod._OfflineDiffReviewRun(
+        cwd=tmp_path,
+        workspace=ResolvedWorkspace(cwd=tmp_path, git_common_dir=tmp_path / ".git", cloned=False),
+        spec=SourceResolverSpec(cwd=tmp_path, invocation_root=tmp_path),
+        out_dir=tmp_path,
+        diff_file=None,
+        trust_tier="trusted",
+        run_bounds=resolve_run_bounds(),
+        analyzers_enabled=True,
+        json_path=None,
+        prompt_extra=None,
+        dry_run=True,
+        model=None,
+        evidence_packet_path=None,
+        on_finding=None,
+        read_cache=False,
+    )
+    driver.materialization = _nonempty_materialization(tmp_path)
+    await driver.analyze()
+    assert driver.analyzer_run is expected
+
+
+class _StubAgent:
+    name = "claude"
+
+    async def install(self, token: str | None = None) -> str:
+        return "ok"
+
+    async def run(self, _ctx: object) -> AgentResult:
+        return AgentResult(success=True, output="ok")
+
+
+class _FakeGithub:
+    def __init__(self, token: str = "", **_: object) -> None:
+        del token
+
+    async def aclose(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_run_offline_agent_review_stamps_analyzer_run_before_packet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy: ``analyzer_run`` is on ``tool_state`` before ``_emit_offline_packet``."""
+    state = _stub_pipeline_state()
+    captured: list[object] = []
+    settings = RepoSettings(analyzers=AnalyzersSettings(enabled=True))
+
+    monkeypatch.setattr(
+        "mergecraft.review.offline_agent.load_repo_settings",
+        lambda root, load_learnings_files=False: settings,
+    )
+    monkeypatch.setattr("mergecraft.review.offline_agent.GitHubClient", _FakeGithub)
+    monkeypatch.setattr(
+        "mergecraft.review.offline_agent.resolve_runtime_agent",
+        lambda **_: _StubAgent(),
+    )
+    monkeypatch.setattr(
+        "mergecraft.review.offline_agent.start_mcp_http_server",
+        lambda ctx, *, output_schema=None: ("http://127.0.0.1:9/mcp", lambda: None),
+    )
+    monkeypatch.setattr("mergecraft.review.offline_agent.install_bundled_skills", lambda **_: None)
+    monkeypatch.setattr(
+        "mergecraft.enterprise.runtime.bind_enterprise_after_trust",
+        lambda *_a, **_k: None,
+    )
+
+    def _emit(tool_context: object, **_kwargs: object) -> None:
+        captured.append(tool_context)
+        return
+
+    monkeypatch.setattr("mergecraft.review.offline_agent._emit_offline_packet", _emit)
+
+    result = await run_offline_agent_review(
+        cwd=tmp_path,
+        materialization=_nonempty_materialization(tmp_path),
+        prompt="review this",
+        model=None,
+        tmpdir=tmp_path,
+        analyzer_run=state,
+    )
+    assert result.success is True
+    assert captured, "packet emit must run so consumers can see analyzer findings"
+    tool_context = captured[0]
+    tool_state = tool_context.tool_state
+    assert tool_state.analyzer_run is state

@@ -6,8 +6,11 @@ import asyncio
 from functools import partial
 from typing import TYPE_CHECKING, Literal
 
+from loguru import logger
+
 from mergecraft.analyzers.pipeline import run_analyzer_pipeline
 from mergecraft.mcp.checkout import changed_paths_in_diff
+from mergecraft.mcp.tool_state import AnalyzerRunState
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -29,10 +32,10 @@ async def run_offline_analyze(
     materialization: DiffMaterialization,
     trust_tier: str,
     analyzers_enabled: bool = True,
-) -> None:
-    """Run the catalog analyzer pipeline on the materialized diff."""
+) -> AnalyzerRunState | None:
+    """Run the catalog analyzer pipeline and return its state for the driver."""
     if not analyzers_enabled or materialization.empty:
-        return
+        return None
     diff_text = materialization.path.read_text(encoding="utf-8")
     pipeline = partial(
         run_analyzer_pipeline,
@@ -45,4 +48,8 @@ async def run_offline_analyze(
         shell="disabled",
         mode="auto",
     )
-    await asyncio.to_thread(pipeline)
+    try:
+        return await asyncio.to_thread(pipeline)
+    except Exception as exc:
+        logger.warning("offline analyze: pipeline failed — {}", exc)
+        return AnalyzerRunState(ran=False, reason=str(exc))

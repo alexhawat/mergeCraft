@@ -46,6 +46,7 @@ from mergecraft.utils.skills import install_bundled_skills
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from mergecraft.mcp.tool_state import AnalyzerRunState
     from mergecraft.utils.offline_diff import DiffMaterialization
     from mergecraft.utils.run_bounds import RunBounds
 
@@ -62,6 +63,7 @@ async def run_offline_agent_review(
     trust_tier: str = "trusted",
     run_bounds: RunBounds | None = None,
     on_finding: Callable[[dict[str, Any]], None] | None = None,
+    analyzer_run: AnalyzerRunState | None = None,
 ) -> OfflineReviewResult:
     """Run the Review agent against a materialized local diff."""
     resolved_tier: Literal["trusted", "untrusted"] = (
@@ -139,6 +141,10 @@ async def run_offline_agent_review(
             resolved_model=resolved_model,
             budget_tracker=budget_tracker,
         )
+        if analyzer_run is not None:
+            from mergecraft.mcp.analyzers import _store_run_state
+
+            _store_run_state(tool_context, analyzer_run)
 
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
         tool_context.mcp_server_url = mcp_url

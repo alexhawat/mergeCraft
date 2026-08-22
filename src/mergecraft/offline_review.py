@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mergecraft.config.settings import CliTrustOverride
+    from mergecraft.mcp.tool_state import AnalyzerRunState
     from mergecraft.review.engine import ReviewEngine
     from mergecraft.tracing.review_context import ReviewContext
     from mergecraft.utils.source_resolve import ResolvedWorkspace
@@ -428,6 +429,7 @@ class _OfflineDiffReviewRun:
     scope_reduction: ScopeReduction | None = None
     cache_key: str | None = None
     from_cache: bool = False
+    analyzer_run: AnalyzerRunState | None = None
 
     async def materialize(self) -> DiffMaterialization:
         built = materialize_resolved_diff(
@@ -469,7 +471,7 @@ class _OfflineDiffReviewRun:
         assert self.materialization is not None
         from mergecraft.review.offline_stages import run_offline_analyze
 
-        await run_offline_analyze(
+        self.analyzer_run = await run_offline_analyze(
             cwd=self.cwd,
             materialization=self.materialization,
             trust_tier=self.trust_tier,
@@ -548,6 +550,7 @@ class _OfflineDiffReviewRun:
             trust_tier=self.trust_tier,
             run_bounds=self.run_bounds,
             on_finding=self.on_finding,
+            analyzer_run=self.analyzer_run,
         )
 
     async def publish(self, review_out: OfflineReviewResult) -> OfflineReviewResult:

@@ -6,6 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from mergecraft import __version__
+from mergecraft.config import load_repo_settings
 from mergecraft.review.offline_result import OfflineReviewResult
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.run_bounds import ScopeReduction, resolve_run_bounds
@@ -24,6 +26,15 @@ def review_cache_repo_identity(*, cwd: Path | str | None = None) -> str:
     return str(start)
 
 
+def review_cache_settings_digest(*, cwd: Path | str | None = None) -> str:
+    """Return a digest of repo settings that can change a review result."""
+    start = Path(cwd) if cwd is not None else Path.cwd()
+    settings = load_repo_settings(root=start, load_learnings_files=False)
+    payload = settings.model_dump(mode="json")
+    blob = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
 def review_result_cache_key(
     diff_bytes: bytes,
     *,
@@ -34,9 +45,14 @@ def review_result_cache_key(
     base_ref: str | None = None,
     repo_identity: str | None = None,
     cwd: Path | str | None = None,
+    version: str | None = None,
+    settings_digest: str | None = None,
 ) -> str:
     """Return a cache key for a materialized review, including inputs that change it."""
     identity = repo_identity if repo_identity is not None else review_cache_repo_identity(cwd=cwd)
+    digest = (
+        settings_digest if settings_digest is not None else review_cache_settings_digest(cwd=cwd)
+    )
     hasher = hashlib.sha256()
     hasher.update(diff_bytes)
     hasher.update(b"\0model=")
@@ -51,6 +67,10 @@ def review_result_cache_key(
     hasher.update((base_ref or "").encode("utf-8"))
     hasher.update(b"\0repo=")
     hasher.update(identity.encode("utf-8"))
+    hasher.update(b"\0version=")
+    hasher.update((version if version is not None else __version__).encode("utf-8"))
+    hasher.update(b"\0settings=")
+    hasher.update(digest.encode("utf-8"))
     return f"{_KEY_PREFIX}{hasher.hexdigest()}"
 
 
@@ -170,6 +190,8 @@ def cache_key_for_diff_path(
     base_ref: str | None = None,
     repo_identity: str | None = None,
     cwd: Path | str | None = None,
+    version: str | None = None,
+    settings_digest: str | None = None,
 ) -> str:
     """Hash an on-disk unified diff plus review-changing inputs into a result-cache key."""
     return review_result_cache_key(
@@ -181,6 +203,8 @@ def cache_key_for_diff_path(
         base_ref=base_ref,
         repo_identity=repo_identity,
         cwd=cwd,
+        version=version,
+        settings_digest=settings_digest,
     )
 
 
@@ -188,6 +212,7 @@ __all__ = [
     "cache_key_for_diff_path",
     "load_review_result",
     "review_cache_repo_identity",
+    "review_cache_settings_digest",
     "review_result_cache_key",
     "store_review_result",
 ]

@@ -97,6 +97,37 @@ def test_review_result_cache_key_empty_model_differs_from_resolved_slug() -> Non
     assert resolved != other
 
 
+def test_review_result_cache_key_differs_when_version_changes() -> None:
+    """Unit: same diff+model+repo, different ``version`` → different keys."""
+    base = {"model": "claude-opus", "repo_identity": "/repos/alpha"}
+    key_a = review_result_cache_key(_DIFF, version="0.1.0", **base)
+    key_b = review_result_cache_key(_DIFF, version="0.2.0", **base)
+    assert key_a != key_b
+    assert key_a.startswith("review-result:")
+    assert key_b.startswith("review-result:")
+
+
+def test_review_result_cache_key_differs_when_settings_digest_changes() -> None:
+    """Unit: same diff+model+repo, different ``settings_digest`` → different keys."""
+    base = {"model": "claude-opus", "repo_identity": "/repos/alpha"}
+    key_a = review_result_cache_key(_DIFF, settings_digest="digest-a", **base)
+    key_b = review_result_cache_key(_DIFF, settings_digest="digest-b", **base)
+    assert key_a != key_b
+    assert key_a.startswith("review-result:")
+    assert key_b.startswith("review-result:")
+
+
+def test_review_result_cache_key_identical_with_same_version_and_digest() -> None:
+    """Unit: identical explicit ``version`` + ``settings_digest`` → identical keys."""
+    kwargs = {
+        "model": "claude-opus",
+        "repo_identity": "/repos/alpha",
+        "version": "1.2.3",
+        "settings_digest": "deadbeef",
+    }
+    assert review_result_cache_key(_DIFF, **kwargs) == review_result_cache_key(_DIFF, **kwargs)
+
+
 def test_load_review_result_returns_none_for_corrupt_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
