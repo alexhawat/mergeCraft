@@ -10,8 +10,7 @@ import yaml
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
-
-DEFAULT_ACTION_REF = "v0.1.0a1"
+from mergecraft.pins import action_pin_minimal
 
 DEFAULT_CONFIG: dict[str, object] = {
     "models": ["anthropic/claude-sonnet"],
@@ -22,20 +21,20 @@ DEFAULT_CONFIG: dict[str, object] = {
     "autoMergeEnabled": False,
 }
 
+_DEFAULT_MODEL = "anthropic/claude-sonnet"
+
 WORKFLOW_TEMPLATE = f"""\
 name: mergeCraft
 
 on:
   pull_request:
-  issue_comment:
-    types: [created]
-  pull_request_review_comment:
-    types: [created]
+    types: [opened, ready_for_review, synchronize]
   workflow_dispatch:
     inputs:
       prompt:
         description: Prompt for the agent
         required: true
+        type: string
 
 permissions:
   contents: write
@@ -43,20 +42,30 @@ permissions:
   issues: write
   checks: write
   actions: read
+  id-token: write
 
 jobs:
   mergecraft:
+    if: >
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Run mergeCraft
-        uses: alexhawat/mergeCraft@{DEFAULT_ACTION_REF}
+        uses: alexhawat/mergeCraft@{action_pin_minimal()}
         with:
-          prompt: ${{{{ github.event.inputs.prompt || github.event.comment.body }}}}
-          model: anthropic/claude-sonnet
+          prompt: >
+            ${{{{ github.event_name == 'pull_request'
+                && 'Review this pull request.'
+                || github.event.inputs.prompt }}}}
+          model: {_DEFAULT_MODEL}
+          status_checks: enabled
         env:
-          ANTHROPIC_API_KEY: ${{{{ secrets.ANTHROPIC_API_KEY }}}}
-          # or: CLAUDE_CODE_OAUTH_TOKEN / CODEX_AUTH_JSON / OPENAI_API_KEY
+          CLAUDE_CODE_OAUTH_TOKEN: ${{{{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}}}
+          # ANTHROPIC_API_KEY: ${{{{ secrets.ANTHROPIC_API_KEY }}}}
+          # CODEX_AUTH_JSON: ${{{{ secrets.CODEX_AUTH_JSON }}}}
+          # OPENAI_API_KEY: ${{{{ secrets.OPENAI_API_KEY }}}}
 """
 
 
@@ -125,5 +134,5 @@ def run(
         "  1. set provider secrets: [cyan]mergecraft auth claude[/cyan] or [cyan]mergecraft auth codex[/cyan]"
     )
     console.print("  2. commit and push the workflow + config")
-    console.print("  3. trigger via comment or workflow_dispatch")
+    console.print("  3. open a PR or run workflow_dispatch")
     logger.debug("init complete at {}", root)

@@ -24,7 +24,6 @@ runner = CliRunner()
 DEFAULTS_YAML = REPO_ROOT / "scripts" / "example_workflows" / "defaults.yaml"
 README = REPO_ROOT / "README.md"
 _ACTION_USES = re.compile(r"uses:\s*alexhawat/mergeCraft@(\S+)", re.IGNORECASE)
-_RELEASE_TAG = re.compile(r"^v\d+\.\d+\.\d+(?:a\d+|b\d+|rc\d+)?$", re.IGNORECASE)
 
 
 def _init_git_repo(tmp_path: Path) -> None:
@@ -109,6 +108,38 @@ def test_scaffolded_config_uses_models_list(tmp_path: Path, monkeypatch: MonkeyP
         "init must scaffold models: list, not singular model: (D13)"
     )
     assert "model" not in data or data.get("model") is None
+
+
+def test_scaffolded_workflow_has_no_comment_triggers(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init", "--force"])
+    assert result.exit_code == 0, result.output
+    workflow = (tmp_path / ".github" / "workflows" / "mergecraft.yml").read_text(encoding="utf-8")
+    assert "issue_comment" not in workflow, (
+        "init scaffold must not include issue_comment trigger (prompt injection surface)"
+    )
+    assert "pull_request_review_comment" not in workflow, (
+        "init scaffold must not include pull_request_review_comment trigger"
+    )
+    assert "github.event.comment.body" not in workflow, (
+        "init scaffold must not pass comment body as agent prompt"
+    )
+
+
+def test_scaffolded_workflow_uses_claude_oauth_secret(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init", "--force"])
+    assert result.exit_code == 0, result.output
+    workflow = (tmp_path / ".github" / "workflows" / "mergecraft.yml").read_text(encoding="utf-8")
+    assert "CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}" in workflow, (
+        "init scaffold must default to CLAUDE_CODE_OAUTH_TOKEN (README Example 1 / mergecraft auth claude)"
+    )
 
 
 def test_scaffolded_workflow_pin_matches_defaults_yaml(

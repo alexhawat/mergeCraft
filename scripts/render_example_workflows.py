@@ -2,7 +2,7 @@
 """Render committed example workflow YAML from shared templates.
 
 Module: scripts.render_example_workflows
-Depends: argparse, pathlib, sys, yaml
+Depends: argparse, pathlib, sys
 
 Exports:
     main — render or --check example workflows under examples/workflows/.
@@ -12,12 +12,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Final
 
-import yaml
+from mergecraft.pins import load_example_defaults
 
 REPO = Path(__file__).resolve().parents[1]
 TEMPLATE_DIR = Path(__file__).resolve().parent / "example_workflows"
@@ -34,22 +33,7 @@ TEMPLATES: Final[dict[str, Path]] = {
 
 def _load_defaults() -> dict[str, str]:
     """Load shared placeholder values from defaults.yaml and env overrides."""
-    raw = yaml.safe_load(DEFAULTS_PATH.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        msg = f"expected mapping in {DEFAULTS_PATH}"
-        raise TypeError(msg)
-    defaults: dict[str, str] = {str(key): str(value) for key, value in raw.items()}
-    env_map = {
-        "action_repo": "MERGECRAFT_EXAMPLE_ACTION_REPO",
-        "action_pin_minimal": "MERGECRAFT_EXAMPLE_ACTION_PIN_MINIMAL",
-        "action_pin_hardened": "MERGECRAFT_EXAMPLE_ACTION_PIN_HARDENED",
-        "ci_job_prefix": "MERGECRAFT_EXAMPLE_CI_JOB_PREFIX",
-        "base_branches": "MERGECRAFT_EXAMPLE_BASE_BRANCHES",
-    }
-    for key, env_name in env_map.items():
-        if env_name in os.environ:
-            defaults[key] = os.environ[env_name]
-    return defaults
+    return load_example_defaults()
 
 
 def _substitute(template_text: str, *, variant: str, defaults: dict[str, str]) -> str:
