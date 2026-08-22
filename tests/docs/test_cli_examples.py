@@ -48,7 +48,6 @@ def _run_script_is_executable(path: Path) -> bool:
     return bool(mode & stat.S_IXUSR)
 
 
-@pytest.mark.xfail(reason="green after RV5: complete example trees (D11)", strict=False)
 def test_every_example_tree_is_complete() -> None:
     dirs = _example_dirs()
     assert dirs, f"missing example trees under {EXAMPLES_CLI.relative_to(REPO_ROOT)}"
@@ -75,7 +74,6 @@ def test_every_example_tree_is_complete() -> None:
     assert not incomplete, "incomplete CLI example trees:\n" + "\n".join(incomplete)
 
 
-@pytest.mark.xfail(reason="green after RV5: run.sh stays offline (D12)", strict=False)
 def test_run_sh_is_offline() -> None:
     dirs = _example_dirs()
     assert dirs, f"missing example trees under {EXAMPLES_CLI.relative_to(REPO_ROOT)}"
@@ -93,7 +91,6 @@ def test_run_sh_is_offline() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after RV5: expected output fixtures match", strict=False)
 def test_expected_output_fixtures_match() -> None:
     dirs = _example_dirs()
     assert dirs, f"missing example trees under {EXAMPLES_CLI.relative_to(REPO_ROOT)}"
@@ -122,10 +119,6 @@ def test_expected_output_fixtures_match() -> None:
             )
 
 
-@pytest.mark.xfail(
-    reason="green after RV5: examples/cli excluded; docs/cli-examples.md manifested (D10)",
-    strict=False,
-)
 def test_examples_are_not_manifested() -> None:
     paths = _manifest_paths()
     manifested_examples = sorted(path for path in paths if path.startswith("examples/cli/"))

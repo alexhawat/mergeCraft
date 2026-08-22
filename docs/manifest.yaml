@@ -43,6 +43,12 @@ pages:
     generator: reference-docs
     purpose: Full mergecraft CLI command reference derived from the live Typer app.
 
+  - path: docs/cli-examples.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Runnable mergecraft review CLI example trees under examples/cli/.
+
   - path: docs/action-reference.md
     audience: consumer
     template: generated-ref

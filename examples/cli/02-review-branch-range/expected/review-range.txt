@@ -1,0 +1,5 @@
+command=mergecraft review --range HEAD~1..HEAD --dry-run
+## Diff summary
+
+1 file(s) changed:
+- src/feature.py
