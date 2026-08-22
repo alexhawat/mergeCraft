@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
     from mergecraft.analyzers.antislop.policy import AntislopRule
 
-_JS_SUFFIXES = frozenset({".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"})
+from mergecraft.analyzers.antislop.scopes import ANTISLOP_JS_SUFFIXES
+
 _PY_SUFFIX = ".py"
 
 
@@ -79,7 +80,7 @@ def _language_for_path(rel_path: str) -> str | None:
     lowered = rel_path.casefold()
     if lowered.endswith(_PY_SUFFIX):
         return "python"
-    if any(lowered.endswith(suffix) for suffix in _JS_SUFFIXES):
+    if any(lowered.endswith(suffix) for suffix in ANTISLOP_JS_SUFFIXES):
         if lowered.endswith((".ts", ".tsx")):
             return "typescript"
         return "javascript"

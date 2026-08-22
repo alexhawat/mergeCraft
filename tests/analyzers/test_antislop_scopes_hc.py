@@ -57,37 +57,21 @@ def _defines_module_level_name(path: Path, name: str) -> bool:
 # --- #423 import contract (RED until W6) -------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W6: import ANTISLOP_SCOPED_SUFFIXES from scopes (#423)",
-    strict=False,
-)
 def test_init_imports_antislop_scoped_suffixes_from_scopes() -> None:
     """``__init__.py`` must import the shared scoped suffix tuple from ``scopes``."""
     assert _imports_name_from_scopes(_INIT_PATH, _SCOPED_IMPORT)
 
 
-@pytest.mark.xfail(
-    reason="green after W6: delete local _SCOPED_SUFFIXES duplicate (#423)",
-    strict=False,
-)
 def test_init_does_not_define_local_scoped_suffixes() -> None:
     """``__init__.py`` must not keep a module-local ``_SCOPED_SUFFIXES`` copy."""
     assert not _defines_module_level_name(_INIT_PATH, "_SCOPED_SUFFIXES")
 
 
-@pytest.mark.xfail(
-    reason="green after W6: import ANTISLOP_JS_SUFFIXES from scopes (#423)",
-    strict=False,
-)
 def test_matcher_imports_antislop_js_suffixes_from_scopes() -> None:
     """``matcher.py`` must import the shared JS suffix set from ``scopes``."""
     assert _imports_name_from_scopes(_MATCHER_PATH, _JS_IMPORT)
 
 
-@pytest.mark.xfail(
-    reason="green after W6: delete local _JS_SUFFIXES duplicate (#423)",
-    strict=False,
-)
 def test_matcher_does_not_define_local_js_suffixes() -> None:
     """``matcher.py`` must not keep a module-local ``_JS_SUFFIXES`` copy."""
     assert not _defines_module_level_name(_MATCHER_PATH, "_JS_SUFFIXES")
