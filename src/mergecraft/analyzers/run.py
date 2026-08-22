@@ -202,8 +202,10 @@ def _outcome_from_completed(
     if plan.version_note:
         combined = f"{plan.version_note}\n{combined}".strip()
     redacted = redact_analyzer_output(combined, tool_id=plan.manifest_id)
-    persist_source = raw_for_parser or combined
-    output_path = _persist_output(persist_source, plan=plan)
+    # Persist only what a parser can read. ``combined`` is the display string and
+    # may be nothing but ``plan.version_note`` prose when the analyzer wrote to
+    # neither stream; persisting that turned a clean run into "failed to parse".
+    output_path = _persist_output(raw_for_parser, plan=plan)
     return AnalyzerOutcome(
         name=plan.manifest_id,
         command=command,
