@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/authentication.md`: provider table now lists **Recommended model** and **Inferred harness** columns; adds an OpenAI-compatible custom-provider row (`MERGECRAFT_CUSTOM_PROVIDER_*`) with harness `opencode` (#A3 / RV4).
+- `docs/compatibility-matrix.md`: Harness × model table gains a **Recommended model** column; adds `tokenhub/hy3` and `minimax/MiniMax-M3` rows (#A3 / RV4).
+
 ### Fixed
 
 - Offline analyze stores ``AnalyzerRunState`` on the CLI tool context and merges analyzer findings into structured output so CC1 exit codes see Critical/Major hits the agent omitted; result-cache keys include mergeCraft version and a settings digest (#399)
