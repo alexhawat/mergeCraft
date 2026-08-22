@@ -29,6 +29,15 @@ class RuleMatch:
     snippet: str
 
 
+@dataclass(frozen=True, slots=True)
+class _ImportBinding:
+    """One imported name plus every spelling that counts as a use of it."""
+
+    name: str
+    usage_names: tuple[str, ...]
+    line: int
+
+
 def apply_rules(
     *,
     rel_path: str,
@@ -232,26 +241,18 @@ def _python_pass_through_wrapper_matches(source: str) -> Iterable[tuple[int, int
 
 
 def _python_phantom_import_matches(source: str) -> Iterable[tuple[int, int, str]]:
-    import_names: list[tuple[str, int]] = []
+    bindings: list[_ImportBinding] = []
     for node in _walk_python_nodes(source):
         if node.type == "import_statement":
+            line_no = node.start_point[0] + 1
             for child in node.children:
                 if child.type == "dotted_name":
-                    import_names.append(
-                        (_node_text(source, child).split(".", 1)[0], node.start_point[0] + 1)
-                    )
+                    root = _node_text(source, child).split(".", 1)[0]
+                    bindings.append(_ImportBinding(name=root, usage_names=(root,), line=line_no))
                 elif child.type == "aliased_import":
-                    alias = child.child_by_field_name("alias")
-                    name_node = child.child_by_field_name("name")
-                    if alias is not None:
-                        import_names.append((_node_text(source, alias), node.start_point[0] + 1))
-                    elif name_node is not None:
-                        import_names.append(
-                            (
-                                _node_text(source, name_node).split(".", 1)[0],
-                                node.start_point[0] + 1,
-                            )
-                        )
+                    binding = _aliased_module_binding(source, child, line_no=line_no)
+                    if binding is not None:
+                        bindings.append(binding)
         elif node.type == "import_from_statement":
             seen_import_keyword = False
             for child in node.children:
@@ -263,26 +264,62 @@ def _python_phantom_import_matches(source: str) -> Iterable[tuple[int, int, str]
                 if child.type == "aliased_import":
                     alias = child.child_by_field_name("alias")
                     name_node = child.child_by_field_name("name")
+                    line_no = node.start_point[0] + 1
                     if alias is not None:
-                        import_names.append((_node_text(source, alias), node.start_point[0] + 1))
+                        bound = _node_text(source, alias)
+                        bindings.append(
+                            _ImportBinding(name=bound, usage_names=(bound,), line=line_no)
+                        )
                     elif name_node is not None:
-                        import_names.append(
-                            (_node_text(source, name_node), node.start_point[0] + 1)
+                        bound = _node_text(source, name_node)
+                        bindings.append(
+                            _ImportBinding(name=bound, usage_names=(bound,), line=line_no)
                         )
                 elif child.type in {"dotted_name", "identifier"}:
-                    import_names.append((_node_text(source, child), child.start_point[0] + 1))
+                    bound = _node_text(source, child)
+                    bindings.append(
+                        _ImportBinding(
+                            name=bound,
+                            usage_names=(bound,),
+                            line=child.start_point[0] + 1,
+                        )
+                    )
 
-    if not import_names:
+    if not bindings:
         return
 
     type_checking_only = _type_checking_only_imports(source)
     body_without_imports = _strip_python_imports(source)
-    for name, line_no in import_names:
-        if name in type_checking_only:
+    for binding in bindings:
+        if any(name in type_checking_only for name in binding.usage_names):
             continue
-        if re.search(rf"\b{re.escape(name)}\b", body_without_imports):
+        if any(
+            re.search(rf"\b{re.escape(name)}\b", body_without_imports)
+            for name in binding.usage_names
+        ):
             continue
-        yield line_no, line_no, f"import {name} is unused"
+        yield binding.line, binding.line, f"import {binding.name} is unused"
+
+
+def _aliased_module_binding(source: str, node: Node, *, line_no: int) -> _ImportBinding | None:
+    """Build the binding for ``import x.y as z``.
+
+    ``import x.y as z`` binds ``z`` and nothing else — the module name is not
+    in scope afterwards, so ``x.y.thing()`` would raise ``NameError``. The
+    alias is therefore the only spelling that can count as a use; treating the
+    module root as one too would suppress a genuinely dead import whenever the
+    body happens to mention it in a docstring or comment. Without an alias the
+    plain ``import x.y`` form binds the root instead.
+    """
+    name_node = node.child_by_field_name("name")
+    alias_node = node.child_by_field_name("alias")
+    if alias_node is not None:
+        alias = _node_text(source, alias_node)
+        return _ImportBinding(name=alias, usage_names=(alias,), line=line_no)
+    if name_node is None:
+        return None
+    root = _node_text(source, name_node).split(".", 1)[0]
+    return _ImportBinding(name=root, usage_names=(root,), line=line_no)
 
 
 def _js_empty_error_handler_matches(*, source: str) -> Iterable[tuple[int, int, str]]:
@@ -331,6 +368,13 @@ def _collect_import_names(source: str, node: Node) -> set[str]:
             if child.type == "dotted_name":
                 collected.add(_node_text(source, child).split(".", 1)[0])
             elif child.type == "aliased_import":
+                # Mirror `_aliased_module_binding`: `import x.y as z` binds `z`
+                # alone. This set suppresses phantom-import findings, so adding
+                # the module root as well would silence a real one.
+                alias_node = child.child_by_field_name("alias")
+                if alias_node is not None:
+                    collected.add(_node_text(source, alias_node))
+                    continue
                 name_node = child.child_by_field_name("name")
                 if name_node is not None:
                     collected.add(_node_text(source, name_node).split(".", 1)[0])

@@ -46,7 +46,8 @@ def _rule_stem(rule_id: str) -> str:
 def _fixture_paths(kind: str, rule_id: str) -> list[Path]:
     stem = _rule_stem(rule_id)
     root = _POSITIVE if kind == "positive" else _FALSE_POSITIVE
-    return sorted(root.glob(f"{stem}.*"))
+    # `<stem>-<variant>.<ext>` fixtures cover extra cases for the same rule.
+    return sorted({*root.glob(f"{stem}.*"), *root.glob(f"{stem}-*.*")})
 
 
 def _copy_fixture_repo(tmp_path: Path, relative_paths: list[str]) -> Path:
@@ -183,6 +184,65 @@ def test_false_positive_fixture_is_clean(tmp_path: Path, rule_id: str) -> None:
         result = antislop.scan_changed_files(repo_root=repo, changed_files=[rel])
         matched = [finding for finding in result.findings if finding.rule_id == rule_id]
         assert not matched, f"{rule_id} must not fire on {fixture.name}"
+
+
+def test_aliased_import_used_via_alias_is_not_phantom(tmp_path: Path) -> None:
+    antislop = _antislop()
+    rel = "src/aliased.py"
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / rel).write_text(
+        "import numpy as np\n"
+        "from os.path import join as path_join\n"
+        "\n\n"
+        "def build(path: str) -> object:\n"
+        '    return np.array([path_join(path, "file")])\n',
+        encoding="utf-8",
+    )
+    result = antislop.scan_changed_files(repo_root=repo, changed_files=[rel])
+    assert not result.skipped, result.skip_reason
+    assert not [f for f in result.findings if f.rule_id == "antislop/phantom-import"]
+
+
+def test_aliased_import_is_phantom_when_only_module_name_appears(tmp_path: Path) -> None:
+    """`import x as y` binds `y` alone, so a stray `x` must not count as a use.
+
+    `numpy.array(...)` after `import numpy as np` is a NameError, not a
+    reference. Counting the module name as a use would silence a genuinely
+    dead import whenever the body mentions it in prose.
+    """
+    antislop = _antislop()
+    rel = "src/module_name_only.py"
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / rel).write_text(
+        "import numpy as np\n"
+        "\n\n"
+        "def build() -> str:\n"
+        '    """Returns a label. Does not use numpy."""\n'
+        '    return "numpy"\n',
+        encoding="utf-8",
+    )
+    result = antislop.scan_changed_files(repo_root=repo, changed_files=[rel])
+    assert not result.skipped, result.skip_reason
+    phantom = [f for f in result.findings if f.rule_id == "antislop/phantom-import"]
+    assert phantom, "unused aliased import must still be reported"
+
+
+def test_non_utf8_file_is_skipped_without_disabling_run(tmp_path: Path) -> None:
+    antislop = _antislop()
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "binary.py").write_bytes(b"\xff\xfe\x00# import os\n")
+    shutil.copyfile(_POSITIVE / "step-comment.py", repo / "src" / "step-comment.py")
+
+    result = antislop.scan_changed_files(
+        repo_root=repo,
+        changed_files=["src/binary.py", "src/step-comment.py"],
+    )
+    assert not result.skipped, result.skip_reason
+    assert any(finding.rule_id == "antislop/step-comment" for finding in result.findings)
+    assert all(finding.path != "src/binary.py" for finding in result.findings)
 
 
 def test_per_rule_off_honoured(tmp_path: Path) -> None:
