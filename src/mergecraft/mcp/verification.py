@@ -331,12 +331,14 @@ def verify_agent_findings_tool(ctx: ToolContext):
         )
         from mergecraft.findings.ledger import (
             ensure_finding_ledger,
+            ledger_round_index,
             record_over_budget_verifications,
         )
 
         record_over_budget_verifications(
             ensure_finding_ledger(ctx.tool_state),
             skipped_over_budget=plan.skipped_over_budget,
+            round_index=ledger_round_index(ctx.tool_state),
         )
         logger.info(
             "agent-finding verification: {} queued, {} already withdrawn, {} over budget "
@@ -378,8 +380,8 @@ def verify_agent_findings_tool(ctx: ToolContext):
             "mergecraft-verifier subagent, before you publish them. Returns one dispatch "
             "prompt per finding — already carrying the finding, its cited file and the "
             "withdrawn-findings section — capped at the repo's `review.verificationBudget` "
-            "(default 24; `0` = no cap), with findings the author already refuted skipped. "
-            "findings the author already refuted skipped. Returns ready:false until a "
+            "(default 24; `0` = unlimited, not disabled), with findings the author "
+            "already refuted skipped. Returns ready:false until a "
             "deterministic check has run: the judge is a secondary signal, not a "
             "substitute for analyzers or static gates."
         ),

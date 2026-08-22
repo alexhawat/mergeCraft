@@ -7,12 +7,13 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from loguru import logger
 
-from mergecraft.analyzers.budget import (
-    DEFERRED_SECTION_HEADING,
-    FIX_ALL_DEFERRED_HEADING,
-    MECHANICAL_SECTION_HEADING,
-)
 from mergecraft.mcp.comment import add_footer
+from mergecraft.mcp.convergence_runtime import (
+    enforce_recall_deferred_lane_at_publish,
+    prepare_inline_comment_for_publish,
+    strip_recall_inline_comments,
+)
+from mergecraft.mcp.deferred_publish import merge_analyzer_sections_into_review_body
 from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
@@ -25,8 +26,6 @@ from mergecraft.mcp.verdict import (
 )
 from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
 from mergecraft.review_taxonomy import (
-    FINDING_MARKER_PREFIX,
-    finding_fingerprint,
     stamp_finding_fingerprint,
 )
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
@@ -186,89 +185,6 @@ def _comments_to_findings(comments: list[dict[str, Any]]) -> list[dict[str, Any]
     return findings
 
 
-def _deferred_findings_for_publish(ctx: ToolContext) -> list[dict[str, Any]]:
-    analyzer_run = ctx.tool_state.analyzer_run
-    if analyzer_run is None:
-        return []
-    stored = analyzer_run.deferred_findings
-    if stored:
-        return stored
-    return [
-        row
-        for row in analyzer_run.findings
-        if str(row.get("path", "")).strip() and str(row.get("body", "")).strip()
-    ]
-
-
-def _section_present(body: str, heading: str) -> bool:
-    return heading in body
-
-
-def _append_section(body: str, section: str | None, heading: str) -> str:
-    if not section or _section_present(body, heading):
-        return body
-    if body.rstrip():
-        return f"{body.rstrip()}\n\n{section}"
-    return section
-
-
-def _stamp_deferred_section(section: str, findings: list[dict[str, Any]]) -> str:
-    markers: list[str] = []
-    for row in findings:
-        path = str(row.get("path", ""))
-        message = str(row.get("body", row.get("message", "")))
-        if not path or not message:
-            continue
-        marker = f"{FINDING_MARKER_PREFIX}{finding_fingerprint(path=path, body=message)} -->"
-        if marker in section:
-            continue
-        markers.append(marker)
-    if not markers:
-        return section
-    injection = "\n\n".join(markers) + "\n\n"
-    if "</details>" in section:
-        return section.replace("</details>", f"\n\n{injection}</details>", 1)
-    return f"{section}\n\n{injection}"
-
-
-def _inject_deferred_fix_all_brief(body: str, findings: list[dict[str, Any]]) -> str:
-    if not findings or FIX_ALL_DEFERRED_HEADING in body:
-        return body
-    if "### 🤖 Fix all findings" not in body:
-        return body
-    lines: list[str] = []
-    for row in findings:
-        path = str(row.get("path", ""))
-        message = str(row.get("body", row.get("message", "")))
-        if not path or not message:
-            continue
-        line = row.get("line", row.get("start_line"))
-        anchor = f"{path}:{line}" if line is not None else path
-        lines.append(f"- `{anchor}` — {message}")
-    if not lines:
-        return body
-    block = f"{FIX_ALL_DEFERRED_HEADING}\n" + "\n".join(lines)
-    fence_close = "````"
-    idx = body.rfind(fence_close)
-    if idx == -1:
-        return f"{body}\n\n{block}"
-    return f"{body[:idx].rstrip()}\n\n{block}\n\n{body[idx:]}"
-
-
-def _merge_analyzer_sections_into_review_body(ctx: ToolContext, body: str) -> str:
-    analyzer_run = getattr(ctx.tool_state, "analyzer_run", None)
-    if analyzer_run is None:
-        return body
-    merged = body
-    merged = _append_section(merged, analyzer_run.mechanical_section, MECHANICAL_SECTION_HEADING)
-    deferred_findings = _deferred_findings_for_publish(ctx)
-    deferred_section = analyzer_run.deferred_section
-    if deferred_section:
-        deferred_section = _stamp_deferred_section(deferred_section, deferred_findings)
-        merged = _append_section(merged, deferred_section, DEFERRED_SECTION_HEADING)
-    return _inject_deferred_fix_all_brief(merged, deferred_findings)
-
-
 def _legacy_params_to_submission(params: dict[str, Any]) -> dict[str, Any] | None:
     """Map ``create_pull_request_review`` params onto the terminal-verdict shape.
 
@@ -333,11 +249,13 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     elif request_changes:
         event = "REQUEST_CHANGES"
 
+    enforce_recall_deferred_lane_at_publish(ctx)
+
     payload: dict[str, Any] = {"event": event}
     if body:
         await ensure_learnings_review_delta(ctx.tool_state)
         body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body))
-        body_with_sections = _merge_analyzer_sections_into_review_body(ctx, body_with_delta)
+        body_with_sections = merge_analyzer_sections_into_review_body(ctx, body_with_delta)
         if ctx.tool_state.dispatched_lens_ids:
             from mergecraft.modes._pr_summary_format import (
                 merge_dispatched_lenses_into_review_metadata,
@@ -355,9 +273,24 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
 
     inline: list[dict[str, Any]] = []
     for c in comments:
+        path = str(c["path"])
+        line = int(c["line"]) if "line" in c else None
+        collateral = c.get("collateral")
+        collateral_list = (
+            [str(item) for item in collateral if str(item).strip()]
+            if isinstance(collateral, list)
+            else None
+        )
+        prepared_body = prepare_inline_comment_for_publish(
+            ctx,
+            path=path,
+            line=line,
+            body=str(c.get("body") or ""),
+            collateral=collateral_list,
+        )
         item: dict[str, Any] = {
-            "path": c["path"],
-            "body": c.get("body") or "",
+            "path": path,
+            "body": prepared_body,
         }
         if c.get("suggestion"):
             suggestion = str(c["suggestion"])
@@ -375,8 +308,18 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             item["start_line"] = int(c["start_line"])
             item["start_side"] = c.get("start_side") or c.get("side") or "RIGHT"
         inline.append(item)
+    inline = strip_recall_inline_comments(ctx, inline)
     if inline:
         payload["comments"] = inline
+
+    from mergecraft.findings.ledger import (
+        record_deferred_from_analyzer_run,
+        record_published_findings_in_ledger,
+    )
+
+    if ctx.tool_state.analyzer_run is not None:
+        record_deferred_from_analyzer_run(ctx.tool_state, ctx.tool_state.analyzer_run)
+    record_published_findings_in_ledger(ctx.tool_state, inline)
 
     scm = ctx.scm
     approve_fallback = False

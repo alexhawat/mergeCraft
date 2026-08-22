@@ -11,13 +11,15 @@ from typing import TYPE_CHECKING, Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mergecraft.analyzers.scope import _line_intersects_hunks, parse_diff_scope
-from mergecraft.evals.scoring import (
-    DEFAULT_LINE_SLACK,
-    BaselineIssue,
-    ReportedFinding,
-    score_findings,
+from mergecraft.analyzers.scope import line_intersects_hunks, parse_diff_scope
+from mergecraft.evals.finding_rows import (
+    baseline_issues_overlap,
+    finding_line_bounds,
+    finding_row_to_baseline,
+    finding_row_to_reported,
+    normalize_finding_path,
 )
+from mergecraft.evals.scoring import DEFAULT_LINE_SLACK, ReportedFinding, score_findings
 from mergecraft.findings.ledger import FindingLedger
 
 if TYPE_CHECKING:
@@ -96,132 +98,24 @@ class RecallPassCorpusReport(BaseModel):
     without_recall: ConvergenceMetrics
 
 
-_RECALL_CORPUS_DIFF = """\
-diff --git a/src/app.py b/src/app.py
-index 1111111..2222222 100644
---- a/src/app.py
-+++ b/src/app.py
-@@ -10,3 +10,6 @@ def handler():
-     pass
-+    timeout = None
-+    return timeout
-diff --git a/src/util.py b/src/util.py
-index 3333333..4444444 100644
---- a/src/util.py
-+++ b/src/util.py
-@@ -40,3 +40,5 @@ def helper():
-     pass
-+    cache = {}
-+    return cache
-"""
-
-
-def _recall_corpus_body(label: str) -> str:
-    return f"{label} — recall pass corpus fixture."
-
-
-def _recall_case_id(index: int) -> str:
-    return f"recall-pass-corpus-{index:03d}"
-
-
-def _recall_corpus_cases() -> list[tuple[str, str, str]]:
-    return [
-        (
-            _recall_case_id(1),
-            _recall_corpus_body("missing timeout on retry"),
-            _recall_corpus_body("unchecked null before return"),
-        ),
-        (
-            _recall_case_id(2),
-            _recall_corpus_body("race when claiming row"),
-            _recall_corpus_body("retry loop never assigns timeout"),
-        ),
-        (
-            _recall_case_id(3),
-            _recall_corpus_body("stale cache key after rename"),
-            _recall_corpus_body("caller still imports removed symbol"),
-        ),
-    ]
-
-
-def _recall_round_one(
-    *,
-    case_id: str,
-    drafted_body: str,
-    missed_body: str,
-    with_recall: bool,
-) -> ConvergenceRound:
-    from mergecraft.review_taxonomy import finding_fingerprint
-
-    path = "src/app.py"
-    drafted_fp = finding_fingerprint(path=path, body=drafted_body)
-    missed_fp = finding_fingerprint(path="src/util.py", body=missed_body)
-    drafted_row = {
-        "fingerprint": drafted_fp,
-        "path": path,
-        "start_line": 12,
-        "end_line": 12,
-        "body": drafted_body,
-    }
-    missed_row = {
-        "fingerprint": missed_fp,
-        "path": "src/util.py",
-        "start_line": 42,
-        "end_line": 42,
-        "body": missed_body,
-    }
-    ledger = FindingLedger()
-    ledger.record(drafted_fp, "open", source=case_id, round_index=1)
-    generated = [drafted_fp]
-    findings = [drafted_row]
-    if with_recall:
-        ledger.record(missed_fp, "deferred", source=case_id, round_index=1)
-        generated.append(missed_fp)
-        findings.append(missed_row)
-    return ConvergenceRound(
-        round_index=1,
-        ledger=ledger,
-        findings=findings,
-        generated_fingerprints=generated,
-        diff_text=_RECALL_CORPUS_DIFF,
-    )
-
-
-def _recall_round_two(*, case_id: str, missed_body: str) -> ConvergenceRound:
-    from mergecraft.review_taxonomy import finding_fingerprint
-
-    missed_fp = finding_fingerprint(path="src/util.py", body=missed_body)
-    ledger = FindingLedger()
-    ledger.record(missed_fp, "open", source=case_id, round_index=2)
-    return ConvergenceRound(
-        round_index=2,
-        ledger=ledger,
-        findings=[
-            {
-                "fingerprint": missed_fp,
-                "path": "src/util.py",
-                "start_line": 42,
-                "end_line": 42,
-                "body": missed_body,
-            }
-        ],
-        generated_fingerprints=[missed_fp],
-        diff_text=_RECALL_CORPUS_DIFF,
-    )
-
-
 def _score_recall_corpus(*, with_recall: bool) -> ConvergenceMetrics:
+    from mergecraft.evals.recall_pass_corpus import (
+        recall_corpus_cases,
+        recall_round_one,
+        recall_round_two,
+    )
+
     case_results: list[ConvergenceCaseResult] = []
-    for case_id, drafted, missed in _recall_corpus_cases():
+    for case_id, drafted, missed in recall_corpus_cases():
         report = score_convergence(
             [
-                _recall_round_one(
+                recall_round_one(
                     case_id=case_id,
                     drafted_body=drafted,
                     missed_body=missed,
                     with_recall=with_recall,
                 ),
-                _recall_round_two(case_id=case_id, missed_body=missed),
+                recall_round_two(case_id=case_id, missed_body=missed),
             ]
         )
         case_results.append(ConvergenceCaseResult(case_id=case_id, report=report))
@@ -233,57 +127,6 @@ def evaluate_recall_pass_corpus() -> RecallPassCorpusReport:
     without_recall = _score_recall_corpus(with_recall=False)
     with_recall = _score_recall_corpus(with_recall=True)
     return RecallPassCorpusReport(with_recall=with_recall, without_recall=without_recall)
-
-
-RECALL_PASS_W0_BASELINE: Final[ConvergenceMetrics] = ConvergenceMetrics(
-    cases_total=3,
-    mean_first_pass_recall=0.5,
-    mean_leakage_rate=0.0,
-    case_results=[],
-)
-
-
-def _normalize_path(value: str) -> str:
-    text = value.strip().replace("\\", "/")
-    for prefix in ("./", "a/", "b/"):
-        if text.startswith(prefix):
-            text = text[len(prefix) :]
-    return text
-
-
-def _line_bounds(row: dict[str, Any]) -> tuple[int, int]:
-    try:
-        start = int(row.get("start_line") or row.get("line") or 1)
-    except (TypeError, ValueError):  # fmt: skip
-        start = 1
-    try:
-        end = int(row.get("end_line") or start)
-    except (TypeError, ValueError):  # fmt: skip
-        end = start
-    if end < start:
-        start, end = end, start
-    return start, end
-
-
-def _to_baseline(issue_id: str, row: dict[str, Any]) -> BaselineIssue:
-    start, end = _line_bounds(row)
-    return BaselineIssue(
-        id=issue_id,
-        path=_normalize_path(str(row.get("path") or "")),
-        start_line=start,
-        end_line=end,
-        title=str(row.get("body") or row.get("message") or ""),
-    )
-
-
-def _to_reported(row: dict[str, Any]) -> ReportedFinding:
-    start, end = _line_bounds(row)
-    return ReportedFinding(
-        path=_normalize_path(str(row.get("path") or "")),
-        start_line=start,
-        end_line=end,
-        message=str(row.get("body") or row.get("message") or ""),
-    )
 
 
 def _ledger_state(ledger: FindingLedger, fingerprint: str) -> str | None:
@@ -315,18 +158,9 @@ def _attributable_to_round1(
     if not round_one_diff.strip():
         return True
     scope = parse_diff_scope(round_one_diff)
-    path = _normalize_path(str(finding.get("path") or ""))
-    start, end = _line_bounds(finding)
-    return _line_intersects_hunks(path, start, end, scope)
-
-
-def _issues_overlap(first: BaselineIssue, second: BaselineIssue, *, slack: int) -> bool:
-    """True when two baseline rows share a path and overlapping line spans."""
-    if not first.path or first.path != second.path:
-        return False
-    return (
-        second.start_line <= first.end_line + slack and first.start_line - slack <= second.end_line
-    )
+    path = normalize_finding_path(str(finding.get("path") or ""))
+    start, end = finding_line_bounds(finding)
+    return line_intersects_hunks(path, start, end, scope)
 
 
 def _cluster_attributable_fingerprints(
@@ -338,10 +172,10 @@ def _cluster_attributable_fingerprints(
     """Collapse locality-overlapping ground-truth rows to one canonical fingerprint."""
     canonical: list[str] = []
     for fingerprint in sorted(attributable_fps):
-        candidate = _to_baseline(fingerprint, ground_truth_by_fp[fingerprint])
+        candidate = finding_row_to_baseline(fingerprint, ground_truth_by_fp[fingerprint])
         if any(
-            _issues_overlap(
-                _to_baseline(representative, ground_truth_by_fp[representative]),
+            baseline_issues_overlap(
+                finding_row_to_baseline(representative, ground_truth_by_fp[representative]),
                 candidate,
                 slack=slack,
             )
@@ -384,7 +218,7 @@ def score_convergence(
     )
 
     attributable_issues = [
-        _to_baseline(fp, ground_truth_by_fp[fp]) for fp in round_one_attributable
+        finding_row_to_baseline(fp, ground_truth_by_fp[fp]) for fp in round_one_attributable
     ]
 
     surfaced_findings: list[ReportedFinding] = []
@@ -409,7 +243,7 @@ def score_convergence(
                 round_one_surfaced += 1
                 row = finding_by_fp.get(fingerprint)
                 if row is not None:
-                    surfaced_findings.append(_to_reported(row))
+                    surfaced_findings.append(finding_row_to_reported(row))
 
     recall_report = score_findings(attributable_issues, surfaced_findings, slack=slack)
     leakage_rate = 0.0
@@ -494,3 +328,35 @@ def fold_convergence_reports(
         mean_leakage_rate=mean_leakage,
         case_results=case_results,
     )
+
+
+def _build_recall_baseline_case_results() -> list[ConvergenceCaseResult]:
+    from mergecraft.evals.recall_pass_corpus import (
+        recall_corpus_cases,
+        recall_round_one,
+        recall_round_two,
+    )
+
+    rows: list[ConvergenceCaseResult] = []
+    for case_id, drafted, missed in recall_corpus_cases():
+        report = score_convergence(
+            [
+                recall_round_one(
+                    case_id=case_id,
+                    drafted_body=drafted,
+                    missed_body=missed,
+                    with_recall=False,
+                ),
+                recall_round_two(case_id=case_id, missed_body=missed),
+            ]
+        )
+        rows.append(ConvergenceCaseResult(case_id=case_id, report=report))
+    return rows
+
+
+RECALL_PASS_W0_BASELINE: Final[ConvergenceMetrics] = ConvergenceMetrics(
+    cases_total=3,
+    mean_first_pass_recall=0.5,
+    mean_leakage_rate=0.0,
+    case_results=_build_recall_baseline_case_results(),
+)

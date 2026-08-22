@@ -78,7 +78,23 @@ def _seed_deferred_analyzer_run(
     deferred_section = _deferred_overflow_section(path=path, body=body)
     run_kwargs: dict[str, Any] = {
         "ran": True,
-        "findings": [{"path": path, "severity": "Major", "body": body}],
+        "findings": [
+            {
+                "path": path,
+                "severity": "Major",
+                "body": body,
+                "fingerprint": finding_fingerprint(path=path, body=body),
+            }
+        ],
+        "deferred_findings": [
+            {
+                "path": path,
+                "line": 9,
+                "body": body,
+                "severity": "Major",
+                "fingerprint": finding_fingerprint(path=path, body=body),
+            }
+        ],
         "mechanical_section": "### 🔧 Mechanical findings",
     }
     if "deferred_section" in AnalyzerRunState.__dataclass_fields__:

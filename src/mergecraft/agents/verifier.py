@@ -286,9 +286,10 @@ def plan_agent_verifications(
     Args:
         findings: The agent's drafted findings, pre-publication.
         budget: Maximum dispatches for this run — the repo's
-            ``review.verificationBudget`` (default 24). ``0`` means no cap.
-            Verification depth is costed separately from ``analyzers.inlineBudget``
-            so a placement knob cannot silently decide publishability (RC3, D2).
+            ``review.verificationBudget`` (default 24). ``0`` means unlimited
+            (no cap), not disabled. Verification depth is costed separately from
+            ``analyzers.inlineBudget`` so a placement knob cannot silently decide
+            publishability (RC3, D2).
         learnings_text: The learnings file contents, read for its
             ``WITHDRAWN_FINDINGS_HEADING`` section.
         repo_root: Checkout root, used to resolve each finding's cited file.

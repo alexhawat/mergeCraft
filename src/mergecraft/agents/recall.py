@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from mergecraft.agents.gates import subagent_denied_tool_names
-from mergecraft.analyzers.budget import FindingPlacement, place_findings
 from mergecraft.findings.dedup import dedupe_findings, dedupe_findings_with_indices
 
 if TYPE_CHECKING:
@@ -26,8 +25,6 @@ __all__ = [
     "RecallPassPlan",
     "build_recall_pass_brief",
     "filter_novel_recall_findings",
-    "place_recall_findings",
-    "plan_recall_pass",
     "recall_denied_tool_names",
 ]
 
@@ -107,27 +104,12 @@ def filter_novel_recall_findings(
     """Return recalled findings that are not duplicates of the draft list."""
     if not recalled:
         return []
-    from mergecraft.findings.dedup import _location_key
+    from mergecraft.findings.dedup import location_key
 
     draft_rows = dedupe_findings_with_indices(list(draft)).findings
-    occupied = {_location_key(finding) for finding in draft_rows}
-    candidates = [finding for finding in recalled if _location_key(finding) not in occupied]
+    occupied = {location_key(finding) for finding in draft_rows}
+    candidates = [finding for finding in recalled if location_key(finding) not in occupied]
     return dedupe_findings(candidates)
-
-
-def place_recall_findings(findings: Sequence[Finding]) -> FindingPlacement:
-    """D1 — recall output always lands in the deferred lane."""
-    return place_findings(list(findings), inline_budget=0)
-
-
-def plan_recall_pass(
-    brief: str,
-    *,
-    budget: int,
-    timeout_s: int,
-) -> RecallPassPlan:
-    """Return the bounded recall dispatch plan for one orchestrator run."""
-    return RecallPassPlan(budget=budget, timeout_s=timeout_s, brief=brief)
 
 
 def recall_denied_tool_names(ctx: ToolContext) -> list[str]:

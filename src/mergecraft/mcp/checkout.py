@@ -268,14 +268,6 @@ def checkout_pr_tool(ctx: ToolContext):
         prior_reviews = await _list_pull_reviews(ctx, pull_number=pull_number)
         round_index = review_round_index(prior_reviews)
         ctx.tool_state.review_round_index = round_index
-        if ctx.budget_tracker is not None:
-            from mergecraft.utils.run_bounds import resolve_run_bounds
-
-            repo_settings = load_repo_settings(root=Path(cwd), load_learnings_files=False)
-            ctx.budget_tracker.bounds = resolve_run_bounds(
-                settings=repo_settings,
-                round_index=round_index,
-            )
 
         # A re-review should pay for the new commits, not the whole PR. The key is
         # emitted only when the range is real: the prompt tells the reviewer to
@@ -368,38 +360,15 @@ def checkout_pr_tool(ctx: ToolContext):
 
         logger.info("checked out PR #{} -> {}", pull_number, local_branch)
         ctx.tool_state.review_phase = "ESTABLISH_SCOPE"
-        from mergecraft.findings.ledger import hydrate_finding_ledger_from_progress_comment
+        from mergecraft.mcp.review_context import hydrate_review_context
         from mergecraft.mcp.verdict import ReviewPhase, stamp_review_phase_on_active_span
 
-        await hydrate_finding_ledger_from_progress_comment(ctx)
-        if (
-            ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE
-            and state.incremental_changed_paths
-        ):
-            from datetime import UTC, datetime
-
-            from mergecraft.findings.ledger import ensure_finding_ledger
-            from mergecraft.modes._incremental_promotion import (
-                deferred_findings_from_reviews,
-                promote_deferred_for_incremental_paths,
-            )
-
-            ledger = ensure_finding_ledger(ctx.tool_state)
-            deferred_rows = deferred_findings_from_reviews(prior_reviews)
-            stamp = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-            promoted = promote_deferred_for_incremental_paths(
-                ledger,
-                deferred_findings=deferred_rows,
-                incremental_changed_paths=state.incremental_changed_paths,
-                round_index=round_index,
-                recorded_at=stamp,
-            )
-            if promoted:
-                logger.info(
-                    "promoted {} deferred finding(s) for incremental paths on PR #{}",
-                    len(promoted),
-                    pull_number,
-                )
+        await hydrate_review_context(
+            ctx,
+            prior_reviews=prior_reviews,
+            round_index=round_index,
+            incremental_changed_paths=state.incremental_changed_paths,
+        )
         stamp_review_phase_on_active_span(ReviewPhase.ESTABLISH_SCOPE)
         return result
 

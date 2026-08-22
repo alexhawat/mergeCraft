@@ -26,15 +26,7 @@ from mergecraft.agents.verifier import (
     judge_pin,
     pinned_judge_model,
 )
-from mergecraft.evals.convergence import (
-    PRE_W1_LEAKAGE_BASELINE_SCENARIO,
-    ConvergenceCaseResult,
-    ConvergenceMetrics,
-    ConvergenceRound,
-    build_pre_w1_leakage_round,
-    fold_convergence_reports,
-    score_convergence,
-)
+from mergecraft.evals.convergence import ConvergenceCaseResult, ConvergenceMetrics, ConvergenceRound
 from mergecraft.evals.scoring import DEFAULT_LINE_SLACK, AggregateScoreReport
 from mergecraft.evals.store import (
     CASE_STATUS_BLOCKED,
@@ -42,9 +34,7 @@ from mergecraft.evals.store import (
     CASE_STATUS_REGRESSION,
     DEFAULT_BANK_DIR,
     Case,
-    convergence_rounds_from_case,
     list_cases,
-    list_multi_round_cases,
     replay_case,
 )
 from mergecraft.modes import modes
@@ -682,100 +672,11 @@ def replay_bank(
     return result, path
 
 
-def load_convergence_scenarios(
-    bank_dir: Path = DEFAULT_BANK_DIR,
-    *,
-    include_builtin_baseline: bool = False,
-) -> list[tuple[str, list[ConvergenceRound]]]:
-    """Load multi-round convergence scenarios from the eval bank (W10)."""
-    scenarios: list[tuple[str, list[ConvergenceRound]]] = [
-        (case.id, convergence_rounds_from_case(case)) for case in list_multi_round_cases(bank_dir)
-    ]
-    if include_builtin_baseline:
-        scenarios.append((PRE_W1_LEAKAGE_BASELINE_SCENARIO, [build_pre_w1_leakage_round()]))
-    return scenarios
-
-
-def run_convergence_eval(
-    scenarios: list[tuple[str, list[ConvergenceRound]]] | None = None,
-    *,
-    bank_dir: Path = DEFAULT_BANK_DIR,
-    providers: tuple[str, ...] = DEFAULT_BENCHMARK_PROVIDERS,
-    include_builtin_baseline: bool = False,
-) -> BenchmarkResultSet:
-    """Score multi-round scenarios and fold convergence metrics (RC6, W10)."""
-    if scenarios is None:
-        scenarios = load_convergence_scenarios(
-            bank_dir,
-            include_builtin_baseline=include_builtin_baseline,
-        )
-    if not scenarios:
-        scenarios = [(PRE_W1_LEAKAGE_BASELINE_SCENARIO, [build_pre_w1_leakage_round()])]
-    case_results = [
-        ConvergenceCaseResult(case_id=case_id, report=score_convergence(rounds))
-        for case_id, rounds in scenarios
-    ]
-    convergence = fold_convergence_reports(case_results)
-    metrics = BenchmarkMetrics(
-        cases_total=convergence.cases_total,
-        cases_replayable=0,
-        cases_passed=0,
-        cases_regression=0,
-        cases_blocked=0,
-        decision_replay_pass_rate=0.0,
-        unsafe_approval_rate=0.0,
-        clean_block_rate=0.0,
-        inconclusive_rate=0.0,
-        gate_matrix=GateMatrix(
-            buggy_total=0,
-            buggy_correct_block=0,
-            buggy_unsafe_approval=0,
-            buggy_inconclusive=0,
-            clean_total=0,
-            clean_correct_approval=0,
-            clean_unsafe_block=0,
-            clean_inconclusive=0,
-        ),
-        by_corpus_class={},
-    )
-    pins = VersionPins(
-        rubric_version=VERIFIER_RUBRIC_VERSION,
-        judge_pins=_judge_pins(providers),
-        mode_prompt_versions=_mode_prompt_versions(),
-        corpus_commit=_git_corpus_commit(),
-        recorded_at=datetime.now(UTC),
-        mergecraft_commit=_git_head_sha(),
-        mergecraft_version=mergecraft.__version__,
-        reviewing_model=_reviewing_model_pins(providers),
-        scorer_version=SCORER_VERSION,
-        line_slack=DEFAULT_LINE_SLACK,
-    )
-    return BenchmarkResultSet(
-        pins=pins,
-        metrics=metrics,
-        case_results=[],
-        convergence=convergence,
-    )
-
-
-def replay_convergence(
-    *,
-    bank_dir: Path = DEFAULT_BANK_DIR,
-    results_dir: Path = DEFAULT_RESULTS_DIR,
-    providers: tuple[str, ...] = DEFAULT_BENCHMARK_PROVIDERS,
-    scenarios: list[tuple[str, list[ConvergenceRound]]] | None = None,
-    include_builtin_baseline: bool = False,
-) -> tuple[BenchmarkResultSet, Path]:
-    """Run convergence eval and write a versioned result set under ``evals/results/``."""
-    result = run_convergence_eval(
-        scenarios,
-        bank_dir=bank_dir,
-        providers=providers,
-        include_builtin_baseline=include_builtin_baseline,
-    )
-    path = write_result_set(result, results_dir=results_dir, update_latest=False)
-    return result, path
-
+from mergecraft.evals.convergence_benchmark import (  # noqa: E402
+    load_convergence_scenarios,
+    replay_convergence,
+    run_convergence_eval,
+)
 
 __all__ = [
     "DEFAULT_BENCHMARK_PROVIDERS",

@@ -209,11 +209,10 @@ def test_recall_pass_output_excludes_findings_already_drafted() -> None:
 
 def test_recall_findings_land_in_the_deferred_lane_regardless_of_claimed_severity() -> None:
     """D1 — recall output is always non-blocking deferred placement."""
-    recall = _recall_mod()
     budget = import_module("mergecraft.analyzers.budget")
 
     critical = _agent_finding(body="Unbounded retry can wedge the queue.", severity="Critical")
-    placement = recall.place_recall_findings([critical])
+    placement = budget.place_findings([critical], inline_budget=0)
 
     assert isinstance(placement, budget.FindingPlacement)
     assert placement.inline == []
@@ -260,11 +259,8 @@ agents:
     assert limits.timeout_s == 90
 
     recall = _recall_mod()
-    plan = recall.plan_recall_pass(
-        recall.build_recall_pass_brief(diff_text=_SAMPLE_DIFF, draft_findings=[]),
-        budget=limits.budget,
-        timeout_s=limits.timeout_s,
-    )
+    brief = recall.build_recall_pass_brief(diff_text=_SAMPLE_DIFF, draft_findings=[])
+    plan = recall.RecallPassPlan(budget=limits.budget, timeout_s=limits.timeout_s, brief=brief)
     assert plan.budget == 4
     assert plan.timeout_s == 90
 

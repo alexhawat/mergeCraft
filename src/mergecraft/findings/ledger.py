@@ -9,11 +9,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any
+from urllib.parse import quote, unquote
 
 from loguru import logger
 
-from mergecraft.findings.lifecycle import LifecycleRecord, LifecycleState
+from mergecraft.findings.lifecycle import LifecycleRecord, LifecycleState, validate_lifecycle_state
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 LEDGER_MARKER_PREFIX: str = "<!-- mergecraft-ledger:v1:"
 LEDGER_SCHEMA_VERSION: str = "v1"
 
-_LEDGER_MARKER_RE = re.compile(r"<!-- mergecraft-ledger:v1:([0-9a-f]+):([a-z-]+) -->")
+_LEDGER_MARKER_RE = re.compile(r"<!-- mergecraft-ledger:v1:([0-9a-f]+):([a-z-]+)(?::([^>]*?))? -->")
 
 
 def files_github_issues() -> bool:
@@ -88,16 +89,20 @@ class FindingLedger:
         *,
         reason: str,
         recorded_at: str,
+        round_index: int | None = None,
     ) -> LifecycleRecord:
         """Promote a deferred finding back to ``open`` with an audit trail (convention 4)."""
         prior = self._records.get(fingerprint)
+        resolved_round = round_index
+        if resolved_round is None:
+            resolved_round = (
+                prior.round_index if prior is not None and prior.round_index is not None else 1
+            )
         return self.record(
             fingerprint,
             "open",
             source=(prior.source if prior is not None and prior.source else "promotion"),
-            round_index=(
-                prior.round_index if prior is not None and prior.round_index is not None else 1
-            ),
+            round_index=resolved_round,
             reason=reason,
             recorded_at=recorded_at,
         )
@@ -116,16 +121,39 @@ class FindingLedger:
         """Parse ledger markers from a progress-comment body."""
         records: dict[str, LifecycleRecord] = {}
         for match in _LEDGER_MARKER_RE.finditer(body):
-            fingerprint, raw_state = match.group(1), match.group(2)
-            if raw_state not in _LEDGER_STATES:
+            fingerprint, raw_state, encoded_path = match.group(1), match.group(2), match.group(3)
+            try:
+                state = validate_lifecycle_state(raw_state)
+            except ValueError:
+                logger.warning(
+                    "finding ledger: skipping marker with unknown state {} for fingerprint {}",
+                    raw_state,
+                    fingerprint,
+                )
                 continue
-            state = cast("LifecycleState", raw_state)  # validated against _LEDGER_STATES
-            records[fingerprint] = LifecycleRecord(fingerprint=fingerprint, state=state)
+            reason = None
+            if encoded_path:
+                reason = f"path:{unquote(encoded_path)}"
+            records[fingerprint] = LifecycleRecord(
+                fingerprint=fingerprint,
+                state=state,
+                reason=reason,
+            )
         return cls(_records=records)
 
 
+def ledger_round_index(tool_state: ToolState) -> int:
+    """Return the active 1-based review round for ledger ``record_*`` call sites."""
+    return max(int(getattr(tool_state, "review_round_index", 1) or 1), 1)
+
+
 def _marker_lines(record: LifecycleRecord) -> list[str]:
-    return [f"{LEDGER_MARKER_PREFIX}{record.fingerprint}:{record.state} -->"]
+    # Marker format: <!-- mergecraft-ledger:v1:{fingerprint}:{state} -->
+    # Optional 4th segment URL-encodes a cited path for deferred promotion (v1.1).
+    path_suffix = ""
+    if record.reason and record.reason.startswith("path:"):
+        path_suffix = f":{quote(record.reason.removeprefix('path:'), safe='')}"
+    return [f"{LEDGER_MARKER_PREFIX}{record.fingerprint}:{record.state}{path_suffix} -->"]
 
 
 def merge_ledger_into_comment(body: str, *, records: Iterable[LifecycleRecord]) -> str:
@@ -160,30 +188,61 @@ def record_deferred_from_analyzer_run(
     tool_state: ToolState,
     run_state: AnalyzerRunState,
     *,
-    round_index: int = 1,
+    round_index: int | None = None,
 ) -> None:
     """Record analyzer overflow findings as ``deferred``."""
+    resolved_round = ledger_round_index(tool_state) if round_index is None else round_index
     ledger = ensure_finding_ledger(tool_state)
     for row in run_state.deferred_findings:
         fingerprint = str(row.get("fingerprint") or "").strip()
         if fingerprint:
+            path = str(row.get("path") or "").strip()
             ledger.record(
                 fingerprint,
                 "deferred",
                 source="overflow",
-                round_index=round_index,
+                round_index=resolved_round,
+                reason=f"path:{path}" if path else None,
             )
 
 
-def record_withdrawn_in_ledger(tool_state: ToolState, *, round_index: int = 1) -> None:
+def record_published_findings_in_ledger(
+    tool_state: ToolState,
+    findings: Sequence[dict[str, Any]],
+    *,
+    round_index: int | None = None,
+) -> None:
+    """Record inline/published findings as ``open`` in the cross-round ledger (RC4)."""
+    from mergecraft.review_taxonomy import finding_fingerprint
+
+    resolved_round = ledger_round_index(tool_state) if round_index is None else round_index
+    ledger = ensure_finding_ledger(tool_state)
+    for row in findings:
+        fingerprint = str(row.get("fingerprint") or "").strip()
+        if not fingerprint:
+            path = str(row.get("path") or "")
+            body = str(row.get("body") or row.get("message") or "")
+            if path and body:
+                fingerprint = finding_fingerprint(path=path, body=body)
+        if fingerprint:
+            ledger.record(
+                fingerprint,
+                "open",
+                source="inline",
+                round_index=resolved_round,
+            )
+
+
+def record_withdrawn_in_ledger(tool_state: ToolState, *, round_index: int | None = None) -> None:
     """Mirror ``ToolState.withdrawn_fingerprints`` into the ledger (X2)."""
+    resolved_round = ledger_round_index(tool_state) if round_index is None else round_index
     ledger = ensure_finding_ledger(tool_state)
     for fingerprint in tool_state.withdrawn_fingerprints:
         ledger.record(
             fingerprint,
             "withdrawn",
             source="verifier-drop",
-            round_index=round_index,
+            round_index=resolved_round,
         )
 
 
@@ -226,9 +285,11 @@ __all__ = [
     "ensure_finding_ledger",
     "files_github_issues",
     "hydrate_finding_ledger_from_progress_comment",
+    "ledger_round_index",
     "merge_ledger_into_comment",
     "persist_to_progress_comment",
     "record_deferred_from_analyzer_run",
     "record_over_budget_verifications",
+    "record_published_findings_in_ledger",
     "record_withdrawn_in_ledger",
 ]

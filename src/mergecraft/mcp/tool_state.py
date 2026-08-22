@@ -438,6 +438,27 @@ def record_lens_execution(
     tool_state.dispatched_lens_ids = tuple(dispatched_lens_ids)
 
 
+def append_dispatched_lens(tool_state: ToolState, agent_id: str) -> None:
+    """Append one lens id when a lens subagent completes (RC7)."""
+    from mergecraft.review.lens_routing import lens_id_from_agent_id
+
+    lens_id = lens_id_from_agent_id(agent_id)
+    if not lens_id:
+        return
+    current = tuple(tool_state.dispatched_lens_ids)
+    if lens_id in current:
+        return
+    decision = tool_state.lens_routing_decision
+    if decision is None:
+        tool_state.dispatched_lens_ids = (*current, lens_id)
+        return
+    record_lens_execution(
+        tool_state,
+        routing_decision=decision,
+        dispatched_lens_ids=(*current, lens_id),
+    )
+
+
 def repo_key(owner: str, name: str) -> str:
     return f"{owner}/{name}".lower()
 

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from mergecraft.analyzers.scope import (
-    _line_intersects_hunks,
     iter_added_diff_lines,
+    line_intersects_hunks,
     parse_diff_scope,
 )
 
@@ -22,7 +22,7 @@ def is_first_pass_miss_line(path: str, line: int, incremental_diff_text: str) ->
     if (path, line) in added:
         return False
     scope = parse_diff_scope(incremental_diff_text)
-    return _line_intersects_hunks(path, line, line, scope)
+    return line_intersects_hunks(path, line, line, scope)
 
 
 def apply_first_pass_miss_label(

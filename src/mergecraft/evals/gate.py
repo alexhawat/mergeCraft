@@ -36,7 +36,7 @@ The CLI shell is ``mergecraft eval gate --baseline … --candidate …``.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -69,7 +69,13 @@ _DETECTION_GATE_METRICS: Final[tuple[tuple[str, Direction], ...]] = (
 #: a ``convergence`` block (W10).
 _CONVERGENCE_GATE_METRICS: Final[tuple[tuple[str, Direction], ...]] = (
     ("convergence.mean_first_pass_recall", "higher_is_better"),
+    ("convergence.mean_leakage_rate", "lower_is_better"),
 )
+
+_CONVERGENCE_METRIC_ACCESSORS: Final[dict[str, Any]] = {
+    "convergence.mean_first_pass_recall": lambda convergence: convergence.mean_first_pass_recall,
+    "convergence.mean_leakage_rate": lambda convergence: convergence.mean_leakage_rate,
+}
 
 
 class MetricDelta(BaseModel):
@@ -130,10 +136,11 @@ def _convergence_metric_value(result: BenchmarkResultSet, metric: str) -> float:
     if convergence is None:
         msg = f"result set has no convergence block for {metric!r}"
         raise ValueError(msg)
-    if metric == "convergence.mean_first_pass_recall":
-        return convergence.mean_first_pass_recall
-    msg = f"unknown convergence gate metric {metric!r}"
-    raise ValueError(msg)
+    accessor = _CONVERGENCE_METRIC_ACCESSORS.get(metric)
+    if accessor is None:
+        msg = f"unknown convergence gate metric {metric!r}"
+        raise ValueError(msg)
+    return float(accessor(convergence))
 
 
 def _append_dg1_precision_floor(deltas: list[MetricDelta]) -> None:

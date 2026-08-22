@@ -35,15 +35,13 @@ def coerce_agent_finding(item: Any) -> AgentFinding:
 
 def _lens_from_current_agent() -> str | None:
     """Resolve lens attribution from the dispatch-issued agent id (D9, RC8)."""
+    from mergecraft.review.lens_routing import lens_id_from_agent_id
     from mergecraft.tracing.signals import current_agent_id
 
     agent_id = current_agent_id()
     if agent_id is None:
         return None
-    prefix = "lens-"
-    if agent_id.startswith(prefix):
-        return agent_id[len(prefix) :]
-    return None
+    return lens_id_from_agent_id(agent_id)
 
 
 def agent_finding_to_finding(

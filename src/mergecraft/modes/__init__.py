@@ -202,9 +202,6 @@ def _expand_template(
     text = text.replace("${finalizeStep}", finalize_step)
     text = text.replace("${PR_SUMMARY_FORMAT}", PR_SUMMARY_FORMAT)
     text = text.replace("${LENS_MENU_BLOCK}", _render_lens_menu_block())
-    text = text.replace("${REVIEWER_AGENT_NAME}", REVIEWER_AGENT_NAME)
-    text = text.replace("${VERIFIER_AGENT_NAME}", VERIFIER_AGENT_NAME)
-    text = text.replace("${RECALL_AGENT_NAME}", RECALL_AGENT_NAME)
 
     def signed_simple(m: re.Match[str]) -> str:
         return m.group(1) if signed_commits else m.group(2)

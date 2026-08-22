@@ -138,11 +138,14 @@ async def _fetch_progress_comment_body(
     nodes = (
         data.get("repository", {}).get("pullRequest", {}).get("comments", {}).get("nodes", []) or []
     )
+    progress_body = ""
     for node in nodes:
         body = str(node.get("body") or "")
-        if LEDGER_MARKER_PREFIX in body or "mergeCraft progress" in body:
+        if LEDGER_MARKER_PREFIX in body:
             return body
-    return ""
+        if "mergeCraft progress" in body or "*via mergecraft*" in body.lower():
+            progress_body = body
+    return progress_body
 
 
 def _render_ledger_markdown(records: list[LifecycleRecord], *, pull_number: int) -> str:

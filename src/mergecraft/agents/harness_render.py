@@ -383,6 +383,16 @@ def render_for_run(
         if selected is not None
         else default_subagent_selection(registry, recall_pass=settings.review.recall_pass)
     )
+    from mergecraft.mcp.convergence_runtime import subagent_limits_for_round
+
+    for role in (AgentRole.verifier, AgentRole.recall):
+        if role is AgentRole.recall and not settings.review.recall_pass:
+            continue
+        subagent_limits_for_round(
+            registry.resolve_role(role),
+            settings=settings,
+            tool_state=ctx.tool_state,
+        )
     return render_agents(registry, selected=roster, harness=harness, ctx=ctx)
 
 
