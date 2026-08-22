@@ -34,3 +34,48 @@ def test_version_is_resolved_not_a_placeholder() -> None:
         "no installed `merge-craft` distribution — run `make install` "
         "(a placeholder version would poison cache keys and telemetry)"
     )
+
+
+def test_real_version_passes_the_payload_compatibility_gate() -> None:
+    """The shipped version must survive `validate_compatibility` (#430 review).
+
+    `validate_compatibility` parsed both sides as strict SemVer, so a PEP 440
+    pre-release like `0.1.0a1` raised. Every `~mergecraft` JSON payload calls it
+    with the package version, so this was a runtime regression on any
+    pre-release build, not just a test failure.
+    """
+    from mergecraft.utils.payload import validate_compatibility
+
+    validate_compatibility(mergecraft.__version__, mergecraft.__version__)
+
+
+def test_pep440_prerelease_is_compatible_with_its_release() -> None:
+    """`0.1.0a1` and `0.1.0` agree on major/minor, which is what the policy compares."""
+    from mergecraft.utils.payload import validate_compatibility
+
+    validate_compatibility("0.1.0", "0.1.0a1")
+    validate_compatibility("0.1.0-a1", "0.1.0a1")
+
+
+def test_unparseable_action_version_names_the_action() -> None:
+    """A bad action version must not be reported as a bad payload version."""
+    import pytest
+
+    from mergecraft.utils.payload import validate_compatibility
+
+    with pytest.raises(ValueError, match="Action version"):
+        validate_compatibility("0.1.0", "not-a-version")
+
+
+def test_resolve_prompt_input_accepts_a_payload_at_the_real_version() -> None:
+    """End-to-end: a JSON payload stamped with the shipped version resolves."""
+    import json
+
+    from mergecraft.utils.payload import JsonPayload, validate_compatibility
+
+    raw = json.dumps(
+        {"~mergecraft": True, "version": mergecraft.__version__, "prompt": "review this"}
+    )
+    payload = JsonPayload.model_validate_json(raw)
+    validate_compatibility(payload.version, mergecraft.__version__)
+    assert payload.prompt == "review this"
