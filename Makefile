@@ -15,7 +15,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
-	examples example-workflows-check agent-packages agent-packages-check docs docs-check llms llms-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
+	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check
@@ -150,6 +150,12 @@ agent-packages: ## Regenerate per-harness Agent Skills packages
 agent-packages-check: ## Fail when generated agent packages drift or fail skills-ref validation
 	$(UV) run python scripts/gen_agent_packages.py --check
 
+cli-examples: ## Regenerate examples/cli expected-output fixtures
+	$(UV) run python scripts/check_cli_examples.py
+
+cli-examples-check: ## Fail when examples/cli fixtures drift from run.sh output
+	$(UV) run python scripts/check_cli_examples.py --check
+
 docs: ## Regenerate generated doc pages (CLI, action ref, docs index, llms-full)
 	$(UV) run python scripts/gen_docs.py
 
@@ -187,11 +193,11 @@ reference-docs: docs ## Regenerate the README action + CLI reference tables (ali
 
 reference-docs-check: docs-check ## Fail when README reference tables drift (alias)
 
-ci-static: lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check docs-check ## Static/build tier
+ci-static: lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check ## Static/build tier
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check docs-check security coverage-gate
+CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check security coverage-gate
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)

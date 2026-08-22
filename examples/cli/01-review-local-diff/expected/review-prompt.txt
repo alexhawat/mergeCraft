@@ -1,0 +1,5 @@
+command=mergecraft review --dry-run
+## Diff summary
+
+1 file(s) changed:
+- src/calculator.py

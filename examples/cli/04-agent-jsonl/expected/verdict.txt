@@ -1,0 +1,5 @@
+protocol_version=1
+events=run_started,phase,phase,phase,phase,verdict,run_finished
+outcome=passed
+exit_code=0
+verdict=pass

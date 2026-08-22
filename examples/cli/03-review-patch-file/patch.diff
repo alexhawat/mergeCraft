@@ -1,0 +1,9 @@
+diff --git a/src/app.py b/src/app.py
+--- a/src/app.py
++++ b/src/app.py
+@@ -4,4 +4,4 @@ from __future__ import annotations
+
+
+ def status() -> str:
+-    return "ok"
++    return "ready"

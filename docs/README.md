@@ -23,6 +23,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [assets README](assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
 | [authentication](authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
 | [blast-radius](blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
+| [cli-examples](cli-examples.md) | consumer | Runnable mergecraft review CLI example trees under examples/cli/. |
 | [cli](cli.md) | consumer | Full mergecraft CLI command reference derived from the live Typer app. |
 | [compatibility-matrix](compatibility-matrix.md) | contributor | Harness and provider compatibility notes for maintainers. |
 | [config-failure-policy](config-failure-policy.md) | contributor | setup_failure_policy and setup_timeout runtime behaviour (S1 / D10). |

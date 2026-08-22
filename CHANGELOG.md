@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-harness Agent Skills packages generated from `skills/mergecraft/SKILL.md` via
   `scripts/gen_agent_packages.py`, with `skills/harnesses.yaml` install matrix,
   `make agent-packages-check` in CI, and Hermes/OpenClaw surfaces (#383 bullet 1, RV3)
+- Runnable CLI example trees under `examples/cli/` (local diff, branch range, patch
+  file, and `--agent` JSONL) with `make cli-examples` / `cli-examples-check` and
+  `docs/cli-examples.md` tour page
 - Agent-loop reference workflow (`docs/agent-loop.md`) for `mergecraft review --agent` (#383)
 - CLI, GitHub Action, and SCM webhooks now enter one review engine over one immutable snapshot (#380)
 - `mergecraft explain`, `ask`, and `replay` plus `run inspect` / `run diff` print output-only change, line Q&A, and stored-run views (#377)

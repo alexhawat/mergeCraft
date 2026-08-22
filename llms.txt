@@ -25,6 +25,7 @@
 
 - docs/README.md — generated index from docs/manifest.yaml
 - docs/cli.md — full mergecraft CLI reference
+- docs/cli-examples.md — runnable offline CLI example trees (examples/cli/)
 - docs/action-reference.md — action.yml inputs and outputs
 - docs/authentication.md — providers, custom gateways, model chains
 - docs/workflows.md — workflow examples, trust tiers, pull_request_target
