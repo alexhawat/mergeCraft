@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Provider quota exhaustion is now classified as retryable for failover. The CLI classifier matched only
+  rate-limit wording (`rate limit`, `too many requests`, `overloaded`, `429`), so Codex's "You've hit your
+  usage limit" matched nothing and read as permanent — the chain refused to try the next model even though
+  the next model was unaffected (#446)
 - `opencode serve` output is now drained for the process lifetime. Boot read the child's stdout only until
   the listening URL appeared and nothing read either pipe afterwards, so once the child filled the ~64KB
   pipe buffer it blocked in `write()` and stopped answering HTTP — a hang with no output, indistinguishable
