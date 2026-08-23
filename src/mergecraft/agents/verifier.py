@@ -9,7 +9,7 @@ reviewing model wrote itself never were, and those are the ones most likely
 to be wrong. ``plan_agent_verifications`` closes that gap: it queues
 agent-authored ``Critical``/``Major`` findings, skips any whose fingerprint
 is already refuted under ``WITHDRAWN_FINDINGS_HEADING``, and caps dispatches
-at the run's inline budget so verification cannot cost more than publication.
+at the repo's ``review.verificationBudget`` (independent of inline placement).
 
 **The judge contract (D14, #45)** treats the verifier as what it is — an LLM
 judge, and therefore a *secondary* signal. Its model, provider, judge version
@@ -285,9 +285,11 @@ def plan_agent_verifications(
 
     Args:
         findings: The agent's drafted findings, pre-publication.
-        budget: Maximum dispatches for this run — the repo's ``inlineBudget``.
-            Verification cannot cost more than publication; there is no second
-            knob.
+        budget: Maximum dispatches for this run — the repo's
+            ``review.verificationBudget`` (default 24). ``0`` means unlimited
+            (no cap), not disabled. Verification depth is costed separately from
+            ``analyzers.inlineBudget`` so a placement knob cannot silently decide
+            publishability (RC3, D2).
         learnings_text: The learnings file contents, read for its
             ``WITHDRAWN_FINDINGS_HEADING`` section.
         repo_root: Checkout root, used to resolve each finding's cited file.
@@ -312,8 +314,12 @@ def plan_agent_verifications(
         eligible.append((identity, finding))
 
     eligible.sort(key=lambda item: (_severity_rank(item[1].severity), item[1].path, item[0]))
-    capped = eligible[: max(budget, 0)]
-    over_budget = [identity for identity, _ in eligible[max(budget, 0) :]]
+    if budget == 0:
+        capped = eligible
+        over_budget: list[str] = []
+    else:
+        capped = eligible[:budget]
+        over_budget = [identity for identity, _ in eligible[budget:]]
 
     dispatch: list[VerificationDispatch] = []
     for identity, finding in capped:
@@ -332,7 +338,7 @@ def plan_agent_verifications(
         )
 
     return VerificationPlan(
-        budget=max(budget, 0),
+        budget=budget,
         dispatch=dispatch,
         skipped_withdrawn=skipped_withdrawn,
         skipped_over_budget=over_budget,

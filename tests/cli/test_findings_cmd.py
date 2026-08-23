@@ -67,6 +67,15 @@ class _FakeClient:
     async def list_issues(self, owner: str, repo: str, **kwargs: Any) -> list[dict[str, Any]]:
         return []
 
+    async def list_issue_comments(
+        self,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        return []
+
     async def create_label(self, owner: str, repo: str, **kwargs: Any) -> dict[str, Any]:
         return {"name": kwargs.get("name")}
 

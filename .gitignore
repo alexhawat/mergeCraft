@@ -63,6 +63,9 @@ docker/agent-clis/node_modules/
 # Regenerable verifier/tool output (never source of truth)
 /evidence/
 
+# Ephemeral local convergence replay artifacts (not baselines)
+evals/results/structural-replay-convergence-*.json
+
 # Sibling wave worktrees that sometimes land nested inside the primary
 # checkout instead of alongside it (backstop; operator removes them with
 # `git worktree remove`, this just keeps them out of `git status`/`find`).

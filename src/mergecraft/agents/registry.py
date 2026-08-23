@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import BaseModel, ConfigDict
 
 from mergecraft.agents.lens_triggers import LensTriggers
+from mergecraft.agents.recall import RECALL_SYSTEM_PROMPT
 from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.structured_handoff import agent_finding_output_schema_id
 from mergecraft.agents.verifier import VERIFIER_SYSTEM_PROMPT, pinned_judge_model
@@ -25,12 +26,13 @@ from mergecraft.mcp.shared import (
     PRIMARY_MUTATING_ALLOWLIST,
     PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES,
     READONLY_MUTATING_ALLOWLIST,
+    REVIEWER_ALLOWED_TOOL_CLASSES,
     VERIFIER_ALLOWED_TOOL_CLASSES,
     ToolClass,
     admits_readonly_role,
 )
 from mergecraft.models import AUTO_EFFICIENT, MODEL_ALIASES, resolve_display_alias
-from mergecraft.types import REVIEWER_AGENT_NAME, VERIFIER_AGENT_NAME
+from mergecraft.types import RECALL_AGENT_NAME, REVIEWER_AGENT_NAME, VERIFIER_AGENT_NAME
 from mergecraft.utils.agent_resolve import effective_model_chain, pick_runnable_slug_from_chain
 
 if TYPE_CHECKING:
@@ -39,6 +41,7 @@ if TYPE_CHECKING:
 
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.tool_state import ToolState
 
 _DEFAULT_BUDGET: Final[int] = 8
 _DEFAULT_TIMEOUT_S: Final[int] = 600
@@ -57,6 +60,7 @@ def _lens_prompt_catalog() -> dict[str, tuple[str, str]]:
 _PROMPT_CATALOG: Final[dict[str, tuple[str, str]]] = {
     "mergecraft.reviewer": (REVIEWER_SYSTEM_PROMPT, _DEFAULT_PROMPT_VERSION),
     "mergecraft.verifier": (VERIFIER_SYSTEM_PROMPT, _DEFAULT_PROMPT_VERSION),
+    "mergecraft.recall": (RECALL_SYSTEM_PROMPT, _DEFAULT_PROMPT_VERSION),
     "mergecraft.orchestrator": ("", _DEFAULT_PROMPT_VERSION),
     "mergecraft.judge": (VERIFIER_SYSTEM_PROMPT, _DEFAULT_PROMPT_VERSION),
     "mergecraft.classifier": ("", _DEFAULT_PROMPT_VERSION),
@@ -70,6 +74,7 @@ class AgentRole(StrEnum):
     orchestrator = "orchestrator"
     reviewer = "reviewer"
     verifier = "verifier"
+    recall = "recall"
     judge = "judge"
     classifier = "classifier"
 
@@ -176,6 +181,8 @@ def _default_tool_classes(role: AgentRole) -> frozenset[ToolClass]:
             return _ORCHESTRATOR_TOOL_CLASSES
         case AgentRole.reviewer:
             return PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES
+        case AgentRole.recall:
+            return REVIEWER_ALLOWED_TOOL_CLASSES
         case AgentRole.verifier | AgentRole.judge:
             return VERIFIER_ALLOWED_TOOL_CLASSES
         case AgentRole.classifier:
@@ -194,6 +201,8 @@ def _default_agent_id(role: AgentRole) -> str:
             return REVIEWER_AGENT_NAME
         case AgentRole.verifier:
             return VERIFIER_AGENT_NAME
+        case AgentRole.recall:
+            return RECALL_AGENT_NAME
         case AgentRole.orchestrator:
             return "mergecraft-orchestrator"
         case AgentRole.judge:
@@ -207,7 +216,7 @@ def _default_prompt_id(role: AgentRole) -> str:
 
 
 def _default_output_schema(role: AgentRole) -> str | None:
-    if role is AgentRole.reviewer:
+    if role in (AgentRole.reviewer, AgentRole.recall):
         return agent_finding_output_schema_id()
     return None
 
@@ -435,6 +444,33 @@ def resolve_agent_model(
     )
 
 
-def effective_agent_limits(binding: AgentBinding, *, settings: RepoSettings) -> AgentLimits:
-    del settings
-    return AgentLimits(budget=binding.budget, timeout_s=binding.timeout_s)
+def effective_agent_limits(
+    binding: AgentBinding,
+    *,
+    settings: RepoSettings,
+    round_index: int = 1,
+) -> AgentLimits:
+    from mergecraft.utils.run_bounds import round_budget_multiplier
+
+    multiplier = round_budget_multiplier(
+        settings.review.round_budgets,
+        round_index=round_index,
+    )
+    scaled_budget = int(binding.budget * multiplier)
+    return AgentLimits(budget=scaled_budget, timeout_s=binding.timeout_s)
+
+
+def subagent_limits_for_round(
+    binding: AgentBinding,
+    *,
+    settings: RepoSettings,
+    tool_state: ToolState,
+) -> AgentLimits:
+    """Resolve round-aware subagent limits for production dispatch."""
+    from mergecraft.findings.ledger import ledger_round_index
+
+    return effective_agent_limits(
+        binding,
+        settings=settings,
+        round_index=ledger_round_index(tool_state),
+    )

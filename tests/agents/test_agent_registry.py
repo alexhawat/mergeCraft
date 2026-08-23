@@ -41,6 +41,7 @@ _ROLES: tuple[str, ...] = (
     "orchestrator",
     "reviewer",
     "verifier",
+    "recall",
     "judge",
     "classifier",
 )

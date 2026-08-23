@@ -46,6 +46,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
+| `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set (RC6). |
 | `mergecraft eval gate` | Check the eval bank's integrity and adversarial corpora — the CI-safe half. |
 | `mergecraft eval list` | List cases in the bank. |
 | `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44, W12.1). |
@@ -57,6 +58,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft explain` | Explain a stored finding or the current working-tree change. |
 | `mergecraft findings carryover --pr N` | File one issue per unresolved mergeCraft finding. Dry run unless `--apply`. |
 | `mergecraft findings export --pr N` | Print the findings a merge would bury. Never writes anything. |
+| `mergecraft findings ledger --pr N` | Print the open-PR finding ledger from the sticky progress comment. Never writes. |
 | `mergecraft gha token` | Acquire a GitHub App installation token, or revoke it with `--post`. |
 | `mergecraft health run` | Emit JSON health status for the running mergeCraft installation. |
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` and an example workflow (local, no API). |

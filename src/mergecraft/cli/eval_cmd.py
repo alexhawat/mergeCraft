@@ -46,12 +46,23 @@ from mergecraft.cli.exits import (
 )
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.config import load_repo_settings
+from mergecraft.evals import (
+    CASE_FILE_SUFFIX,
+    DEFAULT_BANK_DIR,
+    Case,
+    add_case,
+    list_cases,
+    load_case,
+    replay_case,
+    write_permanent_test,
+)
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
     replay_bank,
     write_result_set,
 )
+from mergecraft.evals.convergence_benchmark import replay_convergence
 from mergecraft.evals.live_run import (
     DEFAULT_DETECTION_CORPUS_DIR,
     run_full_benchmark,
@@ -63,19 +74,7 @@ from mergecraft.evals.scoring import (
     load_reported_findings,
     score_findings,
 )
-from mergecraft.evals.store import (
-    CASE_FILE_SUFFIX,
-    CATEGORY_REJECTED,
-    CATEGORY_REVERTED,
-    DEFAULT_BANK_DIR,
-    FAILURE_CATEGORIES,
-    Case,
-    add_case,
-    list_cases,
-    load_case,
-    replay_case,
-    write_permanent_test,
-)
+from mergecraft.evals.store import CATEGORY_REJECTED, CATEGORY_REVERTED, FAILURE_CATEGORIES
 from mergecraft.models import get_model_provider
 from mergecraft.utils.agent_resolve import resolve_effective_model_slug, resolve_model
 from mergecraft.utils.learnings import LearningProvenance
@@ -506,6 +505,45 @@ def replay_bank_cmd(
         console.print(f"  unsafe approval rate: {result.metrics.unsafe_approval_rate:.2%}")
         console.print(f"  clean block rate    : {result.metrics.clean_block_rate:.2%}")
         console.print(f"  inconclusive rate   : {result.metrics.inconclusive_rate:.2%}")
+
+
+@app.command("convergence")
+def convergence_cmd(
+    ctx: typer.Context,
+    results_dir: Path | None = typer.Option(
+        None,
+        "--results-dir",
+        help="Directory for result sets (default: evals/results/).",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the result set as JSON on stdout.",
+    ),
+) -> None:
+    """Score multi-round convergence scenarios and write a versioned result set (RC6).
+
+    Runs built-in ledger-only scenarios (including the pre-W1 overflow-leakage
+    baseline) via :func:`mergecraft.evals.convergence.score_convergence`. No live
+    GitHub or review runs are required.
+    """
+    out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
+    result, path = replay_convergence(results_dir=out_dir)
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(result.model_dump(mode="json"))
+        return
+    convergence = result.convergence
+    if convergence is None:
+        cli_bail("convergence eval produced no convergence block")
+    console.print(f"[green]convergence result set[/green] → {path}")
+    console.print(f"  cases              : {convergence.cases_total}")
+    console.print(f"  mean first-pass recall: {convergence.mean_first_pass_recall:.2%}")
+    console.print(f"  mean leakage rate  : {convergence.mean_leakage_rate:.2%}")
+    for row in convergence.case_results:
+        console.print(
+            f"  {row.case_id}: recall={row.report.first_pass_recall:.2%} "
+            f"leakage={row.report.leakage_rate:.2%}"
+        )
 
 
 # ── bench ──────────────────────────────────────────────────────────────

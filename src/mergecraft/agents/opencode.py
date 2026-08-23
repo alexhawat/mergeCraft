@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import httpx
 from loguru import logger
@@ -79,6 +79,18 @@ _OPENCODE_PROVIDER_OPTION_KEYS: frozenset[str] = frozenset(
     }
 )
 _OPENCODE_LIMIT_SOURCE_KEYS: frozenset[str] = frozenset({"context_limit", "context", "max_tokens"})
+# OpenCode provider HTTP reads can outlast the generic 600s external-op default
+# (Nous inference hung ~10min in PR #442). Match the workflow action timeout
+# (25m) so httpx does not abort before the Action's own budget.
+_OPENCODE_PROVIDER_HTTP_TIMEOUT_DEFAULT_S: Final[float] = 1500.0
+
+
+def _opencode_provider_http_timeout_s() -> float:
+    """Return the httpx timeout for OpenCode provider HTTP session calls."""
+    raw = os.environ.get("MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S", "").strip()
+    if raw:
+        return float(raw)
+    return _OPENCODE_PROVIDER_HTTP_TIMEOUT_DEFAULT_S
 
 
 class ProviderTimeoutError(RuntimeError):
@@ -508,7 +520,7 @@ async def _prompt_session_http(
     }
     if model:
         payload["model"] = model
-    async with httpx.AsyncClient(timeout=600.0) as client:
+    async with httpx.AsyncClient(timeout=_opencode_provider_http_timeout_s()) as client:
         # T2 / D8 — narrow instrumentation: wrap clients mergeCraft builds
         # (the custom OpenAI-compatible provider path) so every outbound
         # ``send`` emits an ``http.client.request`` span. ``current_tracer``

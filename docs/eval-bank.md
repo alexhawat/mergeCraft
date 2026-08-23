@@ -52,7 +52,7 @@ tooling can grep on a stable shape:
 |------|------|----------|-------|
 | `id` | `str` | yes | Stable identifier. Must match `^[A-Za-z0-9][A-Za-z0-9._\-]{0,127}$`. The CLI rejects IDs outside this shape. |
 | `title` | `str` | yes | Short, operator-readable description. |
-| `category` | `str` | yes | Failure category (e.g. `missed_finding`, `false_positive`). |
+| `category` | `str` | yes | Failure category (e.g. `missed_finding`, `false_positive`, `multi_round_convergence`). |
 | `submitted_at` | `datetime` | yes | ISO-8601 UTC timestamp. The CLI writes this on `add`. |
 | `run_id` | `str` | yes | The run id the case came from. |
 | `pr_number` | `int \| None` | no | Optional PR number. |
@@ -193,7 +193,57 @@ current verdict and the diff is computed deterministically. The CLI
 exits with status `2` when the diff is a regression, so a CI loop can
 latch on the regression and fail the run.
 
-The diff has three statuses:
+### Multi-round convergence metric (RC6)
+
+`mergecraft eval convergence` (and `make eval-convergence`) scores
+first-pass recall and leakage rate from ledger snapshots — no live GitHub
+calls. Inputs per round:
+
+| Input | Role |
+|-------|------|
+| `ledger` | `FindingLedger` with lifecycle states per fingerprint |
+| `findings` | Recorded finding rows (`path`, `start_line`, `end_line`, `body`, `fingerprint`) |
+| `generated_fingerprints` | Every fingerprint the system produced in that round |
+| `diff_text` | Round-one unified diff for attributing ground truth to the first reviewed SHA |
+
+Ground truth is the fingerprint-deduped union of findings across all
+rounds. First-pass recall is round-one open ∪ deferred findings divided
+by ground truth attributable to round one (lines intersecting the round-one
+diff). Leakage rate is round-one generated findings that never surfaced
+(open or deferred), divided by round-one generated. Matching reuses
+`evals/scoring.py` ±3-line overlap via `score_findings`, not fingerprint
+equality. Results land in an optional `convergence` block on benchmark
+result sets under `evals/results/`.
+
+#### Multi-round case format (W10)
+
+Cases with `category: multi_round_convergence` carry an ordered `rounds`
+list in the YAML front matter. Each round records:
+
+| Field | Role |
+|-------|------|
+| `round_index` | 1-based review round number |
+| `diff_text` | Unified diff for attributing ground truth to round one |
+| `findings` | Ground-truth rows (`fingerprint`, `path`, lines, `body`, `first_appeared_round`) |
+| `ledger` | Ledger snapshot (`fingerprint`, `state`) for that round |
+| `generated_fingerprints` | Every fingerprint the system produced in that round |
+
+Single-round cases omit `rounds` entirely — the bank stays backward compatible.
+`make eval-convergence` loads every `multi_round_convergence` case under
+`evals/cases/` and folds corpus-wide first-pass recall and leakage rate.
+
+#### Paired convergence gate (W10)
+
+`mergecraft eval gate --baseline … --candidate …` compares
+`convergence.mean_first_pass_recall` when both result sets include a
+`convergence` block. A drop beyond the declared tolerance band fails the
+release. The same comparison also runs the **DG1 precision corpus floor**:
+`evaluate_dg1_precision_corpus()` must keep recall flat and
+corpus-confirmed precision at or above
+`PRE_DG1_BASELINE` — the paired constraint that blocks buying recall with
+noise.
+
+The replay diff has three statuses:
 
 | Status | Meaning |
 |--------|---------|

@@ -10,9 +10,12 @@ before it is trusted with an automation trigger.
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
+
+if TYPE_CHECKING:
+    from mergecraft.findings.lifecycle import LifecycleRecord
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import (
@@ -20,6 +23,11 @@ from mergecraft.cli.exits import (
     CLI_USAGE_EXIT_CODE,
 )
 from mergecraft.cli.global_surface import emit_cli_json, get_cli_globals, wants_json_output
+from mergecraft.findings.ledger import (
+    LEDGER_SCHEMA_VERSION,
+    FindingLedger,
+    fetch_sticky_progress_comment_body,
+)
 from mergecraft.findings.select import (
     DEFAULT_LABEL,
     CarryoverFinding,
@@ -69,10 +77,6 @@ def _client() -> GitHubClient:
         raise typer.Exit(CLI_USAGE_EXIT_CODE) from exc
 
 
-def _finding_payload(finding: CarryoverFinding) -> dict[str, Any]:
-    return finding.model_dump(mode="json")
-
-
 def _render_markdown(findings: list[CarryoverFinding], *, pull_number: int) -> str:
     """Render findings as a review-style markdown digest."""
     if not findings:
@@ -90,6 +94,106 @@ def _render_markdown(findings: list[CarryoverFinding], *, pull_number: int) -> s
         lines.append(finding.body)
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _finding_payload(finding: CarryoverFinding) -> dict[str, Any]:
+    return finding.model_dump(mode="json")
+
+
+def _ledger_record_payload(record: LifecycleRecord) -> dict[str, Any]:
+    return {
+        "fingerprint": record.fingerprint,
+        "state": record.state,
+        "reason": record.reason,
+        "expires_at": record.expires_at,
+        "round_index": record.round_index,
+        "recorded_at": record.recorded_at,
+        "source": record.source,
+    }
+
+
+async def _fetch_progress_comment_body(
+    client: GitHubClient,
+    owner: str,
+    name: str,
+    pull_number: int,
+) -> str:
+    from mergecraft.scm.github import GitHubScmAdapter
+
+    adapter = GitHubScmAdapter(client)
+    return await fetch_sticky_progress_comment_body(
+        adapter,
+        owner,
+        name,
+        pull_number,
+    )
+
+
+def _render_ledger_markdown(records: list[LifecycleRecord], *, pull_number: int) -> str:
+    if not records:
+        return f"No ledger records on #{pull_number}."
+    lines = [f"# Finding ledger — #{pull_number}", ""]
+    for record in records:
+        lines.append(f"- `{record.fingerprint}` — **{record.state}**")
+        if record.source:
+            lines.append(f"  - source: `{record.source}`")
+        if record.round_index is not None:
+            lines.append(f"  - round: {record.round_index}")
+        if record.reason:
+            lines.append(f"  - reason: {record.reason}")
+        if record.recorded_at:
+            lines.append(f"  - recorded: {record.recorded_at}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+@app.command("ledger")
+def ledger(
+    ctx: typer.Context,
+    pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
+    repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
+    output_format: Annotated[
+        str | None,
+        typer.Option(
+            "--output-format",
+            help=(
+                "Ledger payload format: json or markdown (default: markdown). "
+                "Root --format json emits JSON when this flag is omitted; "
+                "explicit --output-format markdown always renders markdown."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Print the open-PR finding ledger from the sticky progress comment. Never writes."""
+    if output_format is not None and output_format not in {"json", "markdown"}:
+        console.print("[red]--output-format must be 'json' or 'markdown'[/red]")
+        raise typer.Exit(CLI_USAGE_EXIT_CODE)
+    emit_json = (
+        output_format == "json"
+        if output_format is not None
+        else get_cli_globals(ctx).format == "json"
+    )
+    owner, name = _resolve_repo(repo)
+
+    async def _run() -> list[LifecycleRecord]:
+        client = _client()
+        try:
+            body = await _fetch_progress_comment_body(client, owner, name, pr)
+            return FindingLedger.from_comment_body(body).records()
+        finally:
+            await client.aclose()
+
+    records = asyncio.run(_run())
+    if emit_json:
+        emit_cli_json(
+            {
+                "schema_version": LEDGER_SCHEMA_VERSION,
+                "pull_number": pr,
+                "count": len(records),
+                "records": [_ledger_record_payload(record) for record in records],
+            }
+        )
+        return
+    typer.echo(_render_ledger_markdown(records, pull_number=pr))
 
 
 @app.command("export")
@@ -207,6 +311,8 @@ def carryover(
     async def _run() -> tuple[CarryoverPlan, CarryoverOutcome | None]:
         client = _client()
         try:
+            progress_body = await _fetch_progress_comment_body(client, owner, name, pr)
+            ledger_records = FindingLedger.from_comment_body(progress_body).records()
             plan = await plan_carryover(
                 client,
                 owner,
@@ -215,6 +321,7 @@ def carryover(
                 label=label,
                 include_resolved=include_resolved,
                 include_answered=include_answered,
+                ledger_records=ledger_records,
             )
             if not apply:
                 return plan, None

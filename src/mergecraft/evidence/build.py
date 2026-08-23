@@ -122,6 +122,7 @@ def _agent_metadata(
     provider: str | None = None,
     fallback_index: int = 0,
     fallback_occurred: bool = False,
+    dispatched_lens_ids: list[str] | None = None,
 ) -> AgentMetadata:
     executed = executed_model or model
     requested = requested_model or executed
@@ -134,6 +135,7 @@ def _agent_metadata(
         provider=provider or "",
         fallback_index=fallback_index,
         fallback_occurred=fallback_occurred,
+        dispatched_lens_ids=list(dispatched_lens_ids or ()),
     )
 
 
@@ -159,6 +161,7 @@ def build_packet(
     fallback_index: int = 0,
     fallback_occurred: bool = False,
     mode_prompt_versions: list[ModePromptVersion] | None = None,
+    dispatched_lens_ids: list[str] | None = None,
 ) -> MergeEvidencePacket:
     """Assemble a :class:`MergeEvidencePacket` from structured sources.
 
@@ -228,6 +231,7 @@ def build_packet(
             provider=provider,
             fallback_index=fallback_index,
             fallback_occurred=fallback_occurred,
+            dispatched_lens_ids=dispatched_lens_ids,
         ),
         files_changed=list(files_changed),
         findings=coerced_findings,

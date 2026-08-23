@@ -325,6 +325,52 @@ def _related_providers_lines() -> list[str]:
     ]
 
 
+def _noise_budget_lines() -> list[str]:
+    """Render the inline/deferred placement section (D14, W1)."""
+    return [
+        "",
+        "## Noise budget (D14)",
+        "",
+        "Inline review comments from analyzers and the reviewing agent share a single "
+        "cap of **8** slots (W0.2 measurement; configurable via `analyzers.inlineBudget`). "
+        "Placement is deterministic:",
+        "",
+        "- **Inline** — highest-priority findings up to the cap. Agent findings win "
+        "tie-breaks over analyzer findings at the same severity and path.",
+        "- **Mechanical overflow** — `source: analyzer` / `source: ci` findings that did "
+        "not earn an inline slot render as a compact `### 🔧 Mechanical findings` table "
+        "(tool, rule id, path:line). mergeCraft appends this section server-side at "
+        "publish time.",
+        "- **Deferred overflow** — `source: agent` findings that did not earn an inline "
+        "slot render in `### 🗂 Deferred findings` with severity, path, line, and the "
+        "**full finding body**. This lane is non-blocking (no inline anchor) and is also "
+        "server-appended at publish time so overflow reasoning is never discarded.",
+        "- **Nitpicks** — `Trivial` severity or `Low value` effort never occupy inline "
+        "or deferred slots; they belong in the Nitpicks section.",
+    ]
+
+
+def _verification_gate_lines() -> list[str]:
+    """Render the verifier dispatch budget section (D11, RC3 / D2)."""
+    return [
+        "",
+        "## Verification gate (D11)",
+        "",
+        "`Critical` and `Major` findings are hypotheses until the read-only "
+        "`mergecraft-verifier` subagent reads the cited code. That gate applies to "
+        "analyzer, CI, and agent-authored findings.",
+        "",
+        "Verification depth is **independent** of inline placement "
+        "(`analyzers.inlineBudget`, default 8). The verifier dispatch cap is "
+        "`review.verificationBudget` (default **24**). Set it to **`0`** to verify every "
+        "eligible finding with no cap. Three filters run in order: severity (skip "
+        "`Minor`/`Trivial`), withdrawn memory (skip fingerprints already refuted under "
+        "`## Withdrawn review findings`), then the verification budget — so pre-budget "
+        "skips never consume slots. Over-budget fingerprints surface in "
+        "`skippedOverBudget` for the open-PR ledger (W3).",
+    ]
+
+
 def _sarif_upload_lines() -> list[str]:
     """Render the code-scanning upload section (#39, D13/D14).
 
@@ -463,6 +509,12 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             "```",
             "",
             "See [CONTRIBUTING-ANALYZERS.md](CONTRIBUTING-ANALYZERS.md) to add a tool.",
+        ]
+    )
+    lines.extend(_noise_budget_lines())
+    lines.extend(_verification_gate_lines())
+    lines.extend(
+        [
             "",
             "## Execution preference",
             "",

@@ -6,6 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.findings.ledger import (
+    hydrate_finding_ledger_from_progress_comment,
+    merge_ledger_into_comment,
+)
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ProgressComment, ReviewReplyRecord, primary_repo_state
 from mergecraft.utils.learnings import (
@@ -199,7 +203,9 @@ def report_progress_tool(ctx: ToolContext):
 
         await ensure_learnings_review_delta(ctx.tool_state)
         body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, body)
-        body_with_footer = add_footer(ctx, body_with_delta)
+        ledger = await hydrate_finding_ledger_from_progress_comment(ctx)
+        body_with_ledger = merge_ledger_into_comment(body_with_delta, records=ledger.records())
+        body_with_footer = add_footer(ctx, body_with_ledger)
 
         if target_plan and ctx.tool_state.existing_plan_comment_id:
             result = await ctx.scm.update_issue_comment(

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from mergecraft.evals.finding_rows import finding_line_bounds, normalize_finding_path
 from mergecraft.review_taxonomy import FINDING_CATEGORIES, FINDING_SEVERITIES
 
 if TYPE_CHECKING:
@@ -67,15 +68,6 @@ _UNKNOWN_SEVERITY: Final[str] = "Unknown"
 DEFAULT_LINE_SLACK: Final[int] = 3
 
 
-def _normalize_path(value: str) -> str:
-    """Strip leading ``./`` and ``a/`` / ``b/`` diff prefixes from a path."""
-    text = value.strip().replace("\\", "/")
-    for prefix in ("./", "a/", "b/"):
-        if text.startswith(prefix):
-            text = text[len(prefix) :]
-    return text
-
-
 class BaselineIssue(BaseModel):
     """One frozen expected issue from a benchmark corpus."""
 
@@ -93,7 +85,7 @@ class BaselineIssue(BaseModel):
     @field_validator("path")
     @classmethod
     def _normalize(cls, value: str) -> str:
-        return _normalize_path(value)
+        return normalize_finding_path(value)
 
 
 class ReportedFinding(BaseModel):
@@ -111,7 +103,7 @@ class ReportedFinding(BaseModel):
     @field_validator("path")
     @classmethod
     def _normalize(cls, value: str) -> str:
-        return _normalize_path(value)
+        return normalize_finding_path(value)
 
 
 class Match(BaseModel):
@@ -449,28 +441,6 @@ def _rows(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _line_bounds(row: dict[str, Any]) -> tuple[int, int]:
-    """Return ``(start, end)`` from either explicit lines or a ``line_range``."""
-    span = row.get("line_range")
-    if isinstance(span, (list, tuple)) and len(span) == 2:
-        try:
-            start, end = int(span[0]), int(span[1])
-        except (TypeError, ValueError):  # fmt: skip
-            start, end = 1, 1
-    else:
-        try:
-            start = int(row.get("start_line") or row.get("line") or 1)
-        except (TypeError, ValueError):  # fmt: skip
-            start = 1
-        try:
-            end = int(row.get("end_line") or start)
-        except (TypeError, ValueError):  # fmt: skip
-            end = start
-    if end < start:
-        start, end = end, start
-    return start, end
-
-
 def load_baseline_issues(payload: Any, *, source: str = "baseline") -> list[BaselineIssue]:
     """Parse baseline issues from a decoded JSON payload.
 
@@ -480,12 +450,12 @@ def load_baseline_issues(payload: Any, *, source: str = "baseline") -> list[Base
     """
     issues: list[BaselineIssue] = []
     for index, row in enumerate(_rows(payload)):
-        start, end = _line_bounds(row)
+        start, end = finding_line_bounds(row)
         identifier = str(row.get("id") or row.get("cluster_id") or f"{source}-{index:03d}")
         issues.append(
             BaselineIssue(
                 id=identifier,
-                path=_normalize_path(str(row.get("path") or "")),
+                path=normalize_finding_path(str(row.get("path") or "")),
                 start_line=start,
                 end_line=end,
                 title=str(row.get("title") or row.get("message") or ""),
@@ -501,10 +471,10 @@ def load_reported_findings(payload: Any) -> list[ReportedFinding]:
     """Parse the findings a review run reported from a decoded JSON payload."""
     findings: list[ReportedFinding] = []
     for row in _rows(payload):
-        start, end = _line_bounds(row)
+        start, end = finding_line_bounds(row)
         findings.append(
             ReportedFinding(
-                path=_normalize_path(str(row.get("path") or "")),
+                path=normalize_finding_path(str(row.get("path") or "")),
                 start_line=start,
                 end_line=end,
                 message=str(row.get("message") or row.get("title") or ""),

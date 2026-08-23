@@ -9,12 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First-pass recall metric (`mergecraft eval convergence`, `make eval-convergence`) with multi-round bank cases and a paired regression gate that holds first-pass recall flat while the DG1 precision corpus stays at or above its floor
+- Open-PR finding ledger in the sticky progress comment — `mergecraft findings ledger --pr N` inspects inline, deferred, withdrawn, and unpublished fingerprints without filing GitHub issues (D4, D5)
+- Optional recall pass (`review.recallPass`, default off) dispatches `mergecraft-recall` after aggregation; novel findings always publish in the deferred lane (D1, D7)
+- Optional round-aware budgets (`review.roundBudgets`) scale token, cost, tool-call, and subagent ceilings by review round; defaults stay flat until opted in (RC12)
+- Lens execution recording on `ToolState`, review metadata, and merge-evidence packets; findings may carry optional `lens` attribution (D9)
+- Collateral lists on `Critical` and `Major` findings name callers, tests, and other files that must move with the fix; inline comments render them under **Also update:** (RC11)
+- Incremental reviews promote deferred findings when their cited path intersects the incremental diff, bias complement lens routing toward lenses that did not run last round, and label first-pass misses on unchanged lines honestly (RC9, D10)
 - Opt-in `antislop` analyzer: YAML rule pack for placeholder code, narrator comments,
   swallowed errors, pass-through wrappers, phantom imports, and related low-quality patterns
   on changed Python and JS/TS files (#393)
 
 ### Changed
 
+- Overflow agent findings now append to a server-written `### 🗂 Deferred findings` section with full finding text (non-blocking); analyzer overflow remains in `### 🔧 Mechanical findings` (RC1, RC2)
+- `review.verificationBudget` (default 24; `0` = no cap) caps verifier dispatches independently of `analyzers.inlineBudget` (RC3, D2)
 - Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily in
   `install()` via `action_pin_minimal()` instead of calling it at module import (#403)
 - Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,

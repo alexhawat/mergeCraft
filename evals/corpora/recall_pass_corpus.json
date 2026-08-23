@@ -1,0 +1,20 @@
+{
+  "diff": "diff --git a/src/app.py b/src/app.py\nindex 1111111..2222222 100644\n--- a/src/app.py\n+++ b/src/app.py\n@@ -10,3 +10,6 @@ def handler():\n     pass\n+    timeout = None\n+    return timeout\ndiff --git a/src/util.py b/src/util.py\nindex 3333333..4444444 100644\n--- a/src/util.py\n+++ b/src/util.py\n@@ -40,3 +40,5 @@ def helper():\n     pass\n+    cache = {}\n+    return cache\n",
+  "cases": [
+    {
+      "id": "recall-pass-corpus-001",
+      "drafted": "missing timeout on retry — recall pass corpus fixture.",
+      "missed": "unchecked null before return — recall pass corpus fixture."
+    },
+    {
+      "id": "recall-pass-corpus-002",
+      "drafted": "race when claiming row — recall pass corpus fixture.",
+      "missed": "retry loop never assigns timeout — recall pass corpus fixture."
+    },
+    {
+      "id": "recall-pass-corpus-003",
+      "drafted": "stale cache key after rename — recall pass corpus fixture.",
+      "missed": "caller still imports removed symbol — recall pass corpus fixture."
+    }
+  ]
+}

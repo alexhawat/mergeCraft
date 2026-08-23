@@ -10,10 +10,12 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
+    from mergecraft.findings.ledger import FindingLedger
     from mergecraft.modes import Mode
     from mergecraft.prep.types import PrepResult
+    from mergecraft.review.lens_routing import LensRoutingDecision
 
 RepoAccess = Literal["primary", "write", "read"]
 
@@ -261,6 +263,8 @@ class AnalyzerRunState:
     findings: list[dict[str, Any]] = field(default_factory=list)
     inline: list[dict[str, Any]] = field(default_factory=list)
     mechanical_section: str | None = None
+    deferred_section: str | None = None
+    deferred_findings: list[dict[str, Any]] = field(default_factory=list)
     pre_merge_summary: str | None = None
     lockfile_digest: str | None = None
     verified_ids: set[str] = field(default_factory=set)
@@ -269,6 +273,13 @@ class AnalyzerRunState:
     # else — including on the GitHub Action path, which has no pre-pass — so an
     # unkeyed run is never reused by ``run_analyzers``.
     key: AnalyzerRunKey | None = None
+
+    def all_rows(self) -> list[dict[str, Any]]:
+        """Return every dict-shaped finding row held on this analyzer run."""
+        rows: list[dict[str, Any]] = []
+        for collection in (self.findings, self.deferred_findings, self.inline):
+            rows.extend(row for row in collection if isinstance(row, dict))
+        return rows
 
 
 @dataclass(slots=True)
@@ -397,8 +408,16 @@ class ToolState:
     # learnings round trip, so the live set is what makes the drop valve
     # reliable here. The learnings file the refutation is also written to is the
     # cross-run memory of the same decision; the approve gate unions both
-    # (``verdict._withdrawn_fingerprints_for_state``).
+    # (``verdict.withdrawn_fingerprints_for_state``).
     withdrawn_fingerprints: set[str] = field(default_factory=set)
+    # Lens routing snapshot (RC7, W5) — recommended vs actually-dispatched lenses.
+    lens_routing_decision: LensRoutingDecision | None = None
+    dispatched_lens_ids: tuple[str, ...] = ()
+    # Open-PR finding ledger (RC4, D4) — hydrated from the sticky progress comment.
+    finding_ledger: FindingLedger | None = None
+    finding_ledger_loaded: bool = False
+    # RC12 — 1-based review round, set by ``checkout_pr`` from prior PR reviews.
+    review_round_index: int = 1
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
     agent_findings: list[dict[str, Any]] = field(default_factory=list)
     # Evidence normalised from the consumer's finished CI (#36). ``None`` until
@@ -413,6 +432,55 @@ class ToolState:
     # appended) on each call. Read by ``validation_state_from_tool_context`` so
     # ``approve`` is rejected when a required gate recorded ``status: failed``.
     static_checks: list[dict[str, Any]] = field(default_factory=list)
+
+    def iter_finding_rows(self) -> list[dict[str, Any]]:
+        """Return every dict-shaped finding row across analyzer and agent lanes."""
+        rows: list[dict[str, Any]] = []
+        if self.analyzer_run is not None:
+            rows.extend(self.analyzer_run.all_rows())
+        rows.extend(row for row in self.agent_findings if isinstance(row, dict))
+        rows.extend(row for row in self.confirmed_findings if isinstance(row, dict))
+        return rows
+
+
+def record_lens_routing_decision(
+    tool_state: ToolState,
+    routing_decision: LensRoutingDecision,
+) -> None:
+    """Persist a lens routing decision before any lens subagent runs (RC7)."""
+    tool_state.lens_routing_decision = routing_decision
+
+
+def record_lens_execution(
+    tool_state: ToolState,
+    *,
+    routing_decision: LensRoutingDecision,
+    dispatched_lens_ids: Sequence[str],
+) -> None:
+    """Persist the routing decision and the lenses that actually ran (RC7)."""
+    record_lens_routing_decision(tool_state, routing_decision)
+    tool_state.dispatched_lens_ids = tuple(dispatched_lens_ids)
+
+
+def append_dispatched_lens(tool_state: ToolState, agent_id: str) -> None:
+    """Append one lens id when a lens subagent completes (RC7)."""
+    from mergecraft.review.lens_routing import lens_id_from_agent_id
+
+    lens_id = lens_id_from_agent_id(agent_id)
+    if not lens_id:
+        return
+    current = tuple(tool_state.dispatched_lens_ids)
+    if lens_id in current:
+        return
+    decision = tool_state.lens_routing_decision
+    if decision is None:
+        tool_state.dispatched_lens_ids = (*current, lens_id)
+        return
+    record_lens_execution(
+        tool_state,
+        routing_decision=decision,
+        dispatched_lens_ids=(*current, lens_id),
+    )
 
 
 def repo_key(owner: str, name: str) -> str:

@@ -352,6 +352,13 @@ def scope_findings(
     return suppress_withdrawn_findings(scoped, learnings_text)
 
 
+def line_intersects_hunks(
+    path: str, start_line: int | None, end_line: int | None, scope: DiffScope
+) -> bool:
+    """Return whether a line span intersects any diff hunk on ``path``."""
+    return _line_intersects_hunks(path, start_line, end_line, scope)
+
+
 __all__ = [
     "DiffScope",
     "annotate_introduced_by_pr",
@@ -362,6 +369,7 @@ __all__ = [
     "filter_to_diff",
     "introduced_by_base_diff",
     "iter_added_diff_lines",
+    "line_intersects_hunks",
     "parse_diff_scope",
     "scope_findings",
     "suppress_withdrawn_findings",

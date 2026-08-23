@@ -12,7 +12,12 @@ from mergecraft.analyzers.baseline_suppression import (
     should_run_baseline_suppression,
     suppress_baseline_findings,
 )
-from mergecraft.analyzers.budget import default_inline_budget, place_findings
+from mergecraft.analyzers.budget import (
+    default_inline_budget,
+    finding_to_deferred_row,
+    place_findings,
+    sync_deferred_section,
+)
 from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.lockfile import lock_digest
@@ -403,10 +408,11 @@ def run_analyzer_pipeline(
         lock_path = repo_root / ".mergecraft" / "analyzers.lock"
         digest = lock_digest(lock_path)
         summary = _build_pre_merge_summary(rows, lockfile_digest_value=digest)
+        deferred_findings = [finding_to_deferred_row(finding) for finding in placement.deferred]
 
         executed = [row for row in rows if row.status in {"passed", "failed"}]
         if not executed:
-            return AnalyzerRunState(
+            run_state = AnalyzerRunState(
                 ran=False,
                 reason=(
                     "every enabled analyzer was skipped in this environment — report the "
@@ -416,19 +422,25 @@ def run_analyzer_pipeline(
                 findings=serialized,
                 inline=inline_payload,
                 mechanical_section=placement.mechanical_section,
+                deferred_findings=deferred_findings,
                 pre_merge_summary=summary,
                 lockfile_digest=digest,
             )
+            sync_deferred_section(run_state)
+            return run_state
 
-        return AnalyzerRunState(
+        run_state = AnalyzerRunState(
             ran=True,
             analyzers=rows,
             findings=serialized,
             inline=inline_payload,
             mechanical_section=placement.mechanical_section,
+            deferred_findings=deferred_findings,
             pre_merge_summary=summary,
             lockfile_digest=digest,
         )
+        sync_deferred_section(run_state)
+        return run_state
 
 
 def analyzer_run_metadata(*, tool_id: str, result: object) -> dict[str, str]:

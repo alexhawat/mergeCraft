@@ -26,9 +26,10 @@ from pathlib import Path
 
 import pytest
 
-from mergecraft.evals.store import (
+from mergecraft.evals import (
     Case,
     add_case,
+    load_case,
     permanent_test_path,
     render_permanent_test,
     write_permanent_test,
@@ -187,7 +188,6 @@ def test_promote_to_bank_then_to_permanent_test_is_collectible(
     add_case(bank_dir, case)
 
     # Re-read the case from disk (mirrors what the CLI does).
-    from mergecraft.evals.store import load_case
 
     loaded = load_case(bank_dir / "synthetic-001.md")
     target = write_permanent_test(permanent_dir, loaded)
@@ -227,8 +227,6 @@ def test_promote_default_replay_blocks_until_current_decision_wired(
     permanent_dir = tmp_path / "permanent"
     case = _case()
     add_case(bank_dir, case)
-
-    from mergecraft.evals.store import load_case
 
     loaded = load_case(bank_dir / "synthetic-001.md")
     target = write_permanent_test(permanent_dir, loaded)
