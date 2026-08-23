@@ -20,6 +20,7 @@ TARGET_PUSH_BRANCHES = frozenset({"main", "pre-0.0.1"})
 COVERAGE_GATE_FRAGMENTS = (
     "make coverage-gate",
     "coverage-gate",
+    "ci_coverage_delta_gate.sh",
     # mergeCraft ``make ci`` always includes ``coverage-gate`` (see Makefile CI_STEPS).
     "make ci",
 )
@@ -31,6 +32,7 @@ DELTA_MARKERS = (
     "base branch",
     "inherited",
     "check_coverage_delta",
+    "ci_coverage_delta_gate.sh",
     "--base",
 )
 

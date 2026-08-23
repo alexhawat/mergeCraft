@@ -9,27 +9,24 @@ change under review.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import sys
 from pathlib import Path
 from typing import Any, NamedTuple
 
-# When the base is already at the floor, a head breach this many points or more
-# below the floor is treated as inherited cumulative drift rather than a marginal
-# regression caused solely by the current change.
+# When the base branch is already at the floor, a head breach this many points or
+# more below ``fail_under`` is treated as inherited cumulative drift rather than a
+# marginal regression caused solely by the current change (#432 / D6).
 INHERITED_BREACH_MARGIN = 1.0
 
 
 def _fail_under_from_pyproject() -> float:
-    cfg_path = Path(__file__).resolve().parent / "coverage_config.py"
-    spec = importlib.util.spec_from_file_location("coverage_config", cfg_path)
-    if spec is None or spec.loader is None:
-        msg = f"could not load coverage config: {cfg_path}"
-        raise ImportError(msg)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.fail_under_from_pyproject()
+    scripts = Path(__file__).resolve().parent
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from coverage_config import fail_under_from_pyproject
+
+    return fail_under_from_pyproject()
 
 
 def _percent_covered(report: Path) -> float:

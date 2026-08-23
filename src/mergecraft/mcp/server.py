@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import secrets
-import socket
 import threading
 from math import isfinite
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -63,8 +62,8 @@ from mergecraft.mcp.ports import (
     MCP_HOST as MCP_HOST,
 )
 from mergecraft.mcp.ports import (
-    port_available,
-    read_env_port,
+    resolve_uvicorn_bind_port,
+    wait_for_bound_port,
 )
 from mergecraft.mcp.pr import (
     close_pull_request_tool,
@@ -671,34 +670,6 @@ async def _kill_background_processes(ctx: ToolContext) -> None:
     procs.clear()
 
 
-def _resolve_bind_port() -> int:
-    """Pick a listen port: explicit env when free, otherwise OS assignment at bind."""
-    requested = read_env_port()
-    if requested is not None and port_available(requested):
-        return requested
-    return 0
-
-
-def _bound_listen_port(server: uvicorn.Server, configured_port: int) -> int:
-    """Return the TCP port uvicorn bound (handles explicit ports and ``port=0``)."""
-    servers = getattr(server, "servers", None) or []
-    for asyncio_server in servers:
-        sockets = getattr(asyncio_server, "sockets", None)
-        if not sockets:
-            continue
-        for sock in sockets:
-            try:
-                _host, port = sock.getsockname()[:2]
-            except OSError:
-                continue
-            if port:
-                return int(port)
-    if configured_port != 0:
-        return configured_port
-    msg = "MCP HTTP server started without a bound listen port"
-    raise RuntimeError(msg)
-
-
 def _serve_in_thread(
     config: uvicorn.Config,
     *,
@@ -731,8 +702,6 @@ def start_mcp_http_server(
 
     Returns ``(url, stop)`` where ``stop`` is an idempotent disposer.
     """
-    import time
-
     # D15 — issue per-run secrets at startup. Agent harnesses receive
     # ``mcp_auth_token`` for reviewer/verifier role routes; the orchestrator
     # ``/mcp`` surface gets its own bearer so a leaked harness token cannot
@@ -752,7 +721,7 @@ def start_mcp_http_server(
         auth_token=agent_token,
         orchestrator_auth_token=orchestrator_token,
     )
-    bind_port = _resolve_bind_port()
+    bind_port = resolve_uvicorn_bind_port()
     http_config = uvicorn.Config(
         app,
         host=MCP_HOST,
@@ -762,26 +731,7 @@ def start_mcp_http_server(
     )
     server, thread, loop = _serve_in_thread(http_config, thread_name="mergecraft-mcp")
 
-    # Wait briefly for uvicorn to bind (port=0 resolves only after startup).
-    port = bind_port
-    for _ in range(50):
-        if getattr(server, "started", False):
-            try:
-                port = _bound_listen_port(server, bind_port)
-            except RuntimeError:
-                pass
-            else:
-                break
-        if bind_port != 0:
-            try:
-                with socket.create_connection((MCP_HOST, bind_port), timeout=0.1):
-                    port = bind_port
-                    break
-            except OSError:
-                pass
-        time.sleep(0.05)
-    else:
-        port = _bound_listen_port(server, bind_port)
+    port = wait_for_bound_port(server, bind_port)
 
     url = f"http://{MCP_HOST}:{port}{MCP_ENDPOINT}"
     ctx.mcp_server_url = url

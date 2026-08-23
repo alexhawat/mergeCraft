@@ -26,6 +26,7 @@ __all__ = [
     "export_audit_log",
     "export_usage",
     "load_audit_events",
+    "maybe_audit_blocking_terminal_submission",
     "record_blocking_decision",
 ]
 
@@ -139,6 +140,37 @@ def record_blocking_decision(
     if run_id is not None:
         event["run_id"] = run_id
     append_audit_event(event, root=root)
+
+
+def maybe_audit_blocking_terminal_submission(
+    ctx: Any,
+    recorded: Any,
+) -> None:
+    """Record enterprise audit when a blocking terminal submission lands."""
+    if recorded.verdict == "approve":
+        return
+    from mergecraft.mcp.tool_state import primary_repo_state
+    from mergecraft.mcp.verdict import blocks_approve_for_context
+
+    if not blocks_approve_for_context(ctx):
+        return
+    try:
+        repo_root = _resolve_root(Path(primary_repo_state(ctx.tool_state).dir))
+        record_blocking_decision(
+            {
+                "decision": "block",
+                "reason": str(recorded.summary),
+                "artifact_id": recorded.id,
+            },
+            run_id=ctx.tool_state.run_id,
+            root=repo_root,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to append blocking decision audit event for {}",
+            recorded.id,
+            exc_info=True,
+        )
 
 
 def load_audit_events(*, root: Path | None = None) -> list[dict[str, Any]]:

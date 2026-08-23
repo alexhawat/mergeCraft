@@ -44,23 +44,11 @@ jobs:
       - name: Integration suite
         run: make test-integration
       - name: Coverage ratchet
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base_ref="origin/${{ github.base_ref }}"
-            git fetch origin "${{ github.base_ref }}"
-            git worktree add ../mergecraft-base-coverage "$base_ref"
-            (
-              cd ../mergecraft-base-coverage
-              make coverage-gate
-              cp coverage.json "$GITHUB_WORKSPACE/coverage-base.json"
-            )
-            git worktree remove ../mergecraft-base-coverage --force
-          fi
-          make coverage-gate
-          if [ -f coverage-base.json ]; then
-            uv run python scripts/check_coverage_delta.py coverage.json --base coverage-base.json
-          fi
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: bash scripts/ci_coverage_delta_gate.sh
 
   security-scope:
     name: npm audit + workflow lint

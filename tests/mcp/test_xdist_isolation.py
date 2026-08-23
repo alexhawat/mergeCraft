@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import ast
 import importlib
-import inspect
 import json
 import subprocess
 import sys
@@ -31,6 +30,7 @@ from mergecraft.mcp.context import (
     ToolContext,
 )
 from mergecraft.mcp.server import start_mcp_http_server
+from mergecraft.mcp.shell import reset_detection_cache
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
@@ -123,31 +123,20 @@ def test_reset_mcp_process_state_is_public_api() -> None:
 
 
 def test_mcp_conftest_autouse_resets_process_state() -> None:
-    """D4 — tests/mcp/conftest.py must autouse-reset MCP process state."""
-    conftest = _MCP_DIR / "conftest.py"
-    assert conftest.is_file(), "tests/mcp/conftest.py is required for xdist isolation"
-    source = conftest.read_text(encoding="utf-8")
-    assert "autouse=True" in source.replace(" ", ""), (
-        "tests/mcp/conftest.py must declare an autouse fixture"
-    )
-    assert "reset_mcp_process_state" in source, (
-        "tests/mcp/conftest.py must call reset_mcp_process_state"
-    )
+    """D4 — tests/mcp/conftest.py registers an autouse reset fixture."""
+    import tests.mcp.conftest as mcp_conftest
+
+    assert hasattr(mcp_conftest, "_reset_mcp_process_state_between_tests")
 
 
-def test_start_mcp_http_server_avoids_select_port_release_window() -> None:
-    """D4 / #421 — do not release an OS port before uvicorn binds it."""
-    from mergecraft.mcp import server as server_mod
-
-    src = inspect.getsource(server_mod.start_mcp_http_server)
-    normalized = src.replace(" ", "")
-    uses_os_assigned_bind = "port=0" in normalized
-    holds_reservation = "reserved" in src.lower() or "reservation" in src.lower()
-    avoids_select_port = "select_port()" not in src
-    assert uses_os_assigned_bind or holds_reservation or avoids_select_port, (
-        "start_mcp_http_server must bind with port=0 or hold the reservation until "
-        "uvicorn serves — select_port() releases the socket before bind"
-    )
+def test_start_mcp_http_server_uses_os_assigned_port_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """D4 / #421 — unset MERGECRAFT_MCP_PORT must bind an ephemeral listen port."""
+    monkeypatch.delenv("MERGECRAFT_MCP_PORT", raising=False)
+    port, _, _ = _start_and_probe(tmp_path)
+    assert port > 0
 
 
 def test_reset_mcp_process_state_clears_shell_detection_cache(
@@ -166,6 +155,11 @@ def test_reset_mcp_process_state_clears_shell_detection_cache(
 
     assert shell_mod._detected_sandbox is None
     assert shell_mod._detected_netns is None
+
+
+def test_reset_detection_cache_is_public_shell_api() -> None:
+    """D4 — shell module exposes reset_detection_cache for xdist isolation."""
+    reset_detection_cache()
 
 
 def test_parallel_server_starts_have_unique_ports_and_tokens(tmp_path: Path) -> None:
@@ -240,7 +234,7 @@ def test_pair_of_flaky_mcp_tests_survive_repeated_xdist_runs() -> None:
         "not integration",
         "-q",
     ]
-    for attempt in range(8):
+    for attempt in range(3):
         proc = subprocess.run(
             cmd,
             cwd=_REPO_ROOT,

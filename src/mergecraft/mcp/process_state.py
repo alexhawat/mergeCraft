@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mergecraft.mcp import shell as shell_mod
+from mergecraft.mcp.shell import reset_detection_cache
 
 
 def reset_mcp_process_state() -> None:
@@ -11,5 +11,4 @@ def reset_mcp_process_state() -> None:
     Called from ``tests/mcp/conftest.py`` (autouse) and available for explicit
     resets when a test starts an MCP HTTP server.
     """
-    shell_mod._detected_sandbox = None
-    shell_mod._detected_netns = None
+    reset_detection_cache()

@@ -11,7 +11,8 @@ can run them offline.
 | --- | --- | --- |
 | `vulture` | `2.14` | `pyproject.toml` `[project.optional-dependencies] dev` → `.venv/bin` |
 | `typos` | `1.32.0` | same dev extra → `.venv/bin` |
-| `markdownlint` | `0.37.4` | `tools/package.json` → `tools/node_modules/.bin` |
+| `markdownlint-cli` | `0.44.0` (npm) | `tools/package.json` → `tools/node_modules/.bin` |
+| `markdownlint` (engine) | `0.37.4` | resolved via `tools/package-lock.json` (catalog `version:`) |
 | `jscpd` | `4.1.0` | same npm tooling package |
 
 Pins match the `version:` fields in `src/mergecraft/analyzers/catalog/*.yaml` and

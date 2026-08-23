@@ -187,28 +187,12 @@ def record_validated_terminal_submission(
     )
     ctx.tool_state.terminal_submission = recorded
     ctx.tool_state.terminal_submission_conflict = False
-    state = validation_state_from_tool_context(ctx)
-    if verdict != "approve" and _blocks_approve(state):
-        from mergecraft.enterprise.audit import record_blocking_decision
-
-        try:
-            repo_root = Path(primary_repo_state(ctx.tool_state).dir)
-            record_blocking_decision(
-                {
-                    "decision": "block",
-                    "reason": str(summary),
-                    "artifact_id": recorded.id,
-                },
-                run_id=ctx.tool_state.run_id,
-                root=repo_root,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to append blocking decision audit event for {}",
-                recorded.id,
-                exc_info=True,
-            )
     return recorded
+
+
+def blocks_approve_for_context(ctx: ToolContext) -> bool:
+    """Return whether the active run's graded state blocks an ``approve`` verdict."""
+    return _blocks_approve(validation_state_from_tool_context(ctx))
 
 
 def verdict_satisfies_attempt(
@@ -658,6 +642,9 @@ def submit_review_verdict_tool(ctx: ToolContext):
             submission_dict,
             findings=normalized_findings,
         )
+        from mergecraft.mcp.terminal_hooks import after_terminal_submission_recorded
+
+        after_terminal_submission_recorded(ctx, recorded)
         ctx.tool_state.review_phase = ReviewPhase.SUBMIT.value
         stamp_review_phase_on_active_span(ReviewPhase.SUBMIT)
         return {
@@ -729,6 +716,7 @@ __all__ = [
     "SubmitReviewVerdictParams",
     "ValidationState",
     "VerdictDiagnostic",
+    "blocks_approve_for_context",
     "build_validation_state",
     "ensure_review_scope_for_terminal",
     "record_validated_terminal_submission",

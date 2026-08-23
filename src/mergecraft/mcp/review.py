@@ -408,7 +408,10 @@ def create_pull_request_review_tool(ctx: ToolContext):
         if ctx.tool_state.terminal_submission is None:
             submission_payload = _legacy_params_to_submission(params)
             if submission_payload is not None:
-                record_validated_terminal_submission(ctx, submission_payload)
+                recorded = record_validated_terminal_submission(ctx, submission_payload)
+                from mergecraft.mcp.terminal_hooks import after_terminal_submission_recorded
+
+                after_terminal_submission_recorded(ctx, recorded)
         else:
             _reject_mismatched_publication(ctx.tool_state.terminal_submission, params)
             revalidate_recorded_submission(ctx)

@@ -1065,13 +1065,9 @@ def _codex_stream_event_handler(
             usage = event.get("usage") if isinstance(event.get("usage"), dict) else None
             if usage is not None:
                 accumulator.replace_usage(usage)
-                tokens_in = int(usage.get("input_tokens") or usage.get("inputTokens") or 0)
-                tokens_out = int(usage.get("output_tokens") or usage.get("outputTokens") or 0)
-                for key in open_pair_bookkeeping:
-                    open_pair_bookkeeping[key] = {
-                        "tokens_in": tokens_in,
-                        "tokens_out": tokens_out,
-                    }
+                from mergecraft.agents.stream_bookkeeping import sync_open_pair_bookkeeping
+
+                sync_open_pair_bookkeeping(open_pair_bookkeeping, usage)
             cost = event.get("total_cost_usd")
             if isinstance(cost, (int, float)) and usage is not None:
                 accumulator.cost_usd = float(cost)
