@@ -35,6 +35,7 @@ ensure-uv: ## Install uv on PATH when missing
 
 setup: ensure-uv ## Fresh checkout: sync deps and pre-commit hooks
 	$(UV) sync --extra dev
+	@$(MAKE) setup-local-analyzers
 	@if [ -n "$${CI}$${MERGECRAFT_SKIP_PRECOMMIT}" ]; then \
 	  echo "skipping pre-commit install (CI / MERGECRAFT_SKIP_PRECOMMIT)"; \
 	else \
@@ -42,8 +43,18 @@ setup: ensure-uv ## Fresh checkout: sync deps and pre-commit hooks
 	  $(PRE_COMMIT) install --hook-type commit-msg; \
 	fi
 
+setup-local-analyzers: ## Install pinned repo-native analyzer npm CLIs (#427)
+	@if [ -f tools/package.json ]; then \
+	  if command -v npm >/dev/null 2>&1; then \
+	    cd tools && npm ci --ignore-scripts --no-audit --no-fund; \
+	  else \
+	    echo "warning: npm not found; markdownlint and jscpd will be skipped locally"; \
+	  fi; \
+	fi
+
 install: ## Sync dev environment after dependency changes
 	$(UV) sync --extra dev
+	@$(MAKE) setup-local-analyzers
 
 lockcheck: ## Fail if uv.lock is out of date
 	$(UV) lock --check

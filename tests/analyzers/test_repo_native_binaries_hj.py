@@ -8,6 +8,7 @@ Pins D8: after ``make setup``, ``find_repo_binary`` resolves ``vulture``,
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -43,19 +44,46 @@ def _catalog_version_matches(reported: str | None, catalog_version: str) -> bool
     return normalized in reported or reported.startswith(normalized)
 
 
+def _engine_version_for_binary(repo_root: Path, binary: str) -> str | None:
+    """Return the nested npm engine version when the catalog pin tracks the library."""
+    if binary != "markdownlint":
+        return None
+    for prefix in _repo_tooling_prefixes(repo_root):
+        package_json = prefix.parent / "markdownlint" / "package.json"
+        if not package_json.is_file():
+            continue
+        payload = json.loads(package_json.read_text(encoding="utf-8"))
+        version = payload.get("version")
+        return version if isinstance(version, str) else None
+    return None
+
+
+def _resolved_version(repo_root: Path, binary: str, manifest: AnalyzerManifest) -> str | None:
+    resolution = find_repo_binary(repo_root, binary)
+    if resolution is None:
+        return None
+    engine = _engine_version_for_binary(repo_root, binary)
+    if engine is not None:
+        return engine
+    return resolution.version
+
+
 def _repo_tooling_prefixes(repo_root: Path) -> tuple[Path, ...]:
     repo_root = repo_root.resolve()
     prefixes: list[Path] = [
         repo_root / ".venv" / "bin",
         repo_root / "venv" / "bin",
         repo_root / "node_modules" / ".bin",
+        repo_root / "node_modules",
     ]
     for package_json in repo_root.glob("packages/*/package.json"):
         prefixes.append(package_json.parent / "node_modules" / ".bin")
+        prefixes.append(package_json.parent / "node_modules")
     for package_json in repo_root.glob("*/package.json"):
         if package_json.parent == repo_root:
             continue
         prefixes.append(package_json.parent / "node_modules" / ".bin")
+        prefixes.append(package_json.parent / "node_modules")
     return tuple(prefixes)
 
 
@@ -71,13 +99,9 @@ def _is_under_repo_tooling(repo_root: Path, tool_path: str) -> bool:
     return False
 
 
-# --- #427 install contract (RED until W20) -----------------------------------
+# --- #427 install contract ---------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="green after W20: install repo-native binaries via make setup (#427)",
-    strict=False,
-)
 @pytest.mark.parametrize("tool_id", _INSTALLED_TOOL_IDS)
 def test_find_repo_binary_resolves_after_make_setup(tool_id: str) -> None:
     """``make setup`` must leave each catalog tool resolvable from the checkout."""
@@ -91,15 +115,12 @@ def test_find_repo_binary_resolves_after_make_setup(tool_id: str) -> None:
     assert _is_under_repo_tooling(_REPO_ROOT, resolution.path), (
         f"{binary} must resolve from .venv/bin or */node_modules/.bin, not arbitrary PATH"
     )
-    assert _catalog_version_matches(resolution.version, manifest.version), (
-        f"{binary} version {resolution.version!r} must match catalog {manifest.version!r}"
+    reported = _resolved_version(_REPO_ROOT, binary, manifest)
+    assert _catalog_version_matches(reported, manifest.version), (
+        f"{binary} version {reported!r} must match catalog {manifest.version!r}"
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W20: install repo-native binaries via make setup (#427)",
-    strict=False,
-)
 @pytest.mark.parametrize("tool_id", _INSTALLED_TOOL_IDS)
 def test_resolve_repo_tool_succeeds_after_make_setup(tool_id: str) -> None:
     """Offline review must not skip the four installed repo-native analyzers."""
@@ -115,10 +136,6 @@ def test_resolve_repo_tool_succeeds_after_make_setup(tool_id: str) -> None:
     assert Path(resolution.path).is_file()
 
 
-@pytest.mark.xfail(
-    reason="green after W20: document knip/tsc intentional skip (#427)",
-    strict=False,
-)
 def test_knip_and_tsc_skip_documented() -> None:
     """D8 written skip: vendor JS under ``docker/agent-clis``, no first-party ``tsconfig``."""
     assert _LOCAL_ANALYZERS_DOC.is_file(), (
@@ -142,13 +159,18 @@ def test_manifests_stay_repo_native_without_darwin_provenance(tool_id: str) -> N
 
 
 @pytest.mark.parametrize("tool_id", _INSTALLED_TOOL_IDS)
-def test_missing_binaries_skip_with_named_reason_today(tool_id: str) -> None:
+def test_missing_binaries_skip_with_named_reason_today(
+    tool_id: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Consumer repos without the tool must still skip with the standard reason."""
+    monkeypatch.setenv("PATH", "")
     manifest = _manifest(tool_id)
     binary = _command_binary(manifest)
     resolution, skip = resolve_repo_tool(
         tool_id,
-        repo_root=_REPO_ROOT,
+        repo_root=tmp_path,
         command_binary=binary,
     )
     assert resolution is None
