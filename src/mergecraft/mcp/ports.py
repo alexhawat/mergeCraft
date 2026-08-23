@@ -12,6 +12,8 @@ import socket
 import time
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 if TYPE_CHECKING:
     import uvicorn
 
@@ -48,8 +50,13 @@ def port_available(port: int) -> bool:
 def resolve_uvicorn_bind_port() -> int:
     """Return explicit env port when free, otherwise ``0`` for OS assignment at bind."""
     requested = read_env_port()
-    if requested is not None and port_available(requested):
-        return requested
+    if requested is not None:
+        if port_available(requested):
+            return requested
+        logger.warning(
+            "MERGECRAFT_MCP_PORT={} is busy; falling back to port 0 for OS assignment",
+            requested,
+        )
     return 0
 
 

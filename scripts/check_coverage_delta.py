@@ -4,6 +4,11 @@
 Compares a head ``coverage.json`` (merge result or push) against a base-branch
 report so CI can distinguish an inherited floor breach from a drop caused by the
 change under review.
+
+Exit policy: inherited floor breaches fail even when the PR did not lower
+coverage. A head report that regresses versus base but stays at or above
+``fail_under`` exits 0 — the absolute floor is enforced separately by
+``make coverage-gate`` on the head tree, not by this delta script.
 """
 
 from __future__ import annotations
@@ -114,7 +119,13 @@ def compare_to_base(head: Path, base: Path, *, floor: float | None = None) -> Co
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=(
+            "Regressions that stay at or above fail_under do not fail this check; "
+            "only inherited floor breaches and caused drops below fail_under exit 1."
+        ),
+    )
     parser.add_argument(
         "head",
         nargs="?",

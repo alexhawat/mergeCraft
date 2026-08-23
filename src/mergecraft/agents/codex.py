@@ -1067,7 +1067,17 @@ def _codex_stream_event_handler(
                 accumulator.replace_usage(usage)
                 from mergecraft.agents.stream_bookkeeping import sync_open_pair_bookkeeping
 
-                sync_open_pair_bookkeeping(open_pair_bookkeeping, usage)
+                active_key: str | None = None
+                completed_thread_id = event.get("thread_id")
+                if isinstance(completed_thread_id, str) and completed_thread_id:
+                    active_key = completed_thread_id
+                elif len(open_pair_bookkeeping) == 1:
+                    active_key = next(iter(open_pair_bookkeeping))
+                sync_open_pair_bookkeeping(
+                    open_pair_bookkeeping,
+                    usage,
+                    active_key=active_key,
+                )
             cost = event.get("total_cost_usd")
             if isinstance(cost, (int, float)) and usage is not None:
                 accumulator.cost_usd = float(cost)

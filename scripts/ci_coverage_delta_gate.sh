@@ -11,12 +11,16 @@ fi
 : "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 
 base_ref="origin/${GITHUB_BASE_REF}"
-worktree="../mergecraft-base-coverage"
+worktree="${GITHUB_WORKSPACE}/.ci-mergecraft-base-coverage"
 
 cleanup() {
   git worktree remove "$worktree" --force 2>/dev/null || true
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
+
+# Drop a stale worktree left by a prior failed integration run before re-adding.
+git worktree remove "$worktree" --force 2>/dev/null || true
+git worktree prune 2>/dev/null || true
 
 git fetch origin "${GITHUB_BASE_REF}"
 git worktree add "$worktree" "$base_ref"

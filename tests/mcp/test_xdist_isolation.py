@@ -143,6 +143,7 @@ def test_reset_mcp_process_state_clears_shell_detection_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """D4 — shell sandbox detection caches must not leak across MCP tests."""
+    import mergecraft.mcp.shared as shared_mod
     import mergecraft.mcp.shell as shell_mod
 
     reset = _find_reset_mcp_process_state()
@@ -150,11 +151,14 @@ def test_reset_mcp_process_state_clears_shell_detection_cache(
 
     monkeypatch.setattr(shell_mod, "_detected_sandbox", "unshare", raising=False)
     monkeypatch.setattr(shell_mod, "_detected_netns", True, raising=False)
+    token = shared_mod.bind_selected_mode("Review")
 
     reset()
 
     assert shell_mod._detected_sandbox is None
     assert shell_mod._detected_netns is None
+    assert shared_mod._selected_mode_var.get() is None
+    shared_mod.reset_selected_mode(token)
 
 
 def test_reset_detection_cache_is_public_shell_api() -> None:

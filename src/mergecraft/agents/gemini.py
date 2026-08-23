@@ -533,7 +533,11 @@ def _gemini_stream_event_handler(
                 accumulator.replace_usage(usage)
                 from mergecraft.agents.stream_bookkeeping import sync_open_pair_bookkeeping
 
-                sync_open_pair_bookkeeping(open_pair_bookkeeping, usage)
+                sync_open_pair_bookkeeping(
+                    open_pair_bookkeeping,
+                    usage,
+                    active_key="default",
+                )
             response = event.get("response")
             if isinstance(response, str) and response:
                 accumulator.set_output(response)

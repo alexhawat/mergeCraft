@@ -46,7 +46,8 @@ setup: ensure-uv ## Fresh checkout: sync deps and pre-commit hooks
 setup-local-analyzers: ## Install pinned repo-native analyzer npm CLIs (#427)
 	@if [ -f tools/package.json ]; then \
 	  if command -v npm >/dev/null 2>&1; then \
-	    cd tools && npm ci --ignore-scripts --no-audit --no-fund; \
+	    cd tools && npm ci --ignore-scripts --no-audit --no-fund \
+	      || echo "warning: npm ci failed; markdownlint and jscpd will be skipped locally"; \
 	  else \
 	    echo "warning: npm not found; markdownlint and jscpd will be skipped locally"; \
 	  fi; \

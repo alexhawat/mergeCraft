@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from mergecraft.mcp.shared import clear_selected_mode_binding
 from mergecraft.mcp.shell import reset_detection_cache
 
 
@@ -12,3 +13,4 @@ def reset_mcp_process_state() -> None:
     resets when a test starts an MCP HTTP server.
     """
     reset_detection_cache()
+    clear_selected_mode_binding()

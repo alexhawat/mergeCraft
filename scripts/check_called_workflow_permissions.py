@@ -9,7 +9,9 @@ failure mode is ``startup_failure`` with no logs, annotations, or check runs
 This script scans ``.github/workflows/`` and fails when a job-level ``uses:``
 target is a *local* reusable workflow (``./…`` under this repo) whose declared
 ``permissions`` are not satisfied by the caller job's effective scopes (job
-``permissions`` when present, otherwise workflow-level ``permissions``).
+``permissions`` when present, otherwise workflow-level ``permissions``). Scalar
+workflow permissions such as ``read-all`` / ``write-all`` are expanded to their
+GitHub shorthand meaning before comparison.
 
 Third-party reusable workflows (``owner/repo/.github/workflows/…@ref``) and
 composite/action ``uses:`` at the *step* level are out of scope.
