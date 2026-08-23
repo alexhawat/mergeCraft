@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from tests.analyzers.support_short_id import require_callable
 from typer.testing import CliRunner
 
@@ -29,7 +28,6 @@ def _write_evidence_packet(repo_root: Path, *, fingerprint: str) -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_explain_accepts_short_finding_id(tmp_path: Path) -> None:
     """Happy — ``mergecraft explain MC-…`` loads the stored evidence packet."""
     finding_short_id = require_callable("finding_short_id")

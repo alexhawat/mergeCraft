@@ -10,8 +10,6 @@ import json
 import re
 from typing import Any
 
-import pytest
-
 from tests.analyzers.support_short_id import require_callable, sample_finding
 
 _MC_ID_RE = re.compile(r"MC-[0-9a-f]{6,}")
@@ -31,7 +29,6 @@ def _extract_short_id(payload: dict[str, Any]) -> str:
     raise AssertionError(msg)
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_render_finding_markdown_includes_short_id() -> None:
     """Markdown review output quotes the stable short id."""
     render_finding_markdown = require_callable("render_finding_markdown")
@@ -42,7 +39,6 @@ def test_render_finding_markdown_includes_short_id() -> None:
     assert _MC_ID_RE.search(rendered)
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_finding_json_record_includes_short_id_field() -> None:
     """Structured JSON exports carry the short id beside the fingerprint."""
     finding_json_record = require_callable("finding_json_record")
@@ -53,7 +49,6 @@ def test_finding_json_record_includes_short_id_field() -> None:
     assert _extract_short_id(payload) == short_id
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_finding_agent_jsonl_record_includes_short_id_field() -> None:
     """Agent JSONL finding events include the same short id."""
     finding_agent_jsonl_record = require_callable("finding_agent_jsonl_record")
@@ -67,7 +62,6 @@ def test_finding_agent_jsonl_record_includes_short_id_field() -> None:
     assert _extract_short_id(parsed) == short_id
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_render_finding_pr_comment_includes_short_id() -> None:
     """PR inline comment bodies surface the short id for human quoting."""
     render_finding_pr_comment = require_callable("render_finding_pr_comment")
@@ -78,7 +72,6 @@ def test_render_finding_pr_comment_includes_short_id() -> None:
     assert _MC_ID_RE.search(body)
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_all_output_surfaces_share_the_same_short_id() -> None:
     """Acceptance — one finding renders the identical ``MC-…`` everywhere."""
     render_finding_markdown = require_callable("render_finding_markdown")

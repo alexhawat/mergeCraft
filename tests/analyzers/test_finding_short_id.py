@@ -20,7 +20,6 @@ from tests.analyzers.support_short_id import (
 _MC_ID_RE = re.compile(r"^MC-[0-9a-f]{6,}$")
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_finding_short_id_prefix_is_mc() -> None:
     """D2 — short ids use the ``MC-`` prefix."""
     prefix = require_attr("FINDING_SHORT_ID_PREFIX")
@@ -31,7 +30,6 @@ def test_finding_short_id_prefix_is_mc() -> None:
     assert short_id.startswith("MC-")
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_finding_short_id_is_deterministic_for_same_fingerprint() -> None:
     """Happy — the same fingerprint always maps to the same short id."""
     finding_short_id = require_callable("finding_short_id")
@@ -39,7 +37,6 @@ def test_finding_short_id_is_deterministic_for_same_fingerprint() -> None:
     assert finding_short_id(fingerprint) == finding_short_id(fingerprint)
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_finding_short_id_uses_fingerprint_prefix() -> None:
     """Happy — default truncation uses the fingerprint's leading hex (issue example)."""
     finding_short_id = require_callable("finding_short_id")
@@ -47,7 +44,6 @@ def test_finding_short_id_uses_fingerprint_prefix() -> None:
     assert finding_short_id(fingerprint) == "MC-a83f91"
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_finding_short_id_differs_for_different_fingerprints() -> None:
     """Edge — unrelated fingerprints should not share a short id by default."""
     finding_short_id = require_callable("finding_short_id")
@@ -65,7 +61,6 @@ def test_finding_short_id_differs_for_different_fingerprints() -> None:
         ("../escape", "path traversal"),
     ],
 )
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_finding_short_id_rejects_unsafe_fingerprint(
     fingerprint: str,
     label: str,
@@ -76,7 +71,6 @@ def test_finding_short_id_rejects_unsafe_fingerprint(
         finding_short_id(fingerprint)
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_resolve_finding_short_ids_disambiguates_truncation_collisions() -> None:
     """D2 — batch assignment yields distinct ids when truncation would collide."""
     resolve_finding_short_ids = require_callable("resolve_finding_short_ids")
@@ -87,7 +81,6 @@ def test_resolve_finding_short_ids_disambiguates_truncation_collisions() -> None
     assert _MC_ID_RE.match(mapping[fp2])
 
 
-@pytest.mark.xfail(reason="green after CA", strict=False)
 def test_resolve_finding_short_ids_is_stable_for_repeated_calls() -> None:
     """Happy — collision resolution is deterministic across repeated batch calls."""
     resolve_finding_short_ids = require_callable("resolve_finding_short_ids")
