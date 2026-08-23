@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `make action-pin-check` also measures the pin against the default branch's own tip, not just against the
+  other branch's pin. Comparing pins to each other passes when both are equally stale, which is what happened
+  after #457 merged: both branches pinned the same SHA and the check reported OK while the reviewer ran none
+  of the fixes that had just landed. Lag is counted over `src/mergecraft/` only, since docs and test commits
+  do not change what the reviewer executes (#450)
 - `make action-pin-check` guards the self-review Action pin against drift. Because
   `.github/workflows/mergecraft.yml` runs on `pull_request_target`, GitHub resolves its `uses:` pin from the
   **default branch**, so a fix merged to `pre-0.0.1` does not reach the reviewer until it reaches `main` —
