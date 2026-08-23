@@ -45,3 +45,22 @@ def test_maybe_audit_skips_approve(tmp_path: Path) -> None:
     maybe_audit_blocking_terminal_submission(ctx, recorded)  # type: ignore[arg-type]
 
     assert load_audit_events(root=tmp_path) == []
+
+
+def test_after_terminal_submission_recorded_skips_replayed_audit(tmp_path: Path) -> None:
+    from mergecraft.mcp.verdict import after_terminal_submission_recorded
+
+    recorded = TerminalSubmission(
+        id="artifact-rc",
+        verdict="request_changes",
+        summary="please fix tests",
+        findings=[],
+        payload_hash="hash",
+        submitted_at="2026-01-01T00:00:00+00:00",
+        attempt_id=1,
+    )
+    ctx = SimpleNamespace(tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)))
+
+    after_terminal_submission_recorded(ctx, recorded, replayed=True)  # type: ignore[arg-type]
+
+    assert load_audit_events(root=tmp_path) == []

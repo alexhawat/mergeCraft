@@ -14,6 +14,7 @@ base_ref="origin/${GITHUB_BASE_REF}"
 worktree="${GITHUB_WORKSPACE}/.ci-mergecraft-base-coverage"
 
 cleanup() {
+  rm -f "${GITHUB_WORKSPACE}/coverage-base.json" 2>/dev/null || true
   git worktree remove "$worktree" --force 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM

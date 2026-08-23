@@ -41,7 +41,21 @@ def test_compare_to_base_marks_regression_above_floor_as_non_fatal(tmp_path: Pat
     result = module.compare_to_base(head, base, floor=82.0)
 
     assert result.caused_by_change is True
+    assert result.inherited is False
     assert result.head_percent >= 82.0
+
+
+def test_compare_to_base_marks_caused_drop_below_floor_before_inherited_margin(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    base = _coverage_json(tmp_path / "base.json", 83.0)
+    head = _coverage_json(tmp_path / "head.json", 80.5)
+
+    result = module.compare_to_base(head, base, floor=82.0)
+
+    assert result.caused_by_change is True
+    assert result.inherited is False
 
 
 def test_main_exits_zero_for_regression_above_floor(

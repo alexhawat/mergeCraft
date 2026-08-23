@@ -10,7 +10,10 @@ Exports:
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -20,6 +23,8 @@ from loguru import logger
 from mergecraft.analyzers.redact import redact_secrets
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import TerminalSubmission
 
@@ -59,6 +64,21 @@ def _audit_path(root: Path) -> Path:
     return root / DEFAULT_AUDIT_REL
 
 
+@contextlib.contextmanager
+def _audit_append_lock(path: Path) -> Iterator[None]:
+    """Serialize concurrent JSONL appends across processes on one workspace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.parent / ".audit.lock"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        if sys.platform != "win32":
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if sys.platform != "win32":
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def _redact_context_value(value: Any) -> Any:
     if isinstance(value, str):
         return redact_secrets(value)
@@ -95,6 +115,11 @@ def append_audit_event(
 ) -> None:
     """Append one structured audit event to ``.mergecraft/audit.jsonl`` (#417).
 
+    Concurrent appends are serialized with an ``fcntl`` lock on
+    ``.mergecraft/.audit.lock`` (best-effort on Windows, where locking is
+    skipped). mergeCraft's Action runs one review process per workspace, so
+    the lock mainly guards local CLI retries and parallel test workers.
+
     Args:
         event: Event payload with ``event_type``, ``outcome``, ``context``, and at
             least one of ``run_id`` / ``artifact_id``. ``timestamp`` is stamped in
@@ -116,9 +141,8 @@ def append_audit_event(
     if "artifact_id" in payload:
         normalized["artifact_id"] = payload["artifact_id"]
 
-    path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(normalized, ensure_ascii=False, default=str) + "\n"
-    with path.open("a", encoding="utf-8") as handle:
+    with _audit_append_lock(path), path.open("a", encoding="utf-8") as handle:
         handle.write(line)
 
 
@@ -134,6 +158,10 @@ def record_blocking_decision(
         artifact: Stored run artifact with ``decision`` and ``artifact_id``.
         run_id: Optional run identifier to attach to the audit event.
         root: Workspace root. Defaults to the current working directory.
+
+    Raises:
+        ValueError: When neither ``artifact_id`` nor ``run_id`` is available to
+            identify the event (``append_audit_event`` requires at least one).
     """
     context: dict[str, Any] = {}
     reason = artifact.get("reason")
@@ -150,6 +178,9 @@ def record_blocking_decision(
         event["artifact_id"] = artifact_id
     if run_id is not None:
         event["run_id"] = run_id
+    if "artifact_id" not in event and "run_id" not in event:
+        msg = "record_blocking_decision requires artifact_id and/or run_id"
+        raise ValueError(msg)
     append_audit_event(event, root=root)
 
 
@@ -163,6 +194,9 @@ def maybe_audit_blocking_terminal_submission(
     non-approve terminal verdict are persisted with ``event_type=terminal_verdict``
     so ``mergecraft audit export`` can replay the full decision surface, not only
     runs whose graded state blocks approval.
+
+    Fail-open: audit persistence errors are logged and swallowed so a broken
+    audit sink cannot block the review terminal path.
     """
     if recorded.verdict == "approve":
         return

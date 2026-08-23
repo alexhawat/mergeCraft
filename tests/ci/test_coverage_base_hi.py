@@ -163,9 +163,9 @@ class TestCoverageDeltaScript:
         compare = getattr(module, "compare_to_base", None)
         assert callable(compare), "check_coverage_delta.compare_to_base missing"
 
-        base = _coverage_json(tmp_path / "base.json", 82.0)
-        head = _coverage_json(tmp_path / "head.json", 81.0)
-        result = compare(head, base)
+        base = _coverage_json(tmp_path / "base.json", 81.0)
+        head = _coverage_json(tmp_path / "head.json", 80.5)
+        result = compare(head, base, floor=82.0)
 
         inherited = getattr(result, "inherited", None)
         message = getattr(result, "message", None)

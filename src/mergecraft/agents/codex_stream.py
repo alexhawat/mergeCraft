@@ -130,13 +130,13 @@ def codex_stream_event_handler(
             if output:
                 accumulator.set_output(output)
             if usage is not None:
-                accumulator.replace_usage(
-                    {
-                        "input_tokens": usage.input_tokens,
-                        "output_tokens": usage.output_tokens,
-                        "total_cost_usd": usage.cost_usd,
-                    }
-                )
+                usage_dict = {
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "total_cost_usd": usage.cost_usd,
+                }
+                accumulator.replace_usage(usage_dict)
+                sync_open_pair_bookkeeping(open_pair_bookkeeping, usage_dict)
             return
 
         if event_type == "thread.started":

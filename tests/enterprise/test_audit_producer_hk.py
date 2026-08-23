@@ -251,6 +251,12 @@ def test_record_blocking_decision_appends_audit_event(tmp_path: Path) -> None:
     assert event["artifact_id"] == "run-1"
 
 
+def test_record_blocking_decision_requires_identifier(tmp_path: Path) -> None:
+    record = _require_record_blocking_decision()
+    with pytest.raises(ValueError, match="artifact_id and/or run_id"):
+        record({"decision": "block"}, root=tmp_path)
+
+
 def test_append_audit_event_stamps_utc_timestamp_when_omitted(tmp_path: Path) -> None:
     """HK417j: producer adds a UTC timestamp when the caller omits one."""
     append = _require_append_audit_event()

@@ -17,7 +17,10 @@ can run them offline.
 
 Pins match the `version:` fields in `src/mergecraft/analyzers/catalog/*.yaml` and
 are locked via `uv.lock` (Python) and `tools/package-lock.json` (npm). `make setup`
-runs `uv sync --extra dev` and `npm ci` in `tools/`.
+runs `uv sync --extra dev` and a **soft** npm install via `make setup-local-analyzers`:
+when `npm` is missing or `npm ci` fails, setup prints a warning and continues —
+`markdownlint` and `jscpd` are skipped locally until `tools/node_modules` exists.
+`make npm-lockcheck` (in `make lint`) still enforces lockfile drift when npm is on PATH.
 
 ## Intentionally skipped in this repo
 
