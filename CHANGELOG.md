@@ -59,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Empty Bandit JSON stdout is a clean scan (zero findings) instead of a skip;
+  unparsable stdout still skips and quotes the first bytes of that output (#467)
 - Catalog-check rejects all-zero `sha256` provenance pins (placeholders that
   made `provision_managed_binary` treat a trailing-slash URL as a directory and
   fail with `Is a directory`). Pip-style tools such as `checkov` and `yamllint`
