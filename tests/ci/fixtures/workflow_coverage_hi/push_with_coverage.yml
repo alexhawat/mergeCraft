@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+# Good: push to protected branches runs coverage-gate.
+name: HI push with coverage (good)
+
+on:
+  push:
+    branches: [main, pre-0.0.1]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Coverage ratchet
+        run: make coverage-gate

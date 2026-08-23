@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+# Good: measure refs/pull/N/merge before gating coverage.
+name: HI PR merge ref (good)
+
+on:
+  pull_request:
+    branches: [main, pre-0.0.1]
+
+jobs:
+  integration-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+      - name: Coverage ratchet
+        run: make coverage-gate

@@ -473,3 +473,65 @@ extra is absent.
 - `make lint` + `make typecheck` clean on touched paths
 - HH431a–b RED (fail_under still 80); HH431e xfail; behaviour tests pass
 - No `src/` edits
+
+---
+
+# Batch HI — #432 coverage on the base branch
+
+Authoring wave: **W17** (HI RED) · Implementation: **W18** (`ci: gate coverage on the base branch after merge`, D6)
+GitHub issue: **#432** — coverage gate cannot catch cross-PR drift on the base branch
+
+Locked decision **D6**: gate coverage on push to ``pre-0.0.1`` / ``main`` **and** report
+delta vs base; prefer measuring ``refs/pull/N/merge`` when the workflow has that ref;
+no line-touching tests (#432 ruled-out list binding).
+
+## xfail schedule
+
+| Wave | Test | Marker reason | Issue |
+|------|------|---------------|-------|
+| **W18** | `test_integration_pr_coverage_checks_merge_ref` | `green after W18: integration PR coverage uses merge ref (#432)` | pending |
+| **W18** | `test_integration_coverage_reports_delta_vs_base` | `green after W18: coverage gate reports delta vs base (#432)` | pending |
+| **W18** | `test_check_coverage_delta_script_exists` | `green after W18: coverage delta vs base (#432)` | pending |
+| **W18** | `test_compare_to_base_marks_inherited_drop` | same | pending |
+| **W18** | `test_compare_to_base_marks_caused_drop` | same | pending |
+
+Never `strict=True` — W18 drops xfails when workflows and delta script land.
+
+## Contract matrix (#432 / D6)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| HI432a | Push to ``main`` and ``pre-0.0.1`` gated by coverage somewhere | integration | policy | `test_repo_has_push_coverage_gate_for_main_and_pre_0_0_1` |
+| HI432b | ``ci-cd.yml`` verify job runs full ``make ci`` on push | integration | happy | `test_ci_cd_workflow_runs_make_ci_on_push` |
+| HI432c | ``integration.yml`` PR job checks out ``refs/pull/N/merge`` | integration | pre-merge | `test_integration_pr_coverage_checks_merge_ref` |
+| HI432d | Coverage gate reports delta vs base (workflow or script) | integration | attribution | `test_integration_coverage_reports_delta_vs_base` |
+| HI432e | ``check_coverage_delta.py`` exists | unit | policy | `test_check_coverage_delta_script_exists` |
+| HI432f | Inherited drop flagged when head < base at floor | unit | edge | `test_compare_to_base_marks_inherited_drop` |
+| HI432g | Caused drop distinguishable from inherited | unit | happy | `test_compare_to_base_marks_caused_drop` |
+| HI432h | Fixture: head-only PR coverage is an offense | unit | error | `test_bad_pr_fixture_scores_head_not_merge` |
+| HI432i | Fixture: merge-ref PR coverage passes scan | unit | happy | `test_good_pr_fixture_checks_merge_ref` |
+| HI432j | Fixture: push without coverage flagged | unit | error | `test_bad_push_fixture_lacks_coverage_gate` |
+| HI432k | Fixture: push with coverage passes | unit | happy | `test_good_push_fixture_runs_coverage_gate` |
+| HI432l | Fixture: delta step text satisfies scanner | unit | happy | `test_good_delta_fixture_reports_vs_base` |
+
+## Named symbols W18 must satisfy
+
+| Symbol | Location | Test |
+|--------|----------|------|
+| merge-ref checkout | ``integration.yml`` integration-pr job | HI432c |
+| delta reporting step or script | ``integration.yml`` or ``scripts/check_coverage_delta.py`` | HI432d–g |
+| ``compare_to_base(head, base)`` | ``scripts/check_coverage_delta.py`` | HI432f–g |
+| push coverage on protected branches | ``ci-cd.yml`` (or additional workflow) | HI432a–b |
+
+## Collection target (W17)
+
+- `tests/ci/coverage_base_branch.py` — scanner helpers
+- `tests/ci/fixtures/workflow_coverage_hi/` — 5 workflow fixtures
+- `tests/ci/test_coverage_base_hi.py` — **14 tests** (5 xfail, 9 pass)
+
+## Acceptance (W17)
+
+- New tests collect with zero import errors
+- `make lint` + `make typecheck` clean on touched paths
+- HI432a–b, HI432h–l pass; HI432c–g xfail (non-strict)
+- No `src/` or `.github/workflows/` edits
