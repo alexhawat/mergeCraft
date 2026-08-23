@@ -19,6 +19,12 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
 from mergecraft.cli.global_surface import get_cli_globals
 from mergecraft.config.settings import parse_cli_trust_override
+from mergecraft.findings.hunk_export import (
+    count_dropped_file_level_findings,
+    export_hunk_comments,
+    first_changed_lines_from_diff,
+    format_file_level_drop_warning,
+)
 from mergecraft.offline_review import (
     OfflineReviewResult,
     parse_offline_review_findings,
@@ -34,7 +40,8 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
 
-OutputFormat = Literal["text", "json", "jsonl", "sarif"]
+OutputFormat = Literal["text", "json", "jsonl", "sarif", "hunk"]
+HunkFileFindings = Literal["drop", "first-changed-line"]
 
 _PANEL_SOURCE = "Source"
 _PANEL_DIFF = "Diff selection"
@@ -104,6 +111,7 @@ Examples — output:
   mergecraft review --json findings.json
   mergecraft review --output-format sarif --output report.sarif.json
   mergecraft review --output-format jsonl --output stream.jsonl
+  mergecraft review --output-format hunk
   mergecraft review --agent
   mergecraft review 2> review.md              # human text lives on stderr (D14)
 
@@ -299,11 +307,21 @@ def run(
         None,
         "--output-format",
         help=(
-            "Review payload format: text (default), json, jsonl, or sarif. "
+            "Review payload format: text (default), json, jsonl, sarif, or hunk. "
             "Root --format json selects json when this flag is omitted; "
             "explicit --output-format text always renders human markdown on stderr. "
             "Default text mode writes human-readable review text to stderr (D14); "
-            "redirect with 2> to capture it."
+            "redirect with 2> to capture it. "
+            "hunk writes Hunk comment JSON to stdout (stdout-only; no --output)."
+        ),
+        rich_help_panel=_PANEL_OUTPUT,
+    ),
+    hunk_file_findings: HunkFileFindings = typer.Option(
+        "drop",
+        "--hunk-file-findings",
+        help=(
+            "For --output-format hunk: drop file-level findings (default) or "
+            "anchor them on the first changed line per file (first-changed-line)."
         ),
         rich_help_panel=_PANEL_OUTPUT,
     ),
@@ -640,6 +658,24 @@ def run(
             document = export_sarif(findings)
             target.write_text(json.dumps(document, indent=2), encoding="utf-8")
             console.print(f"[green]wrote[/green] {target}")
+        elif effective_output_format == "hunk":
+            first_changed_lines: dict[str, int] | None = None
+            if hunk_file_findings == "first-changed-line" and result.diff_path:
+                diff_path = Path(result.diff_path)
+                if diff_path.is_file():
+                    first_changed_lines = first_changed_lines_from_diff(
+                        diff_path.read_text(encoding="utf-8")
+                    )
+            if hunk_file_findings == "drop":
+                dropped = count_dropped_file_level_findings(findings)
+                if dropped:
+                    console.print(format_file_level_drop_warning(dropped))
+            payload = export_hunk_comments(
+                findings,
+                file_findings=hunk_file_findings,
+                first_changed_lines=first_changed_lines,
+            )
+            typer.echo(json.dumps(payload, ensure_ascii=False))
 
         if json_output is not None and result.success and not dry_run:
             console.print(f"[green]wrote[/green] {json_output}")
