@@ -222,12 +222,16 @@ def test_recall_findings_land_in_the_deferred_lane_regardless_of_claimed_severit
 
 
 def test_recall_pass_is_off_by_default_and_on_in_this_repo_config(tmp_path: Path) -> None:
-    """D7 — ``review.recallPass`` defaults false; mergeCraft's own config enables it."""
+    """D7 — ``review.recallPass`` defaults false for consumers and in this repo.
+
+    Dogfood re-enables recall after the recallPass schema merges to pre-0.0.1:
+    pull_request_target self-review cannot consume a PR-branch action pin.
+    """
     consumer = load_repo_settings(root=tmp_path, load_learnings_files=False)
     assert consumer.review.recall_pass is False
 
     mergecraft_settings = load_repo_settings(root=REPO_ROOT, load_learnings_files=False)
-    assert mergecraft_settings.review.recall_pass is True
+    assert mergecraft_settings.review.recall_pass is False
 
 
 def test_recall_pass_respects_the_subagent_budget_and_timeout(

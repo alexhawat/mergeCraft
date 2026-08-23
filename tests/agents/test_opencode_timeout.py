@@ -5,13 +5,20 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from mergecraft.agents.opencode import ProviderTimeoutError, _prompt_session
+from mergecraft.agents.opencode import (
+    ProviderTimeoutError,
+    _opencode_provider_http_timeout_s,
+    _prompt_session,
+)
+
+_CAPTURED_HTTP_TIMEOUTS: list[object] = []
 
 
 class _TimeoutClient:
     """Stub httpx.AsyncClient whose post() raises a read timeout."""
 
     def __init__(self, *args: object, **kwargs: object) -> None:
+        _CAPTURED_HTTP_TIMEOUTS.append(kwargs.get("timeout"))
         self._entered = False
 
     async def __aenter__(self) -> _TimeoutClient:
@@ -27,7 +34,23 @@ class _TimeoutClient:
 
 @pytest.fixture
 def _patch_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
+    _CAPTURED_HTTP_TIMEOUTS.clear()
     monkeypatch.setattr(httpx, "AsyncClient", _TimeoutClient)
+
+
+def test_opencode_provider_http_timeout_defaults_to_action_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenCode HTTP timeout matches the 25m workflow action budget, not 600s."""
+    monkeypatch.delenv("MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S", raising=False)
+    assert _opencode_provider_http_timeout_s() == 1500.0
+
+
+def test_opencode_provider_http_timeout_honors_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S", "900")
+    assert _opencode_provider_http_timeout_s() == 900.0
 
 
 @pytest.mark.usefixtures("_patch_httpx")
@@ -56,3 +79,18 @@ async def test_opencode_client_identifies_timeout() -> None:
             text="review this",
             model={"providerID": "default", "modelID": "x"},
         )
+
+
+@pytest.mark.usefixtures("_patch_httpx")
+async def test_opencode_http_client_uses_provider_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S", raising=False)
+    with pytest.raises(ProviderTimeoutError):
+        await _prompt_session(
+            base_url="http://127.0.0.1:9999",
+            session_id="sess-3",
+            text="review this",
+            model=None,
+        )
+    assert _CAPTURED_HTTP_TIMEOUTS == [1500.0]

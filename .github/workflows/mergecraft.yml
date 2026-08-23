@@ -476,9 +476,10 @@ jobs:
         # pull_request_target is resolved from `main`, so #231 cannot consume this
         # pin until it lands there; pin the product-fix commit now so a follow-up
         # bump PR is not required after merge. 0592d72 survives merge intact.
-        # 2026-08-23 (seventh bump, PR #442): re-bumped to 93c4649 so dogfood
-        # config `review.recallPass: true` validates against the pinned action
-        # schema (0592d72 rejected the extra field).
+        # 2026-08-23 (seventh bump, PR #442): re-bumped to 93c4649 for recallPass
+        # schema + OpenCode HTTP timeout fixes. pull_request_target resolves this
+        # workflow and action pin from the repo default branch (pre-0.0.1), not
+        # the PR head — self-review PRs cannot bump the pin until after merge.
         uses: alexhawat/mergeCraft@93c4649d147c17657c403443fff7aec67bc89572 # wave/rc-review-convergence (PR #442)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
@@ -577,9 +578,10 @@ jobs:
         # the fetch), then to 0592d72 (#231: skipped Python install under `shell:
         # disabled` must not fail prep) — see the matching comment on the Nous step
         # above for why.
-        # 2026-08-23 (seventh bump, PR #442): re-bumped to 93c4649 so dogfood
-        # config `review.recallPass: true` validates against the pinned action
-        # schema (0592d72 rejected the extra field).
+        # 2026-08-23 (seventh bump, PR #442): re-bumped to 93c4649 for recallPass
+        # schema + OpenCode HTTP timeout fixes. pull_request_target resolves this
+        # workflow and action pin from the repo default branch (pre-0.0.1), not
+        # the PR head — self-review PRs cannot bump the pin until after merge.
         uses: alexhawat/mergeCraft@93c4649d147c17657c403443fff7aec67bc89572 # wave/rc-review-convergence (PR #442)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
