@@ -85,6 +85,8 @@ def prepare_inline_comment_for_publish(
     body: str,
     collateral: Sequence[str] | None = None,
     fingerprint: str | None = None,
+    collateral_map: Mapping[str, list[str]] | None = None,
+    incremental_diff_text: str | None = None,
 ) -> str:
     """Apply incremental miss labelling and collateral append at publish time."""
     from mergecraft.mcp.tool_state import primary_repo_state
@@ -93,29 +95,36 @@ def prepare_inline_comment_for_publish(
 
     prepared = body
     if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE and line is not None:
-        primary = primary_repo_state(ctx.tool_state)
-        incremental_path = primary.incremental_diff_path
-        if incremental_path:
-            from pathlib import Path
+        resolved_diff = incremental_diff_text
+        if resolved_diff is None:
+            primary = primary_repo_state(ctx.tool_state)
+            incremental_path = primary.incremental_diff_path
+            if incremental_path:
+                from pathlib import Path
 
-            incremental_diff = Path(incremental_path).read_text(encoding="utf-8")
+                resolved_diff = Path(incremental_path).read_text(encoding="utf-8")
+        if resolved_diff:
             prepared = apply_first_pass_miss_label(
                 prepared,
                 path=path,
                 line=line,
-                incremental_diff_text=incremental_diff,
+                incremental_diff_text=resolved_diff,
             )
     resolved_collateral = list(collateral) if collateral else None
     if not resolved_collateral:
         lookup_fp = fingerprint or finding_fingerprint(path=path, body=body)
-        resolved_collateral = collateral_by_fingerprint(ctx).get(lookup_fp)
+        mapping = collateral_map if collateral_map is not None else collateral_by_fingerprint(ctx)
+        resolved_collateral = mapping.get(lookup_fp)
     if resolved_collateral:
         prepared = append_collateral_to_inline_body(prepared, list(resolved_collateral))
     return prepared
 
 
 def apply_recall_pass_post_process(
-    ctx: ToolContext, recalled: Sequence[Mapping[str, object]]
+    ctx: ToolContext,
+    recalled: Sequence[Mapping[str, object]],
+    *,
+    publish_sets: RecallPublishSets | None = None,
 ) -> None:
     """Merge recall subagent output into the analyzer deferred lane when enabled."""
     from pathlib import Path
@@ -133,10 +142,10 @@ def apply_recall_pass_post_process(
 
         analyzer_run = AnalyzerRunState(ran=True)
         ctx.tool_state.analyzer_run = analyzer_run
-    publish_sets = recall_publish_sets(ctx)
+    resolved_sets = publish_sets or recall_publish_sets(ctx)
     merge_recall_findings_into_analyzer_run(
         analyzer_run,
-        draft=publish_sets.draft_rows,
+        draft=resolved_sets.draft_rows,
         recalled=recalled,
     )
     from mergecraft.findings.ledger import record_deferred_from_analyzer_run
@@ -189,19 +198,30 @@ def recall_publish_sets(ctx: ToolContext) -> RecallPublishSets:
     )
 
 
-def enforce_recall_deferred_lane_at_publish(ctx: ToolContext) -> None:
+def enforce_recall_deferred_lane_at_publish(
+    ctx: ToolContext,
+    *,
+    publish_sets: RecallPublishSets | None = None,
+) -> None:
     """Server-side D1 — recall output never publishes inline; merge into deferred."""
-    recalled = recall_publish_sets(ctx).recall_candidate_rows
+    resolved_sets = publish_sets or recall_publish_sets(ctx)
+    recalled = resolved_sets.recall_candidate_rows
     if recalled:
-        apply_recall_pass_post_process(ctx, recalled)
+        apply_recall_pass_post_process(ctx, recalled, publish_sets=resolved_sets)
 
 
 def strip_recall_inline_comments(
     ctx: ToolContext,
     inline: list[dict[str, Any]],
+    *,
+    publish_sets: RecallPublishSets | None = None,
 ) -> list[dict[str, Any]]:
     """Remove inline comments that duplicate recall-candidate fingerprints."""
-    recalled_fps = recall_publish_sets(ctx).recall_candidate_fingerprints
+    recalled_fps = (
+        publish_sets.recall_candidate_fingerprints
+        if publish_sets is not None
+        else recall_publish_sets(ctx).recall_candidate_fingerprints
+    )
     if not recalled_fps:
         return inline
     from mergecraft.review_resolution import finding_fingerprints_in
@@ -221,5 +241,6 @@ __all__ = [
     "enforce_recall_deferred_lane_at_publish",
     "merge_recall_findings_into_analyzer_run",
     "prepare_inline_comment_for_publish",
+    "recall_publish_sets",
     "strip_recall_inline_comments",
 ]

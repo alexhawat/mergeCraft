@@ -68,7 +68,6 @@ records.
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -77,6 +76,7 @@ import yaml
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from mergecraft.evals.ids import CASE_ID_RE
 from mergecraft.evals.multi_round_types import (
     CATEGORY_MULTI_ROUND_CONVERGENCE,
     CaseRound,
@@ -137,10 +137,7 @@ _CASE_FIELDS: tuple[str, ...] = (
 # not silently fall out of sync when the packet's verdict enum evolves.
 # Shared constant: ``mergecraft.evals.verdict_vocab.EXPECTED_VERDICT_VALUES``.
 
-# Token shape for case IDs. Kept loose intentionally — the bank does
-# not enforce a namespace, only that an ID is a non-empty identifier
-# safe to use as a filename.
-_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,127}$")
+# Token shape for case IDs — see ``mergecraft.evals.ids.CASE_ID_RE``.
 
 
 # ── front-matter scanner ──────────────────────────────────────────────
@@ -307,7 +304,7 @@ class Case(BaseModel):
         The shape mirrors the file-system naming convention so a case
         id is a safe filename.
         """
-        if not _ID_RE.match(value):
+        if not CASE_ID_RE.match(value):
             msg = f"case id {value!r} is not a valid identifier"
             raise ValueError(msg)
         return value
@@ -434,7 +431,7 @@ def parse_case_text(path: Path, text: str) -> Case:
     """
     front_matter, body = _split_frontmatter(text)
     _require_keys(front_matter, path)
-    if not _ID_RE.match(str(front_matter.get("id", ""))):
+    if not CASE_ID_RE.match(str(front_matter.get("id", ""))):
         msg = f"case id {front_matter.get('id')!r} is not a valid identifier"
         raise _FrontmatterError(path, msg)
     expected_decision = str(front_matter["expected_decision"])

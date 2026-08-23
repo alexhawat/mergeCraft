@@ -213,6 +213,22 @@ async def _list_issue_comments_paginated(
     return collected
 
 
+async def fetch_sticky_progress_comment(
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    issue_number: int,
+    *,
+    known_comment_id: int | None = None,
+) -> dict[str, Any] | None:
+    """Load the sticky progress comment dict by id or from paginated issue comments."""
+    if known_comment_id is not None:
+        comment = await scm.get_issue_comment(owner, repo, known_comment_id)
+        return dict(comment)
+    comments = await _list_issue_comments_paginated(scm, owner, repo, issue_number)
+    return sticky_progress_comment(comments)
+
+
 async def fetch_sticky_progress_comment_body(
     scm: ScmProvider,
     owner: str,
@@ -222,11 +238,14 @@ async def fetch_sticky_progress_comment_body(
     known_comment_id: int | None = None,
 ) -> str:
     """Load the sticky progress comment body by id or from paginated issue comments."""
-    if known_comment_id is not None:
-        comment = await scm.get_issue_comment(owner, repo, known_comment_id)
-        return str(comment.get("body") or "")
-    comments = await _list_issue_comments_paginated(scm, owner, repo, issue_number)
-    return sticky_progress_comment_body(comments)
+    sticky = await fetch_sticky_progress_comment(
+        scm,
+        owner,
+        repo,
+        issue_number,
+        known_comment_id=known_comment_id,
+    )
+    return str(sticky.get("body") or "") if sticky is not None else ""
 
 
 def _record_from_v1_marker(
@@ -492,23 +511,17 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
             )
             return
 
-        existing_body = await fetch_sticky_progress_comment_body(
+        sticky = await fetch_sticky_progress_comment(
             ctx.scm,
             ctx.repo.owner,
             ctx.repo.name,
             int(issue_number),
         )
-        if existing_body:
-            merged = merge_ledger_into_comment(existing_body, records=ledger.records())
-            body_with_footer = add_footer(ctx, merged)
-            comments = await _list_issue_comments_paginated(
-                ctx.scm,
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(issue_number),
-            )
-            sticky = sticky_progress_comment(comments)
-            if sticky is not None:
+        if sticky is not None:
+            existing_body = str(sticky.get("body") or "")
+            if existing_body:
+                merged = merge_ledger_into_comment(existing_body, records=ledger.records())
+                body_with_footer = add_footer(ctx, merged)
                 await ctx.scm.update_issue_comment(
                     ctx.repo.owner,
                     ctx.repo.name,
@@ -538,6 +551,7 @@ __all__ = [
     "LEDGER_SCHEMA_VERSION",
     "FindingLedger",
     "ensure_finding_ledger",
+    "fetch_sticky_progress_comment",
     "fetch_sticky_progress_comment_body",
     "hydrate_finding_ledger_from_progress_comment",
     "is_sticky_progress_comment",

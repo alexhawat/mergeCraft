@@ -9,8 +9,10 @@ from loguru import logger
 
 from mergecraft.mcp.comment import add_footer
 from mergecraft.mcp.convergence_runtime import (
+    collateral_by_fingerprint,
     enforce_recall_deferred_lane_at_publish,
     prepare_inline_comment_for_publish,
+    recall_publish_sets,
     strip_recall_inline_comments,
 )
 from mergecraft.mcp.deferred_publish import merge_analyzer_sections_into_review_body
@@ -254,7 +256,8 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     elif request_changes:
         event = "REQUEST_CHANGES"
 
-    enforce_recall_deferred_lane_at_publish(ctx)
+    publish_sets = recall_publish_sets(ctx)
+    enforce_recall_deferred_lane_at_publish(ctx, publish_sets=publish_sets)
 
     payload: dict[str, Any] = {"event": event}
     if body:
@@ -276,6 +279,16 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     elif primary.checkout_sha:
         payload["commit_id"] = primary.checkout_sha
 
+    incremental_diff_text: str | None = None
+    if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE:
+        incremental_path = primary.incremental_diff_path
+        if incremental_path:
+            from pathlib import Path
+
+            incremental_diff_text = Path(incremental_path).read_text(encoding="utf-8")
+
+    collateral_map = collateral_by_fingerprint(ctx)
+
     inline: list[dict[str, Any]] = []
     for c in comments:
         path = str(c["path"])
@@ -294,6 +307,8 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             body=comment_body,
             collateral=collateral_list,
             fingerprint=str(c.get("fingerprint") or "") or None,
+            collateral_map=collateral_map,
+            incremental_diff_text=incremental_diff_text,
         )
         item: dict[str, Any] = {
             "path": path,
@@ -315,7 +330,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             item["start_line"] = int(c["start_line"])
             item["start_side"] = c.get("start_side") or c.get("side") or "RIGHT"
         inline.append(item)
-    inline = strip_recall_inline_comments(ctx, inline)
+    inline = strip_recall_inline_comments(ctx, inline, publish_sets=publish_sets)
     if inline:
         payload["comments"] = inline
 

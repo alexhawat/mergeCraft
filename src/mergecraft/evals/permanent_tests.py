@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path  # noqa: TC003
 
 from loguru import logger
 
+from mergecraft.evals.ids import CASE_ID_RE
 from mergecraft.evals.store import Case  # noqa: TC001
 
 # ── promote-to-permanent-test (W12.1) ──────────────────────────────────
@@ -129,7 +129,7 @@ def render_permanent_test(case: Case) -> str:
         >>> "expected_decision" in text
         True
     """
-    if not _SAFE_PYTHON_ID_RE.match(case.id):
+    if not CASE_ID_RE.match(case.id):
         msg = f"case id {case.id!r} is not safe to use as a Python identifier"
         raise ValueError(msg)
     func_name = case.id.replace("-", "_").replace(".", "_")
@@ -141,9 +141,6 @@ def render_permanent_test(case: Case) -> str:
         title_literal=case.title.replace("\\", "\\\\").replace('"', '\\"'),
         expected_decision=case.expected_decision,
     )
-
-
-_SAFE_PYTHON_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,127}$")
 
 
 def permanent_test_path(target_dir: Path, case_id: str) -> Path:
@@ -163,7 +160,7 @@ def permanent_test_path(target_dir: Path, case_id: str) -> Path:
     Raises:
         ValueError: When ``case_id`` is not a valid identifier.
     """
-    if not _SAFE_PYTHON_ID_RE.match(case_id):
+    if not CASE_ID_RE.match(case_id):
         msg = f"case id {case_id!r} is not a valid identifier"
         raise ValueError(msg)
     return (
@@ -199,7 +196,7 @@ def write_permanent_test(
         ValueError: When the case id is not a valid identifier.
         OSError: When the file cannot be written.
     """
-    if not _SAFE_PYTHON_ID_RE.match(case.id):
+    if not CASE_ID_RE.match(case.id):
         msg = f"case id {case.id!r} is not a valid identifier"
         raise ValueError(msg)
     target_dir.mkdir(parents=True, exist_ok=True)

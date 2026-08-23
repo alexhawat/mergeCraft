@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from mergecraft.evals.ids import CASE_ID_RE
 from mergecraft.evals.store import Case, CaseStatus  # noqa: TC001
 from mergecraft.evals.verdict_vocab import EXPECTED_VERDICT_VALUES
-
-_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,127}$")
 
 
 def _now_utc() -> datetime:
@@ -89,7 +87,7 @@ class EvalMetadata(BaseModel):
         The shape mirrors the bank file-system naming convention so a
         ``case_id`` is a safe filename the reader can resolve.
         """
-        if not _ID_RE.match(value):
+        if not CASE_ID_RE.match(value):
             msg = f"case id {value!r} is not a valid identifier"
             raise ValueError(msg)
         return value
