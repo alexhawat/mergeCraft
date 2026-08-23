@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.budget import agent_dict_to_finding, place_findings
@@ -132,24 +133,15 @@ def apply_recall_pass_post_process(
 
         analyzer_run = AnalyzerRunState(ran=True)
         ctx.tool_state.analyzer_run = analyzer_run
+    publish_sets = recall_publish_sets(ctx)
     merge_recall_findings_into_analyzer_run(
         analyzer_run,
-        draft=_draft_rows_for_recall(ctx),
+        draft=publish_sets.draft_rows,
         recalled=recalled,
     )
     from mergecraft.findings.ledger import record_deferred_from_analyzer_run
 
     record_deferred_from_analyzer_run(ctx.tool_state, analyzer_run)
-
-
-def _draft_rows_for_recall(ctx: ToolContext) -> list[Mapping[str, object]]:
-    """Collect draft findings the orchestrator already plans to publish inline."""
-    rows: list[Mapping[str, object]] = []
-    submission = ctx.tool_state.terminal_submission
-    if submission is not None:
-        rows.extend(submission.findings)
-    rows.extend(row for row in ctx.tool_state.confirmed_findings if isinstance(row, dict))
-    return rows
 
 
 def _withdrawn_fingerprints_for_recall(ctx: ToolContext) -> set[str]:
@@ -159,27 +151,47 @@ def _withdrawn_fingerprints_for_recall(ctx: ToolContext) -> set[str]:
     return withdrawn_fingerprints_for_state(ctx.tool_state, tmpdir=ctx.tmpdir)
 
 
-def _recall_candidate_rows(ctx: ToolContext) -> list[dict[str, object]]:
-    """Return agent findings absent from the inline draft — recall pass candidates."""
+@dataclass(frozen=True, slots=True)
+class RecallPublishSets:
+    """Draft inline rows and recall-candidate fingerprints from one publish scan."""
+
+    draft_rows: list[Mapping[str, object]]
+    recall_candidate_rows: list[dict[str, object]]
+    recall_candidate_fingerprints: frozenset[str]
+
+
+def recall_publish_sets(ctx: ToolContext) -> RecallPublishSets:
+    """Collect draft inline rows and recall candidates in one fingerprint scan."""
+    draft_rows: list[Mapping[str, object]] = []
+    submission = ctx.tool_state.terminal_submission
+    if submission is not None:
+        draft_rows.extend(submission.findings)
+    draft_rows.extend(row for row in ctx.tool_state.confirmed_findings if isinstance(row, dict))
     draft_fps = {
         str(row.get("fingerprint") or "")
-        for row in _draft_rows_for_recall(ctx)
+        for row in draft_rows
         if isinstance(row, dict) and row.get("fingerprint")
     }
     withdrawn = _withdrawn_fingerprints_for_recall(ctx)
-    recalled: list[dict[str, object]] = []
+    recall_candidate_rows: list[dict[str, object]] = []
+    recall_candidate_fingerprints: set[str] = set()
     for row in ctx.tool_state.agent_findings:
         if not isinstance(row, dict):
             continue
         fingerprint = str(row.get("fingerprint") or "")
         if fingerprint and fingerprint not in draft_fps and fingerprint not in withdrawn:
-            recalled.append(row)
-    return recalled
+            recall_candidate_rows.append(row)
+            recall_candidate_fingerprints.add(fingerprint)
+    return RecallPublishSets(
+        draft_rows=draft_rows,
+        recall_candidate_rows=recall_candidate_rows,
+        recall_candidate_fingerprints=frozenset(recall_candidate_fingerprints),
+    )
 
 
 def enforce_recall_deferred_lane_at_publish(ctx: ToolContext) -> None:
     """Server-side D1 — recall output never publishes inline; merge into deferred."""
-    recalled = _recall_candidate_rows(ctx)
+    recalled = recall_publish_sets(ctx).recall_candidate_rows
     if recalled:
         apply_recall_pass_post_process(ctx, recalled)
 
@@ -189,11 +201,7 @@ def strip_recall_inline_comments(
     inline: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Remove inline comments that duplicate recall-candidate fingerprints."""
-    recalled_fps = {
-        str(row.get("fingerprint") or "")
-        for row in _recall_candidate_rows(ctx)
-        if row.get("fingerprint")
-    }
+    recalled_fps = recall_publish_sets(ctx).recall_candidate_fingerprints
     if not recalled_fps:
         return inline
     from mergecraft.review_resolution import finding_fingerprints_in

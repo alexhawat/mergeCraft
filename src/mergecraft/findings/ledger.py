@@ -160,28 +160,36 @@ def is_sticky_progress_comment(body: str) -> bool:
     )
 
 
-def sticky_progress_comment_body(comments: Sequence[Mapping[str, object]]) -> str:
-    """Select the sticky progress comment body from issue comments (ledger wins)."""
+def _select_sticky_progress_comment(
+    comments: Sequence[Mapping[str, object]],
+    *,
+    return_body: bool,
+) -> str | dict[str, Any] | None:
+    """Select the sticky progress comment; ledger markers win over heading heuristics."""
     progress_body = ""
-    for comment in comments:
-        body = str(comment.get("body") or "")
-        if LEDGER_MARKER_PREFIX in body or LEDGER_MARKER_V2_PREFIX in body:
-            return body
-        if is_sticky_progress_comment(body):
-            progress_body = body
-    return progress_body
-
-
-def sticky_progress_comment(comments: Sequence[Mapping[str, object]]) -> dict[str, Any] | None:
-    """Select the sticky progress comment from issue comments (ledger markers win)."""
     progress: dict[str, Any] | None = None
     for comment in comments:
         body = str(comment.get("body") or "")
         if LEDGER_MARKER_PREFIX in body or LEDGER_MARKER_V2_PREFIX in body:
-            return dict(comment)
+            return body if return_body else dict(comment)
         if is_sticky_progress_comment(body):
-            progress = dict(comment)
-    return progress
+            if return_body:
+                progress_body = body
+            else:
+                progress = dict(comment)
+    return progress_body if return_body else progress
+
+
+def sticky_progress_comment_body(comments: Sequence[Mapping[str, object]]) -> str:
+    """Select the sticky progress comment body from issue comments (ledger wins)."""
+    selected = _select_sticky_progress_comment(comments, return_body=True)
+    return selected if isinstance(selected, str) else ""
+
+
+def sticky_progress_comment(comments: Sequence[Mapping[str, object]]) -> dict[str, Any] | None:
+    """Select the sticky progress comment from issue comments (ledger markers win)."""
+    selected = _select_sticky_progress_comment(comments, return_body=False)
+    return selected if isinstance(selected, dict) else None
 
 
 async def _list_issue_comments_paginated(

@@ -672,12 +672,6 @@ def replay_bank(
     return result, path
 
 
-from mergecraft.evals.convergence_benchmark import (  # noqa: E402
-    load_convergence_scenarios,
-    replay_convergence,
-    run_convergence_eval,
-)
-
 __all__ = [
     "DEFAULT_BENCHMARK_PROVIDERS",
     "DEFAULT_RESULTS_DIR",
@@ -698,11 +692,8 @@ __all__ = [
     "ReviewingModelPin",
     "VersionPins",
     "corpus_class_for",
-    "load_convergence_scenarios",
     "replay_bank",
-    "replay_convergence",
     "rollup_by_orchestrator_kind",
-    "run_convergence_eval",
     "run_structural_replay",
     "summarize_latencies",
     "write_result_set",

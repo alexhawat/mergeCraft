@@ -369,8 +369,6 @@ class ReplayDiff(BaseModel):
     notes: str = ""
 
 
-from mergecraft.evals.eval_metadata import EvalMetadata, build_eval_metadata  # noqa: E402
-
 # ── public API (pure) ─────────────────────────────────────────────────
 
 
@@ -794,10 +792,8 @@ __all__ = [
     "CaseRound",
     "CaseRoundFinding",
     "CaseRoundLedgerEntry",
-    "EvalMetadata",
     "ReplayDiff",
     "add_case",
-    "build_eval_metadata",
     "diff_cases",
     "list_cases",
     "load_case",

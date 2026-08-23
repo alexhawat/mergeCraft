@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mergecraft.evals.benchmark import load_convergence_scenarios, run_convergence_eval
 from mergecraft.evals.convergence import score_convergence
+from mergecraft.evals.convergence_benchmark import load_convergence_scenarios, run_convergence_eval
 from mergecraft.evals.convergence_store import (
     CATEGORY_MULTI_ROUND_CONVERGENCE,
     convergence_rounds_from_case,

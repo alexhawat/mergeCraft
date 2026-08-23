@@ -9,8 +9,8 @@ from mergecraft.evals.benchmark import (
     BenchmarkResultSet,
     GateMatrix,
     VersionPins,
-    run_convergence_eval,
 )
+from mergecraft.evals.convergence_benchmark import run_convergence_eval
 from mergecraft.evals.gate import DEFAULT_GATE_TOLERANCE, eval_gate
 from mergecraft.evals.store import DEFAULT_BANK_DIR
 

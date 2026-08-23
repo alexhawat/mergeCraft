@@ -60,9 +60,9 @@ from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
     replay_bank,
-    replay_convergence,
     write_result_set,
 )
+from mergecraft.evals.convergence_benchmark import replay_convergence
 from mergecraft.evals.live_run import (
     DEFAULT_DETECTION_CORPUS_DIR,
     run_full_benchmark,
