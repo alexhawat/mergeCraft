@@ -1,6 +1,8 @@
 """Audit-log and usage/cost export for enterprise deployments (#381).
 
 Exports:
+    append_audit_event: Append a structured event to the enterprise audit JSONL stream.
+    record_blocking_decision: Persist a blocking-decision artifact as an audit event.
     export_audit_log: Serialise a list of audit-event records to JSON.
     export_usage: Serialise a list of usage/cost records to JSON.
     explain_blocking_decision: Return a human-readable explanation of a block.
@@ -9,20 +11,134 @@ Exports:
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
+from mergecraft.analyzers.redact import redact_secrets
+
 __all__ = [
     "DEFAULT_AUDIT_REL",
+    "append_audit_event",
     "explain_blocking_decision",
     "export_audit_log",
     "export_usage",
     "load_audit_events",
+    "record_blocking_decision",
 ]
 
 DEFAULT_AUDIT_REL: Path = Path(".mergecraft") / "audit.jsonl"
+
+_REQUIRED_EVENT_FIELDS = frozenset({"event_type", "outcome", "context"})
+_IDENTIFIER_FIELDS = frozenset({"run_id", "artifact_id"})
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _resolve_root(root: Path | None) -> Path:
+    return root if root is not None else Path.cwd()
+
+
+def _audit_path(root: Path) -> Path:
+    return root / DEFAULT_AUDIT_REL
+
+
+def _redact_context_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return redact_secrets(value)
+    if isinstance(value, dict):
+        return {str(key): _redact_context_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_context_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_context_value(item) for item in value]
+    return value
+
+
+def _validate_event_payload(event: Any) -> dict[str, Any]:
+    if not isinstance(event, dict):
+        msg = "audit event must be a dict"
+        raise TypeError(msg)
+    missing = _REQUIRED_EVENT_FIELDS - event.keys()
+    if missing:
+        msg = f"missing required audit fields: {sorted(missing)}"
+        raise ValueError(msg)
+    if not (_IDENTIFIER_FIELDS & event.keys()):
+        msg = "audit event must include run_id and/or artifact_id"
+        raise ValueError(msg)
+    if not isinstance(event["context"], dict):
+        msg = "audit event context must be a dict"
+        raise TypeError(msg)
+    return dict(event)
+
+
+def append_audit_event(
+    event: dict[str, Any],
+    *,
+    root: Path | None = None,
+) -> None:
+    """Append one structured audit event to ``.mergecraft/audit.jsonl`` (#417).
+
+    Args:
+        event: Event payload with ``event_type``, ``outcome``, ``context``, and at
+            least one of ``run_id`` / ``artifact_id``. ``timestamp`` is stamped in
+            UTC when omitted. ``context`` is redacted before persistence.
+        root: Workspace root. Defaults to the current working directory.
+    """
+    payload = _validate_event_payload(event)
+    workspace = _resolve_root(root)
+    path = _audit_path(workspace)
+
+    normalized: dict[str, Any] = {
+        "timestamp": payload.get("timestamp") or _utc_now_iso(),
+        "event_type": str(payload["event_type"]),
+        "outcome": str(payload["outcome"]),
+        "context": _redact_context_value(payload["context"]),
+    }
+    if "run_id" in payload:
+        normalized["run_id"] = payload["run_id"]
+    if "artifact_id" in payload:
+        normalized["artifact_id"] = payload["artifact_id"]
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(normalized, ensure_ascii=False, default=str) + "\n"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line)
+
+
+def record_blocking_decision(
+    artifact: dict[str, Any],
+    *,
+    run_id: str | None = None,
+    root: Path | None = None,
+) -> None:
+    """Persist a blocking-decision artifact to the enterprise audit JSONL stream.
+
+    Args:
+        artifact: Stored run artifact with ``decision`` and ``artifact_id``.
+        run_id: Optional run identifier to attach to the audit event.
+        root: Workspace root. Defaults to the current working directory.
+    """
+    context: dict[str, Any] = {}
+    reason = artifact.get("reason")
+    if reason:
+        context["reason"] = reason
+
+    event: dict[str, Any] = {
+        "event_type": "blocking_decision",
+        "outcome": str(artifact.get("decision", "unknown")),
+        "context": context,
+    }
+    artifact_id = artifact.get("artifact_id")
+    if artifact_id is not None:
+        event["artifact_id"] = artifact_id
+    if run_id is not None:
+        event["run_id"] = run_id
+    append_audit_event(event, root=root)
 
 
 def load_audit_events(*, root: Path | None = None) -> list[dict[str, Any]]:
@@ -34,7 +150,7 @@ def load_audit_events(*, root: Path | None = None) -> list[dict[str, Any]]:
     Returns:
         Event dicts, one per non-empty JSONL line. Missing file → ``[]``.
     """
-    path = (root if root is not None else Path.cwd()) / DEFAULT_AUDIT_REL
+    path = _audit_path(_resolve_root(root))
     if not path.is_file():
         return []
     events: list[dict[str, Any]] = []

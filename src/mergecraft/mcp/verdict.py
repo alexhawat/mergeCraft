@@ -187,6 +187,27 @@ def record_validated_terminal_submission(
     )
     ctx.tool_state.terminal_submission = recorded
     ctx.tool_state.terminal_submission_conflict = False
+    state = validation_state_from_tool_context(ctx)
+    if verdict != "approve" and _blocks_approve(state):
+        from mergecraft.enterprise.audit import record_blocking_decision
+
+        try:
+            repo_root = Path(primary_repo_state(ctx.tool_state).dir)
+            record_blocking_decision(
+                {
+                    "decision": "block",
+                    "reason": str(summary),
+                    "artifact_id": recorded.id,
+                },
+                run_id=ctx.tool_state.run_id,
+                root=repo_root,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to append blocking decision audit event for {}",
+                recorded.id,
+                exc_info=True,
+            )
     return recorded
 
 

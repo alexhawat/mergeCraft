@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Append-only enterprise audit producer for ``.mergecraft/audit.jsonl`` via
+  ``append_audit_event`` and ``record_blocking_decision``; blocking terminal
+  verdicts now persist audit events consumable by ``mergecraft audit export``
+  (#417)
 - `make lint` checks that jobs calling local reusable workflows grant at least the
   permissions the callee declares, catching ``startup_failure`` permission mismatches
   at authoring time (#425)

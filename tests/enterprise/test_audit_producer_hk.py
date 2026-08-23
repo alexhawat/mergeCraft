@@ -105,7 +105,6 @@ def test_write_policy_audit_does_not_touch_enterprise_audit_jsonl(tmp_path: Path
 # --- W22 producer API -------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after W22: append_audit_event public API (#417)", strict=False)
 def test_append_audit_event_is_exported_public_api() -> None:
     """HK417a: producer entry point is public on ``enterprise.audit``."""
     audit = _audit_module()
@@ -113,7 +112,6 @@ def test_append_audit_event_is_exported_public_api() -> None:
     assert callable(audit.append_audit_event)
 
 
-@pytest.mark.xfail(reason="green after W22: audit event schema fields (#417)", strict=False)
 def test_append_audit_event_writes_required_schema_fields(tmp_path: Path) -> None:
     """HK417b: emitted events carry D10 schema fields."""
     append = _require_append_audit_event()
@@ -132,9 +130,6 @@ def test_append_audit_event_writes_required_schema_fields(tmp_path: Path) -> Non
     _assert_schema(events[0])
 
 
-@pytest.mark.xfail(
-    reason="green after W22: audit JSONL path under workspace root (#417)", strict=False
-)
 def test_append_audit_event_writes_under_default_audit_rel(tmp_path: Path) -> None:
     """HK417c: producer persists under ``DEFAULT_AUDIT_REL``."""
     append = _require_append_audit_event()
@@ -152,7 +147,6 @@ def test_append_audit_event_writes_under_default_audit_rel(tmp_path: Path) -> No
     assert path.parent.name == ".mergecraft"
 
 
-@pytest.mark.xfail(reason="green after W22: append-only audit JSONL (#417)", strict=False)
 def test_append_audit_event_is_append_only(tmp_path: Path) -> None:
     """HK417d: a second append adds a line instead of truncating the file."""
     append = _require_append_audit_event()
@@ -176,7 +170,6 @@ def test_append_audit_event_is_append_only(tmp_path: Path) -> None:
     assert events[1]["artifact_id"] == "artifact-2"
 
 
-@pytest.mark.xfail(reason="green after W22: redact secrets in audit context (#417)", strict=False)
 def test_append_audit_event_redacts_secrets_in_context(tmp_path: Path) -> None:
     """HK417e: sensitive values in context are redacted before persistence."""
     append = _require_append_audit_event()
@@ -196,10 +189,6 @@ def test_append_audit_event_redacts_secrets_in_context(tmp_path: Path) -> None:
     assert _SAMPLE_SECRET not in context_blob
 
 
-@pytest.mark.xfail(
-    reason="green after W22: load_audit_events reads producer output (#417)",
-    strict=False,
-)
 def test_load_audit_events_reads_producer_output(tmp_path: Path) -> None:
     """HK417g: existing reader loads events the producer appends."""
     append = _require_append_audit_event()
@@ -218,10 +207,6 @@ def test_load_audit_events_reads_producer_output(tmp_path: Path) -> None:
     assert events[0]["run_id"] == "run-policy"
 
 
-@pytest.mark.xfail(
-    reason="green after W22: mergecraft audit export returns producer events (#417)",
-    strict=False,
-)
 def test_audit_export_cli_returns_producer_events(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -247,10 +232,6 @@ def test_audit_export_cli_returns_producer_events(
     assert payload[0]["artifact_id"] == "artifact-cli"
 
 
-@pytest.mark.xfail(
-    reason="green after W22: blocking decision hook emits audit event (#417)",
-    strict=False,
-)
 def test_record_blocking_decision_appends_audit_event(tmp_path: Path) -> None:
     """HK417i: blocking-decision hook appends a structured audit event."""
     record = _require_record_blocking_decision()
@@ -272,7 +253,6 @@ def test_record_blocking_decision_appends_audit_event(tmp_path: Path) -> None:
     assert event["artifact_id"] == "run-1"
 
 
-@pytest.mark.xfail(reason="green after W22: audit timestamps are ISO-8601 UTC (#417)", strict=False)
 def test_append_audit_event_stamps_utc_timestamp_when_omitted(tmp_path: Path) -> None:
     """HK417j: producer adds a UTC timestamp when the caller omits one."""
     append = _require_append_audit_event()
@@ -294,7 +274,6 @@ def test_append_audit_event_stamps_utc_timestamp_when_omitted(tmp_path: Path) ->
     assert before <= parsed <= after
 
 
-@pytest.mark.xfail(reason="green after W22: reject non-dict audit payloads (#417)", strict=False)
 def test_append_audit_event_rejects_non_dict_payload(tmp_path: Path) -> None:
     """HK417k: invalid event payloads fail before touching the JSONL file."""
     append = _require_append_audit_event()
