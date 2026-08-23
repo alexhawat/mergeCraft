@@ -146,7 +146,7 @@ class FindingLedger:
 
 def ledger_round_index(tool_state: ToolState) -> int:
     """Return the active 1-based review round for ledger ``record_*`` call sites."""
-    return max(int(getattr(tool_state, "review_round_index", 1) or 1), 1)
+    return max(int(tool_state.review_round_index or 1), 1)
 
 
 def is_sticky_progress_comment(body: str) -> bool:

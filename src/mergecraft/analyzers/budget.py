@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.finding import Finding
+
+if TYPE_CHECKING:
+    from mergecraft.mcp.tool_state import AnalyzerRunState
 from mergecraft.review_taxonomy import (
     BODY_ONLY_EFFORT,
     BODY_ONLY_SEVERITY,
@@ -189,19 +192,25 @@ def place_findings(
     )
 
 
+def finding_to_deferred_row(finding: Finding) -> dict[str, Any]:
+    """Serialize a deferred overflow finding for ``AnalyzerRunState.deferred_findings``."""
+    return {
+        "path": finding.path,
+        "line": finding.start_line,
+        "body": finding.message,
+        "severity": finding.severity,
+        "fingerprint": finding.fingerprint,
+    }
+
+
 def render_deferred_section_from_rows(rows: list[dict[str, Any]]) -> str | None:
     """Render the deferred HTML section from serialized analyzer-run rows."""
     findings = [agent_dict_to_finding(row) for row in rows if isinstance(row, dict)]
     return render_deferred_section(findings)
 
 
-def sync_deferred_section(analyzer_run: object) -> None:
+def sync_deferred_section(analyzer_run: AnalyzerRunState) -> None:
     """Re-render ``deferred_section`` from ``deferred_findings`` rows."""
-    from mergecraft.mcp.tool_state import AnalyzerRunState
-
-    if not isinstance(analyzer_run, AnalyzerRunState):
-        msg = "sync_deferred_section expects AnalyzerRunState"
-        raise TypeError(msg)
     analyzer_run.deferred_section = render_deferred_section_from_rows(
         analyzer_run.deferred_findings
     )
@@ -214,6 +223,7 @@ __all__ = [
     "FindingPlacement",
     "agent_dict_to_finding",
     "default_inline_budget",
+    "finding_to_deferred_row",
     "place_findings",
     "render_deferred_section",
     "render_deferred_section_from_rows",

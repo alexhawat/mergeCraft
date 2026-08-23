@@ -75,7 +75,7 @@ def inject_deferred_fix_all_brief(body: str, findings: list[dict[str, Any]]) -> 
 
 
 def merge_analyzer_sections_into_review_body(ctx: ToolContext, body: str) -> str:
-    analyzer_run = getattr(ctx.tool_state, "analyzer_run", None)
+    analyzer_run = ctx.tool_state.analyzer_run
     if analyzer_run is None:
         return body
     from mergecraft.analyzers.budget import DEFERRED_SECTION_HEADING, MECHANICAL_SECTION_HEADING

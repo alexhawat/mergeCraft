@@ -12,7 +12,12 @@ from mergecraft.analyzers.baseline_suppression import (
     should_run_baseline_suppression,
     suppress_baseline_findings,
 )
-from mergecraft.analyzers.budget import default_inline_budget, place_findings, sync_deferred_section
+from mergecraft.analyzers.budget import (
+    default_inline_budget,
+    finding_to_deferred_row,
+    place_findings,
+    sync_deferred_section,
+)
 from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.lockfile import lock_digest
@@ -403,16 +408,7 @@ def run_analyzer_pipeline(
         lock_path = repo_root / ".mergecraft" / "analyzers.lock"
         digest = lock_digest(lock_path)
         summary = _build_pre_merge_summary(rows, lockfile_digest_value=digest)
-        deferred_findings = [
-            {
-                "path": finding.path,
-                "line": finding.start_line,
-                "body": finding.message,
-                "severity": finding.severity,
-                "fingerprint": finding.fingerprint,
-            }
-            for finding in placement.deferred
-        ]
+        deferred_findings = [finding_to_deferred_row(finding) for finding in placement.deferred]
 
         executed = [row for row in rows if row.status in {"passed", "failed"}]
         if not executed:

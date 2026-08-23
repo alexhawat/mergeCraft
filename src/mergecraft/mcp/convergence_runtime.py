@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.analyzers.budget import agent_dict_to_finding, place_findings
+from mergecraft.analyzers.budget import (
+    agent_dict_to_finding,
+    finding_to_deferred_row,
+    place_findings,
+)
 from mergecraft.modes._incremental_miss import apply_first_pass_miss_label
 from mergecraft.modes._pr_summary_format import append_collateral_to_inline_body
 
@@ -47,15 +51,7 @@ def merge_recall_findings_into_analyzer_run(
     placement = place_findings(novel, inline_budget=0)
     deferred_rows = list(analyzer_run.deferred_findings)
     for finding in placement.deferred:
-        deferred_rows.append(
-            {
-                "path": finding.path,
-                "line": finding.start_line,
-                "body": finding.message,
-                "severity": finding.severity,
-                "fingerprint": finding.fingerprint,
-            }
-        )
+        deferred_rows.append(finding_to_deferred_row(finding))
     analyzer_run.deferred_findings = deferred_rows
     from mergecraft.analyzers.budget import sync_deferred_section
 
