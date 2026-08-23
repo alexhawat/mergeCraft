@@ -243,6 +243,16 @@ async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> Ag
     )
 
 
+def _post_run_issue_signature(issues: PostRunIssues) -> tuple[Any, ...]:
+    """Identity of an issue set, for detecting a retry that changed nothing."""
+    return (
+        issues.stop_hook.exit_code if issues.stop_hook else None,
+        issues.dirty_tree,
+        issues.summary_stale.file_path if issues.summary_stale else None,
+        issues.unsubmitted_review,
+    )
+
+
 async def run_post_run_retry_loop(
     ctx: AgentRunContext,
     *,
@@ -252,14 +262,31 @@ async def run_post_run_retry_loop(
     """Resume the agent up to MAX_POST_RUN_RETRIES while hard/soft gates fail.
 
     ``resume`` is an async callable ``(prompt: str) -> AgentResult``.
+
+    A resume that leaves the issue set byte-identical made no progress, so
+    the loop stops there rather than replaying the same nudge against the
+    same unchangeable state — a deterministic precondition failure cannot
+    resolve itself across attempts, and retrying it only burns wall clock
+    (issue #470).
     """
     result = initial
     usage = result.usage
     skip_summary = False
+    previous_signature: tuple[Any, ...] | None = None
     for attempt in range(MAX_POST_RUN_RETRIES):
         issues = await collect_post_run_issues(ctx, skip_summary_stale=skip_summary)
         if not has_post_run_issues(issues):
             break
+        signature = _post_run_issue_signature(issues)
+        if signature == previous_signature:
+            logger.warning(
+                "post-run retry abandoned after {}/{} — the last resume left the same "
+                "unresolved issues, so a further attempt cannot change them",
+                attempt,
+                MAX_POST_RUN_RETRIES,
+            )
+            break
+        previous_signature = signature
         if issues.summary_stale and not (
             issues.stop_hook or issues.dirty_tree or issues.unsubmitted_review
         ):

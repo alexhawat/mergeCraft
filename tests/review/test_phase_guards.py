@@ -241,3 +241,43 @@ async def test_phase_reaches_the_trace(tmp_path: Path, monkeypatch: pytest.Monke
         f"review.phase missing from span attrs after checkout_pr; events="
         f"{[getattr(e, 'attrs', None) for e in sink.events]!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_offline_scope_lets_the_terminal_verdict_be_recorded(tmp_path: Path) -> None:
+    """#470: an offline run has no PR, so its diff is what establishes scope."""
+    from mergecraft.mcp.tool_state import primary_repo_state
+    from mergecraft.mcp.verdict import (
+        ReviewPhase,
+        establish_offline_review_scope,
+        submit_review_verdict_tool,
+    )
+
+    ctx = _ctx(tmp_path)
+    diff_path = tmp_path / "review.diff"
+    diff_path.write_text("diff --git a/a.py b/a.py\n", encoding="utf-8")
+
+    establish_offline_review_scope(ctx.tool_state, diff_path=str(diff_path))
+
+    assert ctx.tool_state.review_phase == ReviewPhase.ESTABLISH_SCOPE.value
+    assert primary_repo_state(ctx.tool_state).diff_path == str(diff_path)
+
+    result = await submit_review_verdict_tool(ctx).execute(_valid_payload())
+    assert result.is_error is not True, _error_text(result)
+    assert ctx.tool_state.terminal_submission is not None
+
+
+def test_scope_gate_accepts_a_materialized_diff_without_a_phase_transition(
+    tmp_path: Path,
+) -> None:
+    """The gate's requirement is scope, not ``checkout_pr`` specifically (#470)."""
+    from mergecraft.mcp.tool_state import primary_repo_state
+    from mergecraft.mcp.verdict import ensure_review_scope_for_terminal
+
+    ctx = _ctx(tmp_path)
+    assert ctx.tool_state.review_phase == "INIT"
+    with pytest.raises(ValueError, match="review scope"):
+        ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
+
+    primary_repo_state(ctx.tool_state).diff_path = str(tmp_path / "review.diff")
+    ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
