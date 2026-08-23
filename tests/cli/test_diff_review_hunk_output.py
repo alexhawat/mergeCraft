@@ -10,13 +10,16 @@ import asyncio
 import json
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
 from tests.analyzers.support import import_module as import_analyzer_module
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 from mergecraft.offline_review import OfflineReviewResult
+
+if TYPE_CHECKING:
+    import pytest
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -38,25 +41,32 @@ def _plain(text: str) -> str:
 
 def _line_finding_dict(**overrides: object) -> dict[str, object]:
     finding_mod = import_analyzer_module("mergecraft.analyzers.finding")
-    finding = finding_mod.make_finding(
-        tool="ruff",
-        rule_id="F401",
-        category="Maintainability & Code Quality",
-        severity="Minor",
-        confidence="likely",
-        message="unused import os",
-        path="demo.py",
-        start_line=1,
-        end_line=1,
-        source="analyzer",
-        introduced_by_pr="unknown",
-        **overrides,
-    )
+    kwargs: dict[str, object] = {
+        "tool": "ruff",
+        "rule_id": "F401",
+        "category": "Maintainability & Code Quality",
+        "severity": "Minor",
+        "confidence": "likely",
+        "message": "unused import os",
+        "path": "demo.py",
+        "start_line": 1,
+        "end_line": 1,
+        "source": "analyzer",
+        "introduced_by_pr": "unknown",
+    }
+    kwargs.update(overrides)
+    finding = finding_mod.make_finding(**kwargs)
     return finding.model_dump()
 
 
 def _file_level_finding_dict(**overrides: object) -> dict[str, object]:
-    return _line_finding_dict(start_line=None, end_line=None, path="README.md", **overrides)
+    defaults: dict[str, object] = {
+        "start_line": None,
+        "end_line": None,
+        "path": "README.md",
+    }
+    defaults.update(overrides)
+    return _line_finding_dict(**defaults)
 
 
 def _review_argv(tmp_path: Path, *extra: str) -> list[str]:
@@ -90,7 +100,6 @@ def _install_fake_review(
     )
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_hunk_output_format_writes_json_to_stdout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -110,7 +119,6 @@ def test_hunk_output_format_writes_json_to_stdout(
     assert payload["comments"][0]["filePath"] == "demo.py"
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_hunk_output_format_does_not_require_output_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -128,7 +136,6 @@ def test_hunk_output_format_does_not_require_output_path(
     assert json.loads(result.stdout)["comments"]
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_hunk_output_format_warns_about_dropped_file_level_on_stderr(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -153,7 +160,6 @@ def test_hunk_output_format_warns_about_dropped_file_level_on_stderr(
     assert re.search(r"\b1\b", stderr)
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_hunk_output_format_requests_structured_findings_from_run_offline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -189,7 +195,6 @@ def test_hunk_output_format_requests_structured_findings_from_run_offline(
     )
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_hunk_file_findings_first_changed_line_flag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -215,7 +220,6 @@ def test_hunk_file_findings_first_changed_line_flag(
     assert str(comment["summary"]).startswith("[file-level]")
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_review_help_lists_hunk_output_format() -> None:
     """CLI surface documents the hunk exporter."""
     result = runner.invoke(app, ["review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})

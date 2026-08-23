@@ -25,7 +25,6 @@ def _comment_location_keys(comment: dict[str, object]) -> set[str]:
     return {key for key in _LOCATION_KEYS if key in comment}
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_export_hunk_comments_returns_comments_envelope() -> None:
     """Happy — exporter returns the Hunk stdin envelope."""
     payload = export_hunk_comments([sample_line_finding()])
@@ -33,7 +32,6 @@ def test_export_hunk_comments_returns_comments_envelope() -> None:
     assert isinstance(payload["comments"], list)
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_export_hunk_comment_maps_finding_fields_to_golden_shape() -> None:
     """D3 / #451 — path, line, summary, rationale, and author map per issue table."""
     finding = sample_line_finding()
@@ -58,7 +56,6 @@ def test_export_hunk_comment_maps_finding_fields_to_golden_shape() -> None:
         assert item in rationale
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_export_hunk_comment_never_emits_hunk_number_fallback() -> None:
     """D3 — never invent ``hunkNumber: 1`` (or any hunk/oldLine anchor) for file-level gaps."""
     line_payload = export_hunk_comments([sample_line_finding()])
@@ -74,7 +71,6 @@ def test_export_hunk_comment_never_emits_hunk_number_fallback() -> None:
         assert _comment_location_keys(comment) == {"newLine"}
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_export_hunk_drops_file_level_findings_by_default() -> None:
     """D3 — ``--hunk-file-findings drop`` (default) omits ``start_line is None`` findings."""
     payload = export_hunk_comments(
@@ -84,7 +80,6 @@ def test_export_hunk_drops_file_level_findings_by_default() -> None:
     assert payload["comments"][0]["filePath"] == "src/demo.py"
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_export_hunk_first_changed_line_maps_file_level_with_prefix() -> None:
     """Opt-in ``first-changed-line`` anchors file-level findings on the first changed line."""
     payload = export_hunk_comments(
@@ -98,27 +93,23 @@ def test_export_hunk_first_changed_line_maps_file_level_with_prefix() -> None:
     assert str(comment["summary"]).startswith("[file-level]")
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_export_hunk_empty_findings_returns_empty_comments() -> None:
     """Edge — no findings yields an empty comments array."""
     payload = export_hunk_comments([])
     assert payload == {"comments": []}
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_export_hunk_author_constant_is_mergecraft() -> None:
     """Pinned author string matches the issue contract."""
     assert require_attr("HUNK_COMMENT_AUTHOR") == "mergeCraft"
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_export_hunk_rejects_invalid_file_findings_mode() -> None:
     """Error — unknown ``file_findings`` modes fail closed."""
     with pytest.raises((ValueError, TypeError), match=r".+"):
         export_hunk_comments([sample_line_finding()], file_findings="bogus")
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_export_hunk_dropped_file_level_count_helper() -> None:
     """Integration — exporter exposes how many file-level rows were omitted."""
     count_dropped = require_attr("count_dropped_file_level_findings")
@@ -130,7 +121,6 @@ def test_export_hunk_dropped_file_level_count_helper() -> None:
     assert count_dropped(findings) == 2
 
 
-@pytest.mark.xfail(reason="green after CB", strict=False)
 def test_export_hunk_file_level_warning_message_is_counted() -> None:
     """Human warning copy matches the issue example (counted, plural-aware)."""
     format_warning = require_attr("format_file_level_drop_warning")
