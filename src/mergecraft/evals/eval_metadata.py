@@ -8,22 +8,7 @@ from datetime import UTC, datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mergecraft.evals.store import Case, CaseStatus  # noqa: TC001
-
-_EXPECTED_VERDICT_VALUES: frozenset[str] = frozenset(
-    {
-        "success",
-        "failure",
-        "auto_merge",
-        "block",
-        "request_changes",
-        "require_human_review",
-        "require_more_tests",
-        "quarantine",
-        "escalate",
-        "unavailable",
-        "neutral",
-    }
-)
+from mergecraft.evals.verdict_vocab import EXPECTED_VERDICT_VALUES
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,127}$")
 
@@ -118,10 +103,10 @@ class EvalMetadata(BaseModel):
         ``EvalMetadata`` keeps the same vocabulary as the case store
         so the packet does not silently fall out of sync with the bank.
         """
-        if value not in _EXPECTED_VERDICT_VALUES:
+        if value not in EXPECTED_VERDICT_VALUES:
             msg = (
                 f"expected_decision {value!r} is not in the verdict vocabulary "
-                f"{sorted(_EXPECTED_VERDICT_VALUES)}"
+                f"{sorted(EXPECTED_VERDICT_VALUES)}"
             )
             raise ValueError(msg)
         return value

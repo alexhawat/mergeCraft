@@ -282,7 +282,7 @@ def test_metric_is_computable_from_the_ledger_alone(monkeypatch: pytest.MonkeyPa
 
 def test_recall_pass_raises_first_pass_recall_on_the_corpus() -> None:
     """W7 gate — first-pass recall rises; DG1 precision corpus stays flat or better."""
-    from mergecraft.evals.convergence import (
+    from mergecraft.evals.convergence_benchmark import (
         evaluate_recall_pass_corpus,
         load_recall_pass_w0_baseline,
     )

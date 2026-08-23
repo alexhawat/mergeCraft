@@ -154,9 +154,9 @@ def _draft_rows_for_recall(ctx: ToolContext) -> list[Mapping[str, object]]:
 
 def _withdrawn_fingerprints_for_recall(ctx: ToolContext) -> set[str]:
     """Fingerprints a verifier ``drop`` retired — live set plus learnings memory."""
-    from mergecraft.mcp.verdict import _withdrawn_fingerprints_for_state
+    from mergecraft.mcp.verdict import withdrawn_fingerprints_for_state
 
-    return _withdrawn_fingerprints_for_state(ctx.tool_state, tmpdir=ctx.tmpdir)
+    return withdrawn_fingerprints_for_state(ctx.tool_state, tmpdir=ctx.tmpdir)
 
 
 def _recall_candidate_rows(ctx: ToolContext) -> list[dict[str, object]]:

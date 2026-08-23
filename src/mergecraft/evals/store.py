@@ -83,6 +83,7 @@ from mergecraft.evals.multi_round_types import (
     CaseRoundFinding,
     CaseRoundLedgerEntry,
 )
+from mergecraft.evals.verdict_vocab import EXPECTED_VERDICT_VALUES
 from mergecraft.utils.learnings import LearningProvenance
 
 # D13 — local + file-backed. No database, no hosted service. The bank
@@ -134,32 +135,7 @@ _CASE_FIELDS: tuple[str, ...] = (
 # ``mergecraft.evidence.packet.Decision.verdict``. The store does not
 # re-export the type — it stays as a string literal so the bank does
 # not silently fall out of sync when the packet's verdict enum evolves.
-#
-# The mirror had drifted. ``decide_approval()`` wraps its ``Conclusion``
-# verbatim into ``Decision.verdict`` (``agents/gates.py``), so a packet
-# produced today carries ``success`` / ``failure`` / ``neutral`` — of which
-# only ``neutral`` was accepted here. A case could therefore never record the
-# verdict the code actually computes. Both vocabularies are accepted: the
-# check-run one because it is what ships, and the lane one because the
-# thermostat work (W9) is specified to introduce it. W9 adds the four
-# extra action names from the closed vocabulary (#46, W9.1).
-_EXPECTED_VERDICT_VALUES: frozenset[str] = frozenset(
-    {
-        # Check-run conclusions — what `decide_approval()` emits today.
-        "success",
-        "failure",
-        # Lane verdicts — the W9 thermostat action vocabulary.
-        "auto_merge",
-        "block",
-        "request_changes",
-        "require_human_review",
-        "require_more_tests",
-        "quarantine",
-        "escalate",
-        "unavailable",
-        "neutral",
-    }
-)
+# Shared constant: ``mergecraft.evals.verdict_vocab.EXPECTED_VERDICT_VALUES``.
 
 # Token shape for case IDs. Kept loose intentionally — the bank does
 # not enforce a namespace, only that an ID is a non-empty identifier
@@ -315,10 +291,10 @@ class Case(BaseModel):
         The store does not import the packet's type to keep the
         ``evals`` module independent of the merge-evidence schema.
         """
-        if value not in _EXPECTED_VERDICT_VALUES:
+        if value not in EXPECTED_VERDICT_VALUES:
             msg = (
                 f"expected_decision {value!r} is not in the verdict vocabulary "
-                f"{sorted(_EXPECTED_VERDICT_VALUES)}"
+                f"{sorted(EXPECTED_VERDICT_VALUES)}"
             )
             raise ValueError(msg)
         return value
@@ -464,10 +440,10 @@ def parse_case_text(path: Path, text: str) -> Case:
         msg = f"case id {front_matter.get('id')!r} is not a valid identifier"
         raise _FrontmatterError(path, msg)
     expected_decision = str(front_matter["expected_decision"])
-    if expected_decision not in _EXPECTED_VERDICT_VALUES:
+    if expected_decision not in EXPECTED_VERDICT_VALUES:
         msg = (
             f"expected_decision {expected_decision!r} is not in the verdict vocabulary "
-            f"{sorted(_EXPECTED_VERDICT_VALUES)}"
+            f"{sorted(EXPECTED_VERDICT_VALUES)}"
         )
         raise _FrontmatterError(path, msg)
     if "provenance" not in front_matter:

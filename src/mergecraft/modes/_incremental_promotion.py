@@ -23,13 +23,10 @@ def deferred_rows_from_ledger(book: FindingLedger) -> list[dict[str, object]]:
     for record in book.records():
         if record.state != "deferred":
             continue
-        path = ""
-        if record.reason and record.reason.startswith("path:"):
-            path = record.reason.removeprefix("path:")
         rows.append(
             {
                 "fingerprint": record.fingerprint,
-                "path": path,
+                "path": _path_from_record(record),
             }
         )
     return rows

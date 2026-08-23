@@ -408,7 +408,7 @@ class ToolState:
     # learnings round trip, so the live set is what makes the drop valve
     # reliable here. The learnings file the refutation is also written to is the
     # cross-run memory of the same decision; the approve gate unions both
-    # (``verdict._withdrawn_fingerprints_for_state``).
+    # (``verdict.withdrawn_fingerprints_for_state``).
     withdrawn_fingerprints: set[str] = field(default_factory=set)
     # Lens routing snapshot (RC7, W5) — recommended vs actually-dispatched lenses.
     lens_routing_decision: LensRoutingDecision | None = None
