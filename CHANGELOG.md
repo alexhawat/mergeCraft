@@ -59,6 +59,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Repo-native analyzers no longer fall back to an arbitrary PATH binary. When
+  the checkout did not provide a tool, resolution fell through to
+  `shutil.which`, so a system copy ran against the consumer's code at an
+  unpinned version of unverified provenance — Homebrew's `markdownlint`
+  locally, `/usr/local/bin/tsc` on a GitHub runner, which is why `tsc` resolved
+  instead of skipping. The six tools installed into the checkout
+  (`markdownlint`, `jscpd`, `tsc`, `knip`, `vulture`, `typos`) are now
+  repo-local only and skip when absent. Toolchain binaries with no repo-local
+  install convention (`cargo` for clippy, `go` for govulncheck) are unaffected
+  (#427)
 - mergeCraft's consumer workflow approval gate now runs in a separate job that
   `needs:` the review-attempts job, so Codex fallback can post `mergecraft-approval`
   before the fail-closed gate samples check-runs (#433)

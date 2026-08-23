@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -193,6 +194,59 @@ def test_knip_and_tsc_still_skip_when_binary_absent(tool_id: str) -> None:
     assert skip is not None
     assert f"skipped {tool_id}:" in skip
     assert "not found in repo PATH or tooling" in skip
+
+
+@pytest.mark.parametrize("binary", ["markdownlint", "jscpd", "tsc", "knip", "vulture", "typos"])
+def test_an_ambient_path_binary_is_refused_for_repo_local_tools(
+    binary: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#427 — a PATH hit is not a substitute for the repo's pinned tool.
+
+    These six are installed *into the checkout* (``node_modules/.bin`` /
+    ``.venv/bin``). Before this, ``find_repo_binary`` fell back to
+    ``shutil.which``, so a system copy — Homebrew's ``markdownlint``, the GitHub
+    runner's ``/usr/local/bin/tsc`` — resolved and ran against the consumer's
+    code at an unpinned version of unverified provenance. The repo providing
+    nothing must mean skip, not "use whatever is on PATH".
+    """
+    fake_bin = tmp_path / "sysbin"
+    fake_bin.mkdir()
+    planted = fake_bin / binary
+    planted.write_text("#!/bin/sh\necho 1.0.0\n", encoding="utf-8")
+    planted.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake_bin))
+
+    # A repo root that provides no tooling of its own.
+    empty_repo = tmp_path / "repo"
+    empty_repo.mkdir()
+
+    assert shutil.which(binary) == str(planted), "planted binary must be on PATH"
+    assert find_repo_binary(empty_repo, binary) is None
+
+
+def test_a_toolchain_binary_still_resolves_from_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rule is scoped: ``cargo`` (clippy) and ``go`` (govulncheck) have no
+    repo-local install convention, so they must keep resolving from PATH or
+    those analyzers would skip everywhere instead of being hardened.
+    """
+    fake_bin = tmp_path / "sysbin"
+    fake_bin.mkdir()
+    planted = fake_bin / "cargo"
+    planted.write_text("#!/bin/sh\necho cargo 1.99.0\n", encoding="utf-8")
+    planted.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake_bin))
+
+    empty_repo = tmp_path / "repo"
+    empty_repo.mkdir()
+
+    resolution = find_repo_binary(empty_repo, "cargo")
+    assert resolution is not None
+    assert resolution.path == str(planted)
 
 
 def test_catalog_versions_are_pinned_for_installed_tools() -> None:
