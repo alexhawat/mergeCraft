@@ -1311,7 +1311,9 @@ block merge. A precision gain bought by silently dropping recall output would be
 the novelty filter and deferred placement are the paired constraint.
 
 **Default off, dogfooded here (D7).** `review.recallPass` defaults `false` for consumers — it
-costs a subagent dispatch per review — and is `true` in mergeCraft's own `.mergecraft/config.yaml`.
+costs a subagent dispatch per review. mergeCraft's own `.mergecraft/config.yaml` keeps it off
+until the recallPass schema lands on `pre-0.0.1` (the PR-branch action pin cannot consume the
+field before merge); dogfood re-enables it after that merge.
 The W7 corpus gate (`evaluate_recall_pass_corpus`) must show first-pass recall up with the DG1
 precision corpus flat or better before the wave ships.
 
