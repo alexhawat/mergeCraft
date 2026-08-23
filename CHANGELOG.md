@@ -59,14 +59,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the listening URL appeared and nothing read either pipe afterwards, so once the child filled the ~64KB
   pipe buffer it blocked in `write()` and stopped answering HTTP — a hang with no output, indistinguishable
   from an unresponsive provider. A bounded tail of that output is now attached to a provider-timeout error,
-  which previously stringified to nothing at all (#449)
+  which previously stringified to nothing at all — the tail is read under the same lock the drain threads
+  hold, so collecting it cannot raise `deque mutated during iteration` in place of the failure it explains
+  (#449)
 - A provider timeout no longer kills the review. `ProviderTimeoutError` on the opencode path returned an
   `AgentResult` with no `retryable` metadata, and the model chain gates on that flag alone, so the single
   most recoverable failure there is read as permanent and terminated the run at attempt 1 of 10 — leaving
   the PR with no review rather than a review from the next model in the chain. Gateway 429/5xx responses on
   the same path were mis-classified the same way. Two bounds keep the retries from multiplying: opencode
   gets the initial attempt plus exactly one retry, and the chain now honours a wall-clock deadline derived
-  from `RunBounds.run_timeout_s` instead of relying on the attempt cap alone (#444)
+  from `RunBounds.run_timeout_s` instead of relying on the attempt cap alone. Every prompt on that path is
+  covered, the initial review turn included — the likeliest one to time out, and the one whose timeout
+  previously escaped the harness and aborted the chain outright. When the allowance runs out at the chain
+  tail, the evidence packet now names the model that actually ran instead of the entry being skipped (#444)
 - `mergecraft --version` reported `0.1.0` while the project was at `0.1.0a1`: the number was restated as a literal in `mergecraft/__init__.py` alongside `pyproject.toml` and the two drifted. It is now read from the installed distribution. The value also keys the offline result cache and is stamped on telemetry and eval reproducibility pins, so the mismatch quietly mixed artefacts from different builds
 - Managed analyzers no longer report a clean scan as skipped: the adapter's fallback re-parse ran on the
   human-readable output string, which carries the `version_note` prose prefix, so any managed tool whose

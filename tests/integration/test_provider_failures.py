@@ -110,6 +110,13 @@ async def test_opencode_retries_at_most_once(monkeypatch: pytest.MonkeyPatch) ->
     assert len(attempts) == 2, f"opencode ran {len(attempts)} times, expected 2: {attempts}"
     assert result.success is False
     assert slug
+    # The evidence must name the slug that actually ran. The tail entry is only
+    # *skipped* once the allowance is spent, so stamping it would blame a model
+    # that never executed.
+    meta = result.metadata or {}
+    assert meta["executed_model"] == attempts[-1]
+    assert slug == attempts[-1]
+    assert attempts[-1] != settings.models[-1]
 
 
 @pytest.mark.asyncio

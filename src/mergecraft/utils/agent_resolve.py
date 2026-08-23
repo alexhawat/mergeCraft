@@ -719,6 +719,10 @@ async def run_with_model_chain(
         opencode_attempts = 0
         tail_retries = 0
         last_result: AgentResult | None = None
+        # The slug that actually produced ``last_result``. The loop variable
+        # ``slug`` can point at an entry being *skipped*, so evidence must be
+        # stamped from this instead.
+        last_executed_slug: str | None = None
 
         root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
 
@@ -742,17 +746,20 @@ async def run_with_model_chain(
                     # the spent attempts already produced rather than raising a
                     # cap error that hides it. The allowance cannot be spent
                     # before an attempt has run, so ``last_result`` is set.
-                    if last_result is None:  # pragma: no cover - unreachable
-                        break
+                    if last_result is None or last_executed_slug is None:
+                        break  # pragma: no cover - allowance implies an attempt
+                    # ``slug`` here is the entry being skipped — it never ran.
+                    # Stamp the slug that actually produced ``last_result`` so
+                    # the evidence packet names the model that really failed.
                     spent = _attach_model_evidence(
                         last_result,
-                        requested_model=requested_model or slug,
-                        executed_model=slug,
+                        requested_model=requested_model or last_executed_slug,
+                        executed_model=last_executed_slug,
                         fallback_index=chain_index,
                         fallback_reason=last_skip_reason,
                     )
                     _root.set_status("error", last_result.error or "opencode retries exhausted")
-                    return slug, spent
+                    return last_executed_slug, spent
                 opencode_attempts += 1
             attempts += 1
             _prepare_chain_attempt(tool_state, chain_index)
@@ -789,6 +796,7 @@ async def run_with_model_chain(
             ) as attempt_span:
                 result = await run_once(slug)
                 last_result = result
+                last_executed_slug = slug
 
                 call_attrs: dict[str, Any] = {
                     "model.id": slug,
