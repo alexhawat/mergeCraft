@@ -276,7 +276,10 @@ def run(
         None,
         "--model",
         "-m",
-        help="Model slug override (otherwise .mergecraft/config.yaml / MERGECRAFT_MODEL).",
+        help=(
+            "Model slug override — wins over MERGECRAFT_MODEL, which wins over "
+            ".mergecraft/config.yaml."
+        ),
         rich_help_panel=_PANEL_AGENT,
     ),
     output: Path | None = typer.Option(

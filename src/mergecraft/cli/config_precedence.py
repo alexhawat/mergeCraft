@@ -17,7 +17,7 @@ import yaml
 
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, default_settings, load_repo_settings
-from mergecraft.utils.agent_resolve import effective_model_slugs, resolve_effective_model_slug
+from mergecraft.utils.agent_resolve import configured_model_slugs, resolve_effective_model_slug
 
 _TRUE_VALUES = {"true", "1", "yes", "on"}
 _FALSE_VALUES = {"false", "0", "no", "off"}
@@ -81,7 +81,10 @@ def _resolve_model_layers(*, cwd: Path, cli_model: str | None = None) -> dict[Co
     if env_model:
         layers[ConfigLayer.ENV] = env_model.strip()
     settings = load_repo_settings(root=cwd, load_learnings_files=False)
-    yaml_slugs = effective_model_slugs(settings)
+    # The YAML layer is what the config file says on its own —
+    # ``effective_model_slugs`` promotes ``MERGECRAFT_MODEL`` to the front,
+    # which would report the env value under the YAML layer.
+    yaml_slugs = configured_model_slugs(settings)
     if yaml_slugs:
         layers[ConfigLayer.YAML] = yaml_slugs[0]
     layers[ConfigLayer.DEFAULT] = resolve_effective_model_slug(settings)
