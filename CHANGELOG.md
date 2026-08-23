@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `make action-pin-check` guards the self-review Action pin against drift. Because
+  `.github/workflows/mergecraft.yml` runs on `pull_request_target`, GitHub resolves its `uses:` pin from the
+  **default branch**, so a fix merged to `pre-0.0.1` does not reach the reviewer until it reaches `main` —
+  a skew that reached 687 commits undetected and made PR #443 time out on a ceiling already fixed on the
+  branch. The check also rejects a one-sided bump that leaves the review and fallback steps on different
+  SHAs. Advisory in CI: a stale pin is a property of the default branch, not of the PR under review (#450)
 - First-pass recall metric (`mergecraft eval convergence`, `make eval-convergence`) with multi-round bank cases and a paired regression gate that holds first-pass recall flat while the DG1 precision corpus stays at or above its floor
 - Open-PR finding ledger in the sticky progress comment — `mergecraft findings ledger --pr N` inspects inline, deferred, withdrawn, and unpublished fingerprints without filing GitHub issues (D4, D5)
 - Optional recall pass (`review.recallPass`, default off) dispatches `mergecraft-recall` after aggregation; novel findings always publish in the deferred lane (D1, D7)

@@ -86,6 +86,22 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Static, typecheck, build tier
         run: make ci-static
+      # Reports self-review Action-pin drift (#450). Advisory on purpose: the
+      # stale pin lives on the default branch, so it is not a defect in the PR
+      # being checked, and failing here would block every unrelated change
+      # until someone bumps main. The annotation is what makes the skew
+      # visible instead of silent -- which is how it reached 687 commits.
+      - name: Action pin freshness (advisory)
+        if: matrix.python == '3.14'
+        run: |
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main || true
+          if out="$(make action-pin-check 2>&1)"; then
+            echo "$out"
+          else
+            echo "$out"
+            detail="$(printf '%s' "$out" | grep -m1 -- '  - ' | sed 's/^  - //')"
+            echo "::warning title=mergecraft action pin drift::${detail:-see log}"
+          fi
 
   security:
     name: Verify (security audit py${{ matrix.python }})
