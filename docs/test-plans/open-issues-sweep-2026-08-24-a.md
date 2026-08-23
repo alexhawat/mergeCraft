@@ -1,15 +1,15 @@
-# Test plan — open-issues-sweep-2026-08-24-a (AA #458 + AB #467)
+# Test plan — open-issues-sweep-2026-08-24-a (AA #458 + AB #467 + AC #469)
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-24-a-analyzers-ci-wave-plan.md`
 Worktree: `/Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a`
 Branch: `wave/open-issues-sweep-2026-08-24-a`
-Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467)
+Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469)
 
-Authoring: **AA GREEN** (D2 landed). **AB RED** (this update). Implementation: AB impl (D3). AC–AH not authored here.
+Authoring: **AA GREEN** (D2 landed). **AB GREEN** (D3 landed). **AC RED** (this update). Implementation: AC impl (D4). AD–AH not authored here.
 
 ## xfail schedule
 
-None. AB contracts are the next impl wave; tests are **plain FAIL** until D3 lands. Do not `xfail` (would hide RED).
+None. AC contracts are the next impl wave; tests are **plain FAIL** until D4 lands. Do not `xfail` (would hide RED).
 
 ## Contract matrix
 
@@ -26,6 +26,11 @@ None. AB contracts are the next impl wave; tests are **plain FAIL** until D3 lan
 | AB467c | Adapter: whitespace-only bandit stdout is a clean scan, not a skip | integration | edge — whitespace | `test_whitespace_bandit_adapter_output_is_a_clean_scan_not_a_skip` |
 | AB467d | Adapter: unparsable bandit stdout skip reason includes a snippet of the first bytes | integration | error — garbage stdout | `test_garbage_bandit_stdout_skip_reason_includes_a_snippet` |
 | AB467e | Catalog `bandit` command does not gain `-q` / `--quiet` (D3 forbids banner/`-q` as the fix) | unit | pin — not the fix | `test_bandit_catalog_command_does_not_add_quiet` |
+| AC469a | `GitHubClient` owned-client headers omit `Authorization` when token is empty or whitespace | unit | error — empty token | `tests/utils/test_empty_github_bearer_469.py::test_github_client_omits_authorization_when_token_empty` |
+| AC469b | `GitHubClient` still sets `Authorization: Bearer <token>` when a token is present | unit | happy | `test_github_client_sends_bearer_when_token_present` |
+| AC469c | `get_commit_info` with empty token is `is_error`, names missing token, does not send HTTP | functional | error — offline skip | `test_get_commit_info_without_token_reports_unavailable_naming_token` |
+| AC469d | `upload_file` with `MERGECRAFT_API_URL` set and empty/whitespace `api_token` does not send `Authorization: Bearer ` | integration | error — empty Bearer | `tests/mcp/test_empty_upload_bearer_469.py::test_upload_does_not_send_empty_bearer_when_api_url_set` |
+| AC469e | Whitespace `api_token` does not interpolate `Bearer {token}` (same as empty) | integration | edge — whitespace | `test_upload_whitespace_token_does_not_interpolate_bearer` |
 
 Sibling: empty stdout still raises for other JSON-object parsers (`cargo-audit`, `knip`, `jscpd`, `bundler-audit`) in `tests/analyzers/parsers/test_auto_enabled_native.py::test_json_object_parser_raises_on_empty_stdout`. Non-empty garbage still raises for bandit there.
 
@@ -37,14 +42,26 @@ Re-repro after `e66f8826` (2026-08-24): `parse_bandit_json("")` raises `ValueErr
 - **Garbage stdout:** stay skipped, but quote the first bytes of the unparsable output in `skip_reason` so a debugger sees what bandit emitted, not only the parser's expectation.
 - **Do not** add `-q` / `--quiet` to `src/mergecraft/analyzers/catalog/bandit.yaml`.
 
-## How to run (AB: expect FAIL until impl)
+## Notes for the impl wave (D4)
+
+Re-repro (2026-08-24): `GitHubClient("")` sets owned-client default header `Authorization: Bearer ` (trailing space). `get_commit_info` then calls `GitHubClient.request` / httpx, which raises `Illegal header value b'Bearer '` — the agent sees a library defect, not a missing credential. Offline `mergecraft review --diff` constructs `GitHubClient(token="")` by design.
+
+`upload_file` (`src/mergecraft/mcp/upload.py`): empty `api_token` already takes the local `file://` stub when `MERGECRAFT_API_URL` is unset **or** token is falsy. A **whitespace** token is truthy, so the remote arm runs `Authorization: f"Bearer {ctx.api_token}"` and currently dies in SSRF/DNS (or would die in httpx on `Bearer `). Treat whitespace like empty: do not build `Authorization`.
+
+- **`GitHubClient`:** omit the `Authorization` key when `token.strip()` is empty. Keep `Authorization: Bearer <token>` for a real token.
+- **`get_commit_info` (offline / no token):** fail closed before HTTP with a message that names the missing token. Do not leak `Illegal header value`.
+- **`upload_file`:** do not interpolate `Bearer {token}` when `api_token` is empty or whitespace. Local stub or an error naming the token are both acceptable; an empty Bearer header is not.
+
+## How to run (AC: expect FAIL until impl)
 
 ```bash
 cd /Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a
-MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/analyzers/test_bandit_parse_467.py -q
+MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/utils/test_empty_github_bearer_469.py tests/mcp/test_empty_upload_bearer_469.py -q
 make lint
 ```
 
+Expect **11 failed / 2 passed** until D4 (`GitHubClient` with a real token still sets Bearer; empty `api_token` already stubs locally).
+
 ## Out of scope
 
-AC #469, AD #466, AE #459, AF #460, AG #464, AH #485. Product code under `src/mergecraft/`. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`).
+AD #466, AE #459, AF #460, AG #464, AH #485. Product code under `src/mergecraft/`. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`).
