@@ -5,16 +5,18 @@ resolves its ``uses:`` pin from the default branch. When that pin lags, the
 reviewer executes old code while the branch under review holds the fix — the
 skew that made PR #443 time out on an already-fixed 600s ceiling.
 
-Covers the two guards in ``scripts/check_action_pin_freshness.py``: pins inside
-one workflow file must agree, and the default branch's pin must stay within
-``MAX_DRIFT`` commits of this branch's.
+Covers the three guards in ``scripts/check_action_pin_freshness.py``: pins
+inside one workflow file must agree, the default branch's pin must stay within
+``MAX_DRIFT`` commits of this branch's, and the pin must not lag the default
+branch's own tip by more than ``MAX_PRODUCT_LAG`` commits touching
+``src/mergecraft/``.
 """
 
 from __future__ import annotations
 
 import importlib.util
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from tests.ci.workflow_support import REPO_ROOT
 
@@ -91,7 +93,7 @@ def _freshness_with(
         return ""
 
     monkeypatch.setattr(module, "_git", fake_git)
-    return module._check_freshness(_WORKFLOW, _SHA_NEW)
+    return cast("list[str]", module._check_freshness(_WORKFLOW, _SHA_NEW))
 
 
 def test_identical_pins_are_fresh(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -186,7 +188,7 @@ def _staleness_with(
         return ""
 
     monkeypatch.setattr(module, "_git", fake_git)
-    return module._check_staleness(_WORKFLOW, _SHA_OLD)
+    return cast("list[str]", module._check_staleness(_WORKFLOW, _SHA_OLD))
 
 
 def test_a_pin_far_behind_the_default_tip_is_stale(
