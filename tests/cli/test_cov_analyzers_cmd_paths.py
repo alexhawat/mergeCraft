@@ -44,6 +44,10 @@ def _plain(result: Any) -> str:
     return _ANSI.sub("", result.stdout + result.stderr)
 
 
+def _plain_oneline(result: Any) -> str:
+    return _plain(result).replace("\n", "")
+
+
 def _row(text: str, analyzer_id: str) -> list[str]:
     """Return the rendered table row cells whose first cell is ``analyzer_id``."""
     for line in text.splitlines():
@@ -350,7 +354,7 @@ def test_export_output_path_writes_the_file_and_keeps_stdout_clean(
         env=_WIDE,
     )
     assert result.exit_code == 0, _plain(result)
-    assert f"wrote {out}" in _plain(result)
+    assert f"wrote {out}" in _plain_oneline(result)
     payload = out.read_text(encoding="utf-8")
     assert payload.endswith("\n")
     assert json.loads(payload)["runs"][0]["results"][0]["message"]["text"] == "bad"
@@ -565,4 +569,4 @@ def test_docs_reports_the_path_the_generator_wrote(
     monkeypatch.setattr(analyzers_cmd, "write_analyzers_doc", lambda: generated)
     result = runner.invoke(app, ["analyzers", "docs"], env=_WIDE)
     assert result.exit_code == 0, _plain(result)
-    assert f"wrote {generated}" in _plain(result)
+    assert f"wrote {generated}" in _plain_oneline(result)

@@ -328,7 +328,7 @@ def test_local_only_failure_bails_because_nothing_was_written(
         )
     assert excinfo.value.exit_code == CLI_CONFIGURATION_EXIT_CODE
     err = capsys.readouterr().err
-    assert "could not update" in err
+    assert "could not write" in err
     assert "nothing was written" in err
 
 

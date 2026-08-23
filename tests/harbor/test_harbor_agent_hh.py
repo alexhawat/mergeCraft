@@ -14,7 +14,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-pytest.importorskip("harbor", reason="harbor extra required for harbor.agent tests")
+pytest.importorskip(
+    "harbor.agents.installed.base",
+    reason="harbor extra required (uv sync --extra harbor)",
+)
 
 from harbor.models.agent.context import AgentContext
 
