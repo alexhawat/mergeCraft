@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `opencode serve` output is now drained for the process lifetime. Boot read the child's stdout only until
+  the listening URL appeared and nothing read either pipe afterwards, so once the child filled the ~64KB
+  pipe buffer it blocked in `write()` and stopped answering HTTP — a hang with no output, indistinguishable
+  from an unresponsive provider. A bounded tail of that output is now attached to a provider-timeout error,
+  which previously stringified to nothing at all (#449)
 - A provider timeout no longer kills the review. `ProviderTimeoutError` on the opencode path returned an
   `AgentResult` with no `retryable` metadata, and the model chain gates on that flag alone, so the single
   most recoverable failure there is read as permanent and terminated the run at attempt 1 of 10 — leaving

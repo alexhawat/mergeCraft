@@ -9,7 +9,9 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -62,6 +64,8 @@ from mergecraft.utils.retry_policy import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
+    from typing import IO
+
     from mergecraft.tracing.content import ContentCapture
 
 # Re-exported for tests / callers that import these names from opencode.
@@ -83,6 +87,11 @@ _OPENCODE_LIMIT_SOURCE_KEYS: frozenset[str] = frozenset({"context_limit", "conte
 # (Nous inference hung ~10min in PR #442). Match the workflow action timeout
 # (25m) so httpx does not abort before the Action's own budget.
 _OPENCODE_PROVIDER_HTTP_TIMEOUT_DEFAULT_S: Final[float] = 1500.0
+
+# Ring-buffer depth for `opencode serve` output. Bounded because the buffer is
+# a diagnostic tail, not a log sink: enough to explain a stall, never enough to
+# grow without limit on a long run.
+_SERVER_LOG_TAIL_LINES: Final[int] = 50
 
 
 def _opencode_provider_http_timeout_s() -> float:
@@ -367,6 +376,46 @@ class _ServerHandle:
         self.base_url = base_url
         self.proc = proc
         self._closed = False
+        self._recent: deque[str] = deque(maxlen=_SERVER_LOG_TAIL_LINES)
+        self._drains: list[threading.Thread] = []
+
+    def start_draining(self) -> None:
+        """Consume the child's pipes for the rest of its life (#449).
+
+        Boot reads stdout only until the listening URL appears. Without a
+        reader after that, the child blocks in ``write()`` as soon as it fills
+        the ~64KB pipe buffer and stops answering HTTP — a hang with no output,
+        which is exactly what an unexplained provider timeout looks like.
+        """
+        for stream, label in ((self.proc.stdout, "out"), (self.proc.stderr, "err")):
+            if stream is None:
+                continue
+            thread = threading.Thread(
+                target=self._drain,
+                args=(stream, label),
+                name=f"opencode-serve-{label}",
+                daemon=True,
+            )
+            thread.start()
+            self._drains.append(thread)
+
+    def _drain(self, stream: IO[bytes], label: str) -> None:
+        try:
+            for raw in iter(stream.readline, b""):
+                text = raw.decode("utf-8", errors="replace").rstrip()
+                if not text:
+                    continue
+                # deque.append is atomic under the GIL, so the reader thread
+                # needs no lock against recent_output().
+                self._recent.append(text)
+                logger.debug("[opencode serve/{}] {}", label, text)
+        except (OSError, ValueError):
+            # Pipe closed under us during teardown — expected, not an error.
+            return
+
+    def recent_output(self) -> str:
+        """Return the buffered tail of server output, newest last."""
+        return "\n".join(self._recent)
 
     def close(self) -> None:
         if self._closed:
@@ -425,7 +474,9 @@ def _boot_opencode_server(*, cli: str, env: dict[str, str], cwd: str) -> _Server
         msg = "opencode serve did not print a listening URL"
         raise RuntimeError(msg)
     register_process_group(proc.pid)
-    return _ServerHandle(base_url=base_url, proc=proc)
+    handle = _ServerHandle(base_url=base_url, proc=proc)
+    handle.start_draining()
+    return handle
 
 
 def _parse_model(value: str | None) -> dict[str, str] | None:
@@ -675,9 +726,13 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             # ``retryable`` is what lets the model chain advance (#444): the
             # chain gates on this flag alone, so omitting it reads as a
             # permanent failure and terminates the run at attempt 1.
+            # httpx.ReadTimeout stringifies to nothing, so without the server's
+            # own tail the operator gets a bare "timed out:" and no lead (#449).
+            tail = handle.recent_output()
+            detail = f"{exc}\n\nrecent opencode serve output:\n{tail}" if tail else str(exc)
             return AgentResult(
                 success=False,
-                error=str(exc),
+                error=detail,
                 metadata={"retryable": True},
             )
         return await finalize_agent_result(ctx, result)
