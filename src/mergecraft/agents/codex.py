@@ -814,7 +814,10 @@ def _run_codex_streaming(
         usage = None
 
     if returncode != 0:
-        error = stderr_text.strip() or f"codex exited {returncode}"
+        # The provider's own event is the authoritative reason; stderr is the
+        # fallback, because it routinely carries benign CLI chatter (#445).
+        stream_error = accumulator.stream_error
+        error = stream_error or stderr_text.strip() or f"codex exited {returncode}"
         # bwrap fails on the very first exec, so this is the difference between
         # "the environment cannot run Codex" and "the reviewer errored" (#70).
         if is_user_namespace_failure(f"{stderr_text}\n{output or ''}"):
@@ -825,7 +828,12 @@ def _run_codex_streaming(
                 CODEX_SANDBOX_UNSANDBOXED,
             )
             error = f"{user_namespace_failure_hint()}\n\ncodex stderr:\n{error}"
-        retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
+        # Classify against the provider's message too — a stdout-only failure
+        # is invisible to a stderr-only classifier (#445, #446).
+        retryable = is_retryable_cli_failure(
+            returncode=returncode,
+            stderr=f"{stream_error or ''}\n{stderr_text}",
+        )
         return AgentResult(
             success=False,
             output=output or None,
@@ -914,6 +922,23 @@ def _codex_stream_event_handler(
                         "total_cost_usd": usage.cost_usd,
                     }
                 )
+            return
+
+        # Codex reports a fatal turn failure as a stdout event, never on
+        # stderr. With no branch here the message was counted and dropped, and
+        # the run surfaced whatever unrelated line stderr happened to hold —
+        # PR #443 reported "Reading additional input from stdin..." for a quota
+        # exhaustion (#445).
+        if event_type in {"error", "turn.failed"}:
+            payload = event.get("error")
+            message = (
+                payload.get("message")
+                if isinstance(payload, dict)
+                else (payload if isinstance(payload, str) else None)
+            )
+            if not message:
+                message = event.get("message")
+            accumulator.set_stream_error(str(message) if message else None)
             return
 
         if event_type == "thread.started":

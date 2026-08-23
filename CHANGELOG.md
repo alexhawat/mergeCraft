@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `make action-pin-check` guards the self-review Action pin against drift. Because
+  `.github/workflows/mergecraft.yml` runs on `pull_request_target`, GitHub resolves its `uses:` pin from the
+  **default branch**, so a fix merged to `pre-0.0.1` does not reach the reviewer until it reaches `main` —
+  a skew that reached 687 commits undetected and made PR #443 time out on a ceiling already fixed on the
+  branch. The check also rejects a one-sided bump that leaves the review and fallback steps on different
+  SHAs. Advisory in CI: a stale pin is a property of the default branch, not of the PR under review (#450)
 - First-pass recall metric (`mergecraft eval convergence`, `make eval-convergence`) with multi-round bank cases and a paired regression gate that holds first-pass recall flat while the DG1 precision corpus stays at or above its floor
 - Open-PR finding ledger in the sticky progress comment — `mergecraft findings ledger --pr N` inspects inline, deferred, withdrawn, and unpublished fingerprints without filing GitHub issues (D4, D5)
 - Optional recall pass (`review.recallPass`, default off) dispatches `mergecraft-recall` after aggregation; novel findings always publish in the deferred lane (D1, D7)
@@ -33,6 +39,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Retryability now has one decision path. `_is_retryable_failure` gated on `metadata["retryable"]` alone
+  while `_retryable_failure_reason` inferred the same property from the error text, and only the
+  metadata-blind one decided — so a driver that omitted the flag was silently read as "permanent" and its
+  failure terminated the run. An explicit flag still wins in both directions; an omitted one now falls back
+  to inference. A retryable failure at the chain tail is bounded to one in-place retry and then returns that
+  failure, instead of re-asking a refusing provider until the attempt cap raised and replaced the real error
+  with a cap message (#447)
+- Codex `error` and `turn.failed` events are no longer discarded. Codex reports fatal failures as structured
+  events on stdout, and the stream handler had no branch for them, so the message was counted and dropped
+  and the run reported whatever unrelated text stderr happened to hold — PR #443 surfaced "Reading
+  additional input from stdin..." for a quota exhaustion, in the job annotation, the merge evidence packet,
+  and the chain log. The provider's own message is now the run's error and feeds retry classification (#445)
+- Provider quota exhaustion is now classified as retryable for failover. The CLI classifier matched only
+  rate-limit wording (`rate limit`, `too many requests`, `overloaded`, `429`), so Codex's "You've hit your
+  usage limit" matched nothing and read as permanent — the chain refused to try the next model even though
+  the next model was unaffected (#446)
+- `opencode serve` output is now drained for the process lifetime. Boot read the child's stdout only until
+  the listening URL appeared and nothing read either pipe afterwards, so once the child filled the ~64KB
+  pipe buffer it blocked in `write()` and stopped answering HTTP — a hang with no output, indistinguishable
+  from an unresponsive provider. A bounded tail of that output is now attached to a provider-timeout error,
+  which previously stringified to nothing at all — the tail is read under the same lock the drain threads
+  hold, so collecting it cannot raise `deque mutated during iteration` in place of the failure it explains
+  (#449)
+- A provider timeout no longer kills the review. `ProviderTimeoutError` on the opencode path returned an
+  `AgentResult` with no `retryable` metadata, and the model chain gates on that flag alone, so the single
+  most recoverable failure there is read as permanent and terminated the run at attempt 1 of 10 — leaving
+  the PR with no review rather than a review from the next model in the chain. Gateway 429/5xx responses on
+  the same path were mis-classified the same way. Two bounds keep the retries from multiplying: opencode
+  gets the initial attempt plus exactly one retry, and the chain now honours a wall-clock deadline derived
+  from `RunBounds.run_timeout_s` instead of relying on the attempt cap alone. Every prompt on that path is
+  covered, the initial review turn included — the likeliest one to time out, and the one whose timeout
+  previously escaped the harness and aborted the chain outright. When the allowance runs out at the chain
+  tail, the evidence packet now names the model that actually ran instead of the entry being skipped (#444)
 - `mergecraft --version` reported `0.1.0` while the project was at `0.1.0a1`: the number was restated as a literal in `mergecraft/__init__.py` alongside `pyproject.toml` and the two drifted. It is now read from the installed distribution. The value also keys the offline result cache and is stamped on telemetry and eval reproducibility pins, so the mismatch quietly mixed artefacts from different builds
 - Managed analyzers no longer report a clean scan as skipped: the adapter's fallback re-parse ran on the
   human-readable output string, which carries the `version_note` prose prefix, so any managed tool whose

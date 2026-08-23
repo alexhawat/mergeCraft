@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import time
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -429,16 +430,85 @@ def select_runnable_model_slug(*, settings: RepoSettings) -> str:
     )
 
 
-def _is_retryable_failure(result: AgentResult) -> bool:
+# OpenCode attempts are the expensive ones: each retryable failure on that
+# harness can cost a full external-operation timeout before it returns. Allow
+# the initial attempt plus exactly one retry, then stop spending the run's
+# wall clock on it and let the chain move on (#444).
+_OPENCODE_MAX_ATTEMPTS: int = 2
+
+# In-place retries at the chain tail, where there is no next entry to fail over
+# to. Re-issuing against the model that just refused has little value and no
+# backoff, so one retry is the whole allowance; past that the failure is the
+# run's answer. Widening what counts as retryable (#447) made this branch far
+# easier to reach, and unbounded it would spend the attempt cap re-asking a
+# provider that already said no.
+_MAX_TAIL_RETRIES: int = 1
+
+
+def _chain_deadline() -> float | None:
+    """Monotonic wall-clock ceiling for the whole chain, or ``None`` when unset.
+
+    Retryable failures are what make the chain useful, but a retryable
+    *timeout* costs a full external-operation budget each time it recurs, so an
+    attempt-count cap alone is not a bound: ten 1500s timeouts is a four-hour
+    run. This ceiling reuses the existing per-run ``run_timeout_s`` budget
+    rather than introducing a second notion of "too long" (#444).
+    """
+    from mergecraft.utils.run_bounds import resolve_run_bounds
+
+    try:
+        run_timeout_s = resolve_run_bounds().run_timeout_s
+    except Exception as exc:  # pragma: no cover - defensive: never block a run
+        logger.debug("chain deadline unavailable, continuing unbounded: {}", exc)
+        return None
+    if run_timeout_s <= 0:
+        return None
+    return time.monotonic() + run_timeout_s
+
+
+def _inferred_retryable(result: AgentResult) -> bool:
+    """Best-effort retryability from the failure itself, ignoring metadata."""
+    from mergecraft.utils.retry_policy import is_retryable_cli_failure
+
     metadata = result.metadata or {}
-    retryable = metadata.get("retryable")
-    return retryable is True
+    if metadata.get("timeout") is True or metadata.get("crash") is True:
+        return True
+    error = result.error or ""
+    lowered = error.lower()
+    if "timeout" in lowered or "timed out" in lowered or "crash" in lowered:
+        return True
+    return is_retryable_cli_failure(returncode=None, stderr=error)
+
+
+def _is_retryable_failure(result: AgentResult) -> bool:
+    """Decide whether a failed attempt may advance the chain (#447).
+
+    Precedence, and the only decision path — ``_retryable_failure_reason``
+    labels a skip that this function has already decided:
+
+    1. An explicit ``metadata["retryable"]`` (``True`` or ``False``) wins. A
+       driver that states its intent is always believed.
+    2. Unset means *infer* from the failure.
+
+    Unset used to mean "permanent", which made a driver's omission silently
+    fatal rather than merely imprecise: #444 was exactly that shape — an
+    opencode timeout whose error text said "timed out", which
+    ``_retryable_failure_reason`` duly labelled ``FallbackReason.timeout``,
+    terminating the run at attempt 1 because the deciding classifier read only
+    the absent flag. Inference keeps a forgotten flag from costing a review.
+    """
+    metadata = result.metadata or {}
+    declared = metadata.get("retryable")
+    if isinstance(declared, bool):
+        return declared
+    return _inferred_retryable(result)
 
 
 def _retryable_failure_reason(result: AgentResult) -> FallbackReason:
+    """Label a failure for tracing. Never decides — see ``_is_retryable_failure``."""
     error = (result.error or "").lower()
     metadata = result.metadata or {}
-    if "timeout" in error or metadata.get("timeout") is True:
+    if "timeout" in error or "timed out" in error or metadata.get("timeout") is True:
         return FallbackReason.timeout
     if "crash" in error or metadata.get("crash") is True:
         return FallbackReason.crash
@@ -645,6 +715,14 @@ async def run_with_model_chain(
         chain_index = 0
         attempts = 0
         last_skip_reason: FallbackReason | None = None
+        deadline = _chain_deadline()
+        opencode_attempts = 0
+        tail_retries = 0
+        last_result: AgentResult | None = None
+        # The slug that actually produced ``last_result``. The loop variable
+        # ``slug`` can point at an entry being *skipped*, so evidence must be
+        # stamped from this instead.
+        last_executed_slug: str | None = None
 
         root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
 
@@ -652,6 +730,37 @@ async def run_with_model_chain(
 
         while attempts < max_attempts:
             slug = chain[chain_index]
+            if _agent_mode_for_slug(slug) == "opencode":
+                if opencode_attempts >= _OPENCODE_MAX_ATTEMPTS:
+                    logger.warning(
+                        "» model chain skipping slug={} (fallback_index={}): opencode "
+                        "retry allowance of {} attempts already spent",
+                        slug,
+                        chain_index,
+                        _OPENCODE_MAX_ATTEMPTS,
+                    )
+                    if chain_index < len(chain) - 1:
+                        chain_index += 1
+                        continue
+                    # Last entry and the allowance is gone: surface the failure
+                    # the spent attempts already produced rather than raising a
+                    # cap error that hides it. The allowance cannot be spent
+                    # before an attempt has run, so ``last_result`` is set.
+                    if last_result is None or last_executed_slug is None:
+                        break  # pragma: no cover - allowance implies an attempt
+                    # ``slug`` here is the entry being skipped — it never ran.
+                    # Stamp the slug that actually produced ``last_result`` so
+                    # the evidence packet names the model that really failed.
+                    spent = _attach_model_evidence(
+                        last_result,
+                        requested_model=requested_model or last_executed_slug,
+                        executed_model=last_executed_slug,
+                        fallback_index=chain_index,
+                        fallback_reason=last_skip_reason,
+                    )
+                    _root.set_status("error", last_result.error or "opencode retries exhausted")
+                    return last_executed_slug, spent
+                opencode_attempts += 1
             attempts += 1
             _prepare_chain_attempt(tool_state, chain_index)
             logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
@@ -686,6 +795,8 @@ async def run_with_model_chain(
                 attrs_source=_snapshot_attrs(attempt_attrs),
             ) as attempt_span:
                 result = await run_once(slug)
+                last_result = result
+                last_executed_slug = slug
 
                 call_attrs: dict[str, Any] = {
                     "model.id": slug,
@@ -776,15 +887,29 @@ async def run_with_model_chain(
                         chain_index + 1,
                     )
                 elif not result.success and _is_retryable_failure(result):
-                    attempt_span.set_status("retryable", result.error or "unknown error")
-                    terminal_status = "retryable"
-                    logger.warning(
-                        "» model chain slug={} failed (retryable): {} — retrying ({}/{})",
-                        slug,
-                        result.error or "unknown error",
-                        attempts,
-                        max_attempts,
-                    )
+                    if tail_retries >= _MAX_TAIL_RETRIES:
+                        # No fallback left and the retry is spent: this failure
+                        # is the answer. Returning it beats spending the attempt
+                        # cap and then raising, which hides the real error.
+                        attempt_span.set_status("error", result.error or "unknown error")
+                        terminal_status = "error"
+                        logger.warning(
+                            "» model chain slug={} failed (retryable) at the chain tail "
+                            "with its retry spent: {}",
+                            slug,
+                            result.error or "unknown error",
+                        )
+                    else:
+                        tail_retries += 1
+                        attempt_span.set_status("retryable", result.error or "unknown error")
+                        terminal_status = "retryable"
+                        logger.warning(
+                            "» model chain slug={} failed (retryable): {} — retrying ({}/{})",
+                            slug,
+                            result.error or "unknown error",
+                            attempts,
+                            max_attempts,
+                        )
                 else:
                     attempt_span.set_status("error", skip_reason.value)
                     terminal_status = "error"
@@ -834,6 +959,27 @@ async def run_with_model_chain(
                 return slug, stamped
 
             if chain_index < len(chain) - 1:
+                if deadline is not None and time.monotonic() >= deadline:
+                    # Budget spent. Stop advancing and surface the failure we
+                    # already have — a further attempt cannot finish inside the
+                    # run's own ceiling, and pretending otherwise just burns
+                    # the job's remaining wall clock (#444).
+                    logger.warning(
+                        "» model chain stopped at slug={} (fallback_index={}): run budget "
+                        "exhausted with {} chain entries unvisited",
+                        slug,
+                        chain_index,
+                        len(chain) - chain_index - 1,
+                    )
+                    exhausted = _attach_model_evidence(
+                        result,
+                        requested_model=requested_model or slug,
+                        executed_model=slug,
+                        fallback_index=chain_index,
+                        fallback_reason=last_skip_reason,
+                    )
+                    _root.set_status("error", "chain budget exhausted")
+                    return slug, exhausted
                 chain_index += 1
                 continue
 
