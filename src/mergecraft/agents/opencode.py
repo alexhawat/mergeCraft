@@ -9,7 +9,9 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -62,6 +64,8 @@ from mergecraft.utils.retry_policy import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
+    from typing import IO
+
     from mergecraft.tracing.content import ContentCapture
 
 # Re-exported for tests / callers that import these names from opencode.
@@ -83,6 +87,11 @@ _OPENCODE_LIMIT_SOURCE_KEYS: frozenset[str] = frozenset({"context_limit", "conte
 # (Nous inference hung ~10min in PR #442). Match the workflow action timeout
 # (25m) so httpx does not abort before the Action's own budget.
 _OPENCODE_PROVIDER_HTTP_TIMEOUT_DEFAULT_S: Final[float] = 1500.0
+
+# Ring-buffer depth for `opencode serve` output. Bounded because the buffer is
+# a diagnostic tail, not a log sink: enough to explain a stall, never enough to
+# grow without limit on a long run.
+_SERVER_LOG_TAIL_LINES: Final[int] = 50
 
 
 def _opencode_provider_http_timeout_s() -> float:
@@ -367,6 +376,55 @@ class _ServerHandle:
         self.base_url = base_url
         self.proc = proc
         self._closed = False
+        self._recent: deque[str] = deque(maxlen=_SERVER_LOG_TAIL_LINES)
+        self._recent_lock = threading.Lock()
+        self._drains: list[threading.Thread] = []
+
+    def start_draining(self) -> None:
+        """Consume the child's pipes for the rest of its life (#449).
+
+        Boot reads stdout only until the listening URL appears. Without a
+        reader after that, the child blocks in ``write()`` as soon as it fills
+        the ~64KB pipe buffer and stops answering HTTP — a hang with no output,
+        which is exactly what an unexplained provider timeout looks like.
+        """
+        for stream, label in ((self.proc.stdout, "out"), (self.proc.stderr, "err")):
+            if stream is None:
+                continue
+            thread = threading.Thread(
+                target=self._drain,
+                args=(stream, label),
+                name=f"opencode-serve-{label}",
+                daemon=True,
+            )
+            thread.start()
+            self._drains.append(thread)
+
+    def _drain(self, stream: IO[bytes], label: str) -> None:
+        try:
+            for raw in iter(stream.readline, b""):
+                text = raw.decode("utf-8", errors="replace").rstrip()
+                if not text:
+                    continue
+                # ``deque.append`` is itself atomic, but that says nothing
+                # about *iteration*: joining the deque while a drain thread
+                # appends raises ``RuntimeError: deque mutated during
+                # iteration`` until the buffer reaches ``maxlen``. Since
+                # recent_output() is called from inside the timeout handler,
+                # that would replace the clean failed AgentResult with an
+                # exception — so both sides take this lock.
+                with self._recent_lock:
+                    self._recent.append(text)
+                logger.debug("[opencode serve/{}] {}", label, text)
+        except (OSError, ValueError):
+            # Pipe closed under us during teardown — expected, not an error.
+            return
+
+    def recent_output(self) -> str:
+        """Return the buffered tail of server output, newest last."""
+        with self._recent_lock:
+            lines = list(self._recent)
+        return "\n".join(lines)
 
     def close(self) -> None:
         if self._closed:
@@ -425,7 +483,9 @@ def _boot_opencode_server(*, cli: str, env: dict[str, str], cwd: str) -> _Server
         msg = "opencode serve did not print a listening URL"
         raise RuntimeError(msg)
     register_process_group(proc.pid)
-    return _ServerHandle(base_url=base_url, proc=proc)
+    handle = _ServerHandle(base_url=base_url, proc=proc)
+    handle.start_draining()
+    return handle
 
 
 def _parse_model(value: str | None) -> dict[str, str] | None:
@@ -544,9 +604,14 @@ async def _prompt_session_http(
             logger.warning("opencode provider request timed out: {}", exc)
             raise ProviderTimeoutError(f"opencode provider request timed out: {exc}") from exc
         if resp.status_code >= 400:
+            # 429 and 5xx are the gateway saying "not now", not "never" — mark
+            # them retryable so the chain moves to the next entry (#444). Other
+            # 4xx are request-shaped faults that the next model would repeat.
+            retryable = resp.status_code == 429 or resp.status_code >= 500
             return AgentResult(
                 success=False,
                 error=f"opencode prompt failed ({resp.status_code}): {resp.text[:500]}",
+                metadata={"retryable": True} if retryable else {},
             )
         data = resp.json() if resp.content else {}
 
@@ -643,15 +708,6 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         # cap must not be defeatable by environment control).
         capture_policy = resolve_capture_policy(ctx.tool_state.trust_tier)
 
-        initial = await _prompt_session(
-            base_url=handle.base_url,
-            session_id=session_id,
-            text=prompt,
-            model=model_obj,
-            resolved_model=model,
-            capture_policy=capture_policy,
-        )
-
         async def resume(followup: str) -> AgentResult:
             return await _prompt_session(
                 base_url=handle.base_url,
@@ -663,11 +719,35 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             )
 
         try:
+            # The initial prompt carries the whole review and is by far the
+            # likeliest place to time out, so it must sit inside the same
+            # handler as the retry loop (#444). Left outside, a timeout here
+            # propagated out of ``run_once`` and aborted the chain with no
+            # fallback — the exact failure this branch exists to fix.
+            initial = await _prompt_session(
+                base_url=handle.base_url,
+                session_id=session_id,
+                text=prompt,
+                model=model_obj,
+                resolved_model=model,
+                capture_policy=capture_policy,
+            )
             result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
         except ProviderTimeoutError as exc:
             # Controlled domain error: surface as a clean failed attempt
             # rather than letting a raw httpx traceback abort the review.
-            return AgentResult(success=False, error=str(exc))
+            # ``retryable`` is what lets the model chain advance (#444): the
+            # chain gates on this flag alone, so omitting it reads as a
+            # permanent failure and terminates the run at attempt 1.
+            # httpx.ReadTimeout stringifies to nothing, so without the server's
+            # own tail the operator gets a bare "timed out:" and no lead (#449).
+            tail = handle.recent_output()
+            detail = f"{exc}\n\nrecent opencode serve output:\n{tail}" if tail else str(exc)
+            return AgentResult(
+                success=False,
+                error=detail,
+                metadata={"retryable": True},
+            )
         return await finalize_agent_result(ctx, result)
     finally:
         handle.close()

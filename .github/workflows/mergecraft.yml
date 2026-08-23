@@ -476,17 +476,25 @@ jobs:
         # pull_request_target is resolved from `main`, so #231 cannot consume this
         # pin until it lands there; pin the product-fix commit now so a follow-up
         # bump PR is not required after merge. 0592d72 survives merge intact.
-        # 2026-08-23 (eighth bump, PR #442): re-bumped to cfa36704 for OpenCode
-        # HTTP timeout (25m) + recallPass config unblock. pull_request_target resolves
-        # this workflow and action pin from the repo default branch (pre-0.0.1), not
-        # the PR head — self-review PRs cannot bump the pin until after merge.
-        uses: alexhawat/mergeCraft@cfa36704cf6c58a6abe895e539a377c4599fa4bd # wave/rc-review-convergence (PR #442)
+        # 2026-08-23 (ninth bump, PR #457): re-bumped to 5b9ded9f so the reviewer
+        # runs the provider-failover fixes it is meant to exercise — retryable
+        # provider timeouts, drained opencode serve pipes, quota classification,
+        # and a single retryability decision path (#444, #445, #446, #447, #449).
+        # pull_request_target resolves this workflow and action pin from the repo
+        # default branch (main), not the PR head — self-review PRs cannot bump the
+        # pin until after merge.
+        uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1 (PR #457)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: 25m
           # Provider prefix `nous/` selects the opencode harness and names the
           # provider registered from the MERGECRAFT_CUSTOM_PROVIDER_* env vars.
-          model: nous/deepseek/deepseek-v4-flash
+          # 2026-08-23: moved off deepseek-v4-flash, which repeatedly failed to
+          # reach a terminal verdict or ran out the 25m ceiling (runs
+          # 32649874241, 32647074137). hy3 completed a full local review of the
+          # same diff and calls tools correctly. Both models are served by the
+          # same Nous Portal key, so no secret changes are needed.
+          model: nous/tencent/hy3
           push: disabled
           shell: disabled
           status_checks: enabled
@@ -578,11 +586,14 @@ jobs:
         # the fetch), then to 0592d72 (#231: skipped Python install under `shell:
         # disabled` must not fail prep) — see the matching comment on the Nous step
         # above for why.
-        # 2026-08-23 (eighth bump, PR #442): re-bumped to cfa36704 for OpenCode
-        # HTTP timeout (25m) + recallPass config unblock. pull_request_target resolves
-        # this workflow and action pin from the repo default branch (pre-0.0.1), not
-        # the PR head — self-review PRs cannot bump the pin until after merge.
-        uses: alexhawat/mergeCraft@cfa36704cf6c58a6abe895e539a377c4599fa4bd # wave/rc-review-convergence (PR #442)
+        # 2026-08-23 (ninth bump, PR #457): re-bumped to 5b9ded9f so the reviewer
+        # runs the provider-failover fixes it is meant to exercise — retryable
+        # provider timeouts, drained opencode serve pipes, quota classification,
+        # and a single retryability decision path (#444, #445, #446, #447, #449).
+        # pull_request_target resolves this workflow and action pin from the repo
+        # default branch (main), not the PR head — self-review PRs cannot bump the
+        # pin until after merge.
+        uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1 (PR #457)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job

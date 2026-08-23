@@ -18,7 +18,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory hook-pins-check pins-check
+	lint-ruff-advisory hook-pins-check pins-check action-pin-check
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
 PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
@@ -63,6 +63,9 @@ action-yml-hygiene-check: ## Fail when an action.yml description embeds a litera
 
 hook-pins-check: ## Fail when .pre-commit-config.yaml hook revs drift from pyproject.toml pins
 	$(UV) run python scripts/check_hook_pins.py
+
+action-pin-check: ## Fail when the default branch's self-review Action pin drifts too far behind (#450)
+	$(UV) run python scripts/check_action_pin_freshness.py
 
 lint-ruff-advisory: ## Ruff advisory families (non-blocking CI; #146)
 	$(RUFF) check src tests scripts --select $(RUFF_ADVISORY_FAMILIES)
