@@ -15,8 +15,6 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT
 
 if TYPE_CHECKING:
@@ -113,10 +111,6 @@ def test_check_coverage_floors_accepts_measured_at_target(
     assert rc == 0
 
 
-@pytest.mark.xfail(
-    reason="green after W16: measured repo coverage ≥ 82% (#431)",
-    strict=False,
-)
 def test_repo_coverage_report_passes_floor_check_at_target() -> None:
     """W16 must produce ``coverage.json`` with global line ≥ the bumped floor."""
     report = REPO_ROOT / "coverage.json"

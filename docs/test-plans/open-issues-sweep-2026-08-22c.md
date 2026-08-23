@@ -419,7 +419,7 @@ Locked decision **D7**: floor becomes 82%; behaviour tests must catch real defec
 
 | Wave | Test | Marker reason | Issue |
 |------|------|---------------|-------|
-| **W16** | `test_repo_coverage_report_passes_floor_check_at_target` | `green after W16: measured repo coverage ≥ 82% (#431)` | #431 |
+| **W16** | `test_repo_coverage_report_passes_floor_check_at_target` | `green after W16: measured repo coverage ≥ 82% (#431)` | GREEN — marker removed |
 
 Never `strict=True` — W16 drops the xfail when measured coverage and ``fail_under`` land.
 
@@ -459,6 +459,13 @@ extra is absent.
 - `tests/harbor/test_harbor_agent_hh.py` — **10 tests** (all pass when harbor extra present)
 
 **25 tests** total.
+
+## Acceptance (W16)
+
+- `fail_under` is 82 in `pyproject.toml`; HH431a–b green
+- HH431e green (no xfail); measured line coverage ≥ 82%
+- W15 behaviour tests unchanged except xfail removal
+- `make lint` + `make typecheck` clean on touched paths
 
 ## Acceptance (W15)
 
