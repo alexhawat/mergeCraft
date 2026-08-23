@@ -544,9 +544,14 @@ async def _prompt_session_http(
             logger.warning("opencode provider request timed out: {}", exc)
             raise ProviderTimeoutError(f"opencode provider request timed out: {exc}") from exc
         if resp.status_code >= 400:
+            # 429 and 5xx are the gateway saying "not now", not "never" — mark
+            # them retryable so the chain moves to the next entry (#444). Other
+            # 4xx are request-shaped faults that the next model would repeat.
+            retryable = resp.status_code == 429 or resp.status_code >= 500
             return AgentResult(
                 success=False,
                 error=f"opencode prompt failed ({resp.status_code}): {resp.text[:500]}",
+                metadata={"retryable": True} if retryable else {},
             )
         data = resp.json() if resp.content else {}
 
@@ -667,7 +672,14 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         except ProviderTimeoutError as exc:
             # Controlled domain error: surface as a clean failed attempt
             # rather than letting a raw httpx traceback abort the review.
-            return AgentResult(success=False, error=str(exc))
+            # ``retryable`` is what lets the model chain advance (#444): the
+            # chain gates on this flag alone, so omitting it reads as a
+            # permanent failure and terminates the run at attempt 1.
+            return AgentResult(
+                success=False,
+                error=str(exc),
+                metadata={"retryable": True},
+            )
         return await finalize_agent_result(ctx, result)
     finally:
         handle.close()

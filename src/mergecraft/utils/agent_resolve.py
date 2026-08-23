@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import time
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -429,6 +430,34 @@ def select_runnable_model_slug(*, settings: RepoSettings) -> str:
     )
 
 
+# OpenCode attempts are the expensive ones: each retryable failure on that
+# harness can cost a full external-operation timeout before it returns. Allow
+# the initial attempt plus exactly one retry, then stop spending the run's
+# wall clock on it and let the chain move on (#444).
+_OPENCODE_MAX_ATTEMPTS: int = 2
+
+
+def _chain_deadline() -> float | None:
+    """Monotonic wall-clock ceiling for the whole chain, or ``None`` when unset.
+
+    Retryable failures are what make the chain useful, but a retryable
+    *timeout* costs a full external-operation budget each time it recurs, so an
+    attempt-count cap alone is not a bound: ten 1500s timeouts is a four-hour
+    run. This ceiling reuses the existing per-run ``run_timeout_s`` budget
+    rather than introducing a second notion of "too long" (#444).
+    """
+    from mergecraft.utils.run_bounds import resolve_run_bounds
+
+    try:
+        run_timeout_s = resolve_run_bounds().run_timeout_s
+    except Exception as exc:  # pragma: no cover - defensive: never block a run
+        logger.debug("chain deadline unavailable, continuing unbounded: {}", exc)
+        return None
+    if run_timeout_s <= 0:
+        return None
+    return time.monotonic() + run_timeout_s
+
+
 def _is_retryable_failure(result: AgentResult) -> bool:
     metadata = result.metadata or {}
     retryable = metadata.get("retryable")
@@ -645,6 +674,9 @@ async def run_with_model_chain(
         chain_index = 0
         attempts = 0
         last_skip_reason: FallbackReason | None = None
+        deadline = _chain_deadline()
+        opencode_attempts = 0
+        last_result: AgentResult | None = None
 
         root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
 
@@ -652,6 +684,34 @@ async def run_with_model_chain(
 
         while attempts < max_attempts:
             slug = chain[chain_index]
+            if _agent_mode_for_slug(slug) == "opencode":
+                if opencode_attempts >= _OPENCODE_MAX_ATTEMPTS:
+                    logger.warning(
+                        "» model chain skipping slug={} (fallback_index={}): opencode "
+                        "retry allowance of {} attempts already spent",
+                        slug,
+                        chain_index,
+                        _OPENCODE_MAX_ATTEMPTS,
+                    )
+                    if chain_index < len(chain) - 1:
+                        chain_index += 1
+                        continue
+                    # Last entry and the allowance is gone: surface the failure
+                    # the spent attempts already produced rather than raising a
+                    # cap error that hides it. The allowance cannot be spent
+                    # before an attempt has run, so ``last_result`` is set.
+                    if last_result is None:  # pragma: no cover - unreachable
+                        break
+                    spent = _attach_model_evidence(
+                        last_result,
+                        requested_model=requested_model or slug,
+                        executed_model=slug,
+                        fallback_index=chain_index,
+                        fallback_reason=last_skip_reason,
+                    )
+                    _root.set_status("error", last_result.error or "opencode retries exhausted")
+                    return slug, spent
+                opencode_attempts += 1
             attempts += 1
             _prepare_chain_attempt(tool_state, chain_index)
             logger.info("» model chain attempt {}/{} slug={}", attempts, max_attempts, slug)
@@ -686,6 +746,7 @@ async def run_with_model_chain(
                 attrs_source=_snapshot_attrs(attempt_attrs),
             ) as attempt_span:
                 result = await run_once(slug)
+                last_result = result
 
                 call_attrs: dict[str, Any] = {
                     "model.id": slug,
@@ -834,6 +895,27 @@ async def run_with_model_chain(
                 return slug, stamped
 
             if chain_index < len(chain) - 1:
+                if deadline is not None and time.monotonic() >= deadline:
+                    # Budget spent. Stop advancing and surface the failure we
+                    # already have — a further attempt cannot finish inside the
+                    # run's own ceiling, and pretending otherwise just burns
+                    # the job's remaining wall clock (#444).
+                    logger.warning(
+                        "» model chain stopped at slug={} (fallback_index={}): run budget "
+                        "exhausted with {} chain entries unvisited",
+                        slug,
+                        chain_index,
+                        len(chain) - chain_index - 1,
+                    )
+                    exhausted = _attach_model_evidence(
+                        result,
+                        requested_model=requested_model or slug,
+                        executed_model=slug,
+                        fallback_index=chain_index,
+                        fallback_reason=last_skip_reason,
+                    )
+                    _root.set_status("error", "chain budget exhausted")
+                    return slug, exhausted
                 chain_index += 1
                 continue
 

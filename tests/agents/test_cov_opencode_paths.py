@@ -1066,6 +1066,10 @@ async def test_run_converts_a_provider_timeout_into_a_clean_failed_attempt(
 
     assert result.success is False
     assert result.error == "opencode provider request timed out: read timeout"
+    # #444 — the chain gates on this flag alone. Without it a provider timeout
+    # reads as permanent and terminates the run at attempt 1 instead of failing
+    # over. Supersedes plan 06 D11's claim that this path stays non-retryable.
+    assert (result.metadata or {}).get("retryable") is True
     # The serve handle is always torn down, timeout or not.
     assert proc.wait_calls == 1
 
