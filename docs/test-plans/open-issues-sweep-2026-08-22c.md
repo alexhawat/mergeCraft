@@ -404,3 +404,65 @@ Fixture workflows live under ``tests/ci/fixtures/workflow_review_gate_hg/``.
 - `make lint` + `make typecheck` clean on touched paths
 - HG433i–k xfail (non-strict); HG433a–h pass
 - No `src/` or `.github/workflows/` edits
+
+---
+
+# Batch HH — #431 coverage 82%
+
+Authoring wave: **W15** (HH RED) · Implementation: **W16** (`test: raise coverage floor to 82%`, D7)
+GitHub issue: **#431** — raise line coverage to 82% and gate it on PRs
+
+Locked decision **D7**: floor becomes 82%; behaviour tests must catch real defects;
+``harbor/agent.py`` import-only padding forbidden; no line-touching tests (D6).
+
+## xfail schedule
+
+| Wave | Test | Marker reason | Issue |
+|------|------|---------------|-------|
+| **W16** | `test_repo_coverage_report_passes_floor_check_at_target` | `green after W16: measured repo coverage ≥ 82% (#431)` | #431 |
+
+Never `strict=True` — W16 drops the xfail when measured coverage and ``fail_under`` land.
+
+## Contract matrix (#431 / D7)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| HH431a | ``pyproject.toml`` ``fail_under`` is 82 | unit | policy | `test_pyproject_fail_under_is_eighty_two` |
+| HH431b | ``coverage_config`` tracks the 82% floor | unit | policy | `test_coverage_config_fail_under_matches_target` |
+| HH431c | ``check_coverage_floors`` rejects below live floor | unit | error | `test_check_coverage_floors_rejects_measured_below_target` |
+| HH431d | ``check_coverage_floors`` accepts at contract floor | unit | happy | `test_check_coverage_floors_accepts_measured_at_target` |
+| HH431e | Repo ``coverage.json`` passes floor at 82% | integration | regression | `test_repo_coverage_report_passes_floor_check_at_target` |
+| HH431f | ``detect_codex_refresh`` classifies rotation shapes | unit | happy/edge | `test_detect_codex_refresh_*` |
+| HH431g | ``action.post.main`` skips malformed / unchanged state | unit | edge | `test_main_skips_*` |
+| HH431h | Rotated refresh persists via ``gh secret set`` | unit | happy | `test_main_persists_rotated_refresh_via_gh_secret_set` |
+| HH431i | ``gh secret set`` failure is non-fatal | unit | error | `test_main_warns_when_gh_secret_set_fails` |
+| HH431j | ``_resolve_patch_path`` resolves task patches | unit | happy/edge | `test_resolve_patch_path_prefers_known_candidates` |
+| HH431k | Harbor agent parses version + ingests findings | unit | happy | `test_parse_version_*`, `test_populate_context_post_run_*` |
+| HH431l | ``_build_run_env`` prefers explicit model name | unit | happy | `test_build_run_env_prefers_explicit_model_name` |
+
+## Named symbols W16 must satisfy
+
+| Symbol | Module | Test |
+|--------|--------|------|
+| ``fail_under = 82`` | `pyproject.toml` | HH431a–b |
+| measured line coverage ≥ 82% | `make coverage-gate` | HH431e |
+| Codex post-hook branches | `mergecraft.action.post` | HH431f–i |
+| Harbor review agent helpers | `mergecraft.harbor.agent` | HH431j–l |
+
+Harbor behaviour tests require ``uv sync --extra harbor``; skipped when the optional
+extra is absent.
+
+## Collection target (W15)
+
+- `tests/ci/test_coverage_hh.py` — **6 tests** (1 xfail, 2 RED fail_under pins, 3 pass)
+- `tests/action/test_post_hh.py` — **11 tests** (all pass)
+- `tests/harbor/test_harbor_agent_hh.py` — **10 tests** (all pass when harbor extra present)
+
+**25 tests** total.
+
+## Acceptance (W15)
+
+- New tests collect with zero import errors
+- `make lint` + `make typecheck` clean on touched paths
+- HH431a–b RED (fail_under still 80); HH431e xfail; behaviour tests pass
+- No `src/` edits
