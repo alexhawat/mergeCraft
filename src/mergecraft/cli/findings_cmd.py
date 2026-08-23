@@ -311,6 +311,8 @@ def carryover(
     async def _run() -> tuple[CarryoverPlan, CarryoverOutcome | None]:
         client = _client()
         try:
+            progress_body = await _fetch_progress_comment_body(client, owner, name, pr)
+            ledger_records = FindingLedger.from_comment_body(progress_body).records()
             plan = await plan_carryover(
                 client,
                 owner,
@@ -319,6 +321,7 @@ def carryover(
                 label=label,
                 include_resolved=include_resolved,
                 include_answered=include_answered,
+                ledger_records=ledger_records,
             )
             if not apply:
                 return plan, None

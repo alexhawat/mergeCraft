@@ -128,11 +128,24 @@ def render_deferred_section(deferred: list[Finding]) -> str | None:
     return "\n".join(lines)
 
 
+def _coerce_line_number(item: dict[str, Any], *keys: str, default: int = 1) -> int:
+    for key in keys:
+        value = item.get(key)
+        if value is not None:
+            return int(value)
+    return default
+
+
 def agent_dict_to_finding(item: dict[str, Any], *, rule_id: str = "review") -> Finding:
     message = str(item.get("message", item.get("body", "")))
     path = str(item.get("path", ""))
-    start_line = int(item.get("line", item.get("start_line", 1)))
-    end_line = int(item.get("end_line", item.get("line", item.get("start_line", start_line))))
+    start_line = _coerce_line_number(item, "line", "start_line")
+    end_line_raw = item.get("end_line")
+    end_line = (
+        int(end_line_raw)
+        if end_line_raw is not None
+        else _coerce_line_number(item, "line", "start_line", default=start_line)
+    )
     return Finding(
         tool=str(item.get("tool", "agent")),
         rule_id=str(item.get("rule_id", rule_id)),

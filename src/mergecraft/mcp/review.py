@@ -259,6 +259,13 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     publish_sets = recall_publish_sets(ctx)
     enforce_recall_deferred_lane_at_publish(ctx, publish_sets=publish_sets)
 
+    from pathlib import Path
+
+    from mergecraft.config.settings import load_repo_settings
+
+    repo_root = Path(primary.dir or Path.cwd())
+    review_settings = load_repo_settings(root=repo_root, load_learnings_files=False).review
+
     payload: dict[str, Any] = {"event": event}
     if body:
         await ensure_learnings_review_delta(ctx.tool_state)
@@ -300,19 +307,24 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             else None
         )
         comment_body = str(c.get("body") or "")
+        raw_fingerprint = str(c.get("fingerprint") or "") or finding_fingerprint(
+            path=path,
+            body=comment_body,
+        )
         prepared_body = prepare_inline_comment_for_publish(
             ctx,
             path=path,
             line=line,
             body=comment_body,
             collateral=collateral_list,
-            fingerprint=str(c.get("fingerprint") or "") or None,
+            fingerprint=raw_fingerprint,
             collateral_map=collateral_map,
             incremental_diff_text=incremental_diff_text,
         )
         item: dict[str, Any] = {
             "path": path,
             "body": prepared_body,
+            "fingerprint": raw_fingerprint,
         }
         if c.get("suggestion"):
             suggestion = str(c["suggestion"])
@@ -330,7 +342,8 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             item["start_line"] = int(c["start_line"])
             item["start_side"] = c.get("start_side") or c.get("side") or "RIGHT"
         inline.append(item)
-    inline = strip_recall_inline_comments(ctx, inline, publish_sets=publish_sets)
+    if review_settings.recall_pass:
+        inline = strip_recall_inline_comments(ctx, inline, publish_sets=publish_sets)
     if inline:
         payload["comments"] = inline
 

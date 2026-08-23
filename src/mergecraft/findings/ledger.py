@@ -300,11 +300,19 @@ def _record_from_v2_marker(
     round_index = payload.get("round_index")
     recorded_at = payload.get("recorded_at")
     source = payload.get("source")
+    try:
+        resolved_round = int(round_index) if round_index is not None else None
+    except (TypeError, ValueError):
+        logger.warning(
+            "finding ledger: skipping v2 marker with invalid round_index for fingerprint {}",
+            fingerprint,
+        )
+        return None
     return LifecycleRecord(
         fingerprint=fingerprint,
         state=state,
         reason=str(reason) if reason else None,
-        round_index=int(round_index) if round_index is not None else None,
+        round_index=resolved_round,
         recorded_at=str(recorded_at) if recorded_at else None,
         source=str(source) if source else None,
     )

@@ -110,7 +110,7 @@ def _verification_budget_for_round(settings: RepoSettings, ctx: ToolContext) -> 
         review.round_budgets,
         round_index=ledger_round_index(ctx.tool_state),
     )
-    return int(budget * multiplier)
+    return max(1, int(budget * multiplier))
 
 
 def _persist_confirmed_fingerprint(

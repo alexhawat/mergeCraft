@@ -194,16 +194,39 @@ def recall_publish_sets(ctx: ToolContext) -> RecallPublishSets:
     )
 
 
+def _route_agent_overflow_to_deferred_at_publish(
+    ctx: ToolContext,
+    *,
+    publish_sets: RecallPublishSets,
+) -> None:
+    """Route unconfirmed agent findings into the deferred overflow lane (unconditional)."""
+    overflow_rows = publish_sets.recall_candidate_rows
+    if not overflow_rows:
+        return
+    analyzer_run = ctx.tool_state.analyzer_run
+    if analyzer_run is None:
+        from mergecraft.mcp.tool_state import AnalyzerRunState
+
+        analyzer_run = AnalyzerRunState(ran=True)
+        ctx.tool_state.analyzer_run = analyzer_run
+    merge_recall_findings_into_analyzer_run(
+        analyzer_run,
+        draft=publish_sets.draft_rows,
+        recalled=overflow_rows,
+    )
+    from mergecraft.findings.ledger import record_deferred_from_analyzer_run
+
+    record_deferred_from_analyzer_run(ctx.tool_state, analyzer_run)
+
+
 def enforce_recall_deferred_lane_at_publish(
     ctx: ToolContext,
     *,
     publish_sets: RecallPublishSets | None = None,
 ) -> None:
-    """Server-side D1 — recall output never publishes inline; merge into deferred."""
+    """Server-side D1 — agent overflow and recall output never publish inline."""
     resolved_sets = publish_sets or recall_publish_sets(ctx)
-    recalled = resolved_sets.recall_candidate_rows
-    if recalled:
-        apply_recall_pass_post_process(ctx, recalled, publish_sets=resolved_sets)
+    _route_agent_overflow_to_deferred_at_publish(ctx, publish_sets=resolved_sets)
 
 
 def strip_recall_inline_comments(

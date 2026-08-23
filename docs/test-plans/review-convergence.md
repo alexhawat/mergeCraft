@@ -100,7 +100,7 @@ Never `strict=True` — impl waves must not touch `tests/`.
 | RC10 — recall receives diff + draft list | W7.2b prompt contract | Unit | `test_recall_pass_receives_the_draft_finding_list` |
 | RC10 — output excludes already-drafted findings | W7.2b · `findings/dedup.py` | Unit | `test_recall_pass_output_excludes_findings_already_drafted` |
 | D1 — recall output always deferred | Decisions D1 | Integration | `test_recall_findings_land_in_the_deferred_lane_regardless_of_claimed_severity` |
-| D7 — `review.recallPass` default off, on in this repo | Decisions D7 | Unit | `test_recall_pass_is_off_by_default_and_on_in_this_repo_config` |
+| D7 — `review.recallPass` default off; off in this repo until schema on base | Decisions D7 | Unit | `test_recall_pass_is_off_by_default_and_on_in_this_repo_config` |
 | Subagent budget + timeout | W7.2a registry | Unit | `test_recall_pass_respects_the_subagent_budget_and_timeout` |
 | Reviewer-shaped deny list (no terminal / mutation) | W7.2c | Integration | `test_recall_pass_cannot_call_terminal_or_mutation_tools` |
 | W7 gate — recall up, DG1 precision flat | W7 acceptance · DG1 corpus | E2E | `test_recall_pass_raises_first_pass_recall_on_the_corpus` |
