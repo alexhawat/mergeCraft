@@ -612,3 +612,73 @@ Catalog pins under test:
 - `make lint` + `make typecheck` clean on touched paths
 - HJ427a–h xfail (non-strict); HJ427i–k pass
 - No `src/`, lockfile, or `make setup` edits
+
+---
+
+# Batch HK — #417 audit.jsonl producer
+
+Authoring wave: **W21** (HK RED) · Implementation: **W22** (`feat(enterprise): write audit.jsonl for audit export`, D10)
+GitHub issue: **#417** — add `audit.jsonl` producer for audit export
+
+Locked decision **D10**: append-only JSONL producer for ``.mergecraft/audit.jsonl``.
+Schema: timestamp, event type, decision/outcome, run/artifact ids, redacted context.
+Reader/CLI unchanged. Not ``policy-audit.json``.
+
+## xfail schedule
+
+| Wave | Test | Marker reason | Issue |
+|------|------|---------------|-------|
+| **W22** | `test_append_audit_event_is_exported_public_api` | `green after W22: append_audit_event public API (#417)` | pending |
+| **W22** | `test_append_audit_event_writes_required_schema_fields` | `green after W22: audit event schema fields (#417)` | pending |
+| **W22** | `test_append_audit_event_writes_under_default_audit_rel` | `green after W22: audit JSONL path under workspace root (#417)` | pending |
+| **W22** | `test_append_audit_event_is_append_only` | `green after W22: append-only audit JSONL (#417)` | pending |
+| **W22** | `test_append_audit_event_redacts_secrets_in_context` | `green after W22: redact secrets in audit context (#417)` | pending |
+| **W22** | `test_load_audit_events_reads_producer_output` | `green after W22: load_audit_events reads producer output (#417)` | pending |
+| **W22** | `test_audit_export_cli_returns_producer_events` | `green after W22: mergecraft audit export returns producer events (#417)` | pending |
+| **W22** | `test_record_blocking_decision_appends_audit_event` | `green after W22: blocking decision hook emits audit event (#417)` | pending |
+| **W22** | `test_append_audit_event_stamps_utc_timestamp_when_omitted` | `green after W22: audit timestamps are ISO-8601 UTC (#417)` | pending |
+| **W22** | `test_append_audit_event_rejects_non_dict_payload` | `green after W22: reject non-dict audit payloads (#417)` | pending |
+
+Never `strict=True` — W22 drops xfails when the producer and call sites land.
+
+## Contract matrix (#417 / D10)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| HK417a | ``append_audit_event`` is public on ``enterprise.audit`` | unit | happy | `test_append_audit_event_is_exported_public_api` |
+| HK417b | Required schema fields on emitted events | unit | happy | `test_append_audit_event_writes_required_schema_fields` |
+| HK417c | Persists under ``DEFAULT_AUDIT_REL`` | unit | happy | `test_append_audit_event_writes_under_default_audit_rel` |
+| HK417d | Append-only — second call adds a line | unit | edge | `test_append_audit_event_is_append_only` |
+| HK417e | Secrets redacted in ``context`` before write | unit | edge | `test_append_audit_event_redacts_secrets_in_context` |
+| HK417f | ``policy-audit.json`` stays separate from JSONL stream | unit | policy | `test_write_policy_audit_does_not_touch_enterprise_audit_jsonl` |
+| HK417g | ``load_audit_events`` reads producer output | integration | happy | `test_load_audit_events_reads_producer_output` |
+| HK417h | ``mergecraft audit export`` returns producer events | functional | happy | `test_audit_export_cli_returns_producer_events` |
+| HK417i | Blocking-decision hook appends audit event | integration | happy | `test_record_blocking_decision_appends_audit_event` |
+| HK417j | UTC ISO-8601 ``timestamp`` when omitted | unit | edge | `test_append_audit_event_stamps_utc_timestamp_when_omitted` |
+| HK417k | Non-dict payloads rejected before write | unit | error | `test_append_audit_event_rejects_non_dict_payload` |
+| HK417l | ``DEFAULT_AUDIT_REL`` is ``.mergecraft/audit.jsonl`` | unit | policy | `test_default_audit_rel_points_at_mergecraft_audit_jsonl` |
+
+## Named symbols W22 must satisfy
+
+| Symbol | Location | Test |
+|--------|----------|------|
+| ``append_audit_event`` | `mergecraft.enterprise.audit` | HK417a–e, HK417g–h, HK417j–k |
+| ``record_blocking_decision`` | `mergecraft.enterprise.audit` | HK417i |
+| ``DEFAULT_AUDIT_REL`` | `mergecraft.enterprise.audit` | HK417c, HK417l |
+| ``load_audit_events`` | `mergecraft.enterprise.audit` (unchanged reader) | HK417g |
+| ``mergecraft audit export`` | `mergecraft.cli.audit_cmd` (unchanged CLI) | HK417h |
+| ``write_policy_audit`` | `mergecraft.policy.lifecycle` (separate artifact) | HK417f |
+
+Required event fields under test: ``timestamp``, ``event_type``, ``outcome``, ``context``,
+plus at least one of ``run_id`` / ``artifact_id``.
+
+## Collection target (W21)
+
+`tests/enterprise/test_audit_producer_hk.py` — **12 tests** (10 xfail, 2 pass).
+
+## Acceptance (W21)
+
+- New tests collect with zero import errors
+- `make lint` + `make typecheck` clean on touched paths
+- HK417a–e, HK417g–k xfail (non-strict); HK417f, HK417l pass
+- No `src/` edits
