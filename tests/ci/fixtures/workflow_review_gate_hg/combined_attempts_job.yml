@@ -10,7 +10,7 @@ jobs:
   review-attempts:
     runs-on: ubuntu-latest
     steps:
-      - name: mergeCraft PR review (Nous DeepSeek V4 Flash)
+      - name: mergeCraft PR review (Nous Tencent HY3)
         run: echo nous attempt
       - name: Decide Codex fallback after Nous
         id: fallback

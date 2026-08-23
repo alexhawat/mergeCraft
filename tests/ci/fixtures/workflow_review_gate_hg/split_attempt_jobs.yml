@@ -9,7 +9,7 @@ jobs:
   primary-review:
     runs-on: ubuntu-latest
     steps:
-      - name: mergeCraft PR review (Nous DeepSeek V4 Flash)
+      - name: mergeCraft PR review (Nous Tencent HY3)
         run: echo nous attempt posts no verdict
       - name: Decide Codex fallback after Nous
         run: echo trigger codex

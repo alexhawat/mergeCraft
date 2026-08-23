@@ -19,7 +19,7 @@ from tests.ci.workflow_support import as_list, job
 # Canonical step names in ``.github/workflows/mergecraft.yml``.
 APPROVAL_GATE_STEP = "Fail when mergeCraft would not approve"
 CODEX_REVIEW_STEP = "mergeCraft PR review (Codex)"
-NOUS_REVIEW_STEP = "mergeCraft PR review (Nous DeepSeek V4 Flash)"
+NOUS_REVIEW_STEP = "mergeCraft PR review (Nous Tencent HY3)"
 CODEX_FALLBACK_DECIDE_STEP = "Decide Codex fallback after Nous"
 
 # Fixture job names (``tests/ci/fixtures/workflow_review_gate_hg/``).
