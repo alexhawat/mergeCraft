@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+# Models the #424 / #425 startup_failure: caller job holds no scopes while the
+# callee requests contents: read.
+name: HF caller (empty job permissions)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  gate:
+    permissions: {}
+    uses: ./callee_contents_read.yml

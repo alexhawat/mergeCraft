@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+# Preferred fix shape: all attempts live in one job; gate is a separate job that
+# needs it, so GitHub cannot start the gate until Codex fallback completes.
+name: HG gate needs combined review attempts job
+
+on:
+  workflow_dispatch:
+
+jobs:
+  review-attempts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review (Nous Tencent HY3)
+        run: echo nous attempt
+      - name: Decide Codex fallback after Nous
+        id: fallback
+        run: echo need=true >> "${GITHUB_OUTPUT}"
+      - name: mergeCraft PR review (Codex)
+        if: steps.fallback.outputs.need == 'true'
+        run: echo codex fallback posts mergecraft-approval
+
+  approval-gate:
+    needs: review-attempts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when mergeCraft would not approve
+        run: echo gate samples check-runs after attempts job finished

@@ -1,4 +1,8 @@
-"""Shared YAML helpers for release-gating workflow contract tests."""
+"""Shared YAML helpers for release-gating workflow contract tests.
+
+Permission-scope helpers live in ``scripts/workflow_yaml.py`` (shared with
+``scripts/check_called_workflow_permissions.py``).
+"""
 
 from __future__ import annotations
 

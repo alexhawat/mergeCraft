@@ -21,6 +21,7 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
 from mergecraft.mcp.verdict import (
     ReviewPhase,
+    after_terminal_submission_recorded,
     ensure_review_scope_for_terminal,
     record_validated_terminal_submission,
     revalidate_recorded_submission,
@@ -487,7 +488,8 @@ def create_pull_request_review_tool(ctx: ToolContext):
         if ctx.tool_state.terminal_submission is None:
             submission_payload = _legacy_params_to_submission(params)
             if submission_payload is not None:
-                record_validated_terminal_submission(ctx, submission_payload)
+                recorded = record_validated_terminal_submission(ctx, submission_payload)
+                after_terminal_submission_recorded(ctx, recorded, replayed=False)
         else:
             _reject_mismatched_publication(ctx.tool_state.terminal_submission, params)
             revalidate_recorded_submission(ctx)

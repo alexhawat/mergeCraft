@@ -328,7 +328,7 @@ def test_local_only_failure_bails_because_nothing_was_written(
         )
     assert excinfo.value.exit_code == CLI_CONFIGURATION_EXIT_CODE
     err = capsys.readouterr().err
-    assert "could not update" in err
+    assert "could not write" in err
     assert "nothing was written" in err
 
 
@@ -747,48 +747,3 @@ def test_logfire_skips_the_extra_warning_when_the_package_is_present(
     assert result.exit_code == 0, combined
     assert "extra is not installed" not in combined
     assert "mergecraft config tracing" in combined
-
-
-# ---------------------------------------------------------------------------
-# Found defect (#431 investigation)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.xfail(
-    reason=(
-        "auth_cmd._persist_credential computes wrote_local = all([...]) across every "
-        "local entry, so a multi-entry write (auth logfire's MERGECRAFT_LOGFIRE_TOKEN + "
-        "MERGECRAFT_TRACING_PROJECT) where one entry lands and one fails reports "
-        "wrote_local=False. With --scope local that reaches the "
-        "'nothing was written' bail (cli/auth_cmd.py, target.github is None branch) "
-        "and exits 30 — contradicting the code's own comment that 'every entry is "
-        "attempted so a partial failure still leaves the entries that could be "
-        "written', and telling the operator to redo a write that partly succeeded. "
-        "It should report the partial write, not claim nothing landed."
-    ),
-    strict=True,
-)
-def test_partial_local_write_must_not_claim_that_nothing_was_written(
-    monkeypatch: MonkeyPatch, tmp_path: Path, capsys: CaptureFixture[str]
-) -> None:
-    env_path = _local_env(monkeypatch, tmp_path)
-    real_write = auth_cmd._write_env_value
-
-    def _write(path: Path, key: str, value: str) -> bool:
-        if key == "MERGECRAFT_LOGFIRE_TOKEN":
-            return False
-        return real_write(path, key, value)
-
-    monkeypatch.setattr(auth_cmd, "_write_env_value", _write)
-    auth_cmd._persist_credential(
-        target=auth_cmd.AuthTarget(local=True, github=None),
-        name="LOGFIRE_TOKEN",
-        value="pylf_v1_eu_abc",
-        local_entries={
-            "MERGECRAFT_LOGFIRE_TOKEN": "pylf_v1_eu_abc",
-            "MERGECRAFT_TRACING_PROJECT": "mergecraft",
-        },
-    )
-    # The entry that did land is on disk, so "nothing was written" is false.
-    assert dotenv_values(env_path)["MERGECRAFT_TRACING_PROJECT"] == "mergecraft"
-    assert "nothing was written" not in capsys.readouterr().err

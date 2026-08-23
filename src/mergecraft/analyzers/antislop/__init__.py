@@ -10,6 +10,7 @@ from loguru import logger
 
 from mergecraft.analyzers.antislop.matcher import RuleMatch, apply_rules
 from mergecraft.analyzers.antislop.policy import AntislopRule, load_native_rules
+from mergecraft.analyzers.antislop.scopes import ANTISLOP_SCOPED_SUFFIXES
 from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.config.settings import load_repo_settings
@@ -27,16 +28,6 @@ _SEVERITY_MAP: dict[str, str] = {
     "minor": "Minor",
     "trivial": "Trivial",
 }
-
-_SCOPED_SUFFIXES = (
-    ".py",
-    ".js",
-    ".jsx",
-    ".ts",
-    ".tsx",
-    ".mjs",
-    ".cjs",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +139,7 @@ def _path_ignored(rel_path: str, patterns: list[str] | None) -> bool:
 
 def _is_scoped_path(rel_path: str) -> bool:
     lowered = rel_path.strip().casefold()
-    return bool(lowered) and lowered.endswith(_SCOPED_SUFFIXES)
+    return bool(lowered) and lowered.endswith(ANTISLOP_SCOPED_SUFFIXES)
 
 
 def _finding_from_match(match: RuleMatch) -> Finding:

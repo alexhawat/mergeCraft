@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import secrets
-import socket
 import threading
 from math import isfinite
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -63,8 +62,8 @@ from mergecraft.mcp.ports import (
     MCP_HOST as MCP_HOST,
 )
 from mergecraft.mcp.ports import (
-    port_available,
-    select_port,
+    resolve_uvicorn_bind_port,
+    wait_for_bound_port,
 )
 from mergecraft.mcp.pr import (
     close_pull_request_tool,
@@ -703,8 +702,6 @@ def start_mcp_http_server(
 
     Returns ``(url, stop)`` where ``stop`` is an idempotent disposer.
     """
-    import time
-
     # D15 — issue per-run secrets at startup. Agent harnesses receive
     # ``mcp_auth_token`` for reviewer/verifier role routes; the orchestrator
     # ``/mcp`` surface gets its own bearer so a leaked harness token cannot
@@ -724,29 +721,17 @@ def start_mcp_http_server(
         auth_token=agent_token,
         orchestrator_auth_token=orchestrator_token,
     )
-    port = select_port()
+    bind_port = resolve_uvicorn_bind_port()
     http_config = uvicorn.Config(
         app,
         host=MCP_HOST,
-        port=port,
+        port=bind_port,
         log_level="warning",
         access_log=False,
     )
     server, thread, loop = _serve_in_thread(http_config, thread_name="mergecraft-mcp")
 
-    # Wait briefly for bind
-    for _ in range(50):
-        if getattr(server, "started", False):
-            break
-        # uvicorn sets started after startup; also probe the port
-        if not port_available(port):
-            # port is in use by our server (or something) — good enough after thread start
-            try:
-                with socket.create_connection((MCP_HOST, port), timeout=0.1):
-                    break
-            except OSError:
-                pass
-        time.sleep(0.05)
+    port = wait_for_bound_port(server, bind_port)
 
     url = f"http://{MCP_HOST}:{port}{MCP_ENDPOINT}"
     ctx.mcp_server_url = url

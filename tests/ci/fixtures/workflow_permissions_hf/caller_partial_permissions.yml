@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+# Caller grants contents: read but omits packages: read required by the callee.
+name: HF caller (partial job permissions)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  gate:
+    permissions:
+      contents: read
+    uses: ./callee_contents_and_packages.yml

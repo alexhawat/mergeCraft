@@ -35,11 +35,20 @@ jobs:
           # has neither, so they answer "no" on PR builds while passing on
           # tag builds. Full history is what makes those answers truthful.
           fetch-depth: 0
+          # #432 / D6 — score the merge result, not the PR head branch alone.
+          ref: >-
+            ${{ github.event_name == 'pull_request'
+                && format('refs/pull/{0}/merge', github.event.pull_request.number)
+                || github.ref }}
       - uses: ./.github/actions/bootstrap
       - name: Integration suite
         run: make test-integration
       - name: Coverage ratchet
-        run: make coverage-gate
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: bash scripts/ci_coverage_delta_gate.sh
 
   security-scope:
     name: npm audit + workflow lint
@@ -52,7 +61,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: docker/agent-clis/package-lock.json
+          cache-dependency-path: |
+            docker/agent-clis/package-lock.json
+            tools/package-lock.json
       - name: npm audit (agent-clis lockfile)
         run: make npm-audit
       - name: actionlint + zizmor

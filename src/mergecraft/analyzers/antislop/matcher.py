@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
     from mergecraft.analyzers.antislop.policy import AntislopRule
 
-_JS_SUFFIXES = frozenset({".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"})
+from mergecraft.analyzers.antislop.scopes import ANTISLOP_JS_SUFFIXES
+
 _PY_SUFFIX = ".py"
 
 
@@ -79,7 +80,7 @@ def _language_for_path(rel_path: str) -> str | None:
     lowered = rel_path.casefold()
     if lowered.endswith(_PY_SUFFIX):
         return "python"
-    if any(lowered.endswith(suffix) for suffix in _JS_SUFFIXES):
+    if any(lowered.endswith(suffix) for suffix in ANTISLOP_JS_SUFFIXES):
         if lowered.endswith((".ts", ".tsx")):
             return "typescript"
         return "javascript"
@@ -176,20 +177,30 @@ def _python_placeholder_matches(source: str) -> Iterable[tuple[int, int, str]]:
             yield start_line, end_line, "function body is only pass"
             continue
         if statement.type == "raise_statement":
-            text = _node_text(source, statement)
+            text = _node_text_from_node(statement)
             if "NotImplementedError" in text:
                 yield start_line, end_line, text.strip()
             continue
         if statement.type == "expression_statement":
-            text = _node_text(source, statement).strip()
+            text = _node_text_from_node(statement).strip()
             if text == "...":
                 yield start_line, end_line, "function body is only ..."
+
+
+def _except_clause_body(handler: Node) -> Node | None:
+    """Return the suite block for an ``except_clause`` node.
+
+    tree-sitter-python exposes the suite as an unnamed ``block`` child, not a
+    named ``body`` field.
+    """
+    blocks = _child_nodes(handler, "block")
+    return blocks[0] if blocks else None
 
 
 def _python_empty_error_handler_matches(source: str) -> Iterable[tuple[int, int, str]]:
     for _node, _start_line, end_line in _walk_python_try_blocks(source):
         for handler in _child_nodes(_node, "except_clause"):
-            block = handler.child_by_field_name("body")
+            block = _except_clause_body(handler)
             if block is None:
                 continue
             statements = [child for child in block.children if child.type not in {"comment", "\n"}]
@@ -201,13 +212,13 @@ def _python_empty_error_handler_matches(source: str) -> Iterable[tuple[int, int,
 def _python_error_obscuring_catch_matches(source: str) -> Iterable[tuple[int, int, str]]:
     for _node, _start_line, end_line in _walk_python_try_blocks(source):
         for handler in _child_nodes(_node, "except_clause"):
-            block = handler.child_by_field_name("body")
+            block = _except_clause_body(handler)
             if block is None:
                 continue
             statements = [child for child in block.children if child.type not in {"comment", "\n"}]
             if len(statements) != 1 or statements[0].type != "return_statement":
                 continue
-            text = _node_text(source, statements[0]).strip()
+            text = _node_text_from_node(statements[0]).strip()
             if re.fullmatch(r"return\s+None\b.*", text):
                 line = handler.start_point[0] + 1
                 yield line, end_line, text
@@ -233,11 +244,11 @@ def _python_pass_through_wrapper_matches(source: str) -> Iterable[tuple[int, int
         forwarded = _call_positional_argument_names(call)
         if forwarded != params:
             continue
-        callee_name = _node_text(source, callee).strip()
+        callee_name = _node_text_from_node(callee).strip()
         func_name = _python_function_name(node)
         if func_name is None or callee_name == func_name:
             continue
-        yield start_line, end_line, _node_text(source, statements[0]).strip()
+        yield start_line, end_line, _node_text_from_node(statements[0]).strip()
 
 
 def _python_phantom_import_matches(source: str) -> Iterable[tuple[int, int, str]]:
@@ -247,7 +258,7 @@ def _python_phantom_import_matches(source: str) -> Iterable[tuple[int, int, str]
             line_no = node.start_point[0] + 1
             for child in node.children:
                 if child.type == "dotted_name":
-                    root = _node_text(source, child).split(".", 1)[0]
+                    root = _node_text_from_node(child).split(".", 1)[0]
                     bindings.append(_ImportBinding(name=root, usage_names=(root,), line=line_no))
                 elif child.type == "aliased_import":
                     binding = _aliased_module_binding(source, child, line_no=line_no)
@@ -266,17 +277,17 @@ def _python_phantom_import_matches(source: str) -> Iterable[tuple[int, int, str]
                     name_node = child.child_by_field_name("name")
                     line_no = node.start_point[0] + 1
                     if alias is not None:
-                        bound = _node_text(source, alias)
+                        bound = _node_text_from_node(alias)
                         bindings.append(
                             _ImportBinding(name=bound, usage_names=(bound,), line=line_no)
                         )
                     elif name_node is not None:
-                        bound = _node_text(source, name_node)
+                        bound = _node_text_from_node(name_node)
                         bindings.append(
                             _ImportBinding(name=bound, usage_names=(bound,), line=line_no)
                         )
                 elif child.type in {"dotted_name", "identifier"}:
-                    bound = _node_text(source, child)
+                    bound = _node_text_from_node(child)
                     bindings.append(
                         _ImportBinding(
                             name=bound,
@@ -314,11 +325,11 @@ def _aliased_module_binding(source: str, node: Node, *, line_no: int) -> _Import
     name_node = node.child_by_field_name("name")
     alias_node = node.child_by_field_name("alias")
     if alias_node is not None:
-        alias = _node_text(source, alias_node)
+        alias = _node_text_from_node(alias_node)
         return _ImportBinding(name=alias, usage_names=(alias,), line=line_no)
     if name_node is None:
         return None
-    root = _node_text(source, name_node).split(".", 1)[0]
+    root = _node_text_from_node(name_node).split(".", 1)[0]
     return _ImportBinding(name=root, usage_names=(root,), line=line_no)
 
 
@@ -351,7 +362,7 @@ def _type_checking_only_imports(source: str) -> frozenset[str]:
         if node.type != "if_statement":
             continue
         condition = node.child_by_field_name("condition")
-        if condition is None or "TYPE_CHECKING" not in _node_text(source, condition):
+        if condition is None or "TYPE_CHECKING" not in _node_text_from_node(condition):
             continue
         consequence = node.child_by_field_name("consequence")
         if consequence is None:
@@ -366,18 +377,18 @@ def _collect_import_names(source: str, node: Node) -> set[str]:
     if node.type == "import_statement":
         for child in node.children:
             if child.type == "dotted_name":
-                collected.add(_node_text(source, child).split(".", 1)[0])
+                collected.add(_node_text_from_node(child).split(".", 1)[0])
             elif child.type == "aliased_import":
                 # Mirror `_aliased_module_binding`: `import x.y as z` binds `z`
                 # alone. This set suppresses phantom-import findings, so adding
                 # the module root as well would silence a real one.
                 alias_node = child.child_by_field_name("alias")
                 if alias_node is not None:
-                    collected.add(_node_text(source, alias_node))
+                    collected.add(_node_text_from_node(alias_node))
                     continue
                 name_node = child.child_by_field_name("name")
                 if name_node is not None:
-                    collected.add(_node_text(source, name_node).split(".", 1)[0])
+                    collected.add(_node_text_from_node(name_node).split(".", 1)[0])
     elif node.type == "import_from_statement":
         seen_import_keyword = False
         for child in node.children:
@@ -390,11 +401,11 @@ def _collect_import_names(source: str, node: Node) -> set[str]:
                 alias = child.child_by_field_name("alias")
                 name_node = child.child_by_field_name("name")
                 if alias is not None:
-                    collected.add(_node_text(source, alias))
+                    collected.add(_node_text_from_node(alias))
                 elif name_node is not None:
-                    collected.add(_node_text(source, name_node))
+                    collected.add(_node_text_from_node(name_node))
             elif child.type in {"dotted_name", "identifier"}:
-                collected.add(_node_text(source, child))
+                collected.add(_node_text_from_node(child))
     elif node.type == "block":
         for child in node.children:
             collected.update(_collect_import_names(source, child))
@@ -484,21 +495,18 @@ def _call_positional_argument_names(call_node: Node) -> tuple[str, ...]:
     if args is None:
         return ()
     for child in args.children:
+        if child.type in {"(", ")", ","}:
+            continue
         if child.type in {"identifier", "attribute"}:
             names.append(_node_text_from_node(child))
-        elif child.type == "keyword_argument":
+        # Splats, kwargs-only calls, and nested expressions are not positional names.
+        else:
             return ()
     return tuple(names)
 
 
 def _child_nodes(node: Node, node_type: str) -> list[Node]:
     return [child for child in node.children if child.type == node_type]
-
-
-def _node_text(source: str, node: Node) -> str:
-    start = node.start_byte
-    end = node.end_byte
-    return source[start:end]
 
 
 def _node_text_from_node(node: Node) -> str:

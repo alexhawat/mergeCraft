@@ -60,6 +60,9 @@ tests/security/fixtures/outside-target/
 # Docker agent CLI installs (local npm deps for image build)
 docker/agent-clis/node_modules/
 
+# Local repo-native analyzer CLIs (#427)
+tools/node_modules/
+
 # Regenerable verifier/tool output (never source of truth)
 /evidence/
 

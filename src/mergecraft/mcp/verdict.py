@@ -605,6 +605,24 @@ def revalidate_recorded_submission(ctx: ToolContext) -> None:
         raise ValueError(msg)
 
 
+def after_terminal_submission_recorded(
+    ctx: ToolContext,
+    recorded: TerminalSubmission,
+    *,
+    replayed: bool,
+) -> None:
+    """Run post-record hooks for a newly persisted terminal submission.
+
+    Idempotent replays (same payload hash) skip enterprise audit so the JSONL
+    stream does not accumulate duplicate ``terminal_verdict`` rows.
+    """
+    if replayed:
+        return
+    from mergecraft.enterprise.audit import maybe_audit_blocking_terminal_submission
+
+    maybe_audit_blocking_terminal_submission(ctx, recorded)
+
+
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
@@ -637,13 +655,15 @@ def submit_review_verdict_tool(ctx: ToolContext):
             submission_dict,
             findings=normalized_findings,
         )
+        replayed = existing_id is not None and recorded.id == existing_id
+        after_terminal_submission_recorded(ctx, recorded, replayed=replayed)
         ctx.tool_state.review_phase = ReviewPhase.SUBMIT.value
         stamp_review_phase_on_active_span(ReviewPhase.SUBMIT)
         return {
             "recorded": True,
             "id": recorded.id,
             "verdict": recorded.verdict,
-            "replayed": existing_id is not None and recorded.id == existing_id,
+            "replayed": replayed,
         }
 
     return tool(
@@ -708,6 +728,7 @@ __all__ = [
     "SubmitReviewVerdictParams",
     "ValidationState",
     "VerdictDiagnostic",
+    "after_terminal_submission_recorded",
     "build_validation_state",
     "ensure_review_scope_for_terminal",
     "record_validated_terminal_submission",

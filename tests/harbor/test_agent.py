@@ -9,7 +9,10 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("harbor")
+pytest.importorskip(
+    "harbor.agents.installed.base",
+    reason="harbor extra required (uv sync --extra harbor)",
+)
 
 from mergecraft.harbor.agent import MergecraftReviewAgent, _resolve_patch_path
 from mergecraft.pins import action_pin_minimal

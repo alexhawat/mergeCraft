@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MIT
+# Split review attempts across jobs; gate only needs the primary attempt (#433).
+name: HG gate missing codex fallback needs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  primary-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review (Nous Tencent HY3)
+        run: echo nous attempt posts no verdict
+      - name: Decide Codex fallback after Nous
+        run: echo trigger codex
+
+  codex-fallback:
+    needs: primary-review
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review (Codex)
+        run: echo codex posts mergecraft-approval after primary finishes
+
+  approval-gate:
+    needs: primary-review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when mergeCraft would not approve
+        run: echo gate can start while codex-fallback is still running

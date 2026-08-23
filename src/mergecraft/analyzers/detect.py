@@ -296,6 +296,33 @@ def manifest_config_present(manifest_id: str, repo_root: Path) -> bool:
     return check(repo_root)
 
 
+# #427 — binaries a package manager installs *into the checkout*
+# (npm -> node_modules/.bin, pip/uv -> .venv/bin). For these, a hit on the
+# ambient PATH is an arbitrary system binary, not the repo's pinned tool: it
+# runs an unpinned version, of unverified provenance, against the consumer's
+# code. Resolving one is the bug #427 names, so they are repo-local only and
+# skip when the checkout does not provide them.
+#
+# Scope is exactly the six tools #427/W20 covers, and no wider. Toolchain
+# binaries (``cargo`` for clippy, ``go`` for govulncheck, ``php``) have no
+# repo-local install convention, so listing them would disable those
+# analyzers rather than harden them. Python linters/type checkers are also
+# excluded on purpose: ``test_type_checker_never_uses_managed_substitute``
+# requires them to resolve in a fixture repo that has no ``.venv``.
+_REPO_LOCAL_ONLY_BINARIES: frozenset[str] = frozenset(
+    {
+        # node_modules/.bin — installed by `make setup-local-analyzers`
+        "markdownlint",
+        "jscpd",
+        "tsc",
+        "knip",
+        # .venv/bin — installed by `uv sync --extra dev`
+        "vulture",
+        "typos",
+    }
+)
+
+
 def _candidate_bin_dirs(repo_root: Path) -> list[Path]:
     repo_root = repo_root.resolve()
     dirs = [
@@ -345,6 +372,11 @@ def find_repo_binary(repo_root: Path, binary: str) -> RepoToolResolution | None:
                 path=str(candidate.resolve()),
                 version=_tool_version(str(candidate), binary),
             )
+
+    if binary in _REPO_LOCAL_ONLY_BINARIES:
+        # Repo tooling did not provide it; the ambient PATH is not a
+        # substitute for a pinned, repo-installed tool (#427).
+        return None
 
     path = shutil.which(binary)
     if path is not None:

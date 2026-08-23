@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MIT
+# Correct ordering: the gate job needs every review attempt job (#433 / D9).
+name: HG gate needs all attempt jobs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  primary-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review (Nous Tencent HY3)
+        run: echo nous attempt
+
+  codex-fallback:
+    needs: primary-review
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review (Codex)
+        run: echo codex fallback
+
+  approval-gate:
+    needs:
+      - primary-review
+      - codex-fallback
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when mergeCraft would not approve
+        run: echo gate runs only after every attempt finished
