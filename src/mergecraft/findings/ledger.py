@@ -94,6 +94,23 @@ class FindingLedger:
         """Return ledger records in stable fingerprint order."""
         return [self._records[key] for key in sorted(self._records)]
 
+    def get_record(self, fingerprint: str) -> LifecycleRecord | None:
+        """Return the ledger row for ``fingerprint``, if present."""
+        return self._records.get(fingerprint)
+
+    def upsert_if_newer(self, record: LifecycleRecord) -> LifecycleRecord:
+        """Insert ``record`` or replace the stored row when it is newer."""
+        prior = self._records.get(record.fingerprint)
+        if prior is None:
+            self._records[record.fingerprint] = record
+            return record
+        prior_at = prior.recorded_at or ""
+        new_at = record.recorded_at or ""
+        if new_at > prior_at:
+            self._records[record.fingerprint] = record
+            return record
+        return prior
+
     def render_ledger_block(self) -> str:
         """Serialize all records to HTML ledger markers."""
         lines = [line for record in self.records() for line in _marker_lines(record)]
@@ -386,28 +403,7 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
         # newer ``recorded_at`` stamp — progress comments can lag live session
         # updates during the same Action run.
         for record in existing.records():
-            hydrated = ledger._records.get(record.fingerprint)
-            if hydrated is None:
-                ledger.record(
-                    record.fingerprint,
-                    record.state,
-                    source=record.source or "unknown",
-                    round_index=record.round_index if record.round_index is not None else 1,
-                    reason=record.reason,
-                    recorded_at=record.recorded_at,
-                )
-                continue
-            existing_at = record.recorded_at or ""
-            hydrated_at = hydrated.recorded_at or ""
-            if existing_at > hydrated_at:
-                ledger.record(
-                    record.fingerprint,
-                    record.state,
-                    source=record.source or "unknown",
-                    round_index=record.round_index if record.round_index is not None else 1,
-                    reason=record.reason,
-                    recorded_at=record.recorded_at,
-                )
+            ledger.upsert_if_newer(record)
 
     tool_state.finding_ledger = ledger
     tool_state.finding_ledger_loaded = True

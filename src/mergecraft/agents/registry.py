@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.tool_state import ToolState
 
 _DEFAULT_BUDGET: Final[int] = 8
 _DEFAULT_TIMEOUT_S: Final[int] = 600
@@ -457,3 +458,19 @@ def effective_agent_limits(
     )
     scaled_budget = int(binding.budget * multiplier)
     return AgentLimits(budget=scaled_budget, timeout_s=binding.timeout_s)
+
+
+def subagent_limits_for_round(
+    binding: AgentBinding,
+    *,
+    settings: RepoSettings,
+    tool_state: ToolState,
+) -> AgentLimits:
+    """Resolve round-aware subagent limits for production dispatch."""
+    from mergecraft.findings.ledger import ledger_round_index
+
+    return effective_agent_limits(
+        binding,
+        settings=settings,
+        round_index=ledger_round_index(tool_state),
+    )

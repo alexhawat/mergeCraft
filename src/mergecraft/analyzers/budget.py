@@ -125,14 +125,14 @@ def render_deferred_section(deferred: list[Finding]) -> str | None:
     return "\n".join(lines)
 
 
-def agent_dict_to_finding(item: dict[str, Any]) -> Finding:
+def agent_dict_to_finding(item: dict[str, Any], *, rule_id: str = "review") -> Finding:
     message = str(item.get("message", item.get("body", "")))
     path = str(item.get("path", ""))
     start_line = int(item.get("line", item.get("start_line", 1)))
     end_line = int(item.get("end_line", item.get("line", item.get("start_line", start_line))))
     return Finding(
         tool=str(item.get("tool", "agent")),
-        rule_id=str(item.get("rule_id", "review")),
+        rule_id=str(item.get("rule_id", rule_id)),
         category=str(item.get("category", "Maintainability & Code Quality")),
         severity=str(item.get("severity", "Minor")),
         confidence=str(item.get("confidence", "likely")),

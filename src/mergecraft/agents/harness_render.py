@@ -19,6 +19,7 @@ from mergecraft.agents.registry import (
     Registry,
     resolve_agent_model,
     resolve_prompt_text,
+    subagent_limits_for_round,
 )
 from mergecraft.agents.shared import AgentResult, AgentRunContext
 from mergecraft.agents.verifier import (
@@ -150,8 +151,6 @@ def _binding_with_round_limits(
         return binding
     if binding.role is AgentRole.recall and not settings.review.recall_pass:
         return binding
-    from mergecraft.mcp.convergence_runtime import subagent_limits_for_round
-
     limits = subagent_limits_for_round(
         binding,
         settings=settings,

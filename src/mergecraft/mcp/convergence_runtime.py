@@ -4,54 +4,23 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.analyzers.budget import place_findings
-from mergecraft.analyzers.finding import Finding, make_finding
-from mergecraft.findings.ledger import ledger_round_index
+from mergecraft.analyzers.budget import agent_dict_to_finding, place_findings
 from mergecraft.modes._incremental_miss import apply_first_pass_miss_label
 from mergecraft.modes._pr_summary_format import append_collateral_to_inline_body
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from mergecraft.agents.registry import AgentBinding, AgentLimits
-    from mergecraft.config.settings import RepoSettings
+    from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
-    from mergecraft.mcp.tool_state import AnalyzerRunState, ToolState
+    from mergecraft.mcp.tool_state import AnalyzerRunState
 
 
-def subagent_limits_for_round(
-    binding: AgentBinding,
-    *,
-    settings: RepoSettings,
-    tool_state: ToolState,
-) -> AgentLimits:
-    """Resolve round-aware subagent limits for production dispatch."""
-    from mergecraft.agents.registry import effective_agent_limits
-
-    return effective_agent_limits(
-        binding,
-        settings=settings,
-        round_index=ledger_round_index(tool_state),
-    )
-
-
-def _finding_from_row(row: Mapping[str, object]) -> Finding:
-    path = str(row.get("path") or "")
-    raw_line = row.get("line", row.get("start_line", 1))
-    line = int(raw_line) if isinstance(raw_line, (int, float, str)) and str(raw_line).strip() else 1
-    body = str(row.get("body") or row.get("message") or "")
-    return make_finding(
-        tool="agent",
-        rule_id="agent:recall",
-        category="Functional Correctness",
-        severity=str(row.get("severity") or "Major"),
-        confidence="likely",
-        message=body,
-        path=path,
-        start_line=line,
-        end_line=line,
-        source="agent",
-    )
+def _recall_row_to_finding(row: Mapping[str, object]) -> Finding:
+    item = dict(row)
+    item.setdefault("category", "Functional Correctness")
+    item.setdefault("severity", "Major")
+    return agent_dict_to_finding(item, rule_id="agent:recall")
 
 
 def merge_recall_findings_into_analyzer_run(
@@ -65,9 +34,9 @@ def merge_recall_findings_into_analyzer_run(
         return
     from mergecraft.agents.recall import filter_novel_recall_findings
 
-    draft_findings = [_finding_from_row(row) for row in draft]
-    recalled_findings = [_finding_from_row(row) for row in recalled]
-    deferred_findings = [_finding_from_row(row) for row in analyzer_run.deferred_findings]
+    draft_findings = [_recall_row_to_finding(row) for row in draft]
+    recalled_findings = [_recall_row_to_finding(row) for row in recalled]
+    deferred_findings = [_recall_row_to_finding(row) for row in analyzer_run.deferred_findings]
     novel = filter_novel_recall_findings(
         [*draft_findings, *deferred_findings],
         recalled_findings,
@@ -237,5 +206,4 @@ __all__ = [
     "merge_recall_findings_into_analyzer_run",
     "prepare_inline_comment_for_publish",
     "strip_recall_inline_comments",
-    "subagent_limits_for_round",
 ]

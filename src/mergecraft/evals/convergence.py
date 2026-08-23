@@ -423,32 +423,18 @@ def fold_convergence_reports(
     )
 
 
-def _build_recall_baseline_case_results() -> list[ConvergenceCaseResult]:
-    diff_text, cases = _load_recall_pass_corpus()
-    rows: list[ConvergenceCaseResult] = []
-    for case_id, drafted, missed in cases:
-        report = score_convergence(
-            [
-                _recall_round_one(
-                    case_id=case_id,
-                    drafted_body=drafted,
-                    missed_body=missed,
-                    with_recall=False,
-                    diff_text=diff_text,
-                ),
-                _recall_round_two(case_id=case_id, missed_body=missed, diff_text=diff_text),
-            ]
-        )
-        rows.append(ConvergenceCaseResult(case_id=case_id, report=report))
-    return rows
-
-
 @lru_cache(maxsize=1)
 def load_recall_pass_w0_baseline() -> ConvergenceMetrics:
-    """Return the W0 recall-pass baseline without corpus I/O at import time."""
+    """Return the W0 recall-pass baseline (no deferred recall lane).
+
+    ``mean_first_pass_recall`` is pinned at ``0.5`` — the pre-recall-pass W0
+    floor used by the W7 gate. ``cases_total``, leakage, and per-case rows
+    derive from :func:`_score_recall_corpus` with ``with_recall=False``.
+    """
+    scored = _score_recall_corpus(with_recall=False)
     return ConvergenceMetrics(
-        cases_total=3,
+        cases_total=scored.cases_total,
         mean_first_pass_recall=0.5,
-        mean_leakage_rate=0.0,
-        case_results=_build_recall_baseline_case_results(),
+        mean_leakage_rate=scored.mean_leakage_rate,
+        case_results=scored.case_results,
     )
