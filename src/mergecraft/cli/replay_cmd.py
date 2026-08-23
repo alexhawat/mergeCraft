@@ -18,6 +18,7 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.cli.trace_jsonl import load_trace_jsonl_events, session_ids_in_trace_order
+from mergecraft.review.completed import load_completed_review_trace_events
 
 
 def _payload(*, run_id: str | None, events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -51,6 +52,11 @@ def run(
         default=None,
         help="Optional stored review run id to replay. Defaults to the latest traced run.",
     ),
+    repo_root: Path = typer.Option(
+        Path("."),
+        "--repo-root",
+        help="Repository root for durable review replay (read-only).",
+    ),
     trace_dir: Path | None = typer.Option(
         None,
         "--trace-dir",
@@ -58,8 +64,13 @@ def run(
     ),
 ) -> None:
     """Replay a stored review run from local traces (read-only)."""
-    target = trace_dir if trace_dir is not None else trace_jsonl.default_trace_dir()
-    events = load_trace_jsonl_events(target)
+    root = repo_root.expanduser().resolve()
+    events: list[dict[str, Any]] = []
+    if run_id:
+        events = load_completed_review_trace_events(run_id, repo_root=root)
+    if not events:
+        target = trace_dir if trace_dir is not None else trace_jsonl.default_trace_dir()
+        events = load_trace_jsonl_events(target)
     payload = _payload(run_id=run_id, events=events)
     if wants_json_output(ctx, json_flag=False):
         emit_cli_json(payload)

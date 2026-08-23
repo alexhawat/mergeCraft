@@ -17,7 +17,7 @@ from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.agent_protocol import AgentProtocolStream, notify_findings
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
-from mergecraft.cli.global_surface import get_cli_globals
+from mergecraft.cli.global_surface import emit_cli_json, get_cli_globals
 from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.findings.hunk_export import (
     count_dropped_file_level_findings,
@@ -30,6 +30,7 @@ from mergecraft.offline_review import (
     parse_offline_review_findings,
     run_offline_diff_review,
 )
+from mergecraft.review.completed import CompletedReview, persist_completed_review
 from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, canonical_review_snapshot
 from mergecraft.types import ShellPermission  # noqa: TC001
@@ -150,6 +151,49 @@ def _write_jsonl_findings(path: Path, findings: Sequence[Finding]) -> None:
     for row in findings:
         lines.append(json.dumps({"finding": row.model_dump()}, ensure_ascii=False))
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def _persist_completed_cli_review(
+    *,
+    review_id: str,
+    snapshot: ReviewSnapshot,
+    cwd: Path,
+    model: str | None,
+    prompt: str | None,
+    findings: Sequence[Finding],
+) -> None:
+    from mergecraft.evidence.run_manifest import build_run_manifest
+
+    manifest = build_run_manifest(
+        cwd=cwd,
+        model=model or "(unresolved)",
+        agent_id="mergecraft",
+        prompt_text=prompt or "",
+    )
+    review = CompletedReview(
+        review_id=review_id,
+        snapshot=snapshot,
+        manifest=manifest,
+        findings=[row.model_dump(mode="json") for row in findings],
+        trace_session_id=review_id,
+    )
+    persist_completed_review(review, repo_root=cwd)
+
+
+def _emit_review_json_stdout(
+    *,
+    review_id: str,
+    findings: Sequence[Finding],
+    output_text: str | None,
+) -> None:
+    emit_cli_json(
+        {
+            "review_id": review_id,
+            "count": len(findings),
+            "findings": [row.model_dump(mode="json") for row in findings],
+            "output": output_text,
+        }
+    )
 
 
 def cleanup_review_subprocesses() -> None:
@@ -476,6 +520,7 @@ def run(
         and json_output is None
         and output is None
         and not agent_mode
+        and get_cli_globals(ctx).format != "json"
     ):
         _exit_with_message(
             "--output is required for --output-format json (or use --json PATH)",
@@ -538,6 +583,16 @@ def run(
         replay_key=str(diff) if diff is not None else None,
     )
     engine: ReviewEngine[OfflineReviewResult] = ReviewEngine(snapshot=snapshot)
+    from mergecraft.tracing.review_context import resolve_review_id
+
+    review_id = resolve_review_id()
+    json_stdout = (
+        effective_output_format == "json"
+        and json_output is None
+        and output is None
+        and not agent_mode
+        and get_cli_globals(ctx).format == "json"
+    )
 
     stream: AgentProtocolStream | None = None
     seen: set[str] = set()
@@ -610,6 +665,16 @@ def run(
         findings = parse_offline_review_findings(result)
         exit_code = cli_exit_code_for_review(outcome, findings)
 
+        if result.success and not dry_run:
+            _persist_completed_cli_review(
+                review_id=review_id,
+                snapshot=snapshot,
+                cwd=root,
+                model=model,
+                prompt=prompt,
+                findings=findings,
+            )
+
         if not result.success:
             if result.output and not agent_mode:
                 console.print(result.output)
@@ -645,6 +710,12 @@ def run(
             target = json_output or output
             if target is not None and target.is_file():
                 console.print(f"[green]wrote[/green] {target}")
+            if json_stdout:
+                _emit_review_json_stdout(
+                    review_id=review_id,
+                    findings=findings,
+                    output_text=text or None,
+                )
         elif effective_output_format == "jsonl":
             target = output
             if target is None:

@@ -18,6 +18,7 @@ from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import OutputFormat, emit_cli_json, wants_json_output
 from mergecraft.evidence.audit import lookup_finding_packet
+from mergecraft.review.completed import lookup_finding_packet_in_review
 
 
 def _read_diff(repo_root: Path) -> str:
@@ -53,17 +54,25 @@ def _change_payload(repo_root: Path) -> dict[str, Any]:
     }
 
 
-def _finding_payload(finding_id: str, packet: dict[str, Any]) -> dict[str, Any]:
+def _finding_payload(
+    finding_id: str,
+    packet: dict[str, Any],
+    *,
+    review_id: str | None = None,
+) -> dict[str, Any]:
     state = packet.get("state", "unverified")
     kinds = packet.get("kinds", [])
     kinds_text = ", ".join(str(item) for item in kinds) if isinstance(kinds, list) else "none"
-    return {
+    payload: dict[str, Any] = {
         "verb": "explain",
         "finding_id": finding_id,
         "paths": [],
         "summary": f"Finding {finding_id} is {state} (kinds: {kinds_text}).",
         "packet": packet,
     }
+    if review_id is not None:
+        payload["review_id"] = review_id
+    return payload
 
 
 def _render_table(payload: dict[str, Any]) -> Table:
@@ -80,14 +89,23 @@ def _render_table(payload: dict[str, Any]) -> Table:
 
 def run(
     ctx: typer.Context,
+    review_id_or_finding: str | None = typer.Argument(
+        default=None,
+        help="Review id, finding id, or short id (MC-…) depending on invocation.",
+    ),
     finding_id: str | None = typer.Argument(
         default=None,
-        help="Optional finding id to explain. Without it, explain the working-tree diff.",
+        help="Short finding id when the first argument is a stored review id.",
     ),
     repo_root: Path = typer.Option(
         Path("."),
         "--repo-root",
         help="Repository root to read (output-only; nothing is written).",
+    ),
+    review_id: str | None = typer.Option(
+        None,
+        "--review-id",
+        help="Stored review id when explaining a short finding id.",
     ),
     format: OutputFormat | None = typer.Option(
         None,
@@ -97,11 +115,29 @@ def run(
 ) -> None:
     """Explain a stored finding or the current working-tree change."""
     root = repo_root.expanduser().resolve()
-    if finding_id:
-        packet = lookup_finding_packet(finding_id, repo_root=root)
+    resolved_review_id = review_id
+    resolved_finding_id = review_id_or_finding
+    if finding_id is not None:
+        resolved_review_id = review_id_or_finding
+        resolved_finding_id = finding_id
+
+    if resolved_finding_id:
+        packet: dict[str, Any] | None = None
+        if resolved_review_id:
+            packet = lookup_finding_packet_in_review(
+                resolved_review_id,
+                resolved_finding_id,
+                repo_root=root,
+            )
         if packet is None:
-            cli_bail(f"unknown finding id {finding_id}", code=CLI_USAGE_EXIT_CODE)
-        payload = _finding_payload(finding_id, packet)
+            packet = lookup_finding_packet(resolved_finding_id, repo_root=root)
+        if packet is None:
+            cli_bail(f"unknown finding id {resolved_finding_id}", code=CLI_USAGE_EXIT_CODE)
+        payload = _finding_payload(
+            resolved_finding_id,
+            packet,
+            review_id=resolved_review_id,
+        )
     else:
         payload = _change_payload(root)
     use_json = format == "json" or (format is None and wants_json_output(ctx, json_flag=False))

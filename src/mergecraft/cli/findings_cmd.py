@@ -10,19 +10,24 @@ before it is trusted with an automation trigger.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 
 if TYPE_CHECKING:
+    from click import Command, Context
+
     from mergecraft.findings.lifecycle import LifecycleRecord
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
     CLI_USAGE_EXIT_CODE,
 )
 from mergecraft.cli.global_surface import emit_cli_json, get_cli_globals, wants_json_output
+from mergecraft.cli.typer_group import MergecraftTyperGroup
 from mergecraft.findings.ledger import (
     LEDGER_SCHEMA_VERSION,
     FindingLedger,
@@ -41,16 +46,104 @@ from mergecraft.findings.sweep import (
     plan_carryover,
 )
 from mergecraft.findings.threads import fetch_review_threads
+from mergecraft.review.completed import load_completed_review
 from mergecraft.scm.github import GitHubScmAdapter
 from mergecraft.utils.github import GitHubClient, parse_repo_context
 from mergecraft.utils.token import get_job_token
 
+
+class _FindingsTyperGroup(MergecraftTyperGroup):
+    """Route unknown subcommands to durable review lookup (#453)."""
+
+    def get_command(self, ctx: Context, cmd_name: str) -> Command | None:
+        command = super().get_command(ctx, cmd_name)
+        if command is not None:
+            return command
+        ctx.meta["durable_review_id"] = cmd_name
+        return super().get_command(ctx, "_by_review_id")
+
+
 app = typer.Typer(
     help="Inspect and carry forward review findings a merge would otherwise bury.",
     no_args_is_help=True,
+    cls=_FindingsTyperGroup,
 )
 
 _REPO_HELP = "Repository as owner/name. Defaults to $GITHUB_REPOSITORY."
+_REPO_ROOT_HELP = "Repository root for durable review lookup (read-only)."
+
+
+def _render_durable_findings_markdown(
+    *,
+    review_id: str,
+    findings: list[dict[str, Any]],
+) -> str:
+    if not findings:
+        return f"No findings stored for review {review_id}."
+    lines = [f"# Stored findings — {review_id}", ""]
+    for finding in findings:
+        path = str(finding.get("path") or "(no file)")
+        lines.append(f"## {path}")
+        lines.append("")
+        fingerprint = finding.get("fingerprint")
+        if fingerprint:
+            lines.append(f"`{fingerprint}`")
+            lines.append("")
+        message = finding.get("message")
+        if message:
+            lines.append(str(message))
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+@app.command("_by_review_id", hidden=True)
+def _by_review_id(
+    ctx: typer.Context,
+    repo_root: Annotated[
+        Path,
+        typer.Option("--repo-root", help=_REPO_ROOT_HELP),
+    ] = Path("."),
+    output_format: Annotated[
+        str | None,
+        typer.Option(
+            "--output-format",
+            help=(
+                "Stored-findings payload format: json or markdown (default: markdown). "
+                "Root --format json emits JSON when this flag is omitted."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Read persisted findings for a completed review id (D4)."""
+    review_id = str(ctx.meta.get("durable_review_id") or "")
+    if not review_id:
+        cli_bail("review id is required", code=CLI_USAGE_EXIT_CODE)
+    if output_format is not None and output_format not in {"json", "markdown"}:
+        console.print("[red]--output-format must be 'json' or 'markdown'[/red]")
+        raise typer.Exit(CLI_USAGE_EXIT_CODE)
+    emit_json = (
+        output_format == "json"
+        if output_format is not None
+        else get_cli_globals(ctx).format == "json"
+    )
+    root = repo_root.expanduser().resolve()
+    loaded = load_completed_review(review_id, repo_root=root)
+    if loaded is None:
+        cli_bail(f"unknown review id {review_id}", code=CLI_USAGE_EXIT_CODE)
+    if emit_json:
+        emit_cli_json(
+            {
+                "review_id": loaded.review_id,
+                "count": len(loaded.findings),
+                "findings": loaded.findings,
+            }
+        )
+        return
+    typer.echo(
+        _render_durable_findings_markdown(review_id=loaded.review_id, findings=loaded.findings)
+    )
+
+
 _RESOLVED_HELP = "Include threads the author already resolved."
 _ANSWERED_HELP = (
     "Include threads a human replied to (skipped by default: a reply means "
