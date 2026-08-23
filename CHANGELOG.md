@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Codex `error` and `turn.failed` events are no longer discarded. Codex reports fatal failures as structured
+  events on stdout, and the stream handler had no branch for them, so the message was counted and dropped
+  and the run reported whatever unrelated text stderr happened to hold — PR #443 surfaced "Reading
+  additional input from stdin..." for a quota exhaustion, in the job annotation, the merge evidence packet,
+  and the chain log. The provider's own message is now the run's error and feeds retry classification (#445)
 - Provider quota exhaustion is now classified as retryable for failover. The CLI classifier matched only
   rate-limit wording (`rate limit`, `too many requests`, `overloaded`, `429`), so Codex's "You've hit your
   usage limit" matched nothing and read as permanent — the chain refused to try the next model even though
