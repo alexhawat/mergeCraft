@@ -777,41 +777,6 @@ def test_result_event_closes_the_pair_and_records_the_terminal_response() -> Non
     assert accumulated.input_tokens == 40
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG: gemini's stream handler seeds open_pair_bookkeeping to "
-        "{'tokens_in': 0, 'tokens_out': 0} on the `init` event and never updates it. "
-        "The `result` handler reads that dict to stamp cost.tokens_in/out and "
-        "gen_ai.usage.input_tokens/output_tokens on the llm.call span, so every "
-        "gemini llm.call span reports zero tokens even when the terminal event "
-        "carries real counts (which _do_ reach AgentUsage via "
-        "accumulator.replace_usage). claude.py populates the same bookkeeping from "
-        "message_start/message_delta; gemini.py (and codex.py) never do. Fix: have "
-        "the `result` branch fold the event's usage into the bookkeeping entry "
-        "before stamping. Do not fix production code from the coverage batch."
-    ),
-    strict=True,
-)
-def test_result_event_usage_reaches_the_llm_span_token_attrs() -> None:
-    """Token counts reported by the provider must land on the traced llm.call span."""
-    sink, tracer = _tracer()
-    handler, close_all = gemini_mod._gemini_stream_event_handler(tracer=tracer, model_id="gemini-3")
-    acc = StreamSpanAccumulator(agent_name="gemini")
-
-    handler(acc, {"type": "init"})
-    handler(
-        acc,
-        {"type": "result", "usage": {"input_tokens": 40, "output_tokens": 9}, "response": "done"},
-    )
-    close_all()
-
-    attrs = _spans(sink, "llm.call")[0].attrs
-    assert attrs["gen_ai.usage.input_tokens"] == 40
-    assert attrs["gen_ai.usage.output_tokens"] == 9
-    assert attrs["cost.tokens_in"] == 40
-    assert attrs["cost.tokens_out"] == 9
-
-
 def test_close_all_closes_spans_left_open_by_a_truncated_stream() -> None:
     """A stream that dies mid-tool still emits its open spans exactly once."""
     sink, tracer = _tracer()

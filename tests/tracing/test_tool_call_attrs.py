@@ -333,10 +333,10 @@ def test_codex_tool_call_span_has_request_response_attrs(
     "function_call"``; the assertions target the close-side attrs only.
     """
     from mergecraft.agents._stream_consumer import StreamSpanAccumulator
-    from mergecraft.agents.codex import _codex_stream_event_handler
+    from mergecraft.agents.codex_stream import codex_stream_event_handler
 
     tracer = recording_sink["tracer"]
-    handler, close_all = _codex_stream_event_handler(
+    handler, close_all = codex_stream_event_handler(
         tracer=tracer,
         model_id="codex-mini",
     )

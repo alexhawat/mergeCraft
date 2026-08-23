@@ -215,9 +215,9 @@ def test_openai_extractor_still_recognises_both_shapes() -> None:
 
 
 def _codex_handler() -> Any:
-    from mergecraft.agents.codex import _codex_stream_event_handler
+    from mergecraft.agents.codex_stream import codex_stream_event_handler
 
-    handler, _close = _codex_stream_event_handler(tracer=None, model_id="openai/gpt-5.3-codex")
+    handler, _close = codex_stream_event_handler(tracer=None, model_id="openai/gpt-5.3-codex")
     return handler
 
 

@@ -35,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opt-in `antislop` analyzer: YAML rule pack for placeholder code, narrator comments,
   swallowed errors, pass-through wrappers, phantom imports, and related low-quality patterns
   on changed Python and JS/TS files (#393)
+- Append-only enterprise audit producer for ``.mergecraft/audit.jsonl`` via
+  ``append_audit_event`` and ``record_blocking_decision``; blocking terminal
+  verdicts now persist audit events consumable by ``mergecraft audit export``
+  (#417)
+- `make lint` checks that jobs calling local reusable workflows grant at least the
+  permissions the callee declares, catching ``startup_failure`` permission mismatches
+  at authoring time (#425)
+- Integration PR coverage now measures ``refs/pull/N/merge`` and reports delta vs the
+  base branch via ``scripts/check_coverage_delta.py``, distinguishing inherited floor
+  breaches from regressions caused by the PR (#432)
 
 ### Changed
 
@@ -49,6 +59,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Repo-native analyzers no longer fall back to an arbitrary PATH binary. When
+  the checkout did not provide a tool, resolution fell through to
+  `shutil.which`, so a system copy ran against the consumer's code at an
+  unpinned version of unverified provenance — Homebrew's `markdownlint`
+  locally, `/usr/local/bin/tsc` on a GitHub runner, which is why `tsc` resolved
+  instead of skipping. The six tools installed into the checkout
+  (`markdownlint`, `jscpd`, `tsc`, `knip`, `vulture`, `typos`) are now
+  repo-local only and skip when absent. Toolchain binaries with no repo-local
+  install convention (`cargo` for clippy, `go` for govulncheck) are unaffected
+  (#427)
+- mergeCraft's consumer workflow approval gate now runs in a separate job that
+  `needs:` the review-attempts job, so Codex fallback can post `mergecraft-approval`
+  before the fail-closed gate samples check-runs (#433)
 - Retryability now has one decision path. `_is_retryable_failure` gated on `metadata["retryable"]` alone
   while `_retryable_failure_reason` inferred the same property from the error text, and only the
   metadata-blind one decided — so a driver that omitted the flag was silently read as "permanent" and its

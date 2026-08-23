@@ -13,7 +13,7 @@ PIP_AUDIT ?= $(UV) run pip-audit
 PIP_AUDIT_CACHE ?= $(CURDIR)/.cache/pip-audit
 PRE_COMMIT ?= $(UV) run pre-commit
 
-.PHONY: help setup install lockcheck lint format typecheck pyright test security \
+.PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
 	bench-detect diagrams diagrams-check \
@@ -35,6 +35,7 @@ ensure-uv: ## Install uv on PATH when missing
 
 setup: ensure-uv ## Fresh checkout: sync deps and pre-commit hooks
 	$(UV) sync --extra dev
+	@$(MAKE) setup-local-analyzers
 	@if [ -n "$${CI}$${MERGECRAFT_SKIP_PRECOMMIT}" ]; then \
 	  echo "skipping pre-commit install (CI / MERGECRAFT_SKIP_PRECOMMIT)"; \
 	else \
@@ -42,13 +43,29 @@ setup: ensure-uv ## Fresh checkout: sync deps and pre-commit hooks
 	  $(PRE_COMMIT) install --hook-type commit-msg; \
 	fi
 
+setup-local-analyzers: ## Install pinned repo-native analyzer npm CLIs (#427)
+	@if [ -f tools/package.json ]; then \
+	  if command -v npm >/dev/null 2>&1; then \
+	    cd tools && npm ci --ignore-scripts --no-audit --no-fund \
+	      || echo "warning: npm ci failed; markdownlint and jscpd will be skipped locally"; \
+	  else \
+	    echo "warning: npm not found; markdownlint and jscpd will be skipped locally"; \
+	  fi; \
+	fi
+
 install: ## Sync dev environment after dependency changes
 	$(UV) sync --extra dev
+	@$(MAKE) setup-local-analyzers
 
 lockcheck: ## Fail if uv.lock is out of date
 	$(UV) lock --check
 
-lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-check + privilege-drop chown + type-ignore reasons
+npm-lockcheck: ## Fail when npm lockfiles drift from package.json
+	@command -v npm >/dev/null 2>&1 || { echo "npm not found on PATH" >&2; exit 2; }
+	cd tools && npm ci --dry-run --ignore-scripts --no-audit --no-fund
+	cd docker/agent-clis && npm ci --dry-run --ignore-scripts --no-audit --no-fund
+
+lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-check + privilege-drop chown + type-ignore reasons + called-workflow permissions
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
@@ -57,6 +74,8 @@ lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-
 	$(MAKE) hook-pins-check
 	$(UV) run python scripts/check_privilege_drop_chown.py
 	$(UV) run python scripts/check_type_ignores.py
+	$(UV) run python scripts/check_called_workflow_permissions.py
+	@$(MAKE) npm-lockcheck
 
 action-yml-hygiene-check: ## Fail when an action.yml description embeds a literal ${{ }} expression
 	$(UV) run python scripts/check_action_yml_hygiene.py

@@ -117,6 +117,23 @@ def reset_selected_mode(token: Token[str | None]) -> None:
     _selected_mode_var.reset(token)
 
 
+def clear_selected_mode_binding() -> None:
+    """Drop any selected-mode binding (xdist / autouse test isolation)."""
+    _selected_mode_var.set(None)
+
+
+def reset_mcp_process_state() -> None:
+    """Reset module-level MCP caches so parallel tests do not share state.
+
+    Called from ``tests/mcp/conftest.py`` (autouse) and available for explicit
+    resets when a test starts an MCP HTTP server.
+    """
+    from mergecraft.mcp.shell import reset_detection_cache
+
+    reset_detection_cache()
+    clear_selected_mode_binding()
+
+
 def guard_mutating_tool(tool_name: str, *, selected_mode: str | None = None) -> None:
     """Refuse tree/repo mutations unless a write-capable mode is selected."""
     if tool_name in _REVIEW_SESSION_MUTATIONS:

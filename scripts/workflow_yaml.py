@@ -1,0 +1,74 @@
+"""Shared YAML helpers for workflow lint scripts and CI contract tests."""
+
+from __future__ import annotations
+
+from pathlib import Path  # noqa: TC003
+from typing import Any
+
+import yaml
+
+_PERMISSION_RANK = {
+    "none": 0,
+    "read": 1,
+    "write": 2,
+}
+_ALL_READ = "__all_read__"
+_ALL_WRITE = "__all_write__"
+
+
+def load_workflow_file(path: Path) -> dict[str, Any] | None:
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    return loaded
+
+
+def permission_dict(raw: Any) -> dict[str, str]:
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized == "read-all":
+            return {_ALL_READ: "read"}
+        if normalized == "write-all":
+            return {_ALL_WRITE: "write"}
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, str):
+            out[key] = value
+    return out
+
+
+def permission_level_satisfies(have: str | None, need: str) -> bool:
+    if have is None:
+        return False
+    if have == _ALL_WRITE:
+        return True
+    if have == _ALL_READ and _PERMISSION_RANK.get(need, -1) <= _PERMISSION_RANK["read"]:
+        return True
+    have_rank = _PERMISSION_RANK.get(have, -1)
+    need_rank = _PERMISSION_RANK.get(need, -1)
+    if need_rank < 0:
+        return have == need
+    return have_rank >= need_rank
+
+
+def missing_permissions(
+    caller: dict[str, str],
+    callee: dict[str, str],
+) -> dict[str, str]:
+    if _ALL_WRITE in caller:
+        return {}
+    if _ALL_READ in caller and all(
+        _PERMISSION_RANK.get(need, -1) <= _PERMISSION_RANK["read"] for need in callee.values()
+    ):
+        return {}
+    missing: dict[str, str] = {}
+    for scope, need in callee.items():
+        if not permission_level_satisfies(caller.get(scope), need):
+            missing[scope] = need
+    return missing

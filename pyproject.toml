@@ -74,6 +74,10 @@ dev = [
     # runs exercise the same declaration-node kinds as the managed binary
     # impact.py resolves at review time.
     "ast-grep-cli==0.44.1",
+    # Pinned to analyzers/catalog/vulture.yaml — repo-native dead-code scan (#427).
+    "vulture==2.14",
+    # Pinned to analyzers/catalog/typos.yaml — repo-native typo checker (#427).
+    "typos==1.32.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -193,7 +197,7 @@ branch = true
 omit = ["*/tests/*"]
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 82
 show_missing = true
 skip_covered = false
 exclude_lines = [

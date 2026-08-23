@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT
+# Caller job omits a job-level block and inherits workflow-level contents: read.
+name: HF caller (inherits workflow permissions)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    uses: ./callee_contents_read.yml

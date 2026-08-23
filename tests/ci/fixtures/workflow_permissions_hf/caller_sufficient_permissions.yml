@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+# Happy path: caller job grants at least what the callee declares.
+name: HF caller (sufficient job permissions)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  gate:
+    permissions:
+      contents: read
+    uses: ./callee_contents_read.yml

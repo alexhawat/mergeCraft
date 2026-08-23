@@ -10,10 +10,15 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TypeAlias
 
 from loguru import logger
 
+from mergecraft.agents.codex_stream import (
+    CODEX_MODEL_REASONING_EFFORT,
+    codex_stream_event_handler,
+    parse_codex_payload,
+)
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
     CUSTOM_PROVIDER_BASE_URL_ENV,
@@ -28,41 +33,16 @@ from mergecraft.agents.shared import (
     AgentRunContext,
     AgentUsage,
     agent,
-    log_token_table,
     payload_shell_mode,
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
-from mergecraft.tracing._tool_attrs import (
-    emit_verb_subevent,
-    enrich_tool_request,
-    enrich_tool_response,
-)
-from mergecraft.tracing.genai import (
-    ModelParams,
-    output_messages_attrs,
-    request_attrs,
-    resolve_capture_policy,
-    thinking_attrs,
-)
-from mergecraft.tracing.redaction import redact_tool_payload
-from mergecraft.tracing.tracer import (
-    ProviderLLMPair,
-    _close_provider_llm_pair,
-    _open_provider_llm_pair,
-)
+from mergecraft.tracing.genai import resolve_capture_policy
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.retry_policy import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from mergecraft.agents._stream_consumer import StreamSpanAccumulator
-    from mergecraft.tracing.content import ContentCapture
-    from mergecraft.tracing.tracer import Tracer
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
@@ -77,11 +57,6 @@ CODEX_REVIEW_PERMISSION_PROFILE = "mergecraft-review"
 # Codex transport key avoids ``socket_path`` (undocumented) and ``http_headers``
 # (unverified — an unknown key can break Codex's TOML parse).
 _CODEX_MCP_TOKEN_ENV: str = "MERGECRAFT_MCP_TOKEN"
-# O4 — the reasoning effort written into ``config.toml`` is the one request
-# parameter the codex harness exposes to mergeCraft; the constant keeps the
-# TOML value and the span attribute (``mergecraft.reasoning_effort``) from
-# drifting apart.
-_CODEX_MODEL_REASONING_EFFORT = "high"
 
 # Codex CLI's Linux platform sandbox is bubblewrap + Landlock. Inside a
 # container that is *already* namespaced — such as a Docker container action —
@@ -549,7 +524,7 @@ def write_mcp_config(
     config: TomlTable = {
         "approval_policy": "never" if os.environ.get("CI") == "true" else "on-request",
         "experimental_instructions_file": str(instructions_path),
-        "model_reasoning_effort": _CODEX_MODEL_REASONING_EFFORT,
+        "model_reasoning_effort": CODEX_MODEL_REASONING_EFFORT,
     }
     # W3 / #71 — Codex passthrough for OpenAI-compatible providers. No-op
     # when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set.
@@ -608,38 +583,6 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     return env
 
 
-def _parse_codex_payload(data: dict[str, Any]) -> tuple[str, AgentUsage | None]:
-    output = str(data.get("result") or data.get("output") or data.get("message") or "")
-    usage_raw = data.get("usage") or {}
-    usage: AgentUsage | None = None
-    if usage_raw or data.get("total_cost_usd") is not None:
-        input_tokens = int(usage_raw.get("input_tokens") or usage_raw.get("inputTokens") or 0)
-        output_tokens = int(usage_raw.get("output_tokens") or usage_raw.get("outputTokens") or 0)
-        cache_read = int(
-            usage_raw.get("cache_read_input_tokens") or usage_raw.get("cacheReadTokens") or 0
-        )
-        cache_write = int(
-            usage_raw.get("cache_creation_input_tokens") or usage_raw.get("cacheWriteTokens") or 0
-        )
-        cost = data.get("total_cost_usd")
-        usage = AgentUsage(
-            agent="codex",
-            input_tokens=input_tokens + cache_read + cache_write,
-            output_tokens=output_tokens,
-            cache_read_tokens=cache_read or None,
-            cache_write_tokens=cache_write or None,
-            cost_usd=float(cost) if cost is not None else None,
-        )
-        log_token_table(
-            input_tokens=input_tokens,
-            cache_read=cache_read,
-            cache_write=cache_write,
-            output=output_tokens,
-            cost_usd=usage.cost_usd,
-        )
-    return output, usage
-
-
 def _parse_codex_stdout(stdout: str) -> tuple[str, AgentUsage | None]:
     text = stdout.strip()
     if not text:
@@ -648,7 +591,7 @@ def _parse_codex_stdout(stdout: str) -> tuple[str, AgentUsage | None]:
     try:
         data = json.loads(text)
         if isinstance(data, dict):
-            return _parse_codex_payload(data)
+            return parse_codex_payload(data)
     except json.JSONDecodeError:
         pass
 
@@ -666,7 +609,7 @@ def _parse_codex_stdout(stdout: str) -> tuple[str, AgentUsage | None]:
             continue
         if event.get("type") == "message" and isinstance(event.get("content"), str):
             output = str(event["content"])
-        parsed_output, parsed_usage = _parse_codex_payload(event)
+        parsed_output, parsed_usage = parse_codex_payload(event)
         if parsed_output:
             output = parsed_output
         if parsed_usage is not None:
@@ -765,7 +708,7 @@ def _run_codex_streaming(
     capture_policy = (
         resolve_capture_policy(ctx.tool_state.trust_tier) if tracer is not None else None
     )
-    handler, close_all_open_spans = _codex_stream_event_handler(
+    handler, close_all_open_spans = codex_stream_event_handler(
         tracer=tracer,
         model_id=model or "default",
         capture_policy=capture_policy,
@@ -842,306 +785,6 @@ def _run_codex_streaming(
             metadata={"retryable": True} if retryable else {},
         )
     return AgentResult(success=True, output=output or None, usage=usage)
-
-
-def _sole_open_llm_span(open_pairs: dict[str, ProviderLLMPair | None]) -> Any:
-    """Return the llm span of the single open provider pair, else ``None``.
-
-    Codex's ``message.completed`` / reasoning ``item.completed`` events do
-    not carry the thread id, so payload attrs can only be stamped when
-    exactly one pair is open (the typical shape — one thread per run).
-    """
-    live = [pair.llm for pair in open_pairs.values() if pair is not None]
-    return live[0] if len(live) == 1 else None
-
-
-def _codex_stream_event_handler(
-    *,
-    tracer: Tracer | None,
-    model_id: str,
-    capture_policy: ContentCapture | None = None,
-) -> tuple[
-    Callable[[StreamSpanAccumulator, dict[str, Any]], None],
-    Callable[[], None],
-]:
-    """Build a ``consume_stream`` handler for codex NDJSON events (W6).
-
-    Codex ``--json`` events:
-      - ``thread.started``: open a ``llm.call`` span for the thread.
-      - ``item.started`` with ``item.type == "tool_call"``: open a
-        ``tool.call`` span keyed on the tool call id.
-      - ``item.completed`` with ``item.type == "tool_call"``: stamp
-        the tool call's name + input on the open span.
-      - ``item.completed`` with ``item.type == "tool_result"``: close
-        the matching ``tool.call`` span.
-      - ``item.completed`` with ``item.type == "reasoning"``: capture the
-        reasoning text on the open ``llm.call`` span (O6/D9, OB3) — gated
-        by ``capture_policy``; reasoning inherits the prompt gate.
-      - ``message.completed``: surface the assistant text as the
-        run's final output; with ``capture_policy`` set, also capture the
-        output messages on the open ``llm.call`` span (O5, OB3).
-      - ``turn.completed``: replace the accumulator's usage with the
-        authoritative final usage and close the thread's ``llm.call``
-        span.
-
-    ``capture_policy=None`` (the default) keeps the pre-OB3 attribute
-    surface byte-identical: no payload attrs are stamped. The driver
-    resolves it via ``resolve_capture_policy(ctx.tool_state.trust_tier)``
-    — the ``derive_trust_tier()`` output, never an env fallback (D7).
-    """
-    # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt, not two
-    # independent dicts keyed by the same id. Opening the provider span and
-    # the LLM span is atomic: they share a ``parent_span_id`` and both
-    # enter before the first event. The close path is symmetric: the inner
-    # ``llm.call`` span closes first (LIFO), then the outer
-    # ``provider.call`` span.
-    open_tool_spans: dict[str, dict[str, Any]] = {}
-    open_pairs: dict[str, ProviderLLMPair | None] = {}
-    open_pair_bookkeeping: dict[str, dict[str, Any]] = {}
-
-    def handler(
-        accumulator: StreamSpanAccumulator,
-        event: dict[str, Any],
-    ) -> None:
-        event_type = str(event.get("type") or "")
-
-        # Legacy single-blob shape — a final result JSON with no ``type``
-        # field (the W6 test suite still pins this contract from the
-        # pre-streaming parser). Surface it the same way the legacy
-        # ``_parse_codex_payload`` did: ``output`` is ``result`` /
-        # ``output`` / ``message``, ``usage`` flows through the accumulator.
-        if not event_type:
-            output, usage = _parse_codex_payload(event)
-            if output:
-                accumulator.set_output(output)
-            if usage is not None:
-                accumulator.replace_usage(
-                    {
-                        "input_tokens": usage.input_tokens,
-                        "output_tokens": usage.output_tokens,
-                        "total_cost_usd": usage.cost_usd,
-                    }
-                )
-            return
-
-        # Codex reports a fatal turn failure as a stdout event, never on
-        # stderr. With no branch here the message was counted and dropped, and
-        # the run surfaced whatever unrelated line stderr happened to hold —
-        # PR #443 reported "Reading additional input from stdin..." for a quota
-        # exhaustion (#445).
-        if event_type in {"error", "turn.failed"}:
-            payload = event.get("error")
-            message = (
-                payload.get("message")
-                if isinstance(payload, dict)
-                else (payload if isinstance(payload, str) else None)
-            )
-            if not message:
-                message = event.get("message")
-            accumulator.set_stream_error(str(message) if message else None)
-            return
-
-        if event_type == "thread.started":
-            thread_id = str(event.get("thread_id") or "default")
-            if thread_id in open_pairs:
-                return
-            if tracer is not None:
-                # T2 / D10 — ``provider.call`` is a real span kind, not an
-                # attr. Opens on ``thread.started`` and closes on
-                # ``turn.completed``; the ``llm.call`` span becomes its
-                # child so Logfire groups every Responses API request under
-                # one row with the transport family on it. W5 / H1 — open
-                # via the shared pair helper so the provider + llm attrs
-                # + ``__enter__`` are applied atomically; the resulting
-                # ``ProviderLLMPair`` is the single state unit per attempt.
-                pair = _open_provider_llm_pair(
-                    tracer,
-                    model_id=model_id,
-                    family="responses_api",
-                    provider_id="openai_codex",
-                )
-                if pair is not None:
-                    # W6 / L3 — ``_open_provider_llm_pair`` already stamps
-                    # ``model.id`` on the parent ``provider.call`` span (the
-                    # canonical home per the helper docstring). The llm span
-                    # inherits the value through the OTel/mergeCraft parent
-                    # chain; do not re-stamp here.
-                    pair.llm.set_attribute("model.event", "thread.started")
-                    pair.llm.set_attribute("gen_ai.system", "openai")
-                    pair.llm.set_attribute("gen_ai.operation.name", "chat")
-                    pair.llm.set_attribute("gen_ai.request.model", model_id)
-                    pair.llm.set_attribute("gen_ai.response.model", model_id)
-                    # O4 (OB3) — the one request knob codex exposes: the
-                    # reasoning effort mergeCraft itself wrote into
-                    # ``config.toml``. No stable OTel name → mergecraft.*.
-                    for attr_key, attr_value in request_attrs(
-                        model=None,
-                        params=ModelParams(reasoning_effort=_CODEX_MODEL_REASONING_EFFORT),
-                    ).items():
-                        pair.llm.set_attribute(attr_key, attr_value)
-                open_pairs[thread_id] = pair
-                open_pair_bookkeeping[thread_id] = {"tokens_in": 0, "tokens_out": 0}
-            return
-
-        if event_type == "item.started":
-            item = event.get("item") or {}
-            if not isinstance(item, dict) or item.get("type") != "tool_call":
-                return
-            tool_id = str(item.get("id") or "")
-            tool_name = str(item.get("name") or "unknown")
-            if not tool_id:
-                return
-            if tool_id in open_tool_spans:
-                return
-            if tracer is not None:
-                span = tracer.start_span("tool.call")
-                span.__enter__()
-                span.set_attribute("tool.name", tool_name)
-                span.set_attribute("tool.id", tool_id)
-                span.set_attribute("tool.server", "codex")
-                span.set_attribute("gen_ai.operation.name", "execute_tool")
-                span.set_attribute("gen_ai.tool.name", tool_name)
-                span.set_attribute("gen_ai.tool.call.id", tool_id)
-                # T1 / D5 / W4 — request-side enrichment is deferred to the
-                # ``item.completed`` site because codex's
-                # ``item.started`` event does not carry the input payload
-                # — codex sends the input on the matching
-                # ``item.completed``. The close path below applies
-                # ``enrich_tool_request`` + ``enrich_tool_response`` so the
-                # byte count + input representation still surface on the
-                # span.
-                open_tool_spans[tool_id] = {"span": span, "name": tool_name}
-            return
-
-        if event_type == "item.completed":
-            item = event.get("item") or {}
-            if not isinstance(item, dict):
-                return
-            item_type = item.get("type")
-            if item_type == "tool_call":
-                tool_id = str(item.get("id") or "")
-                entry = open_tool_spans.pop(tool_id, None)
-                if entry is None:
-                    return
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    resolved_name = str(item.get("name") or entry.get("name") or "unknown")
-                    span_obj.set_attribute("tool.name", resolved_name)
-                    span_obj.set_attribute("gen_ai.tool.name", resolved_name)
-                    tool_input = str(item.get("input") or "")
-                    span_obj.set_attribute("tool.input", tool_input)
-                    span_obj.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
-                    # T1 / D5 / W4 — request + response enrichment on the
-                    # close path. W4 / H2 — the split helpers mean each
-                    # call site is one obvious line; the prior codex
-                    # double-set bug (``arguments=tool_input,
-                    # output=tool_input``) is gone.
-                    enrich_tool_request(span_obj, arguments=tool_input)
-                    enrich_tool_response(span_obj, output=tool_input)
-                    span_obj.close()
-                    # T1 / D5 — known-verb tools also emit a verb-specific
-                    # child span (tool.browse for ``browser``, etc.) for
-                    # finer-grained Logfire grouping. Fire-and-forget; no
-                    # new bookkeeping state.
-                    emit_verb_subevent(
-                        tracer,
-                        parent_span_id=span_obj.span_id,
-                        tool_name=resolved_name,
-                        attrs=dict(span_obj._attrs),
-                    )
-                return
-            if item_type == "tool_result":
-                # The matching tool.call span was closed on item.completed
-                # above (codex shape). The tool_result just records the
-                # output content; nothing to close here.
-                return
-            if item_type == "reasoning":
-                # O6 / D9 (OB3) — codex surfaces reasoning as items; the
-                # text goes through the same content gate as prompts.
-                if capture_policy is not None:
-                    reasoning_text = item.get("text")
-                    llm_span = _sole_open_llm_span(open_pairs)
-                    if llm_span is not None and isinstance(reasoning_text, str):
-                        for attr_key, attr_value in thinking_attrs(
-                            reasoning_text, policy=capture_policy
-                        ).items():
-                            llm_span.set_attribute(attr_key, attr_value)
-                return
-            return
-
-        if event_type == "message.completed":
-            message = event.get("message") or {}
-            content = message.get("content") if isinstance(message, dict) else None
-            if isinstance(content, str) and content:
-                accumulator.set_output(content)
-                # O5 (OB3) — the assistant text is the completion payload;
-                # capture it on the open llm span under the content policy.
-                if capture_policy is not None:
-                    llm_span = _sole_open_llm_span(open_pairs)
-                    if llm_span is not None:
-                        for attr_key, attr_value in output_messages_attrs(
-                            [{"role": "assistant", "content": content}],
-                            policy=capture_policy,
-                        ).items():
-                            llm_span.set_attribute(attr_key, attr_value)
-            return
-
-        if event_type == "turn.completed":
-            usage = event.get("usage") if isinstance(event.get("usage"), dict) else None
-            if usage is not None:
-                accumulator.replace_usage(usage)
-            cost = event.get("total_cost_usd")
-            if isinstance(cost, (int, float)) and usage is not None:
-                accumulator.cost_usd = float(cost)
-            # O6 (OB3) — the Responses-API usage shape carries the reasoning
-            # token count under output_tokens_details; surface it beside the
-            # body metadata. A count is usage metadata, not a body, so it is
-            # not gated by the content policy (same as gen_ai.usage.*).
-            reasoning_tokens: int | None = None
-            if isinstance(usage, dict):
-                details = usage.get("output_tokens_details")
-                if isinstance(details, dict) and isinstance(
-                    details.get("reasoning_tokens"), (int, float)
-                ):
-                    reasoning_tokens = int(details["reasoning_tokens"])
-            # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt owns the
-            # close discipline (inner llm span first, outer provider span
-            # second). Stamp the cost + usage attrs on the inner llm span
-            # before closing so the per-message totals land on the row.
-            for key in list(open_pairs.keys()):
-                pair = open_pairs[key]
-                bookkeeping = open_pair_bookkeeping.get(key, {})
-                if pair is not None:
-                    pair.llm.set_attribute("cost.tokens_in", bookkeeping.get("tokens_in", 0))
-                    pair.llm.set_attribute("cost.tokens_out", bookkeeping.get("tokens_out", 0))
-                    pair.llm.set_attribute(
-                        "gen_ai.usage.input_tokens", bookkeeping.get("tokens_in", 0)
-                    )
-                    pair.llm.set_attribute(
-                        "gen_ai.usage.output_tokens", bookkeeping.get("tokens_out", 0)
-                    )
-                    if reasoning_tokens is not None:
-                        pair.llm.set_attribute(
-                            "mergecraft.usage.reasoning_tokens", reasoning_tokens
-                        )
-            for key in list(open_pairs.keys()):
-                _close_provider_llm_pair(open_pairs.pop(key))
-            open_pair_bookkeeping.clear()
-            return
-
-    def close_all() -> None:
-        for entry in list(open_tool_spans.values()):
-            span_obj = entry.get("span")
-            if span_obj is not None:
-                span_obj.close()
-        open_tool_spans.clear()
-        # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt; the inner
-        # ``_close_provider_llm_pair`` enforces the LIFO close discipline.
-        for key in list(reversed(list(open_pairs.keys()))):
-            _close_provider_llm_pair(open_pairs.pop(key))
-        open_pair_bookkeeping.clear()
-
-    return handler, close_all
 
 
 async def _run(ctx: AgentRunContext) -> AgentResult:

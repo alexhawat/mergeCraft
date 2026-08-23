@@ -36,6 +36,13 @@ _detected_sandbox: SandboxMethod | None = None
 _detected_netns: bool | None = None
 
 
+def reset_detection_cache() -> None:
+    """Clear cached sandbox / netns probe results (xdist isolation / #421)."""
+    global _detected_sandbox, _detected_netns
+    _detected_sandbox = None
+    _detected_netns = None
+
+
 def get_sandbox_method() -> SandboxMethod:
     return detect_sandbox_method()
 

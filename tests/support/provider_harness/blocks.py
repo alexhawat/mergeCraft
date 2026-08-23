@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from mergecraft.agents.shared import AgentResult
 from mergecraft.mcp.context import ToolContext
-from mergecraft.mcp.verdict import record_validated_terminal_submission
+from mergecraft.mcp.verdict import (
+    after_terminal_submission_recorded,
+    record_validated_terminal_submission,
+)
 from tests.support.provider_harness.schema import ResponseBlock
 
 
@@ -26,7 +29,11 @@ def replay_blocks(blocks: list[ResponseBlock], *, ctx: ToolContext) -> AgentResu
             validation_error = "terminal submission rejected: missing required fields"
             break
         try:
+            existing = ctx.tool_state.terminal_submission
+            existing_id = existing.id if existing is not None else None
             recorded = record_validated_terminal_submission(ctx, args)
+            replayed = existing_id is not None and recorded.id == existing_id
+            after_terminal_submission_recorded(ctx, recorded, replayed=replayed)
         except ValueError as exc:
             validation_error = str(exc)
             break
