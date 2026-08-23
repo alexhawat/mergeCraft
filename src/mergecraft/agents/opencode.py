@@ -377,6 +377,7 @@ class _ServerHandle:
         self.proc = proc
         self._closed = False
         self._recent: deque[str] = deque(maxlen=_SERVER_LOG_TAIL_LINES)
+        self._recent_lock = threading.Lock()
         self._drains: list[threading.Thread] = []
 
     def start_draining(self) -> None:
@@ -405,9 +406,15 @@ class _ServerHandle:
                 text = raw.decode("utf-8", errors="replace").rstrip()
                 if not text:
                     continue
-                # deque.append is atomic under the GIL, so the reader thread
-                # needs no lock against recent_output().
-                self._recent.append(text)
+                # ``deque.append`` is itself atomic, but that says nothing
+                # about *iteration*: joining the deque while a drain thread
+                # appends raises ``RuntimeError: deque mutated during
+                # iteration`` until the buffer reaches ``maxlen``. Since
+                # recent_output() is called from inside the timeout handler,
+                # that would replace the clean failed AgentResult with an
+                # exception — so both sides take this lock.
+                with self._recent_lock:
+                    self._recent.append(text)
                 logger.debug("[opencode serve/{}] {}", label, text)
         except (OSError, ValueError):
             # Pipe closed under us during teardown — expected, not an error.
@@ -415,7 +422,9 @@ class _ServerHandle:
 
     def recent_output(self) -> str:
         """Return the buffered tail of server output, newest last."""
-        return "\n".join(self._recent)
+        with self._recent_lock:
+            lines = list(self._recent)
+        return "\n".join(lines)
 
     def close(self) -> None:
         if self._closed:
@@ -699,15 +708,6 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         # cap must not be defeatable by environment control).
         capture_policy = resolve_capture_policy(ctx.tool_state.trust_tier)
 
-        initial = await _prompt_session(
-            base_url=handle.base_url,
-            session_id=session_id,
-            text=prompt,
-            model=model_obj,
-            resolved_model=model,
-            capture_policy=capture_policy,
-        )
-
         async def resume(followup: str) -> AgentResult:
             return await _prompt_session(
                 base_url=handle.base_url,
@@ -719,6 +719,19 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             )
 
         try:
+            # The initial prompt carries the whole review and is by far the
+            # likeliest place to time out, so it must sit inside the same
+            # handler as the retry loop (#444). Left outside, a timeout here
+            # propagated out of ``run_once`` and aborted the chain with no
+            # fallback — the exact failure this branch exists to fix.
+            initial = await _prompt_session(
+                base_url=handle.base_url,
+                session_id=session_id,
+                text=prompt,
+                model=model_obj,
+                resolved_model=model,
+                capture_policy=capture_policy,
+            )
             result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
         except ProviderTimeoutError as exc:
             # Controlled domain error: surface as a clean failed attempt
