@@ -178,6 +178,44 @@ CLI extensions (compose existing verbs — no `session` namespace):
 | Wave greens | Remove xfail from |
 | --- | --- |
 | CD | all tests in `tests/review/test_durable_review_completed.py`, `tests/cli/test_durable_review_by_id_cmd.py` |
+| CD | ✅ reconciled 2026-08-24 — 14/14 CD cases pass without `--runxfail` |
+
+## CE #455 — per-lens routing capability numbers → CE RED
+
+Source: D6, issue #455. Additive eval metrics only — do not rebuild the eval
+harness. Output must be diffable across commits (sorted JSON + content digest).
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Per-lens TP/FP/FN → precision/recall | `tests/evals/test_lens_routing_capability.py::test_score_lens_routing_reports_per_lens_precision_and_recall` | unit |
+| Macro averages over participating lenses | `…::test_score_lens_routing_macro_averages_participating_lenses_only` | unit |
+| Expected-but-never-selected → recall only | `…::test_lens_never_selected_has_no_precision_but_can_have_recall` | edge |
+| Spurious selection → precision only | `…::test_lens_selected_but_never_expected_has_no_recall` | edge |
+| Empty corpus honest-zero macros | `…::test_empty_corpus_yields_honest_zero_macro_metrics` | edge |
+| Mismatched case ids rejected | `…::test_score_lens_routing_rejects_mismatched_case_ids` | error |
+| Schema version pinned | `…::test_lens_routing_capability_report_pins_schema_version` | unit |
+| Canonical sorted JSON | `tests/evals/test_lens_capability_json.py::test_render_lens_capability_json_is_canonical_and_sorted` | functional |
+| Stable content digest | `…::test_lens_capability_digest_is_stable_for_identical_reports` | functional |
+| Digest ignores dict order | `…::test_lens_capability_digest_ignores_dict_insertion_order` | edge |
+
+### Pinned public API (implementation wave CE)
+
+New module `src/mergecraft/evals/lens_capability.py`:
+
+- `LENS_CAPABILITY_SCHEMA_VERSION` — `"1.0.0"`
+- `LensRoutingCaseLabel` — `case_id`, `expected_lens_ids`
+- `LensRoutingCaseOutcome` — `case_id`, `selected_lens_ids`
+- `PerLensRoutingMetrics` — `lens_id`, `precision`, `recall`, `true_positives`, `false_positives`, `false_negatives`
+- `LensRoutingCapabilityReport` — `schema_version`, `cases`, `by_lens`, `macro_precision`, `macro_recall`, `macro_f1`
+- `score_lens_routing(labels, outcomes) -> LensRoutingCapabilityReport`
+- `render_lens_capability_json(report) -> str` — compact JSON, `sort_keys=True`
+- `lens_capability_digest(report) -> str` — SHA-256 over canonical JSON
+
+## xfail reconciliation (CE)
+
+| Wave greens | Remove xfail from |
+| --- | --- |
+| CE | all tests in `tests/evals/test_lens_routing_capability.py`, `tests/evals/test_lens_capability_json.py` |
 
 ## Verification commands
 
@@ -192,7 +230,9 @@ uv run pytest --collect-only -q \
   tests/cli/test_diff_review_hunk_output.py \
   tests/findings/test_finding_output_round_trip.py \
   tests/review/test_durable_review_completed.py \
-  tests/cli/test_durable_review_by_id_cmd.py
+  tests/cli/test_durable_review_by_id_cmd.py \
+  tests/evals/test_lens_routing_capability.py \
+  tests/evals/test_lens_capability_json.py
 uv run pytest -q \
   tests/analyzers/test_finding_short_id.py \
   tests/findings/test_finding_short_id_outputs.py \
@@ -201,5 +241,7 @@ uv run pytest -q \
   tests/cli/test_diff_review_hunk_output.py \
   tests/findings/test_finding_output_round_trip.py \
   tests/review/test_durable_review_completed.py \
-  tests/cli/test_durable_review_by_id_cmd.py
+  tests/cli/test_durable_review_by_id_cmd.py \
+  tests/evals/test_lens_routing_capability.py \
+  tests/evals/test_lens_capability_json.py
 ```
