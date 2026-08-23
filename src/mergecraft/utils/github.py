@@ -78,6 +78,11 @@ def _default_api_base_url() -> str:
     return (os.environ.get("GITHUB_API_URL") or DEFAULT_API_URL).rstrip("/")
 
 
+def _usable_github_token(token: str) -> str:
+    """Return a non-empty GitHub token, or ``""`` when missing or whitespace (#469)."""
+    return token.strip()
+
+
 class GitHubClient:
     """Thin async GitHub REST + GraphQL client backed by ``httpx.AsyncClient``."""
 
@@ -90,15 +95,16 @@ class GitHubClient:
         user_agent: str = "mergeCraft",
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.token = token
+        self.token = _usable_github_token(token)
         self.base_url = (base_url or _default_api_base_url()).rstrip("/")
         self._owns_client = client is None
         headers = {
             "Accept": DEFAULT_ACCEPT,
-            "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": DEFAULT_API_VERSION,
             "User-Agent": user_agent,
         }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         self._client = client or httpx.AsyncClient(
             base_url=self.base_url,
             headers=headers,
@@ -136,6 +142,9 @@ class GitHubClient:
         errors with bounded exponential backoff + jitter. Mutations
         (POST/PATCH/PUT/DELETE) are never retried blindly (W9.3 / ``#34``).
         """
+        if not self.token:
+            msg = "GitHub token is missing; cannot call the GitHub API"
+            raise ValueError(msg)
         response = await self._client.request(
             method,
             path,
