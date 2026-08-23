@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Retryability now has one decision path. `_is_retryable_failure` gated on `metadata["retryable"]` alone
+  while `_retryable_failure_reason` inferred the same property from the error text, and only the
+  metadata-blind one decided — so a driver that omitted the flag was silently read as "permanent" and its
+  failure terminated the run. An explicit flag still wins in both directions; an omitted one now falls back
+  to inference. A retryable failure at the chain tail is bounded to one in-place retry and then returns that
+  failure, instead of re-asking a refusing provider until the attempt cap raised and replaced the real error
+  with a cap message (#447)
 - Codex `error` and `turn.failed` events are no longer discarded. Codex reports fatal failures as structured
   events on stdout, and the stream handler had no branch for them, so the message was counted and dropped
   and the run reported whatever unrelated text stderr happened to hold — PR #443 surfaced "Reading

@@ -436,6 +436,14 @@ def select_runnable_model_slug(*, settings: RepoSettings) -> str:
 # wall clock on it and let the chain move on (#444).
 _OPENCODE_MAX_ATTEMPTS: int = 2
 
+# In-place retries at the chain tail, where there is no next entry to fail over
+# to. Re-issuing against the model that just refused has little value and no
+# backoff, so one retry is the whole allowance; past that the failure is the
+# run's answer. Widening what counts as retryable (#447) made this branch far
+# easier to reach, and unbounded it would spend the attempt cap re-asking a
+# provider that already said no.
+_MAX_TAIL_RETRIES: int = 1
+
 
 def _chain_deadline() -> float | None:
     """Monotonic wall-clock ceiling for the whole chain, or ``None`` when unset.
@@ -458,16 +466,49 @@ def _chain_deadline() -> float | None:
     return time.monotonic() + run_timeout_s
 
 
-def _is_retryable_failure(result: AgentResult) -> bool:
+def _inferred_retryable(result: AgentResult) -> bool:
+    """Best-effort retryability from the failure itself, ignoring metadata."""
+    from mergecraft.utils.retry_policy import is_retryable_cli_failure
+
     metadata = result.metadata or {}
-    retryable = metadata.get("retryable")
-    return retryable is True
+    if metadata.get("timeout") is True or metadata.get("crash") is True:
+        return True
+    error = result.error or ""
+    lowered = error.lower()
+    if "timeout" in lowered or "timed out" in lowered or "crash" in lowered:
+        return True
+    return is_retryable_cli_failure(returncode=None, stderr=error)
+
+
+def _is_retryable_failure(result: AgentResult) -> bool:
+    """Decide whether a failed attempt may advance the chain (#447).
+
+    Precedence, and the only decision path — ``_retryable_failure_reason``
+    labels a skip that this function has already decided:
+
+    1. An explicit ``metadata["retryable"]`` (``True`` or ``False``) wins. A
+       driver that states its intent is always believed.
+    2. Unset means *infer* from the failure.
+
+    Unset used to mean "permanent", which made a driver's omission silently
+    fatal rather than merely imprecise: #444 was exactly that shape — an
+    opencode timeout whose error text said "timed out", which
+    ``_retryable_failure_reason`` duly labelled ``FallbackReason.timeout``,
+    terminating the run at attempt 1 because the deciding classifier read only
+    the absent flag. Inference keeps a forgotten flag from costing a review.
+    """
+    metadata = result.metadata or {}
+    declared = metadata.get("retryable")
+    if isinstance(declared, bool):
+        return declared
+    return _inferred_retryable(result)
 
 
 def _retryable_failure_reason(result: AgentResult) -> FallbackReason:
+    """Label a failure for tracing. Never decides — see ``_is_retryable_failure``."""
     error = (result.error or "").lower()
     metadata = result.metadata or {}
-    if "timeout" in error or metadata.get("timeout") is True:
+    if "timeout" in error or "timed out" in error or metadata.get("timeout") is True:
         return FallbackReason.timeout
     if "crash" in error or metadata.get("crash") is True:
         return FallbackReason.crash
@@ -676,6 +717,7 @@ async def run_with_model_chain(
         last_skip_reason: FallbackReason | None = None
         deadline = _chain_deadline()
         opencode_attempts = 0
+        tail_retries = 0
         last_result: AgentResult | None = None
 
         root_parent_id = _root.span_id if hasattr(_root, "span_id") else None
@@ -837,15 +879,29 @@ async def run_with_model_chain(
                         chain_index + 1,
                     )
                 elif not result.success and _is_retryable_failure(result):
-                    attempt_span.set_status("retryable", result.error or "unknown error")
-                    terminal_status = "retryable"
-                    logger.warning(
-                        "» model chain slug={} failed (retryable): {} — retrying ({}/{})",
-                        slug,
-                        result.error or "unknown error",
-                        attempts,
-                        max_attempts,
-                    )
+                    if tail_retries >= _MAX_TAIL_RETRIES:
+                        # No fallback left and the retry is spent: this failure
+                        # is the answer. Returning it beats spending the attempt
+                        # cap and then raising, which hides the real error.
+                        attempt_span.set_status("error", result.error or "unknown error")
+                        terminal_status = "error"
+                        logger.warning(
+                            "» model chain slug={} failed (retryable) at the chain tail "
+                            "with its retry spent: {}",
+                            slug,
+                            result.error or "unknown error",
+                        )
+                    else:
+                        tail_retries += 1
+                        attempt_span.set_status("retryable", result.error or "unknown error")
+                        terminal_status = "retryable"
+                        logger.warning(
+                            "» model chain slug={} failed (retryable): {} — retrying ({}/{})",
+                            slug,
+                            result.error or "unknown error",
+                            attempts,
+                            max_attempts,
+                        )
                 else:
                     attempt_span.set_status("error", skip_reason.value)
                     terminal_status = "error"
