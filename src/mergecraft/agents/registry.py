@@ -162,8 +162,13 @@ def _parse_role(value: str) -> AgentRole | None:
         return None
 
 
-def _default_model_chain(settings: RepoSettings, *, role: AgentRole) -> list[str]:
-    run_chain = effective_model_chain(settings)
+def _default_model_chain(
+    settings: RepoSettings,
+    *,
+    role: AgentRole,
+    model_head: str | None = None,
+) -> list[str]:
+    run_chain = effective_model_chain(settings, head=model_head or None)
     if not run_chain:
         run_chain = [AUTO_EFFICIENT]
     if role is AgentRole.verifier:
@@ -221,12 +226,17 @@ def _default_output_schema(role: AgentRole) -> str | None:
     return None
 
 
-def _build_default_binding(settings: RepoSettings, role: AgentRole) -> AgentBinding:
+def _build_default_binding(
+    settings: RepoSettings,
+    role: AgentRole,
+    *,
+    model_head: str | None = None,
+) -> AgentBinding:
     return AgentBinding(
         agent_id=_default_agent_id(role),
         role=role,
         lens=None,
-        model_chain=tuple(_default_model_chain(settings, role=role)),
+        model_chain=tuple(_default_model_chain(settings, role=role, model_head=model_head)),
         prompt_id=_default_prompt_id(role),
         prompt_version=_DEFAULT_PROMPT_VERSION,
         tool_classes=_default_tool_classes(role),
@@ -367,12 +377,20 @@ def load_registry(
     *,
     settings: RepoSettings,
     repo_root: Path | None = None,
+    model_head: str | None = None,
 ) -> Registry:
-    """Load defaults merged with ``settings.agents`` overrides."""
+    """Load defaults merged with ``settings.agents`` overrides.
+
+    ``model_head`` is the model the operator named for this run (the CLI
+    ``--model`` flag, or the Action ``with: model:`` input). It becomes the
+    head of every default binding's chain so an explicit request outranks
+    ``MERGECRAFT_MODEL`` and ``.mergecraft/config.yaml`` for subagents too
+    (issue #468). Per-agent ``model_chain`` overrides still win.
+    """
     del repo_root  # reserved for future repo-local agent manifests
     bindings: dict[str, AgentBinding] = {}
     for role in AgentRole:
-        bindings[role.value] = _build_default_binding(settings, role)
+        bindings[role.value] = _build_default_binding(settings, role, model_head=model_head)
 
     bindings.update(
         __import__(
@@ -397,7 +415,9 @@ def load_registry(
             base = bindings[lens_keys[override.lens]]
         else:
             base_role = declared_role or key_role or AgentRole.reviewer
-            base = bindings.get(base_role.value) or _build_default_binding(settings, base_role)
+            base = bindings.get(base_role.value) or _build_default_binding(
+                settings, base_role, model_head=model_head
+            )
         merged = _apply_override(base, override, agent_key=agent_key, settings=settings)
         if merged.lens is not None and merged.lens in lens_keys:
             stale_key = lens_keys[merged.lens]

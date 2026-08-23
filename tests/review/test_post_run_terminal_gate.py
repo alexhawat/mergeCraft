@@ -17,7 +17,9 @@ from mergecraft.agents.shared import (
     MAX_POST_RUN_RETRIES,
     AgentResult,
     AgentRunContext,
+    PostRunIssues,
     ResolvedInstructions,
+    StopHookFailure,
 )
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import ReviewRecord, TerminalSubmission, init_tool_state
@@ -166,7 +168,10 @@ async def test_retry_exhaustion_yields_inconclusive_not_passed(
         initial=AgentResult(success=True, output="done", terminal_submission_received=False),
         resume=resume,
     )
-    assert len(prompts) == MAX_POST_RUN_RETRIES
+    # #470: a resume that leaves the identical issue set made no progress, so
+    # the loop stops instead of replaying the same nudge to exhaustion.
+    assert len(prompts) == 1
+    assert len(prompts) < MAX_POST_RUN_RETRIES
     assert final.terminal_submission_received is False
 
     outcome, reason = _classify(final, mode="Review")
@@ -175,3 +180,43 @@ async def test_retry_exhaustion_yields_inconclusive_not_passed(
     assert outcome is not RunOutcome.failed
     assert reason == _MISSING_VERDICT_REASON
     assert run_succeeded_for_outcome(outcome) is False
+
+
+@pytest.mark.asyncio
+async def test_retry_loop_keeps_going_while_the_issue_set_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#470's early exit is a no-progress guard, not a retry-budget cut.
+
+    A resume that resolves one issue and leaves another still earns the next
+    attempt — only an unchanged issue set ends the loop early.
+    """
+    monkeypatch.setattr("mergecraft.agents.post_run.get_git_status", lambda: "")
+
+    tool_ctx = _tool_ctx(tmp_path)
+    tool_ctx.tool_state.selected_mode = "Review"
+    tool_ctx.tool_state.had_progress_comment = False
+
+    stop_hook_failures = [StopHookFailure(exit_code=2, output="first"), None]
+    prompts: list[str] = []
+
+    async def collect(ctx: AgentRunContext, *, skip_summary_stale: bool = False) -> PostRunIssues:
+        del ctx, skip_summary_stale
+        failure = stop_hook_failures.pop(0) if stop_hook_failures else None
+        return PostRunIssues(stop_hook=failure, unsubmitted_review="Review")
+
+    monkeypatch.setattr("mergecraft.agents.post_run.collect_post_run_issues", collect)
+
+    async def resume(prompt: str) -> AgentResult:
+        prompts.append(prompt)
+        return AgentResult(success=True, output="ack", terminal_submission_received=False)
+
+    await run_post_run_retry_loop(
+        _run_ctx(tool_ctx),
+        initial=AgentResult(success=True, output="done", terminal_submission_received=False),
+        resume=resume,
+    )
+
+    # Attempt 1 (stop hook + unsubmitted) → attempt 2 (unsubmitted only, a
+    # changed set) → attempt 3 collects the same set as attempt 2 and stops.
+    assert len(prompts) == 2

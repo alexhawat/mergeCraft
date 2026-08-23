@@ -697,12 +697,30 @@ def test_vertex_alias_requires_the_pinned_model_id(monkeypatch: MonkeyPatch) -> 
     assert ar.resolve_model(slug="vertex/byok") == "claude-sonnet-4@20250514"
 
 
-def test_resolve_model_env_override_wins_unless_explicitly_ignored(
+def test_resolve_model_explicit_slug_outranks_the_env_override(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """CLI beats ENV, matching ``ConfigLayer`` (issue #468)."""
+    monkeypatch.setenv("MERGECRAFT_MODEL", "acme/private-1")
+    assert ar.resolve_model(slug="acme/other-1") == "acme/other-1"
+    assert ar.resolve_model(slug="acme/other-1", respect_env_override=False) == "acme/other-1"
+
+
+def test_resolve_model_falls_back_to_the_env_override_without_a_slug(
     monkeypatch: MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("MERGECRAFT_MODEL", "acme/private-1")
-    assert ar.resolve_model(slug="openai/gpt") == "acme/private-1"
-    assert ar.resolve_model(slug="acme/other-1", respect_env_override=False) == "acme/other-1"
+    assert ar.resolve_model() == "acme/private-1"
+    assert ar.resolve_model(slug="  ") == "acme/private-1"
+    assert ar.resolve_model(respect_env_override=False) is None
+
+
+def test_resolve_model_reports_an_unknown_explicit_slug_instead_of_using_env(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """An explicit request is never silently swapped for the env value."""
+    monkeypatch.setenv("MERGECRAFT_MODEL", "acme/private-1")
+    assert ar.resolve_model(slug="gpt-4o-latest") is None
 
 
 def test_resolve_model_passes_through_a_raw_specifier_but_drops_a_bare_name() -> None:

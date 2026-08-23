@@ -21,7 +21,8 @@ from mergecraft.config.settings import (
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.endpoints import mcp_role_url
 from mergecraft.mcp.server import start_mcp_http_server
-from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
+from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.mcp.verdict import establish_offline_review_scope
 from mergecraft.modes import compute_modes
 from mergecraft.review.offline_result import (
     OfflineReviewResult,
@@ -84,7 +85,10 @@ async def run_offline_agent_review(
         tool_state = init_tool_state(owner="local", name=cwd.name, dir=str(cwd))
         tool_state.on_finding = on_finding
         tool_state.trust_tier = resolved_tier
-        primary_repo_state(tool_state).diff_path = str(materialization.path)
+        # Offline runs have no PR to check out; the materialized diff is the
+        # review scope, and establishing it here is what lets the terminal
+        # verdict tools run at all (issue #470).
+        establish_offline_review_scope(tool_state, diff_path=str(materialization.path))
         settings = load_repo_settings(root=cwd, load_learnings_files=False)
         settings, drops = apply_trust_tier_to_repo_settings(
             settings,

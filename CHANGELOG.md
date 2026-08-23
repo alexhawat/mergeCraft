@@ -72,6 +72,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - mergeCraft's consumer workflow approval gate now runs in a separate job that
   `needs:` the review-attempts job, so Codex fallback can post `mergecraft-approval`
   before the fail-closed gate samples check-runs (#433)
+- An explicit `--model` now beats `MERGECRAFT_MODEL`. `resolve_model()` read the env override first and
+  returned before it ever looked at the flag, so a review asked for one model and ran another with no line
+  saying the request was dropped — inverting the repo's own `ConfigLayer` order (CLI > env > YAML > default)
+  and the flag's help text. The named model also heads the subagent chains the harness renders, so it
+  reaches the whole run rather than just the top-level dispatch, and `config explain model` now reports the
+  YAML layer as the config file alone instead of the env value promoted to its front (#468)
+- Offline reviews (`--base`/`--head`, `--diff`, `--cwd`) can record a terminal verdict. Review scope was
+  only ever established by `checkout_pr`, which an offline run has no PR for, so `submit_review_verdict` was
+  refused on every attempt and a completed review — analyzer findings and all — was never decided. The
+  materialized diff now establishes scope on the offline path. The post-run retry loop also stops when a
+  resume leaves the identical issue set, instead of replaying a precondition that cannot change between
+  attempts (#470)
 - Retryability now has one decision path. `_is_retryable_failure` gated on `metadata["retryable"]` alone
   while `_retryable_failure_reason` inferred the same property from the error text, and only the
   metadata-blind one decided — so a driver that omitted the flag was silently read as "permanent" and its

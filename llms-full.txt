@@ -2560,6 +2560,10 @@ preserved as the first entry):
 ```
 
 `MERGECRAFT_MODEL` (env var) follows the same rule: it joins as the head.
+When a model is named explicitly — the Action `with: model:` input or the
+CLI `--model` flag — that one heads the chain and `MERGECRAFT_MODEL`
+follows it, matching the CLI > env > YAML > default precedence that
+`mergecraft config explain model` reports.
 
 #### Escape hatch — `model_pin: enabled`
 

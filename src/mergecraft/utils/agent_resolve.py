@@ -194,6 +194,16 @@ def is_runnable_model_slug(slug: str) -> bool:
     return _agent_binary_available(slug)
 
 
+def configured_model_slugs(settings: RepoSettings) -> list[str]:
+    """Return the slugs configured in ``.mergecraft/config.yaml``, env excluded.
+
+    The YAML precedence layer on its own — :func:`effective_model_slugs`
+    promotes ``MERGECRAFT_MODEL`` to the front, which conflates the env layer
+    with the YAML one for callers that report layers separately.
+    """
+    return _configured_model_slugs(settings)
+
+
 def _configured_model_slugs(settings: RepoSettings) -> list[str]:
     if settings.models:
         return list(settings.models)
@@ -1263,14 +1273,21 @@ def _resolve_slug(slug: str) -> str | None:
 
 
 def resolve_model(*, slug: str | None = None, respect_env_override: bool = True) -> str | None:
-    """Resolve the effective model string for this run."""
-    if respect_env_override:
-        env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
-        if env_model:
-            _enforce_resolved_model_residency(env_model)
-            return _resolve_slug(env_model) or env_model
+    """Resolve the effective model string for this run.
 
+    Precedence matches :class:`mergecraft.cli.config_precedence.ConfigLayer`:
+    an explicit ``slug`` (the CLI layer) outranks ``MERGECRAFT_MODEL`` (the
+    env layer). ``respect_env_override=False`` drops the env layer entirely
+    for callers that have already applied their own precedence (the Action
+    chain in :mod:`mergecraft.main` resolves a winning slug up front).
+
+    An explicit slug is never discarded silently — when it is dropped in
+    favour of the env override, or when it resolves to nothing, that is
+    reported.
+    """
     cleaned = (slug or "").strip()
+    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip() if respect_env_override else ""
+
     if cleaned:
         _enforce_resolved_model_residency(cleaned)
         resolved = _resolve_slug(cleaned)
@@ -1283,6 +1300,11 @@ def resolve_model(*, slug: str | None = None, respect_env_override: bool = True)
             )
             return cleaned
         logger.warning('» unknown model slug "{}" — agent will auto-select', cleaned)
+        return None
+
+    if env_model:
+        _enforce_resolved_model_residency(env_model)
+        return _resolve_slug(env_model) or env_model
     return None
 
 
@@ -1388,6 +1410,7 @@ def resolve_runtime_agent(
 __all__ = [
     "FallbackReason",
     "ModelFallbackPolicyError",
+    "configured_model_slugs",
     "effective_model_chain",
     "effective_model_slugs",
     "has_credentials_for_slug",
