@@ -27,6 +27,11 @@ git fetch origin "${GITHUB_BASE_REF}"
 git worktree add "$worktree" "$base_ref"
 (
   cd "$worktree"
+  # The base worktree gets its own fresh .venv. `dev` is a
+  # [project.optional-dependencies] extra, which `uv run` does not install, so
+  # `make coverage-gate` died with "Failed to spawn: pytest" before measuring
+  # anything. Sync the extra explicitly.
+  "${UV:-uv}" sync --extra dev
   make coverage-gate
   cp coverage.json "${GITHUB_WORKSPACE}/coverage-base.json"
 )
