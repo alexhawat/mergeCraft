@@ -390,3 +390,65 @@ async def test_hydrate_collision_prefers_newer_recorded_at(tmp_path: Path) -> No
     assert record.state == "open"
     assert record.recorded_at == "2026-08-22T12:00:00Z"
     assert record.round_index == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_sticky_progress_comment_body_prefers_ledger_on_later_page() -> None:
+    """Hydration scans all pages and prefers ledger markers over stale progress."""
+    ledger = _ledger_mod()
+
+    persisted_book = ledger.FindingLedger()
+    persisted_book.record(_DEFERRED_FP, "deferred", source="overflow", round_index=1)
+    ledger_body = ledger.merge_ledger_into_comment(
+        "## mergeCraft progress\n\nRound 2 complete.\n",
+        records=persisted_book.records(),
+    )
+    stale_progress_body = "## mergeCraft progress\n\nRound 1 complete.\n"
+
+    class _Scm:
+        async def list_issue_comments(
+            self,
+            owner: str,
+            repo: str,
+            issue_number: int,
+            *,
+            params: dict[str, object] | None = None,
+        ) -> list[dict[str, object]]:
+            page = int((params or {}).get("page", 1))
+            if page == 1:
+                filler = [{"id": index, "body": f"noise {index}"} for index in range(98)]
+                return [
+                    *filler,
+                    {"id": 99, "body": stale_progress_body},
+                    {"id": 100, "body": "another comment"},
+                ]
+            if page == 2:
+                return [{"id": 101, "body": ledger_body}]
+            return []
+
+    body = await ledger.fetch_sticky_progress_comment_body(_Scm(), "acme", "demo", 7)
+
+    assert body == ledger_body
+    assert _DEFERRED_FP in body
+
+
+def test_record_deferred_from_analyzer_run_skips_withdrawn() -> None:
+    """Deferred overflow rows are not stamped when the fingerprint was withdrawn."""
+    from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state
+
+    ledger = _ledger_mod()
+    state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
+    state.withdrawn_fingerprints.add(_DROPPED_FP)
+
+    run_state = AnalyzerRunState(
+        deferred_findings=[
+            {"fingerprint": _DEFERRED_FP, "path": "src/deferred.py"},
+            {"fingerprint": _DROPPED_FP, "path": "src/dropped.py"},
+        ],
+    )
+
+    ledger.record_deferred_from_analyzer_run(state, run_state)
+
+    book = ledger.ensure_finding_ledger(state)
+    states = {record.fingerprint: record.state for record in book.records()}
+    assert states == {_DEFERRED_FP: "deferred"}

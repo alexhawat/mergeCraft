@@ -35,6 +35,8 @@ _LEDGER_MARKER_RE = re.compile(r"<!-- mergecraft-ledger:v1:([0-9a-f]+):([a-z-]+)
 _LEDGER_MARKER_V2_RE = re.compile(r"<!-- mergecraft-ledger:v2:([0-9a-f]+):([a-z-]+):([^>]+) -->")
 
 _ISSUE_COMMENT_PAGE_SIZE = 100
+# GitHub issue comments are paginated at 100/page; cap total scanned comments
+# at 1000 (10 pages) to bound API cost on very chatty PRs.
 _MAX_ISSUE_COMMENT_PAGES = 10
 
 
@@ -215,19 +217,8 @@ async def fetch_sticky_progress_comment_body(
     if known_comment_id is not None:
         comment = await scm.get_issue_comment(owner, repo, known_comment_id)
         return str(comment.get("body") or "")
-    for page in range(1, _MAX_ISSUE_COMMENT_PAGES + 1):
-        comments = await scm.list_issue_comments(
-            owner,
-            repo,
-            issue_number,
-            params={"per_page": _ISSUE_COMMENT_PAGE_SIZE, "page": page},
-        )
-        body = sticky_progress_comment_body(comments)
-        if body:
-            return body
-        if len(comments) < _ISSUE_COMMENT_PAGE_SIZE:
-            break
-    return ""
+    comments = await _list_issue_comments_paginated(scm, owner, repo, issue_number)
+    return sticky_progress_comment_body(comments)
 
 
 def _record_from_v1_marker(
@@ -349,9 +340,10 @@ def record_deferred_from_analyzer_run(
     """Record analyzer overflow findings as ``deferred``."""
     resolved_round = ledger_round_index(tool_state) if round_index is None else round_index
     ledger = ensure_finding_ledger(tool_state)
+    withdrawn = tool_state.withdrawn_fingerprints
     for row in run_state.deferred_findings:
         fingerprint = str(row.get("fingerprint") or "").strip()
-        if fingerprint:
+        if fingerprint and fingerprint not in withdrawn:
             path = str(row.get("path") or "").strip()
             ledger.record(
                 fingerprint,
