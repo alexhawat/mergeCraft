@@ -86,6 +86,46 @@ CLI (`src/mergecraft/cli/diff_review_cmd.py`):
 | Wave greens | Remove xfail from |
 | --- | --- |
 | CB | all tests in `tests/findings/test_hunk_export.py`, `tests/cli/test_diff_review_hunk_output.py` |
+| CB | ✅ reconciled 2026-08-24 — fixed duplicate-kwarg helpers in `tests/cli/test_diff_review_hunk_output.py`; 16/16 CB cases pass without `--runxfail` |
+
+## CC #454 — Finding round-trip conformance → CC
+
+Source: D5, issue #454 (after #451).
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| JSON record round-trips every corpus case | `tests/findings/test_finding_output_round_trip.py::test_json_record_round_trips_finding` | integration |
+| Agent JSONL matches JSON projection | `…::test_agent_jsonl_record_matches_json_record` | integration |
+| Markdown preserves core semantics | `…::test_markdown_render_preserves_core_semantics` | integration |
+| PR comment preserves core semantics | `…::test_pr_comment_render_preserves_core_semantics` | integration |
+| SARIF preserves message/rule/path/region | `…::test_sarif_export_preserves_core_semantics` | integration |
+| Hunk default drop for file-level | `…::test_hunk_default_export_respects_file_level_drop` | unit / edge |
+| Hunk first-changed-line named hack | `…::test_hunk_first_changed_line_exports_file_level_with_named_hack` | unit |
+| Hunk never invents location fallbacks | `…::test_hunk_export_never_invents_location_fallbacks` | unit / error |
+| Named hacks documented (D5) | `…::test_named_format_hacks_are_documented` | functional |
+| Same short id across all surfaces | `…::test_all_formats_share_short_id_for_one_finding` | functional |
+| JSON restore rejects `short_id` field | `…::test_json_round_trip_rejects_export_only_fields_on_restore` | error |
+
+### Corpus (`tests/findings/support_round_trip.py`)
+
+| Case id | Exercises |
+| --- | --- |
+| `line_anchored_minimal` | baseline line-anchored finding |
+| `file_level` | `start_line is None` |
+| `multi_line_range` | `start_line != end_line` with evidence |
+| `empty_evidence` | `evidence=[]` |
+| `no_remediation` | `remediation is None` |
+| `full_metadata` | optional fields populated |
+| `unicode_message` | non-ASCII path and message |
+
+### Named format hacks (D5)
+
+Declared in `tests/findings/support_round_trip.py::NAMED_FORMAT_HACKS`:
+
+- `JSON_ADDS_SHORT_ID` / `AGENT_JSONL_ADDS_SHORT_ID`
+- `MARKDOWN_ONE_WAY_RENDER` / `PR_COMMENT_ONE_WAY_RENDER`
+- `HUNK_FILE_LEVEL_DROP` / `HUNK_FILE_LEVEL_FIRST_CHANGED_LINE`
+- `SARIF_SEVERITY_TO_LEVEL` / `SARIF_FILE_LEVEL_NO_REGION`
 
 ## Verification commands
 
@@ -97,10 +137,13 @@ uv run pytest --collect-only -q \
   tests/findings/test_finding_short_id_outputs.py \
   tests/cli/test_explain_short_id_cmd.py \
   tests/findings/test_hunk_export.py \
-  tests/cli/test_diff_review_hunk_output.py
+  tests/cli/test_diff_review_hunk_output.py \
+  tests/findings/test_finding_output_round_trip.py
 uv run pytest -q \
   tests/analyzers/test_finding_short_id.py \
   tests/findings/test_finding_short_id_outputs.py \
-  tests/cli/test_explain_short_id_cmd.py
-# CA passes; CB cases remain XFAIL until implementation lands
+  tests/cli/test_explain_short_id_cmd.py \
+  tests/findings/test_hunk_export.py \
+  tests/cli/test_diff_review_hunk_output.py \
+  tests/findings/test_finding_output_round_trip.py
 ```
