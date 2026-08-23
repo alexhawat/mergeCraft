@@ -12,7 +12,6 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from tests.review.support_durable_review import (
     sample_fingerprint,
     sample_review_id,
@@ -35,8 +34,6 @@ _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
 _SAMPLE_PATCH = (
     "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
 )
-
-pytestmark = pytest.mark.xfail(reason="green after CD", strict=False)
 
 
 def _plain(text: str) -> str:

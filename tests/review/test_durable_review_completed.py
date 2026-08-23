@@ -10,8 +10,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from tests.review.support_durable_review import (
     artifact_paths,
     build_completed_review,
@@ -25,8 +23,6 @@ from tests.review.support_durable_review import (
     sample_snapshot,
     seed_completed_review,
 )
-
-pytestmark = pytest.mark.xfail(reason="green after CD", strict=False)
 
 
 def test_persist_completed_review_writes_stable_review_id(tmp_path: Path) -> None:
