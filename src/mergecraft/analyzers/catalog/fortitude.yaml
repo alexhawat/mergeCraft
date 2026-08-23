@@ -27,10 +27,7 @@ severity_map:
   error: Major
   warning: Minor
   note: Trivial
-provenance:
-  linux-amd64:
-    url: https://pypi.org/project/fortitude/0.6.2/
-    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+provenance: {}
 network_allowlist: []
 exclusive_group: null
 declared_unavailable: manifest-only — Fortitude not bundled on Linux runners (C6 out

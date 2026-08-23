@@ -89,6 +89,10 @@ def validate_manifest_ship_gate(
 ) -> None:
     """Validate one manifest satisfies fixture, doc row, and severity_map requirements."""
     manifest = load_manifest_file(manifest_path, strict_severity_map=False)
+    try:
+        validate_manifest(manifest, strict_severity_map=False, check_provenance=True)
+    except ManifestValidationError as exc:
+        raise CatalogIntegrityError(str(exc)) from exc
     root = fixture_root or _DEFAULT_FIXTURE_ROOT
     if not manifest_has_fixture(manifest, fixture_root=root):
         msg = f"{manifest.id} missing test fixture under {root}"

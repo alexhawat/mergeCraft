@@ -59,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Catalog-check rejects all-zero `sha256` provenance pins (placeholders that
+  made `provision_managed_binary` treat a trailing-slash URL as a directory and
+  fail with `Is a directory`). Pip-style tools such as `checkov` and `yamllint`
+  now ship `provenance: {}` like `semgrep`; a trailing-slash URL is refused
+  with a `ProvisionError` that names the URL (#458)
 - Repo-native analyzers no longer fall back to an arbitrary PATH binary. When
   the checkout did not provide a tool, resolution fell through to
   `shutil.which`, so a system copy ran against the consumer's code at an

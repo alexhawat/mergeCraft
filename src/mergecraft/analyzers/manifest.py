@@ -18,6 +18,7 @@ RuntimeMode = Literal["repo-native", "managed", "container"]
 DefaultEnabled = bool | Literal["auto"]
 
 _BRACE_RE = re.compile(r"\{([^{}]+)\}")
+_PLACEHOLDER_SHA256 = "0" * 64
 
 # Native severities each parser may emit — repo-native manifests must map them all (D2).
 _PARSER_NATIVE_SEVERITIES: dict[str, frozenset[str]] = {
@@ -136,8 +137,15 @@ def validate_manifest(
 
     if check_provenance:
         for platform, entry in manifest.provenance.items():
-            if not entry.sha256.strip():
+            pin = entry.sha256.strip()
+            if not pin:
                 msg = f"provenance[{platform!r}] requires a non-empty sha256"
+                raise ManifestValidationError(msg)
+            if pin.lower() == _PLACEHOLDER_SHA256:
+                msg = (
+                    f"provenance[{platform!r}] sha256 is an all-zero placeholder pin — "
+                    "replace with a real digest or provenance: {}"
+                )
                 raise ManifestValidationError(msg)
 
     if strict_severity_map:
