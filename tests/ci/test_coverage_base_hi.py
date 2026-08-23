@@ -131,10 +131,6 @@ class TestProductionWorkflows:
         missing = missing_push_coverage_branches(REPO_ROOT)
         assert missing == [], f"push branches missing coverage gate: {missing}"
 
-    @pytest.mark.xfail(
-        reason="green after W18: integration PR coverage uses merge ref (#432)",
-        strict=False,
-    )
     def test_integration_pr_coverage_checks_merge_ref(self) -> None:
         offense = pr_coverage_merge_ref_offense(
             load_workflow(_INTEGRATION_WORKFLOW),
@@ -142,10 +138,6 @@ class TestProductionWorkflows:
         )
         assert offense is None, f"integration.yml merge ref: {offense}"
 
-    @pytest.mark.xfail(
-        reason="green after W18: coverage gate reports delta vs base (#432)",
-        strict=False,
-    )
     def test_integration_coverage_reports_delta_vs_base(self) -> None:
         offense = coverage_delta_report_offense(
             load_workflow(_INTEGRATION_WORKFLOW),
@@ -157,19 +149,11 @@ class TestProductionWorkflows:
 class TestCoverageDeltaScript:
     """Unit: inherited-vs-caused attribution via ``check_coverage_delta.py``."""
 
-    @pytest.mark.xfail(
-        reason="green after W18: coverage delta vs base (#432)",
-        strict=False,
-    )
     def test_check_coverage_delta_script_exists(self) -> None:
         assert _DELTA_SCRIPT.is_file(), (
             f"{_DELTA_SCRIPT.relative_to(REPO_ROOT)} missing — W18 adds delta reporting"
         )
 
-    @pytest.mark.xfail(
-        reason="green after W18: coverage delta vs base (#432)",
-        strict=False,
-    )
     def test_compare_to_base_marks_inherited_drop(self, tmp_path: Path) -> None:
         if not _DELTA_SCRIPT.is_file():
             pytest.fail("scripts/check_coverage_delta.py missing — W18 adds delta reporting")
@@ -190,10 +174,6 @@ class TestCoverageDeltaScript:
         else:
             pytest.fail("compare_to_base must expose inherited or message for attribution")
 
-    @pytest.mark.xfail(
-        reason="green after W18: coverage delta vs base (#432)",
-        strict=False,
-    )
     def test_compare_to_base_marks_caused_drop(self, tmp_path: Path) -> None:
         if not _DELTA_SCRIPT.is_file():
             pytest.fail("scripts/check_coverage_delta.py missing — W18 adds delta reporting")

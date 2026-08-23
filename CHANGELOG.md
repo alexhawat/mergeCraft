@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `make lint` checks that jobs calling local reusable workflows grant at least the
   permissions the callee declares, catching ``startup_failure`` permission mismatches
   at authoring time (#425)
+- Integration PR coverage now measures ``refs/pull/N/merge`` and reports delta vs the
+  base branch via ``scripts/check_coverage_delta.py``, distinguishing inherited floor
+  breaches from regressions caused by the PR (#432)
 
 ### Changed
 

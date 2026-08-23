@@ -35,11 +35,32 @@ jobs:
           # has neither, so they answer "no" on PR builds while passing on
           # tag builds. Full history is what makes those answers truthful.
           fetch-depth: 0
+          # #432 / D6 — score the merge result, not the PR head branch alone.
+          ref: >-
+            ${{ github.event_name == 'pull_request'
+                && format('refs/pull/{0}/merge', github.event.pull_request.number)
+                || github.ref }}
       - uses: ./.github/actions/bootstrap
       - name: Integration suite
         run: make test-integration
       - name: Coverage ratchet
-        run: make coverage-gate
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_ref="origin/${{ github.base_ref }}"
+            git fetch origin "${{ github.base_ref }}"
+            git worktree add ../mergecraft-base-coverage "$base_ref"
+            (
+              cd ../mergecraft-base-coverage
+              make coverage-gate
+              cp coverage.json "$GITHUB_WORKSPACE/coverage-base.json"
+            )
+            git worktree remove ../mergecraft-base-coverage --force
+          fi
+          make coverage-gate
+          if [ -f coverage-base.json ]; then
+            uv run python scripts/check_coverage_delta.py coverage.json --base coverage-base.json
+          fi
 
   security-scope:
     name: npm audit + workflow lint
