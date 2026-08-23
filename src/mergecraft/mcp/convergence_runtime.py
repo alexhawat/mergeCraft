@@ -152,6 +152,13 @@ def _draft_rows_for_recall(ctx: ToolContext) -> list[Mapping[str, object]]:
     return rows
 
 
+def _withdrawn_fingerprints_for_recall(ctx: ToolContext) -> set[str]:
+    """Fingerprints a verifier ``drop`` retired — live set plus learnings memory."""
+    from mergecraft.mcp.verdict import _withdrawn_fingerprints_for_state
+
+    return _withdrawn_fingerprints_for_state(ctx.tool_state, tmpdir=ctx.tmpdir)
+
+
 def _recall_candidate_rows(ctx: ToolContext) -> list[dict[str, object]]:
     """Return agent findings absent from the inline draft — recall pass candidates."""
     draft_fps = {
@@ -159,12 +166,13 @@ def _recall_candidate_rows(ctx: ToolContext) -> list[dict[str, object]]:
         for row in _draft_rows_for_recall(ctx)
         if isinstance(row, dict) and row.get("fingerprint")
     }
+    withdrawn = _withdrawn_fingerprints_for_recall(ctx)
     recalled: list[dict[str, object]] = []
     for row in ctx.tool_state.agent_findings:
         if not isinstance(row, dict):
             continue
         fingerprint = str(row.get("fingerprint") or "")
-        if fingerprint and fingerprint not in draft_fps:
+        if fingerprint and fingerprint not in draft_fps and fingerprint not in withdrawn:
             recalled.append(row)
     return recalled
 

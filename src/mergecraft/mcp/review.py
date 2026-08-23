@@ -26,6 +26,7 @@ from mergecraft.mcp.verdict import (
 )
 from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
 from mergecraft.review_taxonomy import (
+    finding_fingerprint,
     stamp_finding_fingerprint,
 )
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
@@ -174,11 +175,15 @@ def _comments_to_findings(comments: list[dict[str, Any]]) -> list[dict[str, Any]
     """Map legacy inline comments to terminal-submission finding dicts."""
     findings: list[dict[str, Any]] = []
     for comment in comments:
+        path = str(comment["path"])
+        body = str(comment.get("body") or "")
         row: dict[str, Any] = {
-            "path": str(comment["path"]),
-            "body": str(comment.get("body") or ""),
+            "path": path,
+            "body": body,
             "severity": "Major",
         }
+        if path and body:
+            row["fingerprint"] = finding_fingerprint(path=path, body=body)
         if "line" in comment:
             row["line"] = int(comment["line"])
         findings.append(row)

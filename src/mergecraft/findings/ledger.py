@@ -34,6 +34,9 @@ _VIA_MERGECRAFT_MARKER = "*via mergecraft*"
 _LEDGER_MARKER_RE = re.compile(r"<!-- mergecraft-ledger:v1:([0-9a-f]+):([a-z-]+)(?::([^>]*?))? -->")
 _LEDGER_MARKER_V2_RE = re.compile(r"<!-- mergecraft-ledger:v2:([0-9a-f]+):([a-z-]+):([^>]+) -->")
 
+_ISSUE_COMMENT_PAGE_SIZE = 100
+_MAX_ISSUE_COMMENT_PAGES = 10
+
 
 @dataclass
 class FindingLedger:
@@ -167,6 +170,39 @@ def sticky_progress_comment_body(comments: Sequence[Mapping[str, object]]) -> st
     return progress_body
 
 
+def sticky_progress_comment(comments: Sequence[Mapping[str, object]]) -> dict[str, Any] | None:
+    """Select the sticky progress comment from issue comments (ledger markers win)."""
+    progress: dict[str, Any] | None = None
+    for comment in comments:
+        body = str(comment.get("body") or "")
+        if LEDGER_MARKER_PREFIX in body or LEDGER_MARKER_V2_PREFIX in body:
+            return dict(comment)
+        if is_sticky_progress_comment(body):
+            progress = dict(comment)
+    return progress
+
+
+async def _list_issue_comments_paginated(
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    issue_number: int,
+) -> list[dict[str, Any]]:
+    """Fetch issue comments across pages, capped at ``_MAX_ISSUE_COMMENT_PAGES``."""
+    collected: list[dict[str, Any]] = []
+    for page in range(1, _MAX_ISSUE_COMMENT_PAGES + 1):
+        comments = await scm.list_issue_comments(
+            owner,
+            repo,
+            issue_number,
+            params={"per_page": _ISSUE_COMMENT_PAGE_SIZE, "page": page},
+        )
+        collected.extend(comments)
+        if len(comments) < _ISSUE_COMMENT_PAGE_SIZE:
+            break
+    return collected
+
+
 async def fetch_sticky_progress_comment_body(
     scm: ScmProvider,
     owner: str,
@@ -179,13 +215,19 @@ async def fetch_sticky_progress_comment_body(
     if known_comment_id is not None:
         comment = await scm.get_issue_comment(owner, repo, known_comment_id)
         return str(comment.get("body") or "")
-    comments = await scm.list_issue_comments(
-        owner,
-        repo,
-        issue_number,
-        params={"per_page": 100},
-    )
-    return sticky_progress_comment_body(comments)
+    for page in range(1, _MAX_ISSUE_COMMENT_PAGES + 1):
+        comments = await scm.list_issue_comments(
+            owner,
+            repo,
+            issue_number,
+            params={"per_page": _ISSUE_COMMENT_PAGE_SIZE, "page": page},
+        )
+        body = sticky_progress_comment_body(comments)
+        if body:
+            return body
+        if len(comments) < _ISSUE_COMMENT_PAGE_SIZE:
+            break
+    return ""
 
 
 def _record_from_v1_marker(
@@ -459,26 +501,25 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
         if existing_body:
             merged = merge_ledger_into_comment(existing_body, records=ledger.records())
             body_with_footer = add_footer(ctx, merged)
-            comments = await ctx.scm.list_issue_comments(
+            comments = await _list_issue_comments_paginated(
+                ctx.scm,
                 ctx.repo.owner,
                 ctx.repo.name,
                 int(issue_number),
-                params={"per_page": 100},
             )
-            for comment in comments:
-                body = str(comment.get("body") or "")
-                if is_sticky_progress_comment(body):
-                    await ctx.scm.update_issue_comment(
-                        ctx.repo.owner,
-                        ctx.repo.name,
-                        int(comment["id"]),
-                        body_with_footer,
-                    )
-                    tool_state.progress_comment = ProgressComment(
-                        id=str(comment["id"]),
-                        type="issue",
-                    )
-                    return
+            sticky = sticky_progress_comment(comments)
+            if sticky is not None:
+                await ctx.scm.update_issue_comment(
+                    ctx.repo.owner,
+                    ctx.repo.name,
+                    int(sticky["id"]),
+                    body_with_footer,
+                )
+                tool_state.progress_comment = ProgressComment(
+                    id=str(sticky["id"]),
+                    type="issue",
+                )
+                return
 
         result = await ctx.scm.create_issue_comment(
             ctx.repo.owner,
