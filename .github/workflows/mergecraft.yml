@@ -489,7 +489,12 @@ jobs:
           timeout: 25m
           # Provider prefix `nous/` selects the opencode harness and names the
           # provider registered from the MERGECRAFT_CUSTOM_PROVIDER_* env vars.
-          model: nous/deepseek/deepseek-v4-flash
+          # 2026-08-23: moved off deepseek-v4-flash, which repeatedly failed to
+          # reach a terminal verdict or ran out the 25m ceiling (runs
+          # 32649874241, 32647074137). hy3 completed a full local review of the
+          # same diff and calls tools correctly. Both models are served by the
+          # same Nous Portal key, so no secret changes are needed.
+          model: nous/tencent/hy3
           push: disabled
           shell: disabled
           status_checks: enabled

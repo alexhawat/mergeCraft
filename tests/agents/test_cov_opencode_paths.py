@@ -10,6 +10,7 @@ out, and every numeric/model guard that currently only ever sees valid input.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +19,11 @@ import pytest
 from tests.agents.conftest import make_agent_run_context
 
 from mergecraft.agents import opencode as oc
-from mergecraft.agents.openai_compatible_gateways import ProviderConfig
+from mergecraft.agents.openai_compatible_gateways import (
+    CUSTOM_PROVIDER_API_KEY_ENV,
+    CUSTOM_PROVIDER_BASE_URL_ENV,
+    ProviderConfig,
+)
 from mergecraft.tracing.genai import ModelParams
 from mergecraft.types import MERGECRAFT_MCP_NAME
 
@@ -34,8 +39,8 @@ _BASE_URL = "https://gateway.example.com/v1"
 def _clear_gateway_env(monkeypatch: MonkeyPatch) -> None:
     """Keep operator gateway env out of every case in this module."""
     for name in (
-        oc.CUSTOM_PROVIDER_BASE_URL_ENV,
-        oc.CUSTOM_PROVIDER_API_KEY_ENV,
+        CUSTOM_PROVIDER_BASE_URL_ENV,
+        CUSTOM_PROVIDER_API_KEY_ENV,
         "NOUS_API_KEY",
         "NOUS_BASE_URL",
         "TOKENHUB_API_KEY",
@@ -409,7 +414,7 @@ async def test_install_raises_with_an_actionable_message_when_cli_is_absent(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """A missing binary names the package the operator has to install."""
-    monkeypatch.setattr(oc.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
 
     with pytest.raises(FileNotFoundError) as excinfo:
         await oc._install(None)
@@ -541,7 +546,7 @@ def _patch_popen(monkeypatch: MonkeyPatch, proc: _FakeServeProc) -> list[list[st
         captured.append(list(cmd))
         return proc
 
-    monkeypatch.setattr(oc.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
     return captured
 
 
@@ -959,7 +964,7 @@ async def test_run_reports_a_missing_cli_without_touching_the_server(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """``_run`` short-circuits on a missing binary before writing any config."""
-    monkeypatch.setattr(oc.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     result = await oc._run(ctx)
@@ -976,7 +981,7 @@ async def test_run_falls_back_to_the_cli_when_serve_cannot_boot(
     """A serve boot failure degrades to ``opencode run`` instead of failing the review."""
     from mergecraft.agents.shared import AgentResult
 
-    monkeypatch.setattr(oc.shutil, "which", lambda _name: "/usr/bin/opencode")
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/opencode")
 
     def _boom(**kwargs: object) -> Any:
         del kwargs
@@ -1003,7 +1008,7 @@ async def test_run_reports_a_session_creation_failure(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """A 4xx from ``POST /session`` aborts the run with the server's body."""
-    monkeypatch.setattr(oc.shutil, "which", lambda _name: "/usr/bin/opencode")
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/opencode")
     proc = _FakeServeProc()
     handle = oc._ServerHandle(base_url="http://127.0.0.1:5", proc=proc)  # type: ignore[arg-type]
     monkeypatch.setattr(oc, "_boot_opencode_server", lambda **kwargs: handle)
@@ -1022,7 +1027,7 @@ async def test_run_rejects_a_session_response_without_an_id(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """A 200 with no usable id is a failure — the run cannot be addressed."""
-    monkeypatch.setattr(oc.shutil, "which", lambda _name: "/usr/bin/opencode")
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/opencode")
     proc = _FakeServeProc()
     handle = oc._ServerHandle(base_url="http://127.0.0.1:5", proc=proc)  # type: ignore[arg-type]
     monkeypatch.setattr(oc, "_boot_opencode_server", lambda **kwargs: handle)
@@ -1041,7 +1046,7 @@ async def test_run_converts_a_provider_timeout_into_a_clean_failed_attempt(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """``ProviderTimeoutError`` is a controlled domain error, not a raised traceback."""
-    monkeypatch.setattr(oc.shutil, "which", lambda _name: "/usr/bin/opencode")
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/opencode")
     proc = _FakeServeProc()
     handle = oc._ServerHandle(base_url="http://127.0.0.1:5", proc=proc)  # type: ignore[arg-type]
     monkeypatch.setattr(oc, "_boot_opencode_server", lambda **kwargs: handle)
@@ -1084,7 +1089,7 @@ async def test_run_converts_an_initial_prompt_timeout_into_a_failed_attempt(
     ``ProviderTimeoutError`` escaped ``_run`` → ``run_once`` →
     ``run_with_model_chain`` and killed the run with no fallback.
     """
-    monkeypatch.setattr(oc.shutil, "which", lambda _name: "/usr/bin/opencode")
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/opencode")
     proc = _FakeServeProc()
     handle = oc._ServerHandle(base_url="http://127.0.0.1:5", proc=proc)  # type: ignore[arg-type]
     handle._recent.append("serve: upstream stalled")
@@ -1159,7 +1164,7 @@ async def test_run_exports_the_bedrock_flag_only_for_a_matching_model(
     """``BEDROCK_MODEL_ID`` gates the BYOK flag on an exact model match."""
     from mergecraft.agents.shared import AgentResult
 
-    monkeypatch.setattr(oc.shutil, "which", lambda _name: "/usr/bin/opencode")
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/opencode")
     monkeypatch.setenv("BEDROCK_MODEL_ID", "anthropic.claude-x")
     captured: list[dict[str, str]] = []
 

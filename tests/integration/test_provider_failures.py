@@ -116,6 +116,7 @@ async def test_opencode_retries_at_most_once(monkeypatch: pytest.MonkeyPatch) ->
     meta = result.metadata or {}
     assert meta["executed_model"] == attempts[-1]
     assert slug == attempts[-1]
+    assert settings.models is not None
     assert attempts[-1] != settings.models[-1]
 
 

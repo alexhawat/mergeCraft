@@ -6,13 +6,13 @@ GitHub resolves its definition — and therefore its ``uses:`` pin — from the
 repository **default branch**, never from the PR base. A fix merged to
 ``pre-0.0.1`` does not reach the reviewer until it reaches ``main``.
 
-Nothing detected that skew, and it reached 691 commits: PR #443 timed out on a
+Nothing detected that skew, and it reached 687 commits: PR #443 timed out on a
 600s ceiling that had already been fixed on ``pre-0.0.1``, because the run used
 ``main``'s older pin. The failure mode is quiet — the branch holds the fix, the
 branch's own workflow pins the fixed SHA, and CI still exercises the old code
 (#450).
 
-Two checks:
+Three checks:
 
 1. **Self-consistency** (offline, always runs). Every ``uses:`` pin of this
    action inside a workflow file must be the same SHA. The workflow header
