@@ -8,14 +8,11 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from tests.evals.support_lens_capability import (
     require_callable,
     routing_label,
     routing_outcome,
 )
-
-pytestmark = pytest.mark.xfail(reason="green after CE", strict=False)
 
 _GOLDEN_JSON = (
     '{"by_lens":{"security":{"false_negatives":0,"false_positives":0,'

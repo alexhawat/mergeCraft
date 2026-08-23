@@ -20,8 +20,6 @@ from tests.evals.support_lens_capability import (
     routing_outcome,
 )
 
-pytestmark = pytest.mark.xfail(reason="green after CE", strict=False)
-
 
 def test_score_lens_routing_reports_per_lens_precision_and_recall() -> None:
     """Happy — per-lens TP/FP/FN roll up to precision and recall independently."""
