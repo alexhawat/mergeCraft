@@ -418,7 +418,7 @@ jobs:
           echo "baseline mergecraft-approval check-run: ${id:-none}"
           echo "id=${id}" >> "${GITHUB_OUTPUT}"
 
-      - name: mergeCraft PR review (Nous DeepSeek V4 Flash)
+      - name: mergeCraft PR review (Nous Tencent HY3)
         if: env.HAS_NOUS == 'true'
         id: mergecraft_nous
         continue-on-error: true
