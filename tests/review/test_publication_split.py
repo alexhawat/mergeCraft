@@ -346,3 +346,14 @@ def test_publisher_is_not_an_mcp_tool(tmp_path: Path) -> None:
     assert publish_pull_request_review.__name__ not in names
     for spec in (*build_common_tools(ctx), *build_orchestrator_tools(ctx)):
         assert spec.execute is not publish_pull_request_review
+
+
+def test_legacy_inline_comments_map_to_fingerprinted_findings() -> None:
+    """Legacy publish path must stamp fingerprints for recall draft matching."""
+    from mergecraft.mcp.review import _comments_to_findings
+    from mergecraft.review_taxonomy import finding_fingerprint
+
+    body = "Unchecked null before return."
+    path = "src/util.py"
+    findings = _comments_to_findings([{"path": path, "line": 4, "body": body}])
+    assert findings[0]["fingerprint"] == finding_fingerprint(path=path, body=body)

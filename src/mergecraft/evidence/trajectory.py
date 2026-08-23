@@ -254,6 +254,8 @@ class TrajectoryRecord(BaseModel):
     completion_claims: list[str] = Field(default_factory=list)
     read_coverage: bool = False
     """True when *some* read was observed, so "unread" is a real conclusion."""
+    regions_cleared: list[str] = Field(default_factory=list)
+    """Diff regions ruled out (no actionable finding) — D8 cheap pin; optional."""
     external_trace: ExternalTraceRef | None = None
 
 

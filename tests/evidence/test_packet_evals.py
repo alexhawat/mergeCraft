@@ -19,12 +19,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from mergecraft.evals.eval_metadata import EvalMetadata, build_eval_metadata
 from mergecraft.evals.store import (
     Case,
     CaseStatus,
-    EvalMetadata,
     add_case,
-    build_eval_metadata,
     replay_case,
 )
 from mergecraft.evidence.packet import (

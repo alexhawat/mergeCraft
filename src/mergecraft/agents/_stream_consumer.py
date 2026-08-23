@@ -94,6 +94,17 @@ class StreamSpanAccumulator:
     final_output: str | None = None
     parsed_event_count: int = 0
     malformed_event_count: int = 0
+    # First provider-reported fatal error seen on the stream. Providers report
+    # these on stdout as structured events, not on stderr, so without capturing
+    # them the run's only failure signal is whatever unrelated text the CLI
+    # happened to leave on stderr (#445).
+    stream_error: str | None = None
+
+    def set_stream_error(self, message: str | None) -> None:
+        """Record the first provider-reported fatal error on this stream."""
+        text = (message or "").strip()
+        if text and self.stream_error is None:
+            self.stream_error = text
 
     def absorb_usage(self, usage_payload: Mapping[str, Any] | None) -> None:
         """Fold one event's ``usage`` mapping into the accumulator totals."""

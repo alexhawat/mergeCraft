@@ -162,6 +162,38 @@ class TestRetryableCliFailure:
 
         assert is_retryable_cli_failure(returncode=1, stderr=stderr) is True
 
+    @pytest.mark.parametrize(
+        "stderr",
+        [
+            "You've hit your usage limit. Upgrade to Pro or try again at Aug 27th.",
+            "insufficient_quota: you exceeded your current quota",
+            "Quota exceeded for this billing period",
+        ],
+        ids=["codex-usage-limit", "insufficient_quota", "quota-exceeded"],
+    )
+    def test_quota_exhaustion_is_retryable_for_failover(self, stderr: str) -> None:
+        """#446 — quota wording matches none of the rate-limit needles.
+
+        Retrying the same provider cannot succeed until the quota resets, but
+        the next entry in the chain is unaffected, so this must still advance
+        rather than terminate the run. The first case is the verbatim Codex
+        message that killed PR #443's review.
+        """
+        from mergecraft.utils.retry_policy import is_retryable_cli_failure
+
+        assert is_retryable_cli_failure(returncode=1, stderr=stderr) is True
+
+    def test_benign_cli_chatter_is_not_retryable(self) -> None:
+        """Guard the other direction: the stderr line PR #443 actually reported
+        is not a provider refusal and must not be read as one.
+        """
+        from mergecraft.utils.retry_policy import is_retryable_cli_failure
+
+        assert (
+            is_retryable_cli_failure(returncode=1, stderr="Reading additional input from stdin...")
+            is False
+        )
+
     def test_ordinary_failure_is_not_retryable(self) -> None:
         from mergecraft.utils.retry_policy import is_retryable_cli_failure
 

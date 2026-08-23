@@ -15,10 +15,10 @@ PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
-	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check reference-docs reference-docs-check bench-review eval-gate eval-replay \
+	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory hook-pins-check pins-check
+	lint-ruff-advisory hook-pins-check pins-check action-pin-check
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
 PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
@@ -82,6 +82,9 @@ action-yml-hygiene-check: ## Fail when an action.yml description embeds a litera
 
 hook-pins-check: ## Fail when .pre-commit-config.yaml hook revs drift from pyproject.toml pins
 	$(UV) run python scripts/check_hook_pins.py
+
+action-pin-check: ## Fail when the default branch's self-review Action pin drifts too far behind (#450)
+	$(UV) run python scripts/check_action_pin_freshness.py
 
 lint-ruff-advisory: ## Ruff advisory families (non-blocking CI; #146)
 	$(RUFF) check src tests scripts --select $(RUFF_ADVISORY_FAMILIES)
@@ -252,6 +255,9 @@ eval-gate: ## Check eval-bank integrity (structural; see 'mergecraft eval gate -
 
 eval-replay: ## Replay eval bank; write versioned result set (operator-triggered; needs live keys for F1)
 	$(UV) run mergecraft eval replay-bank
+
+eval-convergence: ## Score multi-round convergence metric; write result set (RC6)
+	$(UV) run mergecraft eval convergence
 
 bench-detect: ## Join structural replay + live finding-location detection (#140, B3; needs live keys)
 	$(UV) run mergecraft eval bench

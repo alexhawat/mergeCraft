@@ -158,7 +158,7 @@ def test_score_fails_below_the_required_recall(tmp_path: Path) -> None:
 
 def test_a_promoted_case_is_not_reported_as_unpromoted(tmp_path: Path) -> None:
     """The gate must ask the store for the path, not rebuild the filename."""
-    from mergecraft.evals.store import permanent_test_path
+    from mergecraft.evals import permanent_test_path
 
     bank = tmp_path / "cases"
     _write_case(bank, "synthetic-001")

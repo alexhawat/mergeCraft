@@ -342,6 +342,7 @@ def build_run_packet(
         # advertising the verdict is a misleading evidence artifact. Mirrors
         # the ``JudgePin`` pattern for the verifier.
         mode_prompt_versions=_mode_prompt_versions(_selected_modes(state, ctx)),
+        dispatched_lens_ids=list(state.dispatched_lens_ids),
     )
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
     # W9 (#46): the decision row carries the closed action vocabulary and

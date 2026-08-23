@@ -151,12 +151,16 @@ def run_ensemble_dispatch(
     registry: Registry,
     settings: RepoSettings,
     execute: ExecuteFn,
+    round_index: int = 1,
 ) -> EnsembleRun:
     """Fan out one binding to two models, honouring the binding budget (CC3)."""
     del registry
     validate_ensemble_eligible(binding)
     primary, secondary = plan_ensemble_models(binding, settings=settings)
-    remaining = max(binding.budget, 0)
+    from mergecraft.agents.registry import effective_agent_limits
+
+    limits = effective_agent_limits(binding, settings=settings, round_index=round_index)
+    remaining = max(limits.budget, 0)
     model_runs: list[ModelRun] = []
 
     for model in (primary, secondary):

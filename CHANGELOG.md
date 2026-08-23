@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `make action-pin-check` also measures the pin against the default branch's own
+  tip, not just against the other branch's pin. Comparing pins to each other
+  passes when both are equally stale, which is what happened after #457 merged:
+  both branches pinned the same SHA and the check reported OK while the reviewer
+  ran none of the fixes that had just landed. Lag is counted over
+  `src/mergecraft/` only, since docs and test commits do not change what the
+  reviewer executes (#450)
+- `make action-pin-check` guards the self-review Action pin against drift.
+  Because `.github/workflows/mergecraft.yml` runs on `pull_request_target`,
+  GitHub resolves its `uses:` pin from the **default branch**, so a fix merged
+  to `pre-0.0.1` does not reach the reviewer until it reaches `main` — a skew
+  that reached 687 commits undetected and made PR #443 time out on a ceiling
+  already fixed on the branch. The check also rejects a one-sided bump that
+  leaves the review and fallback steps on different SHAs. Advisory in CI: a
+  stale pin is a property of the default branch, not of the PR under review
+  (#450)
+- First-pass recall metric (`mergecraft eval convergence`, `make eval-convergence`) with multi-round bank cases and a paired regression gate that holds first-pass recall flat while the DG1 precision corpus stays at or above its floor
+- Open-PR finding ledger in the sticky progress comment — `mergecraft findings ledger --pr N` inspects inline, deferred, withdrawn, and unpublished fingerprints without filing GitHub issues (D4, D5)
+- Optional recall pass (`review.recallPass`, default off) dispatches `mergecraft-recall` after aggregation; novel findings always publish in the deferred lane (D1, D7)
+- Optional round-aware budgets (`review.roundBudgets`) scale token, cost, tool-call, and subagent ceilings by review round; defaults stay flat until opted in (RC12)
+- Lens execution recording on `ToolState`, review metadata, and merge-evidence packets; findings may carry optional `lens` attribution (D9)
+- Collateral lists on `Critical` and `Major` findings name callers, tests, and other files that must move with the fix; inline comments render them under **Also update:** (RC11)
+- Incremental reviews promote deferred findings when their cited path intersects the incremental diff, bias complement lens routing toward lenses that did not run last round, and label first-pass misses on unchanged lines honestly (RC9, D10)
 - Opt-in `antislop` analyzer: YAML rule pack for placeholder code, narrator comments,
   swallowed errors, pass-through wrappers, phantom imports, and related low-quality patterns
   on changed Python and JS/TS files (#393)
@@ -25,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Overflow agent findings now append to a server-written `### 🗂 Deferred findings` section with full finding text (non-blocking); analyzer overflow remains in `### 🔧 Mechanical findings` (RC1, RC2)
+- `review.verificationBudget` (default 24; `0` = no cap) caps verifier dispatches independently of `analyzers.inlineBudget` (RC3, D2)
 - Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily in
   `install()` via `action_pin_minimal()` instead of calling it at module import (#403)
 - Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
@@ -37,12 +62,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - mergeCraft's consumer workflow approval gate now runs in a separate job that
   `needs:` the review-attempts job, so Codex fallback can post `mergecraft-approval`
   before the fail-closed gate samples check-runs (#433)
-- `mergecraft --version` reported `0.1.0` while the project was at `0.1.0a1`: the
-  number was restated as a literal in `mergecraft/__init__.py` alongside
-  `pyproject.toml` and the two drifted. It is now read from the installed
-  distribution. The value also keys the offline result cache and is stamped on
-  telemetry and eval reproducibility pins, so the mismatch quietly mixed artefacts
-  from different builds
+- Retryability now has one decision path. `_is_retryable_failure` gated on `metadata["retryable"]` alone
+  while `_retryable_failure_reason` inferred the same property from the error text, and only the
+  metadata-blind one decided — so a driver that omitted the flag was silently read as "permanent" and its
+  failure terminated the run. An explicit flag still wins in both directions; an omitted one now falls back
+  to inference. A retryable failure at the chain tail is bounded to one in-place retry and then returns that
+  failure, instead of re-asking a refusing provider until the attempt cap raised and replaced the real error
+  with a cap message (#447)
+- Codex `error` and `turn.failed` events are no longer discarded. Codex reports fatal failures as structured
+  events on stdout, and the stream handler had no branch for them, so the message was counted and dropped
+  and the run reported whatever unrelated text stderr happened to hold — PR #443 surfaced "Reading
+  additional input from stdin..." for a quota exhaustion, in the job annotation, the merge evidence packet,
+  and the chain log. The provider's own message is now the run's error and feeds retry classification (#445)
+- Provider quota exhaustion is now classified as retryable for failover. The CLI classifier matched only
+  rate-limit wording (`rate limit`, `too many requests`, `overloaded`, `429`), so Codex's "You've hit your
+  usage limit" matched nothing and read as permanent — the chain refused to try the next model even though
+  the next model was unaffected (#446)
+- `opencode serve` output is now drained for the process lifetime. Boot read the child's stdout only until
+  the listening URL appeared and nothing read either pipe afterwards, so once the child filled the ~64KB
+  pipe buffer it blocked in `write()` and stopped answering HTTP — a hang with no output, indistinguishable
+  from an unresponsive provider. A bounded tail of that output is now attached to a provider-timeout error,
+  which previously stringified to nothing at all — the tail is read under the same lock the drain threads
+  hold, so collecting it cannot raise `deque mutated during iteration` in place of the failure it explains
+  (#449)
+- A provider timeout no longer kills the review. `ProviderTimeoutError` on the opencode path returned an
+  `AgentResult` with no `retryable` metadata, and the model chain gates on that flag alone, so the single
+  most recoverable failure there is read as permanent and terminated the run at attempt 1 of 10 — leaving
+  the PR with no review rather than a review from the next model in the chain. Gateway 429/5xx responses on
+  the same path were mis-classified the same way. Two bounds keep the retries from multiplying: opencode
+  gets the initial attempt plus exactly one retry, and the chain now honours a wall-clock deadline derived
+  from `RunBounds.run_timeout_s` instead of relying on the attempt cap alone. Every prompt on that path is
+  covered, the initial review turn included — the likeliest one to time out, and the one whose timeout
+  previously escaped the harness and aborted the chain outright. When the allowance runs out at the chain
+  tail, the evidence packet now names the model that actually ran instead of the entry being skipped (#444)
+- `mergecraft --version` reported `0.1.0` while the project was at `0.1.0a1`: the number was restated as a literal in `mergecraft/__init__.py` alongside `pyproject.toml` and the two drifted. It is now read from the installed distribution. The value also keys the offline result cache and is stamped on telemetry and eval reproducibility pins, so the mismatch quietly mixed artefacts from different builds
 - Managed analyzers no longer report a clean scan as skipped: the adapter's fallback re-parse ran on the
   human-readable output string, which carries the `version_note` prose prefix, so any managed tool whose
   findings stream was empty failed with `Expecting value: line 1 column 1 (char 0)`. TruffleHog hit this on

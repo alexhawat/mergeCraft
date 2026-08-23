@@ -139,6 +139,23 @@ def codex_stream_event_handler(
                 sync_open_pair_bookkeeping(open_pair_bookkeeping, usage_dict)
             return
 
+        # Codex reports a fatal turn failure as a stdout event, never on
+        # stderr. With no branch here the message was counted and dropped, and
+        # the run surfaced whatever unrelated line stderr happened to hold —
+        # PR #443 reported "Reading additional input from stdin..." for a quota
+        # exhaustion (#445).
+        if event_type in {"error", "turn.failed"}:
+            payload = event.get("error")
+            message = (
+                payload.get("message")
+                if isinstance(payload, dict)
+                else (payload if isinstance(payload, str) else None)
+            )
+            if not message:
+                message = event.get("message")
+            accumulator.set_stream_error(str(message) if message else None)
+            return
+
         if event_type == "thread.started":
             thread_id = str(event.get("thread_id") or "default")
             if thread_id in open_pairs:

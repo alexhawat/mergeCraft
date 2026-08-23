@@ -86,6 +86,28 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Static, typecheck, build tier
         run: make ci-static
+      # Reports self-review Action-pin drift (#450). Advisory on purpose: the
+      # stale pin lives on the default branch, so it is not a defect in the PR
+      # being checked, and failing here would block every unrelated change
+      # until someone bumps main. The annotation is what makes the skew
+      # visible instead of silent -- which is how it reached 687 commits.
+      - name: Action pin freshness (advisory)
+        if: matrix.python == '3.14'
+        run: |
+          # No --depth here. A depth-limited fetch marks origin/main as a
+          # shallow boundary, so rev-list stops at the graft and the staleness
+          # check under-reports the product lag (measured on this repo: 5
+          # commits -> 1), silently defanging the guard in the only job that
+          # runs it. The checkout above is fetch-depth: 0, so the objects are
+          # already local and a full fetch is near-free.
+          git fetch --no-tags origin main:refs/remotes/origin/main || true
+          if out="$(make action-pin-check 2>&1)"; then
+            echo "$out"
+          else
+            echo "$out"
+            detail="$(printf '%s' "$out" | grep -m1 -- '  - ' | sed 's/^  - //')"
+            echo "::warning title=mergecraft action pin drift::${detail:-see log}"
+          fi
 
   security:
     name: Verify (security audit py${{ matrix.python }})

@@ -21,6 +21,13 @@ network, and no module-level I/O at import time (§W11.6).
 
 from __future__ import annotations
 
+from mergecraft.evals.permanent_tests import (
+    PERMANENT_TEST_DIR_NAME,
+    PERMANENT_TEST_FILE_SUFFIX,
+    permanent_test_path,
+    render_permanent_test,
+    write_permanent_test,
+)
 from mergecraft.evals.scoring import (
     AggregateScoreReport,
     BaselineIssue,
@@ -61,6 +68,8 @@ __all__ = [
     "CASE_STATUS_PASSED",
     "CASE_STATUS_REGRESSION",
     "DEFAULT_BANK_DIR",
+    "PERMANENT_TEST_DIR_NAME",
+    "PERMANENT_TEST_FILE_SUFFIX",
     "AggregateScoreReport",
     "BaselineIssue",
     "Breakdown",
@@ -79,8 +88,11 @@ __all__ = [
     "load_case",
     "load_reported_findings",
     "parse_case_text",
+    "permanent_test_path",
     "recompute_decision",
     "render_case_text",
+    "render_permanent_test",
     "replay_case",
     "score_findings",
+    "write_permanent_test",
 ]

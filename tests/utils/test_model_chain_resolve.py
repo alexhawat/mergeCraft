@@ -131,7 +131,22 @@ async def test_model_chain_caps_attempts_at_max_depth(
         "Callable[..., Awaitable[tuple[str, AgentResult]]]",
         _import_chain_symbol("run_with_model_chain"),
     )
-    settings = _chain_settings(["openai/gpt-5.3-codex"])
+    # A chain longer than the attempt cap is what makes the cap reachable.
+    # A short chain no longer gets here: a retryable failure at the tail is
+    # bounded to one in-place retry and then returns that failure, because
+    # re-asking the model that just refused has no backoff and no new
+    # information (see test_a_tail_failure_returns_rather_than_exhausting_the_cap
+    # in tests/integration/test_provider_failures.py). The cap remains the
+    # backstop for a chain that keeps finding somewhere to advance to.
+    settings = _chain_settings(
+        [
+            "openai/gpt-5.3-codex",
+            "anthropic/claude-sonnet",
+            "google/gemini-3.1-pro-preview",
+            "openai/gpt-5.1",
+            "anthropic/claude-opus-4.5",
+        ]
+    )
     attempts: list[str] = []
 
     async def run_once(slug: str) -> AgentResult:
@@ -146,7 +161,7 @@ async def test_model_chain_caps_attempts_at_max_depth(
         await run_with_model_chain(
             settings=settings,
             run_once=run_once,
-            max_attempts=_MAX_FALLBACK_DEPTH,
+            max_attempts=3,
         )
-
-    assert len(attempts) == _MAX_FALLBACK_DEPTH
+    assert len(attempts) == 3, "the cap, not the chain length, must stop it"
+    assert len(attempts) < _MAX_FALLBACK_DEPTH, "cap must bind below the default depth"

@@ -953,3 +953,81 @@ def test_close_all_flushes_spans_left_open_by_a_truncated_stream() -> None:
 
     assert [attrs["tool.name"] for attrs in _events_of(sink, "tool.call")] == ["shell"]
     assert len(_events_of(sink, "llm.call")) == 1
+
+
+def test_error_event_message_is_captured_from_stdout() -> None:
+    """#445 — Codex reports fatal failures as stdout events, not on stderr.
+
+    The handler had no branch for them, so the message was counted into
+    ``parsed_event_count`` and dropped. PR #443 then reported an unrelated
+    stderr line ("Reading additional input from stdin...") as the run's error,
+    hiding a quota exhaustion.
+    """
+    handler, _close_all = codex_stream_event_handler(
+        tracer=None,
+        model_id="gpt-5.3-codex",
+    )
+    accumulator = StreamSpanAccumulator(agent_name="codex")
+    quota = "You've hit your usage limit. Upgrade to Pro or try again at Aug 27th."
+
+    handler(accumulator, {"type": "error", "message": quota})
+
+    assert accumulator.stream_error == quota
+
+
+def test_turn_failed_nested_error_message_is_captured() -> None:
+    """``turn.failed`` nests the message under ``error``, unlike ``error``."""
+    handler, _close_all = codex_stream_event_handler(
+        tracer=None,
+        model_id="gpt-5.3-codex",
+    )
+    accumulator = StreamSpanAccumulator(agent_name="codex")
+
+    handler(accumulator, {"type": "turn.failed", "error": {"message": "boom"}})
+
+    assert accumulator.stream_error == "boom"
+
+
+def test_the_first_stream_error_wins() -> None:
+    """A turn emits ``error`` then ``turn.failed`` for the same cause; the
+    run's reason should not be overwritten by the echo.
+    """
+    handler, _close_all = codex_stream_event_handler(
+        tracer=None,
+        model_id="gpt-5.3-codex",
+    )
+    accumulator = StreamSpanAccumulator(agent_name="codex")
+
+    handler(accumulator, {"type": "error", "message": "first"})
+    handler(accumulator, {"type": "turn.failed", "error": {"message": "second"}})
+
+    assert accumulator.stream_error == "first"
+
+
+def test_a_captured_quota_error_classifies_as_retryable() -> None:
+    """The captured message must reach classification, not just the log.
+
+    Together with #444 this is what lets a quota wall fail over to the next
+    model instead of terminating the run.
+    """
+    from mergecraft.utils.retry_policy import is_retryable_cli_failure
+
+    handler, _close_all = codex_stream_event_handler(
+        tracer=None,
+        model_id="gpt-5.3-codex",
+    )
+    accumulator = StreamSpanAccumulator(agent_name="codex")
+    handler(
+        accumulator,
+        {"type": "error", "message": "You've hit your usage limit."},
+    )
+
+    # The driver classifies against the stream error joined with stderr; stderr
+    # here is the benign chatter that used to be the only signal.
+    assert (
+        is_retryable_cli_failure(
+            returncode=1,
+            stderr=f"{accumulator.stream_error}\nReading additional input from stdin...",
+        )
+        is True
+    )

@@ -46,13 +46,31 @@ def is_safe_http_method(method: str) -> bool:
     return method.strip().upper() in SAFE_HTTP_METHODS
 
 
+# Provider prose for "not now". Two distinct classes, both retryable *for
+# failover* — the chain's job is to reach a different model, not to re-issue
+# against the one that just refused:
+#   - rate limiting / overload: transient, the same provider may work later
+#   - quota or credit exhaustion: not transient, but the next provider is
+#     unaffected. Codex says "You've hit your usage limit", which matches none
+#     of the rate-limit wording and so read as permanent (#446).
+_RETRYABLE_CLI_NEEDLES: Final[tuple[str, ...]] = (
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "overloaded",
+    "429",
+    "usage limit",
+    "quota",
+    "insufficient_quota",
+)
+
+
 def is_retryable_cli_failure(*, returncode: int | None, stderr: str = "") -> bool:
-    """Classify CLI rate-limit / overload failures as retryable for the chain."""
+    """Classify CLI rate-limit / overload / quota failures as retryable."""
     if returncode is not None and returncode in RATE_LIMIT_EXIT_CODES:
         return True
     lowered = stderr.lower()
-    needles = ("rate limit", "rate_limit", "too many requests", "overloaded", "429")
-    return any(n in lowered for n in needles)
+    return any(needle in lowered for needle in _RETRYABLE_CLI_NEEDLES)
 
 
 class retry_transient_safe_methods(retry_base):

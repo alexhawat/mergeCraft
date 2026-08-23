@@ -189,6 +189,11 @@ def _messages_semantically_similar(first: str, second: str) -> bool:
     return shared_domain == 1 and each_side_two and ratio >= _SINGLE_DOMAIN_OVERLAP_RATIO
 
 
+def location_key(finding: Finding) -> tuple[str, int | None, int | None, str]:
+    """Return the dedup bucket key for a finding (path, line span, message)."""
+    return _location_key(finding)
+
+
 def _location_key(finding: Finding) -> tuple[str, int | None, int | None, str]:
     return (
         normalize_repo_path(finding.path),
@@ -233,4 +238,4 @@ def dedupe_findings(findings: list[Finding]) -> list[Finding]:
     return dedupe_findings_with_indices(findings).findings
 
 
-__all__ = ["DedupeResult", "dedupe_findings", "dedupe_findings_with_indices"]
+__all__ = ["DedupeResult", "dedupe_findings", "dedupe_findings_with_indices", "location_key"]

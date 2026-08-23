@@ -8,4 +8,8 @@
 # `pull_request` event or workflow_dispatch — never to pull_request_target,
 # regardless of fork status. See the mergecraft.yml trigger comment for how the
 # workflow now earns that "trusted" tier for same-repo PRs.
+#
+# recallPass dogfood resumes after this PR merges to pre-0.0.1: pull_request_target
+# runs the workflow + action pin from the base branch, so self-review PRs cannot
+# enable review.recallPass until the schema lands on base.
 prApproveEnabled: true

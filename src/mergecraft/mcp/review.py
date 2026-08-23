@@ -8,6 +8,14 @@ import httpx
 from loguru import logger
 
 from mergecraft.mcp.comment import add_footer
+from mergecraft.mcp.convergence_runtime import (
+    collateral_by_fingerprint,
+    enforce_recall_deferred_lane_at_publish,
+    prepare_inline_comment_for_publish,
+    recall_publish_sets,
+    strip_recall_inline_comments,
+)
+from mergecraft.mcp.deferred_publish import merge_analyzer_sections_into_review_body
 from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
@@ -20,7 +28,10 @@ from mergecraft.mcp.verdict import (
     stamp_review_phase_on_active_span,
 )
 from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
-from mergecraft.review_taxonomy import stamp_finding_fingerprint
+from mergecraft.review_taxonomy import (
+    finding_fingerprint,
+    stamp_finding_fingerprint,
+)
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
 from mergecraft.utils.learnings import (
     ensure_learnings_review_delta,
@@ -167,11 +178,15 @@ def _comments_to_findings(comments: list[dict[str, Any]]) -> list[dict[str, Any]
     """Map legacy inline comments to terminal-submission finding dicts."""
     findings: list[dict[str, Any]] = []
     for comment in comments:
+        path = str(comment["path"])
+        body = str(comment.get("body") or "")
         row: dict[str, Any] = {
-            "path": str(comment["path"]),
-            "body": str(comment.get("body") or ""),
+            "path": path,
+            "body": body,
             "severity": "Major",
         }
+        if path and body:
+            row["fingerprint"] = finding_fingerprint(path=path, body=body)
         if "line" in comment:
             row["line"] = int(comment["line"])
         findings.append(row)
@@ -242,21 +257,75 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     elif request_changes:
         event = "REQUEST_CHANGES"
 
+    publish_sets = recall_publish_sets(ctx)
+    enforce_recall_deferred_lane_at_publish(ctx, publish_sets=publish_sets)
+
+    from pathlib import Path
+
+    from mergecraft.config.settings import load_repo_settings
+
+    repo_root = Path(primary.dir or Path.cwd())
+    review_settings = load_repo_settings(root=repo_root, load_learnings_files=False).review
+
     payload: dict[str, Any] = {"event": event}
     if body:
         await ensure_learnings_review_delta(ctx.tool_state)
         body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body))
-        payload["body"] = add_footer(ctx, body_with_delta)
+        body_with_sections = merge_analyzer_sections_into_review_body(ctx, body_with_delta)
+        if ctx.tool_state.dispatched_lens_ids:
+            from mergecraft.modes._pr_summary_format import (
+                merge_dispatched_lenses_into_review_metadata,
+            )
+
+            body_with_sections = merge_dispatched_lenses_into_review_metadata(
+                body_with_sections,
+                dispatched_lens_ids=ctx.tool_state.dispatched_lens_ids,
+            )
+        payload["body"] = add_footer(ctx, body_with_sections)
     if params.get("commit_id"):
         payload["commit_id"] = params["commit_id"]
     elif primary.checkout_sha:
         payload["commit_id"] = primary.checkout_sha
 
+    incremental_diff_text: str | None = None
+    if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE:
+        incremental_path = primary.incremental_diff_path
+        if incremental_path:
+            from pathlib import Path
+
+            incremental_diff_text = Path(incremental_path).read_text(encoding="utf-8")
+
+    collateral_map = collateral_by_fingerprint(ctx)
+
     inline: list[dict[str, Any]] = []
     for c in comments:
+        path = str(c["path"])
+        line = int(c["line"]) if "line" in c else None
+        collateral = c.get("collateral")
+        collateral_list = (
+            [str(item) for item in collateral if str(item).strip()]
+            if isinstance(collateral, list)
+            else None
+        )
+        comment_body = str(c.get("body") or "")
+        raw_fingerprint = str(c.get("fingerprint") or "") or finding_fingerprint(
+            path=path,
+            body=comment_body,
+        )
+        prepared_body = prepare_inline_comment_for_publish(
+            ctx,
+            path=path,
+            line=line,
+            body=comment_body,
+            collateral=collateral_list,
+            fingerprint=raw_fingerprint,
+            collateral_map=collateral_map,
+            incremental_diff_text=incremental_diff_text,
+        )
         item: dict[str, Any] = {
-            "path": c["path"],
-            "body": c.get("body") or "",
+            "path": path,
+            "body": prepared_body,
+            "fingerprint": raw_fingerprint,
         }
         if c.get("suggestion"):
             suggestion = str(c["suggestion"])
@@ -274,8 +343,17 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             item["start_line"] = int(c["start_line"])
             item["start_side"] = c.get("start_side") or c.get("side") or "RIGHT"
         inline.append(item)
+    if review_settings.recall_pass:
+        inline = strip_recall_inline_comments(ctx, inline, publish_sets=publish_sets)
     if inline:
         payload["comments"] = inline
+
+    from mergecraft.findings.ledger import (
+        persist_finding_ledger_to_progress_comment,
+        record_published_findings_in_ledger,
+    )
+
+    record_published_findings_in_ledger(ctx.tool_state, inline)
 
     scm = ctx.scm
     approve_fallback = False
@@ -322,6 +400,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     )
     if resolved:
         response["resolvedThreads"] = resolved
+    await persist_finding_ledger_to_progress_comment(ctx)
     return response
 
 

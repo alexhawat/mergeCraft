@@ -51,6 +51,7 @@ from mergecraft.modes import (
 from mergecraft.modes._pr_summary_format import PR_SUMMARY_FORMAT
 from mergecraft.types import (
     MERGECRAFT_MCP_NAME,
+    RECALL_AGENT_NAME,
     REVIEWER_AGENT_NAME,
     VERIFIER_AGENT_NAME,
     AgentId,
@@ -194,14 +195,14 @@ def _expand_template(
 ) -> str:
     text = template
     text = text.replace("${REVIEWER_AGENT_NAME}", REVIEWER_AGENT_NAME)
-    text = text.replace("${VERIFIER_AGENT_NAME}", VERIFIER_AGENT_NAME)
     text = text.replace("${mergecraftMcpName}", MERGECRAFT_MCP_NAME)
     text = text.replace("${commitStep}", commit_step)
     text = text.replace("${finalizeStep}", finalize_step)
     text = text.replace("${PR_SUMMARY_FORMAT}", PR_SUMMARY_FORMAT)
-    text = text.replace("${LENS_MENU_BLOCK}", _render_lens_menu_block())
-    text = text.replace("${REVIEWER_AGENT_NAME}", REVIEWER_AGENT_NAME)
+    # PR_SUMMARY_FORMAT embeds ${VERIFIER_AGENT_NAME}; expand after injection.
     text = text.replace("${VERIFIER_AGENT_NAME}", VERIFIER_AGENT_NAME)
+    text = text.replace("${RECALL_AGENT_NAME}", RECALL_AGENT_NAME)
+    text = text.replace("${LENS_MENU_BLOCK}", _render_lens_menu_block())
 
     def signed_simple(m: re.Match[str]) -> str:
         return m.group(1) if signed_commits else m.group(2)

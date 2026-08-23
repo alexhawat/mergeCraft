@@ -7,9 +7,31 @@ threads to canonical lifecycle states without altering ``findings/threads.py``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast, get_args
 
-LifecycleState = Literal["open", "resolved-by-change", "stale", "disputed", "waived"]
+LifecycleState = Literal[
+    "open",
+    "resolved-by-change",
+    "stale",
+    "disputed",
+    "waived",
+    "deferred",
+    "unpublished",
+    "withdrawn",
+]
+
+_LEDGER_STATES: frozenset[str] = frozenset(get_args(LifecycleState))
+
+
+def validate_lifecycle_state(raw_state: str) -> LifecycleState:
+    """Validate a ledger marker state string against the lifecycle vocabulary."""
+    if raw_state not in _LEDGER_STATES:
+        msg = f"unknown lifecycle state {raw_state!r}"
+        raise ValueError(msg)
+    return cast(  # _LEDGER_STATES membership narrows str to LifecycleState
+        "LifecycleState",
+        raw_state,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +42,9 @@ class LifecycleRecord:
     state: LifecycleState
     reason: str | None = None
     expires_at: str | None = None
+    round_index: int | None = None
+    recorded_at: str | None = None
+    source: str | None = None
 
 
 def dispute_finding(
@@ -70,5 +95,6 @@ __all__ = [
     "dispute_finding",
     "lifecycle_state",
     "lifecycle_state_from_thread",
+    "validate_lifecycle_state",
     "waive_finding",
 ]
