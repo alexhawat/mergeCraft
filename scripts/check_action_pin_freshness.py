@@ -21,6 +21,14 @@ Two checks:
    be an ancestor of this branch's pin and within ``MAX_DRIFT`` commits of it.
    Skips with a notice when the ref is not fetched, so a local ``make lint``
    in a shallow or offline checkout does not fail on it.
+3. **Staleness** (needs the default-branch ref). The pin must not lag the
+   default branch's own tip by more than ``MAX_PRODUCT_LAG`` commits touching
+   ``src/mergecraft/``. Check 2 compares the two branches' pins only to each
+   other, so it passes when *both* are equally stale: after PR #457 merged,
+   both branches pinned the same SHA and the check reported OK while the
+   reviewer ran none of the fixes that had just landed. Measuring against the
+   default branch's tip rather than HEAD keeps this stable, since unmerged
+   feature commits are not something a pin could reference yet.
 
 Module: scripts.check_action_pin_freshness
 Depends: os, re, subprocess, sys, pathlib
@@ -49,6 +57,16 @@ DEFAULT_BRANCH = os.environ.get("MERGECRAFT_DEFAULT_BRANCH", "main")
 # merges behind still runs substantially current code, while hundreds of
 # commits behind is how #450 went unnoticed. Override for a tighter policy.
 MAX_DRIFT = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_DRIFT", "100"))
+
+# Product-code commits the pin may lag the default branch's tip by. Counted
+# over ``src/mergecraft/`` only: docs, tests and workflow commits do not change
+# what the reviewer executes, so counting them would fire for reasons an
+# operator cannot act on. Small, because each one is a behaviour difference
+# between the reviewer and the branch it is reviewing.
+MAX_PRODUCT_LAG = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_PRODUCT_LAG", "5"))
+
+# The tree whose changes alter reviewer behaviour.
+PRODUCT_PATH = "src/mergecraft/"
 
 
 def _pins_in(text: str) -> list[tuple[int, str]]:
@@ -140,6 +158,32 @@ def _check_freshness(rel_path: str, head_sha: str) -> list[str]:
     ]
 
 
+def _check_staleness(rel_path: str, head_sha: str) -> list[str]:
+    """Compare the pin against the default branch's tip, not against another pin."""
+    ref = f"origin/{DEFAULT_BRANCH}"
+    if _git("rev-parse", "--verify", "--quiet", ref) is None:
+        ref = DEFAULT_BRANCH
+        if _git("rev-parse", "--verify", "--quiet", ref) is None:
+            return []
+    if _git("cat-file", "-e", f"{head_sha}^{{commit}}") is None:
+        return []
+    if _git("merge-base", "--is-ancestor", head_sha, ref) is None:
+        # The pin is not on the default branch's history: either it is ahead
+        # (bumped here, not yet promoted) or it points somewhere unrelated.
+        # Neither is staleness, and check 2 already covers divergence.
+        return []
+    lag_raw = _git("rev-list", "--count", f"{head_sha}..{ref}", "--", PRODUCT_PATH)
+    lag = int(lag_raw) if lag_raw and lag_raw.isdigit() else 0
+    if lag <= MAX_PRODUCT_LAG:
+        return []
+    return [
+        f"{rel_path}: pin {head_sha[:12]} lags {DEFAULT_BRANCH} by {lag} commits touching "
+        f"{PRODUCT_PATH} (max {MAX_PRODUCT_LAG}). The reviewer is not running the product "
+        f"code on {DEFAULT_BRANCH}, so anything merged since the pin is absent from every "
+        f"review. Bump the pin."
+    ]
+
+
 def main() -> int:
     """Report Action-pin drift; return 1 when a check fails."""
     if not WORKFLOW_DIR.is_dir():
@@ -157,6 +201,7 @@ def main() -> int:
         rel_path = path.relative_to(REPO).as_posix()
         failures.extend(_check_self_consistency(rel_path, pins))
         failures.extend(_check_freshness(rel_path, pins[0][1]))
+        failures.extend(_check_staleness(rel_path, pins[0][1]))
 
     if failures:
         print("action-pin-check FAILED:", file=sys.stderr)

@@ -161,3 +161,98 @@ def test_the_live_workflow_pins_are_self_consistent() -> None:
     pins = module._pins_in(text)
     assert pins, "expected mergecraft.yml to pin the action by SHA"
     assert module._check_self_consistency(_WORKFLOW, pins) == []
+
+
+def _staleness_with(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    product_lag: str | None,
+    is_ancestor: str | None = "",
+    pin_known: str | None = "",
+    ref_exists: str | None = "",
+) -> list[str]:
+    """Drive ``_check_staleness`` with git responses stubbed."""
+
+    def fake_git(*args: str) -> Any:
+        if args[0] == "rev-parse":
+            return ref_exists
+        if args[0] == "cat-file":
+            return pin_known
+        if args[0] == "merge-base":
+            return is_ancestor
+        if args[0] == "rev-list":
+            return product_lag
+        return ""
+
+    monkeypatch.setattr(module, "_git", fake_git)
+    return module._check_staleness(_WORKFLOW, _SHA_OLD)
+
+
+def test_a_pin_far_behind_the_default_tip_is_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load()
+    monkeypatch.setattr(module, "MAX_PRODUCT_LAG", 5)
+    failures = _staleness_with(module, monkeypatch, product_lag="8")
+    assert len(failures) == 1
+    assert "lags main by 8 commits" in failures[0]
+
+
+def test_a_pin_within_the_product_lag_bound_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load()
+    monkeypatch.setattr(module, "MAX_PRODUCT_LAG", 5)
+    assert _staleness_with(module, monkeypatch, product_lag="2") == []
+
+
+def test_docs_and_test_commits_do_not_count_as_lag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """rev-list is scoped to the product tree, so a docs-only gap is zero.
+
+    Counting every commit would make this fire for changes that cannot alter
+    what the reviewer does, which an operator has no way to act on.
+    """
+    module = _load()
+    monkeypatch.setattr(module, "MAX_PRODUCT_LAG", 0)
+    assert _staleness_with(module, monkeypatch, product_lag="0") == []
+
+
+def test_a_pin_ahead_of_the_default_branch_is_not_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bumped here but not yet promoted is the healthy state, not a failure."""
+    module = _load()
+    assert _staleness_with(module, monkeypatch, product_lag="9", is_ancestor=None) == []
+
+
+def test_staleness_skips_when_the_default_ref_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load()
+    assert _staleness_with(module, monkeypatch, product_lag="9", ref_exists=None) == []
+
+
+def test_matching_pins_that_both_lag_the_tip_are_still_caught(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for the gap this check exists to close.
+
+    After PR #457 merged, main and pre-0.0.1 pinned the same SHA, so the
+    pin-to-pin freshness check reported OK while the reviewer ran none of the
+    fixes that had just landed. Equal pins must not imply a current reviewer.
+    """
+    module = _load()
+    monkeypatch.setattr(module, "MAX_DRIFT", 100)
+    monkeypatch.setattr(module, "MAX_PRODUCT_LAG", 5)
+
+    # Freshness sees both branches on the same pin and is satisfied.
+    monkeypatch.setattr(module, "_default_branch_workflow", lambda _: _workflow_text(_SHA_OLD))
+    monkeypatch.setattr(module, "_git", lambda *_a: "")
+    assert module._check_freshness(_WORKFLOW, _SHA_OLD) == []
+
+    # Staleness measures against the branch tip and catches it.
+    failures = _staleness_with(module, monkeypatch, product_lag="8")
+    assert len(failures) == 1
