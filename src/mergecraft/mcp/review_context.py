@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 async def hydrate_review_context(
     ctx: ToolContext,
     *,
-    prior_reviews: list[dict[str, Any]],
     round_index: int,
     incremental_changed_paths: Sequence[str] | None = None,
 ) -> None:

@@ -36,14 +36,17 @@ The CLI shell is ``mergecraft eval gate --baseline … --candidate …``.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from mergecraft.evals.benchmark import BenchmarkResultSet
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+
+    from mergecraft.evals.convergence import ConvergenceMetrics
 
 #: The declared tolerance band (EV3): wider than one-case noise on the
 #: current corpus, far narrower than any material multi-case regression.
@@ -72,7 +75,7 @@ _CONVERGENCE_GATE_METRICS: Final[tuple[tuple[str, Direction], ...]] = (
     ("convergence.mean_leakage_rate", "lower_is_better"),
 )
 
-_CONVERGENCE_METRIC_ACCESSORS: Final[dict[str, Any]] = {
+_CONVERGENCE_METRIC_ACCESSORS: Final[dict[str, Callable[[ConvergenceMetrics], float]]] = {
     "convergence.mean_first_pass_recall": lambda convergence: convergence.mean_first_pass_recall,
     "convergence.mean_leakage_rate": lambda convergence: convergence.mean_leakage_rate,
 }

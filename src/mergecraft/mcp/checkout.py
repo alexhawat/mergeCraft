@@ -365,7 +365,6 @@ def checkout_pr_tool(ctx: ToolContext):
 
         await hydrate_review_context(
             ctx,
-            prior_reviews=prior_reviews,
             round_index=round_index,
             incremental_changed_paths=state.incremental_changed_paths,
         )

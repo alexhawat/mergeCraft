@@ -33,7 +33,9 @@ from mergecraft.types import format_mcp_tool_ref
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.tool_state import ToolState
 
 HarnessName = Literal["claude", "opencode", "codex", "gemini", "cursor"]
 
@@ -108,8 +110,8 @@ def _resolve_selected_bindings(
     registry: Registry,
     selected: Sequence[str],
     *,
-    settings: Any | None = None,
-    tool_state: Any | None = None,
+    settings: RepoSettings | None = None,
+    tool_state: ToolState | None = None,
 ) -> list[AgentBinding]:
     bindings: list[AgentBinding] = []
     role_values = {role.value for role in AgentRole}
@@ -141,8 +143,8 @@ def _resolve_selected_bindings(
 def _binding_with_round_limits(
     binding: AgentBinding,
     *,
-    settings: Any | None,
-    tool_state: Any | None,
+    settings: RepoSettings | None,
+    tool_state: ToolState | None,
 ) -> AgentBinding:
     """Apply RC12 round-scaled budget (not ``timeout_s``) to reviewer, verifier, and recall."""
     if settings is None or tool_state is None:
