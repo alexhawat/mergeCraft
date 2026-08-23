@@ -535,3 +535,80 @@ Never `strict=True` — W18 drops xfails when workflows and delta script land.
 - `make lint` + `make typecheck` clean on touched paths
 - HI432a–b, HI432h–l pass; HI432c–g xfail (non-strict)
 - No `src/` or `.github/workflows/` edits
+
+---
+
+# Batch HJ — #427 local analyzer binaries
+
+Authoring wave: **W19** (HJ RED) · Implementation: **W20** (`chore(dev): install vulture typos markdownlint jscpd for local review`, D8)
+GitHub issue: **#427** — install macOS-runnable repo-native analyzer binaries
+
+Locked decision **D8**: install ``vulture``, ``typos``, ``markdownlint``, ``jscpd`` pinned to
+catalog versions via ``make setup`` / lockfiles. **knip** and **tsc**: written skip (vendor JS,
+no first-party ``tsconfig``) — do not scan ``docker/agent-clis``. Do not flip
+``runtime: repo-native`` or add darwin provenance.
+
+## xfail schedule
+
+| Wave | Test | Marker reason | Issue |
+|------|------|---------------|-------|
+| **W20** | `test_find_repo_binary_resolves_after_make_setup[vulture]` | `green after W20: install repo-native binaries via make setup (#427)` | pending |
+| **W20** | `test_find_repo_binary_resolves_after_make_setup[typos]` | same | pending |
+| **W20** | `test_find_repo_binary_resolves_after_make_setup[markdownlint]` | same | pending |
+| **W20** | `test_find_repo_binary_resolves_after_make_setup[jscpd]` | same | pending |
+| **W20** | `test_resolve_repo_tool_succeeds_after_make_setup[vulture]` | same | pending |
+| **W20** | `test_resolve_repo_tool_succeeds_after_make_setup[typos]` | same | pending |
+| **W20** | `test_resolve_repo_tool_succeeds_after_make_setup[markdownlint]` | same | pending |
+| **W20** | `test_resolve_repo_tool_succeeds_after_make_setup[jscpd]` | same | pending |
+| **W20** | `test_knip_and_tsc_skip_documented` | `green after W20: document knip/tsc intentional skip (#427)` | pending |
+
+Never `strict=True` — W20 drops xfails when pins, lockfiles, and skip doc land.
+
+## Contract matrix (#427 / D8)
+
+| # | Contract | Layer | Scenario | Primary test |
+|---|----------|-------|----------|--------------|
+| HJ427a | ``find_repo_binary`` resolves ``vulture`` after ``make setup`` | integration | happy | `test_find_repo_binary_resolves_after_make_setup[vulture]` |
+| HJ427b | ``find_repo_binary`` resolves ``typos`` after ``make setup`` | integration | happy | `test_find_repo_binary_resolves_after_make_setup[typos]` |
+| HJ427c | ``find_repo_binary`` resolves ``markdownlint`` after ``make setup`` | integration | happy | `test_find_repo_binary_resolves_after_make_setup[markdownlint]` |
+| HJ427d | ``find_repo_binary`` resolves ``jscpd`` after ``make setup`` | integration | happy | `test_find_repo_binary_resolves_after_make_setup[jscpd]` |
+| HJ427e | Resolved paths live under repo tooling dirs, not arbitrary ``PATH`` | unit | policy | `test_find_repo_binary_resolves_after_make_setup` (path guard) |
+| HJ427f | Resolved ``--version`` matches catalog pin | unit | happy | `test_find_repo_binary_resolves_after_make_setup` (version guard) |
+| HJ427g | ``resolve_repo_tool`` no longer skips the four installed tools | integration | happy | `test_resolve_repo_tool_succeeds_after_make_setup` |
+| HJ427h | ``knip`` / ``tsc`` skip documented (vendor JS, no first-party ``tsconfig``) | docs | policy | `test_knip_and_tsc_skip_documented` |
+| HJ427i | Manifests stay ``runtime: repo-native`` with empty provenance | unit | policy | `test_manifests_stay_repo_native_without_darwin_provenance` |
+| HJ427j | Missing binaries still skip with named reason (consumer repos) | unit | error | `test_missing_binaries_skip_with_named_reason_today` |
+| HJ427k | Catalog version pins for the four install targets | unit | happy | `test_catalog_versions_are_pinned_for_installed_tools` |
+
+## Named symbols W20 must satisfy
+
+| Symbol | Location | Test |
+|--------|----------|------|
+| ``find_repo_binary`` | `mergecraft.analyzers.detect` | HJ427a–f |
+| ``resolve_repo_tool`` | `mergecraft.analyzers.detect` | HJ427g, HJ427j |
+| ``vulture`` dev extra pin | `pyproject.toml` / `uv.lock` | HJ427a |
+| ``typos`` reproducible install | `make setup` tooling | HJ427b |
+| npm tooling package | `package.json` + lockfile → `*/node_modules/.bin` | HJ427c–d |
+| skip rationale doc | `docs/dev/local-analyzers.md` | HJ427h |
+
+Catalog pins under test:
+
+| Tool | Catalog version |
+|------|-----------------|
+| `vulture` | `2.14` |
+| `typos` | `1.32.0` |
+| `markdownlint` | `0.37.4` |
+| `jscpd` | `4.1.0` |
+| `knip` | `5.42.0` (skip — doc only) |
+| `tsc` | `5.8.3` (skip — doc only) |
+
+## Collection target (W19)
+
+`tests/analyzers/test_repo_native_binaries_hj.py` — **23 tests** (9 xfail, 14 pass).
+
+## Acceptance (W19)
+
+- New tests collect with zero import errors
+- `make lint` + `make typecheck` clean on touched paths
+- HJ427a–h xfail (non-strict); HJ427i–k pass
+- No `src/`, lockfile, or `make setup` edits
