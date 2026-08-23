@@ -127,6 +127,58 @@ Declared in `tests/findings/support_round_trip.py::NAMED_FORMAT_HACKS`:
 - `HUNK_FILE_LEVEL_DROP` / `HUNK_FILE_LEVEL_FIRST_CHANGED_LINE`
 - `SARIF_SEVERITY_TO_LEVEL` / `SARIF_FILE_LEVEL_NO_REGION`
 
+## CD #453 — durable completed review by id → CD RED
+
+Source: D4, issue #453. No `mergecraft/renderers/` package. No `mergecraft session *`.
+Durable review composes `ReviewSnapshot` + run manifest + findings + evidence packets;
+existing `explain` / `findings` / `replay` resolve by stored review id without re-running.
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Persist stable review id | `tests/review/test_durable_review_completed.py::test_persist_completed_review_writes_stable_review_id` | unit |
+| D4 composition on disk (snapshot + manifest + findings) | `…::test_persist_stores_snapshot_manifest_and_findings` | integration |
+| Unknown review id is a miss | `…::test_load_returns_none_for_unknown_review_id` | error |
+| Corrupt stored record is a miss | `…::test_load_returns_none_for_corrupt_completed_record` | error |
+| List stored review ids | `…::test_list_completed_review_ids_returns_persisted_ids` | functional |
+| Storage under `.mergecraft/reviews/<id>` | `…::test_completed_review_dir_lives_under_mergecraft_reviews` | unit |
+| `CompletedReview` model round-trip | `…::test_completed_review_model_round_trips_required_fields` | unit |
+| Review persists id on success | `tests/cli/test_durable_review_by_id_cmd.py::test_review_persists_completed_review_id_on_success` | E2E |
+| `findings <review-id>` without rerun | `…::test_findings_by_review_id_returns_stored_findings_without_rerun` | E2E |
+| `explain <review-id> MC-…` resolves packet | `…::test_explain_with_review_id_and_short_finding_id_resolves_packet` | E2E |
+| `explain MC-… --review-id` resolves packet | `…::test_explain_short_id_with_review_context_flag_resolves_packet` | E2E |
+| `replay <review-id>` from stored traces | `…::test_replay_by_review_id_uses_stored_artifacts_without_rerun` | E2E |
+| Unknown review id fail-closed | `…::test_unknown_review_id_is_fail_closed_for_findings` | E2E / error |
+| Lookup never invokes review agent | `…::test_findings_lookup_does_not_invoke_review_agent` | functional |
+
+### Pinned public API (implementation wave CD)
+
+New module `src/mergecraft/review/completed.py`:
+
+- `COMPLETED_REVIEW_SCHEMA_VERSION` — `"1.0.0"`
+- `CompletedReview` — frozen record with `review_id`, `snapshot`, `manifest`, `findings`, `trace_session_id`
+- `completed_review_dir(review_id, *, repo_root) -> Path`
+- `persist_completed_review(review, *, repo_root, evidence_packets=None, trace_events=None) -> Path`
+- `load_completed_review(review_id, *, repo_root) -> CompletedReview | None`
+- `list_completed_review_ids(*, repo_root) -> list[str]`
+
+On-disk layout under `<repo>/.mergecraft/reviews/<review_id>/`:
+
+- `snapshot.json`, `manifest.json`, `findings.json`, `completed.json`
+- evidence packets + `trace.jsonl` co-located for `explain` / `replay`
+
+CLI extensions (compose existing verbs — no `session` namespace):
+
+- `mergecraft review` JSON output includes `review_id` and persists on success
+- `mergecraft findings <review-id> [--repo-root PATH]`
+- `mergecraft explain <review-id> <MC-…>` and `mergecraft explain <MC-…> --review-id <id>`
+- `mergecraft replay <review-id> [--repo-root PATH]`
+
+## xfail reconciliation (CD)
+
+| Wave greens | Remove xfail from |
+| --- | --- |
+| CD | all tests in `tests/review/test_durable_review_completed.py`, `tests/cli/test_durable_review_by_id_cmd.py` |
+
 ## Verification commands
 
 ```bash
@@ -138,12 +190,16 @@ uv run pytest --collect-only -q \
   tests/cli/test_explain_short_id_cmd.py \
   tests/findings/test_hunk_export.py \
   tests/cli/test_diff_review_hunk_output.py \
-  tests/findings/test_finding_output_round_trip.py
+  tests/findings/test_finding_output_round_trip.py \
+  tests/review/test_durable_review_completed.py \
+  tests/cli/test_durable_review_by_id_cmd.py
 uv run pytest -q \
   tests/analyzers/test_finding_short_id.py \
   tests/findings/test_finding_short_id_outputs.py \
   tests/cli/test_explain_short_id_cmd.py \
   tests/findings/test_hunk_export.py \
   tests/cli/test_diff_review_hunk_output.py \
-  tests/findings/test_finding_output_round_trip.py
+  tests/findings/test_finding_output_round_trip.py \
+  tests/review/test_durable_review_completed.py \
+  tests/cli/test_durable_review_by_id_cmd.py
 ```
