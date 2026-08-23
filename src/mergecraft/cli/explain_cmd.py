@@ -16,7 +16,7 @@ from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scop
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
-from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.cli.global_surface import OutputFormat, emit_cli_json, wants_json_output
 from mergecraft.evidence.audit import lookup_finding_packet
 
 
@@ -89,6 +89,11 @@ def run(
         "--repo-root",
         help="Repository root to read (output-only; nothing is written).",
     ),
+    format: OutputFormat | None = typer.Option(
+        None,
+        "--format",
+        help="Output format. Defaults to the root ``--format`` when omitted.",
+    ),
 ) -> None:
     """Explain a stored finding or the current working-tree change."""
     root = repo_root.expanduser().resolve()
@@ -99,7 +104,8 @@ def run(
         payload = _finding_payload(finding_id, packet)
     else:
         payload = _change_payload(root)
-    if wants_json_output(ctx, json_flag=False):
+    use_json = format == "json" or (format is None and wants_json_output(ctx, json_flag=False))
+    if use_json:
         emit_cli_json(payload)
         return
     console.print(_render_table(payload))

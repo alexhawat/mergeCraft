@@ -1,8 +1,15 @@
-"""Normalized analyzer finding schema (D2)."""
+"""Normalized analyzer finding schema (D2).
+
+Short finding ids (issue #452) use prefix ``MC-`` and the leading hex of
+``Finding.fingerprint``. Single-fingerprint ids truncate to six hex chars
+(``MC-a83f91``). ``resolve_finding_short_ids`` extends truncation within a
+batch when two fingerprints would otherwise share the same six-char prefix.
+"""
 
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -16,11 +23,16 @@ from mergecraft.review_taxonomy import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 STRUCTURED_OUTPUT_REQUIRED_MSG = (
     "output_schema was provided but agent did not call set_output — structured output is required"
 )
+
+FINDING_SHORT_ID_PREFIX = "MC-"
+_FINDING_SHORT_ID_DEFAULT_HEX_LEN = 6
+_FINGERPRINT_HEX_RE = re.compile(r"^[0-9a-f]+$")
 
 IntroducedByPr = Literal["true", "false", "unknown"]
 
@@ -180,14 +192,110 @@ def write_findings_json(json_path: Path, findings: list[dict[str, Any]]) -> None
     json_path.write_text(f"{payload}\n", encoding="utf-8")
 
 
+def _validate_fingerprint_for_short_id(fingerprint: str) -> str:
+    """Reject empty, traversal, and other unsafe fingerprint values."""
+    if not isinstance(fingerprint, str):
+        msg = "fingerprint must be a string"
+        raise TypeError(msg)
+    if not fingerprint or fingerprint in {".", ".."}:
+        msg = f"unsafe fingerprint value: {fingerprint!r}"
+        raise ValueError(msg)
+    if "/" in fingerprint or "\\" in fingerprint:
+        msg = f"unsafe fingerprint value: {fingerprint!r}"
+        raise ValueError(msg)
+    if len(fingerprint) < _FINDING_SHORT_ID_DEFAULT_HEX_LEN:
+        msg = (
+            f"fingerprint must be at least {_FINDING_SHORT_ID_DEFAULT_HEX_LEN} "
+            f"characters, got {len(fingerprint)}"
+        )
+        raise ValueError(msg)
+    if not _FINGERPRINT_HEX_RE.fullmatch(fingerprint):
+        msg = f"fingerprint must be lowercase hex, got {fingerprint!r}"
+        raise ValueError(msg)
+    return fingerprint
+
+
+def finding_short_id(fingerprint: str) -> str:
+    """Return the default short id for one fingerprint (six hex chars after ``MC-``)."""
+    validated = _validate_fingerprint_for_short_id(fingerprint)
+    return f"{FINDING_SHORT_ID_PREFIX}{validated[:_FINDING_SHORT_ID_DEFAULT_HEX_LEN]}"
+
+
+def resolve_finding_short_ids(fingerprints: Sequence[str]) -> dict[str, str]:
+    """Assign stable short ids, extending truncation when six-char prefixes collide."""
+    unique = list(dict.fromkeys(_validate_fingerprint_for_short_id(fp) for fp in fingerprints))
+    assigned: dict[str, str] = {}
+    used_ids: set[str] = set()
+    for fingerprint in sorted(unique):
+        hex_len = _FINDING_SHORT_ID_DEFAULT_HEX_LEN
+        while hex_len <= len(fingerprint):
+            candidate = f"{FINDING_SHORT_ID_PREFIX}{fingerprint[:hex_len]}"
+            if candidate not in used_ids:
+                assigned[fingerprint] = candidate
+                used_ids.add(candidate)
+                break
+            hex_len += 1
+        else:
+            candidate = f"{FINDING_SHORT_ID_PREFIX}{fingerprint}"
+            assigned[fingerprint] = candidate
+            used_ids.add(candidate)
+    return {fp: assigned[_validate_fingerprint_for_short_id(fp)] for fp in fingerprints}
+
+
+def render_finding_markdown(finding: Finding, *, short_id: str) -> str:
+    """Render one finding as a markdown section that quotes ``short_id``."""
+    if finding.start_line is not None:
+        location = f"{finding.path}:{finding.start_line}"
+    else:
+        location = finding.path
+    lines = [
+        f"## [{short_id}] {location}",
+        "",
+        f"**{finding.severity}** · `{finding.tool}/{finding.rule_id}`",
+        "",
+        finding.message,
+        "",
+        f"`{short_id}` · fingerprint `{finding.fingerprint}`",
+    ]
+    return "\n".join(lines)
+
+
+def finding_json_record(finding: Finding, *, short_id: str) -> dict[str, Any]:
+    """Serialize a finding for structured JSON export with a stable short id."""
+    record = finding.model_dump()
+    record["short_id"] = short_id
+    return record
+
+
+def finding_agent_jsonl_record(finding: Finding, *, short_id: str) -> dict[str, Any]:
+    """Serialize a finding for agent JSONL events with a stable short id."""
+    return finding_json_record(finding, short_id=short_id)
+
+
+def render_finding_pr_comment(finding: Finding, *, short_id: str) -> str:
+    """Render a PR inline comment body that surfaces ``short_id`` for quoting."""
+    if finding.start_line is not None:
+        location = f"{finding.path}:{finding.start_line}"
+    else:
+        location = finding.path
+    return f"**{short_id}** ({location})\n\n{finding.message}"
+
+
 __all__ = [
+    "FINDING_SHORT_ID_PREFIX",
     "STRUCTURED_OUTPUT_REQUIRED_MSG",
     "Finding",
     "FindingValidationError",
     "FindingsPayload",
     "IntroducedByPr",
+    "finding_agent_jsonl_record",
+    "finding_json_record",
+    "finding_short_id",
     "findings_output_schema",
     "make_finding",
     "parse_findings_payload",
+    "render_finding_markdown",
+    "render_finding_pr_comment",
+    "resolve_finding_short_ids",
     "write_findings_json",
 ]
