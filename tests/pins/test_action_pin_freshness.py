@@ -18,7 +18,7 @@ import importlib.util
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
 
-from tests.ci.workflow_support import REPO_ROOT
+from tests.ci.workflow_support import REPO_ROOT, job, load_workflow
 
 if TYPE_CHECKING:
     import pytest
@@ -163,6 +163,29 @@ def test_the_live_workflow_pins_are_self_consistent() -> None:
     pins = module._pins_in(text)
     assert pins, "expected mergecraft.yml to pin the action by SHA"
     assert module._check_self_consistency(_WORKFLOW, pins) == []
+
+
+def test_the_pin_check_ci_step_does_not_shallow_fetch_the_default_branch() -> None:
+    """A depth-limited fetch silently defangs the staleness guard.
+
+    ``--depth=1`` marks ``origin/main`` as a shallow boundary, so
+    ``_check_staleness``'s ``rev-list --count <pin>..origin/main`` stops at the
+    graft and under-reports the product lag — measured on this repo, 5 commits
+    read as 1. The guard exists for the #450 case freshness cannot see (both
+    branches pinning the same stale SHA), so a silent under-count is the one
+    failure that makes it useless while still reporting OK. The ``static`` job
+    checks out ``fetch-depth: 0``, so a full fetch costs nothing here.
+    """
+    static = job(load_workflow("ci.yml"), "static")
+    steps = [s for s in static["steps"] if "pin freshness" in str(s.get("name", "")).lower()]
+    assert len(steps) == 1, f"expected one pin-freshness step, got {len(steps)}"
+    run = steps[0]["run"]
+
+    fetches = [line.strip() for line in run.splitlines() if line.strip().startswith("git fetch")]
+    assert fetches, f"pin-freshness step no longer fetches the default branch:\n{run}"
+    for line in fetches:
+        assert "--depth" not in line, f"depth-limited fetch defeats the staleness guard: {line}"
+        assert "--shallow-since" not in line, f"shallow fetch defeats the staleness guard: {line}"
 
 
 def _staleness_with(

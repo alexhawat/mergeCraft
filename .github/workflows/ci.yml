@@ -94,7 +94,13 @@ jobs:
       - name: Action pin freshness (advisory)
         if: matrix.python == '3.14'
         run: |
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main || true
+          # No --depth here. A depth-limited fetch marks origin/main as a
+          # shallow boundary, so rev-list stops at the graft and the staleness
+          # check under-reports the product lag (measured on this repo: 5
+          # commits -> 1), silently defanging the guard in the only job that
+          # runs it. The checkout above is fetch-depth: 0, so the objects are
+          # already local and a full fetch is near-free.
+          git fetch --no-tags origin main:refs/remotes/origin/main || true
           if out="$(make action-pin-check 2>&1)"; then
             echo "$out"
           else
