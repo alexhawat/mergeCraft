@@ -216,6 +216,59 @@ New module `src/mergecraft/evals/lens_capability.py`:
 | Wave greens | Remove xfail from |
 | --- | --- |
 | CE | all tests in `tests/evals/test_lens_routing_capability.py`, `tests/evals/test_lens_capability_json.py` |
+| CE | ✅ reconciled 2026-08-24 — 10/10 CE cases pass without `--runxfail` |
+
+## CF #473 — `mergecraft update` + commit in `--version` → CF RED
+
+Source: D7, issue #473. ``update`` shells to ``uv tool install --reinstall``;
+default ref ``main``; ``--branch`` accepts branch/tag/SHA. Version text shows
+``0.1.0a1 (abc1234)`` when commit known; omit parens when unknown. JSON ``commit``
+field is additive on ``version --format json``.
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| ``update --help`` documents uv reinstall | `tests/cli/test_update_version_cmd.py::test_update_help_documents_uv_reinstall` | functional |
+| Default update uses ``main`` ref | `…::test_update_default_shells_to_uv_tool_install_on_main` | E2E |
+| ``--branch`` accepts branch/tag/SHA | `…::test_update_branch_option_accepts_branch_tag_or_sha[*]` | E2E / edge |
+| Version helper with known commit | `…::test_format_version_display_includes_short_commit_when_known` | unit |
+| Version helper without commit | `…::test_format_version_display_omits_paren_commit_when_unknown` | unit |
+| ``--version`` with commit | `…::test_version_flag_includes_commit_when_known` | E2E |
+| ``version`` with commit | `…::test_version_command_includes_commit_when_known` | E2E |
+| ``--version`` without commit parens | `…::test_version_flag_omits_paren_commit_when_unknown` | edge |
+| JSON ``commit`` field additive | `…::test_version_json_includes_additive_commit_field` | functional |
+| JSON ``commit`` null when unknown | `…::test_version_json_commit_null_when_unknown` | edge |
+| ``uv`` failure propagates | `…::test_update_run_uses_check_true` | error |
+
+### Pinned public API (implementation wave CF)
+
+New module `src/mergecraft/cli/update_cmd.py`:
+
+- `DEFAULT_UPDATE_REF` — `"main"`
+- `MERGECRAFT_GIT_ORIGIN` — `"https://github.com/alexhawat/mergeCraft"`
+- `build_uv_install_argv(ref: str) -> list[str]` — argv for ``uv tool install --reinstall …``
+- `run(*, branch: str | None = None) -> None` — Typer command entry
+
+`src/mergecraft/__init__.py`:
+
+- `__commit__` — optional full build commit SHA (``None`` when unknown)
+
+Version helpers (module TBD — likely `mergecraft.version` or `cli/app.py`):
+
+- `format_version_display(version: str, commit: str | None) -> str`
+- `version_json_payload(version: str, commit: str | None) -> dict[str, Any]` — includes
+  ``schema_version``, ``version``, additive ``commit`` (short SHA or ``None``)
+
+CLI (`src/mergecraft/cli/app.py`):
+
+- `app.add_typer(update_cmd.app, name="update")` or `app.command("update")`
+- Root ``--version`` and ``version`` use ``format_version_display``
+- ``version --format json`` emits ``version_json_payload``
+
+## xfail reconciliation (CF)
+
+| Wave greens | Remove xfail from |
+| --- | --- |
+| CF | all tests in `tests/cli/test_update_version_cmd.py` |
 
 ## Verification commands
 
@@ -232,7 +285,8 @@ uv run pytest --collect-only -q \
   tests/review/test_durable_review_completed.py \
   tests/cli/test_durable_review_by_id_cmd.py \
   tests/evals/test_lens_routing_capability.py \
-  tests/evals/test_lens_capability_json.py
+  tests/evals/test_lens_capability_json.py \
+  tests/cli/test_update_version_cmd.py
 uv run pytest -q \
   tests/analyzers/test_finding_short_id.py \
   tests/findings/test_finding_short_id_outputs.py \
@@ -243,5 +297,6 @@ uv run pytest -q \
   tests/review/test_durable_review_completed.py \
   tests/cli/test_durable_review_by_id_cmd.py \
   tests/evals/test_lens_routing_capability.py \
-  tests/evals/test_lens_capability_json.py
+  tests/evals/test_lens_capability_json.py \
+  tests/cli/test_update_version_cmd.py
 ```
