@@ -16,21 +16,19 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL, load_audit_events
+from mergecraft.enterprise.audit import (
+    AUDIT_IDENTIFIER_FIELDS,
+    AUDIT_STORED_EVENT_FIELDS,
+    DEFAULT_AUDIT_REL,
+    load_audit_events,
+)
 from mergecraft.policy.lifecycle import write_policy_audit
 
 runner = CliRunner()
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
 
-_REQUIRED_EVENT_FIELDS = frozenset(
-    {
-        "timestamp",
-        "event_type",
-        "outcome",
-        "context",
-    }
-)
-_IDENTIFIER_FIELDS = frozenset({"run_id", "artifact_id"})
+_REQUIRED_EVENT_FIELDS = AUDIT_STORED_EVENT_FIELDS
+_IDENTIFIER_FIELDS = AUDIT_IDENTIFIER_FIELDS
 _SAMPLE_SECRET = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"
 
 

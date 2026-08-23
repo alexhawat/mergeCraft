@@ -19,6 +19,7 @@ from tests.agents.conftest import make_agent_run_context
 
 from mergecraft.agents import codex as codex_module
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+from mergecraft.agents.codex_stream import codex_stream_event_handler, parse_codex_payload
 from mergecraft.tracing.content import ContentCapture
 from mergecraft.tracing.sinks import MemorySink
 from mergecraft.tracing.tracer import Tracer
@@ -484,7 +485,7 @@ def test_parse_codex_stdout_skips_malformed_lines_and_reads_the_terminal_event()
 
 def test_parse_codex_payload_reports_cost_only_runs() -> None:
     """A payload with cost but no token counts still yields usage, not ``None``."""
-    output, usage = codex_module._parse_codex_payload({"message": "done", "total_cost_usd": 0.5})
+    output, usage = parse_codex_payload({"message": "done", "total_cost_usd": 0.5})
 
     assert output == "done"
     assert usage is not None
@@ -725,7 +726,7 @@ def _handler_with_tracer(
 ) -> tuple[Any, Any, MemorySink, StreamSpanAccumulator]:
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="session-431", run_id="run-431")
-    handler, close_all = codex_module._codex_stream_event_handler(
+    handler, close_all = codex_stream_event_handler(
         tracer=tracer,
         model_id="gpt-5.3-codex",
         capture_policy=capture_policy,
@@ -735,7 +736,7 @@ def _handler_with_tracer(
 
 def test_handler_without_a_tracer_still_accumulates_output_and_usage() -> None:
     """Tracing off must not cost the run its output: the accumulator is still fed."""
-    handler, close_all = codex_module._codex_stream_event_handler(
+    handler, close_all = codex_stream_event_handler(
         tracer=None,
         model_id="gpt-5.3-codex",
     )
@@ -762,7 +763,7 @@ def test_handler_without_a_tracer_still_accumulates_output_and_usage() -> None:
 
 def test_handler_reads_a_legacy_untyped_result_blob() -> None:
     """A pre-streaming single-blob payload (no ``type``) still yields output and usage."""
-    handler, close_all = codex_module._codex_stream_event_handler(
+    handler, close_all = codex_stream_event_handler(
         tracer=None,
         model_id="gpt-5.3-codex",
     )

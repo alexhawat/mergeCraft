@@ -3,6 +3,12 @@
 Extracted from ``server.py`` so that CLI commands (``doctor``, ``mcp serve``)
 can read the env var or probe a port without importing the FastAPI/uvicorn
 server stack.
+
+Uvicorn binds with ``port=0`` for OS assignment; reading the bound port back
+requires walking ``server.servers[*].sockets`` (version-sensitive — see
+:func:`_bound_port_from_uvicorn_server`). When that graph is absent, callers
+must rely on :func:`wait_for_bound_port` polling or an explicit
+``MERGECRAFT_MCP_PORT``.
 """
 
 from __future__ import annotations
@@ -64,9 +70,9 @@ def select_port() -> int:
     """Return a listen port for CLI preview before uvicorn starts.
 
     When ``MERGECRAFT_MCP_PORT`` is unset, briefly reserves an ephemeral port so
-    the CLI can print a concrete URL.     The MCP HTTP server itself binds with ``port=0`` via
-    :func:`resolve_uvicorn_bind_port` to avoid a TOCTOU gap between
-    release and uvicorn's bind.
+    the CLI can print a concrete URL. The MCP HTTP server itself binds with
+    ``port=0`` via :func:`resolve_uvicorn_bind_port` to avoid a TOCTOU gap
+    between release and uvicorn's bind.
     """
     resolved = resolve_uvicorn_bind_port()
     if resolved != 0:

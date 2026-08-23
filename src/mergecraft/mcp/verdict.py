@@ -190,11 +190,6 @@ def record_validated_terminal_submission(
     return recorded
 
 
-def blocks_approve_for_context(ctx: ToolContext) -> bool:
-    """Return whether the active run's graded state blocks an ``approve`` verdict."""
-    return _blocks_approve(validation_state_from_tool_context(ctx))
-
-
 def verdict_satisfies_attempt(
     submission: TerminalSubmission,
     *,
@@ -642,9 +637,9 @@ def submit_review_verdict_tool(ctx: ToolContext):
             submission_dict,
             findings=normalized_findings,
         )
-        from mergecraft.mcp.terminal_hooks import after_terminal_submission_recorded
+        from mergecraft.enterprise.audit import maybe_audit_blocking_terminal_submission
 
-        after_terminal_submission_recorded(ctx, recorded)
+        maybe_audit_blocking_terminal_submission(ctx, recorded)
         ctx.tool_state.review_phase = ReviewPhase.SUBMIT.value
         stamp_review_phase_on_active_span(ReviewPhase.SUBMIT)
         return {
@@ -716,7 +711,6 @@ __all__ = [
     "SubmitReviewVerdictParams",
     "ValidationState",
     "VerdictDiagnostic",
-    "blocks_approve_for_context",
     "build_validation_state",
     "ensure_review_scope_for_terminal",
     "record_validated_terminal_submission",

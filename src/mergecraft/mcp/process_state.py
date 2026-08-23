@@ -2,15 +2,6 @@
 
 from __future__ import annotations
 
-from mergecraft.mcp.shared import clear_selected_mode_binding
-from mergecraft.mcp.shell import reset_detection_cache
+from mergecraft.mcp.shared import reset_mcp_process_state
 
-
-def reset_mcp_process_state() -> None:
-    """Reset module-level MCP caches so parallel tests do not share state.
-
-    Called from ``tests/mcp/conftest.py`` (autouse) and available for explicit
-    resets when a test starts an MCP HTTP server.
-    """
-    reset_detection_cache()
-    clear_selected_mode_binding()
+__all__ = ["reset_mcp_process_state"]

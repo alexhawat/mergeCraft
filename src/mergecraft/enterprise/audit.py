@@ -13,13 +13,20 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from mergecraft.analyzers.redact import redact_secrets
 
+if TYPE_CHECKING:
+    from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.tool_state import TerminalSubmission
+
 __all__ = [
+    "AUDIT_IDENTIFIER_FIELDS",
+    "AUDIT_REQUIRED_EVENT_FIELDS",
+    "AUDIT_STORED_EVENT_FIELDS",
     "DEFAULT_AUDIT_REL",
     "append_audit_event",
     "explain_blocking_decision",
@@ -32,8 +39,12 @@ __all__ = [
 
 DEFAULT_AUDIT_REL: Path = Path(".mergecraft") / "audit.jsonl"
 
-_REQUIRED_EVENT_FIELDS = frozenset({"event_type", "outcome", "context"})
-_IDENTIFIER_FIELDS = frozenset({"run_id", "artifact_id"})
+AUDIT_REQUIRED_EVENT_FIELDS = frozenset({"event_type", "outcome", "context"})
+AUDIT_IDENTIFIER_FIELDS = frozenset({"run_id", "artifact_id"})
+AUDIT_STORED_EVENT_FIELDS = AUDIT_REQUIRED_EVENT_FIELDS | frozenset({"timestamp"})
+
+_REQUIRED_EVENT_FIELDS = AUDIT_REQUIRED_EVENT_FIELDS
+_IDENTIFIER_FIELDS = AUDIT_IDENTIFIER_FIELDS
 
 
 def _utc_now_iso() -> str:
@@ -143,8 +154,8 @@ def record_blocking_decision(
 
 
 def maybe_audit_blocking_terminal_submission(
-    ctx: Any,
-    recorded: Any,
+    ctx: ToolContext,
+    recorded: TerminalSubmission,
 ) -> None:
     """Record enterprise audit for every terminal non-approve verdict (#417).
 

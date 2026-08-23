@@ -27,9 +27,9 @@ def replay_blocks(blocks: list[ResponseBlock], *, ctx: ToolContext) -> AgentResu
             break
         try:
             recorded = record_validated_terminal_submission(ctx, args)
-            from mergecraft.mcp.terminal_hooks import after_terminal_submission_recorded
+            from mergecraft.enterprise.audit import maybe_audit_blocking_terminal_submission
 
-            after_terminal_submission_recorded(ctx, recorded)
+            maybe_audit_blocking_terminal_submission(ctx, recorded)
         except ValueError as exc:
             validation_error = str(exc)
             break

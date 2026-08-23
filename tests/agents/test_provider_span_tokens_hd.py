@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from mergecraft.agents import codex as codex_mod
 from mergecraft.agents import gemini as gemini_mod
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+from mergecraft.agents.codex_stream import codex_stream_event_handler
 from mergecraft.tracing.sinks import MemorySink
 from mergecraft.tracing.tracer import Tracer
 
@@ -35,7 +35,7 @@ def _gemini_spans(sink: MemorySink, kind: str) -> list[Any]:
 def _codex_handler() -> tuple[Any, Any, MemorySink, StreamSpanAccumulator]:
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="hd-codex-session", run_id="hd-codex-run")
-    handler, close_all = codex_mod._codex_stream_event_handler(
+    handler, close_all = codex_stream_event_handler(
         tracer=tracer,
         model_id="gpt-5.3-codex",
     )

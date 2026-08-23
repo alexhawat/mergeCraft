@@ -152,18 +152,6 @@ concurrency:
   group: mergecraft-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# Shared job `if:` guards — YAML anchors referenced by review + approval-gate (#433).
-x-mergecraft-guards:
-  review: &mergecraft_review_if >-
-    always() &&
-    (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
-    github.event.pull_request.user.login != 'dependabot[bot]'
-  approval_gate: &mergecraft_approval_gate_if >-
-    always() &&
-    needs.review.result != 'skipped' &&
-    (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
-    github.event.pull_request.user.login != 'dependabot[bot]'
-
 jobs:
   # Hold the review until mergeCraft's own CI has finished on the PR head SHA, so the
   # reviewer can read real lint/typecheck/test outcomes instead of guessing.
@@ -300,7 +288,10 @@ jobs:
     # Gate on the PR author, not github.actor: a maintainer rebase or an
     # `@dependabot recreate` makes the human the actor on the resulting
     # synchronize, while user.login stays dependabot[bot].
-    if: *mergecraft_review_if
+    if: >-
+      always() &&
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -633,7 +624,11 @@ jobs:
     # Same draft/dispatch/dependabot guard as the attempts job. `always()` keeps
     # the required check reporting when the attempts job errors on a runner fault;
     # a skipped attempts job still skips the gate.
-    if: *mergecraft_approval_gate_if
+    if: >-
+      always() &&
+      needs.review.result != 'skipped' &&
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
