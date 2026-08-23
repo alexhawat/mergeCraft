@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mergecraft.cli.errors import cli_bail
-from mergecraft.evals.store import PERMANENT_TEST_DIR_NAME, Case, ReplayDiff
+from mergecraft.evals import PERMANENT_TEST_DIR_NAME
+
+if TYPE_CHECKING:
+    from mergecraft.evals.store import Case, ReplayDiff
 
 
 def default_permanent_dir() -> Path:

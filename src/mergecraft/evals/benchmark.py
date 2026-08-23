@@ -26,6 +26,7 @@ from mergecraft.agents.verifier import (
     judge_pin,
     pinned_judge_model,
 )
+from mergecraft.evals.convergence import ConvergenceCaseResult, ConvergenceMetrics, ConvergenceRound
 from mergecraft.evals.scoring import DEFAULT_LINE_SLACK, AggregateScoreReport
 from mergecraft.evals.store import (
     CASE_STATUS_BLOCKED,
@@ -38,7 +39,7 @@ from mergecraft.evals.store import (
 )
 from mergecraft.modes import modes
 
-RESULT_SET_SCHEMA_VERSION: Final[str] = "1.3.0"
+RESULT_SET_SCHEMA_VERSION: Final[str] = "1.4.0"
 DEFAULT_RESULTS_DIR: Final[Path] = Path("evals/results")
 
 # Providers the benchmark names by default (W9.0: ≥2 providers).
@@ -279,6 +280,10 @@ class BenchmarkResultSet(BaseModel):
     # `skipped_reason` for which. Both optional (default `None`) so a
     # pre-B3 committed result set with neither key still validates (D3).
     detection: DetectionMetrics | None = None
+    # RC6: multi-round first-pass recall and leakage — optional until
+    # `mergecraft eval convergence` runs (W4). Older result sets without
+    # this key still validate (D3).
+    convergence: ConvergenceMetrics | None = None
     skipped_reason: str | None = None
 
     @property
@@ -637,7 +642,12 @@ def write_result_set(
         out_name = filename
     else:
         suffix = uuid.uuid4().hex[:8]
-        provider_tag = f"-{result.detection.provider}" if result.detection is not None else ""
+        if result.detection is not None:
+            provider_tag = f"-{result.detection.provider}"
+        elif result.convergence is not None:
+            provider_tag = "-convergence"
+        else:
+            provider_tag = ""
         out_name = f"structural-replay{provider_tag}-{stamp}-{suffix}.json"
     path = results_dir / out_name
     path.write_text(
@@ -670,6 +680,9 @@ __all__ = [
     "BenchmarkMetrics",
     "BenchmarkResultSet",
     "CaseReplayRow",
+    "ConvergenceCaseResult",
+    "ConvergenceMetrics",
+    "ConvergenceRound",
     "CorpusClassRollup",
     "DetectionCase",
     "DetectionCaseResult",

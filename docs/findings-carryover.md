@@ -62,6 +62,31 @@ on that pull request, not lost.
 Sweeping the same pull request twice therefore files nothing the second time,
 which is what makes it safe on a trigger that can fire more than once.
 
+## Open-PR finding ledger
+
+While a pull request is open, mergeCraft also keeps a **finding ledger** in the
+sticky progress comment (`## mergeCraft progress`). Each row is an HTML marker:
+
+`<!-- mergecraft-ledger:v1:<fingerprint>:<state> -->`
+
+The fingerprint is the same review-taxonomy hash stamped on inline comments.
+States include `open`, `deferred`, `unpublished`, and `withdrawn` — findings
+that overflow the inline budget, miss the verification budget, or are dropped by
+the verifier before publication.
+
+The ledger survives ephemeral Action checkouts (GitHub-only persistence). Read
+it with:
+
+```bash
+mergecraft findings ledger --pr 161 --output-format json
+```
+
+**No double-filing (D5).** The ledger never creates GitHub issues. Post-merge
+carryover (`findings carryover`) files issues for unresolved **published**
+threads only. Fingerprints already recorded in the open-PR ledger are skipped by
+carryover while the pull request is open, so deferred findings are disclosed on
+the PR without spawning duplicate issues.
+
 The key is scoped to the pull request on purpose. If the same finding is
 reintroduced by a *later* pull request, that is a regression and deserves its
 own issue; keying on the fingerprint alone would let a long-closed issue

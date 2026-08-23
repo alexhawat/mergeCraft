@@ -24,7 +24,7 @@ def validate_agent_registry(*, repo_root: Path | None = None) -> None:
         raise SystemExit(msg) from exc
 
     # Defaults-only pass — every core role must resolve.
-    for role in ("orchestrator", "reviewer", "verifier", "judge", "classifier"):
+    for role in ("orchestrator", "reviewer", "verifier", "recall", "judge", "classifier"):
         binding = registry.resolve_role(role)
         if not binding.model_chain:
             msg = f"default binding for {role!r} has empty model_chain"

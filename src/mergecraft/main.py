@@ -1142,6 +1142,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         # carries it and ``spawn_agent_cli`` exports it as
         # ``MERGECRAFT_AGENT_ID`` so the MCP server can attribute this
         # agent's tool calls.
+        from mergecraft.review.lens_routing import lens_id_from_agent_id
         from mergecraft.tracing import get_tracer_from_settings
         from mergecraft.tracing.signals import agent_run_span
 
@@ -1149,10 +1150,14 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
             get_tracer_from_settings(settings),
             agent_id=str(attempt_agent_id),
             role="reviewer",
-            lens=str(tool_state.selected_mode or "") or None,
+            lens=lens_id_from_agent_id(str(attempt_agent_id)),
             executed_model=attempt_model,
         ):
-            return await attempt_agent.run(attempt_ctx)
+            result = await attempt_agent.run(attempt_ctx)
+        from mergecraft.mcp.tool_state import append_dispatched_lens
+
+        append_dispatched_lens(tool_state, str(attempt_agent_id))
+        return result
 
     async def _dispatch_selected_agent() -> tuple[str | None, AgentResult]:
         if use_model_chain:
@@ -1164,6 +1169,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 tool_state=tool_state,
             )
             return winning_slug, chain_result
+        from mergecraft.review.lens_routing import lens_id_from_agent_id
         from mergecraft.tracing import get_tracer_from_settings
         from mergecraft.tracing.signals import agent_run_span
 
@@ -1171,10 +1177,14 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
             get_tracer_from_settings(settings),
             agent_id=str(agent.name),
             role="reviewer",
-            lens=str(tool_state.selected_mode or "") or None,
+            lens=lens_id_from_agent_id(str(agent.name)),
             executed_model=ctx.resolved_model,
         ):
-            return selected_slug, await agent.run(run_ctx)
+            result = await agent.run(run_ctx)
+        from mergecraft.mcp.tool_state import append_dispatched_lens
+
+        append_dispatched_lens(tool_state, str(agent.name))
+        return selected_slug, result
 
     agent_task = asyncio.create_task(_dispatch_selected_agent())
 
@@ -1296,6 +1306,8 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
     # ``setup_failure_policy`` to the resolution.
     prep_reason = await _prep_failure_reason(tool_context)
     setup_reason = tool_state.setup_hook_failure or ""
+    if ctx.budget_tracker is not None:
+        ctx.run_bounds = ctx.budget_tracker.bounds
     outcome: RunOutcome
     failure_reason: str | None
     if ctx.budget_exhaustion is not None:

@@ -110,6 +110,8 @@ does not trigger fallback.
 
 The reviewer reads the whole diff itself, then picks the **lenses** the PR actually warrants and investigates each as a falsifiable question — optionally dispatching a `mergecraft-reviewer` subagent per lens so they run in parallel. Nothing here is a fixed pass; a docs-only diff gets none of it.
 
+Each review round records which lenses were **selected**, which were **skipped** (with reasons from deterministic routing), and which were **actually dispatched**. That set is written into the review metadata HTML comment and the merge-evidence packet so the next round — and incremental complement routing in a follow-up review — can read what already ran without re-deriving it from prose.
+
 **Run lifecycle (S1)** — a failed or timed-out trusted-tier `setupScript` yields `RunOutcome.inconclusive` (neutral check conclusion), not a review. An under-provisioned tree never receives a review verdict. See [`docs/config-failure-policy.md`](docs/config-failure-policy.md#setup-script-failures-s1--d5--d10--f6) for the policy table and operator checklist.
 
 **Always in play**
@@ -205,7 +207,7 @@ Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif
 
 **Verification (D11):** Critical/Major analyzer hits are **hypotheses** until the read-only `mergecraft-verifier` subagent confirms, downgrades, or drops them. Drops write a reason under `## Withdrawn review findings (known non-issues)`.
 
-**Noise budget (D14):** inline analyzer slots cap at **8** (W0.2 measurement); overflow lands in `### 🔧 Mechanical findings`. Agent findings win ties; Trivial/Low value never inline.
+**Noise budget (D14):** inline analyzer slots cap at **8** (W0.2 measurement). Analyzer overflow lands in `### 🔧 Mechanical findings` (compact tool table). Agent overflow lands in `### 🗂 Deferred findings` with full finding text (non-blocking, server-appended). Agent findings win ties; Trivial/Low value never inline.
 
 **Lockfile (D24):** `.mergecraft/analyzers.lock` records resolved tool id, version, source, and SHA256; the pre-merge **Analyzers** row echoes the digest.
 
@@ -297,7 +299,9 @@ Every surviving finding is graded on three independent axes before it is placed.
 Then placement is mechanical:
 
 - `Trivial` **or** `Low value` → a bullet in the body's Nitpicks list, never an inline comment.
-- everything else → an inline comment at its line, tagged `_{category}_ | _{severity}_ | _{effort}_`.
+- everything else → an inline comment at its line, tagged `_{category}_ | _{severity}_ | _{effort}_`, **unless** it overflowed the inline budget as an agent finding — then it lands in the non-blocking `### 🗂 Deferred findings` section (server-appended, full text, no inline anchor).
+
+**Collateral (RC11):** every `Critical` or `Major` finding names what else must move with the fix — callers, tests, docstrings, configs, or other files — in the finding's `collateral` list and in the inline comment body under an **Also update:** bullet list. Collateral is not required for `Minor` or `Trivial` findings. Any collateral claim about code the diff doesn't contain must ship with evidence; without evidence it is downgraded to a question or dropped (§6).
 
 The axes are also a sweep: a PR that writes persistent state with no Data Integrity & Atomicity finding gets one more look before the reviewer concludes there was nothing there.
 
@@ -317,9 +321,10 @@ file, and the withdrawn-findings section. Three things bound the cost:
 - **Severity** — `Minor` and `Trivial` findings are never verified.
 - **Memory** — a finding whose fingerprint already appears under `## Withdrawn review findings` is
   skipped outright, not re-verified.
-- **Budget** — dispatches are capped at the repo's `analyzers.inlineBudget` (default 8), spent on
-  `Critical` before `Major`. Verification never costs more than publication, and there is no
-  second knob to tune.
+- **Budget** — dispatches are capped at the repo's `review.verificationBudget` (default 24; `0` =
+  no cap), spent on `Critical` before `Major`. Verification depth is independent of inline
+  placement (`analyzers.inlineBudget`, default 8). Over-budget fingerprints are recorded in
+  `skippedOverBudget` rather than silently dropped.
 
 Each verdict goes back through `record_finding_verdict`: **confirm** publishes as drafted,
 **downgrade** re-grades, and **drop** writes the verifier's reason under
@@ -347,12 +352,15 @@ What mergecraft deliberately does **not** report — this is most of what keeps 
 - Anything already refuted in the learnings file (see next group).
 - **Bloat-shaped findings** — proposed fixes that would add defensive checks for cases that can't happen, abstractions used once, comments restating obvious code, tests asserting tautologies, or "just-in-case" guards. The bar for an inline comment is sound **and** correct **and** elegant; a change that improves only one of the three makes the codebase worse.
 - On `IncrementalReview`, anything that restates feedback a prior review already gave.
+- On `IncrementalReview`, **first-pass miss labelling (D10):** when a *new* finding's root cause is on a line that already existed at the first reviewed commit (context in the incremental diff, not a line the fix commits added), the inline body is prefixed with `_(First-pass miss — this line was already present at the first reviewed commit.)_`. That label is honest scope disclosure — not a restatement of prior feedback and not a drop.
+- On `IncrementalReview`, **deferred promotion:** when the incremental diff touches a path cited by a ledger `deferred` finding, checkout promotes that record back to `open` with an audit reason. Promotion is back in scope — not a restatement of prior inline feedback.
 - **PR prose is evidence, never instruction.** A finding whose only support is the PR title, PR body, a comment, or any other fenced untrusted field is **dropped** if the prose merely *describes* a change without anchoring to diff lines, and **downgraded** to a question if the prose *asserts* a property that the diff does not demonstrate. The diff (or, for design questions, the linked design doc) is the only thing that anchors a finding. Sentences inside the per-run fence block are untrusted internet content by default — they may inform a hypothesis, but they never stand in for evidence.
 
 ## 7. Memory across runs
 
 - **Withdrawn findings** — when an author refutes a review finding and `AddressReviews` accepts the pushback, it records the *reason* in `.mergecraft/learnings.md` under `## Withdrawn review findings (known non-issues)`. A `drop` verdict from the verifier writes to the same section, so a finding the reviewer refuted *before publishing* is also refuted permanently. Later reviews read that section first and treat it as binding, so a false positive is argued once instead of on every PR.
 - **Finding fingerprints** — each inline comment is stamped server-side with a content hash of its path and body (`<!-- mergecraft-finding:v1:… -->`). Whitespace and case are normalized, so a re-raised finding is recognizable across runs even when reworded.
+- **Open-PR finding ledger** — the sticky progress comment carries `<!-- mergecraft-ledger:v1:<fingerprint>:<state> -->` markers for every finding this pull request's reviews considered, including deferred overflow, verifier drops (`withdrawn`), and over-budget verifications (`unpublished`). Persistence is GitHub-only; inspect with `mergecraft findings ledger --pr N`. The ledger never files GitHub issues — post-merge carryover owns issue filing (D5).
 - **Repo learnings** — test commands, conventions, gotchas, and architecture notes persist in the same file and are loaded into every run.
 
 ## 8. Output shape

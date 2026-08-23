@@ -123,17 +123,17 @@ async def test_minor_agent_findings_do_not_earn_a_dispatch(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_budget_caps_dispatches_at_the_repo_inline_budget(tmp_path: Path) -> None:
-    """Twelve Critical findings, an inline budget of 8 — eight go, four do not."""
-    findings = [_finding(f"finding number {index}") for index in range(12)]
+async def test_budget_caps_dispatches_at_the_repo_verification_budget(tmp_path: Path) -> None:
+    """Twenty-five Critical findings, default verification budget of 24 — twenty-four go, one does not."""
+    findings = [_finding(f"finding number {index}") for index in range(25)]
     payload = await _plan(_ctx(tmp_path), findings)
 
-    assert payload["budget"] == 8
-    assert len(payload["dispatch"]) == 8
-    assert len(payload["skippedOverBudget"]) == 4
+    assert payload["budget"] == 24
+    assert len(payload["dispatch"]) == 24
+    assert len(payload["skippedOverBudget"]) == 1
     dispatched = {item["fingerprint"] for item in payload["dispatch"]}
     assert dispatched.isdisjoint(payload["skippedOverBudget"])
-    assert len(dispatched | set(payload["skippedOverBudget"])) == 12
+    assert len(dispatched | set(payload["skippedOverBudget"])) == 25
 
 
 @pytest.mark.asyncio

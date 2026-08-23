@@ -13,6 +13,7 @@ from mergecraft.review.lens_routing import (
     LensRoutingEntry,
     load_routing_registry,
     route_lenses,
+    route_lenses_complement,
 )
 from mergecraft.review.snapshot import (
     ReviewSnapshot,
@@ -32,4 +33,5 @@ __all__ = [
     "canonical_review_snapshot",
     "load_routing_registry",
     "route_lenses",
+    "route_lenses_complement",
 ]

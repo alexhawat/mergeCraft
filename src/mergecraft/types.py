@@ -18,6 +18,7 @@ MERGECRAFT_VERIFIER_MCP_NAME = "mergecraft-verifier"
 # Subagent name used in mode prompts (agents/reviewer.ts).
 REVIEWER_AGENT_NAME = "mergecraft-reviewer"
 VERIFIER_AGENT_NAME = "mergecraft-verifier"
+RECALL_AGENT_NAME = "mergecraft-recall"
 # Mode name checked outside modes.py (incremental-scope artifacts, C4).
 INCREMENTAL_REVIEW_MODE = "IncrementalReview"
 

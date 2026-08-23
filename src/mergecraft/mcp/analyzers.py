@@ -26,6 +26,8 @@ def _resolve_tier(ctx: ToolContext) -> str:
 
 
 def _store_run_state(ctx: ToolContext, state: AnalyzerRunState) -> None:
+    from mergecraft.findings.ledger import record_deferred_from_analyzer_run
+
     session_ids = set(ctx.tool_state.verified_ids)
     prior = ctx.tool_state.analyzer_run
     if prior is not None:
@@ -33,6 +35,7 @@ def _store_run_state(ctx: ToolContext, state: AnalyzerRunState) -> None:
     state.verified_ids = set(state.verified_ids) | session_ids
     ctx.tool_state.analyzer_run = state
     ctx.tool_state.verified_ids = session_ids | set(state.verified_ids)
+    record_deferred_from_analyzer_run(ctx.tool_state, state)
 
 
 def run_analyzers_tool(ctx: ToolContext):
@@ -110,6 +113,8 @@ def run_analyzers_tool(ctx: ToolContext):
             payload["reason"] = run_state.reason
         if run_state.mechanical_section:
             payload["mechanicalSection"] = run_state.mechanical_section
+        if run_state.deferred_section:
+            payload["deferredSection"] = run_state.deferred_section
         logger.info(
             "analyzers: ran={} tools={} findings={}",
             run_state.ran,
@@ -195,6 +200,7 @@ def analyzer_findings_tool(ctx: ToolContext):
             "findings": findings,
             "inline": inline,
             "mechanicalSection": run_state.mechanical_section,
+            "deferredSection": run_state.deferred_section,
             "preMergeSummary": run_state.pre_merge_summary,
             "lockfileDigest": run_state.lockfile_digest,
         }

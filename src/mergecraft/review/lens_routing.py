@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from mergecraft.agents.registry import Registry, load_registry
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from mergecraft.agents.registry import AgentBinding
@@ -146,10 +147,67 @@ def route_lenses(
     )
 
 
+def route_lenses_complement(
+    classification: ChangeClassification,
+    *,
+    registry: Registry,
+    prior_dispatched_lens_ids: Sequence[str],
+    dispatch_budget: int,
+) -> LensRoutingDecision:
+    """Bias routing toward lenses that did not run in the prior round (RC9)."""
+    baseline = route_lenses(classification, registry=registry)
+    if classification.is_trivial or dispatch_budget <= 0:
+        return baseline
+
+    prior = frozenset(prior_dispatched_lens_ids)
+    complement = [lid for lid in baseline.selected_lens_ids if lid not in prior]
+    repeat = [lid for lid in baseline.selected_lens_ids if lid in prior]
+
+    selected: list[str] = []
+    for lens_id in complement:
+        if len(selected) >= dispatch_budget:
+            break
+        selected.append(lens_id)
+
+    if not complement:
+        for lens_id in repeat:
+            if len(selected) >= dispatch_budget:
+                break
+            selected.append(lens_id)
+
+    selected_set = frozenset(selected)
+    entries = tuple(
+        LensRoutingEntry(
+            lens_id=entry.lens_id,
+            selected=entry.lens_id in selected_set,
+            reason=(
+                f"complement routing: {entry.reason}"
+                if entry.lens_id in selected_set and entry.lens_id in complement
+                else entry.reason
+            ),
+        )
+        for entry in baseline.entries
+    )
+    return LensRoutingDecision(
+        selected_lens_ids=tuple(selected),
+        entries=entries,
+    )
+
+
+def lens_id_from_agent_id(agent_id: str) -> str | None:
+    """Return the lens id when ``agent_id`` is a lens-scoped reviewer binding."""
+    prefix = "lens-"
+    if agent_id.startswith(prefix):
+        return agent_id[len(prefix) :]
+    return None
+
+
 __all__ = [
     "LENS_ROUTING_STEP4_NOTE",
     "LensRoutingDecision",
     "LensRoutingEntry",
+    "lens_id_from_agent_id",
     "load_routing_registry",
     "route_lenses",
+    "route_lenses_complement",
 ]

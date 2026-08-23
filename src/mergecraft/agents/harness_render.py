@@ -19,6 +19,7 @@ from mergecraft.agents.registry import (
     Registry,
     resolve_agent_model,
     resolve_prompt_text,
+    subagent_limits_for_round,
 )
 from mergecraft.agents.shared import AgentResult, AgentRunContext
 from mergecraft.agents.verifier import (
@@ -32,7 +33,9 @@ from mergecraft.types import format_mcp_tool_ref
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.tool_state import ToolState
 
 HarnessName = Literal["claude", "opencode", "codex", "gemini", "cursor"]
 
@@ -45,6 +48,11 @@ _VERIFIER_DESCRIPTION = (
     "Read-only verification subagent for Critical/Major analyzer, CI and "
     "agent-authored findings. Confirms, downgrades, or drops before "
     f"publication against rubric v{VERIFIER_RUBRIC_VERSION}."
+)
+
+_RECALL_DESCRIPTION = (
+    "Read-only recall subagent. Receives the diff and draft findings; may only "
+    "return novel findings absent from the draft list. Output is deferred-only."
 )
 
 _CLASSIFIER_DESCRIPTION = (
@@ -101,25 +109,56 @@ def _settings_for_ctx(ctx: AgentRunContext | ToolContext) -> Any:
 def _resolve_selected_bindings(
     registry: Registry,
     selected: Sequence[str],
+    *,
+    settings: RepoSettings | None = None,
+    tool_state: ToolState | None = None,
 ) -> list[AgentBinding]:
     bindings: list[AgentBinding] = []
     role_values = {role.value for role in AgentRole}
     by_id = {binding.agent_id: binding for binding in registry.all_bindings()}
     for key in selected:
+        resolved: AgentBinding
         if key in role_values:
-            bindings.append(registry.resolve_role(key))
-            continue
-        if key in by_id:
-            bindings.append(by_id[key])
-            continue
-        for binding in registry.all_bindings():
-            if binding.agent_id == key:
-                bindings.append(binding)
-                break
+            resolved = registry.resolve_role(key)
+        elif key in by_id:
+            resolved = by_id[key]
         else:
-            msg = f"no registry binding for selected agent {key!r}"
-            raise KeyError(msg)
+            for candidate in registry.all_bindings():
+                if candidate.agent_id == key:
+                    resolved = candidate
+                    break
+            else:
+                msg = f"no registry binding for selected agent {key!r}"
+                raise KeyError(msg)
+        bindings.append(
+            _binding_with_round_limits(
+                resolved,
+                settings=settings,
+                tool_state=tool_state,
+            )
+        )
     return bindings
+
+
+def _binding_with_round_limits(
+    binding: AgentBinding,
+    *,
+    settings: RepoSettings | None,
+    tool_state: ToolState | None,
+) -> AgentBinding:
+    """Apply RC12 round-scaled budget (not ``timeout_s``) to reviewer, verifier, and recall."""
+    if settings is None or tool_state is None:
+        return binding
+    if binding.role not in (AgentRole.reviewer, AgentRole.verifier, AgentRole.recall):
+        return binding
+    if binding.role is AgentRole.recall and not settings.review.recall_pass:
+        return binding
+    limits = subagent_limits_for_round(
+        binding,
+        settings=settings,
+        tool_state=tool_state,
+    )
+    return binding.model_copy(update={"budget": limits.budget, "timeout_s": limits.timeout_s})
 
 
 def _denied_tool_names(
@@ -158,7 +197,7 @@ def _harness_dispatched_model(binding: AgentBinding, settings: Any) -> str:
 def _claude_harness_model(binding: AgentBinding, settings: Any) -> str:
     if binding.role is AgentRole.verifier:
         return pinned_judge_model("claude") or "claude-sonnet-5"
-    if binding.role is AgentRole.reviewer:
+    if binding.role in (AgentRole.reviewer, AgentRole.recall):
         return "claude-sonnet-5"
     return _strip_provider_prefix(_harness_dispatched_model(binding, settings))
 
@@ -169,6 +208,8 @@ def _role_description(binding: AgentBinding) -> str:
             return _REVIEWER_DESCRIPTION
         case AgentRole.verifier | AgentRole.judge:
             return _VERIFIER_DESCRIPTION
+        case AgentRole.recall:
+            return _RECALL_DESCRIPTION
         case AgentRole.classifier:
             return _CLASSIFIER_DESCRIPTION
         case AgentRole.orchestrator:
@@ -330,8 +371,14 @@ def render_agents(
 ) -> HarnessRenderResult:
     """Project ``selected`` registry bindings into ``harness`` config (D2)."""
     harness_name: HarnessName = harness  # type: ignore[assignment]  # — harness is HarnessName | str; callers pass a valid HarnessName literal
-    bindings = _resolve_selected_bindings(registry, selected)
     settings = _settings_for_ctx(ctx)
+    tool_state = getattr(ctx, "tool_state", None)
+    bindings = _resolve_selected_bindings(
+        registry,
+        selected,
+        settings=settings,
+        tool_state=tool_state,
+    )
 
     if harness_name == "claude":
         return _render_claude(bindings, ctx=ctx, settings=settings)
@@ -344,11 +391,19 @@ def render_agents(
     raise ValueError(msg)
 
 
-def default_subagent_selection(registry: Registry) -> tuple[str, str]:
-    """Default routed roster before AP4 lens routing — reviewer + verifier."""
+def default_subagent_selection(
+    registry: Registry,
+    *,
+    recall_pass: bool = False,
+) -> tuple[str, ...]:
+    """Default routed roster before AP4 lens routing — reviewer + verifier (+ recall)."""
     reviewer = registry.resolve_role(AgentRole.reviewer)
     verifier = registry.resolve_role(AgentRole.verifier)
-    return (reviewer.agent_id, verifier.agent_id)
+    roster: list[str] = [reviewer.agent_id, verifier.agent_id]
+    if recall_pass:
+        recall = registry.resolve_role(AgentRole.recall)
+        roster.append(recall.agent_id)
+    return tuple(roster)
 
 
 def render_for_run(
@@ -363,7 +418,11 @@ def render_for_run(
     root = _repo_root_from_ctx(ctx) or Path(ctx.tmpdir)
     settings = load_repo_settings(root=root)
     registry = load_registry(settings=settings, repo_root=root)
-    roster = tuple(selected) if selected is not None else default_subagent_selection(registry)
+    roster = (
+        tuple(selected)
+        if selected is not None
+        else default_subagent_selection(registry, recall_pass=settings.review.recall_pass)
+    )
     return render_agents(registry, selected=roster, harness=harness, ctx=ctx)
 
 

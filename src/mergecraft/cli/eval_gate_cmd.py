@@ -12,13 +12,13 @@ from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.eval_cli_output import default_permanent_dir
 from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.evals import permanent_test_path
 from mergecraft.evals.adversarial_corpora import eval_adversarial_gate
 from mergecraft.evals.gate import DEFAULT_GATE_TOLERANCE, eval_gate, load_result_set
 from mergecraft.evals.store import (
     CASE_FILE_SUFFIX,
     DEFAULT_BANK_DIR,
     load_case,
-    permanent_test_path,
 )
 
 

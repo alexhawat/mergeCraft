@@ -431,7 +431,7 @@ def _blocks_approve(state: ValidationState) -> bool:
     return False
 
 
-def _withdrawn_fingerprints_for_state(tool_state: ToolState, *, tmpdir: str | None) -> set[str]:
+def withdrawn_fingerprints_for_state(tool_state: ToolState, *, tmpdir: str | None) -> set[str]:
     """Collect the fingerprints a verifier ``drop`` retired.
 
     ``ToolState.withdrawn_fingerprints`` is authoritative **within a run** —
@@ -476,7 +476,7 @@ def validation_state_from_tool_state(
         analyzer_findings=analyzer_run.findings if analyzer_run is not None else (),
         verified_fingerprints=verified,
         static_checks=tool_state.static_checks,
-        withdrawn_fingerprints=_withdrawn_fingerprints_for_state(tool_state, tmpdir=tmpdir),
+        withdrawn_fingerprints=withdrawn_fingerprints_for_state(tool_state, tmpdir=tmpdir),
     )
 
 
@@ -720,4 +720,5 @@ __all__ = [
     "validation_state_from_tool_context",
     "validation_state_from_tool_state",
     "verdict_satisfies_attempt",
+    "withdrawn_fingerprints_for_state",
 ]

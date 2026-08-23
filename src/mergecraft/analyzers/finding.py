@@ -50,6 +50,8 @@ class Finding(BaseModel):
     introduced_by_pr: IntroducedByPr
     source: FindingSource
     cluster_id: str | None
+    lens: str | None = None
+    collateral: list[str] = Field(default_factory=list)
 
     def __init__(self, **data: object) -> None:
         try:
@@ -100,6 +102,8 @@ def make_finding(
     introduced_by_pr: IntroducedByPr = "unknown",
     cluster_id: str | None = None,
     fingerprint: str | None = None,
+    lens: str | None = None,
+    collateral: list[str] | None = None,
 ) -> Finding:
     """Construct a finding with taxonomy validation and fingerprint stamping."""
     if end_line is None:
@@ -124,6 +128,8 @@ def make_finding(
             introduced_by_pr=introduced_by_pr,
             source=source,
             cluster_id=cluster_id,
+            lens=lens,
+            collateral=collateral or [],
         )
     except ValueError as exc:
         raise FindingValidationError(str(exc)) from exc

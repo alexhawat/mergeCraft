@@ -72,7 +72,7 @@ def test_overflow_agent_findings_get_distinct_fingerprints() -> None:
     placement = budget.place_findings(
         [], inline_budget=INLINE_BUDGET, agent_findings=agent_findings
     )
-    overflow = [f for f in placement.mechanical if f.source == "agent"]
+    overflow = [f for f in placement.deferred if f.source == "agent"]
     assert len(overflow) == 3
     fingerprints = [f.fingerprint for f in overflow]
     assert len(set(fingerprints)) == len(fingerprints)
@@ -102,7 +102,7 @@ def test_overflow_agent_finding_keeps_supplied_fingerprint() -> None:
     placement = budget.place_findings(
         [], inline_budget=INLINE_BUDGET, agent_findings=agent_findings
     )
-    overflow = [f for f in placement.mechanical if f.source == "agent"]
+    overflow = [f for f in placement.deferred if f.source == "agent"]
     assert [f.fingerprint for f in overflow] == ["deadbeefcafe"]
 
 
