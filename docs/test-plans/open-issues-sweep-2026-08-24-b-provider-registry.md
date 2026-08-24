@@ -315,3 +315,72 @@ uv run pytest -q tests/cli/test_agents_setmodel_cmd.py  # RED: xfails expected
 ## BD RED evidence
 
 - BD test-author wave: `6618dba3` — 15 collected, 15 xfails; lint+typecheck clean
+
+## BE #481 — Nous as ordinary registry provider
+
+Maps **BE RED** contracts for #481 (drop presets, registry-only runtime, kill opencode
+fallback) to the test suite.
+
+### D4 — unknown provider is configuration_error → BE
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Unknown slug must not infer ``opencode`` via ``_agent_mode_for_slug`` | `tests/agents/test_registry_provider_runtime.py::test_agent_mode_for_unknown_provider_raises_configuration_error` | unit / error |
+| ``resolve_harness`` fails for unregistered provider | `…::test_resolve_harness_unknown_provider_raises_configuration_error` | unit / error |
+| ``resolve_runtime_agent`` must not silently return opencode | `…::test_resolve_runtime_agent_unknown_provider_not_opencode` | integration / error |
+| Error maps to ``RunOutcome.configuration_error`` | `…::test_classify_unknown_provider_error_maps_to_configuration_error` | integration |
+| ``_harness_supports_provider`` rejects unregistered custom label | `…::test_harness_supports_provider_rejects_unregistered_custom_provider` | unit |
+
+### Registry-only Nous (harness: opencode) → BE
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Nous slug resolves via registry ``harness: opencode`` | `…::test_nous_resolves_to_opencode_via_registry_harness` | integration |
+| Indexed ``LLM_PROVIDER_<N>_API_KEY`` is the credential source | `…::test_nous_credentials_from_indexed_registry_key_only` | unit |
+| Nous without registry row is configuration error | `…::test_nous_without_registry_entry_raises_configuration_error` | error |
+| Gateway endpoint uses registry URL, not preset default | `…::test_resolve_gateway_endpoint_uses_registry_url_not_preset` | integration |
+
+### Remove presets / special-casing → BE
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| ``GATEWAY_PRESETS`` excludes nous/tokenhub/minimax | `tests/agents/test_registry_provider_presets_removed.py::test_gateway_presets_exclude_nous_tokenhub_minimax` | unit |
+| Preset env/base-url constants removed | `…::test_named_gateway_env_constants_removed[*]` | unit |
+| ``_OPENCODE_NATIVE_PROVIDERS`` excludes preset labels | `…::test_opencode_native_providers_exclude_gateway_preset_labels` | unit |
+| ``_KNOWN_CATALOG_PROVIDERS`` excludes preset labels | `…::test_known_catalog_providers_exclude_gateway_preset_labels` | unit |
+| No hardcoded nous/tokenhub/minimax branches in ``agent_resolve`` | `…::test_agent_resolve_has_no_nous_tokenhub_minimax_branches` | structural |
+
+### Harness per registry row → BE
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Each harness value honoured from registry data | `tests/agents/test_registry_provider_runtime.py::test_registry_declared_harness_respected_at_runtime[*]` | integration |
+
+### D7 — legacy ``NOUS_API_KEY`` shim → BE
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Legacy key works with one deprecation warning per process | `…::test_legacy_nous_api_key_emits_deprecation_warning_once` | unit |
+
+### Pinned owner modules (implementation wave BE)
+
+- `src/mergecraft/utils/agent_resolve.py` — kill bare ``return "opencode"``; registry lookup; remove preset branches
+- `src/mergecraft/models.py` — ``PROVIDERS`` seed-only (no runtime special-casing)
+- `src/mergecraft/agents/openai_compatible_gateways.py` — remove ``GATEWAY_PRESETS`` nous/tokenhub/minimax rows and named env constants
+
+Shared fixtures in `tests/cli/support_provider_registry.py`:
+
+- `bootstrap_nous_registry`, `write_registry_provider_row`, `write_indexed_provider_secret`, `clear_legacy_gateway_env`
+
+### xfail reconciliation
+
+| Wave greens | Remove xfail from |
+| --- | --- |
+| BE | all `@BE_XFAIL` / `@pytest.mark.xfail(reason="green after BE impl")` in `tests/agents/test_registry_provider_runtime.py` and `tests/agents/test_registry_provider_presets_removed.py` |
+
+### BE verification commands
+
+```bash
+uv run pytest --collect-only -q tests/agents/test_registry_provider_runtime.py tests/agents/test_registry_provider_presets_removed.py
+uv run pytest -q tests/agents/test_registry_provider_runtime.py tests/agents/test_registry_provider_presets_removed.py  # RED: xfails expected
+```

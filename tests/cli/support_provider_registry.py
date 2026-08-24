@@ -275,3 +275,116 @@ def write_agents_model_chain(tmp_path: Path, role: str, chain: list[str]) -> Non
     entry["modelChain"] = list(chain)
     path = tmp_path / ".mergecraft" / "config.yaml"
     path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+
+# BE #481 — registry-only provider runtime (drop Nous/TokenHub/MiniMax presets).
+
+LEGACY_GATEWAY_ENV_KEYS: tuple[str, ...] = (
+    "NOUS_API_KEY",
+    "NOUS_BASE_URL",
+    "TOKENHUB_API_KEY",
+    "TOKENHUB_BASE_URL",
+    "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL",
+    "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+)
+
+REMOVED_GATEWAY_PRESET_LABELS: frozenset[str] = frozenset({"nous", "tokenhub", "minimax"})
+
+REMOVED_GATEWAY_MODULE_SYMBOLS: tuple[str, ...] = (
+    "DEFAULT_NOUS_BASE_URL",
+    "NOUS_API_KEY_ENV",
+    "NOUS_BASE_URL_ENV",
+    "DEFAULT_TOKENHUB_BASE_URL",
+    "TOKENHUB_API_KEY_ENV",
+    "TOKENHUB_BASE_URL_ENV",
+    "DEFAULT_MINIMAX_BASE_URL",
+    "MINIMAX_API_KEY_ENV",
+    "MINIMAX_BASE_URL_ENV",
+)
+
+NOUS_TENCENT_HY3 = "tencent/hy3"
+NOUS_DEEPSEEK_V4 = "deepseek/deepseek-v4-flash"
+CUSTOM_REGISTRY_URL = "https://registry-acme.example.invalid/v1"
+
+
+def clear_legacy_gateway_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset preset and singleton custom-provider env vars (BE #481)."""
+    for key in LEGACY_GATEWAY_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    for index in range(1, 8):
+        monkeypatch.delenv(f"LLM_PROVIDER_{index}", raising=False)
+        monkeypatch.delenv(f"LLM_PROVIDER_{index}_API_KEY", raising=False)
+
+
+def write_registry_provider_row(
+    tmp_path: Path,
+    *,
+    label: str,
+    harness: str,
+    env_index: int,
+    url: str | None = None,
+    models: list[dict[str, object]] | None = None,
+) -> None:
+    """Append one ``providers:`` row for agent-resolve registry tests."""
+    config = read_config(tmp_path)
+    entries = provider_entries(config)
+    row: dict[str, object] = {
+        "label": label,
+        "harness": harness,
+        "envIndex": env_index,
+        "authKind": AUTH_KIND_API_KEY,
+    }
+    if url is not None:
+        row["url"] = url
+    if models is not None:
+        row["models"] = models
+    entries.append(row)
+    config["providers"] = entries
+    path = tmp_path / ".mergecraft" / "config.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+
+def write_indexed_provider_secret(
+    tmp_path: Path,
+    *,
+    env_index: int,
+    label: str,
+    api_key: str,
+) -> None:
+    """Write ``LLM_PROVIDER_<N>`` label + ``LLM_PROVIDER_<N>_API_KEY`` to ``.env``."""
+    env_path = tmp_path / ".env"
+    lines: list[str] = []
+    if env_path.is_file():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    lines.append(f"LLM_PROVIDER_{env_index}={label}")
+    lines.append(f"LLM_PROVIDER_{env_index}_API_KEY={api_key}")
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def bootstrap_nous_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    url: str = NOUS_BASE_URL,
+    model_id: str = NOUS_TENCENT_HY3,
+    api_key: str = "registry-nous-test-key",
+) -> str:
+    """Register Nous purely via config registry + indexed secret (no presets)."""
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    clear_legacy_gateway_env(monkeypatch)
+    write_registry_provider_row(
+        tmp_path,
+        label="nous",
+        harness="opencode",
+        env_index=1,
+        url=url,
+        models=[{"id": model_id, "modelIndex": 1}],
+    )
+    write_indexed_provider_secret(
+        tmp_path,
+        env_index=1,
+        label="nous",
+        api_key=api_key,
+    )
+    return format_model_slug("nous", model_id)
