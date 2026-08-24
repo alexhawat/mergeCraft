@@ -86,6 +86,12 @@ def dispatch_review_output(
     """Write review artifacts after a successful run (stdout/stderr/files)."""
     text = result.output or ""
 
+    if json_output is not None and findings and effective_output_format != "json":
+        write_findings_json(
+            json_output,
+            [row.model_dump(mode="json") for row in findings],
+        )
+
     if effective_output_format == "text":
         if output is not None:
             output.write_text(text, encoding="utf-8")

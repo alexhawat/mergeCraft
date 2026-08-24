@@ -50,6 +50,23 @@ def test_mechanical_section_includes_short_ids() -> None:
     assert short_id in placement.mechanical_section
 
 
+def test_sync_deferred_section_includes_short_ids() -> None:
+    """Live markdown regen keeps batch-resolved short ids on deferred overflow rows."""
+    from mergecraft.mcp.tool_state import AnalyzerRunState
+
+    finding_mod = import_module("mergecraft.analyzers.finding")
+    budget = import_module("mergecraft.analyzers.budget")
+    finding = _finding("Major", path="src/deferred.py", line=9)
+    run_state = AnalyzerRunState(
+        ran=True,
+        deferred_findings=[budget.finding_to_deferred_row(finding)],
+    )
+    budget.sync_deferred_section(run_state)
+    assert run_state.deferred_section is not None
+    short_id = finding_mod.finding_short_id(finding.fingerprint)
+    assert short_id in run_state.deferred_section
+
+
 def test_trivial_severity_never_inline() -> None:
     budget = import_module("mergecraft.analyzers.budget")
     trivial = _finding(BODY_ONLY_SEVERITY)

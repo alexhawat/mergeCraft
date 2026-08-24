@@ -69,11 +69,12 @@ def finding_fingerprint(*, path: str, body: str) -> str:
     return hashlib.sha256(f"{path}\n{normalized}".encode()).hexdigest()[:24]
 
 
-def stamp_finding_fingerprint(*, path: str, body: str) -> str:
+def stamp_finding_fingerprint(*, path: str, body: str, fingerprint: str | None = None) -> str:
     """Append the dedup marker to ``body``, unless it already carries one."""
     if _MARKER_RE.search(body):
         return body
-    marker = f"{FINDING_MARKER_PREFIX}{finding_fingerprint(path=path, body=body)} -->"
+    resolved = fingerprint or finding_fingerprint(path=path, body=body)
+    marker = f"{FINDING_MARKER_PREFIX}{resolved} -->"
     return f"{body}\n\n{marker}" if body else marker
 
 

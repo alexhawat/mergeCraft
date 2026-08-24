@@ -1,0 +1,86 @@
+{
+  "description": "AP5 routing recall baseline — expected lens selections for eval-shaped diffs",
+  "min_recall": 1.0,
+  "cases": [
+    {
+      "id": "docs-only-trivial",
+      "changed_paths": ["docs/guide.md"],
+      "diff_stats": {
+        "files_changed": 1,
+        "lines_added": 1,
+        "lines_deleted": 1
+      },
+      "expected_lens_ids": []
+    },
+    {
+      "id": "billing-one-liner",
+      "changed_paths": ["src/billing/tax_rate.py"],
+      "diff_stats": {
+        "files_changed": 1,
+        "lines_added": 1,
+        "lines_deleted": 1,
+        "diff": "@@ -1 +1 @@\n-OLD_RATE = 0.05\n+OLD_RATE = 0.06"
+      },
+      "expected_lens_ids": ["security", "correctness", "data-integrity"]
+    },
+    {
+      "id": "schema-migration",
+      "changed_paths": ["migrations/20260816_add_status.sql"],
+      "diff_stats": {
+        "files_changed": 1,
+        "diff": "ALTER TABLE invoices ADD COLUMN status text;"
+      },
+      "expected_lens_ids": ["schema-migration", "data-integrity"]
+    },
+    {
+      "id": "security-sql-injection",
+      "changed_paths": ["src/mergecraft/ci/db.py"],
+      "diff_stats": {
+        "files_changed": 1,
+        "lines_added": 5,
+        "diff": "query = f\"SELECT * FROM runs WHERE id = {run_id}\""
+      },
+      "expected_lens_ids": ["security", "correctness"]
+    },
+    {
+      "id": "dependency-manifest",
+      "changed_paths": ["pyproject.toml"],
+      "diff_stats": {
+        "files_changed": 1,
+        "lines_added": 2,
+        "lines_deleted": 1
+      },
+      "expected_lens_ids": ["dependency-build", "integration"]
+    },
+    {
+      "id": "public-api-surface",
+      "changed_paths": ["src/mergecraft/api/public.py"],
+      "diff_stats": {
+        "files_changed": 1,
+        "lines_added": 20,
+        "lines_deleted": 3
+      },
+      "expected_lens_ids": ["api-compatibility", "impact", "integration"]
+    },
+    {
+      "id": "concurrency-change",
+      "changed_paths": ["src/mergecraft/worker/pool.py"],
+      "diff_stats": {
+        "files_changed": 1,
+        "lines_added": 15,
+        "diff": "asyncio.gather"
+      },
+      "expected_lens_ids": ["concurrency", "correctness"]
+    },
+    {
+      "id": "cross-repo-config",
+      "changed_paths": [".mergecraft/config.yaml"],
+      "diff_stats": {
+        "files_changed": 1,
+        "lines_added": 4,
+        "diff": "xrepo:\n  mode: explicit"
+      },
+      "expected_lens_ids": ["cross-repo", "policy"]
+    }
+  ]
+}

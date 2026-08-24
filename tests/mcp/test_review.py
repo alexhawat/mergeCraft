@@ -77,8 +77,21 @@ async def _submit(ctx: ToolContext, comments: list[dict[str, Any]]) -> list[dict
 async def test_inline_comments_are_fingerprinted(ctx: ToolContext) -> None:
     inline = await _submit(ctx, [{"path": "src/app.py", "line": 12, "body": "A finding."}])
     expected = finding_fingerprint(path="src/app.py", body="A finding.")
-    assert inline[0]["body"].startswith("A finding.")
+    assert "A finding." in inline[0]["body"]
     assert f"{FINDING_MARKER_PREFIX}{expected} -->" in inline[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_inline_comments_include_batch_resolved_short_id(ctx: ToolContext) -> None:
+    """Production PR inline comments surface ``MC-…`` ids for human quoting."""
+    from mergecraft.analyzers.finding import finding_short_id
+
+    body = "Unchecked null before return."
+    path = "src/util.py"
+    inline = await _submit(ctx, [{"path": path, "line": 4, "body": body}])
+    fingerprint = finding_fingerprint(path=path, body=body)
+    short_id = finding_short_id(fingerprint)
+    assert short_id in inline[0]["body"]
 
 
 @pytest.mark.asyncio

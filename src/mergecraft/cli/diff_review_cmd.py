@@ -13,7 +13,7 @@ from typing import Any, NoReturn
 import typer
 from loguru import logger
 
-from mergecraft.analyzers.finding import Finding, finding_short_id, write_findings_json
+from mergecraft.analyzers.finding import Finding, finding_short_id
 from mergecraft.cli.agent_protocol import AgentProtocolStream, notify_findings
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
@@ -174,6 +174,7 @@ def _agent_finding_record(finding: dict[str, Any]) -> dict[str, Any]:
 def _persist_completed_cli_review(
     *,
     review_id: str,
+    trace_session_id: str,
     snapshot: ReviewSnapshot,
     cwd: Path,
     model: str | None,
@@ -183,7 +184,6 @@ def _persist_completed_cli_review(
 ) -> None:
     from mergecraft.evidence.run_manifest import build_run_manifest
 
-    safe_review_id = _safe_review_id_for_persist(review_id)
     manifest = build_run_manifest(
         cwd=cwd,
         model=model or "(unresolved)",
@@ -192,18 +192,18 @@ def _persist_completed_cli_review(
     )
     findings_records = finding_json_records(findings)
     review = CompletedReview(
-        review_id=safe_review_id,
+        review_id=review_id,
         snapshot=snapshot,
         manifest=manifest,
         findings=findings_records,
-        trace_session_id=review_id,
+        trace_session_id=trace_session_id,
     )
     evidence_packets = collect_evidence_packets_for_persist(
         findings,
         repo_root=cwd,
         evidence_packet_path=evidence_packet_path,
     )
-    trace_events = collect_trace_events_for_review(review_id, repo_root=cwd)
+    trace_events = collect_trace_events_for_review(trace_session_id, repo_root=cwd)
     try:
         persist_completed_review(
             review,
@@ -694,15 +694,10 @@ def run(
         findings = parse_offline_review_findings(result)
         exit_code = cli_exit_code_for_review(outcome, findings)
 
-        if result.success and json_output is not None and findings:
-            write_findings_json(
-                json_output,
-                [row.model_dump(mode="json") for row in findings],
-            )
-
         if result.success and not dry_run:
             _persist_completed_cli_review(
-                review_id=review_id,
+                review_id=persist_review_id,
+                trace_session_id=review_id,
                 snapshot=snapshot,
                 cwd=root,
                 model=model,

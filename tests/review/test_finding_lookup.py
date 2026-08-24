@@ -30,3 +30,24 @@ def test_lookup_packet_by_finding_id_prefers_direct_fingerprint_key() -> None:
     packet = lookup_packet_by_finding_id(fingerprint, packets)
     assert packet is not None
     assert packet["state"] == "proven"
+
+
+def test_lookup_packet_by_finding_id_resolves_nested_aggregate_fingerprint() -> None:
+    """Happy — aggregate evidence packets expose per-finding rows under ``packets``."""
+    fingerprint = "cccccccccccccccccccccccc"
+    packets = {
+        "merge-run": {
+            "schema_version": "1.8.0",
+            "packets": {
+                fingerprint: {
+                    "finding_id": fingerprint,
+                    "state": "proven",
+                    "kinds": ["analyzer_findings"],
+                }
+            },
+        }
+    }
+    packet = lookup_packet_by_finding_id(fingerprint, packets)
+    assert packet is not None
+    assert packet["finding_id"] == fingerprint
+    assert packet["state"] == "proven"

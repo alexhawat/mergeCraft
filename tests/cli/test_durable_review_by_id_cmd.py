@@ -444,3 +444,10 @@ def test_review_with_unsafe_review_id_still_succeeds_and_persists_safely(
     loaded_ids = require_callable("list_completed_review_ids")(repo_root=tmp_path)
     assert loaded_ids
     assert unsafe_review_id not in loaded_ids
+    assert len(loaded_ids) == 1
+    persisted_id = loaded_ids[0]
+    payload = json.loads(result.stdout)
+    assert payload.get("review_id") == persisted_id
+    loaded = require_callable("load_completed_review")(persisted_id, repo_root=tmp_path)
+    assert loaded is not None
+    assert loaded.review_id == persisted_id

@@ -89,6 +89,7 @@ artifacts = [
     "src/mergecraft/skills/**/*.md",
     "src/mergecraft/policy/packs/**/*.yaml",
     "src/mergecraft/evals/cases/**/*.json",
+    "src/mergecraft/evals/fixtures/**/*.json",
     "src/mergecraft/data/**/*.yaml",
 ]
 

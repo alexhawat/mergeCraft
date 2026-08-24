@@ -17,17 +17,19 @@ from mergecraft.evals.lens_capability import (
 )
 from mergecraft.review.lens_routing import load_routing_registry, route_lenses
 
-_RECALL_BASELINE_REL: Final[Path] = Path("tests/_fixtures/ap5_routing_recall_baseline.json")
-_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
+_RECALL_BASELINE_NAME: Final[str] = "ap5_routing_recall_baseline.json"
+_EVALS_DIR: Final[Path] = Path(__file__).resolve().parent
+_REPO_ROOT: Final[Path] = _EVALS_DIR.parents[2]
 
 
 def _resolved_recall_baseline_path() -> Path:
-    if _RECALL_BASELINE_REL.is_file():
-        return _RECALL_BASELINE_REL
-    checkout = _REPO_ROOT / _RECALL_BASELINE_REL
+    shipped = _EVALS_DIR / "fixtures" / _RECALL_BASELINE_NAME
+    if shipped.is_file():
+        return shipped
+    checkout = _REPO_ROOT / "evals" / "fixtures" / _RECALL_BASELINE_NAME
     if checkout.is_file():
         return checkout
-    msg = f"routing recall baseline fixture missing: {_RECALL_BASELINE_REL}"
+    msg = f"routing recall baseline fixture missing: {_RECALL_BASELINE_NAME}"
     raise FileNotFoundError(msg)
 
 

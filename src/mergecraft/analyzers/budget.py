@@ -241,7 +241,10 @@ def finding_to_deferred_row(finding: Finding) -> dict[str, Any]:
 def render_deferred_section_from_rows(rows: list[dict[str, Any]]) -> str | None:
     """Render the deferred HTML section from serialized analyzer-run rows."""
     findings = [agent_dict_to_finding(row) for row in rows if isinstance(row, dict)]
-    return render_deferred_section(findings)
+    if not findings:
+        return None
+    short_ids = resolve_finding_short_ids([row.fingerprint for row in findings])
+    return render_deferred_section(findings, short_ids=short_ids)
 
 
 def sync_deferred_section(analyzer_run: AnalyzerRunState) -> None:

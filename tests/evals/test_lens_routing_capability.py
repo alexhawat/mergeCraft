@@ -135,6 +135,17 @@ def test_structural_replay_emits_lens_routing_capability() -> None:
     assert report.by_lens
 
 
+def test_routing_baseline_fixture_is_shipped_under_evals() -> None:
+    """Installed eval replay must not depend on ``tests/_fixtures``."""
+    from mergecraft.evals.lens_capability_benchmark import _resolved_recall_baseline_path
+
+    baseline = _resolved_recall_baseline_path()
+    assert baseline.is_file()
+    assert "tests/_fixtures" not in str(baseline)
+    assert baseline.name == "ap5_routing_recall_baseline.json"
+    assert baseline.parent.name == "fixtures"
+
+
 def test_lens_routing_capability_report_pins_schema_version() -> None:
     """Unit — report carries a stable schema version for diffable JSON."""
     score = require_callable("score_lens_routing")

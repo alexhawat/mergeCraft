@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from loguru import logger
 
+from mergecraft.analyzers.finding import resolve_finding_short_ids
 from mergecraft.mcp.comment import add_footer
 from mergecraft.mcp.convergence_runtime import (
     collateral_by_fingerprint,
@@ -65,6 +66,28 @@ def format_analyzer_inline_body(
 def enrich_analyzer_comment_body(body: str) -> str:
     """Return review comment bodies unchanged (formatting is upstream)."""
     return body
+
+
+def _comment_fingerprints(comments: list[dict[str, Any]]) -> list[str]:
+    fingerprints: list[str] = []
+    for comment in comments:
+        path = str(comment.get("path", ""))
+        body = str(comment.get("body") or "")
+        fingerprint = str(comment.get("fingerprint") or "") or finding_fingerprint(
+            path=path,
+            body=body,
+        )
+        fingerprints.append(fingerprint)
+    return fingerprints
+
+
+def _prepend_short_id(body: str, short_id: str) -> str:
+    marker = f"**{short_id}**"
+    if marker in body:
+        return body
+    if body.strip():
+        return f"{marker}\n\n{body}"
+    return marker
 
 
 _FRESH_PR_TRIGGERS: frozenset[str] = frozenset(
@@ -300,6 +323,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             incremental_diff_text = Path(incremental_path).read_text(encoding="utf-8")
 
     collateral_map = collateral_by_fingerprint(ctx)
+    inline_short_ids = resolve_finding_short_ids(_comment_fingerprints(comments))
 
     inline: list[dict[str, Any]] = []
     for c in comments:
@@ -316,6 +340,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             path=path,
             body=comment_body,
         )
+        short_id = inline_short_ids.get(raw_fingerprint)
         prepared_body = prepare_inline_comment_for_publish(
             ctx,
             path=path,
@@ -338,7 +363,13 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
                 if item["body"]
                 else f"```suggestion\n{suggestion}\n```"
             )
-        item["body"] = stamp_finding_fingerprint(path=item["path"], body=item["body"])
+        item["body"] = stamp_finding_fingerprint(
+            path=item["path"],
+            body=item["body"],
+            fingerprint=raw_fingerprint,
+        )
+        if short_id:
+            item["body"] = _prepend_short_id(item["body"], short_id)
         if "line" in c:
             item["line"] = int(c["line"])
         if "side" in c:
