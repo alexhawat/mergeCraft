@@ -463,4 +463,4 @@ uv run pytest -q tests/cli/test_provider_migrate_cmd.py tests/cli/test_provider_
 
 ## BF RED evidence
 
-- BF test-author wave: `47b5ad2f` — 35 collected, 35 xfails; lint+typecheck clean
+- BF test-author wave: `6aafe11c` — 35 collected, 35 xfails; lint+typecheck clean
