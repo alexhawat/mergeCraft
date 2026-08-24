@@ -63,42 +63,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Packet emit and the approval check share one `prepare_run_packet` assembly
-  (`MergeEvidencePacket | None`); a failed assembly is skipped, not rebuilt;
-  malformed finding rows skip pydantic ``ValidationError``; GitHub check-run
-  listing paginates with the shared pager; `build_run_packet` still resolves
-  `change_id`
-- GitHub workflow-run artifact (and run) listing follows pages past the first
-  100 items; CI evidence recording keeps the more severe duplicate fingerprint
 - Check-suite log fetch skips with a distinct unavailable payload when no
   GitHub client is bound, instead of looking like “no failed runs”
-- Agent CLI failover classifies via `provider_failure` (not `retry_policy`
-  re-exports); Bandit parser and SARIF converter share `end_line` / severity
-  mapping
-
-- A CI SARIF listing error on one workflow run no longer skips later runs, and
-  a Major/Critical CI finding is kept when it shares a fingerprint with a less
-  severe agent duplicate (#464)
-- Bandit JSON `results` rows that are not objects fail parse the same way as
-  the SARIF converter, while empty stdout is still a clean scan (#467)
-- Coverage delta vs the base branch now attributes a drop of 1.0pp or more
-  below `fail_under` as inherited drift when the base is already at the floor,
-  instead of always treating `head < base` as caused by the PR (#485)
-- The approval gate now unions agent findings with analyzer findings, so an
-  agent Critical or Major finding fails ``mergecraft-approval`` and the
-  evidence packet's ``request_changes`` action. An empty finding list still
-  stays ``neutral``; untrusted runs still never ``success``. CI SARIF findings
-  recorded on the run are included in the same union (#460, #464)
-- A transient Nous HTTP 404 (including a false billing/credits refusal) now
-  fails over to the next model instead of stopping the run and reporting a
-  missing `set_output` schema failure (#466)
-- Empty Bandit JSON stdout is a clean scan (zero findings) instead of a skip;
-  unparsable stdout still skips without embedding a raw stdout snippet (#467)
 - Catalog-check rejects all-zero `sha256` provenance pins (placeholders that
   made `provision_managed_binary` treat a trailing-slash URL as a directory and
   fail with `Is a directory`). Pip-style tools such as `checkov` and `yamllint`
   now ship `provenance: {}` like `semgrep`; a trailing-slash URL is refused
   with a `ProvisionError` that names the URL (#458)
+- Empty Bandit JSON stdout is a clean scan (zero findings) instead of a skip;
+  non-object `results` rows fail parse the same way as the SARIF converter;
+  unparsable stdout still skips without embedding a raw stdout snippet (#467)
+- A transient Nous HTTP 404 (including a false billing/credits refusal) now
+  fails over to the next model instead of stopping the run and reporting a
+  missing `set_output` schema failure (#466)
+- The approval gate now unions agent findings with analyzer findings, so an
+  agent Critical or Major finding fails ``mergecraft-approval`` and the
+  evidence packet's ``request_changes`` action. An empty finding list still
+  stays ``neutral``; untrusted runs still never ``success`` (#460)
+- A CI SARIF listing error on one workflow run no longer skips later runs;
+  a Major/Critical CI finding is kept over a less severe duplicate fingerprint,
+  and recorded CI findings reach the same approval union (#464)
+- Coverage delta vs the base branch now attributes a drop of 1.0pp or more
+  below `fail_under` as inherited drift when the base is already at the floor,
+  instead of always treating `head < base` as caused by the PR (#485)
 - Repo-native analyzers no longer fall back to an arbitrary PATH binary. When
   the checkout did not provide a tool, resolution fell through to
   `shutil.which`, so a system copy ran against the consumer's code at an

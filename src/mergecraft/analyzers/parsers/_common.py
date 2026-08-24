@@ -203,9 +203,33 @@ def load_jsonl_objects(raw: str) -> list[dict[str, Any]]:
     raise ValueError(msg)
 
 
+def _as_int_line(value: object) -> int:
+    """Parse a line number from a tool payload, or raise ``ValueError``."""
+    if isinstance(value, bool):
+        msg = f"invalid line number: {value!r}"
+        raise ValueError(msg)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            msg = f"invalid line number: {value!r}"
+            raise ValueError(msg) from None
+    msg = f"invalid line number: {value!r}"
+    raise ValueError(msg)
+
+
 def coerce_line(value: object, *, default: int = 1) -> int:
     """Return a 1-based line number, mapping unusable values to ``default``."""
-    return _line_number(value, default=default, fail_closed=False)
+    if value is None:
+        return max(default, 1)
+    try:
+        return max(_as_int_line(value), 1)
+    except ValueError:
+        return max(default, 1)
 
 
 def require_line(value: object, *, default: int = 1) -> int:
@@ -214,40 +238,9 @@ def require_line(value: object, *, default: int = 1) -> int:
     ``None`` still maps to ``default`` (missing region). Invalid types and
     non-numeric strings fail closed.
     """
-    return _line_number(value, default=default, fail_closed=True)
-
-
-def _line_number(value: object, *, default: int, fail_closed: bool, clamp: bool = True) -> int:
-    parsed: int | None
     if value is None:
-        parsed = None
-    elif isinstance(value, bool):
-        if fail_closed:
-            msg = f"invalid line number: {value!r}"
-            raise ValueError(msg)
-        parsed = None
-    elif isinstance(value, int):
-        parsed = value
-    elif isinstance(value, float):
-        parsed = int(value)
-    elif isinstance(value, str):
-        try:
-            parsed = int(value.strip())
-        except ValueError:
-            if fail_closed:
-                msg = f"invalid line number: {value!r}"
-                raise ValueError(msg) from None
-            parsed = None
-    elif fail_closed:
-        msg = f"invalid line number: {value!r}"
-        raise ValueError(msg)
-    else:
-        parsed = None
-    if parsed is None:
-        parsed = default
-    if clamp:
-        return max(parsed, 1)
-    return parsed
+        return max(default, 1)
+    return max(_as_int_line(value), 1)
 
 
 def coerce_optional_line(value: object) -> int | None:
@@ -255,7 +248,7 @@ def coerce_optional_line(value: object) -> int | None:
     if value is None:
         return None
     try:
-        parsed = _line_number(value, default=0, fail_closed=True, clamp=False)
+        parsed = _as_int_line(value)
     except ValueError:
         return None
     return parsed if parsed >= 1 else None

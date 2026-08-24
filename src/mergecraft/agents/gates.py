@@ -410,11 +410,6 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     return packet.decision is None or packet.decision.verdict != "failure"
 
 
-def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
-    """Blocking agent/analyzer findings request changes under their own key."""
-    return _has_blocker(packet.findings)
-
-
 # Maps an evidence signal to the rule key the policy engine looks up.
 # Each rule is a tuple ``(predicate, rule_id)``; the first match wins.
 # The list is lookup order, so anything more specific must appear before
@@ -424,7 +419,7 @@ def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
 _RULE_PREDICATES: Final[tuple[tuple[Callable[[MergeEvidencePacket], bool], str], ...]] = (
     (_is_high_risk_migration, "high_risk_migration"),
     (_is_low_risk_passing, "low_risk_passing"),
-    (_packet_has_blockers, "has_blockers"),
+    (lambda packet: _has_blocker(packet.findings), "has_blockers"),
     (_has_changed_unread_file, "changed-unread-file"),
     (_has_tool_loop, "tool_loop"),
 )

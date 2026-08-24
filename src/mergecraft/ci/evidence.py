@@ -56,6 +56,11 @@ from mergecraft.analyzers.manifest import AnalyzerManifest, DetectRules
 from mergecraft.analyzers.parsers.sarif import parse_sarif
 from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.ci.paths import failure_line, primary_failure_path
+from mergecraft.evidence.merge import (
+    finding_dedupe_key,
+    merge_findings,
+    typed_findings_from_rows,
+)
 from mergecraft.review_taxonomy import finding_fingerprint
 
 if TYPE_CHECKING:
@@ -422,12 +427,6 @@ def record_ci_findings(state: ToolState, findings: Iterable[Finding]) -> list[Fi
     collide, the more severe row wins (same rule as ``merge_findings``).
     Returns findings that were newly added or upgraded.
     """
-    from mergecraft.evidence.findings import (
-        finding_dedupe_key,
-        merge_findings,
-        typed_findings_from_rows,
-    )
-
     evidence = _evidence_state(state)
     incoming = list(findings)
     if not incoming:
@@ -436,12 +435,11 @@ def record_ci_findings(state: ToolState, findings: Iterable[Finding]) -> list[Fi
     before_severity = {finding_dedupe_key(row): row.severity for row in before}
     merged = merge_findings(before, incoming)
     evidence.findings = [row.model_dump() for row in merged]
-    changed = [
-        row
-        for row in merged
-        if before_severity.get(finding_dedupe_key(row)) != row.severity
-        or finding_dedupe_key(row) not in before_severity
-    ]
+    changed: list[Finding] = []
+    for row in merged:
+        key = finding_dedupe_key(row)
+        if before_severity.get(key) != row.severity:
+            changed.append(row)
     if changed:
         logger.info("ci evidence: recorded {} finding(s) from CI", len(changed))
     return changed
@@ -470,8 +468,6 @@ def ci_evidence_findings(state: ToolState) -> list[Finding]:
     evidence is supplementary, and one bad row must not take down the packet
     that carries the rest of the run's evidence.
     """
-    from mergecraft.evidence.findings import typed_findings_from_rows
-
     evidence = state.ci_evidence
     if evidence is None:
         return []
