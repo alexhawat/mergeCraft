@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.ci.workflow_support import REPO_ROOT
 
 # ---------------------------------------------------------------------------
 # W7.5 — extra uninstalled is a clean no-op (convention 5, D6).
@@ -137,7 +138,7 @@ def test_otel_uninstalled_factory_degrades_with_clear_warning(
 
 def test_logfire_extra_installed_in_pyproject() -> None:
     """The ``tracing`` optional extra is declared in ``pyproject.toml``."""
-    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert "[project.optional-dependencies]" in pyproject
     # Look for the ``tracing`` key with logfire and opentelemetry pins.
     assert "tracing" in pyproject
@@ -153,7 +154,7 @@ def test_tracing_extra_pins_are_exact(tmp_path: Path) -> None:
     exact pins and a committed lockfile. The test invokes ``uv lock --check``
     in a temporary copy of the repo to keep the worktree state untouched.
     """
-    repo_root = Path.cwd().resolve()
+    repo_root = REPO_ROOT
     # Run from a copy so the original lockfile is untouched even on success.
     subprocess.run(
         ["uv", "lock", "--check", "--extra", "tracing"],
@@ -215,7 +216,7 @@ def test_subprocess_without_tracing_extra_still_collects_repo() -> None:
             "--collect-only",
             "-q",
         ],
-        cwd=Path.cwd(),
+        cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=False,
@@ -238,7 +239,7 @@ def test_subprocess_with_tracing_extra_collects_exporter_tests() -> None:
             "--collect-only",
             "-q",
         ],
-        cwd=Path.cwd(),
+        cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=False,

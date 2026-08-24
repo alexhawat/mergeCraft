@@ -12,7 +12,11 @@ from typing import Any
 import pytest
 
 from mergecraft.analyzers.finding import make_finding
-from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES, NAMED_GATE_POLICY_ROWS
+from mergecraft.evidence.gate_policy import (
+    DEFAULT_GATE_POLICIES,
+    NAMED_GATE_POLICY_ROWS,
+    GateAction,
+)
 from mergecraft.evidence.packet import (
     PACKET_SCHEMA_VERSION,
     AgentMetadata,
@@ -143,6 +147,10 @@ def test_each_rule_predicate_has_a_behavioural_case(rule_id: str) -> None:
     """One hand-built packet per named rule id; ``select_rule_id`` must return it."""
     from mergecraft.agents.gates import select_rule_id
 
+    assert rule_id in _RULE_PACKET_BUILDERS, (
+        f"missing behavioural packet builder for rule_id {rule_id!r} — "
+        f"add a case to _RULE_PACKET_BUILDERS (known: {sorted(_RULE_PACKET_BUILDERS)})"
+    )
     builder = _RULE_PACKET_BUILDERS[rule_id]
     packet = builder()
     assert select_rule_id(packet) == rule_id
@@ -159,7 +167,7 @@ def test_self_assessment_only_neutral_verdict_and_no_auto_merge_action() -> None
     decision = decide_approval(packet, run_succeeded=True, tier="trusted")
     assert decision.verdict == "neutral"
     action = decide_action(packet, policy=DEFAULT_GATE_POLICIES)
-    assert str(action) != "auto_merge"
+    assert action != GateAction.AUTO_MERGE
 
 
 def test_has_blockers_outranks_changed_unread_file() -> None:
@@ -195,4 +203,4 @@ def test_has_blockers_outranks_changed_unread_file() -> None:
     packet = _packet(findings=[unread, blocker])
     assert select_rule_id(packet) == "has_blockers"
     action = decide_action(packet, policy=DEFAULT_GATE_POLICIES)
-    assert str(action) == "request_changes"
+    assert action == GateAction.REQUEST_CHANGES

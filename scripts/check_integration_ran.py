@@ -13,18 +13,31 @@ import re
 import sys
 from pathlib import Path
 
-_SUMMARY = re.compile(
+_PASSED_THEN_FAILED = re.compile(
     r"(?P<passed>\d+) passed(?:, (?P<failed>\d+) failed)?",
+)
+_FAILED_THEN_PASSED = re.compile(
+    r"(?P<failed>\d+) failed(?:, (?P<passed>\d+) passed)?",
 )
 
 
 def count_executed(log_text: str) -> int:
     """Return passed + failed from the last pytest summary line, or 0 when absent."""
     executed = 0
-    for match in _SUMMARY.finditer(log_text):
-        passed = int(match.group("passed"))
-        failed = int(match.group("failed") or 0)
-        executed = passed + failed
+    for line in log_text.splitlines():
+        candidates: list[int] = []
+        passed_first = _PASSED_THEN_FAILED.search(line)
+        if passed_first:
+            candidates.append(
+                int(passed_first.group("passed")) + int(passed_first.group("failed") or 0),
+            )
+        failed_first = _FAILED_THEN_PASSED.search(line)
+        if failed_first:
+            candidates.append(
+                int(failed_first.group("failed")) + int(failed_first.group("passed") or 0),
+            )
+        if candidates:
+            executed = max(candidates)
     return executed
 
 

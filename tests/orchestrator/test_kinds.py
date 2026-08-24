@@ -22,13 +22,13 @@ if TYPE_CHECKING:
 def test_llm_is_the_default() -> None:
     """D10 — unset ``orchestrator`` config preserves today's LLM orchestrator behaviour."""
     unset = default_settings()
-    assert getattr(unset, "orchestrator", "llm") == "llm"
+    assert unset.orchestrator == "llm"
 
     merged = RepoSettings.model_validate({})
-    assert getattr(merged, "orchestrator", "llm") == "llm"
+    assert merged.orchestrator == "llm"
 
     with_models = RepoSettings.model_validate({"models": ["anthropic/claude-sonnet"]})
-    assert getattr(with_models, "orchestrator", "llm") == "llm"
+    assert with_models.orchestrator == "llm"
 
 
 def test_deterministic_kind_runs_the_pipeline(

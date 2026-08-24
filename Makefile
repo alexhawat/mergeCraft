@@ -80,8 +80,8 @@ lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-
 	$(MAKE) lint-test-hygiene
 	@$(MAKE) npm-lockcheck
 
-lint-test-hygiene: ## Advisory scan for tautological test patterns (D16)
-	$(UV) run python scripts/check_test_cheat_signatures.py --advisory
+lint-test-hygiene: ## Block on tautological test patterns (D16)
+	$(UV) run python scripts/check_test_cheat_signatures.py
 
 action-yml-hygiene-check: ## Fail when an action.yml description embeds a literal ${{ }} expression
 	$(UV) run python scripts/check_action_yml_hygiene.py

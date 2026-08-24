@@ -42,7 +42,7 @@ Regression audit after PR #491 (#468 / #470 closed). Every precedence-named test
 | # | Contract | Primary test | Status |
 | --- | --- | --- | --- |
 | TH1.1a | Stale 70% coverage fails gate (not skip) | `tests/ci/test_coverage_hh.py::test_repo_coverage_report_fails_on_stale_low_coverage` | ✅ green |
-| TH1.1b | Integration job executes ≥1 test | `tests/ci/test_integration_job_ran.py::test_integration_marker_executes_at_least_one_test` | ✅ green |
+| TH1.1b | Integration job executes ≥1 test | `tests/ci/test_integration_job_ran.py::test_count_executed_parses_pytest_summary` + `…::test_integration_job_always_runs_smoke` | ✅ green |
 | TH1.1c | Delta base measures without floor gate | `tests/ci/test_coverage_delta_wrapper.py::test_delta_wrapper_base_measures_without_floor_gate` | ✅ green |
 | TH1.2a | Catch-all → `schema_failure` | `tests/agents/test_gate_rule_selection.py::test_catch_all_returns_schema_failure` | ✅ green |
 | TH1.2b | One behavioural case per rule id | `…::test_each_rule_predicate_has_a_behavioural_case` | ✅ green |

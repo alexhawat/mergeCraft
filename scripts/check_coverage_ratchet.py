@@ -26,30 +26,27 @@ from typing import Any
 # nudges a deliberate floor bump in ``pyproject.toml``.
 DEFAULT_MARGIN = 5.0
 _EPS = 1e-9
+_COVERAGE_CONFIG_PATH = Path(__file__).resolve().parent / "coverage_config.py"
 
 
-def _fail_under_from_pyproject(repo_root: Path | None = None) -> float:
-    cfg_path = Path(__file__).resolve().parent / "coverage_config.py"
-    spec = importlib.util.spec_from_file_location("coverage_config", cfg_path)
+def _load_coverage_config_module() -> Any:
+    spec = importlib.util.spec_from_file_location("coverage_config", _COVERAGE_CONFIG_PATH)
     if spec is None or spec.loader is None:
-        msg = f"could not load coverage config: {cfg_path}"
+        msg = f"could not load coverage config: {_COVERAGE_CONFIG_PATH}"
         raise ImportError(msg)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.fail_under_from_pyproject(repo_root)
+    return mod
+
+
+def _fail_under_from_pyproject(repo_root: Path | None = None) -> float:
+    return _load_coverage_config_module().fail_under_from_pyproject(repo_root)
 
 
 def _repo_root(repo_root: Path | None) -> Path:
     if repo_root is not None:
         return repo_root
-    cfg_path = Path(__file__).resolve().parent / "coverage_config.py"
-    spec = importlib.util.spec_from_file_location("coverage_config", cfg_path)
-    if spec is None or spec.loader is None:
-        msg = f"could not load coverage config: {cfg_path}"
-        raise ImportError(msg)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.repo_root()
+    return _load_coverage_config_module().repo_root()
 
 
 def _fail_under_from_git_ref(repo_root: Path, ref: str) -> float | None:
@@ -84,12 +81,38 @@ def _merge_base_ref(repo_root: Path) -> str | None:
     return result.stdout.strip()
 
 
-def _fail_under_from_merge_base(repo_root: Path | None = None) -> float | None:
+def _in_ci() -> bool:
+    """Return True when running under CI (local ``CI=true`` or GitHub Actions)."""
+    ci = os.environ.get("CI", "").lower()
+    actions = os.environ.get("GITHUB_ACTIONS", "").lower()
+    return ci in {"1", "true", "yes"} or actions in {"1", "true", "yes"}
+
+
+def _fail_under_from_merge_base(
+    repo_root: Path | None = None,
+    *,
+    allow_no_merge_base: bool = False,
+) -> tuple[float | None, str | None]:
+    """Return merge-base ``fail_under`` and an error message when lookup fails in CI."""
     root = _repo_root(repo_root)
+    base_branch = os.environ.get("GITHUB_BASE_REF", "pre-0.0.1")
+    remote_base = f"origin/{base_branch}"
     merge_base = _merge_base_ref(root)
     if merge_base is None:
-        return None
-    return _fail_under_from_git_ref(root, merge_base)
+        detail = (
+            f"merge-base lookup failed for HEAD vs {remote_base} "
+            f"(git merge-base returned non-zero or empty output)"
+        )
+        if _in_ci() and not allow_no_merge_base:
+            return None, detail
+        return None, None
+    floor = _fail_under_from_git_ref(root, merge_base)
+    if floor is None:
+        detail = f"merge-base {merge_base} has no [tool.coverage.report] fail_under"
+        if _in_ci() and not allow_no_merge_base:
+            return None, detail
+        return None, None
+    return floor, None
 
 
 def _percent_covered(report: Path) -> float:
@@ -107,6 +130,7 @@ def check_coverage_ratchet(
     margin: float = DEFAULT_MARGIN,
     repo_root: Path | None = None,
     hard_ceiling: bool = False,
+    allow_no_merge_base: bool = False,
 ) -> int:
     """Return 0 when coverage is acceptable; 1 on hard failures."""
     report_path = Path(report)
@@ -118,8 +142,13 @@ def check_coverage_ratchet(
     failures: list[str] = []
     warnings: list[str] = []
 
-    baseline_floor = _fail_under_from_merge_base(root)
-    if baseline_floor is not None and declared_floor + _EPS < baseline_floor:
+    baseline_floor, merge_base_error = _fail_under_from_merge_base(
+        root,
+        allow_no_merge_base=allow_no_merge_base,
+    )
+    if merge_base_error is not None:
+        failures.append(merge_base_error)
+    elif baseline_floor is not None and declared_floor + _EPS < baseline_floor:
         failures.append(
             f"fail_under {declared_floor:.2f}% is below merge-base floor "
             f"{baseline_floor:.2f}% — bump fail_under only in a deliberate commit"
@@ -174,12 +203,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Fail (instead of warn) when measured exceeds floor + margin",
     )
+    parser.add_argument(
+        "--allow-no-merge-base",
+        action="store_true",
+        help="Skip merge-base ratchet when git history is unavailable (tests only).",
+    )
     args = parser.parse_args(argv)
     try:
         return check_coverage_ratchet(
             args.coverage_json,
             margin=args.margin,
             hard_ceiling=args.hard_ceiling,
+            allow_no_merge_base=args.allow_no_merge_base,
         )
     except (FileNotFoundError, KeyError, json.JSONDecodeError, ValueError) as exc:
         print(f"coverage ratchet error: {exc}", file=sys.stderr)

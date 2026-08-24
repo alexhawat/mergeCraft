@@ -7,27 +7,24 @@ TH2 wires ``scripts/check_integration_ran.py`` (or equivalent) into the workflow
 
 from __future__ import annotations
 
-import os
-import re
-import subprocess
+import importlib.util
+from typing import Any
 
 import pytest
 
 from tests.ci.workflow_support import REPO_ROOT
 
-_PYTEST_SUMMARY = re.compile(
-    r"(?P<passed>\d+) passed(?:, (?P<failed>\d+) failed)?(?:, (?P<skipped>\d+) skipped)?"
-)
 
-
-def _count_executed_tests(combined_output: str) -> int:
-    """Return passed + failed from the last pytest summary line, or 0 when absent."""
-    executed = 0
-    for match in _PYTEST_SUMMARY.finditer(combined_output):
-        passed = int(match.group("passed"))
-        failed = int(match.group("failed") or 0)
-        executed = passed + failed
-    return executed
+def _load_count_executed() -> Any:
+    path = REPO_ROOT / "scripts" / "check_integration_ran.py"
+    spec = importlib.util.spec_from_file_location("check_integration_ran", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    count_executed = getattr(module, "count_executed", None)
+    assert callable(count_executed)
+    return count_executed
 
 
 @pytest.mark.integration
@@ -36,21 +33,28 @@ def test_integration_job_always_runs_smoke() -> None:
     assert (REPO_ROOT / "scripts" / "check_integration_ran.py").is_file()
 
 
-def test_integration_marker_executes_at_least_one_test() -> None:
-    """``make test-integration`` must not report zero executed tests (passed + failed == 0)."""
-    env = os.environ.copy()
-    env["MERGECRAFT_PYTEST_JOBS"] = "0"
-    proc = subprocess.run(
-        ["make", "test-integration"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-    )
-    combined = proc.stdout + proc.stderr
-    executed = _count_executed_tests(combined)
-    assert executed > 0, (
-        "integration job executed zero tests — secret-gated skips must not satisfy "
-        f"the meta-gate (pytest rc={proc.returncode})\n{combined[-2000:]}"
-    )
+@pytest.mark.parametrize(
+    ("summary_line", "expected"),
+    [
+        ("============================= 5 passed in 0.42s ==============================", 5),
+        ("============================= 3 failed in 1.02s ==============================", 3),
+        (
+            "================== 1 failed, 2 passed, 1 skipped in 0.88s ==================",
+            3,
+        ),
+        (
+            "================== 3 passed, 2 failed, 1 skipped in 0.88s ==================",
+            5,
+        ),
+    ],
+)
+def test_count_executed_parses_pytest_summary(summary_line: str, expected: int) -> None:
+    """``count_executed`` must count passed + failed for common pytest summary shapes."""
+    count_executed = _load_count_executed()
+    assert count_executed(summary_line) == expected
+
+
+def test_count_executed_returns_zero_when_summary_missing() -> None:
+    """Absent summary lines must not satisfy the integration meta-gate."""
+    count_executed = _load_count_executed()
+    assert count_executed("collecting ... no tests ran\n") == 0
