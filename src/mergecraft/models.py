@@ -428,6 +428,15 @@ PROVIDERS: dict[str, ProviderConfig] = {
                     resolve="nous/deepseek/deepseek-v4-flash",
                     preferred=True,
                 ),
+                "tencent/hy3": ModelDef(
+                    display_name="Tencent HY3 (Nous Portal)",
+                    description=(
+                        "Tencent Hunyuan HY3 via the Nous Portal OpenAI-compatible endpoint. "
+                        "Pass as nous/tencent/hy3 for the portal model id."
+                    ),
+                    resolve="nous/tencent/hy3",
+                    preferred=True,
+                ),
             },
         )
     ),

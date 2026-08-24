@@ -31,8 +31,16 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatch
-from pathlib import Path
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
+
+from mergecraft.review.finding_lookup import (
+    is_safe_path_stem,
+    load_json_packets_in_dir,
+    lookup_packet_by_finding_id,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 VerifierState = Literal[
     "proven",
@@ -356,13 +364,13 @@ def apply_verifier_outcome(
     return VerifierStateOutcome(state=safe, reason="verifier did not name a state")
 
 
-def _is_safe_packet_stem(finding_id: str) -> bool:
-    """Reject empty, ``..``, and any separator so ids cannot escape evidence_dir."""
-    if not finding_id or finding_id in {".", ".."}:
-        return False
-    if "/" in finding_id or "\\" in finding_id:
-        return False
-    return Path(finding_id).parts == (finding_id,)
+def _lookup_short_finding_packet(short_id: str, *, repo_root: Path) -> dict[str, Any] | None:
+    """Resolve ``MC-…`` ids against stored evidence packets."""
+    evidence_dir = repo_root / ".mergecraft" / "evidence"
+    packets_by_fingerprint = load_json_packets_in_dir(evidence_dir)
+    if not packets_by_fingerprint:
+        return None
+    return lookup_packet_by_finding_id(short_id, packets_by_fingerprint)
 
 
 def lookup_finding_packet(finding_id: str, *, repo_root: Path) -> dict[str, Any] | None:
@@ -375,7 +383,11 @@ def lookup_finding_packet(finding_id: str, *, repo_root: Path) -> dict[str, Any]
     Returns:
         Packet mapping, or None when the finding is unknown.
     """
-    if not _is_safe_packet_stem(finding_id):
+    from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX
+
+    if finding_id.startswith(FINDING_SHORT_ID_PREFIX):
+        return _lookup_short_finding_packet(finding_id, repo_root=repo_root)
+    if not is_safe_path_stem(finding_id):
         return None
     evidence_dir = repo_root / ".mergecraft" / "evidence"
     try:
@@ -388,25 +400,14 @@ def lookup_finding_packet(finding_id: str, *, repo_root: Path) -> dict[str, Any]
     except OSError:
         resolved = None
     if resolved is not None and resolved.is_file() and resolved.is_relative_to(evidence_root):
-        loaded = json.loads(resolved.read_text(encoding="utf-8"))
+        try:
+            loaded = json.loads(resolved.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            loaded = None
         if isinstance(loaded, dict):
             return loaded
-    if not evidence_dir.is_dir():
-        return None
-    for path in sorted(evidence_dir.glob("*.json")):
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(loaded, dict):
-            continue
-        if str(loaded.get("finding_id", "")) == finding_id:
-            return loaded
-        findings = loaded.get("findings")
-        if isinstance(findings, list):
-            for item in findings:
-                if not isinstance(item, dict):
-                    continue
-                if str(item.get("fingerprint", "")) == finding_id:
-                    return loaded
-    return None
+    packets_by_fingerprint = load_json_packets_in_dir(evidence_dir)
+    return lookup_packet_by_finding_id(finding_id, packets_by_fingerprint)
 
 
 __all__ = [

@@ -485,6 +485,12 @@ def replay_bank_cmd(
     console.print(f"  regression: {result.metrics.cases_regression}")
     console.print(f"  blocked   : {result.metrics.cases_blocked}")
     console.print(f"  pass rate : {result.metrics.decision_replay_pass_rate:.2%}")
+    if result.lens_routing_capability is not None:
+        lens_report = result.lens_routing_capability
+        console.print(
+            f"  lens macro: precision {lens_report.macro_precision:.2%}, "
+            f"recall {lens_report.macro_recall:.2%}"
+        )
     console.print(f"  corpus @  : {result.pins.corpus_commit[:12]}")
     console.print(f"  rubric    : {result.pins.rubric_version}")
     if gate:

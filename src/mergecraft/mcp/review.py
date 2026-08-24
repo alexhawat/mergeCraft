@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from loguru import logger
 
+from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX, resolve_finding_short_ids
 from mergecraft.mcp.comment import add_footer
 from mergecraft.mcp.convergence_runtime import (
     collateral_by_fingerprint,
@@ -15,7 +17,10 @@ from mergecraft.mcp.convergence_runtime import (
     recall_publish_sets,
     strip_recall_inline_comments,
 )
-from mergecraft.mcp.deferred_publish import merge_analyzer_sections_into_review_body
+from mergecraft.mcp.deferred_publish import (
+    merge_analyzer_sections_into_review_body,
+    refresh_analyzer_sections_for_publish,
+)
 from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
@@ -46,13 +51,17 @@ if TYPE_CHECKING:
 def format_analyzer_inline_body(
     finding: Finding,
     *,
+    short_id: str | None = None,
     effort: str = "Quick win",
     verification_note: str | None = None,
 ) -> str:
     """Format an analyzer-sourced inline comment with tool citation and confidence (W7.6)."""
     tag = f"_{finding.category}_ | _{finding.severity}_ | _{effort}_ | _{finding.confidence}_"
     citation = f"`{finding.tool}` `{finding.rule_id}`"
-    lines = [tag, "", f"{finding.message}", "", f"Source: {citation}."]
+    lines: list[str] = []
+    if short_id:
+        lines.append(f"**{short_id}**")
+    lines.extend([tag, "", f"{finding.message}", "", f"Source: {citation}."])
     if verification_note:
         lines.extend(["", verification_note.strip()])
     return "\n".join(lines)
@@ -61,6 +70,91 @@ def format_analyzer_inline_body(
 def enrich_analyzer_comment_body(body: str) -> str:
     """Return review comment bodies unchanged (formatting is upstream)."""
     return body
+
+
+_SHORT_ID_LINE_RE = re.compile(
+    rf"^\*\*{re.escape(FINDING_SHORT_ID_PREFIX)}[0-9a-f]{{6,}}\*\*\s*\n?",
+    re.MULTILINE,
+)
+
+
+def _body_without_short_id_line(body: str) -> str:
+    """Strip a leading publication short-id line before content fingerprinting."""
+    return _SHORT_ID_LINE_RE.sub("", body, count=1).lstrip()
+
+
+def _comment_fingerprint(comment: dict[str, Any]) -> str:
+    """Return the stable fingerprint for one inline comment row."""
+    explicit = str(comment.get("fingerprint") or "").strip()
+    if explicit:
+        return explicit
+    finding = comment.get("finding")
+    if isinstance(finding, dict):
+        nested = str(finding.get("fingerprint") or "").strip()
+        if nested:
+            return nested
+    path = str(comment.get("path", ""))
+    body = str(comment.get("body") or "")
+    return finding_fingerprint(path=path, body=_body_without_short_id_line(body))
+
+
+def _comment_fingerprints(comments: list[dict[str, Any]]) -> list[str]:
+    return [_comment_fingerprint(comment) for comment in comments]
+
+
+def _analyzer_publish_fingerprints(ctx: ToolContext) -> list[str]:
+    """Return analyzer-run finding fingerprints merged into the review body."""
+    analyzer_run = ctx.tool_state.analyzer_run
+    if analyzer_run is None:
+        return []
+    fingerprints: list[str] = []
+    for row in analyzer_run.findings:
+        if isinstance(row, dict):
+            fp = str(row.get("fingerprint", "")).strip()
+            if fp:
+                fingerprints.append(fp)
+    return fingerprints
+
+
+def _publish_fingerprint_batch(
+    comments: list[dict[str, Any]],
+    ctx: ToolContext,
+) -> list[str]:
+    """Collect inline and body-appended fingerprints for one publish batch."""
+    return _comment_fingerprints(comments) + _analyzer_publish_fingerprints(ctx)
+
+
+def _body_has_short_id_line(body: str) -> bool:
+    first_line = body.lstrip().split("\n", 1)[0]
+    return bool(
+        re.fullmatch(
+            rf"\*\*{re.escape(FINDING_SHORT_ID_PREFIX)}[0-9a-f]{{6,}}\*\*",
+            first_line,
+        )
+    )
+
+
+def _prepend_short_id(body: str, short_id: str) -> str:
+    """Stamp or refresh the publication short-id line with batch-resolved ``short_id``."""
+    marker = f"**{short_id}**"
+    if not body.strip():
+        return marker
+    if _body_has_short_id_line(body):
+        content = _body_without_short_id_line(body)
+        if content.strip():
+            return f"{marker}\n\n{content}"
+        return marker
+    title_match = re.match(
+        rf"^\*\*{re.escape(FINDING_SHORT_ID_PREFIX)}[0-9a-f]{{6,}}\*\*(\s*\([^)]+\))\s*\n?",
+        body.lstrip(),
+    )
+    if title_match:
+        rest = body.lstrip()[title_match.end() :].lstrip()
+        first_line = f"{marker}{title_match.group(1)}"
+        if rest:
+            return f"{first_line}\n\n{rest}"
+        return first_line
+    return f"{marker}\n\n{body}"
 
 
 _FRESH_PR_TRIGGERS: frozenset[str] = frozenset(
@@ -267,6 +361,15 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     repo_root = Path(primary.dir or Path.cwd())
     review_settings = load_repo_settings(root=repo_root, load_learnings_files=False).review
 
+    publish_short_ids = resolve_finding_short_ids(_publish_fingerprint_batch(comments, ctx))
+    analyzer_run = ctx.tool_state.analyzer_run
+    if analyzer_run is not None:
+        refresh_analyzer_sections_for_publish(
+            analyzer_run,
+            short_ids=publish_short_ids,
+            inline_comment_fingerprints=set(_comment_fingerprints(comments)),
+        )
+
     payload: dict[str, Any] = {"event": event}
     if body:
         await ensure_learnings_review_delta(ctx.tool_state)
@@ -308,10 +411,8 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             else None
         )
         comment_body = str(c.get("body") or "")
-        raw_fingerprint = str(c.get("fingerprint") or "") or finding_fingerprint(
-            path=path,
-            body=comment_body,
-        )
+        raw_fingerprint = _comment_fingerprint(c)
+        short_id = publish_short_ids.get(raw_fingerprint)
         prepared_body = prepare_inline_comment_for_publish(
             ctx,
             path=path,
@@ -334,7 +435,13 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
                 if item["body"]
                 else f"```suggestion\n{suggestion}\n```"
             )
-        item["body"] = stamp_finding_fingerprint(path=item["path"], body=item["body"])
+        item["body"] = stamp_finding_fingerprint(
+            path=item["path"],
+            body=item["body"],
+            fingerprint=raw_fingerprint,
+        )
+        if short_id:
+            item["body"] = _prepend_short_id(item["body"], short_id)
         if "line" in c:
             item["line"] = int(c["line"])
         if "side" in c:

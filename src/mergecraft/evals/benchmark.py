@@ -27,6 +27,10 @@ from mergecraft.agents.verifier import (
     pinned_judge_model,
 )
 from mergecraft.evals.convergence import ConvergenceCaseResult, ConvergenceMetrics, ConvergenceRound
+from mergecraft.evals.lens_capability import (
+    LensRoutingCapabilityReport,  # noqa: TC001 — Pydantic field type
+)
+from mergecraft.evals.lens_capability_benchmark import score_routing_baseline_capability
 from mergecraft.evals.scoring import DEFAULT_LINE_SLACK, AggregateScoreReport
 from mergecraft.evals.store import (
     CASE_STATUS_BLOCKED,
@@ -284,6 +288,8 @@ class BenchmarkResultSet(BaseModel):
     # `mergecraft eval convergence` runs (W4). Older result sets without
     # this key still validate (D3).
     convergence: ConvergenceMetrics | None = None
+    # CE #455: per-lens routing precision/recall from the frozen AP5 baseline.
+    lens_routing_capability: LensRoutingCapabilityReport | None = None
     skipped_reason: str | None = None
 
     @property
@@ -609,7 +615,12 @@ def run_structural_replay(
         line_slack=DEFAULT_LINE_SLACK,
     )
 
-    return BenchmarkResultSet(pins=pins, metrics=metrics, case_results=rows)
+    return BenchmarkResultSet(
+        pins=pins,
+        metrics=metrics,
+        case_results=rows,
+        lens_routing_capability=score_routing_baseline_capability(),
+    )
 
 
 def write_result_set(

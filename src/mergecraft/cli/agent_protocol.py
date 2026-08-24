@@ -136,16 +136,30 @@ def notify_findings(
     rows: Sequence[dict[str, Any]],
     *,
     seen: set[str] | None = None,
+    streamed_short_ids: dict[str, str] | None = None,
+    refresh: bool = False,
 ) -> set[str]:
-    """Call ``on_finding`` once per novel row. Returns the updated seen set."""
+    """Call ``on_finding`` once per novel row. Returns the updated seen set.
+
+    When ``refresh`` is true, rows whose batch-resolved ``short_id`` differs from
+    the provisional id already streamed are re-emitted once; unchanged ids are not
+    duplicated.
+    """
     emitted = seen if seen is not None else set()
+    short_ids = streamed_short_ids if streamed_short_ids is not None else {}
     if on_finding is None:
         return emitted
     for row in rows:
         key = finding_event_key(row)
+        short_id = row.get("short_id")
         if key in emitted:
+            if refresh and isinstance(short_id, str) and short_ids.get(key) != short_id:
+                on_finding(row)
+                short_ids[key] = short_id
             continue
         emitted.add(key)
+        if isinstance(short_id, str):
+            short_ids[key] = short_id
         on_finding(row)
     return emitted
 

@@ -4,37 +4,43 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import tempfile
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, NoReturn
+from typing import Any, NoReturn
 
 import typer
 from loguru import logger
 
-from mergecraft.analyzers.sarif import export_sarif
+from mergecraft.analyzers.finding import Finding, finding_short_id
 from mergecraft.cli.agent_protocol import AgentProtocolStream, notify_findings
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
 from mergecraft.cli.global_surface import get_cli_globals
+from mergecraft.cli.review_output import (
+    HunkFileFindings,
+    OutputFormat,
+    dispatch_review_output,
+    finding_json_records,
+)
 from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.offline_review import (
     OfflineReviewResult,
     parse_offline_review_findings,
     run_offline_diff_review,
 )
+from mergecraft.review.completed import CompletedReview, persist_completed_review
+from mergecraft.review.completed_artifacts import (
+    collect_evidence_packets_for_persist,
+    collect_trace_events_for_review,
+)
 from mergecraft.review.engine import ReviewEngine
+from mergecraft.review.finding_lookup import is_safe_path_stem
 from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, canonical_review_snapshot
 from mergecraft.types import ShellPermission  # noqa: TC001
 from mergecraft.utils.log import configure_logging
 from mergecraft.utils.source_resolve import SourceResolverSpec
-
-if TYPE_CHECKING:
-    from mergecraft.analyzers.finding import Finding
-
-
-OutputFormat = Literal["text", "json", "jsonl", "sarif"]
 
 _PANEL_SOURCE = "Source"
 _PANEL_DIFF = "Diff selection"
@@ -104,6 +110,7 @@ Examples — output:
   mergecraft review --json findings.json
   mergecraft review --output-format sarif --output report.sarif.json
   mergecraft review --output-format jsonl --output stream.jsonl
+  mergecraft review --output-format hunk
   mergecraft review --agent
   mergecraft review 2> review.md              # human text lives on stderr (D14)
 
@@ -137,11 +144,80 @@ def _resolve_outcome(result: OfflineReviewResult) -> RunOutcome:
     return RunOutcome.passed if result.success else RunOutcome.failed
 
 
-def _write_jsonl_findings(path: Path, findings: Sequence[Finding]) -> None:
-    lines: list[str] = []
-    for row in findings:
-        lines.append(json.dumps({"finding": row.model_dump()}, ensure_ascii=False))
-    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+def _safe_review_id_for_persist(review_id: str) -> str:
+    """Return a path-safe review id for durable storage."""
+    if is_safe_path_stem(review_id):
+        return review_id
+    logger.warning(
+        "ignoring unsafe {} for durable review storage; using generated id",
+        review_id,
+    )
+    return uuid.uuid4().hex
+
+
+def _agent_finding_record(finding: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a streamed finding with a provisional short id when possible."""
+    fingerprint = finding.get("fingerprint")
+    if fingerprint:
+        record = dict(finding)
+        if "short_id" not in record:
+            with contextlib.suppress(ValueError, TypeError):
+                record["short_id"] = finding_short_id(str(fingerprint))
+        return record
+    try:
+        model = Finding.model_validate(finding)
+    except ValueError:
+        return finding
+    return model.model_dump(mode="json")
+
+
+def _persist_completed_cli_review(
+    *,
+    review_id: str,
+    trace_session_id: str,
+    snapshot: ReviewSnapshot,
+    cwd: Path,
+    model: str | None,
+    prompt: str | None,
+    findings: Sequence[Finding],
+    evidence_packet_path: str | None = None,
+    trace_dir: Path | None = None,
+) -> None:
+    from mergecraft.evidence.run_manifest import build_run_manifest
+
+    manifest = build_run_manifest(
+        cwd=cwd,
+        model=model or "(unresolved)",
+        agent_id="mergecraft",
+        prompt_text=prompt or "",
+    )
+    findings_records = finding_json_records(findings)
+    review = CompletedReview(
+        review_id=review_id,
+        snapshot=snapshot,
+        manifest=manifest,
+        findings=findings_records,
+        trace_session_id=trace_session_id,
+    )
+    evidence_packets = collect_evidence_packets_for_persist(
+        findings,
+        repo_root=cwd,
+        evidence_packet_path=evidence_packet_path,
+    )
+    trace_events = collect_trace_events_for_review(
+        trace_session_id,
+        repo_root=cwd,
+        trace_dir=trace_dir,
+    )
+    try:
+        persist_completed_review(
+            review,
+            repo_root=cwd,
+            evidence_packets=evidence_packets,
+            trace_events=trace_events,
+        )
+    except (OSError, ValueError) as exc:
+        logger.warning("skipped durable review persistence: {}", exc)
 
 
 def cleanup_review_subprocesses() -> None:
@@ -178,11 +254,14 @@ def _finish_agent_protocol(
     exit_code: int,
     findings: Sequence[Finding],
     seen: set[str],
+    streamed_short_ids: dict[str, str],
 ) -> None:
     notify_findings(
         stream.finding,
-        [row.model_dump() for row in findings],
+        finding_json_records(findings),
         seen=seen,
+        streamed_short_ids=streamed_short_ids,
+        refresh=True,
     )
     stream.verdict(outcome.value, exit_code)
     stream.run_finished(exit_code)
@@ -299,11 +378,21 @@ def run(
         None,
         "--output-format",
         help=(
-            "Review payload format: text (default), json, jsonl, or sarif. "
+            "Review payload format: text (default), json, jsonl, sarif, or hunk. "
             "Root --format json selects json when this flag is omitted; "
             "explicit --output-format text always renders human markdown on stderr. "
             "Default text mode writes human-readable review text to stderr (D14); "
-            "redirect with 2> to capture it."
+            "redirect with 2> to capture it. "
+            "hunk writes Hunk comment JSON to stdout (stdout-only; no --output)."
+        ),
+        rich_help_panel=_PANEL_OUTPUT,
+    ),
+    hunk_file_findings: HunkFileFindings = typer.Option(
+        "drop",
+        "--hunk-file-findings",
+        help=(
+            "For --output-format hunk: drop file-level findings (default) or "
+            "anchor them on the first changed line per file (first-changed-line)."
         ),
         rich_help_panel=_PANEL_OUTPUT,
     ),
@@ -458,6 +547,7 @@ def run(
         and json_output is None
         and output is None
         and not agent_mode
+        and get_cli_globals(ctx).format != "json"
     ):
         _exit_with_message(
             "--output is required for --output-format json (or use --json PATH)",
@@ -520,9 +610,21 @@ def run(
         replay_key=str(diff) if diff is not None else None,
     )
     engine: ReviewEngine[OfflineReviewResult] = ReviewEngine(snapshot=snapshot)
+    from mergecraft.tracing.review_context import resolve_review_id
+
+    review_id = resolve_review_id()
+    persist_review_id = _safe_review_id_for_persist(review_id)
+    json_stdout = (
+        effective_output_format == "json"
+        and json_output is None
+        and output is None
+        and not agent_mode
+        and get_cli_globals(ctx).format == "json"
+    )
 
     stream: AgentProtocolStream | None = None
     seen: set[str] = set()
+    streamed_short_ids: dict[str, str] = {}
     phases_emitted = False
     if agent_mode:
         agent_stream = _start_agent_protocol()
@@ -538,7 +640,12 @@ def run(
     def _on_finding(finding: dict[str, Any]) -> None:
         if stream is None:
             return
-        notify_findings(stream.finding, [finding], seen=seen)
+        notify_findings(
+            stream.finding,
+            [_agent_finding_record(finding)],
+            seen=seen,
+            streamed_short_ids=streamed_short_ids,
+        )
 
     read_cache = use_cache or resume
 
@@ -592,6 +699,19 @@ def run(
         findings = parse_offline_review_findings(result)
         exit_code = cli_exit_code_for_review(outcome, findings)
 
+        if result.success and not dry_run:
+            _persist_completed_cli_review(
+                review_id=persist_review_id,
+                trace_session_id=review_id,
+                snapshot=snapshot,
+                cwd=root,
+                model=model,
+                prompt=prompt,
+                findings=findings,
+                evidence_packet_path=result.evidence_packet_path,
+                trace_dir=trace_dir,
+            )
+
         if not result.success:
             if result.output and not agent_mode:
                 console.print(result.output)
@@ -602,6 +722,7 @@ def run(
                     exit_code=exit_code,
                     findings=findings,
                     seen=seen,
+                    streamed_short_ids=streamed_short_ids,
                 )
             _exit_with_message(result.error or "diff-review failed", exit_code)
 
@@ -612,36 +733,28 @@ def run(
                 exit_code=exit_code,
                 findings=findings,
                 seen=seen,
+                streamed_short_ids=streamed_short_ids,
             )
             raise typer.Exit(exit_code)
 
-        text = result.output or ""
+        dispatch_review_output(
+            effective_output_format=effective_output_format,
+            result=result,
+            findings=findings,
+            review_id=persist_review_id,
+            output=output,
+            json_output=json_output,
+            json_stdout=json_stdout,
+            hunk_file_findings=hunk_file_findings,
+            exit_code=exit_code,
+        )
 
-        if effective_output_format == "text":
-            if output is not None:
-                output.write_text(text, encoding="utf-8")
-                console.print(f"[green]wrote[/green] {output}")
-            elif json_output is None:
-                console.print(text)
-        elif effective_output_format == "json":
-            target = json_output or output
-            if target is not None and target.is_file():
-                console.print(f"[green]wrote[/green] {target}")
-        elif effective_output_format == "jsonl":
-            target = output
-            if target is None:
-                _exit_with_message("--output is required for --output-format jsonl", exit_code)
-            _write_jsonl_findings(target, findings)
-            console.print(f"[green]wrote[/green] {target}")
-        elif effective_output_format == "sarif":
-            target = output
-            if target is None:
-                _exit_with_message("--output is required for --output-format sarif", exit_code)
-            document = export_sarif(findings)
-            target.write_text(json.dumps(document, indent=2), encoding="utf-8")
-            console.print(f"[green]wrote[/green] {target}")
-
-        if json_output is not None and result.success and not dry_run:
+        if (
+            json_output is not None
+            and result.success
+            and not dry_run
+            and effective_output_format != "json"
+        ):
             console.print(f"[green]wrote[/green] {json_output}")
 
         raise typer.Exit(exit_code)

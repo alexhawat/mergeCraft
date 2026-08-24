@@ -91,7 +91,7 @@ RUN cd /opt/agent-clis \
 
 WORKDIR /opt/mergecraft
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md hatch_build.py ./
 COPY src/mergecraft ./src/mergecraft
 
 RUN uv sync --frozen --no-dev \

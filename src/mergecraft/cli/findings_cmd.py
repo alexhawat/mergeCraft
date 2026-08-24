@@ -10,19 +10,33 @@ before it is trusted with an automation trigger.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Annotated, Any
+import re
+from difflib import SequenceMatcher
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import typer
 
 if TYPE_CHECKING:
+    from click import Command, Context
+
     from mergecraft.findings.lifecycle import LifecycleRecord
 
+from mergecraft.analyzers.finding import (
+    Finding,
+    finding_record_without_short_id,
+    finding_short_id,
+    render_finding_markdown,
+    resolve_finding_short_ids,
+)
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
     CLI_USAGE_EXIT_CODE,
 )
 from mergecraft.cli.global_surface import emit_cli_json, get_cli_globals, wants_json_output
+from mergecraft.cli.typer_group import MergecraftTyperGroup
 from mergecraft.findings.ledger import (
     LEDGER_SCHEMA_VERSION,
     FindingLedger,
@@ -41,16 +55,134 @@ from mergecraft.findings.sweep import (
     plan_carryover,
 )
 from mergecraft.findings.threads import fetch_review_threads
+from mergecraft.review.completed import load_completed_review
 from mergecraft.scm.github import GitHubScmAdapter
 from mergecraft.utils.github import GitHubClient, parse_repo_context
 from mergecraft.utils.token import get_job_token
 
+_FINDINGS_SUBCOMMANDS = frozenset({"export", "carryover", "ledger"})
+_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+FindingsOutputFormat = Literal["json", "markdown"]
+
+
+def _looks_like_review_id(token: str) -> bool:
+    return len(token) >= 4 and _REVIEW_ID_PATTERN.fullmatch(token) is not None
+
+
+def _looks_like_subcommand_typo(cmd_name: str) -> bool:
+    """Return whether ``cmd_name`` is likely a misspelling of a reserved subcommand."""
+    for reserved in _FINDINGS_SUBCOMMANDS:
+        if len(cmd_name) >= 3 and reserved.startswith(cmd_name):
+            return True
+        if SequenceMatcher(None, cmd_name, reserved).ratio() >= 0.75:
+            return True
+    return False
+
+
+class _FindingsTyperGroup(MergecraftTyperGroup):
+    """Route unknown subcommands to durable review lookup (#453)."""
+
+    def get_command(self, ctx: Context, cmd_name: str) -> Command | None:
+        command = super().get_command(ctx, cmd_name)
+        if command is not None:
+            return command
+        if cmd_name in _FINDINGS_SUBCOMMANDS:
+            return None
+        if _looks_like_subcommand_typo(cmd_name):
+            return None
+        if not _looks_like_review_id(cmd_name):
+            return None
+        ctx.meta["durable_review_id"] = cmd_name
+        return super().get_command(ctx, "_by_review_id")
+
+
 app = typer.Typer(
     help="Inspect and carry forward review findings a merge would otherwise bury.",
     no_args_is_help=True,
+    cls=_FindingsTyperGroup,
 )
 
 _REPO_HELP = "Repository as owner/name. Defaults to $GITHUB_REPOSITORY."
+_REPO_ROOT_HELP = "Repository root for durable review lookup (read-only)."
+
+
+def _render_durable_findings_markdown(
+    *,
+    review_id: str,
+    findings: list[dict[str, Any]],
+) -> str:
+    if not findings:
+        return f"No findings stored for review {review_id}."
+    short_ids = resolve_finding_short_ids(
+        [str(row.get("fingerprint", "")) for row in findings if row.get("fingerprint")]
+    )
+    lines = [f"# Stored findings — {review_id}", ""]
+    for row in findings:
+        try:
+            finding = Finding.model_validate(finding_record_without_short_id(row))
+        except ValueError:
+            path = str(row.get("path") or "(no file)")
+            lines.append(f"## {path}")
+            lines.append("")
+            message = row.get("message")
+            if message:
+                lines.append(str(message))
+                lines.append("")
+            continue
+        short_id = short_ids.get(finding.fingerprint, finding_short_id(finding.fingerprint))
+        lines.append(render_finding_markdown(finding, short_id=short_id))
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+@app.command("_by_review_id", hidden=True)
+def _by_review_id(
+    ctx: typer.Context,
+    repo_root: Annotated[
+        Path,
+        typer.Option("--repo-root", help=_REPO_ROOT_HELP),
+    ] = Path("."),
+    output_format: Annotated[
+        FindingsOutputFormat | None,
+        typer.Option(
+            "--output-format",
+            help=(
+                "Stored-findings payload format: json or markdown (default: markdown). "
+                "Root --format json emits JSON when this flag is omitted."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Read persisted findings for a completed review id (D4)."""
+    review_id = str(ctx.meta.get("durable_review_id") or "")
+    if not review_id:
+        cli_bail("review id is required", code=CLI_USAGE_EXIT_CODE)
+    if output_format is not None and output_format not in {"json", "markdown"}:
+        console.print("[red]--output-format must be 'json' or 'markdown'[/red]")
+        raise typer.Exit(CLI_USAGE_EXIT_CODE)
+    emit_json = (
+        output_format == "json"
+        if output_format is not None
+        else get_cli_globals(ctx).format == "json"
+    )
+    root = repo_root.expanduser().resolve()
+    loaded = load_completed_review(review_id, repo_root=root)
+    if loaded is None:
+        cli_bail(f"unknown review id {review_id}", code=CLI_USAGE_EXIT_CODE)
+    if emit_json:
+        emit_cli_json(
+            {
+                "review_id": loaded.review_id,
+                "count": len(loaded.findings),
+                "findings": loaded.findings,
+            }
+        )
+        return
+    typer.echo(
+        _render_durable_findings_markdown(review_id=loaded.review_id, findings=loaded.findings)
+    )
+
+
 _RESOLVED_HELP = "Include threads the author already resolved."
 _ANSWERED_HELP = (
     "Include threads a human replied to (skipped by default: a reply means "
@@ -152,7 +284,7 @@ def ledger(
     pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
     repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
     output_format: Annotated[
-        str | None,
+        FindingsOutputFormat | None,
         typer.Option(
             "--output-format",
             help=(
@@ -202,7 +334,7 @@ def export(
     pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
     repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
     output_format: Annotated[
-        str | None,
+        FindingsOutputFormat | None,
         typer.Option(
             "--output-format",
             help=(

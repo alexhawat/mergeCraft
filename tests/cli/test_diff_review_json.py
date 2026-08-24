@@ -10,7 +10,7 @@ import pytest
 from tests.analyzers.support import import_module as import_analyzer_module
 from typer.testing import CliRunner
 
-from mergecraft.analyzers.finding import Finding, findings_output_schema
+from mergecraft.analyzers.finding import Finding, findings_export_schema, validate_findings_export
 from mergecraft.cli.app import app
 from mergecraft.offline_review import OfflineReviewResult, build_offline_review_prompt
 
@@ -50,8 +50,8 @@ def _step_four_block(prompt: str) -> str:
     return match.group(1)
 
 
-def test_findings_output_schema_is_valid_json_schema() -> None:
-    schema = findings_output_schema()
+def test_findings_export_schema_is_valid_json_schema() -> None:
+    schema = findings_export_schema()
 
     assert schema.get("type") == "object"
     properties = schema.get("properties")
@@ -65,12 +65,9 @@ def test_findings_output_schema_is_valid_json_schema() -> None:
 
     item_properties = items.get("properties")
     assert isinstance(item_properties, dict)
+    assert "short_id" in item_properties
     assert frozenset(item_properties) >= frozenset(Finding.model_json_schema()["properties"])
     assert schema.get("required") == ["findings"]
-
-    severity = item_properties.get("severity")
-    assert isinstance(severity, dict)
-    assert "enum" in severity
 
 
 def test_build_offline_review_prompt_requires_set_output_when_json_mode(
@@ -208,9 +205,10 @@ def test_cli_diff_review_json_validates_findings(
         assert json_out.is_file(), combined
         payload = json.loads(json_out.read_text(encoding="utf-8"))
         assert isinstance(payload.get("findings"), list)
-        finding_mod = import_analyzer_module("mergecraft.analyzers.finding")
+        validate_findings_export(payload)
         for item in payload["findings"]:
-            finding_mod.Finding.model_validate(item)
+            assert isinstance(item.get("short_id"), str)
+            assert item["short_id"].startswith("MC-")
     else:
         assert result.exit_code != 0, combined
         assert not json_out.exists(), combined
