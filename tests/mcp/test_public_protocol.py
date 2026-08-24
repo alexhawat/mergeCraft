@@ -12,6 +12,7 @@ from tests.mcp.public_mcp_support import (
     PUBLIC_TOOL_NAMES,
     build_public_http_client,
     is_auth_rejection,
+    minimal_valid_finding_dict,
     rpc_json,
 )
 
@@ -129,15 +130,7 @@ def test_large_findings_result_is_json(
     from mergecraft.review.snapshot import canonical_review_snapshot
 
     review_id = "mp1-large-findings"
-    findings = [
-        {
-            "fingerprint": f"{index:064x}",
-            "short_id": f"MC-{index:06x}",
-            "message": f"finding {index}",
-            "severity": "minor",
-        }
-        for index in range(200)
-    ]
+    findings = [minimal_valid_finding_dict(f"{index:064x}", index=index) for index in range(200)]
     persist_completed_review(
         CompletedReview(
             review_id=review_id,

@@ -7,8 +7,7 @@ import subprocess
 from typing import Any
 
 from tests.ci.workflow_support import REPO_ROOT
-from tests.docs.support import ci_steps
-from tests.mcp.public_mcp_support import require_generator_script
+from tests.docs.support import ci_steps, load_script_module
 
 _SCHEMA_PATH = REPO_ROOT / "tests" / "fixtures" / "mcp" / "server.schema.2025-12-11.json"
 _SERVER_JSON = REPO_ROOT / "server.json"
@@ -66,7 +65,7 @@ def test_make_mcp_server_json_check_in_ci_steps() -> None:
 
 
 def test_generator_check_detects_drift() -> None:
-    gen = require_generator_script()
+    gen = load_script_module("scripts/gen_mcp_server_json.py")
     assert hasattr(gen, "main") or hasattr(gen, "run_check"), gen
     assert _SERVER_JSON.is_file(), "server.json must exist before drift check"
     original = _SERVER_JSON.read_text(encoding="utf-8")

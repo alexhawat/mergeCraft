@@ -1,4 +1,4 @@
-"""Shared helpers for public MCP product RED tests (MP1)."""
+"""Shared helpers for public MCP product tests (MP1)."""
 
 from __future__ import annotations
 
@@ -13,22 +13,42 @@ from tests.ci.workflow_support import REPO_ROOT
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.mcp.endpoints import MCP_PUBLIC_ENDPOINT
+from mergecraft.mcp.public import PUBLIC_TOOL_NAMES
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
 
-PUBLIC_TOOL_NAMES: frozenset[str] = frozenset(
-    {
-        "review_change",
-        "get_review",
-        "inspect_finding",
-        "explain_finding",
-        "get_capabilities",
-        "get_policy",
-    }
-)
+
+def minimal_valid_finding_dict(
+    fingerprint: str,
+    *,
+    index: int = 0,
+    message: str | None = None,
+) -> dict[str, Any]:
+    """Build one ``Finding``-valid row with ``short_id`` for public MCP tests."""
+    from mergecraft.analyzers.finding import finding_short_id, make_finding
+
+    finding = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message=message or f"finding {index}",
+        path="demo.py",
+        start_line=1,
+        end_line=1,
+        source="analyzer",
+        introduced_by_pr="unknown",
+        fingerprint=fingerprint,
+    )
+    row = finding.model_dump(mode="json")
+    row["short_id"] = finding_short_id(fingerprint)
+    return row
+
 
 RUNTIME_PRIMITIVE_SAMPLES: tuple[str, ...] = (
     "checkout_pr",
@@ -40,8 +60,6 @@ MUTATING_RUNTIME_TOOLS: tuple[str, ...] = (
     "commit_changes",
     "create_pull_request",
 )
-
-MCP_PUBLIC_ENDPOINT = "/mcp/public"
 
 _LIST_PAYLOAD: dict[str, Any] = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
 _INIT_PAYLOAD: dict[str, Any] = {
@@ -59,42 +77,25 @@ cli_runner = CliRunner()
 
 
 def import_module(dotted: str) -> Any:
-    """Lazy import so collection succeeds before MP2+ lands modules."""
     return importlib.import_module(dotted)
 
 
 def require_public_module() -> Any:
-    """Return ``mergecraft.mcp.public`` or fail the RED test."""
-    try:
-        return import_module("mergecraft.mcp.public")
-    except ImportError as exc:
-        pytest.fail(f"mergecraft.mcp.public missing (MP2): {exc}")
+    return import_module("mergecraft.mcp.public")
 
 
 def require_stdio_module() -> Any:
-    """Return ``mergecraft.mcp.stdio`` or fail the RED test."""
-    try:
-        return import_module("mergecraft.mcp.stdio")
-    except ImportError as exc:
-        pytest.fail(f"mergecraft.mcp.stdio missing (MP3): {exc}")
+    return import_module("mergecraft.mcp.stdio")
 
 
 def require_eval_module() -> Any:
-    """Return ``mergecraft.evals.mcp_public`` or fail the RED test."""
-    try:
-        return import_module("mergecraft.evals.mcp_public")
-    except ImportError as exc:
-        pytest.fail(f"mergecraft.evals.mcp_public missing (MP6): {exc}")
+    return import_module("mergecraft.evals.mcp_public")
 
 
 def require_generator_script() -> Any:
-    """Load ``scripts/gen_mcp_server_json.py`` or fail the RED test."""
     from tests.docs.support import load_script_module
 
-    try:
-        return load_script_module("scripts/gen_mcp_server_json.py")
-    except (AssertionError, ImportError) as exc:
-        pytest.fail(f"scripts/gen_mcp_server_json.py missing (MP4): {exc}")
+    return load_script_module("scripts/gen_mcp_server_json.py")
 
 
 def init_git_repo(tmp_path: Path) -> None:
@@ -243,6 +244,7 @@ __all__ = [
     "init_git_repo",
     "is_auth_rejection",
     "mcp_list_names",
+    "minimal_valid_finding_dict",
     "require_eval_module",
     "require_generator_script",
     "require_public_module",

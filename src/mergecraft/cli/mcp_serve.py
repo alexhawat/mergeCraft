@@ -39,6 +39,34 @@ if TYPE_CHECKING:
 ServeRole = Literal["orchestrator", "reviewer", "verifier", "public"]
 
 
+def build_codegen_tool_context() -> ToolContext:
+    """Minimal :class:`ToolContext` for codegen and registry generation (no workspace)."""
+    import tempfile
+
+    tmpdir = tempfile.mkdtemp(prefix="mergecraft-gen-mcp-")
+    state = init_tool_state(owner="local", name="mergecraft", dir=tmpdir)
+    return ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="local", name="mergecraft"),
+        payload=ResolvedPayload(
+            event=PayloadEvent(trigger="unknown"),
+            shell="disabled",
+            push="disabled",
+        ),
+        github=GitHubClient(token=""),
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=compute_modes("claude"),
+        tool_state=state,
+        mcp_server_url="",
+        mcp_auth_token="",
+        mcp_orchestrator_auth_token="",
+        tmpdir=tmpdir,
+        xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
+    )
+
+
 def _role_endpoint(role: ServeRole) -> str:
     if role == "reviewer":
         return MCP_REVIEWER_ENDPOINT
@@ -236,6 +264,7 @@ def build_mcp_app_for_role(
 
 __all__ = [
     "_role_endpoint",
+    "build_codegen_tool_context",
     "build_mcp_app_for_role",
     "build_mcp_app_from_ctx",
     "build_mcp_tool_context",

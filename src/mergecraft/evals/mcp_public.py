@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Final, TypedDict
+from typing import Final, TypedDict
 
 from mergecraft.cli.capabilities_cmd import capabilities_manifest
 from mergecraft.mcp.public import PUBLIC_TOOL_NAMES
@@ -89,9 +89,7 @@ def load_mcp_public_cases(*, cases_path: Path | None = None) -> list[McpPublicEv
     return data
 
 
-def build_get_capabilities_payload() -> dict[str, Any]:
-    """Mirror the public ``get_capabilities`` tool payload (D10)."""
-    return dict(capabilities_manifest())
+build_get_capabilities_payload = capabilities_manifest
 
 
 def _normalized(prompt: str) -> str:

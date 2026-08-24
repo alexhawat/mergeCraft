@@ -25,7 +25,7 @@ def mcp_role_url(base: str, agent_id: str | None) -> str:
     - verifier → ``/mcp/verifier``
     - reviewer / judge / classifier / anything else → ``/mcp/reviewer``
     """
-    for suffix in (MCP_REVIEWER_ENDPOINT, MCP_VERIFIER_ENDPOINT, MCP_ENDPOINT):
+    for suffix in (MCP_PUBLIC_ENDPOINT, MCP_REVIEWER_ENDPOINT, MCP_VERIFIER_ENDPOINT, MCP_ENDPOINT):
         if base.endswith(suffix):
             host = base[: -len(suffix)]
             break

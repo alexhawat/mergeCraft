@@ -7,7 +7,6 @@ Exports:
 
 from __future__ import annotations
 
-import json
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,14 +14,13 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.cli.capabilities_cmd import capabilities_manifest
+from mergecraft.cli.explain_cmd import finding_explain_payload
 from mergecraft.cli.review_output import finding_json_records
 from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 from mergecraft.mcp.shared import EMPTY_SCHEMA, JsonSchema, ToolClass, execute, tool
 from mergecraft.offline_review import parse_offline_review_findings, run_offline_diff_review
 from mergecraft.review.completed import (
     CompletedReview,
-    completed_review_dir,
-    completed_review_exists,
     load_completed_review,
     lookup_finding_packet_in_review,
     persist_completed_review,
@@ -34,7 +32,7 @@ from mergecraft.review.completed_artifacts import (
 from mergecraft.review.finding_lookup import is_safe_path_stem
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.run_outcome import RunOutcome
-from mergecraft.utils.source_resolve import SourceResolverSpec
+from mergecraft.utils.source_resolve import SourceResolverSpec, confine_path
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -76,6 +74,12 @@ def _resolve_outcome(*, success: bool, outcome: RunOutcome | None) -> str:
     if outcome is not None:
         return outcome.value
     return RunOutcome.passed.value if success else RunOutcome.failed.value
+
+
+def _require_nonempty_str(value: object, field: str) -> str | dict[str, str]:
+    if not isinstance(value, str) or not value.strip():
+        return {"error": f"{field} is required"}
+    return value.strip()
 
 
 def _persist_public_review(
@@ -133,47 +137,21 @@ def _finding_row_for_id(
     return None
 
 
-def _load_completed_findings_rows(
+def _get_review_payload(
     review_id: str,
     *,
     repo_root: Path,
-) -> list[dict[str, Any]] | None:
-    """Return finding rows for a stored review, tolerating pre-validation fixtures."""
+) -> dict[str, Any] | None:
+    """Load a stored review via strict completed-review validation."""
     loaded = load_completed_review(review_id, repo_root=repo_root)
-    if loaded is not None:
-        return loaded.findings
-    if not completed_review_exists(review_id, repo_root=repo_root):
+    if loaded is None:
         return None
-    findings_path = completed_review_dir(review_id, repo_root=repo_root) / "findings.json"
-    try:
-        payload = json.loads(findings_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    raw_findings = payload.get("findings")
-    if not isinstance(raw_findings, list):
-        return None
-    return [row for row in raw_findings if isinstance(row, dict)]
-
-
-def _explain_finding_payload(
-    finding_id: str,
-    packet: dict[str, Any],
-    *,
-    review_id: str | None = None,
-) -> dict[str, Any]:
-    state = packet.get("state", "unverified")
-    kinds = packet.get("kinds", [])
-    kinds_text = ", ".join(str(item) for item in kinds) if isinstance(kinds, list) else "none"
-    payload: dict[str, Any] = {
-        "verb": "explain",
-        "finding_id": finding_id,
-        "paths": [],
-        "summary": f"Finding {finding_id} is {state} (kinds: {kinds_text}).",
-        "packet": packet,
+    return {
+        "review_id": loaded.review_id,
+        "manifest": loaded.manifest,
+        "findings": loaded.findings,
+        "trace_session_id": loaded.trace_session_id,
     }
-    if review_id is not None:
-        payload["review_id"] = review_id
-    return payload
 
 
 def review_change_tool(ctx: ToolContext) -> ToolSpec:
@@ -183,11 +161,23 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
         from mergecraft.tracing.review_context import resolve_review_id
 
         repo_root = _repo_root(ctx)
+        # D4 — ``entry="cli"`` matches offline review snapshot shape for public MCP serve.
         snapshot = canonical_review_snapshot(entry="cli", source=str(repo_root))
         trace_session_id = resolve_review_id()
         review_id = _safe_review_id(trace_session_id)
 
-        diff_path = params.get("diff")
+        diff_file = None
+        raw_diff = params.get("diff")
+        if raw_diff is not None:
+            confined = confine_path(repo_root, str(raw_diff))
+            if confined is None:
+                return {"error": "diff path must be inside the workspace"}
+            diff_file = confined
+
+        trust_override = None
+        if ctx.trust_tier in ("trusted", "untrusted"):
+            trust_override = ctx.trust_tier
+
         source_spec = SourceResolverSpec(
             cwd=repo_root,
             invocation_root=repo_root,
@@ -198,12 +188,13 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
         result = await run_offline_diff_review(
             cwd=repo_root,
             base=params.get("base"),
-            diff_file=Path(str(diff_path)) if diff_path else None,
+            diff_file=diff_file,
             prompt_extra=params.get("prompt"),
             dry_run=bool(params.get("dry_run", False)),
             invocation_root=repo_root,
             source_spec=source_spec,
             engine=engine,
+            trust_override=trust_override,
         )
         if not result.success:
             return {"error": result.error or "review_change failed"}
@@ -219,10 +210,10 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
             evidence_packet_path=result.evidence_packet_path,
         )
         finding_rows = finding_json_records(findings)
+        outcome = _resolve_outcome(success=result.success, outcome=result.outcome)
         return {
             "review_id": review_id,
-            "outcome": _resolve_outcome(success=result.success, outcome=result.outcome),
-            "verdict": _resolve_outcome(success=result.success, outcome=result.outcome),
+            "outcome": outcome,
             "findings": finding_rows,
             "summary": (
                 f"Review {review_id} completed with {len(finding_rows)} finding(s)."
@@ -271,50 +262,11 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
     )
 
 
-def _get_review_payload(
-    review_id: str,
-    *,
-    repo_root: Path,
-) -> dict[str, Any] | None:
-    """Load a stored review, tolerating fixture rows that skip strict Finding validation."""
-    loaded = load_completed_review(review_id, repo_root=repo_root)
-    if loaded is not None:
-        return {
-            "review_id": loaded.review_id,
-            "manifest": loaded.manifest,
-            "findings": loaded.findings,
-            "trace_session_id": loaded.trace_session_id,
-        }
-    findings = _load_completed_findings_rows(review_id, repo_root=repo_root)
-    if findings is None:
-        return None
-    review_dir = completed_review_dir(review_id, repo_root=repo_root)
-    try:
-        manifest = json.loads((review_dir / "manifest.json").read_text(encoding="utf-8"))
-        completed = json.loads((review_dir / "completed.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(manifest, dict):
-        return None
-    trace_session_id: str | None = None
-    if isinstance(completed, dict):
-        raw_trace = completed.get("trace_session_id")
-        if isinstance(raw_trace, str) and raw_trace:
-            trace_session_id = raw_trace
-    return {
-        "review_id": review_id,
-        "manifest": manifest,
-        "findings": findings,
-        "trace_session_id": trace_session_id,
-    }
-
-
 def get_review_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        review_id = params.get("review_id")
-        if not isinstance(review_id, str) or not review_id.strip():
-            return {"error": "review_id is required"}
-        review_id = review_id.strip()
+        review_id = _require_nonempty_str(params.get("review_id"), "review_id")
+        if isinstance(review_id, dict):
+            return review_id
         payload = _get_review_payload(review_id, repo_root=_repo_root(ctx))
         if payload is None:
             return {"error": f"unknown review id {review_id!r}"}
@@ -343,19 +295,17 @@ def get_review_tool(ctx: ToolContext) -> ToolSpec:
 
 def inspect_finding_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        finding_id = params.get("finding_id")
-        if not isinstance(finding_id, str) or not finding_id.strip():
-            return {"error": "finding_id is required"}
-        finding_id = finding_id.strip()
-        review_id = params.get("review_id")
-        if not isinstance(review_id, str) or not review_id.strip():
-            return {"error": "review_id is required"}
-        review_id = review_id.strip()
+        finding_id = _require_nonempty_str(params.get("finding_id"), "finding_id")
+        if isinstance(finding_id, dict):
+            return finding_id
+        review_id = _require_nonempty_str(params.get("review_id"), "review_id")
+        if isinstance(review_id, dict):
+            return review_id
         repo_root = _repo_root(ctx)
-        findings = _load_completed_findings_rows(review_id, repo_root=repo_root)
-        if findings is None:
+        loaded = load_completed_review(review_id, repo_root=repo_root)
+        if loaded is None:
             return {"error": f"unknown review id {review_id!r}"}
-        row = _finding_row_for_id(findings, finding_id)
+        row = _finding_row_for_id(loaded.findings, finding_id)
         if row is None:
             return {"error": f"unknown finding id {finding_id!r}"}
         return {"finding_id": finding_id, "finding": row, "review_id": review_id}
@@ -387,14 +337,12 @@ def inspect_finding_tool(ctx: ToolContext) -> ToolSpec:
 
 def explain_finding_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        finding_id = params.get("finding_id")
-        if not isinstance(finding_id, str) or not finding_id.strip():
-            return {"error": "finding_id is required"}
-        finding_id = finding_id.strip()
-        review_id = params.get("review_id")
-        if not isinstance(review_id, str) or not review_id.strip():
-            return {"error": "review_id is required"}
-        review_id = review_id.strip()
+        finding_id = _require_nonempty_str(params.get("finding_id"), "finding_id")
+        if isinstance(finding_id, dict):
+            return finding_id
+        review_id = _require_nonempty_str(params.get("review_id"), "review_id")
+        if isinstance(review_id, dict):
+            return review_id
         packet = lookup_finding_packet_in_review(
             review_id,
             finding_id,
@@ -402,7 +350,7 @@ def explain_finding_tool(ctx: ToolContext) -> ToolSpec:
         )
         if packet is None:
             return {"error": f"unknown finding id {finding_id!r}"}
-        return _explain_finding_payload(finding_id, packet, review_id=review_id)
+        return finding_explain_payload(finding_id, packet, review_id=review_id)
 
     return tool(
         name="explain_finding",

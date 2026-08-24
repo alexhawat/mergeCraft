@@ -57,7 +57,7 @@ def _change_payload(repo_root: Path) -> dict[str, Any]:
     }
 
 
-def _finding_payload(
+def finding_explain_payload(
     finding_id: str,
     packet: dict[str, Any],
     *,
@@ -148,7 +148,7 @@ def run(
             packet = lookup_finding_packet(resolved_finding_id, repo_root=root)
             if packet is None:
                 cli_bail(f"unknown finding id {resolved_finding_id}", code=CLI_USAGE_EXIT_CODE)
-        payload = _finding_payload(
+        payload = finding_explain_payload(
             resolved_finding_id,
             packet,
             review_id=resolved_review_id,
@@ -162,4 +162,4 @@ def run(
     console.print(_render_table(payload))
 
 
-__all__ = ["run"]
+__all__ = ["finding_explain_payload", "run"]

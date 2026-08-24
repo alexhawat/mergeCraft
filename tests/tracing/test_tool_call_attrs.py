@@ -128,12 +128,8 @@ def test_mcp_tool_call_span_has_request_attrs(
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="mcp-success", run_id="mcp-success-run")
 
-    # The MCP handler binds ``get_tracer_from_settings`` via a top-level
-    # ``from mergecraft.tracing.tracer import get_tracer_from_settings``
-    # import (W4 hoist). Patch the canonical symbol so the returned tracer
-    # routes every emitted span onto our ``MemorySink``.
     monkeypatch.setattr(
-        "mergecraft.mcp.server.get_tracer_from_settings",
+        "mergecraft.tracing.tracer.get_tracer_from_settings",
         lambda _settings: tracer,
     )
 
@@ -213,7 +209,7 @@ def test_mcp_tool_call_span_has_error_attrs(
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="mcp-error", run_id="mcp-error-run")
     monkeypatch.setattr(
-        "mergecraft.mcp.server.get_tracer_from_settings",
+        "mergecraft.tracing.tracer.get_tracer_from_settings",
         lambda _settings: tracer,
     )
 

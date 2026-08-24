@@ -14,11 +14,12 @@ from tests.mcp.public_mcp_support import (
     PUBLIC_TOOL_NAMES,
     build_public_http_client,
     init_git_repo,
-    require_public_module,
+    minimal_valid_finding_dict,
     rpc_json,
     write_minimal_config,
 )
 
+import mergecraft.mcp.public as public_mod
 from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX
 from mergecraft.cli.capabilities_cmd import capabilities_manifest
 from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
@@ -140,15 +141,10 @@ def test_inspect_finding_accepts_short_id(
     from mergecraft.review.completed import persist_completed_review
 
     fingerprint = "a" * 64
-    short_id = f"{FINDING_SHORT_ID_PREFIX}{fingerprint[:6]}"
+    finding = minimal_valid_finding_dict(fingerprint, message="sample")
+    short_id = finding["short_id"]
     review_id = "mp1-inspect-finding"
     snapshot = canonical_review_snapshot(entry="cli")
-    finding = {
-        "fingerprint": fingerprint,
-        "short_id": short_id,
-        "message": "sample",
-        "severity": "minor",
-    }
     persist_completed_review(
         CompletedReview(
             review_id=review_id,
@@ -180,7 +176,8 @@ def test_explain_finding_matches_cli_explain_payload_keys(
     from mergecraft.review.completed import persist_completed_review
 
     fingerprint = "b" * 64
-    short_id = f"{FINDING_SHORT_ID_PREFIX}{fingerprint[:6]}"
+    finding = minimal_valid_finding_dict(fingerprint, message="sample")
+    short_id = finding["short_id"]
     review_id = "mp1-explain-finding"
     snapshot = canonical_review_snapshot(entry="cli")
     persist_completed_review(
@@ -188,14 +185,7 @@ def test_explain_finding_matches_cli_explain_payload_keys(
             review_id=review_id,
             snapshot=snapshot,
             manifest={"outcome": "changes_requested"},
-            findings=[
-                {
-                    "fingerprint": fingerprint,
-                    "short_id": short_id,
-                    "message": "sample",
-                    "severity": "minor",
-                }
-            ],
+            findings=[finding],
         ),
         repo_root=tmp_path,
         evidence_packets={
@@ -233,7 +223,6 @@ def test_get_policy_is_read_only(
 ) -> None:
     from mergecraft.cli.mcp_serve import build_mcp_tool_context
 
-    public_mod = require_public_module()
     init_git_repo(tmp_path)
     write_minimal_config(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -257,6 +246,48 @@ def test_get_policy_is_read_only(
         assert set(rule_ids).issuperset(set(DEFAULT_GATE_POLICIES))
 
 
+def test_review_change_rejects_diff_outside_workspace(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    outside = tmp_path.parent / "outside-mcp.patch"
+    outside.write_text("diff --git a/x b/x\n", encoding="utf-8")
+    payload = _call_public_tool(
+        tmp_path,
+        monkeypatch,
+        "review_change",
+        {"diff": f"../{outside.name}", "dry_run": True},
+    )
+    assert payload.get("error") == "diff path must be inside the workspace"
+
+
+@pytest.mark.asyncio
+async def test_review_change_forwards_serve_trust_tier(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from mergecraft.cli.mcp_serve import build_mcp_tool_context
+    from mergecraft.offline_review import OfflineReviewResult
+
+    init_git_repo(tmp_path)
+    write_minimal_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ctx = build_mcp_tool_context(cwd=tmp_path, trust_override="trusted")
+    captured: dict[str, object] = {}
+
+    async def fake_run_offline_diff_review(**kwargs: object) -> OfflineReviewResult:
+        captured.update(kwargs)
+        return OfflineReviewResult(success=True, output="ok")
+
+    monkeypatch.setattr(
+        "mergecraft.mcp.public.run_offline_diff_review",
+        fake_run_offline_diff_review,
+    )
+    spec = public_mod.review_change_tool(ctx)
+    await spec.execute({"dry_run": True})
+    assert captured.get("trust_override") == "trusted"
+
+
 def test_public_tools_are_not_filtered_orchestrator_tools(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -264,7 +295,6 @@ def test_public_tools_are_not_filtered_orchestrator_tools(
     from mergecraft.cli.mcp_serve import build_mcp_tool_context
     from mergecraft.mcp.server import build_orchestrator_tools
 
-    public_mod = require_public_module()
     names = frozenset(public_mod.PUBLIC_TOOL_NAMES)
     assert names == PUBLIC_TOOL_NAMES
     init_git_repo(tmp_path)

@@ -8,7 +8,7 @@ import os
 import secrets
 import threading
 from math import isfinite
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
@@ -77,6 +77,7 @@ from mergecraft.mcp.review_comments import (
     list_pull_request_reviews_tool,
     resolve_review_thread_tool,
 )
+from mergecraft.mcp.rpc import RpcError, dispatch_mcp_rpc, mcp_server_version
 from mergecraft.mcp.select_mode import select_mode_tool
 from mergecraft.mcp.shared import (
     PRIMARY_MUTATING_ALLOWLIST,
@@ -88,8 +89,6 @@ from mergecraft.mcp.shared import (
     ToolResult,
     ToolSpec,
     admits_readonly_role,
-    bind_selected_mode,
-    reset_selected_mode,
 )
 from mergecraft.mcp.shell import detect_sandbox_method, kill_background_tool, shell_tool
 from mergecraft.mcp.static_checks import run_static_checks_tool
@@ -101,12 +100,6 @@ from mergecraft.mcp.verification import (
 )
 from mergecraft.mcp.xrepo import checkout_repo_tool, list_repos_tool
 from mergecraft.scm.ingress import accept_webhook
-from mergecraft.tracing._tool_attrs import (
-    emit_verb_subevent,
-    enrich_tool_request,
-    enrich_tool_response,
-)
-from mergecraft.tracing.tracer import get_tracer_from_settings
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.process_group import kill_process_groups
 
@@ -306,22 +299,6 @@ def _record_trajectory(
         logger.debug("trajectory: failed to record {} — {}", name, exc)
 
 
-class RpcError(NamedTuple):
-    """A JSON-RPC error code/message pair, before it is wrapped in an envelope."""
-
-    code: int
-    message: str
-
-
-def _rpc_error(req_id: Any, error: RpcError) -> dict[str, Any]:
-    """Wrap ``error`` in the JSON-RPC response envelope for ``req_id``."""
-    return {
-        "jsonrpc": "2.0",
-        "id": req_id,
-        "error": {"code": error.code, "message": error.message},
-    }
-
-
 # The JSON vocabulary and its two string encodings, nothing invented: a model
 # writing `yes` has not written a boolean any JSON Schema consumer recognises.
 _TRUE_STRINGS = frozenset({"true", "1"})
@@ -449,94 +426,19 @@ def _register_mcp_route(
         req_id = body.get("id")
         method = body.get("method")
         params = body.get("params") or {}
-        if method == "initialize":
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": MERGECRAFT_MCP_NAME, "version": "0.1.0"},
-                },
-            }
-        if method == "tools/list":
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"tools": [t.list_entry() for t in tools]},
-            }
-        if method == "tools/call":
-            name = params.get("name")
-            arguments = params.get("arguments") or {}
-            if not isinstance(name, str):
-                return _rpc_error(req_id, RpcError(-32602, "tools/call requires string name"))
-            if not isinstance(arguments, dict):
-                arguments = {}
-            tool = by_name.get(name)
-            if tool is None:
-                return _rpc_error(req_id, RpcError(-32601, f"Unknown tool: {name}"))
-            arguments = _coerce_arguments(arguments, tool.input_schema)
-            # Validate before charging: a call rejected here never ran, so it
-            # costs no tool call — otherwise a schema mismatch the agent keeps
-            # retrying burns the run budget with nothing executed. It is still
-            # recorded on the trajectory, which is the only place the rejection
-            # would otherwise be visible.
-            schema_error = _argument_schema_error(tool, arguments, validators)
-            if schema_error is not None:
-                _record_trajectory(tool_ctx, name, arguments, ok=False, error=schema_error.message)
-                return _rpc_error(req_id, schema_error)
-            try:
-                from mergecraft.utils.run_bounds import BudgetExhausted
-
-                _charge_tool_call_budget(tool_ctx)
-            except BudgetExhausted as exc:
-                return _rpc_error(req_id, RpcError(-32000, str(exc)))
-            from mergecraft.config.settings import RepoSettings
-
-            tracer = get_tracer_from_settings(RepoSettings())
-            call_attrs: dict[str, Any] = {
-                "tool.name": name,
-                "tool.server": MERGECRAFT_MCP_NAME,
-                "gen_ai.operation.name": "execute_tool",
-                "gen_ai.tool.name": name,
-                "gen_ai.tool.call.id": _span_tool_call_id(),
-            }
-            # D10 (OB4) — per-agent attribution from the MCP side: the
-            # dispatch-issued identity arrives as a request header (the
-            # harness subprocess is uninstrumentable), so every tool.call
-            # span carries the calling agent's id.
-            if agent_id:
-                call_attrs["mergecraft.agent.id"] = agent_id
-            with tracer.start_span("tool.call", attrs_source=lambda: dict(call_attrs)) as _span:
-                enrich_tool_request(_span, arguments=arguments)
-                mode = tool_ctx.tool_state.selected_mode if tool_ctx is not None else None
-                mode_token = bind_selected_mode(mode)
-                try:
-                    result = await tool.execute(arguments)
-                except Exception as exc:
-                    _span.set_status("error", str(exc))
-                    enrich_tool_response(_span, output=None, error=exc)
-                    _record_trajectory(tool_ctx, name, arguments, ok=False, error=str(exc))
-                    raise
-                finally:
-                    reset_selected_mode(mode_token)
-                enrich_tool_response(_span, output=result)
-                _record_trajectory(tool_ctx, name, arguments, ok=True, result=result)
-                # T1 / D5 — known-verb tools also emit a verb-specific child
-                # span (tool.browse for ``browser``, etc.) for finer-grained
-                # Logfire grouping. Fire-and-forget; no new bookkeeping.
-                emit_verb_subevent(
-                    tracer,
-                    parent_span_id=_span.span_id,
-                    tool_name=name,
-                    attrs=call_attrs,
-                )
-                return {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": _tool_result_to_rpc(result),
-                }
-        return _rpc_error(req_id, RpcError(-32601, f"Method not found: {method}"))
+        if not isinstance(params, dict):
+            params = {}
+        return await dispatch_mcp_rpc(
+            req_id,
+            method,
+            params,
+            tools=tools,
+            by_name=by_name,
+            tool_ctx=tool_ctx,
+            validators=validators,
+            agent_id=agent_id,
+            return_tool_errors=False,
+        )
 
     async def mcp_endpoint(request: Request) -> Response:
         # D15 — auth at request edge: every tools/list and tools/call (including
@@ -626,7 +528,7 @@ def create_mcp_app(
     When ``tools`` is empty or ``None``, the ``/mcp`` primary endpoint is omitted
     and only ``/health`` and any ``role_tools`` routes are registered.
     """
-    app = FastAPI(title=MERGECRAFT_MCP_NAME, version="0.1.0")
+    app = FastAPI(title=MERGECRAFT_MCP_NAME, version=mcp_server_version())
 
     @app.get("/health")
     async def health() -> dict[str, str]:
