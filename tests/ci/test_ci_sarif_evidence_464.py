@@ -283,6 +283,41 @@ async def test_collect_makes_no_api_call_when_ci_evidence_is_empty(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_collect_paginates_workflow_runs_past_first_page(tmp_path: Path) -> None:
+    class _PagedRuns(_ArtifactGitHub):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.pages: list[int] = []
+
+        async def get(self, path: str, **kwargs: Any) -> Any:
+            self.get_paths.append(path)
+            if path.endswith("/actions/runs"):
+                params = kwargs.get("params") or {}
+                page = int(params.get("page") or 1)
+                self.pages.append(page)
+                if page == 1:
+                    return {"workflow_runs": [{"id": i} for i in range(100)]}
+                return {"workflow_runs": [{"id": 88}]}
+            return {}
+
+        async def list_workflow_run_artifacts(
+            self, owner: str, repo: str, run_id: int
+        ) -> list[dict[str, Any]]:
+            if run_id != 88:
+                return []
+            return list(self.artifacts)
+
+    github = _PagedRuns(
+        artifacts=[{"id": 7, "name": "ruff-sarif"}],
+        archives={7: _zip_sarif("ruff.sarif", _sarif(tool="ruff", rule_id="F401", level="error"))},
+    )
+    ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif"])
+    findings = await collect_ci_sarif_findings(ctx, check_suite_id=123)
+    assert github.pages == [1, 2]
+    assert any(item.severity in _BLOCKING for item in findings)
+
+
+@pytest.mark.asyncio
 async def test_collect_continues_after_one_run_listing_failure(tmp_path: Path) -> None:
     """A listing error on run n must not skip remaining workflow runs."""
 

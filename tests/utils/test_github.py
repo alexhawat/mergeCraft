@@ -155,3 +155,39 @@ async def test_graphql_errors_raise() -> None:
         client = GitHubClient("t", client=raw)
         with pytest.raises(RuntimeError, match="GraphQL"):
             await client.graphql("query { x }")
+
+
+@pytest.mark.asyncio
+async def test_list_workflow_run_artifacts_follows_pages() -> None:
+    pages: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/actions/runs/9/artifacts")
+        page = int(request.url.params.get("page") or "1")
+        pages.append(page)
+        if page == 1:
+            artifacts = [{"id": i, "name": f"a{i}"} for i in range(100)]
+        else:
+            artifacts = [{"id": 100, "name": "last"}]
+        return httpx.Response(200, json={"total_count": 101, "artifacts": artifacts})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.github.com") as raw:
+        client = GitHubClient("t", client=raw)
+        artifacts = await client.list_workflow_run_artifacts("acme", "widgets", 9)
+
+    assert pages == [1, 2]
+    assert len(artifacts) == 101
+    assert artifacts[-1]["name"] == "last"
+
+
+def test_provider_agents_import_failure_taxonomy_from_provider_failure() -> None:
+    import inspect
+
+    from mergecraft.agents import claude, codex, gemini, opencode
+    from mergecraft.utils import agent_resolve
+
+    for module in (claude, codex, gemini, opencode, agent_resolve):
+        source = inspect.getsource(module)
+        assert "mergecraft.utils.provider_failure" in source
+        assert "from mergecraft.utils.retry_policy import is_retryable_cli_failure" not in source

@@ -13,6 +13,7 @@ from loguru import logger
 from mergecraft.ci.log_excerpt import analyze_log
 from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation
 from mergecraft.scm.github import GitHubScmAdapter
+from mergecraft.utils.github import paginate_github_list_pages
 
 if TYPE_CHECKING:
     from mergecraft.ci.types import ProviderContext, RawFailure
@@ -40,15 +41,14 @@ class GitHubActionsProvider:
         truncation_cap: int = DEFAULT_TRUNCATION_CAP,
     ) -> dict[str, Any]:
         """Download failed workflow logs for a check suite (legacy MCP contract)."""
-        payload = await ctx.scm.get(
-            f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs",
-            params={"check_suite_id": check_suite_id, "per_page": 100},
-        )
-        runs = (
-            payload.get("workflow_runs", [])
-            if isinstance(payload, dict)
-            else (payload if isinstance(payload, list) else [])
-        )
+
+        async def _fetch_runs(page: int) -> Any:
+            return await ctx.scm.get(
+                f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs",
+                params={"check_suite_id": check_suite_id, "per_page": 100, "page": page},
+            )
+
+        runs = await paginate_github_list_pages(_fetch_runs, item_key="workflow_runs")
         failed = [run for run in runs if run.get("conclusion") == "failure"]
         if not failed:
             return {

@@ -60,7 +60,7 @@ from mergecraft.utils.process_group import (
     unregister_process_group,
     wait_or_kill_process_group,
 )
-from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:

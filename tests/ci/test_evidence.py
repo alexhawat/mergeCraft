@@ -290,6 +290,21 @@ def test_recording_is_idempotent_on_fingerprint() -> None:
     assert len(ci_evidence_findings(state)) == 1
 
 
+def test_recording_keeps_higher_severity_on_fingerprint_collision() -> None:
+    state = init_tool_state(owner="acme", name="demo", dir=".")
+    minor = check_run_to_finding(_check_run(conclusion="failure"))
+    assert minor is not None
+    minor = minor.model_copy(update={"severity": "Minor", "fingerprint": "ci-dup"})
+    major = minor.model_copy(update={"severity": "Major"})
+
+    record_ci_findings(state, [minor])
+    record_ci_findings(state, [major])
+
+    restored = ci_evidence_findings(state)
+    assert len(restored) == 1
+    assert restored[0].severity == "Major"
+
+
 def test_declared_gate_findings_report_a_failing_mapped_check_run() -> None:
     """A declared gate CI proved *broken* is reported — unblamed — not hidden."""
     findings = declared_gate_findings(

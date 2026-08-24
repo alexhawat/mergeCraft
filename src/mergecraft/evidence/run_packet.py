@@ -20,6 +20,7 @@ Exports:
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,16 +30,15 @@ from mergecraft.analyzers.scope import parse_diff_scope
 from mergecraft.classify import ChangeSet, classify_blast_radius
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.emit import write_packet
-from mergecraft.evidence.packet import DeterministicCheck, ModePromptVersion
+from mergecraft.evidence.packet import DeterministicCheck, MergeEvidencePacket, ModePromptVersion
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from mergecraft.analyzers.finding import Finding
     from mergecraft.classify import BlastRadiusClassification
-    from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.mcp.context import ToolContext
-    from mergecraft.mcp.tool_state import ToolState
+    from mergecraft.mcp.tool_state import RepoToolState, ToolState
     from mergecraft.modes import Mode
 
 PACKET_FILENAME = "merge-evidence-packet.json"
@@ -46,6 +46,29 @@ PACKET_FILENAME = "merge-evidence-packet.json"
 
 _PACKET_DIR_ENV = "MERGECRAFT_EVIDENCE_DIR"
 """Operator override for the packet's parent directory."""
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedPacket:
+    """Result of one packet assembly attempt.
+
+    ``packet`` is the assembled evidence, or ``None`` when the run has no
+    change to attest or assembly failed. Passing this type means assembly
+    already ran — emit and status-check paths must not rebuild.
+    """
+
+    packet: MergeEvidencePacket | None
+
+
+def take_prepared_packet(
+    packet: MergeEvidencePacket | PreparedPacket | None,
+) -> tuple[MergeEvidencePacket | None, bool]:
+    """Return ``(packet, already_attempted)`` from a collapsed assembly argument."""
+    if isinstance(packet, PreparedPacket):
+        return packet.packet, True
+    if packet is not None:
+        return packet, True
+    return None, False
 
 
 def resolve_packet_path(*, tmpdir: str, change_slug: str) -> Path:
@@ -78,7 +101,7 @@ def _slugify(change_id: str) -> str:
     return "".join(char if char.isalnum() or char in "-_" else "-" for char in change_id).strip("-")
 
 
-def _read_diff_text(state: Any) -> str:
+def _read_diff_text(state: RepoToolState) -> str:
     """Return the run's unified diff text, preferring the full-PR diff.
 
     The incremental diff covers only commits since the last review, so it
@@ -86,8 +109,7 @@ def _read_diff_text(state: Any) -> str:
     lands the whole PR — so the full diff is authoritative and the
     incremental one is only a fallback.
     """
-    for attr in ("diff_path", "incremental_diff_path"):
-        raw = getattr(state, attr, None)
+    for raw in (state.diff_path, state.incremental_diff_path):
         if not raw:
             continue
         path = Path(raw)
@@ -95,7 +117,7 @@ def _read_diff_text(state: Any) -> str:
             try:
                 return path.read_text(encoding="utf-8")
             except OSError as err:
-                logger.debug("evidence packet: cannot read {} ({}) — {}", attr, path, err)
+                logger.debug("evidence packet: cannot read {} — {}", path, err)
     return ""
 
 
@@ -164,8 +186,8 @@ def _deterministic_checks(state: ToolState) -> list[DeterministicCheck]:
     analyzer missing from the catalog still yields a row — dropping it would
     understate the evidence.
     """
-    run_state = getattr(state, "analyzer_run", None)
-    rows = list(getattr(run_state, "analyzers", []) or [])
+    run_state = state.analyzer_run
+    rows = list(run_state.analyzers) if run_state is not None else []
     from mergecraft.analyzers.pipeline import CatalogScanStatus, catalog_scan_status
     from mergecraft.analyzers.registry import get_manifest
 
@@ -178,7 +200,7 @@ def _deterministic_checks(state: ToolState) -> list[DeterministicCheck]:
     for row in rows:
         try:
             command = " ".join(get_manifest(row.id).command)
-        except Exception:  # unknown analyzer id must not lose the row
+        except KeyError:
             command = row.id
         checks.append(DeterministicCheck(name=row.id, status=row.status, command=command))
     return checks
@@ -235,7 +257,7 @@ def _self_assessment(state: ToolState) -> dict[str, Any] | None:
     ``build_packet`` already maps ``would_approve`` onto ``approved``; this
     only has to hand it the dict.
     """
-    approval = getattr(state, "approval", None)
+    approval = state.approval
     if approval is None:
         return None
     return {"would_approve": approval.would_approve, "sha": approval.sha}
@@ -263,8 +285,8 @@ def _structural_findings(
 def build_run_packet(
     ctx: ToolContext,
     *,
-    change_id: str,
     run_succeeded: bool,
+    change_id: str | None = None,
     extra_findings: list[Finding] | None = None,
 ) -> MergeEvidencePacket:
     """Assemble the packet for a completed run, decision included.
@@ -273,9 +295,15 @@ def build_run_packet(
     packet: build the evidence, hand it to ``decide_approval``, then attach
     the returned verdict. That keeps the verdict a pure function of the
     evidence actually recorded, rather than of a parallel set of inputs.
+    ``change_id`` defaults to the PR-derived identifier on ``ctx``.
     """
     from mergecraft.agents.gates import decide_action, decide_approval
     from mergecraft.mcp.tool_state import primary_repo_state
+
+    resolved_change_id = change_id or _change_id(ctx)
+    if resolved_change_id is None:
+        msg = "evidence packet: run has no pull request"
+        raise ValueError(msg)
 
     state = ctx.tool_state
     repo_state = primary_repo_state(state)
@@ -294,8 +322,8 @@ def build_run_packet(
 
     executed_model = ctx.resolved_model or state.model or "(unresolved)"
     requested_model = state.requested_model or executed_model
-    fallback_index = int(getattr(state, "fallback_index", 0) or 0)
-    fallback_occurred = bool(getattr(state, "fallback_occurred", False))
+    fallback_index = state.fallback_index
+    fallback_occurred = state.fallback_occurred
     provider = _provider_for_model_evidence(
         executed_model=executed_model,
         requested_model=requested_model,
@@ -303,7 +331,7 @@ def build_run_packet(
     )
 
     packet = build_packet(
-        change_id=change_id,
+        change_id=resolved_change_id,
         agent_id=ctx.agent_id,
         agent_version=_agent_version(),
         model=executed_model,
@@ -425,6 +453,31 @@ def _change_id(ctx: ToolContext) -> str | None:
     return f"{ctx.repo.owner}/{ctx.repo.name}#{pull_number}"
 
 
+def prepare_run_packet(
+    ctx: ToolContext,
+    *,
+    run_succeeded: bool,
+    change_id: str | None = None,
+    extra_findings: list[Finding] | None = None,
+) -> PreparedPacket:
+    """Assemble once. ``None`` packet means skip write/approval, never rebuild."""
+    resolved = change_id or _change_id(ctx)
+    if resolved is None:
+        return PreparedPacket(None)
+    try:
+        return PreparedPacket(
+            build_run_packet(
+                ctx,
+                change_id=resolved,
+                run_succeeded=run_succeeded,
+                extra_findings=extra_findings,
+            )
+        )
+    except Exception as err:
+        logger.warning("evidence packet: assembly failed — {}", err)
+        return PreparedPacket(None)
+
+
 def emit_run_packet(
     ctx: ToolContext,
     *,
@@ -434,8 +487,7 @@ def emit_run_packet(
     output_path: Path | None = None,
     verdict_prediction: Any | None = None,
     actual_outcome: str | None = None,
-    packet: MergeEvidencePacket | None = None,
-    packet_ready: bool = False,
+    packet: MergeEvidencePacket | PreparedPacket | None = None,
 ) -> Path | None:
     """Build and write this run's evidence packet; return its path.
 
@@ -447,15 +499,16 @@ def emit_run_packet(
     ``change_id`` overrides the PR-derived identifier — the offline
     ``diff-review`` path has a real change to attest to but no pull request.
     ``output_path`` overrides the resolved destination.
-    ``packet_ready`` means the caller already assembled (or failed to);
-    this function then only writes and must not rebuild.
+    Pass a :class:`PreparedPacket` (or a built :class:`MergeEvidencePacket`)
+    when assembly already ran; ``PreparedPacket(None)`` skips without rebuild.
 
     Returns ``None`` when the run has no change to attest to.
     """
-    if packet_ready:
-        if packet is None:
+    assembled, already_attempted = take_prepared_packet(packet)
+    if already_attempted:
+        if assembled is None:
             return None
-        resolved_change_id = change_id or packet.change_id or _change_id(ctx)
+        resolved_change_id = change_id or assembled.change_id or _change_id(ctx)
         if resolved_change_id is None:
             logger.debug("evidence packet: run has no pull request — nothing to attest")
             return None
@@ -465,7 +518,7 @@ def emit_run_packet(
             logger.debug("evidence packet: run has no pull request — nothing to attest")
             return None
         try:
-            packet = build_run_packet(
+            assembled = build_run_packet(
                 ctx,
                 change_id=resolved_change_id,
                 run_succeeded=run_succeeded,
@@ -479,20 +532,20 @@ def emit_run_packet(
         path = output_path or resolve_packet_path(
             tmpdir=ctx.tmpdir, change_slug=_slugify(resolved_change_id)
         )
-        written = write_packet(packet, output_path=path)
+        written = write_packet(assembled, output_path=path)
         # W10.2 (#50): in shadow mode the predicted action is recorded as
         # an audit breadcrumb beside the packet. The record is the row
         # the disagreement report reads; the gate itself is never
         # applied (D11, D12). The shadow recorder is a no-op in enforce
         # mode — applying the action is the gate's job, not a side
         # effect of emit.
-        if packet.decision is not None and packet.decision.mode == "shadow":
+        if assembled.decision is not None and assembled.decision.mode == "shadow":
             from mergecraft.evidence.shadow import record_shadow_prediction
 
             shadow_path = path.with_name("merge-evidence-shadow.jsonl")
             try:
                 record_shadow_prediction(
-                    packet,
+                    assembled,
                     change_id=resolved_change_id,
                     run_id=_shadow_run_id(ctx),
                     policy_id="default",
@@ -506,7 +559,7 @@ def emit_run_packet(
             shadow_path = path.with_name("merge-evidence-shadow.jsonl")
             try:
                 record_shadow_prediction(
-                    packet,
+                    assembled,
                     change_id=resolved_change_id,
                     run_id=_shadow_run_id(ctx),
                     policy_id="verdict-protocol",
@@ -519,10 +572,10 @@ def emit_run_packet(
     except Exception as err:  # an audit artifact never fails the run
         logger.warning("evidence packet: emission failed — {}", err)
         return None
-    lane = packet.blast_radius.lane if packet.blast_radius else "(unclassified)"
-    verdict = packet.decision.verdict if packet.decision else "(none)"
-    action = packet.decision.action if packet.decision else "(none)"
-    mode = packet.decision.mode if packet.decision else "(none)"
+    lane = assembled.blast_radius.lane if assembled.blast_radius else "(unclassified)"
+    verdict = assembled.decision.verdict if assembled.decision else "(none)"
+    action = assembled.decision.action if assembled.decision else "(none)"
+    mode = assembled.decision.mode if assembled.decision else "(none)"
     # W9.3 — the action is the next required action: the only thing the
     # operator or downstream gate needs to act on. The numeric score
     # never appears; verdict + action + lane + mode is the full wire.
@@ -540,9 +593,12 @@ def emit_run_packet(
 
 __all__ = [
     "PACKET_FILENAME",
+    "PreparedPacket",
     "build_run_packet",
     "changed_paths_from_diff",
     "classify_run_blast_radius",
     "emit_run_packet",
+    "prepare_run_packet",
     "resolve_packet_path",
+    "take_prepared_packet",
 ]

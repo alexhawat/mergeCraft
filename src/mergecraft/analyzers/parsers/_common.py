@@ -246,6 +246,31 @@ def coerce_line(value: object, *, default: int = 1) -> int:
     return default
 
 
+_BANDIT_NATIVE_LEVELS: dict[str, str] = {
+    "high": "high",
+    "medium": "medium",
+    "low": "low",
+    "undefined": "undefined",
+}
+
+
+def bandit_native_severity(result: dict[str, Any]) -> str:
+    """Normalize Bandit ``issue_severity`` for the parser and SARIF converter."""
+    return _BANDIT_NATIVE_LEVELS.get(
+        str(result.get("issue_severity") or "medium").casefold(), "medium"
+    )
+
+
+def bandit_row_span(result: dict[str, Any]) -> tuple[int, int]:
+    """Return ``(start_line, end_line)`` from ``line_number`` / ``line_range``."""
+    start = coerce_line(result.get("line_number"), default=1)
+    line_range = result.get("line_range")
+    if isinstance(line_range, list) and line_range:
+        end = coerce_line(line_range[-1], default=start)
+        return start, max(end, start)
+    return start, start
+
+
 def coerce_optional_line(value: object) -> int | None:
     """Return a 1-based line, or ``None`` when the tool did not report one."""
     if value is None or isinstance(value, bool):

@@ -14,6 +14,7 @@ the point. Do not edit ``src/mergecraft/``.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -80,6 +81,27 @@ def _stub_bandit_parse_boundary(
 def test_empty_bandit_stdout_is_zero_findings_not_an_error(raw: str) -> None:
     findings = parse_bandit_json(raw, manifest=_manifest(), repo_root=Path("."))
     assert findings == []
+
+
+def test_bandit_line_range_sets_end_line() -> None:
+    raw = json.dumps(
+        {
+            "results": [
+                {
+                    "test_id": "B101",
+                    "issue_severity": "HIGH",
+                    "issue_text": "assert used",
+                    "filename": "app.py",
+                    "line_number": 4,
+                    "line_range": [4, 9],
+                }
+            ]
+        }
+    )
+    findings = parse_bandit_json(raw, manifest=_manifest(), repo_root=Path("."))
+    assert len(findings) == 1
+    assert findings[0].start_line == 4
+    assert findings[0].end_line == 9
 
 
 def test_bandit_non_object_results_row_raises() -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any, Final
 
 import httpx
 from loguru import logger
@@ -21,9 +21,14 @@ from mergecraft.utils.retry_policy import (
     retry_transient_safe_methods,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
 DEFAULT_API_URL = "https://api.github.com"
 DEFAULT_ACCEPT = "application/vnd.github+json"
 DEFAULT_API_VERSION = "2022-11-28"
+GITHUB_LIST_PAGE_SIZE: Final[int] = 100
+GITHUB_LIST_MAX_PAGES: Final[int] = 20
 
 
 def _as_dict(data: Any) -> dict[str, Any]:
@@ -37,6 +42,34 @@ def _as_list(data: Any) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         return []
     return [item for item in data if isinstance(item, dict)]
+
+
+async def paginate_github_list_pages(
+    fetch_page: Callable[[int], Awaitable[Any]],
+    *,
+    item_key: str,
+    page_size: int = GITHUB_LIST_PAGE_SIZE,
+    max_pages: int = GITHUB_LIST_MAX_PAGES,
+) -> list[dict[str, Any]]:
+    """Follow GitHub list pages until a short page or ``max_pages``.
+
+    Each ``fetch_page(page)`` should return a JSON object with ``item_key``
+    (or a bare list). A full page of ``page_size`` continues; a shorter
+    page ends the walk so items past 100 are not silently dropped.
+    """
+    collected: list[dict[str, Any]] = []
+    for page in range(1, max_pages + 1):
+        payload = await fetch_page(page)
+        if isinstance(payload, list):
+            batch = [item for item in payload if isinstance(item, dict)]
+        elif isinstance(payload, dict):
+            batch = _as_list(payload.get(item_key))
+        else:
+            batch = []
+        collected.extend(batch)
+        if len(batch) < page_size:
+            break
+    return collected
 
 
 class RepoContext:
@@ -514,14 +547,15 @@ class GitHubClient:
         repo: str,
         run_id: int,
     ) -> list[dict[str, Any]]:
-        """List artifacts a workflow run uploaded."""
-        payload = await self.get(
-            f"/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
-            params={"per_page": 100},
-        )
-        if not isinstance(payload, dict):
-            return []
-        return _as_list(payload.get("artifacts"))
+        """List artifacts a workflow run uploaded (every page, not only the first 100)."""
+
+        async def _fetch_page(page: int) -> Any:
+            return await self.get(
+                f"/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
+                params={"per_page": GITHUB_LIST_PAGE_SIZE, "page": page},
+            )
+
+        return await paginate_github_list_pages(_fetch_page, item_key="artifacts")
 
     async def download_artifact_zip(
         self,

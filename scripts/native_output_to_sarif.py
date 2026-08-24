@@ -16,9 +16,14 @@ import sys
 from pathlib import Path
 from typing import TypedDict
 
-from mergecraft.analyzers.parsers._common import iter_bandit_result_rows, require_json_object
+from mergecraft.analyzers.parsers._common import (
+    bandit_native_severity,
+    bandit_row_span,
+    iter_bandit_result_rows,
+    require_json_object,
+)
 
-_BANDIT_LEVEL = {"HIGH": "error", "MEDIUM": "warning", "LOW": "note"}
+_BANDIT_LEVEL = {"high": "error", "medium": "warning", "low": "note", "undefined": "note"}
 
 
 class ConverterError(ValueError):
@@ -183,16 +188,16 @@ def bandit_to_sarif(raw: str) -> SarifLog:
         raise ConverterError(str(exc)) from exc
     results: list[SarifResult] = []
     for item in rows:
-        native = str(item.get("issue_severity") or "LOW").upper()
-        line = _as_line(item.get("line_number"), default=1)
+        native = bandit_native_severity(item)
+        start, end = bandit_row_span(item)
         results.append(
             _result(
                 rule_id=str(item.get("test_id") or "bandit"),
                 level=_BANDIT_LEVEL.get(native, "note"),
                 message=str(item.get("issue_text") or "bandit finding"),
                 uri=str(item.get("filename") or "unknown"),
-                start_line=max(line, 1),
-                end_line=max(line, 1),
+                start_line=max(start, 1),
+                end_line=max(end, start, 1),
             )
         )
     return _sarif(tool="bandit", results=results)

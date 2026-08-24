@@ -19,6 +19,7 @@ import pytest
 from mergecraft.analyzers.finding import make_finding
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION
 from mergecraft.evidence.run_packet import (
+    PreparedPacket,
     build_run_packet,
     changed_paths_from_diff,
     classify_run_blast_radius,
@@ -218,7 +219,7 @@ def test_emit_run_packet_does_not_rebuild_when_packet_ready(
         raise RuntimeError(msg)
 
     monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
-    written = emit_run_packet(ctx, run_succeeded=True, packet=packet, packet_ready=True)
+    written = emit_run_packet(ctx, run_succeeded=True, packet=packet)
     assert calls["n"] == 0
     assert written is not None
     assert json.loads(written.read_text(encoding="utf-8"))["change_id"] == packet.change_id
@@ -541,3 +542,64 @@ def test_load_run_findings_keeps_ci_blocker_over_agent_minor(tmp_path: Path) -> 
     assert len(matching) == 1
     assert matching[0].severity == "Critical"
     assert matching[0].source == "ci"
+
+
+def test_main_does_not_import_private_change_id() -> None:
+    import inspect
+
+    from mergecraft import main as main_mod
+
+    source = inspect.getsource(main_mod)
+    assert "_change_id" not in source
+    assert "prepare_run_packet" in source
+
+
+def test_emit_run_packet_skips_without_rebuild_when_prepared_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _make_ctx(tmp_path)
+    calls = {"n": 0}
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        calls["n"] += 1
+        msg = "must not rebuild"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
+    assert emit_run_packet(ctx, run_succeeded=True, packet=PreparedPacket(None)) is None
+    assert calls["n"] == 0
+
+
+def test_deterministic_checks_unknown_id_is_keyerror_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.evidence import run_packet as run_packet_mod
+
+    ctx = _make_ctx(tmp_path)
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        analyzers=[AnalyzerStatusRow(id="not-a-catalog-tool", status="completed", finding_count=0)],
+    )
+    packet = build_run_packet(ctx, run_succeeded=True)
+    names = {row.name: row.command for row in packet.deterministic_checks}
+    assert names["not-a-catalog-tool"] == "not-a-catalog-tool"
+
+    def _raise_os(*_args: object, **_kwargs: object) -> None:
+        msg = "catalog unreadable"
+        raise OSError(msg)
+
+    monkeypatch.setattr("mergecraft.analyzers.registry.get_manifest", _raise_os)
+    with pytest.raises(OSError, match="catalog unreadable"):
+        run_packet_mod._deterministic_checks(ctx.tool_state)
+
+
+def test_packet_helpers_use_tool_state_attributes_not_getattr() -> None:
+    import inspect
+
+    from mergecraft.evidence import run_packet as run_packet_mod
+    from mergecraft.utils.status_checks import _catalog_unavailable_banner
+
+    assert "getattr" not in inspect.getsource(run_packet_mod._deterministic_checks)
+    assert "getattr" not in inspect.getsource(run_packet_mod._self_assessment)
+    assert "getattr" not in inspect.getsource(run_packet_mod._read_diff_text)
+    assert "getattr" not in inspect.getsource(_catalog_unavailable_banner)

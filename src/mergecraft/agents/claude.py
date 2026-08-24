@@ -60,7 +60,7 @@ from mergecraft.tracing.tracer import (
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.privilege import prepare_workspace_for_agent, wrap_agent_command
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
-from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:

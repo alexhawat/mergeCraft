@@ -36,6 +36,7 @@ from mergecraft.run_outcome import CompletionConclusion
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.evidence.packet import MergeEvidencePacket
+    from mergecraft.evidence.run_packet import PreparedPacket
     from mergecraft.mcp.context import ToolContext
 
 COMPLETION_CHECK = "mergecraft"
@@ -78,7 +79,7 @@ def _catalog_unavailable_banner(ctx: ToolContext) -> str | None:
     D6 / #459: glanceable ``analyzers: unavailable`` on check-run summaries.
     Omitted when the catalog executed (including mixed passed + skipped).
     """
-    run_state = getattr(ctx.tool_state, "analyzer_run", None)
+    run_state = ctx.tool_state.analyzer_run
     if run_state is None:
         return None
     from mergecraft.analyzers.pipeline import CatalogScanStatus, catalog_scan_status
@@ -94,8 +95,7 @@ async def report_status_checks(
     run_succeeded: bool,
     failure_reason: str | None = None,
     conclusion: CompletionConclusion | None = None,
-    packet: MergeEvidencePacket | None = None,
-    packet_ready: bool = False,
+    packet: MergeEvidencePacket | PreparedPacket | None = None,
 ) -> None:
     """Post opt-in status checks. Best-effort; never raises into the run outcome.
 
@@ -171,9 +171,12 @@ async def report_status_checks(
     # D7 / #460: the packet already ran ``decide_approval``. Reuse
     # ``packet.decision.verdict`` so this layer only posts check-runs.
     # Best-effort: never raise after the completion check-run has posted.
-    # ``packet_ready`` means the caller already assembled (or failed to);
-    # do not rebuild for isolation.
-    if not packet_ready:
+    from mergecraft.evidence.run_packet import take_prepared_packet
+
+    assembled, already_attempted = take_prepared_packet(packet)
+    if already_attempted:
+        packet = assembled
+    else:
         from mergecraft.evidence.run_packet import build_run_packet
 
         change_id = f"{ctx.repo.owner}/{ctx.repo.name}#{pull_number}"

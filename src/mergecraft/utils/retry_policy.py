@@ -9,8 +9,7 @@ Contracts:
 - Safe methods (GET/HEAD/OPTIONS) may retry; mutations never retry blindly.
 
 Model-chain / Nous taxonomy lives in ``provider_failure`` — this module
-must not own ``ProviderFailureClass``. Classifier helpers are re-exported
-so existing import sites keep working.
+must not own ``ProviderFailureClass`` or re-export its classifiers.
 """
 
 from __future__ import annotations
@@ -23,12 +22,6 @@ from tenacity import (
     retry_base,
     stop_after_attempt,
     wait_exponential_jitter,
-)
-
-from mergecraft.utils.provider_failure import (
-    RATE_LIMIT_EXIT_CODES,
-    classify_provider_failure,
-    is_retryable_cli_failure,
 )
 
 # Keep stop bound aligned with the GitHub client (≤5 attempts).
@@ -86,10 +79,7 @@ def _http_method_from_retry_state(retry_state: RetryCallState) -> str | None:
 __all__ = [
     "DEFAULT_STOP",
     "DEFAULT_WAIT",
-    "RATE_LIMIT_EXIT_CODES",
     "SAFE_HTTP_METHODS",
-    "classify_provider_failure",
-    "is_retryable_cli_failure",
     "is_safe_http_method",
     "is_transient_http_error",
     "retry_transient_safe_methods",

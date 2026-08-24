@@ -87,6 +87,27 @@ def test_valid_bandit_finding_writes_sarif(tmp_path: Path) -> None:
     assert doc["runs"][0]["results"][0]["ruleId"] == "B201"
 
 
+def test_bandit_line_range_matches_parser_end_line() -> None:
+    raw = json.dumps(
+        {
+            "results": [
+                {
+                    "test_id": "B101",
+                    "issue_severity": "HIGH",
+                    "issue_text": "assert used",
+                    "filename": "app.py",
+                    "line_number": 4,
+                    "line_range": [4, 9],
+                }
+            ]
+        }
+    )
+    doc = bandit_to_sarif(raw)
+    region = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["region"]
+    assert region["startLine"] == 4
+    assert region["endLine"] == 9
+
+
 def test_empty_mypy_input_is_converter_failure() -> None:
     with pytest.raises(ConverterError):
         mypy_to_sarif("  \n")

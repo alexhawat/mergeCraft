@@ -78,17 +78,12 @@ _SCHEMA_MARKERS = ("schema_failure", "set_output")
 
 def _classify(stderr: str, *, status_code: int | None = None) -> object:
     """D5 public classifier — must exist; needle-list-only is not the fix."""
-    from mergecraft.utils import retry_policy as rp
+    from mergecraft.utils.provider_failure import classify_provider_failure
 
-    fn = getattr(rp, "classify_provider_failure", None)
-    assert callable(fn), (
-        "classify_provider_failure is the D5 classifier; growing "
-        "_RETRYABLE_CLI_NEEDLES is not the only allowed fix"
-    )
     try:
-        return fn(stderr=stderr, status_code=status_code)
+        return classify_provider_failure(stderr=stderr, status_code=status_code)
     except TypeError:
-        return fn(stderr)
+        return classify_provider_failure(stderr)
 
 
 def _failed(stderr: str) -> AgentResult:
@@ -225,6 +220,18 @@ def test_provider_failure_class_is_not_owned_by_http_retry_module() -> None:
     from mergecraft.utils.provider_failure import ProviderFailureClass, classify_provider_failure
 
     assert not hasattr(rp, "ProviderFailureClass")
+    assert not hasattr(rp, "classify_provider_failure")
+    assert not hasattr(rp, "is_retryable_cli_failure")
+    assert not hasattr(rp, "RATE_LIMIT_EXIT_CODES")
     assert classify_provider_failure is not getattr(rp, "ProviderFailureClass", None)
     assert ProviderFailureClass.BILLING.value == "billing"
-    assert callable(rp.classify_provider_failure)
+
+
+def test_provider_failure_reuses_try_load_json() -> None:
+    import inspect
+
+    from mergecraft.utils import provider_failure
+
+    source = inspect.getsource(provider_failure)
+    assert "try_load_json" in source
+    assert "JSONDecoder" not in source

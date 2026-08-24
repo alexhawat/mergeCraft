@@ -7,10 +7,11 @@ without treating a billing 404 as ``schema_failure``.
 
 from __future__ import annotations
 
-import json
 import re
 from enum import StrEnum
 from typing import Any, Final
+
+from mergecraft.analyzers.parsers._common import try_load_json
 
 # CLI wrappers: treat these exit codes as rate-limit / overloaded (retryable
 # for model-chain advance — never blindly re-issue a mutating CLI invoke).
@@ -81,7 +82,7 @@ def classify_provider_failure(
     permanent and do not advance the model chain.
     """
     if payload is None:
-        payload = _provider_json_payload(stderr)
+        payload = _provider_json_object(stderr)
     haystack = f"{stderr} {_message_from_payload(payload)}"
     http_404 = _is_http_404(stderr=stderr, status_code=status_code, payload=payload)
     if _looks_like_billing(stderr=haystack, payload=payload):
@@ -107,7 +108,7 @@ def is_retryable_cli_failure(
     """Classify CLI rate-limit / overload / quota / transient-404 failures as retryable."""
     if returncode is not None and returncode in RATE_LIMIT_EXIT_CODES:
         return True
-    payload = _provider_json_payload(stderr)
+    payload = _provider_json_object(stderr)
     if status_code is None:
         status_code = _status_code_from_payload(payload)
     kind = classify_provider_failure(stderr, status_code=status_code, payload=payload)
@@ -136,20 +137,9 @@ def _looks_like_billing(
     return _BILLING_TOKEN_RE.search(" ".join(parts)) is not None
 
 
-def _provider_json_payload(stderr: str) -> dict[str, Any] | None:
-    text = stderr.strip()
-    if not text:
-        return None
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(text):
-        if char != "{":
-            continue
-        try:
-            parsed, _end = decoder.raw_decode(text, index)
-        except json.JSONDecodeError:
-            continue
-        return parsed if isinstance(parsed, dict) else None
-    return None
+def _provider_json_object(stderr: str) -> dict[str, Any] | None:
+    parsed = try_load_json(stderr)
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _message_from_payload(payload: dict[str, Any] | None) -> str:

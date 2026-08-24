@@ -198,7 +198,7 @@ async def test_report_status_checks_does_not_rebuild_when_packet_ready(
         raise RuntimeError(msg)
 
     monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
-    await report_status_checks(ctx, run_succeeded=True, packet=packet, packet_ready=True)
+    await report_status_checks(ctx, run_succeeded=True, packet=packet)
     assert calls["n"] == 0
     assert APPROVAL_CHECK in [run.get("name") for run in github.check_runs]
 
@@ -217,7 +217,9 @@ async def test_report_status_checks_skips_approval_without_rebuilding_failed_pac
         raise RuntimeError(msg)
 
     monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
-    await report_status_checks(ctx, run_succeeded=True, packet=None, packet_ready=True)
+    from mergecraft.evidence.run_packet import PreparedPacket
+
+    await report_status_checks(ctx, run_succeeded=True, packet=PreparedPacket(None))
     assert calls["n"] == 0
     names = [run.get("name") for run in github.check_runs]
     assert COMPLETION_CHECK in names

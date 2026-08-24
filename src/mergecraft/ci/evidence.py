@@ -418,21 +418,29 @@ def record_ci_findings(state: ToolState, findings: Iterable[Finding]) -> list[Fi
 
     Deduplication matters because the approval gate and the evidence packet are
     monotone in blockers: the same failure read twice (once off a check run,
-    once off the clustered logs) must not count twice. Returns the findings
-    that were newly added.
+    once off the clustered logs) must not count twice. When fingerprints
+    collide, the more severe row wins (same rule as ``merge_findings``).
+    Returns findings that were newly added or upgraded.
     """
+    from mergecraft.evidence.findings import merge_findings, typed_findings_from_rows
+
     evidence = _evidence_state(state)
-    seen = {str(row.get("fingerprint")) for row in evidence.findings}
-    added: list[Finding] = []
-    for finding in findings:
-        if finding.fingerprint in seen:
-            continue
-        seen.add(finding.fingerprint)
-        evidence.findings.append(finding.model_dump())
-        added.append(finding)
-    if added:
-        logger.info("ci evidence: recorded {} finding(s) from CI", len(added))
-    return added
+    incoming = list(findings)
+    if not incoming:
+        return []
+    before = typed_findings_from_rows(list(evidence.findings))
+    before_severity = {row.fingerprint: row.severity for row in before}
+    merged = merge_findings(before, incoming)
+    evidence.findings = [row.model_dump() for row in merged]
+    changed = [
+        row
+        for row in merged
+        if before_severity.get(row.fingerprint) != row.severity
+        or row.fingerprint not in before_severity
+    ]
+    if changed:
+        logger.info("ci evidence: recorded {} finding(s) from CI", len(changed))
+    return changed
 
 
 def record_gate_substitutions(
