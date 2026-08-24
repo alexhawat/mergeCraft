@@ -86,7 +86,6 @@ def _register_provider(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_help_lists_registry_verbs() -> None:
     _require_model_command()
     result = _invoke("model", "--help")
@@ -101,7 +100,6 @@ def test_model_help_lists_registry_verbs() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_add_writes_model_to_config_without_provider_prefix(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -124,7 +122,6 @@ def test_model_add_writes_model_to_config_without_provider_prefix(
     assert model_index_value(models[0]) == 1
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_list_shows_registered_models(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -142,7 +139,6 @@ def test_model_list_shows_registered_models(
     assert "nous" in output.lower()
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_delete_removes_model_from_config(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -162,7 +158,6 @@ def test_model_delete_removes_model_from_config(
     assert remaining == {TENCENT_HY3}
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_add_does_not_write_env_by_default(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -178,7 +173,6 @@ def test_model_add_does_not_write_env_by_default(
     assert not any(key.startswith("LLM_PROVIDER_") and "_MODEL_" in key for key in env)
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_env_override_optional(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -205,7 +199,6 @@ def test_model_env_override_optional(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_add_unknown_provider_fails_and_names_registered_providers(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -238,7 +231,6 @@ def test_model_add_unknown_provider_fails_and_names_registered_providers(
     assert provider_model_entries(config, "nuos") == []
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_delete_unknown_provider_fails(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -257,7 +249,6 @@ def test_model_delete_unknown_provider_fails(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_add_rejects_duplicate_model_on_same_provider(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -282,7 +273,6 @@ def test_model_add_rejects_duplicate_model_on_same_provider(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_add_without_provider_prompts_registered_providers(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -328,7 +318,6 @@ def test_model_add_without_provider_prompts_registered_providers(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_delete_leaves_model_index_gap_and_never_reuses(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -374,7 +363,6 @@ def test_model_delete_leaves_model_index_gap_and_never_reuses(
     assert 2 not in all_indices
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_model_add_allocates_max_plus_one_model_index_with_gaps(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -414,7 +402,6 @@ def test_model_add_allocates_max_plus_one_model_index_with_gaps(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_allocate_model_index_returns_max_plus_one() -> None:
     registry = import_model_registry()
     allocate = getattr(registry, "allocate_model_index", None)
@@ -426,7 +413,6 @@ def test_allocate_model_index_returns_max_plus_one() -> None:
     assert allocate([]) == 1
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_allocate_model_index_never_reuses_gaps() -> None:
     registry = import_model_registry()
     allocate = getattr(registry, "allocate_model_index", None)
@@ -437,7 +423,6 @@ def test_allocate_model_index_never_reuses_gaps() -> None:
     assert allocate([{"modelIndex": 1}, {"modelIndex": 5}]) == 6
 
 
-@pytest.mark.xfail(reason="green after BC impl", strict=False)
 def test_stored_model_rows_use_id_without_provider_prefix_field(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

@@ -110,6 +110,13 @@ class StaticCheckDefinition(_OptionalFeatureModel):
     suffixes: list[str] = Field(default_factory=list)
 
 
+class ProviderModelEntry(_OptionalFeatureModel):
+    """One model registered on an operator provider (#479 / BC)."""
+
+    id: str
+    model_index: int = Field(alias="modelIndex")
+
+
 class ProviderRegistryEntry(_OptionalFeatureModel):
     """One operator-registered LLM provider (#477 / BA)."""
 
@@ -119,6 +126,7 @@ class ProviderRegistryEntry(_OptionalFeatureModel):
     env_index: int = Field(alias="envIndex")
     auth_kind: str | None = Field(default=None, alias="authKind")
     region: str | None = None
+    models: list[ProviderModelEntry] = Field(default_factory=list)
 
 
 class CiEvidenceSettings(_OptionalFeatureModel):
