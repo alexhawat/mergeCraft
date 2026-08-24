@@ -3,7 +3,7 @@
 
 Parses the pytest summary line from a captured log (``make test-integration``
 pipes stdout/stderr through ``tee``). Secret-gated skips must not satisfy the
-meta-gate — at least one test must report passed or failed.
+meta-gate — at least one test must report passed, failed, or errors.
 """
 
 from __future__ import annotations
@@ -19,25 +19,36 @@ _PASSED_THEN_FAILED = re.compile(
 _FAILED_THEN_PASSED = re.compile(
     r"(?P<failed>\d+) failed(?:, (?P<passed>\d+) passed)?",
 )
+_ERRORS = re.compile(r"(?P<errors>\d+) error(?:s)?")
+
+
+def _executed_on_line(line: str) -> int | None:
+    candidates: list[int] = []
+    passed_first = _PASSED_THEN_FAILED.search(line)
+    if passed_first:
+        candidates.append(
+            int(passed_first.group("passed")) + int(passed_first.group("failed") or 0),
+        )
+    failed_first = _FAILED_THEN_PASSED.search(line)
+    if failed_first:
+        candidates.append(
+            int(failed_first.group("failed")) + int(failed_first.group("passed") or 0),
+        )
+    errors = _ERRORS.search(line)
+    if errors:
+        candidates.append(int(errors.group("errors")))
+    if not candidates:
+        return None
+    return max(candidates)
 
 
 def count_executed(log_text: str) -> int:
-    """Return passed + failed from the last pytest summary line, or 0 when absent."""
+    """Return passed + failed + errors from the last pytest summary line, or 0 when absent."""
     executed = 0
     for line in log_text.splitlines():
-        candidates: list[int] = []
-        passed_first = _PASSED_THEN_FAILED.search(line)
-        if passed_first:
-            candidates.append(
-                int(passed_first.group("passed")) + int(passed_first.group("failed") or 0),
-            )
-        failed_first = _FAILED_THEN_PASSED.search(line)
-        if failed_first:
-            candidates.append(
-                int(failed_first.group("failed")) + int(failed_first.group("passed") or 0),
-            )
-        if candidates:
-            executed = max(candidates)
+        line_executed = _executed_on_line(line)
+        if line_executed is not None:
+            executed = line_executed
     return executed
 
 
@@ -54,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     executed = count_executed(text)
     if executed == 0:
         print(
-            "Integration gate: zero tests executed (passed + failed == 0). "
+            "Integration gate: zero tests executed (passed + failed + errors == 0). "
             "Secret-gated skips must not satisfy the meta-gate.",
             file=sys.stderr,
         )

@@ -13,6 +13,8 @@ BANDIT ?= $(UV) run bandit
 PIP_AUDIT ?= $(UV) run pip-audit
 PIP_AUDIT_CACHE ?= $(CURDIR)/.cache/pip-audit
 PRE_COMMIT ?= $(UV) run pre-commit
+# test-integration uses pipefail and PIPESTATUS (bash-only); GNU make defaults to /bin/sh (dash on Ubuntu CI).
+SHELL := /bin/bash
 
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \

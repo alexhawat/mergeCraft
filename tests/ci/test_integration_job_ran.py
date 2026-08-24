@@ -46,6 +46,10 @@ def test_integration_job_always_runs_smoke() -> None:
             "================== 3 passed, 2 failed, 1 skipped in 0.88s ==================",
             5,
         ),
+        (
+            "================== 2 errors in 0.12s ==================",
+            2,
+        ),
     ],
 )
 def test_count_executed_parses_pytest_summary(summary_line: str, expected: int) -> None:
@@ -58,3 +62,13 @@ def test_count_executed_returns_zero_when_summary_missing() -> None:
     """Absent summary lines must not satisfy the integration meta-gate."""
     count_executed = _load_count_executed()
     assert count_executed("collecting ... no tests ran\n") == 0
+
+
+def test_count_executed_uses_last_summary_line_only() -> None:
+    """Earlier spurious matches must not override the final pytest summary."""
+    count_executed = _load_count_executed()
+    log = (
+        "noise: 100 passed, 50 failed in unrelated output\n"
+        "============================= 2 passed in 0.42s ==============================\n"
+    )
+    assert count_executed(log) == 2
