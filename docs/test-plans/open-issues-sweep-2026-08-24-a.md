@@ -1,15 +1,15 @@
-# Test plan — open-issues-sweep-2026-08-24-a (AA–AF GREEN + AG #464 RED)
+# Test plan — open-issues-sweep-2026-08-24-a (AA–AG GREEN + AH #485 RED)
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-24-a-analyzers-ci-wave-plan.md`
 Worktree: `/Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a`
 Branch: `wave/open-issues-sweep-2026-08-24-a`
-Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469), [#466](https://github.com/alexhawat/mergeCraft/issues/466), [#459](https://github.com/alexhawat/mergeCraft/issues/459), [#460](https://github.com/alexhawat/mergeCraft/issues/460), [#464](https://github.com/alexhawat/mergeCraft/issues/464)
+Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469), [#466](https://github.com/alexhawat/mergeCraft/issues/466), [#459](https://github.com/alexhawat/mergeCraft/issues/459), [#460](https://github.com/alexhawat/mergeCraft/issues/460), [#464](https://github.com/alexhawat/mergeCraft/issues/464), [#485](https://github.com/alexhawat/mergeCraft/issues/485)
 
-Authoring: **AA–AF GREEN**. **AG RED** (this update). Implementation: AG impl (D8). AH not authored here.
+Authoring: **AA–AG GREEN**. **AH RED** (this update). Implementation: AH impl (D9). Final not authored here.
 
 ## xfail schedule
 
-None. AG contracts are the next impl wave; tests are **plain FAIL** until D8 lands. Do not `xfail` (would hide RED).
+None. AH contracts are the next impl wave; tests are **plain FAIL** until D9 lands. Do not `xfail` (would hide RED). Either D9 fork greens the XOR tests — do not pick a fork in the tests.
 
 ## Contract matrix
 
@@ -87,6 +87,15 @@ None. AG contracts are the next impl wave; tests are **plain FAIL** until D8 lan
 | AG464u | Warning-level CI SARIF does not fail the gate | functional | edge — warning | `test_warning_ci_sarif_does_not_fail_the_gate` |
 | AG464v | Empty CI evidence does not silently succeed | functional | pin — empty-list | `test_empty_ci_evidence_does_not_silently_succeed` |
 | AG464w | Untrusted check never `success` with CI SARIF | functional | pin — untrusted | `test_untrusted_tier_does_not_succeed_with_ci_sarif` |
+| AH485a | Attribution (1): base already below floor is inherited, not caused | unit | happy — (1) | `tests/ci/test_coverage_inherited_drift_485.py::test_attribution_1_base_below_floor_is_inherited` |
+| AH485b | Attribution (2): drop that stays at/above floor is caused and non-fatal | unit | happy — (2) | `test_attribution_2_drop_staying_above_floor_is_caused_and_non_fatal` |
+| AH485c | Below-floor drop shallower than 1.0pp margin stays caused under both D9 forks | unit | edge — (2) | `test_attribution_2_drop_shallower_than_margin_stays_caused` |
+| AH485d | Head == base above floor is neither inherited nor caused | unit | edge — OK | `test_equal_coverage_above_floor_is_ok` |
+| AH485e | Missing coverage report raises FileNotFoundError naming the path | unit | error | `test_missing_coverage_report_raises_file_not_found` |
+| AH485f | D9 XOR: fixture hits inherited-drift (3) while the margin constant exists, or constant+dead branch are gone and (1)(2) remain | unit | D9 — either fork | `test_d9_inherited_drift_is_reachable_or_dead_branch_and_constant_removed` |
+| AH485g | `main()` exit 1 for the D9 fixture; CLI text follows the chosen fork | functional | D9 — CLI | `test_d9_cli_matches_inherited_drift_or_caused_remaining_attribution` |
+| AH485h | `inherited` and `caused_by_change` never both True (no third attribution) | unit | pin — D9 | `test_no_third_attribution_flags` |
+| AH485i | Exit-policy suite does not lock (2)-before-(3) order | unit | pin — both forks | `tests/ci/test_coverage_delta_exit_policy.py::test_compare_to_base_marks_shallower_than_margin_drop_below_floor_as_caused` |
 
 Sibling: empty stdout still raises for other JSON-object parsers (`cargo-audit`, `knip`, `jscpd`, `bundler-audit`) in `tests/analyzers/parsers/test_auto_enabled_native.py::test_json_object_parser_raises_on_empty_stdout`. Non-empty garbage still raises for bandit there. `tests/ci/test_evidence.py::test_ci_sarif_findings_are_never_blamed_on_this_pr` still pins `introduced_by_pr=unknown`; it no longer asserts a non-blocking severity cap.
 
@@ -152,17 +161,29 @@ Re-repro (2026-08-24): `sarif_findings` restamps every CI SARIF result through `
 - **Gate:** after uncap, packet `decide_approval` is `failure` / `request_changes` and `mergecraft-approval` is `failure` for a ruff CI SARIF error even when the in-job catalog did not run. Empty-list stays `neutral`. Untrusted never `success`.
 - **Do not** invent blame or satisfied-by-CI waves (issue AC is wider; D8 wins). Do not grant `trusted` on `pull_request_target`. Do not run catalog tools in the privileged Action job.
 
-## How to run (AG: expect FAIL until impl)
+## Notes for the impl wave (D9)
+
+Owner: `scripts/check_coverage_delta.py`. Today attribution (3) is dead: `compare_to_base` returns caused when `head < base` before `INHERITED_BREACH_MARGIN` can run. With base at the floor and head ≥ 1.0pp below the floor, current classification is caused (2).
+
+**Fork A (reorder):** keep `INHERITED_BREACH_MARGIN` (or `INHERITED_DRIFT_THRESHOLD`). Reorder so the D9 fixture (`floor=82`, `base=82`, `head=80.5`) sets `inherited=True`, `caused_by_change=False`, and the message is inherited-drift (not “base branch … below floor”). `main()` exits 1 and stdout/stderr mention inherited. Do not invent a third attribution.
+
+**Fork B (delete):** remove the dead branch and the constant. The same fixture stays caused (2). `compare_to_base` has exactly one `inherited=True` (attribution 1). (1) and (2) tests stay green.
+
+A below-floor drop shallower than 1.0pp (`83 → 81.5`, floor `82`) stays caused under **both** forks. Do not restore a test that requires (2) to run before (3) on a ≥-margin drop — that locked the dead order.
+
+Do not implement a third attribution class.
+
+## How to run (AH: expect FAIL until impl)
 
 ```bash
 cd /Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a
-MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/ci/test_ci_sarif_evidence_464.py tests/agents/test_approval_gate_ci_sarif_464.py tests/utils/test_approval_check_ci_sarif_464.py -q
+MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/ci/test_coverage_inherited_drift_485.py tests/ci/test_coverage_delta_exit_policy.py -q
 make lint
 make typecheck
 ```
 
-Expect RED until D8 (SARIF errors clamped to Minor; `ci.yml` does not upload first-wave SARIF; dogfood `ciEvidence` unset). Warning / empty / untrusted / check-run pins, Makefile first-wave tools, and `mergecraft.yml` non-ownership already pass.
+Expect RED until D9: two XOR tests fail while `INHERITED_BREACH_MARGIN` exists and the fixture is classified caused. Attributions (1)(2), OK, missing-file, no-third-class, and the shallower-than-margin exit-policy case already pass.
 
 ## Out of scope
 
-AH #485. Product code under `src/mergecraft/` (this wave is tests only). Weakening `pull_request_target` trust. Running analyzers inside the privileged Action job. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`). Blame / satisfied-by-CI (issue AC beyond D8). 422 / dual-verdict anomalies.
+AH product impl (this update is tests only). Weakening `pull_request_target` trust. Running analyzers inside the privileged Action job. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`). Blame / satisfied-by-CI. 422 / dual-verdict anomalies. A third coverage-delta attribution.

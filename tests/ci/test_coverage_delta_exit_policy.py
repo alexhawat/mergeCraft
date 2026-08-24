@@ -45,12 +45,18 @@ def test_compare_to_base_marks_regression_above_floor_as_non_fatal(tmp_path: Pat
     assert result.head_percent >= 82.0
 
 
-def test_compare_to_base_marks_caused_drop_below_floor_before_inherited_margin(
+def test_compare_to_base_marks_shallower_than_margin_drop_below_floor_as_caused(
     tmp_path: Path,
 ) -> None:
+    """A below-floor drop shallower than INHERITED_BREACH_MARGIN stays caused.
+
+    Depth 0.5pp (< 1.0) remains attribution (2) under both D9 forks: reorder
+    so the margin can fire, or delete the dead branch. Do not require the
+    current (2)-before-(3) order — that made inherited-drift unreachable.
+    """
     module = _load_module()
     base = _coverage_json(tmp_path / "base.json", 83.0)
-    head = _coverage_json(tmp_path / "head.json", 80.5)
+    head = _coverage_json(tmp_path / "head.json", 81.5)
 
     result = module.compare_to_base(head, base, floor=82.0)
 
