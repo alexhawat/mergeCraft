@@ -140,6 +140,7 @@ async def test_get_check_suite_logs_skips_when_github_client_unavailable(tmp_pat
     assert payload["check_suite_id"] == 42
     assert payload["jobs"] == []
     assert payload["skipped"] is True
+    assert payload["available"] is False
     assert "unavailable" in payload["message"]
     assert "no failed workflow runs" not in payload["message"]
 
@@ -163,7 +164,33 @@ async def test_get_check_suite_logs_listing_failure_is_unavailable_not_an_error(
     assert payload["available"] is False
     assert payload["jobs"] == []
     assert payload["check_suite_id"] == 42
+    assert payload["skipped"] is False
     assert "boom" in payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_get_check_suite_logs_incomplete_listing_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    from mergecraft.utils.github import GitHubListedItems
+
+    class _IncompleteGitHub(GitHubClient):
+        async def list_workflow_runs_for_check_suite(
+            self, *_args: object, **_kwargs: object
+        ) -> GitHubListedItems:
+            return GitHubListedItems(
+                items=[{"id": 1, "conclusion": "failure", "name": "ci"}],
+                incomplete=True,
+            )
+
+    ctx = _ctx(tmp_path)
+    bind_github_client(ctx, _IncompleteGitHub(token="test-token"))
+    result = await get_check_suite_logs_tool(ctx).execute({"check_suite_id": 42})
+    payload = json.loads(result.content[0]["text"])
+    assert result.is_error is False
+    assert payload["available"] is False
+    assert payload["jobs"] == []
+    assert "incomplete" in payload["message"]
 
 
 @pytest.mark.asyncio

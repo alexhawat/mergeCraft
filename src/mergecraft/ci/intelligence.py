@@ -12,6 +12,7 @@ from loguru import logger
 
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
 from mergecraft.scm.github import github_client_from_scm
+from mergecraft.utils.github import coerce_github_listed
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -213,8 +214,8 @@ async def collect_ci_sarif_findings(
         if not isinstance(run_id, int):
             continue
         try:
-            artifacts = await client.list_workflow_run_artifacts(
-                ctx.repo.owner, ctx.repo.name, run_id
+            listed = coerce_github_listed(
+                await client.list_workflow_run_artifacts(ctx.repo.owner, ctx.repo.name, run_id)
             )
         except Exception as listing_err:
             logger.warning(
@@ -223,7 +224,13 @@ async def collect_ci_sarif_findings(
                 listing_err,
             )
             continue
-        for artifact in artifacts:
+        if listed.incomplete:
+            logger.warning(
+                "ci evidence: SARIF listing truncated for run {} — not treating as complete",
+                run_id,
+            )
+            continue
+        for artifact in listed.items:
             name = str(artifact.get("name") or "")
             artifact_id = artifact.get("id")
             if name not in wanted or not isinstance(artifact_id, int):
@@ -273,13 +280,20 @@ async def run_ci_intelligence(
         suite = unbound_check_suite_logs(check_suite_id)
     else:
         try:
-            runs = await client.list_workflow_runs_for_check_suite(
-                ctx.repo.owner, ctx.repo.name, check_suite_id
+            listed = coerce_github_listed(
+                await client.list_workflow_runs_for_check_suite(
+                    ctx.repo.owner, ctx.repo.name, check_suite_id
+                )
             )
         except Exception as err:
             return _unavailable_ci_intelligence(
                 reason=str(err) or "check-suite run listing failed",
             )
+        if listed.incomplete:
+            return _unavailable_ci_intelligence(
+                reason="check-suite run listing incomplete",
+            )
+        runs = listed.items
         sarif = await collect_ci_sarif_findings(ctx, client=client, runs=runs)
         if sarif:
             record_ci_findings(ctx.tool_state, sarif)

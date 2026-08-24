@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 import httpx
 from loguru import logger
@@ -44,21 +44,49 @@ def _as_list(data: Any) -> list[dict[str, Any]]:
     return [item for item in data if isinstance(item, dict)]
 
 
+class GitHubListedItems(NamedTuple):
+    """One GitHub list walk: items plus whether the walk is known-incomplete."""
+
+    items: list[dict[str, Any]]
+    incomplete: bool
+
+
+def coerce_github_listed(
+    result: GitHubListedItems | list[dict[str, Any]] | tuple[list[dict[str, Any]], bool],
+) -> GitHubListedItems:
+    """Normalize a list-walk result (test doubles may still return a bare list)."""
+    if isinstance(result, GitHubListedItems):
+        return result
+    if isinstance(result, tuple) and len(result) == 2:
+        items, incomplete = result
+        if isinstance(items, list) and isinstance(incomplete, bool):
+            return GitHubListedItems(items=items, incomplete=incomplete)
+    if isinstance(result, list):
+        return GitHubListedItems(items=result, incomplete=False)
+    msg = f"expected GitHubListedItems or list, got {type(result).__name__}"
+    raise TypeError(msg)
+
+
 async def paginate_github_list_pages(
     fetch_page: Callable[[int], Awaitable[Any]],
     *,
     item_key: str,
     page_size: int = GITHUB_LIST_PAGE_SIZE,
     max_pages: int = GITHUB_LIST_MAX_PAGES,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], bool]:
     """Follow GitHub list pages until a short page or ``max_pages``.
 
     Each ``fetch_page(page)`` should return a JSON object with ``item_key``
     (or a bare list). A full page of ``page_size`` continues; a shorter
     page ends the walk so items past 100 are not silently dropped.
+
+    Returns ``(items, incomplete)``. ``incomplete`` is True when the walk
+    hit ``max_pages`` on a full page or the payload was not a list/object —
+    callers must not treat that as a complete catalog.
     """
     collected: list[dict[str, Any]] = []
     last_batch_len = 0
+    incomplete = False
     for page in range(1, max_pages + 1):
         payload = await fetch_page(page)
         if isinstance(payload, list):
@@ -72,6 +100,7 @@ async def paginate_github_list_pages(
                 type(payload).__name__,
                 item_key,
             )
+            incomplete = True
             break
         last_batch_len = len(batch)
         collected.extend(batch)
@@ -85,7 +114,8 @@ async def paginate_github_list_pages(
                 page_size,
                 item_key,
             )
-    return collected
+            incomplete = True
+    return collected, incomplete
 
 
 class RepoContext:
@@ -566,28 +596,40 @@ class GitHubClient:
         at whether the whole suite went green.
         """
         extra = kwargs.pop("params", None) or {}
+        reported_total: int | None = None
 
         async def _fetch_page(page: int) -> Any:
+            nonlocal reported_total
             params = {
                 **extra,
                 "per_page": GITHUB_LIST_PAGE_SIZE,
                 "page": page,
             }
-            return await self.get(
+            payload = await self.get(
                 f"/repos/{owner}/{repo}/commits/{ref}/check-runs",
                 params=params,
                 **kwargs,
             )
+            if isinstance(payload, dict) and isinstance(payload.get("total_count"), int):
+                reported_total = payload["total_count"]
+            return payload
 
-        runs = await paginate_github_list_pages(_fetch_page, item_key="check_runs")
-        return {"total_count": len(runs), "check_runs": runs}
+        runs, incomplete = await paginate_github_list_pages(_fetch_page, item_key="check_runs")
+        # Never overwrite GitHub's total_count with len(runs): a truncated
+        # walk would then look complete.
+        result: dict[str, Any] = {"check_runs": runs, "incomplete": incomplete}
+        if reported_total is not None:
+            result["total_count"] = reported_total
+        elif not incomplete:
+            result["total_count"] = len(runs)
+        return result
 
     async def list_workflow_runs_for_check_suite(
         self,
         owner: str,
         repo: str,
         check_suite_id: int,
-    ) -> list[dict[str, Any]]:
+    ) -> GitHubListedItems:
         """List workflow runs for a check suite (every page, not only the first 100)."""
 
         async def _fetch_page(page: int) -> Any:
@@ -600,14 +642,15 @@ class GitHubClient:
                 },
             )
 
-        return await paginate_github_list_pages(_fetch_page, item_key="workflow_runs")
+        items, incomplete = await paginate_github_list_pages(_fetch_page, item_key="workflow_runs")
+        return GitHubListedItems(items=items, incomplete=incomplete)
 
     async def list_workflow_run_artifacts(
         self,
         owner: str,
         repo: str,
         run_id: int,
-    ) -> list[dict[str, Any]]:
+    ) -> GitHubListedItems:
         """List artifacts a workflow run uploaded (every page, not only the first 100)."""
 
         async def _fetch_page(page: int) -> Any:
@@ -616,7 +659,8 @@ class GitHubClient:
                 params={"per_page": GITHUB_LIST_PAGE_SIZE, "page": page},
             )
 
-        return await paginate_github_list_pages(_fetch_page, item_key="artifacts")
+        items, incomplete = await paginate_github_list_pages(_fetch_page, item_key="artifacts")
+        return GitHubListedItems(items=items, incomplete=incomplete)
 
     async def download_artifact_zip(
         self,

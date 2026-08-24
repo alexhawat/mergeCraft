@@ -135,6 +135,39 @@ async def test_declared_ci_gate_replaces_the_unavailable_row(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_incomplete_check_run_listing_does_not_substitute_the_gate(
+    tmp_path: Path,
+) -> None:
+    class _IncompleteCheckRuns(_CheckRunGitHub):
+        async def list_check_runs_for_ref(
+            self,
+            owner: str,
+            repo: str,
+            ref: str,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            payload = await super().list_check_runs_for_ref(owner, repo, ref, **kwargs)
+            payload["incomplete"] = True
+            payload["total_count"] = 500
+            return payload
+
+    github = _IncompleteCheckRuns([_check_run("Verify (drift gates)", "success")])
+    ctx = _ctx(
+        tmp_path,
+        github=github,
+        ci_gate_checks={"lint": "Verify (drift gates)"},
+        static_checks=[StaticCheckConfig(name="lint", command="python -c 'pass'")],
+    )
+
+    payload = await _run_static_checks(ctx)
+
+    assert github.refs == [HEAD_SHA]
+    statuses = [check["status"] for check in payload["checks"]]
+    assert "satisfied-by-ci" not in statuses
+    assert "declared-but-cannot-run" in statuses
+
+
+@pytest.mark.asyncio
 async def test_undeclared_ci_results_never_touch_a_gate(tmp_path: Path) -> None:
     """No declared mapping means mergeCraft must not even ask GitHub (D10)."""
     github = _CheckRunGitHub([_check_run("lint", "success")])

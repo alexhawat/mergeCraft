@@ -263,8 +263,6 @@ def _decide_approval_from_packet(
 
     The function is pure: no I/O, no logging, no module state.
     """
-    from mergecraft.evidence.packet import Decision as PacketDecision
-
     # #41 hard rule — if the packet already carries an explicit decision
     # (set by an upstream layer, e.g. a W9 thermostat overlay), honour it
     # verbatim. The agent's recorded ``self_assessment`` cannot override

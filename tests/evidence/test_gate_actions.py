@@ -499,3 +499,8 @@ def test_rule_predicates_table_is_the_only_matcher_and_includes_has_blockers() -
     assert 'return "has_blockers"' not in source
     assert "schema_failure" not in rule_ids
     assert 'return "schema_failure"' in source
+    from mergecraft.evidence import gate_policy
+
+    assert gate_policy.__doc__ is not None
+    assert "six" in gate_policy.__doc__
+    assert "has_blockers" in gate_policy.__doc__

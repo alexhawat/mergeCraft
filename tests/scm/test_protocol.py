@@ -311,11 +311,12 @@ def test_check_suite_workflow_listing_is_github_client_not_scm_protocol() -> Non
     assert "list_workflow_runs_for_check_suite" not in github_src
     for rel in (
         "src/mergecraft/ci/intelligence.py",
-        "src/mergecraft/ci/providers/github_actions.py",
+        "src/mergecraft/mcp/check_suite.py",
     ):
         text = (root / rel).read_text(encoding="utf-8")
         assert "github_client_from_scm" in text
         assert "list_workflow_runs_for_check_suite" in text
+        assert "GitHubScmAdapter" not in text
 
 
 @pytest.mark.asyncio

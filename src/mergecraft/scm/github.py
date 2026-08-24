@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mergecraft.scm.protocol import ScmCapability, ScmProvider
-from mergecraft.utils.github import GitHubClient
+from mergecraft.utils.github import GitHubClient, coerce_github_listed
 
 
 class GitHubScmAdapter:
@@ -213,7 +213,10 @@ class GitHubScmAdapter:
     async def list_workflow_run_artifacts(
         self, owner: str, repo: str, run_id: int
     ) -> list[dict[str, Any]]:
-        return await self._client.list_workflow_run_artifacts(owner, repo, run_id)
+        listed = coerce_github_listed(
+            await self._client.list_workflow_run_artifacts(owner, repo, run_id)
+        )
+        return listed.items
 
     async def download_artifact_zip(self, owner: str, repo: str, artifact_id: int) -> bytes:
         return await self._client.download_artifact_zip(owner, repo, artifact_id)

@@ -163,3 +163,27 @@ async def test_analyze_ci_failures_listing_failure_is_unavailable_not_an_error(
     assert payload.keys() == empty_payload.keys()
     assert payload["stats"] == empty_payload["stats"]
     assert payload["sarifFindingCount"] == 0
+
+
+@pytest.mark.asyncio
+async def test_analyze_ci_failures_incomplete_listing_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    from mergecraft.utils.github import GitHubListedItems
+
+    class _IncompleteGitHub(GitHubClient):
+        async def list_workflow_runs_for_check_suite(
+            self, *_args: object, **_kwargs: object
+        ) -> GitHubListedItems:
+            return GitHubListedItems(
+                items=[{"id": 1, "conclusion": "failure", "name": "ci"}],
+                incomplete=True,
+            )
+
+    listed = await analyze_ci_failures_tool(_ctx(tmp_path, _IncompleteGitHub(token="t"))).execute(
+        {"check_suite_id": 7}
+    )
+    payload = json.loads(listed.content[0]["text"])
+    assert listed.is_error is False
+    assert payload["available"] is False
+    assert "incomplete" in payload["reason"]

@@ -1,10 +1,12 @@
-"""The five default gate-action policies (#46 / W9.2).
+"""The six default gate-action policies (#46 / W9.2 plus ``has_blockers``).
 
 The thermostat is the structural successor to the ``Decision`` row Batch
 A shipped: every gate outcome maps to a *named* action, never to a
 number. The default policies here are the five example mappings #46
-names literally — a schema failure blocks, a changed-unread-file asks
-for changes, a low-risk passing change merges, a tool-loop asks for more
+names literally, plus ``has_blockers`` so Critical/Major findings
+request changes under their own key — a schema failure blocks, a
+changed-unread-file asks for changes, ``has_blockers`` asks for
+changes, a low-risk passing change merges, a tool-loop asks for more
 tests, and a high-risk migration asks for human review.
 
 The mapping is **declarative data, not a long if/elif**: a repository
@@ -17,7 +19,7 @@ by ``decide_action()`` rather than silently widening the gate.
 Exports:
     GateAction: The closed action vocabulary (Pydantic enum / Literal).
     GateActionPolicy: A schema -> action mapping. Treated as data.
-    DEFAULT_GATE_POLICIES: The five example policies from #46.
+    DEFAULT_GATE_POLICIES: The six policies (#46 examples plus ``has_blockers``).
 """
 
 from __future__ import annotations

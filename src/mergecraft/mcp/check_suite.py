@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING, Any
 from mergecraft.ci.log_excerpt import analyze_log as _analyze_log
 from mergecraft.ci.providers.github_actions import (
     GitHubActionsProvider,
+    unavailable_check_suite_logs,
     unbound_check_suite_logs,
 )
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.scm.github import github_client_from_scm
+from mergecraft.utils.github import coerce_github_listed
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -25,20 +27,25 @@ def get_check_suite_logs_tool(ctx: ToolContext):
         if client is None:
             return unbound_check_suite_logs(check_suite_id)
         try:
-            runs = await client.list_workflow_runs_for_check_suite(
-                ctx.repo.owner, ctx.repo.name, check_suite_id
+            listed = coerce_github_listed(
+                await client.list_workflow_runs_for_check_suite(
+                    ctx.repo.owner, ctx.repo.name, check_suite_id
+                )
             )
         except Exception as err:
             # Same fail-closed policy as ``run_ci_intelligence``: listing
             # failure is unavailable, not a raised tool error.
-            return {
-                "check_suite_id": check_suite_id,
-                "message": str(err) or "check-suite run listing failed",
-                "jobs": [],
-                "available": False,
-            }
+            return unavailable_check_suite_logs(
+                check_suite_id,
+                message=str(err) or "check-suite run listing failed",
+            )
+        if listed.incomplete:
+            return unavailable_check_suite_logs(
+                check_suite_id,
+                message="check-suite run listing incomplete",
+            )
         return await _GITHUB_PROVIDER.fetch_check_suite_logs(
-            ctx, check_suite_id=check_suite_id, client=client, runs=runs
+            ctx, check_suite_id=check_suite_id, client=client, runs=listed.items
         )
 
     return tool(

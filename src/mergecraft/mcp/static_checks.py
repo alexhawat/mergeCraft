@@ -108,6 +108,13 @@ async def _apply_ci_evidence(
         logger.warning("ci evidence: could not read check runs for {} — {}", ref, err)
         return outcomes, []
 
+    if payload.get("incomplete"):
+        logger.warning(
+            "ci evidence: check-run listing for {} incomplete — skipping gate substitution",
+            ref,
+        )
+        return outcomes, []
+
     check_runs = [run for run in (payload.get("check_runs") or []) if isinstance(run, dict)]
     if not check_runs:
         return outcomes, []

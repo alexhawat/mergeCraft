@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 import pytest
 
@@ -177,8 +179,9 @@ async def test_list_workflow_run_artifacts_follows_pages() -> None:
         artifacts = await client.list_workflow_run_artifacts("acme", "widgets", 9)
 
     assert pages == [1, 2]
-    assert len(artifacts) == 101
-    assert artifacts[-1]["name"] == "last"
+    assert len(artifacts.items) == 101
+    assert artifacts.incomplete is False
+    assert artifacts.items[-1]["name"] == "last"
 
 
 @pytest.mark.asyncio
@@ -202,6 +205,7 @@ async def test_list_check_runs_for_ref_follows_pages() -> None:
 
     assert pages == [1, 2]
     assert payload["total_count"] == 101
+    assert payload["incomplete"] is False
     assert payload["check_runs"][-1]["name"] == "last"
 
 
@@ -223,7 +227,8 @@ async def test_list_workflow_runs_for_check_suite_follows_pages() -> None:
         runs = await client.list_workflow_runs_for_check_suite("acme", "widgets", 7)
 
     assert pages == [1, 2]
-    assert len(runs) == 101
+    assert len(runs.items) == 101
+    assert runs.incomplete is False
 
 
 @pytest.mark.asyncio
@@ -238,10 +243,13 @@ async def test_paginate_logs_when_max_pages_is_full() -> None:
     messages: list[str] = []
     sink_id = logger.add(lambda message: messages.append(str(message.record["message"])))
     try:
-        items = await paginate_github_list_pages(_full, item_key="items", page_size=2, max_pages=1)
+        items, incomplete = await paginate_github_list_pages(
+            _full, item_key="items", page_size=2, max_pages=1
+        )
     finally:
         logger.remove(sink_id)
     assert len(items) == 2
+    assert incomplete is True
     assert any("max_pages" in item for item in messages)
 
 
@@ -257,13 +265,51 @@ async def test_paginate_logs_unexpected_non_object_payload() -> None:
     messages: list[str] = []
     sink_id = logger.add(lambda message: messages.append(str(message.record["message"])))
     try:
-        items = await paginate_github_list_pages(_weird, item_key="items", page_size=100)
+        items, incomplete = await paginate_github_list_pages(
+            _weird, item_key="items", page_size=100
+        )
     finally:
         logger.remove(sink_id)
         assert items == []
+        assert incomplete is True
         assert any("unexpected" in item for item in messages)
         assert not any("end of list" in item for item in messages)
         assert any("without treating the list as complete" in item for item in messages)
+
+
+@pytest.mark.asyncio
+async def test_list_check_runs_for_ref_keeps_api_total_when_walk_is_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A truncated walk must not overwrite GitHub's total_count with len(runs)."""
+    from mergecraft.utils import github as github_mod
+
+    async def _truncated(
+        fetch_page: Any,
+        **_kwargs: Any,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        payload = await fetch_page(1)
+        assert isinstance(payload, dict)
+        runs = payload["check_runs"]
+        assert isinstance(runs, list)
+        return runs, True
+
+    monkeypatch.setattr(github_mod, "paginate_github_list_pages", _truncated)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _ = request
+        runs = [{"id": i, "name": f"c{i}"} for i in range(3)]
+        return httpx.Response(200, json={"total_count": 500, "check_runs": runs})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.github.com") as raw:
+        client = GitHubClient("t", client=raw)
+        payload = await client.list_check_runs_for_ref("acme", "widgets", "abc")
+
+    assert payload["incomplete"] is True
+    assert payload["total_count"] == 500
+    assert len(payload["check_runs"]) == 3
+    assert payload["total_count"] != len(payload["check_runs"])
 
 
 def test_provider_agents_import_failure_taxonomy_from_provider_failure() -> None:

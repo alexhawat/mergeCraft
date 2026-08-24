@@ -19,14 +19,33 @@ if TYPE_CHECKING:
     from mergecraft.utils.github import GitHubClient
 
 
-def unbound_check_suite_logs(check_suite_id: int) -> dict[str, Any]:
-    """Payload when no GitHub client is bound — skip, do not invent a list."""
+def unavailable_check_suite_logs(
+    check_suite_id: int,
+    *,
+    message: str,
+    skipped: bool = False,
+) -> dict[str, Any]:
+    """MCP skip/unavailable payload (unbound client or listing failure).
+
+    Always includes ``available: False`` so clients do not treat an empty
+    job list as a live suite with no failures.
+    """
     return {
         "check_suite_id": check_suite_id,
-        "message": "check-suite logs unavailable: GitHub client not bound",
+        "message": message,
         "jobs": [],
-        "skipped": True,
+        "available": False,
+        "skipped": skipped,
     }
+
+
+def unbound_check_suite_logs(check_suite_id: int) -> dict[str, Any]:
+    """Payload when no GitHub client is bound — skip, do not invent a list."""
+    return unavailable_check_suite_logs(
+        check_suite_id,
+        message="check-suite logs unavailable: GitHub client not bound",
+        skipped=True,
+    )
 
 
 class GitHubActionsProvider:
@@ -125,4 +144,8 @@ class GitHubActionsProvider:
         return log_text
 
 
-__all__ = ["GitHubActionsProvider", "unbound_check_suite_logs"]
+__all__ = [
+    "GitHubActionsProvider",
+    "unavailable_check_suite_logs",
+    "unbound_check_suite_logs",
+]

@@ -323,8 +323,8 @@ async def test_collect_paginates_workflow_runs_past_first_page(tmp_path: Path) -
         archives={7: _zip_sarif("ruff.sarif", _sarif(tool="ruff", rule_id="F401", level="error"))},
     )
     ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif"])
-    runs = await github.list_workflow_runs_for_check_suite("acme", "demo", 123)
-    findings = await _collect(ctx, github, runs)
+    listed = await github.list_workflow_runs_for_check_suite("acme", "demo", 123)
+    findings = await _collect(ctx, github, listed.items)
     assert github.pages == [1, 2]
     assert any(item.severity in _BLOCKING for item in findings)
 
@@ -360,6 +360,29 @@ async def test_collect_continues_after_one_run_listing_failure(tmp_path: Path) -
     assert any(item.source == "ci" and item.severity in _BLOCKING for item in findings), (
         "later workflow run must still be ingested after an earlier listing failure"
     )
+
+
+@pytest.mark.asyncio
+async def test_collect_skips_truncated_artifact_listing(tmp_path: Path) -> None:
+    """An incomplete artifact walk must not ingest a partial catalog as complete."""
+    from mergecraft.utils.github import GitHubListedItems
+
+    class _TruncatedArtifacts(_ArtifactGitHub):
+        async def list_workflow_run_artifacts(
+            self, owner: str, repo: str, run_id: int
+        ) -> GitHubListedItems:
+            _ = (owner, repo, run_id)
+            return GitHubListedItems(items=list(self.artifacts), incomplete=True)
+
+    github = _TruncatedArtifacts(
+        artifacts=[{"id": 7, "name": "ruff-sarif"}],
+        archives={7: _zip_sarif("ruff.sarif", _sarif(tool="ruff", rule_id="F401", level="error"))},
+    )
+    ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif"])
+
+    findings = await _collect(ctx, github)
+
+    assert findings == []
 
 
 @pytest.mark.asyncio
