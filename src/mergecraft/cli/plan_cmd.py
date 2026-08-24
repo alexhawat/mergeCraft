@@ -19,6 +19,7 @@ from mergecraft.config.settings import load_repo_settings
 from mergecraft.mcp.shared import REVIEWER_ALLOWED_TOOL_CLASSES
 from mergecraft.offline_review import build_offline_review_prompt
 from mergecraft.utils.agent_resolve import (
+    ModelFallbackPolicyError,
     effective_model_slugs,
     resolve_model,
     resolve_runtime_agent,
@@ -92,7 +93,7 @@ def build_plan_report(
     agent_label: str
     try:
         agent_label = resolve_runtime_agent(model=resolved_model, settings=settings).name
-    except ValueError:
+    except (ValueError, ModelFallbackPolicyError):
         if resolved_model and "/" in resolved_model:
             agent_label = resolved_model.partition("/")[0]
         else:
