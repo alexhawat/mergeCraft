@@ -270,6 +270,20 @@ def test_workflow_model_prioritize_reorders_fallback_steps(
     assert acme_add.exit_code == CLI_SUCCESS_EXIT_CODE, acme_add.stdout + acme_add.stderr
     acme_model = _invoke("model", "add", "--provider", "acme", "gateway-model-1")
     assert acme_model.exit_code == CLI_SUCCESS_EXIT_CODE, acme_model.stdout + acme_model.stderr
+    wire_acme = _invoke(
+        "workflow",
+        "model",
+        "add",
+        "--provider",
+        "acme",
+        "gateway-model-1",
+        "--step",
+        "mergecraft_codex",
+        "--workflow",
+        str(workflow),
+        "--apply",
+    )
+    assert wire_acme.exit_code == CLI_SUCCESS_EXIT_CODE, wire_acme.stdout + wire_acme.stderr
     before = workflow.read_text(encoding="utf-8")
 
     result = _invoke(
@@ -291,6 +305,98 @@ def test_workflow_model_prioritize_reorders_fallback_steps(
     after = workflow.read_text(encoding="utf-8")
     parsed = yaml.safe_load(after)
     models = [step["with"]["model"] for step in parsed["jobs"]["review"]["steps"] if "with" in step]
+    assert models.index("acme/gateway-model-1") < models.index("nous/tencent/hy3")
+    assert_only_owned_workflow_keys_changed(before, after)
+
+
+WORKFLOW_THREE_STEP_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request_target:
+jobs:
+  review:
+    name: mergecraft review
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - name: mergeCraft PR review (Nous primary)
+        id: mergecraft_nous
+        uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1
+        with:
+          prompt: ${{ steps.prompt.outputs.text }}
+          timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
+          model: nous/tencent/hy3
+        env:
+          MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
+          MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
+
+      - name: mergeCraft PR review (middle)
+        id: mergecraft_middle
+        uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1
+        with:
+          prompt: ${{ steps.prompt.outputs.text }}
+          timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
+          model: openai/gpt-5.3-codex
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+
+      - name: mergeCraft PR review (Codex fallback)
+        id: mergecraft_codex
+        uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1
+        with:
+          prompt: ${{ steps.prompt.outputs.text }}
+          timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
+          model: acme/gateway-model-1
+        env:
+          MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_2: https://custom.example.test/v1
+          LLM_PROVIDER_2_API_KEY: ${{ secrets.LLM_PROVIDER_2_API_KEY }}
+"""
+
+
+def test_workflow_model_prioritize_targets_step_with_requested_model(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Three-step chains must swap with the step that holds the promoted model."""
+    workflow = _setup_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_THREE_STEP_TEMPLATE)
+    _register_nous_provider(tmp_path)
+    acme_add = _invoke(
+        "provider",
+        "add",
+        "--label",
+        "acme",
+        "--url",
+        CUSTOM_BASE_URL,
+        "--harness",
+        "opencode",
+    )
+    assert acme_add.exit_code == CLI_SUCCESS_EXIT_CODE, acme_add.stdout + acme_add.stderr
+    acme_model = _invoke("model", "add", "--provider", "acme", "gateway-model-1")
+    assert acme_model.exit_code == CLI_SUCCESS_EXIT_CODE, acme_model.stdout + acme_model.stderr
+    before = workflow.read_text(encoding="utf-8")
+
+    result = _invoke(
+        "workflow",
+        "model",
+        "prioritize",
+        "--provider",
+        "acme",
+        "--model",
+        "gateway-model-1",
+        "--before",
+        "nous/tencent/hy3",
+        "--workflow",
+        str(workflow),
+        "--apply",
+    )
+    output = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, output
+    after = workflow.read_text(encoding="utf-8")
+    parsed = yaml.safe_load(after)
+    steps = parsed["jobs"]["review"]["steps"]
+    models = [step["with"]["model"] for step in steps if "with" in step]
+    middle = next(step for step in steps if step.get("id") == "mergecraft_middle")
+    assert middle["with"]["model"] == "openai/gpt-5.3-codex"
     assert models.index("acme/gateway-model-1") < models.index("nous/tencent/hy3")
     assert_only_owned_workflow_keys_changed(before, after)
 

@@ -32,6 +32,7 @@ from mergecraft.config.provider_registry import (
 from mergecraft.config.runtime_provider_registry import SEED_PROVIDER_URLS
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import PROVIDERS
+from mergecraft.utils.workspace import git_repo_root
 
 AUTH_KIND_API_KEY = "api_key"
 AUTH_KIND_OAUTH = "oauth"
@@ -124,11 +125,17 @@ def _config_path(cwd: Path) -> Path:
     return (cwd / _DEFAULT_CONFIG_REL).resolve()
 
 
-def _env_path() -> Path:
+def _env_path(cwd: Path | None = None) -> Path:
     configured = os.environ.get("MERGECRAFT_ENV")
     if configured:
         return Path(configured).resolve()
-    return Path.cwd() / ".env"
+    if cwd is not None:
+        return cwd.resolve() / ".env"
+
+    top = git_repo_root()
+    if top is None:
+        cli_bail("not inside a git repository (or pass --cwd)")
+    return top / ".env"
 
 
 def _load_config_dict(path: Path) -> dict[str, Any]:
@@ -159,11 +166,11 @@ def _provider_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
     return [entry for entry in raw if isinstance(entry, dict)]
 
 
-def _write_env_label(env_index: int, label: str) -> None:
+def _write_env_label(env_index: int, label: str, cwd: Path | None = None) -> None:
     from mergecraft.cli.auth_cmd import _write_env_value
 
     key = f"LLM_PROVIDER_{env_index}"
-    _write_env_value(_env_path(), key, label)
+    _write_env_value(_env_path(cwd), key, label)
 
 
 def _harness_help_suffix() -> str:
@@ -308,7 +315,7 @@ def add_cmd(
     entries.append(entry)
     data["providers"] = entries
     _write_config_dict(config_path, data)
-    _write_env_label(env_index, normalised_label)
+    _write_env_label(env_index, normalised_label, repo_root)
     console.print(
         f"registered provider [green]{normalised_label}[/green] "
         f"(envIndex={env_index}, harness={resolved_harness})"
@@ -443,6 +450,8 @@ def _persist_indexed_credentials(
     entry: Mapping[str, Any],
     scope: str,
     credential_map: Mapping[str, str],
+    *,
+    cwd: Path | None = None,
 ) -> None:
     """Write ``LLM_PROVIDER_<N>`` label plus indexed credential suffixes."""
     from mergecraft.cli.auth_cmd import (
@@ -456,7 +465,7 @@ def _persist_indexed_credentials(
     label = str(entry["label"])
     target = _resolve_auth_target(scope)
 
-    env_path = _env_path()
+    env_path = _env_path(cwd)
     label_key = _indexed_label_key(env_index)
     any_local_written = False
 
@@ -546,7 +555,12 @@ def _validate_api_key_for_label(label: str, api_key: str, url: str | None) -> bo
     return True
 
 
-def _run_api_key_strategy(entry: Mapping[str, Any], scope: str) -> None:
+def _run_api_key_strategy(
+    entry: Mapping[str, Any],
+    scope: str,
+    *,
+    cwd: Path | None = None,
+) -> None:
     label = str(entry["label"])
     url = entry.get("url")
     url_str = str(url) if url is not None else None
@@ -560,10 +574,16 @@ def _run_api_key_strategy(entry: Mapping[str, Any], scope: str) -> None:
         entry,
         scope,
         {AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_API_KEY]: api_key},
+        cwd=cwd,
     )
 
 
-def _run_oauth_strategy(entry: Mapping[str, Any], scope: str) -> None:
+def _run_oauth_strategy(
+    entry: Mapping[str, Any],
+    scope: str,
+    *,
+    cwd: Path | None = None,
+) -> None:
     from mergecraft.cli.auth_cmd import CLAUDE_OAUTH_TOKEN_PREFIX
 
     console.print(
@@ -579,10 +599,15 @@ def _run_oauth_strategy(entry: Mapping[str, Any], scope: str) -> None:
             f"(expected {CLAUDE_OAUTH_TOKEN_PREFIX}…). saving it anyway."
         )
     suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_OAUTH]
-    _persist_indexed_credentials(entry, scope, {suffix: oauth_token})
+    _persist_indexed_credentials(entry, scope, {suffix: oauth_token}, cwd=cwd)
 
 
-def _run_device_code_strategy(entry: Mapping[str, Any], scope: str) -> None:
+def _run_device_code_strategy(
+    entry: Mapping[str, Any],
+    scope: str,
+    *,
+    cwd: Path | None = None,
+) -> None:
     if not shutil.which("codex"):
         cli_bail(
             "codex CLI not found on PATH.\n"
@@ -608,10 +633,15 @@ def _run_device_code_strategy(entry: Mapping[str, Any], scope: str) -> None:
         value = auth_path.read_text(encoding="utf-8")
 
     suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_DEVICE_CODE]
-    _persist_indexed_credentials(entry, scope, {suffix: value})
+    _persist_indexed_credentials(entry, scope, {suffix: value}, cwd=cwd)
 
 
-def _run_cloud_chain_strategy(entry: Mapping[str, Any], scope: str) -> None:
+def _run_cloud_chain_strategy(
+    entry: Mapping[str, Any],
+    scope: str,
+    *,
+    cwd: Path | None = None,
+) -> None:
     label = str(entry.get("label", "")).lower()
     if label == "bedrock":
         credentials: dict[str, str] = {}
@@ -621,7 +651,7 @@ def _run_cloud_chain_strategy(entry: Mapping[str, Any], scope: str) -> None:
             if value is None:
                 return
             credentials[suffix] = value
-        _persist_indexed_credentials(entry, scope, credentials)
+        _persist_indexed_credentials(entry, scope, credentials, cwd=cwd)
         return
 
     if label == "vertex":
@@ -635,6 +665,7 @@ def _run_cloud_chain_strategy(entry: Mapping[str, Any], scope: str) -> None:
                 entry,
                 scope,
                 {VERTEX_CLOUD_SUFFIXES[0]: path_or_empty},
+                cwd=cwd,
             )
             return
 
@@ -648,7 +679,7 @@ def _run_cloud_chain_strategy(entry: Mapping[str, Any], scope: str) -> None:
                 "use --scope github, or store base64 in a GitHub secret."
             )
         suffix = VERTEX_CLOUD_SUFFIXES[0]
-        _persist_indexed_credentials(entry, scope, {suffix: pasted})
+        _persist_indexed_credentials(entry, scope, {suffix: pasted}, cwd=cwd)
         return
 
     cli_bail(f"cloud_chain auth is not configured for provider {label!r}")
@@ -686,14 +717,15 @@ def run_provider_auth(
     scope: str,
     *,
     credential_map: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> None:
     """Execute unified provider auth for one registry row (#478)."""
     if credential_map is not None:
-        _persist_indexed_credentials(entry, scope, credential_map)
+        _persist_indexed_credentials(entry, scope, credential_map, cwd=cwd)
         return
     auth_kind = _entry_auth_kind(entry)
     strategy = resolve_auth_strategy(auth_kind)
-    strategy.run(entry, scope)
+    strategy.run(entry, scope, cwd=cwd)
 
 
 @dataclass(frozen=True, slots=True)
@@ -793,13 +825,17 @@ def _warn_legacy_credential_once(legacy_key: str, indexed_key: str) -> None:
     warnings.warn(message, DeprecationWarning, stacklevel=2)
 
 
-def resolve_indexed_credential(entry: Mapping[str, Any]) -> str | None:
+def resolve_indexed_credential(
+    entry: Mapping[str, Any],
+    *,
+    cwd: Path | None = None,
+) -> str | None:
     """Resolve the primary API credential for *entry*; registry key wins over legacy (D7)."""
     env_index = int(entry["envIndex"])
     label = str(entry.get("label", "")).lower()
     auth_kind = str(entry.get("authKind") or AUTH_KIND_API_KEY)
 
-    env_map = _read_env_map(_env_path())
+    env_map = _read_env_map(_env_path(cwd))
     legacy_key = LEGACY_LABEL_TO_API_KEY_ENV.get(label)
     legacy_value = env_map.get(legacy_key, "").strip() if legacy_key else ""
 
@@ -1101,7 +1137,7 @@ def migrate_cmd(
     """Migrate legacy ``*_API_KEY`` env vars into indexed provider registry layout (D2 / #483)."""
     repo_root = cwd.resolve()
     config_path = _config_path(repo_root)
-    env_path = _env_path()
+    env_path = _env_path(cwd)
     plan = plan_provider_migration(env_path=env_path, config_path=config_path)
 
     if not plan.providers and not plan.env_writes:
@@ -1170,12 +1206,12 @@ def provider_auth_cmd(
         if entry is None:
             cli_bail(f"unknown provider label {normalised!r}")
         console.print(f"authenticating provider [cyan]{entry.get('label', normalised)}[/cyan]")
-        run_provider_auth(entry, scope)
+        run_provider_auth(entry, scope, cwd=repo_root)
         return
 
     picked = _interactive_provider_picker(registry)
     console.print(f"authenticating provider [cyan]{picked.get('label')}[/cyan]")
-    run_provider_auth(picked, scope)
+    run_provider_auth(picked, scope, cwd=repo_root)
 
 
 __all__ = [

@@ -138,7 +138,7 @@ def _plan_provider_for_workflow(
         entries.append(entry)
         data["providers"] = entries
         _write_config_dict(config_path, data)
-        _write_env_label(env_index, normalised_label)
+        _write_env_label(env_index, normalised_label, repo_root)
     return entry, env_index
 
 

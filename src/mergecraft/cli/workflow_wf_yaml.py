@@ -34,7 +34,7 @@ WORKFLOW_OWNED_WITH_KEYS: tuple[str, ...] = ("model",)
 
 WORKFLOW_OWNED_ENV_PREFIXES: tuple[str, ...] = (
     "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_",
-    "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_",
+    "LLM_PROVIDER_",
 )
 
 WorkflowYamlError = LogfireWorkflowError
@@ -46,7 +46,7 @@ def _indexed_base_url_key(env_index: int) -> str:
 
 
 def _indexed_api_key_key(env_index: int) -> str:
-    return f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{env_index}"
+    return f"LLM_PROVIDER_{env_index}_API_KEY"
 
 
 def _read_workflow_text(workflow_path: Path) -> str:
@@ -241,7 +241,7 @@ def apply_model_wiring(
     )
 
 
-def _find_prioritize_step_ids(text: str, before_slug: str) -> tuple[str, str]:
+def _find_prioritize_step_ids(text: str, model_slug: str, before_slug: str) -> tuple[str, str]:
     try:
         parsed = yaml.safe_load(text)
     except yaml.YAMLError as exc:
@@ -252,8 +252,8 @@ def _find_prioritize_step_ids(text: str, before_slug: str) -> tuple[str, str]:
     if not isinstance(jobs, dict):
         raise WorkflowYamlError("workflow has no jobs: mapping")
 
-    anchor_id: str | None = None
-    other_ids: list[str] = []
+    before_ids: list[str] = []
+    model_ids: list[str] = []
     for job_name, job_def in jobs.items():
         if not isinstance(job_def, dict):
             continue
@@ -270,15 +270,25 @@ def _find_prioritize_step_ids(text: str, before_slug: str) -> tuple[str, str]:
             with_map = step.get("with")
             model = with_map.get("model") if isinstance(with_map, dict) else None
             if model == before_slug:
-                anchor_id = step_id
-            else:
-                other_ids.append(step_id)
+                before_ids.append(step_id)
+            elif model == model_slug:
+                model_ids.append(step_id)
 
-    if anchor_id is None:
+    if not before_ids:
         raise WorkflowYamlError(f"no mergeCraft step with with.model={before_slug!r} found")
-    if not other_ids:
-        raise WorkflowYamlError("need at least two mergeCraft steps to prioritize models")
-    return anchor_id, other_ids[-1]
+    if len(before_ids) > 1:
+        raise WorkflowYamlError(
+            f"ambiguous mergeCraft steps with with.model={before_slug!r}; "
+            "exactly one step must match"
+        )
+    if not model_ids:
+        raise WorkflowYamlError(f"no mergeCraft step with with.model={model_slug!r} found")
+    if len(model_ids) > 1:
+        raise WorkflowYamlError(
+            f"ambiguous mergeCraft steps with with.model={model_slug!r}; "
+            "exactly one step must match"
+        )
+    return before_ids[0], model_ids[0]
 
 
 def apply_model_prioritize(
@@ -290,7 +300,7 @@ def apply_model_prioritize(
 ) -> WorkflowChange:
     """Promote *model_slug* on the anchor step and demote *before_slug* to a fallback step."""
     original = _read_workflow_text(workflow_path)
-    anchor_id, swap_id = _find_prioritize_step_ids(original, before_slug)
+    anchor_id, swap_id = _find_prioritize_step_ids(original, model_slug, before_slug)
 
     intermediate = _mutate_steps(
         original,

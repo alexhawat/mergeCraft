@@ -1372,36 +1372,71 @@ def resolve_runtime_agent(
             if _has_codex_subscription_auth() or _has_openai_api_key_auth():
                 return agents["codex"]
             openai_entry = lookup_registry_entry(resolved_settings, provider)
-            if openai_entry is not None and indexed_credential_for_entry(openai_entry):
-                return resolve_agent(openai_entry.harness)
+            if openai_entry is not None:
+                if indexed_credential_for_entry(openai_entry):
+                    return resolve_agent(openai_entry.harness)
+                msg = (
+                    f"configuration error: provider {provider!r} is registered but missing "
+                    f"credentials — run `mergecraft provider auth {provider}`"
+                )
+                raise ModelFallbackPolicyError(msg)
             _fail_loud_for_openai(model=model)
 
         if provider == "google":
             if _has_gemini_auth():
                 return agents["gemini"]
             google_entry = lookup_registry_entry(resolved_settings, provider)
-            if google_entry is not None and indexed_credential_for_entry(google_entry):
-                return resolve_agent(google_entry.harness)
+            if google_entry is not None:
+                if indexed_credential_for_entry(google_entry):
+                    return resolve_agent(google_entry.harness)
+                msg = (
+                    f"configuration error: provider {provider!r} is registered but missing "
+                    f"credentials — run `mergecraft provider auth {provider}`"
+                )
+                raise ModelFallbackPolicyError(msg)
             _fail_loud_for_google(model=model)
 
         if provider == "cursor":
             if _has_cursor_auth():
                 return agents["cursor"]
             cursor_entry = lookup_registry_entry(resolved_settings, provider)
-            if cursor_entry is not None and indexed_credential_for_entry(cursor_entry):
-                return resolve_agent(cursor_entry.harness)
+            if cursor_entry is not None:
+                if indexed_credential_for_entry(cursor_entry):
+                    return resolve_agent(cursor_entry.harness)
+                msg = (
+                    f"configuration error: provider {provider!r} is registered but missing "
+                    f"credentials — run `mergecraft provider auth {provider}`"
+                )
+                raise ModelFallbackPolicyError(msg)
             _fail_loud_for_cursor(model=model)
 
         if provider == "anthropic":
             if _has_claude_code_auth():
                 return agents["claude"]
             anthropic_entry = lookup_registry_entry(resolved_settings, provider)
-            if anthropic_entry is not None and indexed_credential_for_entry(anthropic_entry):
-                return resolve_agent(anthropic_entry.harness)
+            if anthropic_entry is not None:
+                if indexed_credential_for_entry(anthropic_entry):
+                    return resolve_agent(anthropic_entry.harness)
+                msg = (
+                    f"configuration error: provider {provider!r} is registered but missing "
+                    f"credentials — run `mergecraft provider auth {provider}`"
+                )
+                raise ModelFallbackPolicyError(msg)
+            msg = (
+                f"configuration error: provider {provider!r} is not registered — "
+                "add it with `mergecraft provider add`"
+            )
+            raise ModelFallbackPolicyError(msg)
 
         entry = lookup_registry_entry(resolved_settings, provider) if provider else None
-        if entry is not None and indexed_credential_for_entry(entry):
-            return resolve_agent(entry.harness)
+        if entry is not None:
+            if indexed_credential_for_entry(entry):
+                return resolve_agent(entry.harness)
+            msg = (
+                f"configuration error: provider {provider!r} is registered but missing "
+                f"credentials — run `mergecraft provider auth {provider}`"
+            )
+            raise ModelFallbackPolicyError(msg)
 
         if provider is not None:
             msg = (

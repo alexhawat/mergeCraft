@@ -567,7 +567,7 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     extra: dict[str, str] = {"CODEX_HOME": str(codex_home)}
     if ctx.mcp_auth_token:
         extra[_CODEX_MCP_TOKEN_ENV] = ctx.mcp_auth_token
-    env = build_agent_env("codex", extra)
+    env = build_agent_env("codex", extra, model=ctx.resolved_model)
     _setup_codex_auth(ctx, codex_home=codex_home)
     # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
     # (config.toml, mergecraft-instructions.md, auth.json) while this process

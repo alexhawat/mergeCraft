@@ -37,6 +37,7 @@ PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_PROVIDER_EXTRA_OPTIONS"
 # (no renumbering).
 INDEXED_CUSTOM_PROVIDER_BASE_URL_RE = re.compile(r"^MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_(\d+)$")
 INDEXED_CUSTOM_PROVIDER_API_KEY_RE = re.compile(r"^MERGECRAFT_CUSTOM_PROVIDER_API_KEY_(\d+)$")
+INDEXED_LLM_PROVIDER_API_KEY_RE = re.compile(r"^LLM_PROVIDER_(\d+)_API_KEY$")
 INDEXED_CUSTOM_PROVIDER_EXTRA_OPTIONS_FMT = "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS_{n}"
 # Provider-id derivation rule (operator locked): ``"provider_" + str(N)`` for
 # indexed pairs; ``"default"`` for the singleton back-compat alias.
@@ -349,17 +350,28 @@ def _resolve_indexed_providers() -> dict[str, ProviderConfig]:
                 continue
             base_url, api_key = by_index.get(n, ("", ""))
             by_index[n] = (base_url, stripped)
+            continue
+        match = INDEXED_LLM_PROVIDER_API_KEY_RE.match(key)
+        if match is not None:
+            n = int(match.group(1))
+            stripped = value.strip()
+            if not stripped:
+                continue
+            base_url, api_key = by_index.get(n, ("", ""))
+            by_index[n] = (base_url, stripped)
     out: dict[str, ProviderConfig] = {}
     for n in sorted(by_index):
         base_url, api_key = by_index[n]
         if not base_url or not api_key:
             # Partial pair — drop silently.
             continue
-        provider_id = INDEXED_PROVIDER_ID_FMT.format(n=n)
+        from mergecraft.config.runtime_provider_registry import _provider_id_for_env_index
+
+        provider_id = _provider_id_for_env_index(n)
         out[provider_id] = _provider_config_from_env_pair(
             provider_id=provider_id,
             base_url=base_url,
-            api_key_env=f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{n}",
+            api_key_env=f"LLM_PROVIDER_{n}_API_KEY",
             extra_options_env=INDEXED_CUSTOM_PROVIDER_EXTRA_OPTIONS_FMT.format(n=n),
         )
     return out

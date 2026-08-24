@@ -231,7 +231,7 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
         or (vertex_id and model == vertex_id)
     ):
         extras["CLAUDE_CODE_USE_VERTEX"] = "1"
-    return build_agent_env("claude", extras)
+    return build_agent_env("claude", extras, model=ctx.resolved_model)
 
 
 def _build_claude_streaming_usage(payload: dict[str, Any]) -> AgentUsage:

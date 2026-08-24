@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import warnings
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mergecraft.config.provider_registry import BUILTIN_HARNESS_DEFAULTS
@@ -31,6 +32,13 @@ _BEDROCK_CLOUD_SUFFIXES: tuple[str, ...] = (
 )
 
 _VERTEX_CLOUD_SUFFIXES: tuple[str, ...] = ("GOOGLE_APPLICATION_CREDENTIALS",)
+
+_BUILTIN_LABEL_TO_HARNESS_API_KEY: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google": "GEMINI_API_KEY",
+    "cursor": "CURSOR_API_KEY",
+}
 
 # Seed-only default URLs for ``provider seed`` — not used at runtime (BE / D4).
 SEED_PROVIDER_URLS: dict[str, str] = {
@@ -62,6 +70,29 @@ def lookup_registry_entry(
         if entry.label.strip().lower() == lowered:
             return entry
     return None
+
+
+def lookup_registry_entry_by_env_index(
+    settings: RepoSettings | None,
+    env_index: int,
+) -> ProviderRegistryEntry | None:
+    """Return the registry row for *env_index*, or ``None`` when absent."""
+    if settings is None:
+        return None
+    for entry in settings.providers:
+        if entry.env_index == env_index:
+            return entry
+    return None
+
+
+def _provider_id_for_env_index(env_index: int) -> str:
+    from mergecraft.config.settings import load_repo_settings
+
+    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    entry = lookup_registry_entry_by_env_index(settings, env_index)
+    if entry is not None:
+        return entry.label.strip().lower()
+    return f"provider_{env_index}"
 
 
 def registry_harness_for_provider(
@@ -168,6 +199,76 @@ def resolve_registry_gateway_endpoint(
     return provider_id, entry.url, api_key
 
 
+def _harness_env_name_for_suffix(label: str, suffix: str) -> str | None:
+    """Map one indexed credential suffix to the harness env var native CLIs consume."""
+    if suffix == "API_KEY":
+        return _BUILTIN_LABEL_TO_HARNESS_API_KEY.get(label.strip().lower())
+    if suffix in {
+        "CODEX_AUTH_JSON",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "VERTEX_SERVICE_ACCOUNT_JSON",
+        "GOOGLE_CLOUD_PROJECT",
+        "CLOUD_ML_PROJECT_ID",
+        "VERTEX_LOCATION",
+    }:
+        return suffix
+    return None
+
+
+def _read_indexed_credential_value(entry: ProviderRegistryEntry, suffix: str) -> str | None:
+    value = _read_env_value(indexed_env_key(entry.env_index, suffix))
+    if value:
+        return value
+    if suffix == "API_KEY":
+        workflow_key = f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{entry.env_index}"
+        return _read_env_value(workflow_key)
+    return None
+
+
+def harness_env_for_active_provider(
+    model: str | None,
+    agent_id: str,
+) -> dict[str, str]:
+    """Map indexed registry credentials into legacy harness env names for *agent_id*.
+
+    Only the active model's provider row is mapped — indexed secrets are copied
+    into the env vars Codex / Claude / Gemini / Cursor subprocesses read
+    (``OPENAI_API_KEY``, ``CODEX_AUTH_JSON``, ``CLAUDE_CODE_OAUTH_TOKEN``, etc.).
+    """
+    if not model:
+        return {}
+    from mergecraft.models import get_model_provider
+
+    try:
+        provider = get_model_provider(model)
+    except ValueError:
+        return {}
+
+    from mergecraft.config.settings import load_repo_settings
+
+    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    entry = lookup_registry_entry(settings, provider)
+    if entry is None or entry.harness != agent_id:
+        return {}
+
+    mapped: dict[str, str] = {}
+    for suffix in _credential_suffixes_for_entry(entry):
+        value = _read_indexed_credential_value(entry, suffix)
+        if not value:
+            continue
+        harness_key = _harness_env_name_for_suffix(entry.label, suffix)
+        if harness_key is not None:
+            mapped[harness_key] = value
+    return mapped
+
+
 def infer_harness_for_slug(
     slug: str,
     *,
@@ -198,12 +299,14 @@ def infer_harness_for_slug(
 
 __all__ = [
     "SEED_PROVIDER_URLS",
+    "harness_env_for_active_provider",
     "has_registry_credentials",
     "indexed_api_key_for_entry",
     "indexed_credential_for_entry",
     "indexed_env_key",
     "infer_harness_for_slug",
     "lookup_registry_entry",
+    "lookup_registry_entry_by_env_index",
     "registry_harness_for_provider",
     "resolve_registry_gateway_endpoint",
     "warn_legacy_nous_api_key_once",

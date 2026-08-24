@@ -83,7 +83,7 @@ def list_cmd(
     repo_root = cwd.resolve()
     config_path = _config_path(repo_root)
     registry = load_provider_registry(config_path)
-    env_file = _env_path()
+    env_file = _env_path(repo_root)
 
     if not registry.labels():
         console.print("no models registered")

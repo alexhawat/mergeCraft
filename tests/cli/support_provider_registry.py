@@ -327,6 +327,7 @@ def write_registry_provider_row(
     env_index: int,
     url: str | None = None,
     models: list[dict[str, object]] | None = None,
+    auth_kind: str | None = None,
 ) -> None:
     """Append one ``providers:`` row for agent-resolve registry tests."""
     config = read_config(tmp_path)
@@ -335,7 +336,7 @@ def write_registry_provider_row(
         "label": label,
         "harness": harness,
         "envIndex": env_index,
-        "authKind": AUTH_KIND_API_KEY,
+        "authKind": auth_kind or AUTH_KIND_API_KEY,
     }
     if url is not None:
         row["url"] = url
@@ -529,7 +530,7 @@ WORKFLOW_OWNED_WITH_KEYS: tuple[str, ...] = ("model",)
 
 WORKFLOW_OWNED_ENV_PREFIXES: tuple[str, ...] = (
     "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_",
-    "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_",
+    "LLM_PROVIDER_",
 )
 
 WORKFLOW_ONE_STEP_TEMPLATE = """\
@@ -663,8 +664,8 @@ def indexed_custom_provider_base_url(env_index: int) -> str:
 
 
 def indexed_custom_provider_api_key(env_index: int) -> str:
-    """Return ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY_<N>`` for workflow env blocks."""
-    return f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{env_index}"
+    """Return ``LLM_PROVIDER_<N>_API_KEY`` for workflow env blocks."""
+    return f"LLM_PROVIDER_{env_index}_API_KEY"
 
 
 def _line_is_owned_workflow_mutation(line: str) -> bool:

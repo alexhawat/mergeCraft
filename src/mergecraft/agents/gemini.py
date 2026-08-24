@@ -171,7 +171,7 @@ def _normalize_gemini_api_key(env: dict[str, str]) -> None:
 
 
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
-    env = build_agent_env("gemini", {"HOME": str(Path(ctx.tmpdir))})
+    env = build_agent_env("gemini", {"HOME": str(Path(ctx.tmpdir))}, model=ctx.resolved_model)
     _normalize_gemini_api_key(env)
     return env
 
