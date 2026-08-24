@@ -65,6 +65,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `mergecraft workflow` resolves a relative `--workflow` against `--cwd` on every
+  subcommand. The registry config was scoped by `--cwd` while the workflow path
+  stayed against the process working directory, so invoking from outside the
+  target repository could read config from one repo and rewrite another repo's
+  workflow
+- `mergecraft workflow provider add --url` on an already-registered provider now
+  applies the validated endpoint to the row that is wired and persisted. The
+  override was validated and then discarded, leaving the workflow on the
+  superseded endpoint with no indication the flag was ignored
+- Indexed registry credentials survive the legacy credential re-injection in
+  `build_agent_env`. When an `LLM_PROVIDER_<N>_*` secret and its deprecated
+  counterpart were both set, the legacy value overwrote the registry one for
+  API keys, Claude Code OAuth tokens, and the Bedrock/Vertex chains, inverting
+  the documented precedence
 - `list_check_runs` omits `check_runs` when the listing is truncated, instead
   of returning a partial catalog with `total_count`. Analyzer JSON arrays no
   longer treat a leading `{"error": ...}` then `[]` as a clean scan
