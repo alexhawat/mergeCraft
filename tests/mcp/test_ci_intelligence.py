@@ -137,3 +137,29 @@ async def test_analyze_ci_failures_tool_no_failures(tmp_path: Path) -> None:
     payload = json.loads(raw.content[0]["text"])
     assert payload["available"] is False
     assert payload["stats"]["clusterCount"] == 0
+
+
+@pytest.mark.asyncio
+async def test_analyze_ci_failures_listing_failure_is_unavailable_not_an_error(
+    tmp_path: Path,
+) -> None:
+    class _ListingFailGitHub(GitHubClient):
+        async def list_workflow_runs_for_check_suite(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            msg = "check-suite run listing failed"
+            raise RuntimeError(msg)
+
+    listed = await analyze_ci_failures_tool(_ctx(tmp_path, _ListingFailGitHub(token="t"))).execute(
+        {"check_suite_id": 7}
+    )
+    empty = await analyze_ci_failures_tool(
+        _ctx(tmp_path, _FakeGitHub(runs=[], log_bytes=b""))
+    ).execute({"check_suite_id": 7})
+    assert listed.is_error is False
+    payload = json.loads(listed.content[0]["text"])
+    empty_payload = json.loads(empty.content[0]["text"])
+    assert payload["available"] is False
+    assert payload.keys() == empty_payload.keys()
+    assert payload["stats"] == empty_payload["stats"]
+    assert payload["sarifFindingCount"] == 0

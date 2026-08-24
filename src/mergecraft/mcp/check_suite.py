@@ -24,9 +24,19 @@ def get_check_suite_logs_tool(ctx: ToolContext):
         client = github_client_from_scm(ctx.scm)
         if client is None:
             return unbound_check_suite_logs(check_suite_id)
-        runs = await client.list_workflow_runs_for_check_suite(
-            ctx.repo.owner, ctx.repo.name, check_suite_id
-        )
+        try:
+            runs = await client.list_workflow_runs_for_check_suite(
+                ctx.repo.owner, ctx.repo.name, check_suite_id
+            )
+        except Exception as err:
+            # Same fail-closed policy as ``run_ci_intelligence``: listing
+            # failure is unavailable, not a raised tool error.
+            return {
+                "check_suite_id": check_suite_id,
+                "message": str(err) or "check-suite run listing failed",
+                "jobs": [],
+                "available": False,
+            }
         return await _GITHUB_PROVIDER.fetch_check_suite_logs(
             ctx, check_suite_id=check_suite_id, client=client, runs=runs
         )

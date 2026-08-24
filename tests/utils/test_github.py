@@ -236,7 +236,7 @@ async def test_paginate_logs_when_max_pages_is_full() -> None:
         return {"items": [{"id": 1}, {"id": 2}]}
 
     messages: list[str] = []
-    sink_id = logger.add(lambda message: messages.append(str(message)))
+    sink_id = logger.add(lambda message: messages.append(str(message.record["message"])))
     try:
         items = await paginate_github_list_pages(_full, item_key="items", page_size=2, max_pages=1)
     finally:
@@ -255,13 +255,15 @@ async def test_paginate_logs_unexpected_non_object_payload() -> None:
         return "nope"
 
     messages: list[str] = []
-    sink_id = logger.add(lambda message: messages.append(str(message)))
+    sink_id = logger.add(lambda message: messages.append(str(message.record["message"])))
     try:
         items = await paginate_github_list_pages(_weird, item_key="items", page_size=100)
     finally:
         logger.remove(sink_id)
-    assert items == []
-    assert any("unexpected" in item for item in messages)
+        assert items == []
+        assert any("unexpected" in item for item in messages)
+        assert not any("end of list" in item for item in messages)
+        assert any("without treating the list as complete" in item for item in messages)
 
 
 def test_provider_agents_import_failure_taxonomy_from_provider_failure() -> None:

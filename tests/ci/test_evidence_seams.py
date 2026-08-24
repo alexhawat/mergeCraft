@@ -335,8 +335,8 @@ async def test_recorded_finding_count_is_merged_evidence_length(
     )
     clustered = shared.model_copy(update={"severity": "Major"})
 
-    async def _sarif(ctx: ToolContext, *, check_suite_id: int, **_: object) -> list[Any]:
-        _ = ctx, check_suite_id
+    async def _sarif(ctx: ToolContext, **_: object) -> list[Any]:
+        _ = ctx
         return [shared]
 
     async def _suite(

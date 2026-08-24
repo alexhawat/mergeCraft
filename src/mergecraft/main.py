@@ -371,8 +371,12 @@ async def _publish(
 
     from mergecraft.tracing.tracer import get_tracer_from_settings
 
-    assert ctx.settings is not None
-    assert attrs_source is not None
+    if ctx.settings is None:
+        msg = "settings is required when emit=True"
+        raise ValueError(msg)
+    if attrs_source is None:
+        msg = "attrs_source is required when emit=True"
+        raise ValueError(msg)
     tracer = get_tracer_from_settings(ctx.settings)
     with tracer.start_span("mergecraft.publish", attrs_source=attrs_source) as _span:
         await _learnings_and_status()

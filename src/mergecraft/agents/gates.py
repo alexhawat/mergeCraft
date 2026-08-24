@@ -417,10 +417,11 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
 
 # Ordered ``(callable, rule_id)`` pairs the policy engine walks; first match
 # wins. This is not a dict mapping — each predicate is a callable.
-# The list is lookup order, so anything more specific must appear before
-# anything more general (a high-risk migration is checked before the
-# generic low-risk pass). ``has_blockers`` is in this table — it is not a
-# parallel if-chain sitting beside an unused lookup.
+# Lookup order (not ``DEFAULT_GATE_POLICIES`` insertion order):
+# high_risk_migration, low_risk_passing, has_blockers, changed-unread-file,
+# tool_loop, then ``schema_failure`` as the catch-all. Tests pin
+# ``has_blockers`` before ``changed-unread-file`` / ``tool_loop``; do not
+# reorder the table to put ``tool_loop`` first.
 _RULE_PREDICATES: Final[tuple[tuple[Callable[[MergeEvidencePacket], bool], str], ...]] = (
     (_is_high_risk_migration, "high_risk_migration"),
     (_is_low_risk_passing, "low_risk_passing"),

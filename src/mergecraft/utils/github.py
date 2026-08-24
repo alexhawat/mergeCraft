@@ -67,11 +67,12 @@ async def paginate_github_list_pages(
             batch = _as_list(payload.get(item_key))
         else:
             logger.warning(
-                "github list pagination: unexpected {} payload for {}, treating as end of list",
+                "github list pagination: unexpected {} payload for {}; "
+                "stopping without treating the list as complete",
                 type(payload).__name__,
                 item_key,
             )
-            batch = []
+            break
         last_batch_len = len(batch)
         collected.extend(batch)
         if last_batch_len < page_size:

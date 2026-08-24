@@ -517,6 +517,8 @@ def run_adapter(
         # Classify the failure: empty output means the analyzer never produced
         # anything (sandbox unavailable outside CI), not that it emitted garbage
         # we could not parse. Skip reason stays generic — exception text is logged.
+        # Bandit empty stdout never reaches this branch: ``parse_bandit_json``
+        # returns ``[]`` (#467) instead of raising.
         if not raw.strip():
             reason = (
                 f"skipped {tool_id}: no output (analyzer did not run — "

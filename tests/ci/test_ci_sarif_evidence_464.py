@@ -42,7 +42,6 @@ _DEFAULT_RUNS = [{"id": 88}]
 async def _collect(ctx: Any, github: GitHubClient, runs: list[dict[str, Any]] | None = None):
     return await collect_ci_sarif_findings(
         ctx,
-        check_suite_id=123,
         client=github,
         runs=_DEFAULT_RUNS if runs is None else runs,
     )

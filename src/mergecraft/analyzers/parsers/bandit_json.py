@@ -78,6 +78,8 @@ def bandit_row_span(
 def parse_bandit_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> list[Finding]:
     # Empty stdout is a clean scan (Bandit JSON on a finding-free run). Do not
     # treat it as missing output; unparsable non-empty stdout still raises.
+    # The adapter's empty-output skip path does not apply here: returning ``[]``
+    # is a passed scan (#467), not a sandbox-unavailable skip.
     if not raw.strip():
         return []
     payload = require_json_object(raw, what="bandit JSON output")

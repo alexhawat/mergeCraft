@@ -158,10 +158,34 @@ def _sarif_documents(archive: bytes) -> list[str]:
         return []
 
 
+def _unavailable_ci_intelligence(
+    *,
+    reason: str,
+    sarif_finding_count: int = 0,
+) -> dict[str, Any]:
+    """Fail-closed CI intelligence when listing failed or no failed jobs exist."""
+    return {
+        "available": False,
+        "reason": reason,
+        "section": "",
+        "preMergeSummary": "",
+        "comments": [],
+        "sarifFindingCount": sarif_finding_count,
+        "stats": {
+            "failureCount": 0,
+            "clusterCount": 0,
+            "flakyCount": 0,
+            "prAttributedCount": 0,
+            "truncated": False,
+            "overflow": 0,
+        },
+        "clusters": [],
+    }
+
+
 async def collect_ci_sarif_findings(
     ctx: ToolContext,
     *,
-    check_suite_id: int,
     client: GitHubClient,
     runs: list[dict[str, Any]],
 ) -> list[Finding]:
@@ -181,7 +205,6 @@ async def collect_ci_sarif_findings(
     from mergecraft.ci.evidence import sarif_findings
     from mergecraft.mcp.tool_state import primary_repo_state
 
-    _ = check_suite_id
     repo_root = Path(primary_repo_state(ctx.tool_state).dir)
     findings: list[Finding] = []
 
@@ -254,26 +277,10 @@ async def run_ci_intelligence(
                 ctx.repo.owner, ctx.repo.name, check_suite_id
             )
         except Exception as err:
-            return {
-                "available": False,
-                "reason": str(err) or "check-suite run listing failed",
-                "section": "",
-                "preMergeSummary": "",
-                "comments": [],
-                "sarifFindingCount": 0,
-                "stats": {
-                    "failureCount": 0,
-                    "clusterCount": 0,
-                    "flakyCount": 0,
-                    "prAttributedCount": 0,
-                    "truncated": False,
-                    "overflow": 0,
-                },
-                "clusters": [],
-            }
-        sarif = await collect_ci_sarif_findings(
-            ctx, check_suite_id=check_suite_id, client=client, runs=runs
-        )
+            return _unavailable_ci_intelligence(
+                reason=str(err) or "check-suite run listing failed",
+            )
+        sarif = await collect_ci_sarif_findings(ctx, client=client, runs=runs)
         if sarif:
             record_ci_findings(ctx.tool_state, sarif)
         suite = await _GITHUB_PROVIDER.fetch_check_suite_logs(
@@ -284,23 +291,7 @@ async def run_ci_intelligence(
     total_failed_runs = int(suite.get("total_failed_runs") or len(jobs))
     if not jobs:
         reason = str(suite.get("message") or "no failed workflow runs found for this check suite")
-        return {
-            "available": False,
-            "reason": reason,
-            "section": "",
-            "preMergeSummary": "",
-            "comments": [],
-            "sarifFindingCount": len(sarif),
-            "stats": {
-                "failureCount": 0,
-                "clusterCount": 0,
-                "flakyCount": 0,
-                "prAttributedCount": 0,
-                "truncated": False,
-                "overflow": 0,
-            },
-            "clusters": [],
-        }
+        return _unavailable_ci_intelligence(reason=reason, sarif_finding_count=len(sarif))
 
     raw_failures = provider_jobs_to_raw_failures(jobs)
     reports, stats, overflow = analyze_ci_failures(

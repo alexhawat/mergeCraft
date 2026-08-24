@@ -145,6 +145,28 @@ async def test_get_check_suite_logs_skips_when_github_client_unavailable(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_get_check_suite_logs_listing_failure_is_unavailable_not_an_error(
+    tmp_path: Path,
+) -> None:
+    class _ListingFailGitHub(GitHubClient):
+        async def list_workflow_runs_for_check_suite(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            msg = "boom"
+            raise RuntimeError(msg)
+
+    ctx = _ctx(tmp_path)
+    bind_github_client(ctx, _ListingFailGitHub(token="test-token"))
+    result = await get_check_suite_logs_tool(ctx).execute({"check_suite_id": 42})
+    assert result.is_error is False
+    payload = json.loads(result.content[0]["text"])
+    assert payload["available"] is False
+    assert payload["jobs"] == []
+    assert payload["check_suite_id"] == 42
+    assert "boom" in payload["message"]
+
+
+@pytest.mark.asyncio
 async def test_get_check_suite_logs_return_shape_and_three_run_cap(tmp_path: Path) -> None:
     log_body = "step one\n##[error]Process completed with exit code 2.\n"
     zbuf = BytesIO()
