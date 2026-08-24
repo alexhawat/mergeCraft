@@ -68,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the loader; GitHub check-run listing paginates with the shared pager
 - GitHub workflow-run artifact (and run) listing follows pages past the first
   100 items; CI evidence recording keeps the more severe duplicate fingerprint
-- Packet publish uses one assembly result (`PreparedPacket`) so a failed
+- Packet publish uses one assembly result (`MergeEvidencePacket | None`) so a failed
   packet cannot be rebuilt on the approval check; `build_run_packet` resolves
   `change_id`
 - Agent CLI failover classifies via `provider_failure` (not `retry_policy`

@@ -36,7 +36,6 @@ _GITHUB_REST_OPERATIONS: frozenset[str] = frozenset(
         "list_check_suites_for_ref",
         "get_check_suite",
         "list_check_runs_for_ref",
-        "list_workflow_runs_for_check_suite",
         "list_workflow_run_artifacts",
         "download_artifact_zip",
         "download_workflow_run_logs",
@@ -237,9 +236,6 @@ class ScmProvider(Protocol):
     async def list_check_runs_for_ref(
         self, owner: str, repo: str, ref: str, **kwargs: Any
     ) -> dict[str, Any]: ...
-    async def list_workflow_runs_for_check_suite(
-        self, owner: str, repo: str, check_suite_id: int
-    ) -> list[dict[str, Any]]: ...
     async def list_workflow_run_artifacts(
         self, owner: str, repo: str, run_id: int
     ) -> list[dict[str, Any]]: ...

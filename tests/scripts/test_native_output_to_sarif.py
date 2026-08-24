@@ -148,20 +148,21 @@ def test_bandit_non_object_results_row_is_converter_failure() -> None:
         bandit_to_sarif('{"results": ["not-an-object"]}')
 
 
-def test_as_line_uses_coerce_line_strict_not_a_second_type_ladder() -> None:
+def test_as_line_uses_require_line_not_a_second_type_ladder() -> None:
     import inspect
 
-    from mergecraft.analyzers.parsers._common import coerce_line
+    from mergecraft.analyzers.parsers._common import coerce_line, require_line
 
     source = inspect.getsource(_MOD._as_line)
     assert "isinstance" not in source
-    assert "strict=True" in source
-    assert coerce_line(None, strict=True) == 1
+    assert "strict=" not in source
+    assert "require_line" in source
+    assert require_line(None) == 1
     assert coerce_line("nope") == 1
     with pytest.raises(ValueError, match="line number"):
-        coerce_line("nope", strict=True)
+        require_line("nope")
     with pytest.raises(ValueError, match="line number"):
-        coerce_line(True, strict=True)
+        require_line(True)
     with pytest.raises(ConverterError, match="line number"):
         _MOD._as_line("nope")
     with pytest.raises(ConverterError, match="line number"):

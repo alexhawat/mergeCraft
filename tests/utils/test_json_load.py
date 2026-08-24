@@ -22,3 +22,13 @@ def test_try_load_json_object_skips_numeric_array_then_object() -> None:
         "error": {"message": "not found"},
         "statusCode": 404,
     }
+
+
+def test_try_load_json_object_skips_progress_array_then_404() -> None:
+    raw = '[{"type":"progress"}]\n{"statusCode": 404}'
+    assert try_load_json_object(raw) == {"statusCode": 404}
+
+
+def test_try_load_json_object_skips_nested_progress_array_then_schema() -> None:
+    raw = '[[], {"type":"progress"}]\n{"SchemaVersion": 2}'
+    assert try_load_json_object(raw) == {"SchemaVersion": 2}

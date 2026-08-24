@@ -12,6 +12,7 @@ from loguru import logger
 
 from mergecraft.ci.log_excerpt import analyze_log
 from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation
+from mergecraft.scm.github import github_client_from_scm
 
 if TYPE_CHECKING:
     from mergecraft.ci.types import ProviderContext, RawFailure
@@ -39,8 +40,14 @@ class GitHubActionsProvider:
         truncation_cap: int = DEFAULT_TRUNCATION_CAP,
     ) -> dict[str, Any]:
         """Download failed workflow logs for a check suite (legacy MCP contract)."""
-        scm = ctx.scm
-        runs = await scm.list_workflow_runs_for_check_suite(
+        client = github_client_from_scm(ctx.scm)
+        if client is None:
+            return {
+                "check_suite_id": check_suite_id,
+                "message": "no failed workflow runs found for this check suite",
+                "jobs": [],
+            }
+        runs = await client.list_workflow_runs_for_check_suite(
             ctx.repo.owner, ctx.repo.name, check_suite_id
         )
         failed = [run for run in runs if run.get("conclusion") == "failure"]
@@ -58,7 +65,7 @@ class GitHubActionsProvider:
         for run in selected:
             run_id = run["id"]
             try:
-                raw = await scm.download_workflow_run_logs(
+                raw = await ctx.scm.download_workflow_run_logs(
                     ctx.repo.owner,
                     ctx.repo.name,
                     run_id,

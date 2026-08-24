@@ -135,9 +135,9 @@ def _manifest_paths(repo_root: Path, files: list[str]) -> dict[str, Path]:
 def _package_names_from_trivy(raw: str) -> dict[str, str]:
     mapping: dict[str, str] = {}
     try:
-        from mergecraft.analyzers.parsers.trivy_json import loads_trivy_object
+        from mergecraft.analyzers.parsers._common import require_json_object
 
-        payload = loads_trivy_object(raw)
+        payload = require_json_object(raw, what="trivy JSON output")
     except (json.JSONDecodeError, ValueError):  # fmt: skip
         return mapping
     for result in payload.get("Results") or []:

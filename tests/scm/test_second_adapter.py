@@ -58,17 +58,13 @@ async def test_create_review_raises_unsupported_not_fabricated_success() -> None
 
 
 @pytest.mark.asyncio
-async def test_gitlab_list_workflow_runs_for_check_suite_is_unsupported_stub() -> None:
-    """Protocol names the GitHub helper; GitLab stubs it instead of faking runs."""
+async def test_gitlab_does_not_stub_github_check_suite_workflow_listing() -> None:
+    """GitLab must not expose a GitHub Actions CI listing method."""
     require_scm()
-    from mergecraft.scm.errors import UnsupportedScmCapability
     from mergecraft.scm.gitlab import GitLabScmAdapter
 
     adapter = GitLabScmAdapter(token="test-token", base_url="https://gitlab.example/api/v4")
-    assert callable(adapter.list_workflow_runs_for_check_suite)
-    with pytest.raises(UnsupportedScmCapability) as exc_info:
-        await adapter.list_workflow_runs_for_check_suite("acme", "demo", 7)
-    assert "list_workflow_runs_for_check_suite" in str(exc_info.value).lower()
+    assert not hasattr(adapter, "list_workflow_runs_for_check_suite")
 
 
 def test_tool_context_preserves_explicit_scm_instance(tmp_path: object) -> None:

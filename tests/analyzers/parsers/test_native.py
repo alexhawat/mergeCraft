@@ -131,13 +131,13 @@ def test_trivy_parser_skips_leading_empty_array_before_report() -> None:
     """A banner plus ``[]`` must not hide the later Trivy report object."""
     parsers = import_module("mergecraft.analyzers.parsers")
     manifest = import_module("mergecraft.analyzers.manifest")
-    from mergecraft.analyzers.parsers.trivy_json import loads_trivy_object
+    from mergecraft.analyzers.parsers._common import require_json_object
     from mergecraft.utils.json_load import try_load_json
 
     body = (FIXTURES_DIR / "native/trivy-minimal.json").read_text(encoding="utf-8")
     raw = "2026-08-01T08:13:17.574Z\tINFO\tLoaded config\n[]\n" + body
     assert try_load_json(raw) == []
-    payload = loads_trivy_object(raw)
+    payload = require_json_object(raw, what="trivy JSON output")
     assert payload.get("Results")
     m = manifest.load_manifest_yaml(
         """
@@ -170,4 +170,49 @@ exclusive_group: dependency-vuln
     assert findings
     assert findings[0].rule_id == "CVE-2024-0001"
     source = Path(__file__).resolve().parents[3] / "src/mergecraft/analyzers/parsers/trivy_json.py"
-    assert "require_json_object" not in source.read_text(encoding="utf-8")
+    text = source.read_text(encoding="utf-8")
+    assert "require_json_object" in text
+    assert "loads_trivy_object" not in text
+
+
+def test_trivy_parser_does_not_false_clean_on_progress_object() -> None:
+    """Progress tokens inside a skipped array must not latch as a clean Trivy report."""
+    parsers = import_module("mergecraft.analyzers.parsers")
+    manifest = import_module("mergecraft.analyzers.manifest")
+    from mergecraft.utils.json_load import try_load_json_object
+
+    body = (FIXTURES_DIR / "native/trivy-minimal.json").read_text(encoding="utf-8")
+    raw = '[[], {"type":"progress"}]\n' + body
+    payload = try_load_json_object(raw)
+    assert payload is not None
+    assert payload.get("SchemaVersion") == 2 or payload.get("Results")
+    m = manifest.load_manifest_yaml(
+        """
+id: trivy
+category: vuln
+languages: []
+detect:
+  files: ["requirements*.txt"]
+command: ["trivy", "fs", "--quiet", "--format", "json"]
+scope: diff
+parser: trivy_json
+supports_fix: false
+default_enabled: false
+version: "0.72.0"
+runtime: managed
+timeout_s: 300
+trust: untrusted
+severity_map:
+  critical: Critical
+  high: Major
+  medium: Minor
+  low: Trivial
+  unknown: Minor
+provenance: {}
+network_allowlist: []
+exclusive_group: dependency-vuln
+"""
+    )
+    findings = parsers.get_parser("trivy_json")(raw, manifest=m, repo_root=Path("."))
+    assert findings
+    assert findings[0].rule_id == "CVE-2024-0001"

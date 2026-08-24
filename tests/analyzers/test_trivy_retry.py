@@ -82,7 +82,7 @@ def test_gives_up_after_max_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(supply_chain, "run_plan", fake_run_plan)
 
-    with pytest.raises(ValueError, match="trivy JSON output must be an object"):
+    with pytest.raises(ValueError, match="trivy JSON output must be a JSON object"):
         supply_chain._run_trivy_and_parse(
             _plan(),
             manifest=get_manifest("trivy"),

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
 from mergecraft.analyzers.manifest import ManifestValidationError
 from mergecraft.review_taxonomy import FINDING_CATEGORIES
-from mergecraft.utils.json_load import try_load_json
+from mergecraft.utils.json_load import try_load_json, try_load_json_object
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -119,12 +119,16 @@ def load_json(raw: str) -> object:
 
 
 def require_json_object(raw: str, *, what: str) -> dict[str, Any]:
-    """Parse ``raw`` as a JSON object or raise ``ValueError``."""
-    payload = load_json(raw)
-    if not isinstance(payload, dict):
+    """Parse ``raw`` as a JSON object or raise ``ValueError``.
+
+    Leading JSON arrays are skipped (same resume-at-``_end`` path as
+    ``try_load_json_object``) so progress tokens cannot hide a later object.
+    """
+    payload = try_load_json_object(raw)
+    if payload is None:
         msg = f"{what} must be a JSON object"
         raise ValueError(msg)
-    return cast("dict[str, Any]", payload)  # json.loads values are typed Any
+    return payload
 
 
 def iter_bandit_result_rows(payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
@@ -212,16 +216,25 @@ def load_jsonl_objects(raw: str) -> list[dict[str, Any]]:
     raise ValueError(msg)
 
 
-def coerce_line(value: object, *, default: int = 1, strict: bool = False) -> int:
-    """Return a 1-based line number.
+def coerce_line(value: object, *, default: int = 1) -> int:
+    """Return a 1-based line number, mapping unusable values to ``default``."""
+    return _line_number(value, default=default, fail_closed=False)
 
-    ``strict=False`` (parsers) maps unusable values to ``default``.
-    ``strict=True`` (SARIF converter) raises ``ValueError`` instead.
+
+def require_line(value: object, *, default: int = 1) -> int:
+    """Return a 1-based line number, or raise ``ValueError`` if unusable.
+
+    ``None`` still maps to ``default`` (missing region). Invalid types and
+    non-numeric strings fail closed.
     """
+    return _line_number(value, default=default, fail_closed=True)
+
+
+def _line_number(value: object, *, default: int, fail_closed: bool) -> int:
     if value is None:
         return default
     if isinstance(value, bool):
-        if strict:
+        if fail_closed:
             msg = f"invalid line number: {value!r}"
             raise ValueError(msg)
         return default
@@ -233,11 +246,11 @@ def coerce_line(value: object, *, default: int = 1, strict: bool = False) -> int
         try:
             return max(int(value.strip()), 1)
         except ValueError:
-            if strict:
+            if fail_closed:
                 msg = f"invalid line number: {value!r}"
                 raise ValueError(msg) from None
             return default
-    if strict:
+    if fail_closed:
         msg = f"invalid line number: {value!r}"
         raise ValueError(msg)
     return default

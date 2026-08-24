@@ -66,7 +66,6 @@ _GITHUB_REST_OPERATIONS: frozenset[str] = frozenset(
         "list_check_suites_for_ref",
         "get_check_suite",
         "list_check_runs_for_ref",
-        "list_workflow_runs_for_check_suite",
         "list_workflow_run_artifacts",
         "download_artifact_zip",
         "download_workflow_run_logs",
@@ -298,19 +297,19 @@ def test_no_github_specific_type_leaks_into_core() -> None:
     )
 
 
-def test_check_suite_workflow_listing_is_on_the_protocol_not_a_github_narrow() -> None:
-    """Call sites must use ScmProvider.list_workflow_runs_for_check_suite."""
+def test_check_suite_workflow_listing_is_github_client_not_scm_protocol() -> None:
+    """GitHub Actions CI listing stays on GitHubClient; GitLab must not stub it."""
     require_scm()
     from mergecraft.scm.protocol import protocol_operation_names
 
-    assert "list_workflow_runs_for_check_suite" in protocol_operation_names()
+    assert "list_workflow_runs_for_check_suite" not in protocol_operation_names()
     root = Path(__file__).resolve().parents[2]
     for rel in (
         "src/mergecraft/ci/intelligence.py",
         "src/mergecraft/ci/providers/github_actions.py",
     ):
         text = (root / rel).read_text(encoding="utf-8")
-        assert "GitHubScmAdapter" not in text
+        assert "github_client_from_scm" in text
         assert "list_workflow_runs_for_check_suite" in text
 
 

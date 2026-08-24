@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
+from mergecraft.scm.github import github_client_from_scm
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -177,8 +178,11 @@ async def collect_ci_sarif_findings(
     repo_root = Path(primary_repo_state(ctx.tool_state).dir)
     findings: list[Finding] = []
     try:
-        scm = ctx.scm
-        runs = await scm.list_workflow_runs_for_check_suite(
+        client = github_client_from_scm(ctx.scm)
+        if client is None:
+            logger.warning("ci evidence: SARIF listing requires GitHub")
+            return []
+        runs = await client.list_workflow_runs_for_check_suite(
             ctx.repo.owner, ctx.repo.name, check_suite_id
         )
     except Exception as err:

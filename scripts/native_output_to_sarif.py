@@ -19,9 +19,9 @@ from typing import TypedDict
 from mergecraft.analyzers.parsers._common import (
     bandit_native_severity,
     bandit_row_span,
-    coerce_line,
     iter_bandit_result_rows,
     require_json_object,
+    require_line,
 )
 
 _BANDIT_LEVEL = {"high": "error", "medium": "warning", "low": "note", "undefined": "note"}
@@ -89,7 +89,7 @@ def _sarif(*, tool: str, results: list[SarifResult]) -> SarifLog:
 def _as_line(value: object, *, default: int = 1) -> int:
     """Parse a SARIF line number, wrapping conversion errors."""
     try:
-        return coerce_line(value, default=default, strict=True)
+        return require_line(value, default=default)
     except ValueError as exc:
         raise ConverterError(str(exc)) from exc
 
