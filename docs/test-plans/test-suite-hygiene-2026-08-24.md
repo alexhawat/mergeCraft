@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/test-suite-hygiene-2026-08-24-wave-plan.md`
 Branch: `wave/test-suite-hygiene-2026-08-24`
 Base SHA: `ef7e70d8` (PR #495, lane A merged)
-**Final SHA:** `14eeb4a1` (2026-08-25 — Thermos fixes + full `make ci-resume` green)
+**Final SHA:** `50c52d89` (2026-08-25 — Thermos remediation complete + `make ci-resume` green)
 
 **Status:** ✅ **Complete** — TH1–TH9 implemented; Final CI gate passed. Awaiting Thermos review / merge.
 
