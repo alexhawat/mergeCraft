@@ -1,15 +1,15 @@
-# Test plan — open-issues-sweep-2026-08-24-a (AA #458 + AB #467 + AC #469)
+# Test plan — open-issues-sweep-2026-08-24-a (AA #458 + AB #467 + AC #469 + AD #466)
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-24-a-analyzers-ci-wave-plan.md`
 Worktree: `/Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a`
 Branch: `wave/open-issues-sweep-2026-08-24-a`
-Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469)
+Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469), [#466](https://github.com/alexhawat/mergeCraft/issues/466)
 
-Authoring: **AA GREEN** (D2 landed). **AB GREEN** (D3 landed). **AC RED** (this update). Implementation: AC impl (D4). AD–AH not authored here.
+Authoring: **AA GREEN** (D2 landed). **AB GREEN** (D3 landed). **AC GREEN** (D4 landed). **AD RED** (this update). Implementation: AD impl (D5). AE–AH not authored here.
 
 ## xfail schedule
 
-None. AC contracts are the next impl wave; tests are **plain FAIL** until D4 lands. Do not `xfail` (would hide RED).
+None. AD contracts are the next impl wave; tests are **plain FAIL** until D5 lands. Do not `xfail` (would hide RED).
 
 ## Contract matrix
 
@@ -31,6 +31,16 @@ None. AC contracts are the next impl wave; tests are **plain FAIL** until D4 lan
 | AC469c | `get_commit_info` with empty token is `is_error`, names missing token, does not send HTTP | functional | error — offline skip | `test_get_commit_info_without_token_reports_unavailable_naming_token` |
 | AC469d | `upload_file` with `MERGECRAFT_API_URL` set and empty/whitespace `api_token` does not send `Authorization: Bearer ` | integration | error — empty Bearer | `tests/mcp/test_empty_upload_bearer_469.py::test_upload_does_not_send_empty_bearer_when_api_url_set` |
 | AC469e | Whitespace `api_token` does not interpolate `Bearer {token}` (same as empty) | integration | edge — whitespace | `test_upload_whitespace_token_does_not_interpolate_bearer` |
+| AD466a | `classify_provider_failure` treats billing/credit/balance 404 as a different class from unknown-model 404 | unit | error — distinct classes | `tests/utils/test_nous_404_classification_466.py::TestNous404ClassesAreDistinct::test_billing_404_and_unknown_model_404_are_classified_separately` |
+| AD466b | Generic HTTP 404 (not ``does not exist``) is not the unknown-model class | unit | edge — unstructured 404 | `test_generic_404_is_not_classified_as_unknown_model` |
+| AD466c | Nous billing 404 JSON (`isRetryable: false`) is retryable for chain fail-over | unit | happy — fail-over | `TestNous404Failover::test_nous_billing_404_is_retryable_for_failover` |
+| AD466d | Generic 404 without credits/balance/quota needles is retryable (needle-list-only cannot pass) | unit | pin — not needles-only | `test_generic_http_404_without_billing_prose_is_retryable_for_failover` |
+| AD466e | Unknown-model 404 (``does not exist``) is not retryable / does not fail over | unit | error — config | `test_unknown_model_404_does_not_fail_over` |
+| AD466f | Failed provider 404 with `output_schema` set is not rewritten as `schema_failure` / `set_output` | functional | error — surface provider | `TestProviderErrorNotSchemaFailure::test_failed_provider_404_is_not_rewritten_as_schema_failure` |
+| AD466g | Successful agent without `set_output` still fails the schema check (do not delete the gate) | unit | pin — keep schema check | `test_successful_run_without_set_output_still_requires_schema` |
+| AD466h | Nous billing 404 advances `run_with_model_chain` to the next slug | integration | happy — fail-over | `tests/integration/test_nous_404_failover_466.py::test_nous_billing_404_advances_the_model_chain` |
+| AD466i | Generic (non-unknown-model) 404 advances the chain | integration | pin — not needles-only | `test_generic_404_that_is_not_unknown_model_advances_the_chain` |
+| AD466j | Unknown-model 404 does not advance the chain; error is not `schema_failure` | integration | error — no fail-over | `test_unknown_model_404_does_not_fail_over` |
 
 Sibling: empty stdout still raises for other JSON-object parsers (`cargo-audit`, `knip`, `jscpd`, `bundler-audit`) in `tests/analyzers/parsers/test_auto_enabled_native.py::test_json_object_parser_raises_on_empty_stdout`. Non-empty garbage still raises for bandit there.
 
@@ -52,16 +62,29 @@ Re-repro (2026-08-24): `GitHubClient("")` sets owned-client default header `Auth
 - **`get_commit_info` (offline / no token):** fail closed before HTTP with a message that names the missing token. Do not leak `Illegal header value`.
 - **`upload_file`:** do not interpolate `Bearer {token}` when `api_token` is empty or whitespace. Local stub or an error naming the token are both acceptable; an empty Bearer header is not.
 
-## How to run (AC: expect FAIL until impl)
+## Notes for the impl wave (D5)
+
+Re-repro (2026-08-24): `_RETRYABLE_CLI_NEEDLES` has no `credits` / `balance`. `is_retryable_cli_failure` on the #466 Nous JSON (`statusCode: 404`, billing prose, `isRetryable: false`) returns False, so `_is_retryable_failure` does not advance the chain. Owner comment: the billing 404 was **factually false** (account funded). The bug is classification + `schema_failure` surface, not "out of credits".
+
+`_promote_and_finalize_agent_result` raises `RuntimeError: output_schema was provided but agent did not call set_output` whenever `output_schema` is set and `tool_state.output` is empty — including when `AgentResult.success is False` and the agent never ran.
+
+- **Classify separately:** add `classify_provider_failure` on `utils/retry_policy.py`. Billing/credit/balance 404 and unknown-model 404 (`does not exist`) must return different classes. A 404 that is not `does not exist` is retryable / fail-over even with no billing prose (so growing needles is not sufficient).
+- **Wire fail-over:** `_is_retryable_failure` / `is_retryable_cli_failure` must treat billing 404 and generic (non-unknown-model) 404 as retryable for the chain. Provider `isRetryable: false` is wrong for chain purposes. Unknown-model 404 must not fail over.
+- **Surface the provider error:** when the agent never ran (`success is False`), do not replace the provider message with the `set_output` / `schema_failure` RuntimeError. Keep the schema check for a successful run that skipped `set_output`.
+- **Do not** expand D5 into "post-run retry re-calls the provider".
+- **Do not** treat GitHub HTTP 404 retries as in-scope (`is_transient_http_error` stays 429/5xx).
+
+## How to run (AD: expect FAIL until impl)
 
 ```bash
 cd /Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a
-MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/utils/test_empty_github_bearer_469.py tests/mcp/test_empty_upload_bearer_469.py -q
+MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/utils/test_nous_404_classification_466.py tests/integration/test_nous_404_failover_466.py -q
 make lint
+make typecheck
 ```
 
-Expect **11 failed / 2 passed** until D4 (`GitHubClient` with a real token still sets Bearer; empty `api_token` already stubs locally).
+Expect **9 failed / 4 passed** until D5 (unknown-model 404 already does not fail over; successful run without `set_output` still hits the schema check).
 
 ## Out of scope
 
-AD #466, AE #459, AF #460, AG #464, AH #485. Product code under `src/mergecraft/`. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`).
+AE #459, AF #460, AG #464, AH #485. Product code under `src/mergecraft/`. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`). Post-run retry re-invoking the provider.
