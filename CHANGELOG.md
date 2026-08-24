@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Coverage delta vs the base branch now attributes a drop of 1.0pp or more
+  below `fail_under` as inherited drift when the base is already at the floor,
+  instead of always treating `head < base` as caused by the PR (#485)
 - The approval gate now unions agent findings with analyzer findings, so an
   agent Critical or Major finding fails ``mergecraft-approval`` and the
   evidence packet's ``request_changes`` action. An empty finding list still
