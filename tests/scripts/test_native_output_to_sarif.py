@@ -74,6 +74,29 @@ def test_clean_mypy_cli_json_output_converts_to_empty_sarif(tmp_path: Path) -> N
     assert doc["runs"][0]["results"] == []
 
 
+def test_failing_mypy_cli_json_output_keeps_every_error(tmp_path: Path) -> None:
+    """PR #498 review: real mypy error output must not convert to a clean scan.
+
+    One reviewer read ``mypy --output json`` as a single-line JSON array, which
+    the converter would drop. It is JSON Lines. Pin that against the real CLI so
+    the #464 contract (a mypy ``error`` can fail approval) cannot regress.
+    """
+    src = tmp_path / "bad.py"
+    src.write_text("def f(x: int) -> str:\n    return x\n", encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "-m", "mypy", str(src), "--output", "json", "--no-error-summary"],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode != 0, "the fixture must actually fail typechecking"
+    doc = mypy_to_sarif(proc.stdout)
+    results = doc["runs"][0]["results"]
+    assert results, f"real mypy errors converted to a clean scan: {proc.stdout!r}"
+    assert all(item["level"] == "error" for item in results), results
+
+
 def test_missing_input_file_does_not_write_clean_sarif(tmp_path: Path) -> None:
     dest = tmp_path / "out.sarif"
     missing = tmp_path / "no-such.json"

@@ -270,3 +270,40 @@ def test_legacy_nous_api_key_emits_deprecation_warning_once(
     assert len(deprecation) == 1, (
         f"expected exactly one DeprecationWarning for legacy NOUS_API_KEY, got {deprecation}"
     )
+
+
+# ── PR #498 review — global `harness: opencode` with a known catalog provider ──
+
+
+@pytest.mark.parametrize("provider", ["xai", "deepseek", "moonshotai", "openrouter"])
+def test_global_opencode_harness_rejects_non_native_known_provider(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    provider: str,
+) -> None:
+    """A repo-wide ``harness: opencode`` fails closed for a non-native provider.
+
+    ``_OPENCODE_NATIVE_PROVIDERS`` is only ``{openai, anthropic}``. The old
+    ``provider not in _KNOWN_CATALOG_PROVIDERS`` escape hatch is gone, so these
+    providers now raise ``configuration_error`` rather than silently running on
+    a harness that cannot serve them.
+    """
+    scaffold_mergecraft_home(tmp_path, config_body="harness: opencode\nmodels: []")
+    monkeypatch.chdir(tmp_path)
+    settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
+    assert settings.harness == "opencode"
+
+    with pytest.raises(ModelFallbackPolicyError, match="incompatible"):
+        resolve_harness(settings, f"{provider}/some-model")
+
+
+@pytest.mark.parametrize("provider", ["openai", "anthropic"])
+def test_global_opencode_harness_still_serves_native_providers(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    provider: str,
+) -> None:
+    scaffold_mergecraft_home(tmp_path, config_body="harness: opencode\nmodels: []")
+    monkeypatch.chdir(tmp_path)
+    settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
+    assert resolve_harness(settings, f"{provider}/some-model") == "opencode"
