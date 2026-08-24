@@ -212,7 +212,7 @@ def test_resolve_build_commit_reads_git_head_from_checkout() -> None:
 
 
 def test_installed_wheel_reports_build_commit(tmp_path: Path) -> None:
-    """Functional — installed artifacts resolve commit from git or MERGECRAFT_BUILD_COMMIT."""
+    """Functional — installed wheel artifacts carry a build-time stamped commit."""
     repo_root = Path(__file__).resolve().parents[2]
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_root, text=True).strip()
     dist_dir = tmp_path / "dist"
@@ -225,7 +225,29 @@ def test_installed_wheel_reports_build_commit(tmp_path: Path) -> None:
     subprocess.run([str(python), "-m", "pip", "install", str(wheels[-1])], check=True)
     output = subprocess.check_output(
         [str(python), "-c", "import mergecraft; print(mergecraft.__commit__ or '')"],
-        env={"MERGECRAFT_BUILD_COMMIT": head},
+        cwd=tmp_path,
         text=True,
     ).strip()
     assert output == head
+
+
+def test_mergecraft_commit_is_lazy() -> None:
+    """Unit — ``import mergecraft`` does not resolve ``__commit__`` until accessed."""
+    script = """
+import mergecraft.build_metadata as build_metadata
+
+calls = 0
+
+def _fake_resolve() -> str | None:
+    global calls
+    calls += 1
+    return None
+
+build_metadata.resolve_build_commit = _fake_resolve
+import mergecraft
+
+assert calls == 0
+assert mergecraft.__commit__ is None
+assert calls == 1
+"""
+    subprocess.run([sys.executable, "-c", script], check=True)

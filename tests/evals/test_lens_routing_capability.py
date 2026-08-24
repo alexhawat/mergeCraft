@@ -11,6 +11,7 @@ Implementation wave CE commits ``feat(evals): emit per-lens capability numbers``
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 from tests.evals.support_lens_capability import (
@@ -121,6 +122,17 @@ def test_score_lens_routing_rejects_mismatched_case_ids() -> None:
             [routing_label("case-a", "security")],
             [routing_outcome("case-b", "security")],
         )
+
+
+def test_structural_replay_emits_lens_routing_capability() -> None:
+    """Benchmark result sets include per-lens routing capability metrics (CE #455)."""
+    from mergecraft.evals.benchmark import run_structural_replay
+
+    result = run_structural_replay(Path("evals/bank"), providers=("claude",))
+    report = result.lens_routing_capability
+    assert report is not None
+    assert report.cases > 0
+    assert report.by_lens
 
 
 def test_lens_routing_capability_report_pins_schema_version() -> None:

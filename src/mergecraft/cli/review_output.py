@@ -17,6 +17,7 @@ import typer
 from mergecraft.analyzers.finding import (
     finding_json_record,
     resolve_finding_short_ids,
+    validate_findings_export,
     write_findings_json,
 )
 from mergecraft.analyzers.sarif import export_sarif
@@ -58,11 +59,13 @@ def emit_review_json_stdout(
     output_text: str | None,
 ) -> None:
     """Emit the review JSON envelope on stdout (root ``--format json``)."""
+    records = finding_json_records(findings)
+    validate_findings_export({"findings": records})
     emit_cli_json(
         {
             "review_id": review_id,
             "count": len(findings),
-            "findings": finding_json_records(findings),
+            "findings": records,
             "output": output_text,
         }
     )

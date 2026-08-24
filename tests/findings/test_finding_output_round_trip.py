@@ -215,6 +215,7 @@ def test_all_formats_share_short_id_for_one_finding() -> None:
     assert short_id in pr_comment
 
     hunk_comment = export_hunk_comments([finding])["comments"][0]
+    assert short_id in str(hunk_comment["summary"])
     assert finding.path == hunk_comment["filePath"]
     assert finding.start_line == hunk_comment["newLine"]
 

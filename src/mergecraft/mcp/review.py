@@ -46,13 +46,17 @@ if TYPE_CHECKING:
 def format_analyzer_inline_body(
     finding: Finding,
     *,
+    short_id: str | None = None,
     effort: str = "Quick win",
     verification_note: str | None = None,
 ) -> str:
     """Format an analyzer-sourced inline comment with tool citation and confidence (W7.6)."""
     tag = f"_{finding.category}_ | _{finding.severity}_ | _{effort}_ | _{finding.confidence}_"
     citation = f"`{finding.tool}` `{finding.rule_id}`"
-    lines = [tag, "", f"{finding.message}", "", f"Source: {citation}."]
+    lines: list[str] = []
+    if short_id:
+        lines.append(f"**{short_id}**")
+    lines.extend([tag, "", f"{finding.message}", "", f"Source: {citation}."])
     if verification_note:
         lines.extend(["", verification_note.strip()])
     return "\n".join(lines)

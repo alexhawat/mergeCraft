@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
+from mergecraft.analyzers.finding import resolve_finding_short_ids
 from mergecraft.analyzers.scope import parse_diff_scope
 
 if TYPE_CHECKING:
@@ -42,9 +43,15 @@ def first_changed_lines_from_diff(diff_text: str) -> dict[str, int]:
     }
 
 
-def _format_hunk_summary(finding: Finding, *, file_level: bool = False) -> str:
+def _format_hunk_summary(
+    finding: Finding,
+    *,
+    short_id: str | None = None,
+    file_level: bool = False,
+) -> str:
     prefix = "[file-level] " if file_level else ""
-    return f"{prefix}{finding.rule_id} [{finding.severity}/{finding.confidence}]"
+    id_prefix = f"{short_id} " if short_id else ""
+    return f"{prefix}{id_prefix}{finding.rule_id} [{finding.severity}/{finding.confidence}]"
 
 
 def _format_hunk_rationale(finding: Finding) -> str:
@@ -69,7 +76,9 @@ def export_hunk_comments(
         raise ValueError(msg)
 
     comments: list[dict[str, Any]] = []
+    short_ids = resolve_finding_short_ids([finding.fingerprint for finding in findings])
     for finding in findings:
+        short_id = short_ids[finding.fingerprint]
         if finding.start_line is None:
             if file_findings == "drop":
                 continue
@@ -82,7 +91,11 @@ def export_hunk_comments(
                 {
                     "filePath": finding.path,
                     "newLine": new_line,
-                    "summary": _format_hunk_summary(finding, file_level=True),
+                    "summary": _format_hunk_summary(
+                        finding,
+                        short_id=short_id,
+                        file_level=True,
+                    ),
                     "rationale": _format_hunk_rationale(finding),
                     "author": HUNK_COMMENT_AUTHOR,
                 }
@@ -93,7 +106,7 @@ def export_hunk_comments(
             {
                 "filePath": finding.path,
                 "newLine": finding.start_line,
-                "summary": _format_hunk_summary(finding),
+                "summary": _format_hunk_summary(finding, short_id=short_id),
                 "rationale": _format_hunk_rationale(finding),
                 "author": HUNK_COMMENT_AUTHOR,
             }

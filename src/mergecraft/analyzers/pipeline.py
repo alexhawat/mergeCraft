@@ -19,7 +19,7 @@ from mergecraft.analyzers.budget import (
     sync_deferred_section,
 )
 from mergecraft.analyzers.cluster import cluster_findings
-from mergecraft.analyzers.finding import Finding
+from mergecraft.analyzers.finding import Finding, resolve_finding_short_ids
 from mergecraft.analyzers.lockfile import lock_digest
 from mergecraft.analyzers.registry import detect_enabled
 from mergecraft.analyzers.review_gate import filter_for_review
@@ -393,12 +393,17 @@ def run_analyzer_pipeline(
         placement = place_findings(clustered, inline_budget=budget)
 
         serialized = [_serialize_finding(f) for f in clustered]
+        inline_findings = [item for item in placement.inline if isinstance(item, Finding)]
+        inline_short_ids = resolve_finding_short_ids([row.fingerprint for row in inline_findings])
         inline_payload: list[dict[str, Any]] = []
         for item in placement.inline:
             if isinstance(item, Finding):
                 payload: dict[str, Any] = {
                     "finding": _serialize_finding(item),
-                    "inlineBody": format_analyzer_inline_body(item),
+                    "inlineBody": format_analyzer_inline_body(
+                        item,
+                        short_id=inline_short_ids[item.fingerprint],
+                    ),
                     "path": item.path,
                 }
                 if item.start_line is not None:

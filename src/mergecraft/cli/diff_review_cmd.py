@@ -211,7 +211,7 @@ def _persist_completed_cli_review(
             evidence_packets=evidence_packets,
             trace_events=trace_events,
         )
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         logger.warning("skipped durable review persistence: {}", exc)
 
 

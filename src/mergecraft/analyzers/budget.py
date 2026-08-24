@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.analyzers.finding import Finding
+from mergecraft.analyzers.finding import Finding, resolve_finding_short_ids
 
 if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import AnalyzerRunState
@@ -93,7 +93,11 @@ def _finding_anchor(finding: Finding) -> str:
     return f"{finding.path}:{finding.start_line}"
 
 
-def _render_mechanical_section(mechanical: list[Finding]) -> str | None:
+def _render_mechanical_section(
+    mechanical: list[Finding],
+    *,
+    short_ids: dict[str, str] | None = None,
+) -> str | None:
     if not mechanical:
         return None
     by_tool: dict[str, list[Finding]] = {}
@@ -108,11 +112,19 @@ def _render_mechanical_section(mechanical: list[Finding]) -> str | None:
         lines.append(f"| {tool} | {count} |")
     lines.append("")
     for finding in mechanical:
-        lines.append(f"- **{finding.tool}** `{finding.rule_id}` — {_finding_anchor(finding)}")
+        short_id = short_ids.get(finding.fingerprint) if short_ids else None
+        prefix = f"**{short_id}** " if short_id else ""
+        lines.append(
+            f"- {prefix}**{finding.tool}** `{finding.rule_id}` — {_finding_anchor(finding)}"
+        )
     return "\n".join(lines)
 
 
-def render_deferred_section(deferred: list[Finding]) -> str | None:
+def render_deferred_section(
+    deferred: list[Finding],
+    *,
+    short_ids: dict[str, str] | None = None,
+) -> str | None:
     if not deferred:
         return None
     lines = [
@@ -122,7 +134,11 @@ def render_deferred_section(deferred: list[Finding]) -> str | None:
         "",
     ]
     for finding in deferred:
-        lines.append(f"**{finding.severity}** `{_finding_anchor(finding)}` — {finding.message}")
+        short_id = short_ids.get(finding.fingerprint) if short_ids else None
+        prefix = f"**{short_id}** " if short_id else ""
+        lines.append(
+            f"{prefix}**{finding.severity}** `{_finding_anchor(finding)}` — {finding.message}"
+        )
         lines.append("")
     lines.append("</details>")
     return "\n".join(lines)
@@ -199,9 +215,15 @@ def place_findings(
     return FindingPlacement(
         inline=inline,
         mechanical=mechanical,
-        mechanical_section=_render_mechanical_section(mechanical),
+        mechanical_section=_render_mechanical_section(
+            mechanical,
+            short_ids=resolve_finding_short_ids([row.fingerprint for row in mechanical]),
+        ),
         deferred=deferred,
-        deferred_section=render_deferred_section(deferred),
+        deferred_section=render_deferred_section(
+            deferred,
+            short_ids=resolve_finding_short_ids([row.fingerprint for row in deferred]),
+        ),
     )
 
 

@@ -38,6 +38,18 @@ def test_overflow_lands_in_mechanical_section() -> None:
     assert "### 🔧 Mechanical findings" in placement.mechanical_section
 
 
+def test_mechanical_section_includes_short_ids() -> None:
+    """Production markdown surfaces batch-resolved short ids for overflow findings."""
+    finding_mod = import_module("mergecraft.analyzers.finding")
+    budget = import_module("mergecraft.analyzers.budget")
+    findings = [_finding("Major", path=f"src/f{i}.py", line=i) for i in range(1, INLINE_BUDGET + 2)]
+    placement = budget.place_findings(findings, inline_budget=0)
+    assert placement.mechanical_section is not None
+    overflow = findings[0]
+    short_id = finding_mod.finding_short_id(overflow.fingerprint)
+    assert short_id in placement.mechanical_section
+
+
 def test_trivial_severity_never_inline() -> None:
     budget = import_module("mergecraft.analyzers.budget")
     trivial = _finding(BODY_ONLY_SEVERITY)

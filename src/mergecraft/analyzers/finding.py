@@ -155,6 +155,23 @@ class FindingsPayload(BaseModel):
     findings: list[Finding]
 
 
+class FindingExportRecord(Finding):
+    """Wire record for JSON/JSONL export — ``Finding`` fields plus stable ``short_id``."""
+
+    short_id: str
+
+
+class FindingsExportPayload(BaseModel):
+    """Validated envelope for exported findings files and CLI JSON outputs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    findings: list[FindingExportRecord]
+
+
+FINDINGS_EXPORT_SCHEMA_VERSION = "1.0.0"
+
+
 def findings_output_schema() -> dict[str, Any]:
     """JSON Schema for structured findings output derived from ``Finding``."""
     item_schema = Finding.model_json_schema()
@@ -173,6 +190,36 @@ def findings_output_schema() -> dict[str, Any]:
         },
         "required": ["findings"],
     }
+
+
+def findings_export_schema() -> dict[str, Any]:
+    """JSON Schema for exported findings (``Finding`` fields plus ``short_id``)."""
+    item_schema = FindingExportRecord.model_json_schema()
+    properties = item_schema.get("properties")
+    if isinstance(properties, dict):
+        properties["category"] = {"type": "string", "enum": list(FINDING_CATEGORIES)}
+        properties["severity"] = {"type": "string", "enum": list(FINDING_SEVERITIES)}
+        properties["confidence"] = {"type": "string", "enum": list(FINDING_CONFIDENCES)}
+    return {
+        "type": "object",
+        "properties": {
+            "findings": {
+                "type": "array",
+                "items": item_schema,
+            }
+        },
+        "required": ["findings"],
+    }
+
+
+def validate_findings_export(payload: dict[str, Any]) -> list[FindingExportRecord]:
+    """Validate an exported findings payload and return typed export records."""
+    try:
+        envelope = FindingsExportPayload.model_validate(payload)
+    except ValidationError as exc:
+        msg = f"exported findings do not conform to export schema: {exc}"
+        raise ValueError(msg) from exc
+    return envelope.findings
 
 
 def parse_findings_payload(raw: str) -> list[dict[str, Any]]:
@@ -195,9 +242,11 @@ def write_findings_json(json_path: Path, findings: list[dict[str, Any]]) -> None
     models = [Finding.model_validate(finding_record_without_short_id(row)) for row in findings]
     short_ids = resolve_finding_short_ids([row.fingerprint for row in models])
     records = [finding_json_record(row, short_id=short_ids[row.fingerprint]) for row in models]
+    payload = {"findings": records}
+    validate_findings_export(payload)
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps({"findings": records}, indent=2, ensure_ascii=False)
-    json_path.write_text(f"{payload}\n", encoding="utf-8")
+    encoded = json.dumps(payload, indent=2, ensure_ascii=False)
+    json_path.write_text(f"{encoded}\n", encoding="utf-8")
 
 
 def _validate_fingerprint_for_short_id(fingerprint: str) -> str:
@@ -277,9 +326,8 @@ def render_finding_markdown(finding: Finding, *, short_id: str) -> str:
 
 def finding_json_record(finding: Finding, *, short_id: str) -> dict[str, Any]:
     """Serialize a finding for structured JSON export with a stable short id."""
-    record = finding.model_dump()
-    record["short_id"] = short_id
-    return record
+    record = FindingExportRecord(short_id=short_id, **finding.model_dump())
+    return record.model_dump()
 
 
 def render_finding_pr_comment(finding: Finding, *, short_id: str) -> str:
@@ -289,20 +337,25 @@ def render_finding_pr_comment(finding: Finding, *, short_id: str) -> str:
 
 
 __all__ = [
+    "FINDINGS_EXPORT_SCHEMA_VERSION",
     "FINDING_SHORT_ID_PREFIX",
     "STRUCTURED_OUTPUT_REQUIRED_MSG",
     "Finding",
+    "FindingExportRecord",
     "FindingValidationError",
+    "FindingsExportPayload",
     "FindingsPayload",
     "IntroducedByPr",
     "finding_json_record",
     "finding_record_without_short_id",
     "finding_short_id",
+    "findings_export_schema",
     "findings_output_schema",
     "make_finding",
     "parse_findings_payload",
     "render_finding_markdown",
     "render_finding_pr_comment",
     "resolve_finding_short_ids",
+    "validate_findings_export",
     "write_findings_json",
 ]

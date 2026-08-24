@@ -48,6 +48,11 @@ def test_export_hunk_comment_maps_finding_fields_to_golden_shape() -> None:
     assert finding.rule_id in summary
     assert finding.severity in summary
     assert finding.confidence in summary
+    from tests.analyzers.support import import_module as import_analyzer_module
+
+    finding_mod = import_analyzer_module("mergecraft.analyzers.finding")
+    short_id = finding_mod.finding_short_id(finding.fingerprint)
+    assert short_id in summary
 
     rationale = str(comment["rationale"])
     assert finding.message in rationale
