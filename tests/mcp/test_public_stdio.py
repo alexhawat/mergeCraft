@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.mcp.public_mcp_support import (
     _LIST_PAYLOAD,
     MCP_PUBLIC_ENDPOINT,
@@ -28,7 +27,6 @@ if TYPE_CHECKING:
 runner = CliRunner()
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP3: stdio public tools/list")
 def test_stdio_public_lists_six_tools(tmp_path: Path) -> None:
     init_git_repo(tmp_path)
     write_minimal_config(tmp_path)
@@ -44,7 +42,6 @@ def test_stdio_public_lists_six_tools(tmp_path: Path) -> None:
     assert names == set(PUBLIC_TOOL_NAMES)
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP3: stdio needs no bearer")
 def test_stdio_does_not_require_bearer(tmp_path: Path) -> None:
     init_git_repo(tmp_path)
     write_minimal_config(tmp_path)
@@ -58,7 +55,6 @@ def test_stdio_does_not_require_bearer(tmp_path: Path) -> None:
     assert "error" not in body or body["error"] is None
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP3: stdio non-public usage error")
 def test_stdio_non_public_role_is_usage_error(tmp_path: Path) -> None:
     init_git_repo(tmp_path)
     write_minimal_config(tmp_path)
@@ -78,7 +74,6 @@ def test_stdio_non_public_role_is_usage_error(tmp_path: Path) -> None:
     assert result.exit_code == 2
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: HTTP public bearer gate")
 def test_http_public_still_requires_bearer(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

@@ -79,6 +79,12 @@ pages:
     generator: mcp-server-json
     purpose: Generated public MCP tool reference from ToolSpec schemas.
 
+  - path: docs/mcp.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries.
+
   - path: docs/blast-radius.md
     audience: contributor
     template: contributor

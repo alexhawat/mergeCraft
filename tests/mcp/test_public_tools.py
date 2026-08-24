@@ -69,7 +69,6 @@ def _call_public_tool(
     return _tool_result_text(body)
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: review_change persists")
 def test_review_change_persists_completed_review(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -87,7 +86,6 @@ def test_review_change_persists_completed_review(
     assert loaded is not None
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: review_change short ids")
 def test_review_change_returns_short_ids(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -109,7 +107,6 @@ def test_review_change_returns_short_ids(
         assert short_id.startswith(FINDING_SHORT_ID_PREFIX), item
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: get_review round-trip")
 def test_get_review_round_trips_completed_store(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -136,7 +133,6 @@ def test_get_review_round_trips_completed_store(
     assert payload.get("review_id") == review_id
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: inspect_finding short id")
 def test_inspect_finding_accepts_short_id(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -177,7 +173,6 @@ def test_inspect_finding_accepts_short_id(
     assert payload.get("finding_id") == short_id
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: explain_finding payload keys")
 def test_explain_finding_matches_cli_explain_payload_keys(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -222,7 +217,6 @@ def test_explain_finding_matches_cli_explain_payload_keys(
     assert payload.get("review_id") == review_id
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: get_capabilities manifest")
 def test_get_capabilities_matches_capabilities_manifest(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -264,7 +258,6 @@ def test_get_policy_is_read_only(
         assert set(rule_ids).issuperset(set(DEFAULT_GATE_POLICIES))
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: dedicated build_public_tools")
 def test_public_tools_are_not_filtered_orchestrator_tools(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

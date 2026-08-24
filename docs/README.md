@@ -37,6 +37,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [glossary](glossary.md) | consumer | Plain-language definitions for landing-page jargon — trust tier, typed findings, and related terms. |
 | [install](install.md) | consumer | Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback. |
 | [mcp-tools](mcp-tools.md) | consumer | Generated public MCP tool reference from ToolSpec schemas. |
+| [mcp](mcp.md) | consumer | Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries. |
 | [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |
 | [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
 | [support-matrix](support-matrix.md) | consumer | Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models. |

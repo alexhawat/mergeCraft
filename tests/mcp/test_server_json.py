@@ -6,7 +6,6 @@ import json
 import subprocess
 from typing import Any
 
-import pytest
 from tests.ci.workflow_support import REPO_ROOT
 from tests.docs.support import ci_steps
 from tests.mcp.public_mcp_support import require_generator_script
@@ -27,20 +26,17 @@ def _validate_server_json(data: dict[str, Any]) -> None:
     jsonschema.validate(instance=data, schema=_load_schema())
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP4: server.json exists")
 def test_server_json_exists_and_matches_schema() -> None:
     assert _SERVER_JSON.is_file(), "repo-root server.json missing (MP4)"
     data = json.loads(_SERVER_JSON.read_text(encoding="utf-8"))
     _validate_server_json(data)
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP4: registry name")
 def test_server_json_name_is_io_github_alexhawat_mergecraft() -> None:
     data = json.loads(_SERVER_JSON.read_text(encoding="utf-8"))
     assert data.get("name") == "io.github.alexhawat/mergecraft"
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP4: pypi stdio package")
 def test_server_json_package_is_pypi_merge_craft_stdio_public() -> None:
     data = json.loads(_SERVER_JSON.read_text(encoding="utf-8"))
     packages = data.get("packages")
@@ -58,7 +54,6 @@ def test_server_json_package_is_pypi_merge_craft_stdio_public() -> None:
     assert "stdio" in command_text
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP4: public-only advertisement")
 def test_server_json_does_not_advertise_runtime_tool_names() -> None:
     data = json.loads(_SERVER_JSON.read_text(encoding="utf-8"))
     blob = json.dumps(data)
@@ -66,12 +61,10 @@ def test_server_json_does_not_advertise_runtime_tool_names() -> None:
         assert name not in blob
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP4: CI_STEPS token")
 def test_make_mcp_server_json_check_in_ci_steps() -> None:
     assert "mcp-server-json-check" in ci_steps()
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP4: generator --check drift")
 def test_generator_check_detects_drift() -> None:
     gen = require_generator_script()
     assert hasattr(gen, "main") or hasattr(gen, "run_check"), gen

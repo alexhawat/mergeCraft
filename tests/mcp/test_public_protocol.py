@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from tests.mcp.public_mcp_support import (
     _INIT_PAYLOAD,
     _LIST_PAYLOAD,
@@ -32,7 +31,6 @@ def _initialize(client: Any, auth_token: str) -> dict[str, Any]:
     return body
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP5: initialize then tools/list")
 def test_initialize_then_tools_list(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -50,7 +48,6 @@ def test_initialize_then_tools_list(
     assert names == set(PUBLIC_TOOL_NAMES)
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP5: unauthenticated tools/list")
 def test_unauthenticated_http_tools_list_rejected(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -60,7 +57,6 @@ def test_unauthenticated_http_tools_list_rejected(
     assert is_auth_rejection(status, body), (status, body)
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP5: authenticated get_capabilities")
 def test_authenticated_tools_call_get_capabilities(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -83,7 +79,6 @@ def test_authenticated_tools_call_get_capabilities(
     assert payload.get("review_only") is True
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP5: unknown tool JSON-RPC error")
 def test_unknown_tool_jsonrpc_error(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -105,7 +100,6 @@ def test_unknown_tool_jsonrpc_error(
     assert error.get("code") == -32601, body
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP5: inspect_finding schema error")
 def test_schema_error_on_inspect_finding_missing_id(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -127,7 +121,6 @@ def test_schema_error_on_inspect_finding_missing_id(
     assert error.get("code") in {-32602, -32603}, body
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP5: large findings JSON payload")
 def test_large_findings_result_is_json(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

@@ -1,10 +1,9 @@
-"""MP1.7 — public MCP install/docs contracts (RED until MP7)."""
+"""MP1.7 — public MCP install/docs contracts."""
 
 from __future__ import annotations
 
 import re
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT
@@ -28,7 +27,7 @@ def _read(path: object) -> str:
 def _manifest_paths() -> set[str]:
     data = yaml.safe_load(_MANIFEST.read_text(encoding="utf-8"))
     assert isinstance(data, dict)
-    docs = data.get("docs")
+    docs = data.get("pages") or data.get("docs")
     assert isinstance(docs, list)
     paths: set[str] = set()
     for row in docs:
@@ -37,13 +36,11 @@ def _manifest_paths() -> set[str]:
     return paths
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP7: docs/mcp.md manifest row")
 def test_mcp_page_exists_and_is_manifested() -> None:
     assert _MCP_PAGE.is_file()
     assert "docs/mcp.md" in _manifest_paths()
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP7: what/connect/never sections")
 def test_mcp_page_answers_three_questions() -> None:
     text = _read(_MCP_PAGE).lower()
     for heading in (
@@ -54,7 +51,6 @@ def test_mcp_page_answers_three_questions() -> None:
         assert heading in text, f"docs/mcp.md must answer '{heading}'"
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP7: OpenAI vs Anthropic sections")
 def test_mcp_page_has_separate_openai_and_anthropic_sections() -> None:
     text = _read(_MCP_PAGE)
     assert re.search(r"openai|chatgpt", text, re.IGNORECASE)
@@ -68,7 +64,6 @@ def test_mcp_page_has_separate_openai_and_anthropic_sections() -> None:
     assert openai_pos != anthropic_pos or chatgpt_pos != claude_pos
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP7: README links docs/mcp.md")
 def test_readme_agent_section_links_docs_mcp() -> None:
     text = _read(_README)
     agent_match = re.search(
@@ -84,7 +79,6 @@ def test_readme_agent_section_links_docs_mcp() -> None:
     assert "docs/mcp.md" in section
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP7: skill stdio public + HTTP bearer")
 def test_skill_mentions_stdio_public_and_keeps_runtime_http_bearer() -> None:
     text = _read(_SKILL)
     lowered = text.lower()
@@ -94,14 +88,12 @@ def test_skill_mentions_stdio_public_and_keeps_runtime_http_bearer() -> None:
     assert "/mcp/reviewer" in lowered or "reviewer" in lowered
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP7: generated mcp-tools.md")
 def test_generated_mcp_tools_page_matches_public_tool_names() -> None:
     text = _read(_MCP_TOOLS_PAGE)
     for name in PUBLIC_TOOL_NAMES:
         assert name in text
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP7: registry ownership string")
 def test_readme_has_mcp_name_ownership_string() -> None:
     text = _read(_README)
     assert "mcp-name: io.github.alexhawat/mergecraft" in text

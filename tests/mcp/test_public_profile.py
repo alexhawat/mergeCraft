@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.mcp.public_mcp_support import (
     _LIST_PAYLOAD,
     MCP_PUBLIC_ENDPOINT,
@@ -22,7 +21,6 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: public mount rejects mutators")
 def test_public_mount_does_not_expose_push_branch(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

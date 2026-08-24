@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.mcp.public_mcp_support import (
     PUBLIC_TOOL_NAMES,
     RUNTIME_PRIMITIVE_SAMPLES,
@@ -22,7 +21,6 @@ if TYPE_CHECKING:
 runner = CliRunner()
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: public role list")
 def test_list_role_public_prints_exactly_six_names(tmp_path: Path) -> None:
     init_git_repo(tmp_path)
     write_minimal_config(tmp_path)
@@ -38,7 +36,6 @@ def test_list_role_reviewer_still_includes_runtime_primitives(tmp_path: Path) ->
         assert sample in names
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: public role accepted")
 def test_unknown_role_rejected(tmp_path: Path) -> None:
     init_git_repo(tmp_path)
     write_minimal_config(tmp_path)

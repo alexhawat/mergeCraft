@@ -150,7 +150,7 @@ def select_public_tool(prompt: str) -> str | None:
 
 def score_mcp_public_case(case: McpPublicEvalCase) -> bool:
     """Return whether ``select_public_tool`` satisfies one corpus case."""
-    chosen = select_public_tool(case["prompt"])
+    chosen = select_public_tool(case.get("prompt", ""))
     expected = case.get("expected_tool")
     forbidden = frozenset(case.get("forbidden_tools") or ())
 

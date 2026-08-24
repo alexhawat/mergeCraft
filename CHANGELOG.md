@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
+  Anthropic sections), README ``For LLM / Agents`` row linking public stdio install,
+  ``docs/agent-loop.md`` parity note, and ``skills/mergecraft/SKILL.md`` public stdio
+  plus runtime HTTP Bearer; registry ownership string
+  ``mcp-name: io.github.alexhawat/mergecraft``
+
 ### Added
 
 - Public MCP product profile: ``mergecraft mcp serve --role public`` mounts six

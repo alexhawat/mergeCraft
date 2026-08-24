@@ -23,6 +23,7 @@
 
 ## Docs
 
+- docs/mcp.md — public MCP install (stdio six-tool profile, per-runtime JSON)
 - docs/mcp-tools.md — generated public MCP tool reference (six-tool profile)
 - docs/README.md — generated index from docs/manifest.yaml
 - docs/cli.md — full mergecraft CLI reference
