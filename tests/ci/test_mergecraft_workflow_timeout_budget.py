@@ -37,7 +37,6 @@ def workflow_doc() -> dict[str, object]:
     return load_workflow(_WORKFLOW)
 
 
-@pytest.mark.xfail(reason="green after CG", strict=False)
 def test_workflow_declares_single_review_attempt_timeout_budget(
     workflow_doc: dict[str, object],
 ) -> None:
@@ -50,7 +49,6 @@ def test_workflow_declares_single_review_attempt_timeout_budget(
     assert minutes >= 25, "declared attempt budget should not regress below the prior 25m ceiling"
 
 
-@pytest.mark.xfail(reason="green after CG", strict=False)
 def test_mergecraft_review_steps_reference_declared_attempt_timeout(
     workflow_doc: dict[str, object],
 ) -> None:
@@ -74,7 +72,6 @@ def test_mergecraft_review_steps_reference_declared_attempt_timeout(
         )
 
 
-@pytest.mark.xfail(reason="green after CG", strict=False)
 def test_review_job_timeout_composes_from_attempt_budget(
     workflow_doc: dict[str, object],
 ) -> None:
@@ -90,7 +87,6 @@ def test_review_job_timeout_composes_from_attempt_budget(
     )
 
 
-@pytest.mark.xfail(reason="green after CG", strict=False)
 def test_per_attempt_timeout_not_shortened_below_declared_budget(
     workflow_doc: dict[str, object],
 ) -> None:
