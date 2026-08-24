@@ -102,4 +102,4 @@ uv run pytest -q tests/cli/test_provider_cmd.py tests/cli/test_provider_registry
 
 ## BA RED evidence
 
-- W1 test-author wave: pending commit
+- W1 test-author wave: `97b21581` — 35 collected, 34 xfails, 1 pass (`test_providers_catalog_has_fourteen_builtin_entries`)
