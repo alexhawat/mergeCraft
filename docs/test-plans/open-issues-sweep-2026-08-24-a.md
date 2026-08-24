@@ -1,15 +1,15 @@
-# Test plan — open-issues-sweep-2026-08-24-a (AA–AE GREEN + AF #460 RED)
+# Test plan — open-issues-sweep-2026-08-24-a (AA–AF GREEN + AG #464 RED)
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-24-a-analyzers-ci-wave-plan.md`
 Worktree: `/Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a`
 Branch: `wave/open-issues-sweep-2026-08-24-a`
-Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469), [#466](https://github.com/alexhawat/mergeCraft/issues/466), [#459](https://github.com/alexhawat/mergeCraft/issues/459), [#460](https://github.com/alexhawat/mergeCraft/issues/460)
+Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469), [#466](https://github.com/alexhawat/mergeCraft/issues/466), [#459](https://github.com/alexhawat/mergeCraft/issues/459), [#460](https://github.com/alexhawat/mergeCraft/issues/460), [#464](https://github.com/alexhawat/mergeCraft/issues/464)
 
-Authoring: **AA–AE GREEN**. **AF RED** (this update). Implementation: AF impl (D7). AG–AH not authored here.
+Authoring: **AA–AF GREEN**. **AG RED** (this update). Implementation: AG impl (D8). AH not authored here.
 
 ## xfail schedule
 
-None. AF contracts are the next impl wave; tests are **plain FAIL** until D7 lands. Do not `xfail` (would hide RED).
+None. AG contracts are the next impl wave; tests are **plain FAIL** until D8 lands. Do not `xfail` (would hide RED).
 
 ## Contract matrix
 
@@ -64,8 +64,31 @@ None. AF contracts are the next impl wave; tests are **plain FAIL** until D7 lan
 | AF460i | Analyzer Major still fails the gate | integration | pin — analyzer path | `test_analyzer_major_still_fails_the_gate` |
 | AF460j | Empty findings do not silently succeed on the check | functional | pin — empty-list guard | `test_empty_findings_do_not_silently_succeed` |
 | AF460k | Untrusted check never `success` | functional | pin — untrusted guard | `test_untrusted_tier_does_not_silently_succeed` |
+| AG464a | SARIF `error` from ruff/mypy/bandit keeps Critical/Major (not clamped) | unit | happy — uncap | `tests/ci/test_ci_sarif_evidence_464.py::test_error_level_ci_sarif_keeps_blocking_severity` |
+| AG464b | SARIF `warning` stays non-blocking | unit | edge — warning | `test_warning_level_ci_sarif_stays_non_blocking` |
+| AG464c | Failed check-run finding stays non-blocking (D11 pin) | unit | pin — check run | `test_check_run_finding_stays_non_blocking` |
+| AG464d | Empty SARIF is zero findings | unit | edge — empty | `test_empty_sarif_is_zero_findings` |
+| AG464e | Recorded CI SARIF is readable from tool state at blocking severity | integration | happy — record | `test_record_ci_sarif_is_readable_from_tool_state` |
+| AG464f | `collect_ci_sarif_findings` ingests declared `ruff-sarif` zip; error stays blocking | integration | happy — ingest | `test_collect_ingests_declared_ruff_sarif_artifact` |
+| AG464g | Undeclared artifact is ignored | integration | edge — undeclared | `test_collect_ignores_undeclared_artifact` |
+| AG464h | Empty `ciEvidence` makes no GitHub API call | integration | pin — opt-in | `test_collect_makes_no_api_call_when_ci_evidence_is_empty` |
+| AG464i | Artifact download failure is swallowed (no raise) | error | ingest failure | `test_collect_swallows_artifact_download_failure` |
+| AG464j | `RepoSettings` accepts first-wave `ciEvidence.sarifArtifacts` | unit | happy — settings | `test_settings_accept_first_wave_sarif_artifacts` |
+| AG464k | Dogfood config enables ruff/mypy/bandit SARIF only | functional | happy — enable | `test_dogfood_config_enables_first_wave_ci_evidence` |
+| AG464l | `ci.yml` uploads `ruff-sarif` / `mypy-sarif` / `bandit-sarif` | functional | happy — CI upload | `test_ci_yml_uploads_first_wave_sarif` |
+| AG464m | Makefile still runs ruff, mypy, bandit | pin | first wave tools | `test_makefile_first_wave_tools_still_run` |
+| AG464n | `mergecraft.yml` is not the SARIF upload surface | pin — B/C | do not steal | `test_mergecraft_yml_is_not_the_sarif_upload_surface` |
+| AG464o | Packet includes CI ruff SARIF; `decide_approval` is `failure` | unit | happy — gate | `tests/agents/test_approval_gate_ci_sarif_464.py::test_packet_from_ci_ruff_sarif_fails_decide_approval` |
+| AG464p | Packet `action=request_changes` for CI ruff SARIF | unit | happy — packet action | `test_packet_request_changes_for_ci_ruff_sarif` |
+| AG464q | Empty CI evidence stays `neutral` | unit | pin — empty-list | `test_empty_ci_evidence_stays_neutral` |
+| AG464r | Untrusted never `success` with CI ruff SARIF | unit | pin — untrusted | `test_untrusted_never_succeeds_with_ci_ruff_sarif` |
+| AG464s | `report_status_checks` posts `mergecraft-approval` `failure` for CI ruff SARIF | functional | happy — check-run | `tests/utils/test_approval_check_ci_sarif_464.py::test_ruff_ci_sarif_makes_approval_check_failure` |
+| AG464t | Packet `request_changes` matches check `failure` | integration | happy — match | `test_packet_request_changes_matches_ci_sarif_approval_check` |
+| AG464u | Warning-level CI SARIF does not fail the gate | functional | edge — warning | `test_warning_ci_sarif_does_not_fail_the_gate` |
+| AG464v | Empty CI evidence does not silently succeed | functional | pin — empty-list | `test_empty_ci_evidence_does_not_silently_succeed` |
+| AG464w | Untrusted check never `success` with CI SARIF | functional | pin — untrusted | `test_untrusted_tier_does_not_succeed_with_ci_sarif` |
 
-Sibling: empty stdout still raises for other JSON-object parsers (`cargo-audit`, `knip`, `jscpd`, `bundler-audit`) in `tests/analyzers/parsers/test_auto_enabled_native.py::test_json_object_parser_raises_on_empty_stdout`. Non-empty garbage still raises for bandit there.
+Sibling: empty stdout still raises for other JSON-object parsers (`cargo-audit`, `knip`, `jscpd`, `bundler-audit`) in `tests/analyzers/parsers/test_auto_enabled_native.py::test_json_object_parser_raises_on_empty_stdout`. Non-empty garbage still raises for bandit there. `tests/ci/test_evidence.py::test_ci_sarif_findings_are_never_blamed_on_this_pr` still pins `introduced_by_pr=unknown`; it no longer asserts a non-blocking severity cap.
 
 ## Notes for the impl wave (D3)
 
@@ -119,17 +142,27 @@ Re-repro (2026-08-24): `report_status_checks` loads `_load_structural_findings` 
 - **Guards stay:** empty findings on trusted → `neutral` (not `success`). Untrusted → never `success`.
 - **Do not** ingest CI SARIF here (AG #464 / D8). Do not diagnose 422 inline comments or dual-verdict / `semantic_rejection`.
 
-## How to run (AF: expect FAIL until impl)
+## Notes for the impl wave (D8)
+
+Re-repro (2026-08-24): `sarif_findings` restamps every CI SARIF result through `_as_unblamed_ci_finding`, which clamps severity to `Minor` unless it is already `Minor`/`Trivial`. A ruff SARIF `error` therefore never reaches `BLOCKING_SEVERITIES` (`Critical`, `Major`). After AF, `build_run_packet` already unions `ci_evidence_findings` and `report_status_checks` calls `decide_approval` on that packet — so a clamped Minor CI finding is recorded (`source=ci`) and the approval check can still conclude `success`. D8 is: keep the native blocking grade, ship SARIF artifacts from `ci.yml` for ruff/mypy/bandit, enable `ciEvidence.sarifArtifacts` in dogfood config, and let that ruff error fail the gate.
+
+- **Uncap SARIF errors:** a SARIF `error` from `ruff-sarif` / `mypy-sarif` / `bandit-sarif` must stay `Major` (or `Critical`). Do not clamp every CI finding to non-blocking. Attribution may stay `introduced_by_pr=unknown` until blame speaks. A SARIF `warning` and a bare failed check-run stay non-blocking (D11 pin).
+- **Ingest:** `collect_ci_sarif_findings` already downloads declared workflow artifacts. Keep opt-in (empty `ci_sarif_artifacts` → no API call). Swallow download/parse failures. Ignore undeclared artifact names. First wave only: `ruff-sarif`, `mypy-sarif`, `bandit-sarif` — do not port the rest of the catalog.
+- **Enable:** additive `ciEvidence.sarifArtifacts` on `config/settings.py` already exists. Dogfood `.mergecraft/config.yaml` must list the three first-wave names. `ci.yml` (not `mergecraft.yml`) must upload those artifacts. B/C own `mergecraft.yml`.
+- **Gate:** after uncap, packet `decide_approval` is `failure` / `request_changes` and `mergecraft-approval` is `failure` for a ruff CI SARIF error even when the in-job catalog did not run. Empty-list stays `neutral`. Untrusted never `success`.
+- **Do not** invent blame or satisfied-by-CI waves (issue AC is wider; D8 wins). Do not grant `trusted` on `pull_request_target`. Do not run catalog tools in the privileged Action job.
+
+## How to run (AG: expect FAIL until impl)
 
 ```bash
 cd /Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a
-MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/agents/test_approval_gate_agent_findings_460.py tests/utils/test_approval_check_agent_findings_460.py -q
+MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/ci/test_ci_sarif_evidence_464.py tests/agents/test_approval_gate_ci_sarif_464.py tests/utils/test_approval_check_ci_sarif_464.py -q
 make lint
 make typecheck
 ```
 
-Expect RED until D7 (agent findings never reach `_load_structural_findings` / the packet). Empty-list and untrusted pins, and the analyzer-Major pin, already pass.
+Expect RED until D8 (SARIF errors clamped to Minor; `ci.yml` does not upload first-wave SARIF; dogfood `ciEvidence` unset). Warning / empty / untrusted / check-run pins, Makefile first-wave tools, and `mergecraft.yml` non-ownership already pass.
 
 ## Out of scope
 
-AG #464, AH #485. Product code under `src/mergecraft/`. Weakening `pull_request_target` trust. Running analyzers inside the privileged Action job. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`). 422 / dual-verdict anomalies.
+AH #485. Product code under `src/mergecraft/` (this wave is tests only). Weakening `pull_request_target` trust. Running analyzers inside the privileged Action job. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`). Blame / satisfied-by-CI (issue AC beyond D8). 422 / dual-verdict anomalies.

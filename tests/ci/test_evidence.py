@@ -146,11 +146,15 @@ def test_ci_sarif_artifact_becomes_findings(tmp_path: Path) -> None:
 
 
 def test_ci_sarif_findings_are_never_blamed_on_this_pr(tmp_path: Path) -> None:
-    """SARIF from someone else's pipeline says nothing about *who* introduced it (D11)."""
+    """SARIF from someone else's pipeline says nothing about *who* introduced it (D11).
+
+    Attribution stays ``unknown`` until the blame layer speaks. D8 / #464
+    forbids clamping every CI SARIF finding to a non-blocking severity —
+    blocking grade is asserted in ``test_ci_sarif_evidence_464``.
+    """
     findings = sarif_findings(_SARIF, artifact="ruff-sarif", repo_root=tmp_path)
 
     assert [f.introduced_by_pr for f in findings] == ["unknown"]
-    assert all(f.severity not in {"Critical", "Major"} for f in findings)
 
 
 # ── W5.3 — substitution requires a declared mapping (D10) ─────────────────────
