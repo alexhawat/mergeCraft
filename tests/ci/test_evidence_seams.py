@@ -31,7 +31,7 @@ from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
-from mergecraft.utils.github import GitHubClient
+from mergecraft.utils.github import GitHubClient, GitHubListedItems
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -408,8 +408,8 @@ async def test_recorded_finding_count_is_merged_evidence_length(
     class _DummyClient:
         async def list_workflow_runs_for_check_suite(
             self, *_args: object, **_kwargs: object
-        ) -> list[dict[str, object]]:
-            return [{"id": 1}]
+        ) -> GitHubListedItems:
+            return GitHubListedItems(items=[{"id": 1}], incomplete=False)
 
     monkeypatch.setattr(
         "mergecraft.ci.intelligence.github_client_from_scm", lambda _scm: _DummyClient()

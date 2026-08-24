@@ -33,7 +33,7 @@ from mergecraft.config.settings import RepoSettings, load_repo_settings
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
-from mergecraft.utils.github import GitHubClient
+from mergecraft.utils.github import GitHubClient, GitHubListedItems
 from tests.ci.workflow_support import REPO_ROOT, as_list, load_workflow, read_text
 
 _DEFAULT_RUNS = [{"id": 88}]
@@ -111,8 +111,9 @@ class _ArtifactGitHub(GitHubClient):
 
     async def list_workflow_run_artifacts(
         self, owner: str, repo: str, run_id: int
-    ) -> list[dict[str, Any]]:
-        return list(self.artifacts)
+    ) -> GitHubListedItems:
+        _ = (owner, repo, run_id)
+        return GitHubListedItems(items=list(self.artifacts), incomplete=False)
 
     async def download_artifact_zip(self, owner: str, repo: str, artifact_id: int) -> bytes:
         return self.archives[artifact_id]
@@ -313,10 +314,10 @@ async def test_collect_paginates_workflow_runs_past_first_page(tmp_path: Path) -
 
         async def list_workflow_run_artifacts(
             self, owner: str, repo: str, run_id: int
-        ) -> list[dict[str, Any]]:
+        ) -> GitHubListedItems:
             if run_id != 88:
-                return []
-            return list(self.artifacts)
+                return GitHubListedItems(items=[], incomplete=False)
+            return GitHubListedItems(items=list(self.artifacts), incomplete=False)
 
     github = _PagedRuns(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
@@ -342,10 +343,10 @@ async def test_collect_continues_after_one_run_listing_failure(tmp_path: Path) -
 
         async def list_workflow_run_artifacts(
             self, owner: str, repo: str, run_id: int
-        ) -> list[dict[str, Any]]:
+        ) -> GitHubListedItems:
             if run_id == 1:
                 raise RuntimeError("listing exploded")
-            return list(self.artifacts)
+            return GitHubListedItems(items=list(self.artifacts), incomplete=False)
 
     github = _FirstRunBoom(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
@@ -365,7 +366,6 @@ async def test_collect_continues_after_one_run_listing_failure(tmp_path: Path) -
 @pytest.mark.asyncio
 async def test_collect_skips_truncated_artifact_listing(tmp_path: Path) -> None:
     """An incomplete artifact walk must not ingest a partial catalog as complete."""
-    from mergecraft.utils.github import GitHubListedItems
 
     class _TruncatedArtifacts(_ArtifactGitHub):
         async def list_workflow_run_artifacts(

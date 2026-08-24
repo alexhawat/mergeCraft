@@ -12,7 +12,7 @@ from mergecraft.ci.providers.github_actions import (
 )
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.scm.github import github_client_from_scm
-from mergecraft.utils.github import coerce_github_listed
+from mergecraft.utils.github import require_github_listed
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -27,7 +27,7 @@ def get_check_suite_logs_tool(ctx: ToolContext):
         if client is None:
             return unbound_check_suite_logs(check_suite_id)
         try:
-            listed = coerce_github_listed(
+            listed = require_github_listed(
                 await client.list_workflow_runs_for_check_suite(
                     ctx.repo.owner, ctx.repo.name, check_suite_id
                 )

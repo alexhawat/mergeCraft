@@ -473,13 +473,15 @@ def decide_action(
     vocabulary. The first step is consulting the policy map; the second
     is selecting the rule key the packet matches. Both are deterministic.
 
-    The five named policies ``DEFAULT_GATE_POLICIES`` ships are the
-    example set #46 names literally: a schema failure blocks, a
-    changed-unread-file asks for changes, a low-risk passing change
-    merges, a tool-loop asks for more tests, and a high-risk migration
-    asks for human review. Repositories override the mapping at the
-    call site: the override is merged on top of the defaults and any
-    value outside the closed vocabulary is rejected.
+    The six named policies ``DEFAULT_GATE_POLICIES`` ships are
+    ``schema_failure``, ``changed-unread-file``, ``has_blockers``,
+    ``low_risk_passing``, ``tool_loop``, and ``high_risk_migration``:
+    a schema failure blocks, a changed-unread-file asks for changes,
+    blockers request changes, a low-risk passing change merges, a
+    tool-loop asks for more tests, and a high-risk migration asks for
+    human review. Repositories override the mapping at the call site:
+    the override is merged on top of the defaults and any value
+    outside the closed vocabulary is rejected.
 
     ``mode`` is not consulted by this function — it is recorded on
     the resulting ``Decision`` row by the I/O shell. The gate's

@@ -77,6 +77,9 @@ class GitHubActionsProvider:
         """
         failed = [run for run in runs if run.get("conclusion") == "failure"]
         if not failed:
+            # Trusted empty: no failed runs. Omit ``available`` so this does
+            # not share the unbound/truncated/list-failure shape
+            # (``unavailable_check_suite_logs`` always sets ``available: False``).
             return {
                 "check_suite_id": check_suite_id,
                 "message": "no failed workflow runs found for this check suite",

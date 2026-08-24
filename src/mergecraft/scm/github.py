@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mergecraft.scm.protocol import ScmCapability, ScmProvider
-from mergecraft.utils.github import GitHubClient, coerce_github_listed
+from mergecraft.utils.github import GitHubClient, GitHubListedItems, require_github_listed
 
 
 class GitHubScmAdapter:
@@ -208,12 +208,18 @@ class GitHubScmAdapter:
     async def list_check_runs_for_ref(
         self, owner: str, repo: str, ref: str, **kwargs: Any
     ) -> dict[str, Any]:
-        return await self._client.list_check_runs_for_ref(owner, repo, ref, **kwargs)
+        result = await self._client.list_check_runs_for_ref(owner, repo, ref, **kwargs)
+        if isinstance(result, GitHubListedItems):
+            return result.as_check_runs_payload()
+        if isinstance(result, dict):
+            return result
+        msg = f"expected GitHubListedItems or dict, got {type(result).__name__}"
+        raise TypeError(msg)
 
     async def list_workflow_run_artifacts(
         self, owner: str, repo: str, run_id: int
     ) -> list[dict[str, Any]]:
-        listed = coerce_github_listed(
+        listed = require_github_listed(
             await self._client.list_workflow_run_artifacts(owner, repo, run_id)
         )
         return listed.items
