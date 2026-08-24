@@ -55,12 +55,11 @@ def collect_trace_events_for_review(
     review_id: str,
     *,
     repo_root: Path,
+    trace_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Return trace rows for ``review_id`` from the repo trace directory."""
-    return load_trace_jsonl_events(
-        default_trace_dir(repo_root=repo_root),
-        session_id=review_id,
-    )
+    """Return trace rows for ``review_id`` from the configured trace directory."""
+    target = trace_dir if trace_dir is not None else default_trace_dir(repo_root=repo_root)
+    return load_trace_jsonl_events(target, session_id=review_id)
 
 
 __all__ = [

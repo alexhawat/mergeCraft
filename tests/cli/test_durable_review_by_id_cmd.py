@@ -415,6 +415,54 @@ def test_findings_subcommand_typo_surfaces_typer_error_not_unknown_review_id(
     assert "unknown review" not in combined.casefold()
 
 
+def test_review_persists_trace_from_custom_trace_dir_for_replay(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression — ``--trace-dir`` traces are persisted for ``replay <review-id>``."""
+    review_id = sample_review_id()
+    custom_trace_dir = tmp_path / "custom-traces"
+    custom_trace_dir.mkdir(parents=True)
+    trace_events = sample_trace_events(review_id=review_id)
+    (custom_trace_dir / "2026-08-24.jsonl").write_text(
+        "\n".join(json.dumps(event) for event in trace_events) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MERGECRAFT_REVIEW_ID", review_id)
+    _install_fake_review(monkeypatch)
+    patch = tmp_path / "change.diff"
+    patch.write_text(_SAMPLE_PATCH, encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "--format",
+            "json",
+            "review",
+            "--diff",
+            str(patch),
+            "--cwd",
+            str(tmp_path),
+            "--trace-dir",
+            str(custom_trace_dir),
+        ],
+        env={**_DUMB_ENV, "MERGECRAFT_REVIEW_ID": review_id},
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, combined
+    _guard_against_review_rerun(monkeypatch)
+    replay = runner.invoke(
+        app,
+        ["--format", "json", "replay", review_id, "--repo-root", str(tmp_path)],
+        env=_DUMB_ENV,
+    )
+    replay_combined = _plain(replay.stdout + replay.stderr)
+    assert replay.exit_code == CLI_SUCCESS_EXIT_CODE, replay_combined
+    payload = json.loads(replay.stdout)
+    assert payload.get("run_id") == review_id
+    assert payload.get("replayed") is True
+    assert payload.get("event_count", 0) >= 1
+
+
 def test_review_with_unsafe_review_id_still_succeeds_and_persists_safely(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

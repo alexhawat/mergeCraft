@@ -181,6 +181,7 @@ def _persist_completed_cli_review(
     prompt: str | None,
     findings: Sequence[Finding],
     evidence_packet_path: str | None = None,
+    trace_dir: Path | None = None,
 ) -> None:
     from mergecraft.evidence.run_manifest import build_run_manifest
 
@@ -203,7 +204,11 @@ def _persist_completed_cli_review(
         repo_root=cwd,
         evidence_packet_path=evidence_packet_path,
     )
-    trace_events = collect_trace_events_for_review(trace_session_id, repo_root=cwd)
+    trace_events = collect_trace_events_for_review(
+        trace_session_id,
+        repo_root=cwd,
+        trace_dir=trace_dir,
+    )
     try:
         persist_completed_review(
             review,
@@ -704,6 +709,7 @@ def run(
                 prompt=prompt,
                 findings=findings,
                 evidence_packet_path=result.evidence_packet_path,
+                trace_dir=trace_dir,
             )
 
         if not result.success:

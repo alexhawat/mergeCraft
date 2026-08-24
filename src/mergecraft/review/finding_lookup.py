@@ -10,6 +10,7 @@ Exports:
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -18,6 +19,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX, resolve_finding_short_ids
+
+_FINGERPRINT_HEX_RE = re.compile(r"^[0-9a-f]+$")
+_MIN_FINGERPRINT_HEX_LEN = 6
 
 
 def is_safe_path_stem(stem: str) -> bool:
@@ -53,6 +57,15 @@ def load_json_packets_in_dir(
     return packets
 
 
+def _is_hex_fingerprint(value: str) -> bool:
+    """Return whether ``value`` is a lowercase hex fingerprint suitable for short ids."""
+    if not value or "/" in value or "\\" in value:
+        return False
+    if len(value) < _MIN_FINGERPRINT_HEX_LEN:
+        return False
+    return _FINGERPRINT_HEX_RE.fullmatch(value) is not None
+
+
 def _nested_packet_candidates(packet: dict[str, Any]) -> Iterable[dict[str, Any]]:
     """Yield per-finding packets nested inside an aggregate evidence packet."""
     for key in ("packets", "evidence", "finding_packets"):
@@ -76,18 +89,18 @@ def _fingerprints_in_packet_map(
     seen: set[str] = set()
     ordered: list[str] = []
     for stem, packet in packets_by_fingerprint.items():
-        if stem and stem not in seen:
+        if stem and _is_hex_fingerprint(stem) and stem not in seen:
             seen.add(stem)
             ordered.append(stem)
         nested_id = str(packet.get("finding_id", "")).strip()
-        if nested_id and nested_id not in seen:
+        if nested_id and _is_hex_fingerprint(nested_id) and nested_id not in seen:
             seen.add(nested_id)
             ordered.append(nested_id)
         for nested in _nested_packet_candidates(packet):
             fingerprint = str(nested.get("fingerprint", "")).strip()
             if not fingerprint:
                 fingerprint = str(nested.get("finding_id", "")).strip()
-            if fingerprint and fingerprint not in seen:
+            if fingerprint and _is_hex_fingerprint(fingerprint) and fingerprint not in seen:
                 seen.add(fingerprint)
                 ordered.append(fingerprint)
     return tuple(ordered)
@@ -96,7 +109,10 @@ def _fingerprints_in_packet_map(
 @lru_cache(maxsize=128)
 def _short_id_index(fingerprints_tuple: tuple[str, ...]) -> dict[str, str]:
     """Memoized short-id → fingerprint map for one fingerprint batch."""
-    mapping = resolve_finding_short_ids(fingerprints_tuple)
+    valid = tuple(fp for fp in fingerprints_tuple if _is_hex_fingerprint(fp))
+    if not valid:
+        return {}
+    mapping = resolve_finding_short_ids(valid)
     return {short_id: fingerprint for fingerprint, short_id in mapping.items()}
 
 
