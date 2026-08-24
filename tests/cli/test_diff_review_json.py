@@ -210,7 +210,10 @@ def test_cli_diff_review_json_validates_findings(
         assert isinstance(payload.get("findings"), list)
         finding_mod = import_analyzer_module("mergecraft.analyzers.finding")
         for item in payload["findings"]:
-            finding_mod.Finding.model_validate(item)
+            short_id = item.get("short_id")
+            assert isinstance(short_id, str)
+            assert short_id.startswith("MC-")
+            finding_mod.Finding.model_validate(finding_mod.finding_record_without_short_id(item))
     else:
         assert result.exit_code != 0, combined
         assert not json_out.exists(), combined
