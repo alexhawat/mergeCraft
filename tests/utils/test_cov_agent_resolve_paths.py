@@ -882,8 +882,10 @@ def test_gateway_providers_resolve_to_opencode_once_credentialled(
     assert ar.resolve_runtime_agent(model=minimax_slug).name == "opencode"
 
 
-def test_unknown_provider_and_no_model_both_raise_configuration_error() -> None:
+def test_unknown_provider_raises_configuration_error() -> None:
     with pytest.raises(ar.ModelFallbackPolicyError, match=r"not registered|provider add"):
         ar.resolve_runtime_agent(model="acme/private-1")
-    with pytest.raises(ar.ModelFallbackPolicyError, match="no model configured"):
-        ar.resolve_runtime_agent(model=None)
+
+
+def test_no_model_falls_back_to_opencode() -> None:
+    assert ar.resolve_runtime_agent(model=None).name == "opencode"

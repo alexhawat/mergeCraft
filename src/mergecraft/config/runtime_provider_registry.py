@@ -174,13 +174,8 @@ def warn_legacy_nous_api_key_once() -> None:
     )
 
 
-def legacy_opencode_harness_for_unregistered_provider(
-    settings: RepoSettings | None,
-    provider: str,
-) -> str | None:
-    """Return ``opencode`` when D7 legacy credentials exist without a registry row."""
-    if lookup_registry_entry(settings, provider) is not None:
-        return None
+def legacy_opencode_harness_for_provider(provider: str) -> str | None:
+    """Return ``opencode`` when D7 legacy env credentials exist for *provider*."""
     if provider == "nous" and _legacy_nous_api_key_present():
         warn_legacy_nous_api_key_once()
         return "opencode"
@@ -189,6 +184,16 @@ def legacy_opencode_harness_for_unregistered_provider(
     if _legacy_gateway_preset_credentials(provider):
         return "opencode"
     return None
+
+
+def legacy_opencode_harness_for_unregistered_provider(
+    settings: RepoSettings | None,
+    provider: str,
+) -> str | None:
+    """Return ``opencode`` when D7 legacy credentials exist without a registry row."""
+    if lookup_registry_entry(settings, provider) is not None:
+        return None
+    return legacy_opencode_harness_for_provider(provider)
 
 
 def resolve_legacy_nous_gateway_endpoint(
@@ -346,6 +351,7 @@ __all__ = [
     "indexed_credential_for_entry",
     "indexed_env_key",
     "infer_harness_for_slug",
+    "legacy_opencode_harness_for_provider",
     "legacy_opencode_harness_for_unregistered_provider",
     "lookup_registry_entry",
     "lookup_registry_entry_by_env_index",

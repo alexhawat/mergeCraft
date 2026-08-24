@@ -1432,6 +1432,14 @@ def resolve_runtime_agent(
         if entry is not None:
             if indexed_credential_for_entry(entry):
                 return resolve_agent(entry.harness)
+            from mergecraft.config.runtime_provider_registry import (
+                legacy_opencode_harness_for_provider,
+            )
+
+            assert provider is not None
+            legacy_harness = legacy_opencode_harness_for_provider(provider)
+            if legacy_harness is not None:
+                return resolve_agent(legacy_harness)
             msg = (
                 f"configuration error: provider {provider!r} is registered but missing "
                 f"credentials — run `mergecraft provider auth {provider}`"
@@ -1456,8 +1464,7 @@ def resolve_runtime_agent(
             )
             raise ModelFallbackPolicyError(msg)
 
-    msg = "configuration error: no model configured for runtime agent resolution"
-    raise ModelFallbackPolicyError(msg)
+    return agents["opencode"]
 
 
 __all__ = [

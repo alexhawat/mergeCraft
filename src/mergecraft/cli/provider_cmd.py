@@ -59,6 +59,8 @@ LEGACY_API_KEY_MIGRATIONS: dict[str, tuple[str, str]] = {
     "CURSOR_API_KEY": ("cursor", "API_KEY"),
     "DEEPSEEK_API_KEY": ("deepseek", "API_KEY"),
     "NOUS_API_KEY": ("nous", "API_KEY"),
+    "TOKENHUB_API_KEY": ("tokenhub", "API_KEY"),
+    "MERGECRAFT_CUSTOM_PROVIDER_API_KEY": ("minimax", "API_KEY"),
 }
 
 LEGACY_LABEL_TO_API_KEY_ENV: dict[str, str] = {

@@ -95,6 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`success` / `failure` / `neutral`); schema version 1.9.0
 - `mergecraft-approval` posts `neutral` when the evidence packet was not
   assembled, instead of omitting the check
+- Custom provider slugs not in the operator registry now fail closed instead of silently routing to OpenCode; the built-in catalog allow-list was narrowed accordingly.
+- Seeded ``tokenhub``/``minimax`` registry rows no longer shadow legacy ``TOKENHUB_API_KEY`` / ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` credentials: ``resolve_runtime_agent`` honours the same legacy fallbacks as ``has_credentials_for_slug``, and ``provider migrate`` can index those keys.
 - Repo-native analyzers no longer fall back to an arbitrary PATH binary. When
   the checkout did not provide a tool, resolution fell through to
   `shutil.which`, so a system copy ran against the consumer's code at an

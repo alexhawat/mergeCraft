@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from mergecraft.agents.openai_compatible_gateways import (
+    CUSTOM_PROVIDER_API_KEY_ENV,
     resolve_gateway_endpoint,
 )
+from mergecraft.cli.provider_cmd import seed_builtin_providers
 from mergecraft.utils.agent_resolve import (
     has_credentials_for_slug,
     resolve_runtime_agent,
@@ -17,6 +19,7 @@ from tests.cli.support_provider_registry import (
     bootstrap_nous_registry,
     bootstrap_opencode_gateway,
     clear_legacy_gateway_env,
+    scaffold_mergecraft_home,
 )
 
 if TYPE_CHECKING:
@@ -25,6 +28,7 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 TOKENHUB_BASE_URL = "https://tokenhub-intl.tencentcloudmaas.com/v1"
+MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 NOUS_DEEPSEEK_MODEL = "deepseek/deepseek-v4-flash"
 
 
@@ -99,6 +103,31 @@ def test_resolve_runtime_agent_routes_gateways_to_opencode(
     )
     agent = resolve_runtime_agent(model=nous_slug)
     assert agent.name == "opencode"
+
+
+def test_seeded_registry_with_legacy_env_resolves_to_opencode(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Init seeds tokenhub/minimax rows; legacy env alone must still resolve (PR #494)."""
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    clear_legacy_gateway_env(monkeypatch)
+    for index in range(1, 8):
+        monkeypatch.delenv(f"LLM_PROVIDER_{index}", raising=False)
+        monkeypatch.delenv(f"LLM_PROVIDER_{index}_API_KEY", raising=False)
+
+    config_path = tmp_path / ".mergecraft" / "config.yaml"
+    seed_builtin_providers(config_path)
+
+    monkeypatch.setenv("TOKENHUB_API_KEY", "th-legacy-key")
+    assert has_credentials_for_slug("tokenhub/hy3") is True
+    assert resolve_runtime_agent(model="tokenhub/hy3").name == "opencode"
+
+    clear_legacy_gateway_env(monkeypatch)
+    monkeypatch.setenv(CUSTOM_PROVIDER_API_KEY_ENV, "mm-legacy-key")
+    assert has_credentials_for_slug("minimax/MiniMax-M3") is True
+    assert resolve_runtime_agent(model="minimax/MiniMax-M3").name == "opencode"
 
 
 def test_resolve_gateway_endpoint_tokenhub_default_url(
