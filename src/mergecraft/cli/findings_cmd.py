@@ -10,8 +10,9 @@ before it is trusted with an automation trigger.
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import typer
 
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 
     from mergecraft.findings.lifecycle import LifecycleRecord
 
+from mergecraft.analyzers.finding import Finding, render_finding_markdown, resolve_finding_short_ids
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
@@ -51,6 +53,14 @@ from mergecraft.scm.github import GitHubScmAdapter
 from mergecraft.utils.github import GitHubClient, parse_repo_context
 from mergecraft.utils.token import get_job_token
 
+_FINDINGS_SUBCOMMANDS = frozenset({"export", "carryover", "ledger"})
+_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+FindingsOutputFormat = Literal["json", "markdown"]
+
+
+def _looks_like_review_id(token: str) -> bool:
+    return len(token) >= 4 and _REVIEW_ID_PATTERN.fullmatch(token) is not None
+
 
 class _FindingsTyperGroup(MergecraftTyperGroup):
     """Route unknown subcommands to durable review lookup (#453)."""
@@ -59,6 +69,10 @@ class _FindingsTyperGroup(MergecraftTyperGroup):
         command = super().get_command(ctx, cmd_name)
         if command is not None:
             return command
+        if cmd_name in _FINDINGS_SUBCOMMANDS:
+            return None
+        if not _looks_like_review_id(cmd_name):
+            return None
         ctx.meta["durable_review_id"] = cmd_name
         return super().get_command(ctx, "_by_review_id")
 
@@ -80,19 +94,25 @@ def _render_durable_findings_markdown(
 ) -> str:
     if not findings:
         return f"No findings stored for review {review_id}."
+    short_ids = resolve_finding_short_ids(
+        [str(row.get("fingerprint", "")) for row in findings if row.get("fingerprint")]
+    )
     lines = [f"# Stored findings — {review_id}", ""]
-    for finding in findings:
-        path = str(finding.get("path") or "(no file)")
-        lines.append(f"## {path}")
+    for row in findings:
+        try:
+            finding = Finding.model_validate(row)
+        except ValueError:
+            path = str(row.get("path") or "(no file)")
+            lines.append(f"## {path}")
+            lines.append("")
+            message = row.get("message")
+            if message:
+                lines.append(str(message))
+                lines.append("")
+            continue
+        short_id = short_ids.get(finding.fingerprint, finding.fingerprint[:6])
+        lines.append(render_finding_markdown(finding, short_id=short_id))
         lines.append("")
-        fingerprint = finding.get("fingerprint")
-        if fingerprint:
-            lines.append(f"`{fingerprint}`")
-            lines.append("")
-        message = finding.get("message")
-        if message:
-            lines.append(str(message))
-            lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -104,7 +124,7 @@ def _by_review_id(
         typer.Option("--repo-root", help=_REPO_ROOT_HELP),
     ] = Path("."),
     output_format: Annotated[
-        str | None,
+        FindingsOutputFormat | None,
         typer.Option(
             "--output-format",
             help=(
@@ -245,7 +265,7 @@ def ledger(
     pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
     repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
     output_format: Annotated[
-        str | None,
+        FindingsOutputFormat | None,
         typer.Option(
             "--output-format",
             help=(
@@ -295,7 +315,7 @@ def export(
     pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
     repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
     output_format: Annotated[
-        str | None,
+        FindingsOutputFormat | None,
         typer.Option(
             "--output-format",
             help=(

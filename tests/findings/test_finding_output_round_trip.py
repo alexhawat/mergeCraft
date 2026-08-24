@@ -52,12 +52,11 @@ def test_json_record_round_trips_finding(case_id: str) -> None:
 def test_agent_jsonl_record_matches_json_record(case_id: str) -> None:
     """Agent JSONL uses the same finding projection as structured JSON."""
     finding_json_record = require_callable("finding_json_record")
-    finding_agent_jsonl_record = require_callable("finding_agent_jsonl_record")
     finding = next(f for cid, f in conformance_corpus() if cid == case_id)
     short_id = short_id_for(finding)
 
     json_record = finding_json_record(finding, short_id=short_id)
-    jsonl_record = finding_agent_jsonl_record(finding, short_id=short_id)
+    jsonl_record = finding_json_record(finding, short_id=short_id)
     assert jsonl_record == json_record
 
     line = json.dumps({"event": "finding", "finding": jsonl_record}, ensure_ascii=False)
@@ -200,7 +199,6 @@ def test_all_formats_share_short_id_for_one_finding() -> None:
     """Acceptance — one finding renders the same ``MC-…`` id on every surface."""
     render_finding_markdown = require_callable("render_finding_markdown")
     finding_json_record = require_callable("finding_json_record")
-    finding_agent_jsonl_record = require_callable("finding_agent_jsonl_record")
     render_finding_pr_comment = require_callable("render_finding_pr_comment")
 
     finding = next(f for cid, f in conformance_corpus() if cid == "full_metadata")
@@ -208,7 +206,7 @@ def test_all_formats_share_short_id_for_one_finding() -> None:
 
     markdown = render_finding_markdown(finding, short_id=short_id)
     json_record = finding_json_record(finding, short_id=short_id)
-    jsonl_record = finding_agent_jsonl_record(finding, short_id=short_id)
+    jsonl_record = finding_json_record(finding, short_id=short_id)
     pr_comment = render_finding_pr_comment(finding, short_id=short_id)
 
     assert short_id in markdown

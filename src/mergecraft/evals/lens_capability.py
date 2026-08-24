@@ -93,6 +93,11 @@ def _f1(precision: float | None, recall: float | None) -> float:
 
 
 def _macro_average(values: list[float | None]) -> float:
+    """Macro-average metric values over participating lenses only.
+
+    ``None`` precision/recall (lens never selected or never expected) counts as
+    0.0 so macro totals stay finite and match the CE routing capability tests.
+    """
     if not values:
         return 0.0
     total = sum(0.0 if value is None else value for value in values)

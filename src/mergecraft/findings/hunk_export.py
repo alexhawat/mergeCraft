@@ -58,7 +58,7 @@ def _format_hunk_rationale(finding: Finding) -> str:
 def export_hunk_comments(
     findings: Sequence[Finding],
     *,
-    file_findings: str = "drop",
+    file_findings: FileFindingsMode = "drop",
     first_changed_lines: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     """Convert findings to the Hunk ``comment apply --stdin`` payload."""

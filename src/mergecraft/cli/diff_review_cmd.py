@@ -4,33 +4,36 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import typer
 from loguru import logger
 
-from mergecraft.analyzers.sarif import export_sarif
+from mergecraft.analyzers.finding import finding_json_record, finding_short_id
 from mergecraft.cli.agent_protocol import AgentProtocolStream, notify_findings
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
-from mergecraft.cli.global_surface import emit_cli_json, get_cli_globals
-from mergecraft.config.settings import parse_cli_trust_override
-from mergecraft.findings.hunk_export import (
-    count_dropped_file_level_findings,
-    export_hunk_comments,
-    first_changed_lines_from_diff,
-    format_file_level_drop_warning,
+from mergecraft.cli.global_surface import get_cli_globals
+from mergecraft.cli.review_output import (
+    HunkFileFindings,
+    OutputFormat,
+    dispatch_review_output,
+    finding_json_records,
 )
+from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.offline_review import (
     OfflineReviewResult,
     parse_offline_review_findings,
     run_offline_diff_review,
 )
 from mergecraft.review.completed import CompletedReview, persist_completed_review
+from mergecraft.review.completed_artifacts import (
+    collect_evidence_packets_for_persist,
+    collect_trace_events_for_review,
+)
 from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, canonical_review_snapshot
 from mergecraft.types import ShellPermission  # noqa: TC001
@@ -39,10 +42,6 @@ from mergecraft.utils.source_resolve import SourceResolverSpec
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
-
-
-OutputFormat = Literal["text", "json", "jsonl", "sarif", "hunk"]
-HunkFileFindings = Literal["drop", "first-changed-line"]
 
 _PANEL_SOURCE = "Source"
 _PANEL_DIFF = "Diff selection"
@@ -146,11 +145,18 @@ def _resolve_outcome(result: OfflineReviewResult) -> RunOutcome:
     return RunOutcome.passed if result.success else RunOutcome.failed
 
 
-def _write_jsonl_findings(path: Path, findings: Sequence[Finding]) -> None:
-    lines: list[str] = []
-    for row in findings:
-        lines.append(json.dumps({"finding": row.model_dump()}, ensure_ascii=False))
-    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+def _agent_finding_record(finding: dict[str, Any]) -> dict[str, Any]:
+    """Attach a short id when ``finding`` carries a fingerprint."""
+    fingerprint = finding.get("fingerprint")
+    if not isinstance(fingerprint, str) or not fingerprint:
+        return finding
+    from mergecraft.analyzers.finding import Finding
+
+    try:
+        model = Finding.model_validate(finding)
+    except ValueError:
+        return finding
+    return finding_json_record(model, short_id=finding_short_id(fingerprint))
 
 
 def _persist_completed_cli_review(
@@ -161,6 +167,7 @@ def _persist_completed_cli_review(
     model: str | None,
     prompt: str | None,
     findings: Sequence[Finding],
+    evidence_packet_path: str | None = None,
 ) -> None:
     from mergecraft.evidence.run_manifest import build_run_manifest
 
@@ -170,29 +177,25 @@ def _persist_completed_cli_review(
         agent_id="mergecraft",
         prompt_text=prompt or "",
     )
+    findings_records = finding_json_records(findings)
     review = CompletedReview(
         review_id=review_id,
         snapshot=snapshot,
         manifest=manifest,
-        findings=[row.model_dump(mode="json") for row in findings],
+        findings=findings_records,
         trace_session_id=review_id,
     )
-    persist_completed_review(review, repo_root=cwd)
-
-
-def _emit_review_json_stdout(
-    *,
-    review_id: str,
-    findings: Sequence[Finding],
-    output_text: str | None,
-) -> None:
-    emit_cli_json(
-        {
-            "review_id": review_id,
-            "count": len(findings),
-            "findings": [row.model_dump(mode="json") for row in findings],
-            "output": output_text,
-        }
+    evidence_packets = collect_evidence_packets_for_persist(
+        findings,
+        repo_root=cwd,
+        evidence_packet_path=evidence_packet_path,
+    )
+    trace_events = collect_trace_events_for_review(review_id, repo_root=cwd)
+    persist_completed_review(
+        review,
+        repo_root=cwd,
+        evidence_packets=evidence_packets,
+        trace_events=trace_events,
     )
 
 
@@ -233,7 +236,7 @@ def _finish_agent_protocol(
 ) -> None:
     notify_findings(
         stream.finding,
-        [row.model_dump() for row in findings],
+        finding_json_records(findings),
         seen=seen,
     )
     stream.verdict(outcome.value, exit_code)
@@ -611,7 +614,7 @@ def run(
     def _on_finding(finding: dict[str, Any]) -> None:
         if stream is None:
             return
-        notify_findings(stream.finding, [finding], seen=seen)
+        notify_findings(stream.finding, [_agent_finding_record(finding)], seen=seen)
 
     read_cache = use_cache or resume
 
@@ -673,6 +676,7 @@ def run(
                 model=model,
                 prompt=prompt,
                 findings=findings,
+                evidence_packet_path=result.evidence_packet_path,
             )
 
         if not result.success:
@@ -698,55 +702,17 @@ def run(
             )
             raise typer.Exit(exit_code)
 
-        text = result.output or ""
-
-        if effective_output_format == "text":
-            if output is not None:
-                output.write_text(text, encoding="utf-8")
-                console.print(f"[green]wrote[/green] {output}")
-            elif json_output is None:
-                console.print(text)
-        elif effective_output_format == "json":
-            target = json_output or output
-            if target is not None and target.is_file():
-                console.print(f"[green]wrote[/green] {target}")
-            if json_stdout:
-                _emit_review_json_stdout(
-                    review_id=review_id,
-                    findings=findings,
-                    output_text=text or None,
-                )
-        elif effective_output_format == "jsonl":
-            target = output
-            if target is None:
-                _exit_with_message("--output is required for --output-format jsonl", exit_code)
-            _write_jsonl_findings(target, findings)
-            console.print(f"[green]wrote[/green] {target}")
-        elif effective_output_format == "sarif":
-            target = output
-            if target is None:
-                _exit_with_message("--output is required for --output-format sarif", exit_code)
-            document = export_sarif(findings)
-            target.write_text(json.dumps(document, indent=2), encoding="utf-8")
-            console.print(f"[green]wrote[/green] {target}")
-        elif effective_output_format == "hunk":
-            first_changed_lines: dict[str, int] | None = None
-            if hunk_file_findings == "first-changed-line" and result.diff_path:
-                diff_path = Path(result.diff_path)
-                if diff_path.is_file():
-                    first_changed_lines = first_changed_lines_from_diff(
-                        diff_path.read_text(encoding="utf-8")
-                    )
-            if hunk_file_findings == "drop":
-                dropped = count_dropped_file_level_findings(findings)
-                if dropped:
-                    console.print(format_file_level_drop_warning(dropped))
-            payload = export_hunk_comments(
-                findings,
-                file_findings=hunk_file_findings,
-                first_changed_lines=first_changed_lines,
-            )
-            typer.echo(json.dumps(payload, ensure_ascii=False))
+        dispatch_review_output(
+            effective_output_format=effective_output_format,
+            result=result,
+            findings=findings,
+            review_id=review_id,
+            output=output,
+            json_output=json_output,
+            json_stdout=json_stdout,
+            hunk_file_findings=hunk_file_findings,
+            exit_code=exit_code,
+        )
 
         if json_output is not None and result.success and not dry_run:
             console.print(f"[green]wrote[/green] {json_output}")

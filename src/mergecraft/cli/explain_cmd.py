@@ -5,6 +5,7 @@ Exports: ``run``
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -12,13 +13,23 @@ from typing import Any
 import typer
 from rich.table import Table
 
+from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX
 from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import OutputFormat, emit_cli_json, wants_json_output
 from mergecraft.evidence.audit import lookup_finding_packet
-from mergecraft.review.completed import lookup_finding_packet_in_review
+from mergecraft.review.completed import load_completed_review, lookup_finding_packet_in_review
+from mergecraft.review.finding_lookup import is_safe_path_stem
+
+_FINGERPRINT_HEX_RE = re.compile(r"^[0-9a-f]+$")
+
+
+def _is_finding_id_token(token: str) -> bool:
+    if token.startswith(FINDING_SHORT_ID_PREFIX):
+        return True
+    return len(token) >= 6 and _FINGERPRINT_HEX_RE.fullmatch(token) is not None
 
 
 def _read_diff(repo_root: Path) -> str:
@@ -91,7 +102,7 @@ def run(
     ctx: typer.Context,
     review_id_or_finding: str | None = typer.Argument(
         default=None,
-        help="Review id, finding id, or short id (MC-…) depending on invocation.",
+        help="Finding id or short id (MC-…). With two arguments: review id then finding id.",
     ),
     finding_id: str | None = typer.Argument(
         default=None,
@@ -116,10 +127,23 @@ def run(
     """Explain a stored finding or the current working-tree change."""
     root = repo_root.expanduser().resolve()
     resolved_review_id = review_id
-    resolved_finding_id = review_id_or_finding
+    resolved_finding_id: str | None = None
+
     if finding_id is not None:
         resolved_review_id = review_id_or_finding
         resolved_finding_id = finding_id
+    elif review_id_or_finding is not None:
+        token = review_id_or_finding
+        if _is_finding_id_token(token):
+            resolved_finding_id = token
+        elif is_safe_path_stem(token) and load_completed_review(token, repo_root=root) is not None:
+            cli_bail(
+                f"{token!r} is a stored review id — pass a finding id (MC-…) "
+                "or use: explain <review-id> <finding-id>",
+                code=CLI_USAGE_EXIT_CODE,
+            )
+        else:
+            resolved_finding_id = token
 
     if resolved_finding_id:
         packet: dict[str, Any] | None = None

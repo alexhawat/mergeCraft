@@ -9,6 +9,7 @@ import typer
 from mergecraft.cli.errors import cli_bail
 
 DEFAULT_UPDATE_REF = "main"
+"""Default ``uv tool install`` git ref — tracks ``main`` on mergeCraft (branch tip at install time)."""
 MERGECRAFT_GIT_ORIGIN = "https://github.com/alexhawat/mergeCraft"
 MERGECRAFT_UV_INSTALL_PACKAGE = "merge-craft"
 

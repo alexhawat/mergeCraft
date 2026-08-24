@@ -14,30 +14,24 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX, resolve_finding_short_ids
+if TYPE_CHECKING:
+    from pathlib import Path
+
+from mergecraft.analyzers.finding import Finding
+from mergecraft.review.finding_lookup import (
+    is_safe_path_stem,
+    load_json_packets_in_dir,
+    lookup_packet_by_finding_id,
+)
 from mergecraft.review.snapshot import ReviewSnapshot
 
 COMPLETED_REVIEW_SCHEMA_VERSION = "1.0.0"
 _REVIEWS_SUBDIR = ".mergecraft/reviews"
-
-
-def _is_safe_review_id(review_id: str) -> bool:
-    if not review_id or review_id in {".", ".."}:
-        return False
-    if "/" in review_id or "\\" in review_id:
-        return False
-    return Path(review_id).parts == (review_id,)
-
-
-def _is_safe_packet_stem(finding_id: str) -> bool:
-    if not finding_id or finding_id in {".", ".."}:
-        return False
-    if "/" in finding_id or "\\" in finding_id:
-        return False
-    return Path(finding_id).parts == (finding_id,)
+_REVIEW_ARTIFACT_SKIP = frozenset(
+    {"snapshot.json", "manifest.json", "findings.json", "completed.json"}
+)
 
 
 def completed_review_dir(review_id: str, *, repo_root: Path) -> Path:
@@ -64,7 +58,7 @@ def persist_completed_review(
     trace_events: list[dict[str, Any]] | None = None,
 ) -> Path:
     """Persist ``review`` and optional evidence/trace artifacts; return the directory."""
-    if not _is_safe_review_id(review.review_id):
+    if not is_safe_path_stem(review.review_id):
         msg = f"unsafe review id {review.review_id!r}"
         raise ValueError(msg)
     root = completed_review_dir(review.review_id, repo_root=repo_root)
@@ -91,7 +85,7 @@ def persist_completed_review(
         encoding="utf-8",
     )
     for fingerprint, packet in (evidence_packets or {}).items():
-        if not _is_safe_packet_stem(fingerprint):
+        if not is_safe_path_stem(fingerprint):
             continue
         (root / f"{fingerprint}.json").write_text(
             json.dumps(packet, ensure_ascii=False, indent=2),
@@ -108,9 +102,26 @@ def _read_json_file(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _validate_loaded_findings(raw_findings: list[Any]) -> list[dict[str, Any]] | None:
+    validated: list[dict[str, Any]] = []
+    for row in raw_findings:
+        if not isinstance(row, dict):
+            return None
+        short_id = row.get("short_id")
+        payload = {key: value for key, value in row.items() if key != "short_id"}
+        try:
+            record = Finding.model_validate(payload).model_dump(mode="json")
+        except ValueError:
+            return None
+        if isinstance(short_id, str):
+            record["short_id"] = short_id
+        validated.append(record)
+    return validated
+
+
 def load_completed_review(review_id: str, *, repo_root: Path) -> CompletedReview | None:
     """Load a stored review, or ``None`` when missing or corrupt."""
-    if not _is_safe_review_id(review_id):
+    if not is_safe_path_stem(review_id):
         return None
     root = completed_review_dir(review_id, repo_root=repo_root)
     completed_path = root / "completed.json"
@@ -132,8 +143,14 @@ def load_completed_review(review_id: str, *, repo_root: Path) -> CompletedReview
             return None
         if not isinstance(findings_payload, dict):
             return None
+        schema_version = completed_payload.get("schema_version")
+        if schema_version != COMPLETED_REVIEW_SCHEMA_VERSION:
+            return None
         raw_findings = findings_payload.get("findings")
         if not isinstance(raw_findings, list):
+            return None
+        findings = _validate_loaded_findings(raw_findings)
+        if findings is None:
             return None
         snapshot = ReviewSnapshot.model_validate(snapshot_payload)
         trace_session_id = completed_payload.get("trace_session_id")
@@ -141,7 +158,7 @@ def load_completed_review(review_id: str, *, repo_root: Path) -> CompletedReview
             review_id=str(completed_payload.get("review_id", review_id)),
             snapshot=snapshot,
             manifest=manifest_payload,
-            findings=[row for row in raw_findings if isinstance(row, dict)],
+            findings=findings,
             trace_session_id=str(trace_session_id) if trace_session_id else None,
         )
     except (OSError, json.JSONDecodeError, ValueError):
@@ -158,7 +175,7 @@ def list_completed_review_ids(*, repo_root: Path) -> list[str]:
         if not child.is_dir():
             continue
         review_id = child.name
-        if not _is_safe_review_id(review_id):
+        if not is_safe_path_stem(review_id):
             continue
         if (child / "completed.json").is_file():
             ids.append(review_id)
@@ -166,17 +183,16 @@ def list_completed_review_ids(*, repo_root: Path) -> list[str]:
 
 
 def _packets_in_review_dir(review_dir: Path) -> dict[str, dict[str, Any]]:
-    packets: dict[str, dict[str, Any]] = {}
-    for path in sorted(review_dir.glob("*.json")):
-        if path.name in {"snapshot.json", "manifest.json", "findings.json", "completed.json"}:
-            continue
-        stem = path.stem
-        if not _is_safe_packet_stem(stem):
-            continue
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            packets[stem] = loaded
-    return packets
+    return load_json_packets_in_dir(review_dir, skip_names=_REVIEW_ARTIFACT_SKIP)
+
+
+def _fingerprints_from_findings(findings: list[dict[str, Any]]) -> list[str]:
+    fingerprints: list[str] = []
+    for row in findings:
+        fp = row.get("fingerprint")
+        if isinstance(fp, str) and fp:
+            fingerprints.append(fp)
+    return fingerprints
 
 
 def lookup_finding_packet_in_review(
@@ -186,32 +202,26 @@ def lookup_finding_packet_in_review(
     repo_root: Path,
 ) -> dict[str, Any] | None:
     """Resolve a finding id against one completed review's co-located evidence."""
-    if not _is_safe_review_id(review_id):
+    if not is_safe_path_stem(review_id):
         return None
     review_dir = completed_review_dir(review_id, repo_root=repo_root)
     if not review_dir.is_dir():
         return None
     packets_by_fingerprint = _packets_in_review_dir(review_dir)
-    if not packets_by_fingerprint:
-        return None
-    if finding_id.startswith(FINDING_SHORT_ID_PREFIX):
-        suffix = finding_id[len(FINDING_SHORT_ID_PREFIX) :]
-        if not suffix or not all(char in "0123456789abcdef" for char in suffix):
-            return None
-        mapping = resolve_finding_short_ids(list(packets_by_fingerprint))
-        for fingerprint, mapped_id in mapping.items():
-            if mapped_id == finding_id:
-                return packets_by_fingerprint[fingerprint]
-        return None
-    if not _is_safe_packet_stem(finding_id):
-        return None
-    direct = packets_by_fingerprint.get(finding_id)
-    if direct is not None:
-        return direct
-    for packet in packets_by_fingerprint.values():
-        if str(packet.get("finding_id", "")) == finding_id:
+    if packets_by_fingerprint:
+        packet = lookup_packet_by_finding_id(finding_id, packets_by_fingerprint)
+        if packet is not None:
             return packet
-    return None
+    loaded = load_completed_review(review_id, repo_root=repo_root)
+    if loaded is None:
+        return None
+    fingerprints = _fingerprints_from_findings(loaded.findings)
+    if not fingerprints:
+        return None
+    fallback_packets = {
+        fp: {"finding_id": fp, "state": "unverified", "kinds": []} for fp in fingerprints
+    }
+    return lookup_packet_by_finding_id(finding_id, fallback_packets)
 
 
 def load_completed_review_trace_events(
@@ -220,7 +230,7 @@ def load_completed_review_trace_events(
     repo_root: Path,
 ) -> list[dict[str, Any]]:
     """Return trace rows stored beside a completed review."""
-    if not _is_safe_review_id(review_id):
+    if not is_safe_path_stem(review_id):
         return []
     trace_path = completed_review_dir(review_id, repo_root=repo_root) / "trace.jsonl"
     if not trace_path.is_file():
@@ -229,7 +239,10 @@ def load_completed_review_trace_events(
     for line in trace_path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
-        loaded = json.loads(line)
+        try:
+            loaded = json.loads(line)
+        except json.JSONDecodeError:
+            continue
         if isinstance(loaded, dict):
             events.append(loaded)
     return events

@@ -223,10 +223,13 @@ def finding_short_id(fingerprint: str) -> str:
 
 def resolve_finding_short_ids(fingerprints: Sequence[str]) -> dict[str, str]:
     """Assign stable short ids, extending truncation when six-char prefixes collide."""
-    unique = list(dict.fromkeys(_validate_fingerprint_for_short_id(fp) for fp in fingerprints))
+    validated_by_input: dict[str, str] = {}
+    for fp in fingerprints:
+        validated_by_input[fp] = _validate_fingerprint_for_short_id(fp)
+    unique = sorted(dict.fromkeys(validated_by_input.values()))
     assigned: dict[str, str] = {}
     used_ids: set[str] = set()
-    for fingerprint in sorted(unique):
+    for fingerprint in unique:
         hex_len = _FINDING_SHORT_ID_DEFAULT_HEX_LEN
         while hex_len <= len(fingerprint):
             candidate = f"{FINDING_SHORT_ID_PREFIX}{fingerprint[:hex_len]}"
@@ -239,15 +242,19 @@ def resolve_finding_short_ids(fingerprints: Sequence[str]) -> dict[str, str]:
             candidate = f"{FINDING_SHORT_ID_PREFIX}{fingerprint}"
             assigned[fingerprint] = candidate
             used_ids.add(candidate)
-    return {fp: assigned[_validate_fingerprint_for_short_id(fp)] for fp in fingerprints}
+    return {fp: assigned[validated_by_input[fp]] for fp in fingerprints}
+
+
+def _finding_location(finding: Finding) -> str:
+    """Return ``path:line`` when line-anchored, else ``path`` alone."""
+    if finding.start_line is not None:
+        return f"{finding.path}:{finding.start_line}"
+    return finding.path
 
 
 def render_finding_markdown(finding: Finding, *, short_id: str) -> str:
     """Render one finding as a markdown section that quotes ``short_id``."""
-    if finding.start_line is not None:
-        location = f"{finding.path}:{finding.start_line}"
-    else:
-        location = finding.path
+    location = _finding_location(finding)
     lines = [
         f"## [{short_id}] {location}",
         "",
@@ -267,17 +274,9 @@ def finding_json_record(finding: Finding, *, short_id: str) -> dict[str, Any]:
     return record
 
 
-def finding_agent_jsonl_record(finding: Finding, *, short_id: str) -> dict[str, Any]:
-    """Serialize a finding for agent JSONL events with a stable short id."""
-    return finding_json_record(finding, short_id=short_id)
-
-
 def render_finding_pr_comment(finding: Finding, *, short_id: str) -> str:
     """Render a PR inline comment body that surfaces ``short_id`` for quoting."""
-    if finding.start_line is not None:
-        location = f"{finding.path}:{finding.start_line}"
-    else:
-        location = finding.path
+    location = _finding_location(finding)
     return f"**{short_id}** ({location})\n\n{finding.message}"
 
 
@@ -288,7 +287,6 @@ __all__ = [
     "FindingValidationError",
     "FindingsPayload",
     "IntroducedByPr",
-    "finding_agent_jsonl_record",
     "finding_json_record",
     "finding_short_id",
     "findings_output_schema",

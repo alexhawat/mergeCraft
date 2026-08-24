@@ -50,11 +50,11 @@ def test_finding_json_record_includes_short_id_field() -> None:
 
 
 def test_finding_agent_jsonl_record_includes_short_id_field() -> None:
-    """Agent JSONL finding events include the same short id."""
-    finding_agent_jsonl_record = require_callable("finding_agent_jsonl_record")
+    """Agent JSONL finding events include the same short id as structured JSON."""
+    finding_json_record = require_callable("finding_json_record")
     finding = sample_finding()
     short_id = _short_id_for(finding)
-    payload = finding_agent_jsonl_record(finding, short_id=short_id)
+    payload = finding_json_record(finding, short_id=short_id)
     assert _extract_short_id(payload) == short_id
     # round-trip as JSONL line without losing the id
     line = json.dumps({"event": "finding", "finding": payload}, ensure_ascii=False)
@@ -76,7 +76,6 @@ def test_all_output_surfaces_share_the_same_short_id() -> None:
     """Acceptance — one finding renders the identical ``MC-…`` everywhere."""
     render_finding_markdown = require_callable("render_finding_markdown")
     finding_json_record = require_callable("finding_json_record")
-    finding_agent_jsonl_record = require_callable("finding_agent_jsonl_record")
     render_finding_pr_comment = require_callable("render_finding_pr_comment")
 
     finding = sample_finding()
@@ -84,7 +83,7 @@ def test_all_output_surfaces_share_the_same_short_id() -> None:
 
     markdown = render_finding_markdown(finding, short_id=short_id)
     json_record = finding_json_record(finding, short_id=short_id)
-    jsonl_record = finding_agent_jsonl_record(finding, short_id=short_id)
+    jsonl_record = finding_json_record(finding, short_id=short_id)
     pr_comment = render_finding_pr_comment(finding, short_id=short_id)
 
     assert short_id in markdown
