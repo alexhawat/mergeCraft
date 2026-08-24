@@ -554,9 +554,10 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             "- **Green only substitutes.** A declared check run that passed rewrites "
             "the gate row to `satisfied-by-ci`. A declared check run that *failed* "
             "leaves the row alone and is reported as a `source: ci` finding instead.",
-            "- **Reported, not blamed.** Findings derived from CI start non-blocking "
-            "with `introduced_by_pr: unknown`; only the CI-intelligence blame layer "
-            "(`ci/blame.py`, `ci/flaky.py`) may attribute one to this PR.",
+            "- **Reported, not blamed.** Bare check-run findings start non-blocking; "
+            "SARIF `error` from declared `sarifArtifacts` keeps Major/Critical. "
+            "`introduced_by_pr` stays `unknown` until `ci/blame.py` / `ci/flaky.py` "
+            "attribute a finding to this PR.",
             "- **Redacted.** Log excerpts are truncated and passed through "
             "`analyzers/redact.py` before they enter a finding.",
         ]

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CI SARIF from ruff, mypy, and bandit is review evidence: `error` keeps
+  Major/Critical (not clamped to Minor), dogfood `.mergecraft/config.yaml`
+  lists those three `ciEvidence.sarifArtifacts`, and `.github/workflows/ci.yml`
+  uploads them. A ruff SARIF error can fail `mergecraft-approval` (#464)
 - `make action-pin-check` also measures the pin against the default branch's own
   tip, not just against the other branch's pin. Comparing pins to each other
   passes when both are equally stale, which is what happened after #457 merged:

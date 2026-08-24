@@ -20,11 +20,12 @@ Two rules keep this from turning into author-blame:
 * Only a **successful** declared check run may substitute. A declared gate that
   CI proved *broken* leaves the row alone and is reported as a finding instead,
   so the report never claims a green gate on red evidence.
-* Findings derived from CI start at a non-blocking severity with
-  ``introduced_by_pr="unknown"``. Attribution is the CI-intelligence layer's
-  job (``ci/blame.py``, ``ci/flaky.py``); until it speaks, a CI failure is
-  *reported, not blamed* (D11). The approval gate is monotone in blockers, so
-  this is what stops a flaky pipeline from blocking a clean PR.
+* Bare check-run findings start at a non-blocking severity with
+  ``introduced_by_pr="unknown"`` (D11). Declared-artifact SARIF keeps the
+  parser's mapped grade — a SARIF ``error`` stays Major/Critical so it can
+  reach the approval gate (D8 / #464) — while attribution stays ``unknown``
+  until ``ci/blame.py`` / ``ci/flaky.py`` speak. Flaky and pre-existing
+  failures those layers annotate remain non-blocking.
 
 Everything here is pure. The MCP tools stay the I/O boundary.
 
@@ -86,8 +87,8 @@ _FAILING_CONCLUSIONS: frozenset[str] = frozenset(
 # The only conclusion that may stand in for a gate mergeCraft could not run.
 _PASSING_CONCLUSION = "success"
 
-# Severity ceiling for anything derived from CI (D11). Nothing here may reach
-# `agents.gates.BLOCKING_SEVERITIES` on its own; only the blame layer promotes.
+# Severity for bare check-run findings (D11). SARIF from declared artifacts
+# keeps the parser's mapped grade (D8); this ceiling does not apply there.
 _UNBLAMED_SEVERITY = "Minor"
 
 _EXCERPT_LINES = 12
@@ -370,19 +371,17 @@ def _ci_sarif_manifest(artifact: str) -> AnalyzerManifest:
 def _as_unblamed_ci_finding(finding: Finding, *, tool: str) -> Finding:
     """Re-stamp an analyzer-shaped finding as unblamed CI evidence.
 
-    Severity is capped rather than preserved: SARIF uploaded by someone else's
-    pipeline describes the tree, not this diff, so it may inform a reviewer but
-    must never block a merge on its own (D11). The message is redacted and the
-    fingerprint recomputed from the redacted text, so the stored hash always
-    matches the text a human will read.
+    Native SARIF severity is preserved (D8 / #464): a mapped Major/Critical
+    ``error`` must be able to reach the approval gate. Attribution stays
+    ``unknown`` until the blame layer speaks (D11). The message is redacted
+    and the fingerprint recomputed from the redacted text, so the stored hash
+    always matches the text a human will read.
     """
     message = redact_secrets(finding.message)
-    severity = finding.severity if finding.severity in {"Minor", "Trivial"} else _UNBLAMED_SEVERITY
     return finding.model_copy(
         update={
             "tool": tool,
             "source": "ci",
-            "severity": severity,
             "introduced_by_pr": "unknown",
             "message": message,
             "evidence": [redact_secrets(item) for item in finding.evidence],
